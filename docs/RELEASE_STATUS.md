@@ -1,6 +1,16 @@
 # Lworkstation 发布状态
 
-更新时间：2026-08-21
+更新时间：2026-09-01
+
+## 已发布公开 Beta
+
+- 公开仓库：love70805/lworkstation
+- v0.2.6-beta.1：引导版，需手工安装一次；安装包 88,726,534 bytes，SHA-256 1FA2C36A64AB9D9EB05C96BB113A8F19229CC93A3FE414040E2274B4B6C8D7D0。
+- v0.2.6-beta.2：软件内自动更新验收版；安装包 88,726,544 bytes，SHA-256 0EA54ACAE4A29102A1DF32350C7414A1635C12A12587C255A1174CD09A4B891F。
+- 两个版本均为 GitHub prerelease，完整上传 EXE、blockmap、beta.yml 和 SHA256.txt。
+- 更新路径：手工安装 beta.1 后，在软件内检查更新，确认下载，再选择重启安装到 beta.2。自动下载和退出即装仍保持关闭。
+- 本次桌面安全收口提交：72502cf；已通过 desktop verify、desktop build、desktop smoke:packaged 和 desktop smoke:update。
+- Windows 代码签名尚未配置，首次安装可能显示“未知发布者”。
 
 ## 当前正式候选
 
