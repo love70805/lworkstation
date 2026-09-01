@@ -13,6 +13,10 @@ export function installerVersion(name) {
   return name.match(SETUP_PATTERN)?.[2] ?? null;
 }
 
+function normalizedMetadataInstallerName(name) {
+  return String(name || "").replace(/^Lworkstation-Setup-/, "Lworkstation Setup ");
+}
+
 function ensureDirectory(directory, ops = fs) {
   ops.mkdirSync(directory, { recursive: true });
 }
@@ -69,8 +73,12 @@ export function validateLatestArtifacts({ latestRoot, artifactName, version, ops
       const value = match[1].trim();
       try { return decodeURIComponent(value); } catch { return value; }
     });
-  if (exeReferences.some((name) => name !== artifactName)) throw new Error("latest.yml references a non-current installer");
-  if (!latest.includes(artifactName)) throw new Error("latest.yml must reference the current installer");
+  if (exeReferences.some((name) => normalizedMetadataInstallerName(name) !== artifactName)) {
+    throw new Error("latest.yml references a non-current installer");
+  }
+  if (!exeReferences.some((name) => normalizedMetadataInstallerName(name) === artifactName)) {
+    throw new Error("latest.yml must reference the current installer");
+  }
   return true;
 }
 
