@@ -15,6 +15,7 @@ const generator = path.join(toolsRoot, "build-erpa-shopeers-bridge.mjs");
 const extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension");
 const sourcePath = (name) => path.join(extensionRoot, "src", name);
 const capability = "test-capability-0123456789-abcdefghijklmnopqrstuvwxyz";
+const freshCreatedAt = () => new Date(Date.now() - 60_000).toISOString();
 const sender = {
   frameId: 0,
   tab: { url: "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html?tab=cost" },
@@ -128,7 +129,7 @@ function requestRecord() {
 function resultInput(overrides = {}) {
   return {
     resultDeliveryId: "ERP-RESULT-SECURE-1",
-    createdAt: "2026-08-29T00:01:00.000Z",
+    createdAt: freshCreatedAt(),
     queryCapturedAt: "2026-08-29T00:01:00.000Z",
     querySkcs: ["st260608151900573902683"],
     results: [{
@@ -244,7 +245,11 @@ async function verifyPublishedPackage() {
   await verifyRoot(publicDir);
   const extractRoot = await mkdtemp(path.join(os.tmpdir(), "shopeers-erpa-public-zip-"));
   try {
-    await execFileAsync("tar", ["-xf", publicZip, "-C", extractRoot], { windowsHide: true });
+    if (process.platform === "win32") {
+      await execFileAsync("tar", ["-xf", publicZip, "-C", extractRoot], { windowsHide: true });
+    } else {
+      await execFileAsync("unzip", ["-q", publicZip, "-d", extractRoot], { windowsHide: true });
+    }
     await verifyRoot(extractRoot);
   } finally {
     await rm(extractRoot, { recursive: true, force: true });
@@ -473,7 +478,7 @@ async function verifyPendingWorkspaceSnapshotCannotRebind() {
 
   const hydratedA = {
     resultDeliveryId: "ERP-RESULT-HYDRATED-A",
-    createdAt: "2026-08-29T00:01:00.000Z",
+    createdAt: freshCreatedAt(),
     queryCapturedAt: "2026-08-29T00:01:00.000Z",
     registeredBefore: "2026-08-29T00:01:00.000Z",
     attemptsTotal: 2,
@@ -593,7 +598,7 @@ async function verifyRetryRestartAndConflicts() {
 
   const hydratedRecord = {
     resultDeliveryId: "ERP-RESULT-RESTART",
-    createdAt: "2026-08-29T00:01:00.000Z",
+    createdAt: freshCreatedAt(),
     queryCapturedAt: "2026-08-29T00:01:00.000Z",
     registeredBefore: "2026-08-29T00:01:00.000Z",
     attemptsTotal: 1,
