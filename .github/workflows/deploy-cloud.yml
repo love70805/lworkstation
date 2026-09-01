@@ -1,0 +1,114 @@
+name: Shopeers cloud deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_frontend:
+        description: "发布 Vercel 前端"
+        required: true
+        default: true
+        type: boolean
+      deploy_sync:
+        description: "触发同步 API 部署"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run release checks
+        run: pnpm release:check
+
+  frontend:
+    needs: release-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate Vercel cloud configuration
+        if: ${{ inputs.deploy_frontend }}
+        env:
+          VITE_SYNC_PROVIDER: ${{ secrets.VITE_SYNC_PROVIDER }}
+          VITE_SYNC_API_BASE_URL: ${{ secrets.VITE_SYNC_API_BASE_URL }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if [ "$VITE_SYNC_PROVIDER" != "api" ] && [ "$VITE_SYNC_PROVIDER" != "supabase" ]; then
+            echo "VITE_SYNC_PROVIDER 必须是 api 或 supabase，不能发布 local 模式。"
+            exit 1
+          fi
+          SYNC_ENDPOINT="${VITE_SYNC_API_BASE_URL:-$VITE_API_BASE_URL}"
+          if [ -z "$SYNC_ENDPOINT" ]; then
+            echo "缺少 Vercel 云端变量：VITE_SYNC_API_BASE_URL 或 VITE_API_BASE_URL"
+            exit 1
+          fi
+          if [ -z "$VITE_SUPABASE_URL" ] || [ -z "$VITE_SUPABASE_ANON_KEY" ]; then
+            echo "Supabase 模式缺少：VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY；api 模式同样使用 Supabase Auth 验证当前成员"
+            exit 1
+          fi
+      - name: Configure Vercel production environment
+        if: ${{ inputs.deploy_frontend }}
+        working-directory: frontend
+        run: |
+          SYNC_ENDPOINT="${VITE_SYNC_API_BASE_URL:-$VITE_API_BASE_URL}"
+          npx --yes vercel@latest env add VITE_SYNC_PROVIDER production --force --value "$VITE_SYNC_PROVIDER" --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID" --yes
+          npx --yes vercel@latest env add VITE_SYNC_API_BASE_URL production --force --value "$SYNC_ENDPOINT" --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID" --yes
+          npx --yes vercel@latest env add VITE_SUPABASE_URL production --force --value "$VITE_SUPABASE_URL" --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID" --yes
+          npx --yes vercel@latest env add VITE_SUPABASE_ANON_KEY production --force --value "$VITE_SUPABASE_ANON_KEY" --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID" --yes
+          if [ "$VITE_SYNC_PROVIDER" = "api" ]; then
+            npx --yes vercel@latest env add VITE_API_BASE_URL production --force --value "$SYNC_ENDPOINT" --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID" --yes
+          fi
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VITE_SYNC_PROVIDER: ${{ secrets.VITE_SYNC_PROVIDER }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_SYNC_API_BASE_URL: ${{ secrets.VITE_SYNC_API_BASE_URL }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+      - name: Deploy Vercel frontend
+        if: ${{ inputs.deploy_frontend }}
+        working-directory: frontend
+        run: npx --yes vercel@latest deploy --prod --token "$VERCEL_TOKEN" --scope "$VERCEL_ORG_ID" --project "$VERCEL_PROJECT_ID" --yes
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  sync:
+    needs: release-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render sync service deploy
+        if: ${{ inputs.deploy_sync }}
+        run: curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK"
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}

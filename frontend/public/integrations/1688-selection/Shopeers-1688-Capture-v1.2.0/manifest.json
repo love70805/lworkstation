@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "选品工作台 · 1688 采集助手",
+  "version": "1.2.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvGEZOkjj7303xwBY1JvWNVuZACdTYbmvYpHt1tj1tmMNSaGuyACfgmcz9Pi/OR+5mdgAEFjO4yYhnxmUIgBFBeVlzE+ZZC9eJL/lfDSp3tkGd6l16WGYUxPBUp3ZriAOGDtsOYY0l1wgiErgv9OnS9kouSZc59QxOb8X944xd5av5sUl822fUNaHlXaWqjfMG8Uccir73TvTg1bA6lT9nWQ4IsJhup43oSkvR8PXlOq/1Gvd6gpXfuR1aCR6ppXOx9i487d60aWufFFUEMO8j7sn1WDcjNC3RhgFpcKWCFdk6zk4Ojhc8oHIvLBIr8TMa6WUnTefbF2LHACGq4TKLwIDAQAB",
+  "description": "从 1688 确认订单页采集实际规格、数量、价格和运费，并发送到本机选品工作台。",
+  "minimum_chrome_version": "102",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8790/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "选品工作台 · 1688 采集助手",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://order.1688.com/order/*"
+      ],
+      "js": [
+        "bridge.js",
+        "capture.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

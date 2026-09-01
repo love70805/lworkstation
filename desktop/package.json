@@ -1,0 +1,107 @@
+{
+  "name": "shopeers-desktop",
+  "version": "0.2.5",
+  "private": true,
+  "description": "Lworkstation Windows desktop shell",
+  "author": "Shopeers Team",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "node dev.mjs",
+    "start": "electron .",
+    "brand:icons": "electron generate-brand-assets.cjs",
+    "build:update-fixtures": "node build-update-fixtures.mjs",
+    "verify": "node verify.mjs && node inbox-ipc.test.mjs && node extension-runtime.test.mjs && node workspace-context.test.mjs && node workspace-navigation.test.mjs && node inbox-service.test.mjs && node update-runtime.test.mjs && node release-artifacts.test.mjs",
+    "release:organize": "node organize-release.mjs",
+    "release:check": "node release-check.mjs",
+    "smoke:packaged": "node smoke.mjs",
+    "smoke:update": "node update-smoke.mjs",
+    "build": "pnpm --dir ../frontend build && pnpm brand:icons && electron-builder --config.electronDist=./node_modules/electron/dist"
+  },
+  "devDependencies": {
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.shopeers.workstation",
+    "productName": "Lworkstation",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "assets/lworkstation.ico",
+      "desktop-preferences.cjs",
+      "extension-runtime.cjs",
+      "workspace-context.cjs",
+      "workspace-navigation.cjs",
+      "inbox-ipc.cjs",
+      "navigation-history.cjs",
+      "inbox-service.cjs",
+      "inbox-popover-lifecycle.cjs",
+      "remote-navigation.cjs",
+      "preload.cjs",
+      "workspace-preload.cjs",
+      "shell.html",
+      "shell.css",
+      "shell-state.cjs",
+      "shell.js",
+      "inbox-popover.html",
+      "inbox-popover.css",
+      "inbox-popover.js",
+      "inbox-popover-preload.cjs",
+      "update-runtime.cjs",
+      "update-popover.html",
+      "update-popover.css",
+      "update-popover.js",
+      "update-popover-preload.cjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend"
+      },
+      {
+        "from": "../integrations",
+        "to": "integrations"
+      },
+      {
+        "from": "update-config.json",
+        "to": "update-config.json"
+      },
+      {
+        "from": "../tools/erp-inbox-server.mjs",
+        "to": "runtime/erp-inbox-server.mjs"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "love70805",
+        "repo": "lworkstation",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/lworkstation.ico",
+      "executableName": "Lworkstation",
+      "artifactName": "Lworkstation Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "installerIcon": "assets/lworkstation.ico",
+      "installerHeaderIcon": "assets/lworkstation.ico",
+      "uninstallerIcon": "assets/lworkstation.ico",
+      "shortcutName": "Lworkstation",
+      "uninstallDisplayName": "Lworkstation ${version}",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9",
+    "lucide": "0.468.0"
+  }
+}

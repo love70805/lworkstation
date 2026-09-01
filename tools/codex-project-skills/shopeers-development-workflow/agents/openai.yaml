@@ -1,0 +1,4 @@
+interface:
+  display_name: "Shopeers 开发确认流程"
+  short_description: "先确认复杂需求，再按任务看板执行 Shopeers 开发"
+  default_prompt: "按照 Shopeers 的需求确认、任务路由和 Windows 工作流处理当前任务。"

@@ -1,0 +1,44 @@
+# Dependencies and generated build output
+.pnpm-store/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+desktop/release/
+releases/latest/
+releases/history/
+archive/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Local databases, backups, exports and browser QA artifacts
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+backups/
+exports/
+qa/
+tmp_sheet/
+.tools/
+stitch/
+
+# Business source files should never be committed by default
+*.xlsx
+*.xls
+*.csv
+*.tsv
+to-questionnaire-profit-erp-operations.md
+利润核算与ERP运营问卷.docx
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

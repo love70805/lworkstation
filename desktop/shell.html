@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>document.documentElement.dataset.appearance = new URLSearchParams(location.search).get("appearance") === "dark" ? "dark" : "light";</script>
+    <title>Lworkstation</title>
+    <link rel="stylesheet" href="./shell.css" />
+  </head>
+  <body>
+    <header class="app-chrome">
+      <div class="titlebar">
+        <button
+          id="inbox-status"
+          class="brand-status"
+          type="button"
+          data-status="danger"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          aria-label="ERP 通道异常"
+          title="ERP 通道异常"
+        >
+          <span class="erp-status-dot" aria-hidden="true"></span>
+          <strong>Lworkstation</strong>
+        </button>
+        <button
+          id="update-status"
+          class="version-status"
+          type="button"
+          data-status="idle"
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          aria-label="检查 Lworkstation 更新"
+          title="检查 Lworkstation 更新"
+        >
+          <span id="app-version">v--</span>
+          <i class="update-indicator" data-lucide="download" aria-hidden="true"></i>
+        </button>
+        <div class="titlebar-drag-space" aria-hidden="true"></div>
+      </div>
+
+      <div class="toolbar">
+        <nav class="tabs" aria-label="工作区标签" role="tablist">
+          <button data-tab="workspace" class="tab active" type="button" role="tab" aria-selected="true" aria-label="工作站" title="工作站">
+            <i data-lucide="layout-dashboard" aria-hidden="true"></i><span>工作站</span>
+          </button>
+          <button data-tab="erp" class="tab" type="button" role="tab" aria-selected="false" aria-label="ERP" title="ERP">
+            <i data-lucide="warehouse" aria-hidden="true"></i><span>ERP</span>
+          </button>
+          <button data-tab="1688" class="tab" type="button" role="tab" aria-selected="false" aria-label="1688" title="1688">
+            <i data-lucide="shopping-bag" aria-hidden="true"></i><span>1688</span>
+          </button>
+        </nav>
+        <div class="toolbar-divider" aria-hidden="true"></div>
+        <div class="browser-actions" aria-label="网页导航">
+          <button class="icon-button" data-action="back" type="button" aria-label="后退" title="后退">
+            <i data-lucide="arrow-left" aria-hidden="true"></i>
+          </button>
+          <button class="icon-button" data-action="forward" type="button" aria-label="前进" title="前进">
+            <i data-lucide="arrow-right" aria-hidden="true"></i>
+          </button>
+          <button class="icon-button" data-action="refresh" type="button" aria-label="刷新" title="刷新">
+            <i data-lucide="rotate-cw" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="address-form">
+          <div class="address-shell">
+            <i data-lucide="lock-keyhole" aria-hidden="true"></i>
+            <input id="address" value="内部工作站" aria-label="当前页面地址" aria-readonly="true" readonly />
+          </div>
+        </div>
+        <div id="erp-zoom" class="erp-zoom" hidden aria-label="ERP 页面缩放">
+          <button class="icon-button" data-zoom="-10" type="button" aria-label="缩小 ERP 页面" title="缩小 ERP 页面">
+            <i data-lucide="minus" aria-hidden="true"></i>
+          </button>
+          <span id="erp-zoom-label" aria-live="polite">80%</span>
+          <button class="icon-button" data-zoom="10" type="button" aria-label="放大 ERP 页面" title="放大 ERP 页面">
+            <i data-lucide="plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        <button class="icon-button external-button" data-action="external" type="button" aria-label="在系统浏览器打开" title="在系统浏览器打开">
+          <i data-lucide="external-link" aria-hidden="true"></i>
+        </button>
+      </div>
+    </header>
+    <span id="erp-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></span>
+
+    <script src="./node_modules/lucide/dist/umd/lucide.min.js"></script>
+    <script src="./shell-state.cjs"></script>
+    <script src="./shell.js"></script>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="160" viewBox="0 0 620 160" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Lworkstation horizontal logo for light surfaces</title>
+  <rect width="160" height="160" rx="29" fill="#286BE5"/>
+  <path fill="#FFFFFF" d="M35 39h14v66h31v15H35V39Z"/>
+  <path fill="#FFFFFF" d="M56 39h14v45h24v15H56V39Z"/>
+  <path fill="#FFFFFF" d="M78 39h49v15l-32 66H78l32-66H78V39Z"/>
+  <text x="188" y="106" fill="#182230" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="0">Lworkstation</text>
+</svg>

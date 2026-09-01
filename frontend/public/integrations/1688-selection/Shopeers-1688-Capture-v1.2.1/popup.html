@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shopeers · 1688 采集助手</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <main class="panel">
+        <header class="header">
+            <img src="icons/icon-128.png" alt="" class="logo">
+            <div><h1>1688 采集助手</h1><p>Shopeers 选品工作台</p></div>
+            <span id="version" class="version">v1.2.1</span>
+        </header>
+        <section id="statusCard" class="status-card status-idle" aria-live="polite">
+            <span class="status-dot"></span>
+            <div><strong id="statusTitle">正在检查...</strong><p id="statusText">连接本机采集服务</p></div>
+        </section>
+        <section class="form">
+            <p class="hint">在 1688 确认订单页点击右下角“发送确认订单数据”，商品会自动进入 Shopeers 待确认采集。</p>
+            <button id="testButton" class="primary" type="button">重新检测连接</button>
+            <div class="secondary-actions"><button id="openButton" type="button">打开待确认采集</button></div>
+        </section>
+        <footer>采集成本只作为选品参考，不会覆盖 ERP 正式成本。</footer>
+    </main>
+    <script src="popup.js"></script>
+</body>
+</html>

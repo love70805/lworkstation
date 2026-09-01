@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: shopeers-sync
+    runtime: docker
+    dockerfilePath: ./Dockerfile.sync
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SHOPEERS_SYNC_PORT
+        value: 8787
+      - key: SHOPEERS_DATABASE_URL
+        sync: false
+      - key: SHOPEERS_JWKS_URL
+        sync: false
+      - key: SHOPEERS_JWT_ISSUER
+        sync: false
+      - key: SHOPEERS_JWT_AUDIENCE
+        value: authenticated
+      - key: SHOPEERS_SYNC_CORS_ORIGINS
+        sync: false
+      - key: SHOPEERS_DATABASE_SSL
+        value: require
+      - key: SHOPEERS_DB_POOL_MAX
+        value: 10

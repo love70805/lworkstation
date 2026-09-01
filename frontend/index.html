@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f7f9" />
+    <title>Lworkstation 经营管理中心</title>
+    <script>
+      (function () {
+        try {
+          var appearance = localStorage.getItem("shopeers-appearance");
+          if (appearance === "dark" || appearance === "soft") {
+            document.documentElement.dataset.appearance = "dark";
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#121821");
+          }
+        } catch (error) {
+          // Keep the standard light boot screen when local storage is unavailable.
+        }
+      }());
+    </script>
+    <style>
+      html, body, #root { min-height: 100%; margin: 0; background: #f6f7f9; }
+      html[data-appearance="dark"], html[data-appearance="dark"] body, html[data-appearance="dark"] #root { background: #121821; }
+      .boot-loader { display: flex; min-height: 100vh; align-items: center; justify-content: center; gap: 10px; color: #505f76; font: 13px/1.45 Inter, "Microsoft YaHei", Arial, sans-serif; }
+      .boot-loader-spinner { width: 22px; height: 22px; border: 2px solid #c2c6d9; border-top-color: #004bca; border-radius: 50%; animation: boot-spin 800ms linear infinite; }
+      html[data-appearance="dark"] .boot-loader { color: #bac5d1; }
+      html[data-appearance="dark"] .boot-loader-spinner { border-color: #46586b; border-top-color: #77aeff; }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .boot-loader-spinner { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div class="boot-loader" role="status"><span class="boot-loader-spinner" aria-hidden="true"></span><span>正在启动工作区...</span></div></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

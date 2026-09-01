@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.vite/
+.env
+.env.*
+!.env.example
+
+# 本机数据、导出文件和浏览器调试产物
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+backups/
+exports/
+qa/.artifacts/
+
+# 操作系统与编辑器文件
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

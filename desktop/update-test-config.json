@@ -1,0 +1,19 @@
+{
+  "enabled": false,
+  "purpose": "beta-smoke-only",
+  "channel": "beta",
+  "releaseType": "prerelease",
+  "sourceVersion": "0.2.6-beta.1",
+  "targetVersion": "0.2.6-beta.2",
+  "artifactPattern": "Lworkstation-Setup-${version}.${ext}",
+  "metadataFile": "beta.yml",
+  "betaConfigFile": "update-beta-config.json",
+  "feed": "loopback-only",
+  "repository": {
+    "owner": "love70805",
+    "repo": "lworkstation",
+    "sourceTag": "v0.2.6-beta.1",
+    "targetTag": "v0.2.6-beta.2"
+  },
+  "status": "prepared-not-published"
+}

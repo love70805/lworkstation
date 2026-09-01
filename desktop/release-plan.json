@@ -1,0 +1,43 @@
+{
+  "product": "Lworkstation",
+  "version": "0.2.5",
+  "integrationBranch": "codex/selection-profit-erp-sync",
+  "requiredCommits": [
+    {
+      "module": "global-ui",
+      "commit": "edac462"
+    },
+    {
+      "module": "desktop-shell",
+      "commit": "d112b08"
+    },
+    {
+      "module": "profit-erp-inbox-contract",
+      "commit": "18d4bd4"
+    },
+    {
+      "module": "desktop-erp-packaged-smoke",
+      "commit": "0f00b4f"
+    },
+    {
+      "module": "profit-erp-evidence-scope",
+      "commit": "e216f29"
+    },
+    {
+      "module": "desktop-1688-heartbeat",
+      "commit": "92d10ac"
+    },
+    {
+      "module": "profit-erp-evidence-details",
+      "commit": "dc75782"
+    },
+    {
+      "module": "erp-clipboard-fallback",
+      "commit": "b4b4859"
+    },
+    {
+      "module": "profit-erp-evidence-status",
+      "commit": "b5e2682"
+    }
+  ]
+}

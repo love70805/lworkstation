@@ -1,0 +1,31 @@
+/* Monthly ledger */
+.ledger-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-bottom: 34px; }
+.ledger-stat { position: relative; min-height: 118px; padding: 20px 20px 16px; }
+.ledger-stat > svg { position: absolute; top: 20px; left: 20px; color: var(--primary-bright); }
+.ledger-stat > span { display: block; margin-left: 28px; color: var(--text-muted); font-size: 13px; }
+.ledger-stat > strong { display: block; margin: 8px 0 0; font-size: 24px; line-height: 30px; }
+.ledger-stat > small { display: block; margin-top: 7px; font-size: 11px; font-weight: 700; }
+.ledger-stat:nth-child(2) > svg { color: var(--success); }
+.ledger-stat.pending { border-style: dashed; background: var(--surface-soft); }
+.ledger-stat.pending > svg { color: var(--warning); }
+.ledger-filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); }
+.ledger-filter-bar .search-input { width: min(360px, 100%); }
+.ledger-filter-count { margin-left: auto; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.ledger-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
+.ledger-card { min-height: 340px; overflow: hidden; }
+.ledger-card.locked { opacity: 0.72; }
+.ledger-card-head { display: grid; grid-template-columns: 48px minmax(0, 1fr) 24px; align-items: start; gap: 12px; min-height: 92px; padding: 20px 18px; border-bottom: 1px solid var(--border); }
+.month-tile { display: grid; width: 44px; height: 44px; place-items: center; border-radius: 4px; background: var(--surface-soft); color: var(--primary); font-size: 16px; font-weight: 700; }
+.ledger-card-head h2 { margin-bottom: 5px; font-size: 16px; line-height: 22px; }
+.ledger-card-head > button { padding: 0; border: 0; background: transparent; color: var(--text-muted); }
+.ledger-metrics { display: flex; min-height: 174px; flex-direction: column; gap: 14px; padding: 20px 18px; }
+.ledger-metrics > span { display: flex; align-items: center; justify-content: space-between; color: var(--text-muted); }
+.ledger-metrics > span strong { color: var(--text); font-size: 13px; }
+.ledger-card-footer { padding: 14px; border-top: 1px solid var(--border); background: #fbfcff; }
+.ledger-card-footer .button { width: 100%; }
+@media (max-width: 760px) {
+  .ledger-filter-bar { align-items: stretch; flex-direction: column; }
+  .ledger-filter-bar .search-input { width: 100%; }
+  .ledger-filter-count { margin-left: 0; }
+}
+

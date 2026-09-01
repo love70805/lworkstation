@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "ERP Assistant",
+  "version": "8.0.14",
+  "description": "卓麟 ERP SKU 采购成本核算工具",
+  "host_permissions": [
+    "https://*.zhuolinkeji.cn/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "permissions": [
+    "alarms",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html*"
+      ],
+      "js": [
+        "src/query-hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html*"
+      ],
+      "js": [
+        "src/result-policy.js",
+        "src/request-context.js",
+        "src/shopeers-bridge.js",
+        "src/content.js"
+      ],
+      "css": [
+        "src/content.css"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "ERP Assistant",
+    "default_popup": "popup/popup.html"
+  }
+}

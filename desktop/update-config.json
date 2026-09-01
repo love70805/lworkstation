@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "provider": "github",
+  "owner": "love70805",
+  "repo": "lworkstation",
+  "private": false,
+  "channel": "latest"
+}

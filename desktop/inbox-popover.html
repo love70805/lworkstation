@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>document.documentElement.dataset.appearance = new URLSearchParams(location.search).get("appearance") === "dark" ? "dark" : "light";</script>
+    <title>ERP 通道</title>
+    <link rel="stylesheet" href="./inbox-popover.css" />
+  </head>
+  <body>
+    <main class="popover-card" role="dialog" aria-label="ERP 通道状态" aria-modal="false" tabindex="-1">
+      <header class="popover-heading"><strong>ERP 通道</strong><span id="popover-status" aria-live="polite">通道正常</span></header>
+      <dl class="popover-details">
+        <div id="popover-error-row" hidden><dt>错误原因</dt><dd id="popover-error"></dd></div>
+      </dl>
+    </main>
+    <script src="./node_modules/lucide/dist/umd/lucide.min.js"></script>
+    <script src="./shell-state.cjs"></script>
+    <script src="./inbox-popover.js"></script>
+  </body>
+</html>

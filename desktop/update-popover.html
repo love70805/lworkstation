@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>document.documentElement.dataset.appearance = new URLSearchParams(location.search).get("appearance") === "dark" ? "dark" : "light";</script>
+    <title>Lworkstation 更新</title>
+    <link rel="stylesheet" href="./update-popover.css" />
+  </head>
+  <body>
+    <main class="update-card" role="dialog" aria-label="Lworkstation 软件更新" aria-modal="false" tabindex="-1">
+      <header class="update-heading">
+        <div>
+          <strong>软件更新</strong>
+          <span id="update-message" aria-live="polite">正在读取更新状态</span>
+        </div>
+        <span id="update-state" class="state-badge">检查中</span>
+      </header>
+
+      <dl class="release-details">
+        <div><dt>当前版本</dt><dd id="current-version">--</dd></div>
+        <div id="latest-row" hidden><dt>最新版本</dt><dd id="latest-version">--</dd></div>
+        <div id="size-row" hidden><dt>安装包</dt><dd id="package-size">--</dd></div>
+        <div id="date-row" hidden><dt>发布日期</dt><dd id="release-date">--</dd></div>
+      </dl>
+
+      <div id="progress-row" class="progress-row" hidden>
+        <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
+        <span id="progress-value">0%</span>
+      </div>
+
+      <section id="notes-section" class="notes-section" hidden aria-label="版本说明">
+        <p id="release-notes"></p>
+        <button id="release-notes-action" class="link-button" type="button">查看完整说明</button>
+      </section>
+
+      <div class="update-actions">
+        <button data-update-action="check" class="secondary-button" type="button">检查更新</button>
+        <button data-update-action="download" class="primary-button" type="button" hidden>下载更新</button>
+        <button data-update-action="cancel" class="secondary-button" type="button" hidden>取消下载</button>
+        <button data-update-action="retry" class="primary-button" type="button" hidden>重试</button>
+        <button data-update-action="install" class="primary-button" type="button" hidden>重启安装</button>
+        <button data-update-action="postpone" class="secondary-button" type="button" hidden>稍后</button>
+      </div>
+    </main>
+    <script src="./update-popover.js"></script>
+  </body>
+</html>
