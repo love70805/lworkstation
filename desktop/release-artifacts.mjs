@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-const SETUP_PATTERN = /^(.+?) Setup (\d+\.\d+\.\d+)\.exe$/;
+const SETUP_PATTERN = /^(.+?) Setup (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\.exe$/;
 const ALLOWED_SUFFIXES = new Set(["latest.yml", "SHA256.txt"]);
 
 export function artifactNameFromPattern(pattern, version, ext = "exe") {

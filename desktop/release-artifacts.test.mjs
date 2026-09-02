@@ -8,7 +8,7 @@ const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "lworkstation-release-test
 const buildRoot = path.join(fixture, "build");
 const latestRoot = path.join(fixture, "releases", "latest");
 const historyRoot = path.join(fixture, "releases", "history");
-const version = "0.2.5";
+const version = "0.2.6-beta.3";
 const oldArtifact = `Shopeers 工作站 Setup ${version}.exe`;
 const artifactName = `Lworkstation Setup ${version}.exe`;
 
