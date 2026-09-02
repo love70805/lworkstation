@@ -15,25 +15,25 @@
 
 ## 最新发布 Beta
 
-- 版本：`0.2.6-beta.4`
+- 版本：`0.2.6-beta.5`
 - 集成分支：`codex/selection-profit-erp-sync`
-- 发布提交：`4b0b85b`
-- 安装包：`Lworkstation-Setup-0.2.6-beta.4.exe`
-- 文件大小：`88,726,356` bytes
-- SHA-256：`6FBFC490EC41538BE211A62FEFFD7EDCEF0CB75D1207A17C9798F6BAAD3898A6`
-- 更新路径：`0.2.6-beta.3 -> 0.2.6-beta.4`
-- GitHub Release：`v0.2.6-beta.4`，已于 2026-09-02 发布为 prerelease。
+- 发布提交：待发布
+- 安装包：`Lworkstation-Setup-0.2.6-beta.5.exe`
+- 文件大小：待构建
+- SHA-256：待构建
+- 更新路径：`0.2.6-beta.4 -> 0.2.6-beta.5`
+- GitHub Release：待发布，目标为 prerelease。
 
 ## 发布门禁
 
 - [x] 公开仓库基线、更新时间安全修复和预发布发布工具已合入集成分支。
-- [x] 桌面版本、更新夹具与 `release-plan.json` 均为 `0.2.6-beta.4`。
-- [x] 前端测试：71 files / 486 tests。
+- [x] 桌面版本与 `release-plan.json` 已推进到 `0.2.6-beta.5`；历史更新夹具继续固定为 beta.4 回归链。
+- [x] 前端测试：71 files / 493 tests。
 - [x] 前端生产构建。
 - [x] Desktop verify 与发布产物契约测试。
-- [x] beta.3 与 beta.4 安装包构建。
+- [x] beta.5 安装包构建。
 - [x] Packaged smoke：工作站、ERP、1688、运行时端口注入、ERP inbox v2、工作站读取确认和扩展加载通过。
-- [x] Update smoke：检查失败重试、发现 beta.4、手动下载、取消、重新下载、稍后安装和显式重启安装通过。
+- [x] Update smoke：历史 beta.3 -> beta.4 更新链通过；beta.5 发布后需补充线上回读。
 - [x] `pnpm --dir desktop release:organize`：beta 资产整理到隔离的 prerelease 目录。
 - [x] `pnpm --dir desktop release:check`。
 - [x] EXE、blockmap 与 beta.yml 的 SHA-256 均写入并通过校验。
