@@ -5,13 +5,16 @@ import { archiveReleaseFile, artifactNameFromPattern, organizeReleaseArtifacts }
 
 const desktopRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(desktopRoot, "..");
-const buildRoot = path.join(desktopRoot, "release");
 const releasesRoot = path.join(repositoryRoot, "releases");
-const latestRoot = path.join(releasesRoot, "latest");
 const historyRoot = path.join(releasesRoot, "history");
 const pkg = JSON.parse(fs.readFileSync(path.join(desktopRoot, "package.json"), "utf8"));
 const plan = JSON.parse(fs.readFileSync(path.join(desktopRoot, "release-plan.json"), "utf8"));
-const artifactName = artifactNameFromPattern(pkg.build.win.artifactName, plan.version, "exe");
+const prerelease = plan.version.includes("-");
+const metadataFile = prerelease ? "beta.yml" : "latest.yml";
+const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
+const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
+const buildRoot = prerelease ? path.join(desktopRoot, "release-test", plan.version) : path.join(desktopRoot, "release");
+const releaseRoot = prerelease ? path.join(releasesRoot, "prerelease", plan.version) : path.join(releasesRoot, "latest");
 
 function importLegacyArchive() {
   const legacyRoot = path.join(buildRoot, "archive");
@@ -29,14 +32,23 @@ function importLegacyArchive() {
   if (fs.readdirSync(legacyRoot).length === 0) fs.rmdirSync(legacyRoot);
 }
 
-importLegacyArchive();
-const result = organizeReleaseArtifacts({ buildRoot, latestRoot, historyRoot, artifactName, version: plan.version });
+if (!prerelease) importLegacyArchive();
+const result = organizeReleaseArtifacts({
+  buildRoot,
+  latestRoot: releaseRoot,
+  historyRoot,
+  artifactName,
+  version: plan.version,
+  metadataFile,
+});
 
 console.log(JSON.stringify({
   version: plan.version,
-  latest: latestRoot,
+  releaseRoot,
   history: historyRoot,
   artifact: artifactName,
+  metadata: metadataFile,
+  prerelease,
   bytes: result.bytes,
   sha256: result.sha256
 }, null, 2));

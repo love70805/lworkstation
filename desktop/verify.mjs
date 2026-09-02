@@ -135,8 +135,8 @@ assert.deepEqual(updateTestConfig, {
   purpose: "beta-smoke-only",
   channel: "beta",
   releaseType: "prerelease",
-  sourceVersion: "0.2.6-beta.1",
-  targetVersion: "0.2.6-beta.2",
+  sourceVersion: "0.2.6-beta.3",
+  targetVersion: "0.2.6-beta.4",
   artifactPattern: "Lworkstation-Setup-${version}.${ext}",
   metadataFile: "beta.yml",
   betaConfigFile: "update-beta-config.json",
@@ -144,15 +144,15 @@ assert.deepEqual(updateTestConfig, {
   repository: {
     owner: "love70805",
     repo: "lworkstation",
-    sourceTag: "v0.2.6-beta.1",
-    targetTag: "v0.2.6-beta.2",
+    sourceTag: "v0.2.6-beta.3",
+    targetTag: "v0.2.6-beta.4",
   },
   status: "prepared-not-published",
 });
 const { loadUpdateFixtureConfig } = createRequire(import.meta.url)("./update-fixture-config.cjs");
 const loadedFixtureConfig = loadUpdateFixtureConfig(root);
-assert.equal(loadedFixtureConfig.sourceArtifactName, "Lworkstation-Setup-0.2.6-beta.1.exe");
-assert.equal(loadedFixtureConfig.targetArtifactName, "Lworkstation-Setup-0.2.6-beta.2.exe");
+assert.equal(loadedFixtureConfig.sourceArtifactName, "Lworkstation-Setup-0.2.6-beta.3.exe");
+assert.equal(loadedFixtureConfig.targetArtifactName, "Lworkstation-Setup-0.2.6-beta.4.exe");
 assert.equal(pkg.build.files.includes("update-beta-config.json"), false, "beta config must not enter stable app.asar");
 assert.equal(pkg.build.extraResources.some((resource) => resource.from === "update-beta-config.json"), false, "stable packages must not embed beta config");
 assert.match(main, /allowLoopback && process\.env\.SHOPEERS_DESKTOP_UPDATE_URL/);

@@ -3,18 +3,26 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SETUP_PATTERN = /^(.+?) Setup (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\.exe$/;
-const ALLOWED_SUFFIXES = new Set(["latest.yml", "SHA256.txt"]);
+const ALLOWED_SUFFIXES = new Set(["latest.yml", "beta.yml", "SHA256.txt"]);
+
+function canonicalInstallerName(name) {
+  return String(name || "").replace(/^Lworkstation-Setup-/, "Lworkstation Setup ");
+}
+
+function sha256(file, ops = fs) {
+  return crypto.createHash("sha256").update(ops.readFileSync(file)).digest("hex").toUpperCase();
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export function artifactNameFromPattern(pattern, version, ext = "exe") {
   return pattern.replace("${version}", version).replace("${ext}", ext);
 }
 
 export function installerVersion(name) {
-  return name.match(SETUP_PATTERN)?.[2] ?? null;
-}
-
-function normalizedMetadataInstallerName(name) {
-  return String(name || "").replace(/^Lworkstation-Setup-/, "Lworkstation Setup ");
+  return canonicalInstallerName(name).match(SETUP_PATTERN)?.[2] ?? null;
 }
 
 function ensureDirectory(directory, ops = fs) {
@@ -58,41 +66,52 @@ function archiveDestinationFor(name, historyRoot, fallbackVersion) {
   return path.join(historyRoot, "unclassified", name);
 }
 
-export function validateLatestArtifacts({ latestRoot, artifactName, version, ops = fs }) {
-  const expected = new Set([artifactName, `${artifactName}.blockmap`, "latest.yml", "SHA256.txt"]);
+export function validateLatestArtifacts({ latestRoot, artifactName, version, metadataFile = "latest.yml", ops = fs }) {
+  const hashedArtifacts = [artifactName, `${artifactName}.blockmap`, metadataFile];
+  const expected = new Set([...hashedArtifacts, "SHA256.txt"]);
   if (!ops.existsSync(latestRoot)) throw new Error(`missing release directory: ${latestRoot}`);
   const actual = new Set(ops.readdirSync(latestRoot));
   for (const name of expected) if (!actual.has(name)) throw new Error(`missing release artifact: ${name}`);
-  for (const name of actual) if (!expected.has(name)) throw new Error(`unexpected latest artifact: ${name}`);
-  const latest = ops.readFileSync(path.join(latestRoot, "latest.yml"), "utf8");
-  if (!new RegExp(`^version:\\s*${version.replaceAll(".", "\\.")}\\s*$`, "m").test(latest)) {
-    throw new Error("latest.yml version does not match release plan");
+  for (const name of actual) if (!expected.has(name)) throw new Error(`unexpected release artifact: ${name}`);
+  const metadata = ops.readFileSync(path.join(latestRoot, metadataFile), "utf8");
+  if (!new RegExp(`^version:\\s*${escapeRegExp(version)}\\s*$`, "m").test(metadata)) {
+    throw new Error(`${metadataFile} version does not match release plan`);
   }
-  const exeReferences = [...latest.matchAll(/^\s*(?:path|url):\s*["']?(.+?\.exe)["']?\s*$/gm)]
+  const exeReferences = [...metadata.matchAll(/^\s*(?:-\s*)?(?:path|url):\s*["']?(.+?\.exe)["']?\s*$/gm)]
     .map((match) => {
       const value = match[1].trim();
       try { return decodeURIComponent(value); } catch { return value; }
     });
-  if (exeReferences.some((name) => normalizedMetadataInstallerName(name) !== artifactName)) {
-    throw new Error("latest.yml references a non-current installer");
+  if (exeReferences.some((name) => canonicalInstallerName(name) !== canonicalInstallerName(artifactName))) {
+    throw new Error(`${metadataFile} references a non-current installer`);
   }
-  if (!exeReferences.some((name) => normalizedMetadataInstallerName(name) === artifactName)) {
-    throw new Error("latest.yml must reference the current installer");
+  if (!exeReferences.some((name) => canonicalInstallerName(name) === canonicalInstallerName(artifactName))) {
+    throw new Error(`${metadataFile} must reference the current installer`);
+  }
+  const recordedHashes = new Map(ops.readFileSync(path.join(latestRoot, "SHA256.txt"), "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.match(/^([A-Fa-f0-9]{64})\s{2}(.+)$/))
+    .filter(Boolean)
+    .map((match) => [match[2], match[1].toUpperCase()]));
+  for (const name of hashedArtifacts) {
+    if (recordedHashes.get(name) !== sha256(path.join(latestRoot, name), ops)) {
+      throw new Error(`SHA256.txt does not match release artifact: ${name}`);
+    }
   }
   return true;
 }
 
-export function organizeReleaseArtifacts({ buildRoot, latestRoot, historyRoot, artifactName, version, ops = fs }) {
+export function organizeReleaseArtifacts({ buildRoot, latestRoot, historyRoot, artifactName, version, metadataFile = "latest.yml", ops = fs }) {
   ensureDirectory(latestRoot, ops);
   ensureDirectory(historyRoot, ops);
-  const currentArtifacts = [artifactName, `${artifactName}.blockmap`, "latest.yml"];
+  const currentArtifacts = [artifactName, `${artifactName}.blockmap`, metadataFile];
   const missingBuildArtifact = currentArtifacts.find((name) => !ops.existsSync(path.join(buildRoot, name)));
   if (missingBuildArtifact) {
     try {
-      validateLatestArtifacts({ latestRoot, artifactName, version, ops });
+      validateLatestArtifacts({ latestRoot, artifactName, version, metadataFile, ops });
       const artifact = ops.readFileSync(path.join(latestRoot, artifactName));
-      const sha256 = crypto.createHash("sha256").update(artifact).digest("hex").toUpperCase();
-      return { artifactName, version, bytes: artifact.byteLength, sha256 };
+      return { artifactName, version, bytes: artifact.byteLength, sha256: sha256(path.join(latestRoot, artifactName), ops) };
     } catch {
       throw new Error(`missing release artifact: ${missingBuildArtifact}`);
     }
@@ -112,8 +131,8 @@ export function organizeReleaseArtifacts({ buildRoot, latestRoot, historyRoot, a
     ops.renameSync(source, destination);
   }
   const artifact = ops.readFileSync(path.join(latestRoot, artifactName));
-  const sha256 = crypto.createHash("sha256").update(artifact).digest("hex").toUpperCase();
-  ops.writeFileSync(path.join(latestRoot, "SHA256.txt"), `${sha256}  ${artifactName}\n`, "utf8");
-  validateLatestArtifacts({ latestRoot, artifactName, version, ops });
-  return { artifactName, version, bytes: artifact.byteLength, sha256 };
+  const hashes = currentArtifacts.map((name) => `${sha256(path.join(latestRoot, name), ops)}  ${name}`);
+  ops.writeFileSync(path.join(latestRoot, "SHA256.txt"), `${hashes.join("\n")}\n`, "utf8");
+  validateLatestArtifacts({ latestRoot, artifactName, version, metadataFile, ops });
+  return { artifactName, version, bytes: artifact.byteLength, sha256: sha256(path.join(latestRoot, artifactName), ops) };
 }

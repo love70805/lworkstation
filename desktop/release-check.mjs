@@ -42,11 +42,16 @@ for (const requirement of plan.requiredCommits) {
   }
 }
 
-const artifactName = artifactNameFromPattern(pkg.build.win.artifactName, plan.version, "exe");
-const releaseRoot = path.join(repositoryRoot, "releases", "latest");
+const prerelease = plan.version.includes("-");
+const metadataFile = prerelease ? "beta.yml" : "latest.yml";
+const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
+const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
+const releaseRoot = prerelease
+  ? path.join(repositoryRoot, "releases", "prerelease", plan.version)
+  : path.join(repositoryRoot, "releases", "latest");
 const artifactPath = path.join(releaseRoot, artifactName);
 
-validateLatestArtifacts({ latestRoot: releaseRoot, artifactName, version: plan.version });
+validateLatestArtifacts({ latestRoot: releaseRoot, artifactName, version: plan.version, metadataFile });
 
 const artifact = fs.readFileSync(artifactPath);
 const sha256 = crypto.createHash("sha256").update(artifact).digest("hex").toUpperCase();
@@ -56,6 +61,8 @@ console.log(JSON.stringify({
   branch,
   requiredCommits: plan.requiredCommits,
   artifact: artifactName,
+  metadata: metadataFile,
+  prerelease,
   bytes: artifact.byteLength,
   sha256
 }, null, 2));

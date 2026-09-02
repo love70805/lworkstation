@@ -33,21 +33,21 @@ function loadUpdateFixtureConfig(root) {
     purpose: "beta-smoke-only",
     channel: "beta",
     releaseType: "prerelease",
-    sourceVersion: "0.2.6-beta.1",
-    targetVersion: "0.2.6-beta.2",
+    sourceVersion: "0.2.6-beta.3",
+    targetVersion: "0.2.6-beta.4",
     artifactPattern: ARTIFACT_PATTERN,
     metadataFile: "beta.yml",
     betaConfigFile: "update-beta-config.json",
     feed: "loopback-only",
     repository: {
       ...EXPECTED_REPOSITORY,
-      sourceTag: "v0.2.6-beta.1",
-      targetTag: "v0.2.6-beta.2",
+      sourceTag: "v0.2.6-beta.3",
+      targetTag: "v0.2.6-beta.4",
     },
     status: "prepared-not-published",
   };
   if (JSON.stringify(raw) !== JSON.stringify(expected)) {
-    throw new Error("更新夹具必须明确为未发布的 0.2.6-beta.1 -> 0.2.6-beta.2 beta 通道验证");
+    throw new Error("更新夹具必须明确为 0.2.6-beta.3 -> 0.2.6-beta.4 beta 通道验证");
   }
   const betaConfigPath = path.join(root, raw.betaConfigFile);
   const betaConfig = assertBetaUpdateConfig(JSON.parse(fs.readFileSync(betaConfigPath, "utf8")));
