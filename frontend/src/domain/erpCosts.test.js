@@ -91,6 +91,14 @@ describe("ERP v8.0-compatible cost selection", () => {
     expect(result.skippedCancelled).toBe(2);
   });
 
+  it("truncates legacy ERP cost outputs to two decimals", () => {
+    const result = calculateLegacyWarehouseCosts([
+      { id: "R1", warehouseSku: "WH-1", purchaseDate: "2026-07-01", quantity: 3, unitPrice: 1.239, purchaseOrderNo: "P1" },
+    ], { currentYearMonth: 202608 });
+
+    expect(result.costs[0]).toMatchObject({ totalPrice: 3.71, unitCost: 1.23 });
+  });
+
   it("recognizes cancelled payment and 1688 order states even when the ERP field name varies", () => {
     expect(isCancelledPurchaseRecord({ paymentStatus: "已取消", order1688Status: "已取消" })).toBe(true);
     expect(isCancelledPurchaseRecord({ erpPaymentState: "CANCELLED" })).toBe(true);

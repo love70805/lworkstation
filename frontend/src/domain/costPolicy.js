@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { canonicalPlatformSku, normalizePlatformSku } from "./identifiers";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@4";
+export const COST_POLICY_VERSION = "formal-cost-policy@5-truncate-2dp";
 
 function text(value) {
   const normalized = String(value ?? "").trim();
@@ -46,7 +46,7 @@ function normalizeCandidate(candidate, expectedCanonicalSku, kind) {
     candidate: issues.length === 0 ? {
       ...candidate,
       id: text(candidate.id),
-      unitCost: amount.toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber(),
+      unitCost: amount.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
       currency,
     } : null,
     issues,
@@ -71,7 +71,9 @@ function validateApproval({ approval, referenceCost, ledgerId, canonicalSku }) {
   if (!approvalSku || canonicalPlatformSku(approvalSku) !== canonicalSku) issues.push("approval_sku_mismatch");
   if (text(approval.referenceCostId) !== text(referenceCost.id)) issues.push("approval_reference_mismatch");
   if (approvalCurrency !== DEFAULT_CURRENCY) issues.push("approval_currency_unsupported");
-  if (!approvedAmount || !new Decimal(referenceCost.unitCost).eq(approvedAmount)) issues.push("approval_amount_mismatch");
+  if (!approvedAmount || !new Decimal(referenceCost.unitCost).eq(approvedAmount.toDecimalPlaces(2, Decimal.ROUND_DOWN))) {
+    issues.push("approval_amount_mismatch");
+  }
 
   return issues;
 }
@@ -87,7 +89,9 @@ function latestValidCost(items, kind) {
       const timestamp = dateText && Number.isFinite(Date.parse(dateText)) ? Date.parse(dateText) : index;
       return {
         ...item,
-        unitCost: amount.toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber(),
+        unitCost: kind === "finalized_profit_history"
+          ? amount.toNumber()
+          : amount.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
         currency,
         referenceKind: kind,
         _timestamp: timestamp,

@@ -6,7 +6,7 @@ import { isDesktopRuntime } from "../lib/desktopRuntime";
 import { getErpExtensionStatus, getErpRequestHistory } from "../lib/erpInboxTransport";
 import { getActiveMemberContext } from "../data/database";
 
-export const ERP_ASSISTANT_VERSION = "8.0.14";
+export const ERP_ASSISTANT_VERSION = "8.0.15";
 export const extensionDownload = `/integrations/erp-assistant/ERP-Assistant-v${ERP_ASSISTANT_VERSION}-shopeers-bridge.zip`;
 export const extensionManagerUrl = "chrome://extensions/";
 

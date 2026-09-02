@@ -20,14 +20,14 @@
 - 总控范围：公共 `erpCostBatchEnvelope`、`erpBridgeContract`、ERP inbox payload 与 `profitRepository` 发布契约的审查、合并和完整回归。
 - ERP 扩展职责：只采集、提示异常、预览并回传完整原始证据；异常不得阻止复制、导出或回传，扩展不得确认、修正或发布正式成本。
 - Shopeers 职责：`CostMatching` 负责 median/MAD 异常检测、修正、真实价确认和审计；repository 独立复算，并阻止未处置异常、零价或篡改成本发布。
-- 成本口径：正式成本继续使用最近最多三次有效采购记录按数量加权；全部有效历史只用于异常基线；ERP 正式、1688 参考的业务口径不变。
+- 成本口径：正式成本继续使用最近最多三次有效采购记录按数量加权；全部有效历史只用于异常基线；ERP 正式、1688 参考的业务口径不变。新产生的 ERP/1688 单件成本、采购成本、仓储、扣款、利润与利润率统一直接舍弃小数点后两位，不四舍五入；已结算历史数据保持原值。
 - Contract 状态：ERP batch envelope `formatVersion: 2`，inbox transport v2；`requestId + ledgerId + 完整 SKC 集合` 必须精确匹配。同一仓库 SKU 可共享给多个平台 SKU/SKC；当前账本使用的行标记为 `ledgerScopeRole: expected`，同查询 SKC 下但本账本未使用的额外变体标记为 `auxiliary`。辅助变体只保留预览与审计，不参与匹配兜底、证据完整性阻断或正式成本发布。任一层 v1 均只按 `legacy_partial` 预览；非法警告、重复证据身份、无效币种或负成本在落盘前拒绝，正式发布必须使用完整 v2 `warehouseEvidence`。
 - 集成结果：利润/ERP 最终链路 `18d4bd4`、ERP 证据归属修复 `e216f29`、桌面 packaged smoke 适配 `0f00b4f`、1688 心跳兼容修复 `92d10ac`、ERP 复制回退 `b4b4859`、未映射证据折叠 `dc75782`、证据状态区分 `b5e2682` 与共享仓库映射修复 `8020c8e` 已合入集成分支；`0.2.5` 正式发布提交为 `9f002fb`。
 - 最新集成回归：60 个前端测试文件、317 项测试、前端构建、ERP bridge/inbox/result-policy、desktop verify/inbox 生命周期与发布产物夹具全部通过。包含 `8020c8e` 的桌面 build 和 packaged smoke 仍是下一次正式发布的前置条件。
 - 软件内更新：`acacf2e` 已加入受控更新状态机，`a412684` 隔离更新 smoke 缓存；已验证静默检查、手动重试、取消下载、重新下载、稍后安装和显式重启安装。`autoDownload=false`、`autoInstallOnAppQuit=false`，稳定源默认关闭，当前只使用 `0.2.6-internal.1/.2` 做内部夹具验证，不代表正式 `0.2.6` 发布。
 - 桌面版本：`0.2.5` 保留现有安全壳与 ERP/1688 内置扩展，并加入 ERP 成本复制回退、未映射证据折叠和证据不完整原因/补齐指引；桌面层不执行异常判断、人工确认或正式成本发布。
 - UI 集成：`edac462`、桌面壳 `d112b08`、利润/ERP `18d4bd4` 与桌面 smoke `0f00b4f` 均由 `desktop/release-plan.json` 作为正式发布前置提交检查。
-- ERP Assistant：`v8.0.14`，38,147 bytes，SHA-256 `0210C69B5872FA701923DC278010FEA7F098815035F700C145B50B0EA2101620`。
+- ERP Assistant：`v8.0.15`，38,645 bytes，SHA-256 `EDA7774D60791FCAF02AA25D47645E4C39A578C2656DED7BC1BE36FB0EDB900C`。该版支持采购页 iframe 注入，并在 ERP 替换页面 DOM 后自动恢复右下角核算按钮。
 - 安装包：`releases/latest/Shopeers 工作站 Setup 0.2.5.exe`，88,464,108 bytes，SHA-256 `81F7DEF97D68BF44FEA7D6D1B6ACD6851A376162E6CC0FBEB0EEE5B166ADB7E3`。
 - 待发布 UI/桌面候选：全局 UI `ca4ceda`，桌面壳/缩放 `15c8db5`，Windows 品牌与图标 `cf3c36a`，发布与偏好恢复加固 `3657664`，发布定位文档 `b9936d2` 与 `5acae7d` 已合入集成分支。主工作区候选包为 `desktop/release/Lworkstation Setup 0.2.5.exe`，88,623,760 bytes，SHA-256 `E49CD34AE5885FAA21D3E11A2B42685C1BDC070A6067F4E6CE41C52D52E74447`；该候选生成于 `8020c8e` / ERP Assistant v8.0.14 之前，必须从最新集成分支重新构建并通过 desktop build、packaged smoke、`release:organize` 与 `release:check`，不得视为当前可发布版本。
 - 待人工验收：真实 ERP 登录态跨重启、采购页扩展注入、真实分页、SKU/SKC/仓库 SKU 映射、供应商与 1688 链接、真实 `warehouseEvidence` 完整性。

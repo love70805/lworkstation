@@ -18,7 +18,13 @@ const capability = "test-capability-0123456789-abcdefghijklmnopqrstuvwxyz";
 const freshCreatedAt = () => new Date(Date.now() - 60_000).toISOString();
 const sender = {
   frameId: 0,
+  url: "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html?tab=cost",
   tab: { url: "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html?tab=cost" },
+};
+const embeddedSender = {
+  frameId: 4,
+  url: sender.url,
+  tab: { url: "https://www.zhuolinkeji.cn/view/console/index.html" },
 };
 
 function jsonClone(value) {
@@ -69,7 +75,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.14" }),
+      getManifest: () => ({ version: "8.0.15" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -174,20 +180,20 @@ function resultInput(overrides = {}) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.14");
+  assert.equal(manifest.version, "8.0.15");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolated = manifest.content_scripts.find((entry) => !entry.world);
   assert.deepEqual(main.js, ["src/query-hook.js"]);
-  assert.equal(main.all_frames, false);
+  assert.equal(main.all_frames, true);
   assert.deepEqual(isolated.js, [
     "src/result-policy.js",
     "src/request-context.js",
     "src/shopeers-bridge.js",
     "src/content.js",
   ]);
-  assert.equal(isolated.all_frames, false);
+  assert.equal(isolated.all_frames, true);
   assert.ok(!isolated.js.includes("src/inbox-config.js"));
 
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "shopeers-erpa-secure-"));
@@ -208,6 +214,7 @@ async function verifyManifestAndGenerator() {
     const generatedContent = await readFile(path.join(outputDir, "src", "content.js"), "utf8");
     const generatedBackground = await readFile(path.join(outputDir, "src", "background.js"), "utf8");
     assert.deepEqual(generatedManifest.content_scripts, manifest.content_scripts);
+    assert.equal(generatedManifest.version, manifest.version);
     assert.deepEqual(generatedManifest.background, { service_worker: "src/background.js" });
     assert.ok(generatedManifest.permissions.includes("alarms"));
     assert.ok(generatedManifest.permissions.includes("storage"));
@@ -220,7 +227,7 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.14-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.15-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
@@ -229,9 +236,9 @@ async function verifyPublishedPackage() {
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
-    assert.equal(main.all_frames, false);
+    assert.equal(main.all_frames, true);
     assert.deepEqual(isolated.js, ["src/result-policy.js", "src/request-context.js", "src/shopeers-bridge.js", "src/content.js"]);
-    assert.equal(isolated.all_frames, false);
+    assert.equal(isolated.all_frames, true);
     const background = await readFile(path.join(root, "src", "background.js"), "utf8");
     const content = await readFile(path.join(root, "src", "content.js"), "utf8");
     const bridge = await readFile(path.join(root, "src", "shopeers-bridge.js"), "utf8");
@@ -341,9 +348,14 @@ async function verifyBackgroundSecurityAndDelivery() {
     },
   });
   await assert.rejects(
-    () => background.api.submitCostResult(resultInput(), { frameId: 1, tab: sender.tab }),
+    () => background.api.submitCostResult(resultInput(), {
+      frameId: 1,
+      url: "https://www.zhuolinkeji.cn/view/system/orderManagement/orderList.html",
+      tab: embeddedSender.tab,
+    }),
     (error) => error.code === "ERP_UNTRUSTED_SENDER",
   );
+  assert.equal(background.api.senderAllowed(embeddedSender), true);
   const delivered = await background.api.submitCostResult(resultInput(), sender);
   assert.equal(delivered.ok, true);
   const getCall = calls.find((call) => new URL(call.url).pathname === "/erp/v1/requests");
@@ -364,9 +376,9 @@ async function verifyBackgroundSecurityAndDelivery() {
   assert.doesNotMatch(JSON.stringify(background.logs), new RegExp(capability));
 
   calls.length = 0;
-  await background.api.reportInstalled({ ready: true, sender });
+  await background.api.reportInstalled({ ready: true, sender: embeddedSender });
   const statusBody = JSON.parse(calls.find((call) => new URL(call.url).pathname === "/erp/v1/extension-status").init.body);
-  assert.equal(statusBody.pageUrl, sender.tab.url);
+  assert.equal(statusBody.pageUrl, embeddedSender.url);
   assert.equal(statusBody.context, "extension-isolated");
 }
 

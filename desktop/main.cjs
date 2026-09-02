@@ -906,7 +906,7 @@ async function runErpV2SmokeFixture() {
       onMessage: { addListener: (listener) => { runtimeMessageHandler = listener; } },
       onInstalled: { addListener: () => {} },
       onStartup: { addListener: () => {} },
-      getManifest: () => ({ version: "8.0.14" }),
+      getManifest: () => ({ version: "8.0.15" }),
       lastError: null,
       sendMessage: (message, callback) => {
         if (typeof runtimeMessageHandler !== "function") {

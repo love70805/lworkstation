@@ -41,7 +41,7 @@ export function calculateSupplierLandedUnitCost({
     .plus(shipping.div(packCount))
     .plus(handling)
     .div(packUnits)
-    .toDecimalPlaces(6, Decimal.ROUND_HALF_UP)
+    .toDecimalPlaces(2, Decimal.ROUND_DOWN)
     .toNumber();
 }
 

@@ -1,7 +1,7 @@
-Shopeers ERP Assistant v8.0.14 桥接扩展
+Shopeers ERP Assistant v8.0.15 桥接扩展
 
 安装步骤：
-1. 解压 ERP-Assistant-v8.0.14-shopeers-bridge.zip。
+1. 解压 ERP-Assistant-v8.0.15-shopeers-bridge.zip。
 2. 在 Chrome 打开 chrome://extensions/。
 3. 开启开发者模式。
 4. 点击“加载已解压的扩展程序”，选择解压后能看到 manifest.json 的文件夹。

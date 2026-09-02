@@ -130,7 +130,7 @@ export function evidenceRepairGuidance(issueKeys = []) {
   if (keys.has("mappingSourceWarnings") || keys.has("mappingFailures")) guidance.push("核对当前账本平台 SKU/SKC 与 ERP 仓库映射；修正商品身份或仓库 SKU 映射后重新采集。");
   if (keys.has("detailSourceWarnings") || keys.has("detailFailures")) guidance.push("检查 ERP 采购页分页和历史订单明细是否完整加载后重新采集。");
   if (keys.has("sourceWarnings")) guidance.push("按采集警告完成对应修正后重新回传。");
-  if (keys.has("evidenceRef") || keys.has("batchEvidence")) guidance.push("使用 ERP Assistant v8.0.14 重新生成完整 v2 批次，再回到本页载入。");
+  if (keys.has("evidenceRef") || keys.has("batchEvidence")) guidance.push("使用 ERP Assistant v8.0.15 重新生成完整 v2 批次，再回到本页载入。");
   return [...new Set(guidance)];
 }
 

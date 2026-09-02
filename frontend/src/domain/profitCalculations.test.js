@@ -68,4 +68,32 @@ describe("exact and reference profit", () => {
       referenceKind: "supplier_landed",
     });
   });
+
+  it("truncates every calculated monetary input and result to two decimals", () => {
+    const result = calculateExactProfitLine({
+      revenue: 20.999,
+      quantity: 3,
+      warehouseRate: 0.789,
+      penalty: 0.239,
+      costDecision: {
+        id: "DEC-TRUNCATE",
+        status: "final",
+        calculationMode: "exact",
+        eligibleForExactProfit: true,
+        source: "erp",
+        unitCost: 4.239,
+        currency: "CNY",
+      },
+    });
+
+    expect(result).toMatchObject({
+      revenue: 20.99,
+      unitCost: 4.23,
+      purchaseCost: 12.69,
+      warehouseCost: 2.34,
+      penalty: 0.23,
+      profit: 5.73,
+      profitRate: 27.29,
+    });
+  });
 });
