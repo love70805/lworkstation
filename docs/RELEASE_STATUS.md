@@ -17,12 +17,12 @@
 
 - 版本：`0.2.6-beta.5`
 - 集成分支：`codex/selection-profit-erp-sync`
-- 发布提交：待发布
+- 发布提交：`ad8d875`
 - 安装包：`Lworkstation-Setup-0.2.6-beta.5.exe`
-- 文件大小：待构建
-- SHA-256：待构建
+- 文件大小：`88,799,635` bytes
+- SHA-256：`3369A15C9BA77C785F307F0D89F215B34018C371078C8B92FB66B03B117B0C39`
 - 更新路径：`0.2.6-beta.4 -> 0.2.6-beta.5`
-- GitHub Release：待发布，目标为 prerelease。
+- GitHub Release：`v0.2.6-beta.5`，已于 2026-09-02 发布为 prerelease。
 
 ## 发布门禁
 
@@ -37,6 +37,7 @@
 - [x] `pnpm --dir desktop release:organize`：beta 资产整理到隔离的 prerelease 目录。
 - [x] `pnpm --dir desktop release:check`。
 - [x] EXE、blockmap 与 beta.yml 的 SHA-256 均写入并通过校验。
+- [x] GitHub Release 资产回读：标签、prerelease 状态、文件名与文件大小均匹配。
 - [x] GitHub Release 资产回读：标签、文件大小、SHA-256 与 beta.yml 均匹配。
 - [x] 真实公开更新：beta.3 从 GitHub 发现、下载 beta.4，并仅在显式操作时触发安装。
 
