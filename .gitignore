@@ -7,6 +7,7 @@ frontend/.vite/
 desktop/release/
 releases/latest/
 releases/history/
+releases/prerelease/
 archive/
 
 # Environment files and secrets
