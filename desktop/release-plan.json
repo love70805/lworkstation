@@ -1,6 +1,6 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.6-beta.5",
+  "version": "0.2.6-beta.6",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
@@ -18,6 +18,10 @@
     {
       "module": "prerelease-release-tooling",
       "commit": "f143e92"
+    },
+    {
+      "module": "v12-data-preservation",
+      "commit": "a180e13"
     }
   ]
 }
