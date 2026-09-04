@@ -1,6 +1,6 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.6-beta.6",
+  "version": "0.2.6-beta.7",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {

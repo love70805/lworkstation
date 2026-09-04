@@ -1,6 +1,6 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-04
+更新时间：2026-09-05
 
 ## 已发布公开 Beta
 
@@ -29,27 +29,21 @@
 
 ## 当前发布候选
 
-- 目标版本：`0.2.6-beta.6`
-- 目标更新路径：`0.2.6-beta.5 -> 0.2.6-beta.6`
-- 本轮包含：v12 升级只做 schema 前向迁移并保留业务数据；L7 Windows 图标资源更新；前述 ERP/1688 受控 transport 与桌面安全壳修订的集成发布。
-- 状态：线上 prerelease 已创建并完成资产回读；真实 beta.5 -> beta.6 安装替换仍待隔离 Windows 手工验收。
+- 目标版本：`0.2.6-beta.7`
+- 目标更新路径：`0.2.6-beta.6 (手工安装一次) -> 0.2.6-beta.7 -> 后续 beta (软件内更新)`
+- 本轮包含：把 beta 更新配置仅在 prerelease 打包后的资源目录中受控写入；稳定包继续保持 `enabled: false`、`channel: latest`。
+- 状态：候选构建和 GitHub prerelease 发布待执行。beta.6 的线上资产已有下载，不能替换或原地修复。
 
 ## 发布门禁
 
 - [x] 公开仓库基线、更新时间安全修复和预发布发布工具已合入集成分支。
-- [x] 桌面版本与 `release-plan.json` 推进到 `0.2.6-beta.6`；历史更新夹具继续固定为 beta.4 回归链。
-- [x] 前端测试：71 files / 493 tests。
-- [x] 前端生产构建。
-- [x] Desktop verify 与发布产物契约测试。
-- [x] beta.6 安装包构建。
-- [x] Packaged smoke：工作站、ERP、1688、运行时端口注入、ERP inbox v2、工作站读取确认和扩展加载通过。
-- [x] Update smoke：历史 beta.3 -> beta.4 更新链通过；beta.6 线上资产回读已完成。
-- [x] `pnpm --dir desktop release:organize`：beta 资产整理到隔离的 prerelease 目录。
-- [x] `pnpm --dir desktop release:check`。
-- [x] EXE、blockmap 与 beta.yml 的 SHA-256 均写入并通过校验。
-- [x] GitHub Release 资产回读：beta.1 至 beta.5 的标签、prerelease 状态、文件名、大小、SHA-256 与 beta.yml 均匹配。
-- [x] GitHub Release 资产回读：beta.6 标签、文件大小、SHA-256 与 beta.yml 均匹配。
-- [ ] 真实公开更新：从已安装 beta.5 发现、下载 beta.6，并仅在显式操作时触发安装；未完成前不作通过声明。
+- [ ] 桌面版本与 `release-plan.json` 推进到 `0.2.6-beta.7`；历史更新夹具继续固定为 beta.4 回归链。
+- [ ] 前端测试与生产构建。
+- [ ] Desktop verify、update smoke 与发布产物契约测试。
+- [ ] beta.7 安装包构建、`release:organize` 与 `release:check`。
+- [ ] EXE、blockmap 与 beta.yml 的 SHA-256 写入并回读。
+- [ ] GitHub Release 资产回读：beta.7 标签、prerelease 状态、文件名、大小、SHA-256 与 beta.yml 均匹配。
+- [ ] 真实公开更新：从手工安装的 beta.7 发现、下载并显式安装后续 beta；未完成前不作通过声明。
 
 ## 权威规则
 

@@ -1,6 +1,6 @@
 {
   "name": "shopeers-desktop",
-  "version": "0.2.6-beta.6",
+  "version": "0.2.6-beta.7",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
   "author": "Shopeers Team",
@@ -10,9 +10,10 @@
     "start": "electron .",
     "brand:icons": "electron generate-brand-assets.cjs",
     "build:update-fixtures": "node build-update-fixtures.mjs",
-    "verify": "node verify.mjs && node inbox-ipc.test.mjs && node extension-runtime.test.mjs && node workspace-context.test.mjs && node workspace-navigation.test.mjs && node inbox-service.test.mjs && node update-runtime.test.mjs && node release-artifacts.test.mjs",
+    "verify": "node verify.mjs && node inbox-ipc.test.mjs && node extension-runtime.test.mjs && node workspace-context.test.mjs && node workspace-navigation.test.mjs && node inbox-service.test.mjs && node update-runtime.test.mjs && node release-after-pack.test.mjs && node release-artifacts.test.mjs",
     "release:organize": "node organize-release.mjs",
     "release:check": "node release-check.mjs",
+    "release:build": "node release-build.mjs",
     "smoke:packaged": "node smoke.mjs",
     "smoke:update": "node update-smoke.mjs",
     "build": "pnpm --dir ../frontend build && pnpm brand:icons && electron-builder --config.electronDist=./node_modules/electron/dist"

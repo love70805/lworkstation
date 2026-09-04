@@ -6,10 +6,10 @@
 
 - GitHub 仓库：`love70805/lworkstation`
 - 集成分支：`codex/selection-profit-erp-sync`
-- 最新集成提交：`d69e3ca`（beta.5 发布记录；beta.6 发布准备在隔离发布工作树进行）
+- 最新集成提交：`78cb6f7`（beta.6 发布记录；beta.7 发布准备在隔离发布工作树进行）
 - 当前草稿 PR：`#1`
 - 本地开发地址：`http://127.0.0.1:5173`
-- 官方桌面版本：`0.2.6-beta.5`；下一候选：`0.2.6-beta.6`
+- 官方桌面版本：`0.2.6-beta.6`；下一候选：`0.2.6-beta.7`
 - 发布状态入口：`desktop/release-plan.json` 与 `docs/RELEASE_STATUS.md`
 
 ## 进行中的跨模块协调
@@ -24,11 +24,11 @@
 - Contract 状态：ERP batch envelope `formatVersion: 2`，inbox transport v2；`requestId + ledgerId + 完整 SKC 集合` 必须精确匹配。同一仓库 SKU 可共享给多个平台 SKU/SKC；当前账本使用的行标记为 `ledgerScopeRole: expected`，同查询 SKC 下但本账本未使用的额外变体标记为 `auxiliary`。辅助变体只保留预览与审计，不参与匹配兜底、证据完整性阻断或正式成本发布。任一层 v1 均只按 `legacy_partial` 预览；非法警告、重复证据身份、无效币种或负成本在落盘前拒绝，正式发布必须使用完整 v2 `warehouseEvidence`。
 - 集成结果：利润/ERP 最终链路 `18d4bd4`、ERP 证据归属修复 `e216f29`、桌面 packaged smoke 适配 `0f00b4f`、1688 心跳兼容修复 `92d10ac`、ERP 复制回退 `b4b4859`、未映射证据折叠 `dc75782`、证据状态区分 `b5e2682` 与共享仓库映射修复 `8020c8e` 已合入集成分支；`0.2.5` 正式发布提交为 `9f002fb`。
 - 最新集成回归：60 个前端测试文件、317 项测试、前端构建、ERP bridge/inbox/result-policy、desktop verify/inbox 生命周期与发布产物夹具全部通过。包含 `8020c8e` 的桌面 build 和 packaged smoke 仍是下一次正式发布的前置条件。
-- 软件内更新：`acacf2e` 已加入受控更新状态机，`a412684` 隔离更新 smoke 缓存；beta.1 至 beta.5 已公开为 GitHub prerelease，`autoDownload=false`、`autoInstallOnAppQuit=false`，发现更新后仍由用户确认下载并显式重启安装。beta.6 发布前继续使用 beta 通道夹具做回归，稳定源默认关闭。
+- 软件内更新：`acacf2e` 已加入受控更新状态机，`a412684` 隔离更新 smoke 缓存；beta.1 至 beta.6 已公开为 GitHub prerelease，`autoDownload=false`、`autoInstallOnAppQuit=false`，发现更新后仍由用户确认下载并显式重启安装。beta.6 的已发布安装包未启用 beta 更新源，beta.7 将作为一次手工安装的更新引导版；beta.7 之后继续使用 beta 通道更新，稳定源默认关闭。
 - 桌面版本：`0.2.5` 保留现有安全壳与 ERP/1688 内置扩展，并加入 ERP 成本复制回退、未映射证据折叠和证据不完整原因/补齐指引；桌面层不执行异常判断、人工确认或正式成本发布。
 - UI 集成：`edac462`、桌面壳 `d112b08`、利润/ERP `18d4bd4` 与桌面 smoke `0f00b4f` 均由 `desktop/release-plan.json` 作为正式发布前置提交检查。
 - ERP Assistant：`v8.0.15`，38,645 bytes，SHA-256 `EDA7774D60791FCAF02AA25D47645E4C39A578C2656DED7BC1BE36FB0EDB900C`。该版支持采购页 iframe 注入，并在 ERP 替换页面 DOM 后自动恢复右下角核算按钮。
-- beta.5 安装包：`Lworkstation-Setup-0.2.6-beta.5.exe`，88,799,635 bytes，SHA-256 `3369A15C9BA77C785F307F0D89F215B34018C371078C8B92FB66B03B117B0C39`；beta.6 需从本次最终集成提交重新构建，不能复用旧候选。
+- beta.6 安装包已发布；由于其包内更新源仍关闭，不能替换已下载的同名资产。beta.7 必须从最新集成提交重新构建并发布为新的 prerelease，作为后续软件内更新的引导版。
 - 待发布 UI/桌面候选：全局 UI `ca4ceda`，桌面壳/缩放 `15c8db5`，Windows 品牌与图标 `cf3c36a`，发布与偏好恢复加固 `3657664`，发布定位文档 `b9936d2` 与 `5acae7d` 已合入集成分支。主工作区候选包为 `desktop/release/Lworkstation Setup 0.2.5.exe`，88,623,760 bytes，SHA-256 `E49CD34AE5885FAA21D3E11A2B42685C1BDC070A6067F4E6CE41C52D52E74447`；该候选生成于 `8020c8e` / ERP Assistant v8.0.14 之前，必须从最新集成分支重新构建并通过 desktop build、packaged smoke、`release:organize` 与 `release:check`，不得视为当前可发布版本。
 - 待人工验收：真实 ERP 登录态跨重启、采购页扩展注入、真实分页、SKU/SKC/仓库 SKU 映射、供应商与 1688 链接、真实 `warehouseEvidence` 完整性。
 - 本轮不通知选品与全局 UI 对话；若最终 contract 改变选品参考读模型或共享视觉组件，再按路由规则补充广播。
