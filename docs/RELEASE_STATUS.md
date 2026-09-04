@@ -10,39 +10,38 @@
 - v0.2.6-beta.3：公开仓库基线与更新时间安全修复；安装包 88,726,721 bytes，SHA-256 787EDBD10582719303E163A96E0A0C740BE976180047D39E1E52843223D83E14。
 - v0.2.6-beta.4：公开更新链验证版；安装包 88,726,356 bytes，SHA-256 6FBFC490EC41538BE211A62FEFFD7EDCEF0CB75D1207A17C9798F6BAAD3898A6。
 - v0.2.6-beta.6：数据保留与安全传输集成版；安装包 88,798,962 bytes，SHA-256 6F0C6F802DBFE640AF75AF0DC91D1A6115E6CDDE4A9F406CF6DD19FFE9EC6CBA；blockmap SHA-256 4F584BFEBB9E0DDCB66D96107263CAB381C687AC4E6E7CC8178E5A5FA0C2A8AD；beta.yml SHA-256 4E83F8F7C0881FA903986A9A99BCD93394AC0F06A019A5D11C77B326BD1889C3。
-- 六个版本均为 GitHub prerelease，完整上传 EXE、blockmap、beta.yml 和 SHA256.txt。
+- v0.2.6-beta.7：beta 更新源引导版；安装包 88,799,017 bytes，SHA-256 753A8C876C77D021AA633F8EF3076E7B93D50511A27AAC5D11D4EBAFB1E85560；blockmap SHA-256 C1442CCACD36032859CE4FD72F30E779EE3EA0BB01214C6FE1A64885FB3C233B；beta.yml SHA-256 34A597E9AFFE7A9C4EBE6C40BBBE6ADB5610C606468E8345913E322E2E6272B6。
+- 七个版本均为 GitHub prerelease，完整上传 EXE、blockmap、beta.yml 和 SHA256.txt。
 - 自动下载和退出即装保持关闭，更新必须由用户确认下载并显式重启安装。
 - Windows 代码签名尚未配置，首次安装可能显示“未知发布者”。
 
 ## 最新发布 Beta
 
-- 版本：`0.2.6-beta.6`
+- 版本：`0.2.6-beta.7`
 - 集成分支：`codex/selection-profit-erp-sync`
-- 发布提交：`048cb6d`
-- 安装包：`Lworkstation-Setup-0.2.6-beta.6.exe`
-- 文件大小：`88,798,962` bytes
-- SHA-256：`6F0C6F802DBFE640AF75AF0DC91D1A6115E6CDDE4A9F406CF6DD19FFE9EC6CBA`
-- blockmap：`93,989` bytes，SHA-256 `4F584BFEBB9E0DDCB66D96107263CAB381C687AC4E6E7CC8178E5A5FA0C2A8AD`
-- beta.yml：`373` bytes，SHA-256 `4E83F8F7C0881FA903986A9A99BCD93394AC0F06A019A5D11C77B326BD1889C3`
-- 更新路径：`0.2.6-beta.5 -> 0.2.6-beta.6`
-- GitHub Release：`v0.2.6-beta.6`，已于 2026-09-04 18:41 UTC 发布为 prerelease。
+- 发布提交：`40e4da8`
+- 安装包：`Lworkstation-Setup-0.2.6-beta.7.exe`
+- 文件大小：`88,799,017` bytes
+- SHA-256：`753A8C876C77D021AA633F8EF3076E7B93D50511A27AAC5D11D4EBAFB1E85560`
+- blockmap：`94,042` bytes，SHA-256 `C1442CCACD36032859CE4FD72F30E779EE3EA0BB01214C6FE1A64885FB3C233B`
+- beta.yml：`373` bytes，SHA-256 `34A597E9AFFE7A9C4EBE6C40BBBE6ADB5610C606468E8345913E322E2E6272B6`
+- 更新路径：`0.2.6-beta.6 (手工安装一次) -> 0.2.6-beta.7 -> 后续 beta (软件内更新)`
+- GitHub Release：`v0.2.6-beta.7`，已于 2026-09-05 03:14（UTC+8）发布为 prerelease。
 
-## 当前发布候选
+## 下一候选
 
-- 目标版本：`0.2.6-beta.7`
-- 目标更新路径：`0.2.6-beta.6 (手工安装一次) -> 0.2.6-beta.7 -> 后续 beta (软件内更新)`
-- 本轮包含：把 beta 更新配置仅在 prerelease 打包后的资源目录中受控写入；稳定包继续保持 `enabled: false`、`channel: latest`。
-- 状态：候选构建和 GitHub prerelease 发布待执行。beta.6 的线上资产已有下载，不能替换或原地修复。
+- 当前没有待发布版本。下一 beta 必须基于 beta.7 的受控 beta 更新配置继续验证软件内更新。
+- beta.6 的线上资产已有下载，不能替换或原地修复；需要手工安装 beta.7 一次。
 
 ## 发布门禁
 
 - [x] 公开仓库基线、更新时间安全修复和预发布发布工具已合入集成分支。
-- [ ] 桌面版本与 `release-plan.json` 推进到 `0.2.6-beta.7`；历史更新夹具继续固定为 beta.4 回归链。
-- [ ] 前端测试与生产构建。
-- [ ] Desktop verify、update smoke 与发布产物契约测试。
-- [ ] beta.7 安装包构建、`release:organize` 与 `release:check`。
-- [ ] EXE、blockmap 与 beta.yml 的 SHA-256 写入并回读。
-- [ ] GitHub Release 资产回读：beta.7 标签、prerelease 状态、文件名、大小、SHA-256 与 beta.yml 均匹配。
+- [x] 桌面版本与 `release-plan.json` 推进到 `0.2.6-beta.7`；历史更新夹具继续固定为 beta.4 回归链。
+- [x] 前端生产构建。
+- [x] Desktop verify、update smoke 与发布产物契约测试。
+- [x] beta.7 安装包构建、`release:organize` 与 `release:check`。
+- [x] EXE、blockmap 与 beta.yml 的 SHA-256 写入并回读。
+- [x] GitHub Release 资产回读：beta.7 标签、prerelease 状态、文件名、大小、SHA-256 与 beta.yml 均匹配。
 - [ ] 真实公开更新：从手工安装的 beta.7 发现、下载并显式安装后续 beta；未完成前不作通过声明。
 
 ## 权威规则

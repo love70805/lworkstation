@@ -1,6 +1,6 @@
 # Lworkstation 0.2.6 beta 更新测试清单
 
-状态：beta.1 至 beta.6 已发布为 GitHub prerelease；beta.7 是修复包内 beta 更新配置的当前候选。生产稳定更新源继续关闭（`desktop/update-config.json` 的 `enabled: false`、`channel: latest`）。
+状态：beta.1 至 beta.7 已发布为 GitHub prerelease；beta.7 是后续软件内 beta 更新的引导版。生产稳定更新源继续关闭（`desktop/update-config.json` 的 `enabled: false`、`channel: latest`）。
 
 ## 已确认的更新路线
 
@@ -27,7 +27,7 @@
 
 - 历史回归资产：`Lworkstation-Setup-0.2.6-beta.2.exe`
 
-`v0.2.6-beta.7` 作为后续软件内更新的引导版，必须提供：
+`v0.2.6-beta.7` 已作为后续软件内更新的引导版发布，提供：
 
 - `Lworkstation-Setup-0.2.6-beta.7.exe`
 - `Lworkstation-Setup-0.2.6-beta.7.exe.blockmap`
@@ -49,9 +49,9 @@ packaged smoke 必须从 beta.1 的真实打包配置启动，读取 `beta.yml`�
 
 ## 线上 beta 验收
 
-1. beta.1 至 beta.6 的 GitHub prerelease 保持可回读，资产文件名、大小、SHA-256 和 yml URL 必须一致。
+1. beta.1 至 beta.7 的 GitHub prerelease 保持可回读，资产文件名、大小、SHA-256 和 yml URL 必须一致。
 2. 手工安装 beta.7，确认更新浮窗处于 beta 测试通道且现有用户数据、登录态和 persist 分区不变。
-3. `v0.2.6-beta.7` GitHub prerelease 必须上传 beta.7 的同名资产。
+3. `v0.2.6-beta.7` GitHub prerelease 已上传 beta.7 的同名资产，并完成标签、prerelease、尺寸和 SHA-256 回读。
 4. 发布后续 beta 版本时，从已安装 beta.7 执行软件内检查，验证 GitHub provider 选择新的 beta.yml，再完成下载、取消、重试、稍后和显式重启安装。
 5. 安装替换完成后核对实际版本，并复测 ERP/1688 登录态、inbox 与工作站读取。
 
