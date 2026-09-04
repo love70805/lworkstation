@@ -221,17 +221,23 @@ afterEach(async () => {
   await Dexie.delete(CLIENT_DATABASE_NAME);
 });
 
-describe("0.2.6-beta.1 ERP test data reset migration", () => {
-  it("upgrades a real v11 database once while preserving sales and selection data", async () => {
+describe("v12 database upgrade", () => {
+  it("upgrades a real v11 database without mutating ERP, profit, ledger, or audit history", async () => {
     await seedVersion11Database();
     await db.open();
 
-    expect(await db.erpCostRequests.count()).toBe(0);
-    expect(await db.erpCostInbox.count()).toBe(0);
-    expect(await db.erpCostBatches.count()).toBe(0);
-    expect(await db.erpCostRows.count()).toBe(0);
-    expect(await db.costApprovals.count()).toBe(0);
-    expect(await db.profitLines.count()).toBe(0);
+    expect(await db.erpCostRequests.count()).toBe(2);
+    expect(await db.erpCostInbox.count()).toBe(3);
+    expect(await db.erpCostBatches.count()).toBe(1);
+    expect(await db.erpCostRows.count()).toBe(1);
+    expect(await db.costApprovals.count()).toBe(1);
+    expect(await db.profitLines.count()).toBe(1);
+    expect(await db.erpCostRequests.get("REQ-PENDING")).toMatchObject({ workspaceId: "WS-A", ledgerId: "LEDGER-SALES", status: "copied" });
+    expect(await db.erpCostInbox.get("INBOX-APPLIED")).toMatchObject({ deliveryId: "D-APPLIED", status: "applied", envelope: { retained: true } });
+    expect(await db.erpCostBatches.get("COST-1")).toMatchObject({ workspaceId: "WS-A", ledgerId: "LEDGER-SALES", status: "published" });
+    expect((await db.erpCostRows.toArray())[0]).toMatchObject({ batchId: "COST-1", platformSku: "SKU-1", unitCost: 3 });
+    expect(await db.costApprovals.get("APPROVAL-1")).toMatchObject({ status: "approved", platformSku: "SKU-1" });
+    expect((await db.profitLines.toArray())[0]).toMatchObject({ ledgerId: "LEDGER-SALES", profit: 10 });
 
     expect(await db.products.count()).toBe(1);
     expect(await db.platformSkus.count()).toBe(1);
@@ -241,72 +247,36 @@ describe("0.2.6-beta.1 ERP test data reset migration", () => {
     expect(await db.salesRows.count()).toBe(1);
     expect(await db.settings.get("desktop-preferences")).toMatchObject({ value: { zoom: 1.1 } });
 
-    expect(await db.ledgers.get("LEDGER-SALES")).toMatchObject({ status: "cost_pending", warehouseRate: 0.8, summary: { quantity: 2 } });
-    expect(await db.ledgers.get("LEDGER-EMPTY")).toMatchObject({ status: "draft", warehouseRate: 0.6, summary: { quantity: 0 } });
+    expect(await db.ledgers.get("LEDGER-SALES")).toMatchObject({ status: "locked", warehouseRate: 0.8, summary: { quantity: 2 }, costSummary: { matchedCount: 1 }, profitSummary: { profit: 20 }, finalizedAt: "2026-08-01", lockedAt: "2026-08-02", formulaVersion: "v-old" });
+    expect(await db.ledgers.get("LEDGER-EMPTY")).toMatchObject({ status: "finalized", warehouseRate: 0.6, summary: { quantity: 0 }, costSummary: { matchedCount: 1 }, profitSummary: { profit: 0 }, finalizedAt: "2026-08-01", formulaVersion: "v-old" });
     expect(await db.ledgers.get("LEDGER-DRAFT")).toMatchObject({ status: "draft", warehouseRate: 0.5, summary: { quantity: 0 } });
-    for (const ledger of await db.ledgers.toArray()) {
-      expect(ledger).not.toHaveProperty("costSummary");
-      expect(ledger).not.toHaveProperty("profitSummary");
-      expect(ledger).not.toHaveProperty("finalizedAt");
-      expect(ledger).not.toHaveProperty("finalizedBy");
-      expect(ledger).not.toHaveProperty("lockedAt");
-      expect(ledger).not.toHaveProperty("lockedBy");
-      expect(ledger).not.toHaveProperty("formulaVersion");
-    }
 
     const auditEvents = await db.auditEvents.toArray();
-    expect(auditEvents.map((event) => event.eventId)).toEqual(expect.arrayContaining(["EVT-SALES", "EVT-RATE", "EVT-PRODUCT"]));
-    expect(auditEvents.map((event) => event.eventId)).not.toEqual(expect.arrayContaining(["EVT-ERP", "EVT-FINAL"]));
+    expect(auditEvents.map((event) => event.eventId)).toEqual(expect.arrayContaining(["EVT-ERP", "EVT-FINAL", "EVT-SALES", "EVT-RATE", "EVT-PRODUCT"]));
+    expect(auditEvents).toHaveLength(5);
+    expect(auditEvents.find((event) => event.eventId === "EVT-ERP")).toMatchObject({ after: { snapshot: { secretBusinessRows: [1, 2, 3] } } });
+    expect(auditEvents.find((event) => event.eventId === "EVT-FINAL")).toMatchObject({ action: "finalized", syncState: "synced", after: { snapshot: { profitLines: [1] } } });
     const preservedSalesAudit = auditEvents.find((event) => event.eventId === "EVT-SALES");
     const preservedRateAudit = auditEvents.find((event) => event.eventId === "EVT-RATE");
-    expect(preservedSalesAudit.after.snapshot.ledger).toMatchObject({ status: "cost_pending", warehouseRate: 0.8 });
-    expect(preservedRateAudit.after.snapshot).toMatchObject({ status: "cost_pending", warehouseRate: 0.8 });
-    for (const snapshot of [preservedSalesAudit.after.snapshot.ledger, preservedRateAudit.after.snapshot]) {
-      expect(snapshot).not.toHaveProperty("costSummary");
-      expect(snapshot).not.toHaveProperty("profitSummary");
-      expect(snapshot).not.toHaveProperty("finalizedAt");
-      expect(snapshot).not.toHaveProperty("lockedAt");
-    }
+    expect(preservedSalesAudit.after.snapshot.ledger).toMatchObject({ status: "locked", warehouseRate: 0.8, costSummary: { matchedCount: 1 }, profitSummary: { profit: 20 }, finalizedAt: "2026-08-01", lockedAt: "2026-08-02" });
+    expect(preservedRateAudit.after.snapshot).toMatchObject({ status: "finalized", warehouseRate: 0.8, costSummary: { matchedCount: 1 }, profitSummary: { profit: 20 }, finalizedAt: "2026-08-01" });
     const resets = auditEvents.filter((event) => event.action === ERP_TEST_DATA_RESET_ACTION);
-    expect(resets).toHaveLength(1);
-    expect(resets[0]).toMatchObject({ actorId: "local-user", syncState: "synced", syncTerminal: false });
-    expect(resets[0].after).toMatchObject({
-      counts: expect.objectContaining({ erpCostInbox: 3, erpCostRows: 1, profitLines: 1, ledgersReset: 3 }),
-    });
-    expect(JSON.stringify(resets[0])).not.toContain("secretBusinessRows");
+    expect(resets).toHaveLength(0);
 
     db.close();
     await db.open();
-    expect((await db.auditEvents.toArray()).filter((event) => event.action === ERP_TEST_DATA_RESET_ACTION)).toHaveLength(1);
+    expect(await db.erpCostInbox.count()).toBe(3);
+    expect((await db.auditEvents.toArray()).filter((event) => event.action === ERP_TEST_DATA_RESET_ACTION)).toHaveLength(0);
   });
 
-  it("uses the active cloud member for the one-time reset audit", async () => {
+  it("does not create a reset audit in cloud mode", async () => {
     const previousCloudConfigured = runtimeConfig.cloudConfigured;
     runtimeConfig.cloudConfigured = true;
     try {
       await seedVersion11Database({ activeMemberId: "finance-cloud-1" });
       await db.open();
-      let reset = (await db.auditEvents.toArray()).find((event) => event.action === ERP_TEST_DATA_RESET_ACTION);
-      expect(reset).toMatchObject({
-        actorId: "system-migration",
-        syncState: "failed",
-        syncTerminal: true,
-        syncErrorCode: "SYNC_ACTOR_REPAIR_REQUIRED",
-      });
-      await repairLegacyTechnicalAuditActors({
-        workspaceId: "workspace-default",
-        activeMemberId: "finance-cloud-1",
-        cloudConfigured: true,
-        repairedAt: "2026-08-28T08:30:00.000Z",
-      });
-      reset = (await db.auditEvents.toArray()).find((event) => event.action === ERP_TEST_DATA_RESET_ACTION);
-      expect(reset).toMatchObject({
-        actorId: "finance-cloud-1",
-        syncState: "pending",
-        syncAttempts: 0,
-        syncTerminal: false,
-        after: { auditActorRepair: { originalActorId: "system-migration", source: "technical-actor", strategy: "active-cloud-member" } },
-      });
+      expect((await db.auditEvents.toArray()).find((event) => event.action === ERP_TEST_DATA_RESET_ACTION)).toBeUndefined();
+      expect(await db.settings.get(ACTIVE_MEMBER_CONTEXT_KEY)).toMatchObject({ memberId: "finance-cloud-1", role: "finance", workspaceId: "WS-A" });
     } finally {
       runtimeConfig.cloudConfigured = previousCloudConfigured;
     }
