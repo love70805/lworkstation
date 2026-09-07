@@ -37,4 +37,20 @@
 
 ## 完成记录
 
-待各独立提交审查与集成后填写。
+- 代码修复：显式动作注册与授权、active 成员验证、选品对象归属与跨工作区检查、私有审计 RLS/恢复一致过滤、删除对象的服务端权限元数据及禁止复用 ID、严格数据库 TLS、本机数据库回环绑定与无默认密码。追加 `0010`，不改写历史审计/哈希和月度利润。
+- 独立复审补充并关闭了删除后历史重新可见、所有者历史被误过滤、伪造空删除、复用已删除 ID 与 SQL NULL 放行问题。已用真实 PostgreSQL 同时验证同步接口和直接 RLS 路径。
+- ERP CSV 提交 `4dcb9be`，桌面依赖提交 `faf1fd9`，前端依赖提交 `473cb71` 已分别审查并合入安全分支；锁文件仅机械性解决 PGlite 新依赖与 esbuild 更新位置冲突。
+- 前端与桌面全等级依赖审计均为 **0** 告警（原分别 34 / 38）。SheetJS 固定官方 CDN 0.20.3 及锁文件完整性；Vite 6.4.3、React Router 7.18.3、Happy DOM 20.8.9、Electron 44.2.0、electron-builder 26.15.3。Dependabot 不替代官方 CDN 依赖的人工版本复核。
+- 最终代码基线 `c961ca8`：`pnpm --dir frontend release:check` 通过，73 文件 / **510 项**测试、生产构建、ERP bridge/inbox、同步/种子/schema/部署门禁全部通过；`pnpm --dir desktop verify` 通过。实际 PostgreSQL 安全回归 12 项、TLS 回归 4 项包含在完整套件中。
+- 默认大量并发曾触发已有 5 秒测试超时；将测试 worker 限为 2 后完整套件通过，未调整断言或超时阈值。
+- 真实 Vite 外部 Origin 资源读取/预检无允许来源响应头，本机来源正常；实际 CSV/XLSX worker 导出、解析与校验保留中文、前导零和数值精度。
+- 独立空工作区的 `/workspace`、`/products`、`/products?view=reference`、`/profit`、`/ledger`、`/cost-matching` 在 1440×900 与 390×844 下均正常加载，未出现页面异常或整页横向溢出；截图留于本机 `qa/security-ui/`。本轮未使用真实业务数据做页面验收。
+- 桌面模块 Windows x64 预览 NSIS 构建、打包 smoke 和更新夹具 smoke 通过，ERP/1688 扩展加载、隔离及 ERP v2 evidence acknowledge 正常。更新 smoke 会截获安装调用，不能代替真实覆盖安装与重启验收。
+- 推荐 ERP 扩展包更新为 v8.0.16：38,999 bytes，SHA-256 `CD5D824B61A71DCBE31D780E2BE0031D4564654B5674C7500326D0DECDEFDD53`；已发布 v8.0.15 归档保持不变。
+- GitHub 集成、受保护分支 CI 与合并结果待本次 PR 完成后补记。官方桌面版本仍为 0.2.6-beta.7，安全候选未发布。
+
+## 上线验收前置条件
+
+- 未发现本机服务端环境配置、GitHub deployment secrets 或部署记录，因此尚未操作线上数据库、云端 API 或正式发布资产。真实 ERP/1688 登录、目标数据库迁移及证书、真实 NSIS 覆盖安装/重启仍待目标环境确认。
+- 数据库必须先迁移再切 API，完整备份包括内部删除权限元数据；具体步骤见 [数据库安全配置](integration/DATABASE_SECURITY_SETUP.md)。
+- 本次提交的 `__fixtures__/tls/localhost-test-key.pem` 仅为新生成的公开测试夹具，从未用于真实服务；真实业务密钥、数据库和备份未提交。
