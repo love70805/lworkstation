@@ -258,7 +258,7 @@ export function calculateWarehouseCostDecision({
   const unresolvedAnomalyCount = anomalies.filter((anomaly) => anomaly.status === "pending").length;
   const hasNonPositivePrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice) || record.effectiveUnitPrice <= 0);
   const computedUnitCost = totalQuantity.gt(0)
-    ? totalPrice.div(totalQuantity).toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toNumber()
+    ? totalPrice.div(totalQuantity).toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber()
     : null;
   const resolutionStatus = evidenceComplete
     && selectedRecords.length > 0
@@ -276,7 +276,7 @@ export function calculateWarehouseCostDecision({
     selectedRecords: resolvedRecords,
     calculationCount: resolvedRecords.length,
     totalQuantity: totalQuantity.toNumber(),
-    totalPrice: totalPrice.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
+    totalPrice: totalPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
     unitCost: computedUnitCost,
     formalUnitCost: resolutionStatus === "resolved" ? computedUnitCost : null,
     baseline: detection.baseline,

@@ -23,9 +23,12 @@ assert.ok(pkg.build.files.includes("workspace-navigation.cjs"));
 for (const key of ["installerIcon", "installerHeaderIcon", "uninstallerIcon"]) assert.equal(pkg.build.nsis[key], "assets/lworkstation.ico");
 assert.match(pkg.scripts.build, /pnpm brand:icons/);
 assert.match(pkg.scripts.build, /electronDist=\.\/node_modules\/electron\/dist/);
+assert.doesNotMatch(pkg.scripts.build, /afterPack|release-after-pack/, "stable build must not enable beta updates");
+assert.match(pkg.scripts.verify, /release-after-pack\.test\.mjs/);
+assert.match(pkg.scripts["release:build"], /release-build\.mjs/);
 assert.ok(pkg.dependencies["electron-updater"]);
 assert.ok(pkg.dependencies.lucide);
-for (const file of ["main.cjs", "desktop-preferences.cjs", "extension-runtime.cjs", "extension-runtime.test.mjs", "workspace-context.cjs", "workspace-context.test.mjs", "workspace-navigation.cjs", "workspace-navigation.test.mjs", "inbox-ipc.cjs", "inbox-ipc.test.mjs", "generate-brand-assets.cjs", "navigation-history.cjs", "inbox-service.cjs", "inbox-service.test.mjs", "remote-navigation.cjs", "preload.cjs", "workspace-preload.cjs", "shell.html", "shell.css", "shell-state.cjs", "shell.js", "inbox-popover.html", "inbox-popover.css", "inbox-popover.js", "inbox-popover-preload.cjs", "inbox-popover-lifecycle.cjs", "update-runtime.cjs", "update-runtime.test.mjs", "update-popover.html", "update-popover.css", "update-popover.js", "update-popover-preload.cjs", "build-update-fixtures.mjs", "update-smoke.mjs", "update-fixture-config.cjs", "update-fixture-after-pack.cjs", "smoke.mjs", "update-config.json", "update-beta-config.json", "update-test-config.json", "UPDATE_RELEASE_CHECKLIST.md", "release-plan.json", "organize-release.mjs", "release-artifacts.mjs", "release-artifacts.test.mjs", "release-check.mjs", "assets/lworkstation.png", "assets/lworkstation.ico"]) assert.ok(fs.existsSync(path.join(root, file)), file);
+for (const file of ["main.cjs", "desktop-preferences.cjs", "extension-runtime.cjs", "extension-runtime.test.mjs", "workspace-context.cjs", "workspace-context.test.mjs", "workspace-navigation.cjs", "workspace-navigation.test.mjs", "inbox-ipc.cjs", "inbox-ipc.test.mjs", "generate-brand-assets.cjs", "navigation-history.cjs", "inbox-service.cjs", "inbox-service.test.mjs", "remote-navigation.cjs", "preload.cjs", "workspace-preload.cjs", "shell.html", "shell.css", "shell-state.cjs", "shell.js", "inbox-popover.html", "inbox-popover.css", "inbox-popover.js", "inbox-popover-preload.cjs", "inbox-popover-lifecycle.cjs", "update-runtime.cjs", "update-runtime.test.mjs", "update-popover.html", "update-popover.css", "update-popover.js", "update-popover-preload.cjs", "build-update-fixtures.mjs", "update-smoke.mjs", "update-fixture-config.cjs", "update-fixture-after-pack.cjs", "release-after-pack.cjs", "release-after-pack.test.mjs", "release-build.mjs", "smoke.mjs", "update-config.json", "update-beta-config.json", "update-test-config.json", "UPDATE_RELEASE_CHECKLIST.md", "release-plan.json", "organize-release.mjs", "release-artifacts.mjs", "release-artifacts.test.mjs", "release-check.mjs", "assets/lworkstation.png", "assets/lworkstation.ico"]) assert.ok(fs.existsSync(path.join(root, file)), file);
 const masterSource = fs.readFileSync(path.join(root, "../frontend/public/assets/brand/l7-app-icon-master.svg"), "utf8").replace(/\r\n/g, "\n");
 assert.equal(crypto.createHash("sha256").update(masterSource).digest("hex").toUpperCase(), "07A556FA1A57EC9E147138CFA97443214FF63AB0E67CB4B3AD10EB4A5708DA53");
 const png = fs.readFileSync(path.join(root, "assets/lworkstation.png"));
@@ -129,6 +132,13 @@ assert.doesNotMatch(read("update-config.json"), /shopeers\.invalid|token/i);
 const betaUpdateConfig = JSON.parse(read("update-beta-config.json"));
 assert.deepEqual(betaUpdateConfig, { enabled: true, provider: "github", owner: "love70805", repo: "lworkstation", private: false, channel: "beta" });
 assert.doesNotMatch(read("update-beta-config.json"), /token/i);
+const releaseAfterPack = createRequire(import.meta.url)("./release-after-pack.cjs");
+assert.deepEqual(releaseAfterPack.loadReleaseBetaConfig(root), betaUpdateConfig);
+assert.equal(releaseAfterPack.isPrereleaseVersion(releasePlan.version), true);
+assert.match(read("release-after-pack.cjs"), /Refusing to enable beta updates for non-prerelease/);
+assert.match(read("release-build.mjs"), /--config\.afterPack=\.\/release-after-pack\.cjs/);
+assert.match(read("release-build.mjs"), /--config\.publish\.channel=beta/);
+assert.match(read("release-build.mjs"), /--publish",\s*"never"/);
 const updateTestConfig = JSON.parse(read("update-test-config.json"));
 assert.deepEqual(updateTestConfig, {
   enabled: false,
@@ -250,6 +260,8 @@ for (const file of [
   "update-beta-config.json",
   "update-test-config.json",
   "update-fixture-config.cjs",
+  "release-after-pack.cjs",
+  "release-build.mjs",
   "update-runtime.cjs",
   "UPDATE_RELEASE_CHECKLIST.md",
 ]) {

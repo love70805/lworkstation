@@ -5,10 +5,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: shopeers
-      POSTGRES_PASSWORD: shopeers-dev-only
+      POSTGRES_PASSWORD: ${SHOPEERS_POSTGRES_PASSWORD:?Set a unique local database password in the root .env file}
       POSTGRES_DB: shopeers
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - shopeers-postgres-data:/var/lib/postgresql/data
     healthcheck:

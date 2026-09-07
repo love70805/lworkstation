@@ -34,7 +34,7 @@ await Promise.all(secureModules.map((file) => fs.copyFile(
 await fs.rm(path.join(outputDir, "src", "inbox-config.js"), { force: true });
 
 const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-manifest.version = "8.0.14";
+manifest.version = canonicalManifest.version;
 manifest.host_permissions = [...new Set([...(manifest.host_permissions || []), "http://127.0.0.1/*", "http://localhost/*"])];
 manifest.permissions = [...new Set([...(manifest.permissions || []), "alarms", "storage"])];
 manifest.background = { service_worker: "src/background.js" };

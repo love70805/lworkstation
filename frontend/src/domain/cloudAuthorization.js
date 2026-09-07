@@ -1,35 +1,13 @@
 import { canCloudRole, isCloudRole } from "./cloudPermissions.js";
-
-const ACTION_RULES = Object.freeze({
-  capture_created: [["captures", "insert"]],
-  capture_draft_saved: [["captures", "update"]],
-  capture_confirmed: [["captures", "update"]],
-  capture_ignored: [["captures", "update"]],
-  product_created: [["products", "insert"]],
-  product_updated: [["products", "update"]],
-  created: [["ledgers", "insert"]],
-  imported: [["import_batches", "insert"]],
-  warehouse_rate_updated: [["ledgers", "update"]],
-  deleted: [["ledgers", "delete"]],
-  published: [["erp_cost_batches", "insert"], ["erp_cost_rows", "insert"], ["erp_cost_inbox", "insert"], ["ledgers", "update"]],
-  voided: [["erp_cost_batches", "update"], ["erp_cost_inbox", "update"], ["ledgers", "update"]],
-  skcs_copied: [["erp_cost_requests", "update"]],
-  approved_1688_fallback: [["cost_approvals", "insert"]],
-  revoked: [["cost_approvals", "update"]],
-  finalized: [["profit_lines", "insert"]],
-  reopened_for_cost_recalculation: [["ledgers", "update"], ["profit_lines", "delete"]],
-  backup_exported: [["audit_events", "insert"]],
-  cloud_seed_exported: [["audit_events", "insert"]],
-  cloud_seed_imported: [["audit_events", "insert"]],
-});
+import { syncActionRule } from "./syncActionRegistry.js";
 
 export function auditActionPermission(event = {}) {
-  return auditActionPermissions(event)[0];
+  return auditActionPermissions(event)?.[0] ?? null;
 }
 
 export function auditActionPermissions(event = {}) {
-  const rules = ACTION_RULES[event.action] ?? [["audit_events", "insert"]];
-  return rules.map(([table, operation]) => ({ table, operation }));
+  const rule = syncActionRule(event.action);
+  return rule?.permissions.map(([table, operation]) => ({ table, operation })) ?? null;
 }
 
 export function createCloudAuthorizer({ expectedToken = "", role = "admin", allowedWorkspaces = [] } = {}) {
@@ -44,8 +22,8 @@ export function createCloudAuthorizer({ expectedToken = "", role = "admin", allo
     if (operation === "recovery") return canCloudRole(normalizedRole, "workspaces", "read");
     if (operation === "audit_events") return events.every((event) => {
       const permissions = auditActionPermissions(event);
-      return permissions.every((permission) => canCloudRole(normalizedRole, permission.table, permission.operation));
+      return Boolean(permissions?.length) && permissions.every((permission) => canCloudRole(normalizedRole, permission.table, permission.operation));
     });
-    return canCloudRole(normalizedRole, "audit_events", "insert");
+    return false;
   };
 }

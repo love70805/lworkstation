@@ -105,7 +105,7 @@ describe("ERP Shopeers-owned resolutions", () => {
         resolvedAt: "2026-08-12T08:00:00.000Z",
       }],
     });
-    expect(result).toMatchObject({ resolutionStatus: "resolved", unresolvedAnomalyCount: 0, unitCost: 1.075 });
+    expect(result).toMatchObject({ resolutionStatus: "resolved", unresolvedAnomalyCount: 0, unitCost: 1.07 });
   });
 
   it("does not allow a zero price to be confirmed as true", () => {
@@ -163,6 +163,19 @@ describe("ERP Shopeers-owned resolutions", () => {
       evidenceComplete: false,
     });
     expect(result).toMatchObject({ resolutionStatus: "pending", anomalyCount: 0, formalUnitCost: null, unitCost: 2 });
+  });
+
+  it("truncates the formal weighted unit cost to two decimals", () => {
+    const result = calculateWarehouseCostDecision({
+      warehouseSku: "WH-1",
+      evidenceComplete: true,
+      purchaseRecords: [
+        record("R1", "2026-07-02", 1.239, 1),
+        record("R2", "2026-07-01", 1.239, 2),
+      ],
+    });
+
+    expect(result).toMatchObject({ totalPrice: 3.71, unitCost: 1.23, formalUnitCost: 1.23 });
   });
 
   it("independently excludes cancelled, current-month and invalid records", () => {

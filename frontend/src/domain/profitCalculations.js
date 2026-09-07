@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { assertDomain } from "./errors";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 
-export const PROFIT_FORMULA_VERSION = "monthly-profit-v8-compatible@1";
+export const PROFIT_FORMULA_VERSION = "monthly-profit-v8-truncate-2dp@2";
 export const DEFAULT_WAREHOUSE_RATE = 0.7;
 
 function finiteDecimal(value, label) {
@@ -17,28 +17,28 @@ function finiteDecimal(value, label) {
 }
 
 function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty }) {
-  const revenueValue = finiteDecimal(revenue, "销售金额");
+  const revenueValue = finiteDecimal(revenue, "销售金额").toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const quantityValue = finiteDecimal(quantity, "销量");
-  const costValue = finiteDecimal(unitCost, "单件成本");
-  const warehouseRateValue = finiteDecimal(warehouseRate, "仓储费率");
-  const penaltyValue = finiteDecimal(penalty, "扣款");
+  const costValue = finiteDecimal(unitCost, "单件成本").toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  const warehouseRateValue = finiteDecimal(warehouseRate, "仓储费率").toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  const penaltyValue = finiteDecimal(penalty, "扣款").toDecimalPlaces(2, Decimal.ROUND_DOWN);
 
   assertDomain(warehouseRateValue.gte(0), "negative_warehouse_rate", "仓储费率不能为负数");
 
-  const purchaseCost = quantityValue.times(costValue);
-  const warehouseCost = quantityValue.times(warehouseRateValue);
-  const profit = revenueValue.minus(purchaseCost).minus(warehouseCost).minus(penaltyValue);
+  const purchaseCost = quantityValue.times(costValue).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  const warehouseCost = quantityValue.times(warehouseRateValue).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  const profit = revenueValue.minus(purchaseCost).minus(warehouseCost).minus(penaltyValue).toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const profitRate = revenueValue.eq(0) ? null : profit.div(revenueValue).times(100);
 
   return {
-    revenue: revenueValue.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
+    revenue: revenueValue.toNumber(),
     quantity: quantityValue.toNumber(),
-    unitCost: costValue.toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber(),
-    purchaseCost: purchaseCost.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
-    warehouseCost: warehouseCost.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
-    penalty: penaltyValue.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
-    profit: profit.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
-    profitRate: profitRate?.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber() ?? null,
+    unitCost: costValue.toNumber(),
+    purchaseCost: purchaseCost.toNumber(),
+    warehouseCost: warehouseCost.toNumber(),
+    penalty: penaltyValue.toNumber(),
+    profit: profit.toNumber(),
+    profitRate: profitRate?.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() ?? null,
   };
 }
 
@@ -50,8 +50,8 @@ export function calculateExactProfitLine({
   penalty = 0,
 }) {
   const warehouseCost = finiteDecimal(quantity, "销量")
-    .times(finiteDecimal(warehouseRate, "仓储费率"))
-    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+    .times(finiteDecimal(warehouseRate, "仓储费率").toDecimalPlaces(2, Decimal.ROUND_DOWN))
+    .toDecimalPlaces(2, Decimal.ROUND_DOWN)
     .toNumber();
 
   if (costDecision?.status !== "final" || costDecision?.calculationMode !== "exact" || !costDecision.eligibleForExactProfit) {

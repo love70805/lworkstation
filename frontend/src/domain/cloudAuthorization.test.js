@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { auditActionPermission, auditActionPermissions, createCloudAuthorizer } from "./cloudAuthorization";
+import { SYNC_ACTION_RULES } from "./syncActionRegistry";
 
 describe("cloud authorization", () => {
   it("按事件动作映射角色权限", () => {
@@ -27,8 +28,23 @@ describe("cloud authorization", () => {
     ]);
   });
 
-  it("未知 action 只能写审计，不能取得业务表权限", () => {
-    expect(auditActionPermissions({ action: "forged_business_write" })).toEqual([{ table: "audit_events", operation: "insert" }]);
+  it("拒绝未知 action，包含原型属性名称", () => {
+    for (const action of ["forged_business_write", "toString", "__proto__", "constructor"]) {
+      expect(auditActionPermissions({ action })).toBeNull();
+      expect(createCloudAuthorizer({ role: "admin" })({ events: [{ action }] })).toBe(false);
+    }
+  });
+
+  it("只读账号不能通过任何业务投影动作写入数据", () => {
+    const viewer = createCloudAuthorizer({ role: "viewer" });
+    for (const [action, rule] of Object.entries(SYNC_ACTION_RULES)) {
+      if (rule.entityType) expect(viewer({ events: [{ action }] }), action).toBe(false);
+    }
+    const selection = createCloudAuthorizer({ role: "selection" });
+    for (const action of ["product_merged", "product_deleted", "catalog_manual_cost_confirmed", "catalog_manual_cost_relinked", "capture_product_relinked"]) {
+      expect(selection({ events: [{ action }] }), action).toBe(true);
+    }
+    expect(selection({ events: [{ action: "selection_status_definitions_updated" }] })).toBe(false);
   });
 
   it("云端种子迁移只允许管理员和指定工作区", () => {

@@ -1,3 +1,7 @@
 allowBuilds:
   electron: true
   electron-winstaller: false
+overrides:
+  # Security fixes within the existing parent ranges (^3.0.1 and ^0.8.8).
+  'ajv@8.20.0>fast-uri': 3.1.7
+  'plist@3.1.0>@xmldom/xmldom': 0.8.15

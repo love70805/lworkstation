@@ -19,8 +19,8 @@
 2. 克隆仓库并进入目录：
 
    ```powershell
-   git clone https://github.com/love70805/shopeers-workstation.git
-   cd shopeers-workstation
+   git clone https://github.com/love70805/lworkstation.git
+   cd lworkstation
    ```
 
 3. 安装依赖并启动前端：

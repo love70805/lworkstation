@@ -1,5 +1,6 @@
 import http from "node:http";
 import { createRequire } from "node:module";
+import { buildSyncDatabaseConfig } from "./sync-database-config.mjs";
 
 // Dependencies live with the frontend workspace package while this entrypoint
 // intentionally stays at repository level for deployment scripts.
@@ -95,11 +96,7 @@ function buildRuntime() {
     return result.payload;
   };
   const resolveActor = createTokenActorResolver({ verifyToken });
-  const pool = new Pool({
-    connectionString: databaseUrl,
-    max: Number(process.env.SHOPEERS_DB_POOL_MAX || 10),
-    ssl: String(process.env.SHOPEERS_DATABASE_SSL || "").toLowerCase() === "require" ? { rejectUnauthorized: false } : undefined,
-  });
+  const pool = new Pool(buildSyncDatabaseConfig());
   const resolveMembership = createPostgresMembershipResolver({ query: (text, values) => pool.query(text, values) });
   const authorize = createClaimsAuthorizer({ verifyToken, resolveMembership });
   const runtime = createPostgresSyncRuntime({
@@ -108,7 +105,7 @@ function buildRuntime() {
     recoveryRepository: postgresRecoveryRepository,
     seedRepository: postgresSeedRepository,
   });
-  return { runtime, pool, resolveActor };
+  return { runtime, pool, resolveActor, resolveMembership };
 }
 
 if (process.argv.includes("--help")) {
@@ -116,7 +113,7 @@ if (process.argv.includes("--help")) {
 } else {
   let serverHandle;
   try {
-    const { runtime, pool, resolveActor } = buildRuntime();
+    const { runtime, pool, resolveActor, resolveMembership } = buildRuntime();
     const server = http.createServer(async (req, res) => {
       const origin = String(req.headers.origin || "");
       if (origin && !corsOrigins.has(origin)) {

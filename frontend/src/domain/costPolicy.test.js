@@ -103,6 +103,23 @@ describe("formal cost policy", () => {
     expect(decision.eligibleForExactProfit).toBe(false);
     expect(decision.reasons).toContain("approval_ledger_mismatch");
   });
+
+  it("truncates new ERP and 1688 unit costs to two decimals", () => {
+    const erp = resolveFormalCostDecision({
+      ledgerId: "LEDGER-1",
+      platformSku: "SKU-1",
+      erpCost: { id: "ERP-TRUNCATE", platformSku: "SKU-1", unitCost: 4.239, currency: "CNY", resolutionStatus: "resolved" },
+    });
+    const fallback = resolveFormalCostDecision({
+      ledgerId: "LEDGER-1",
+      platformSku: "SKU-1",
+      reference1688Cost: { ...referenceCost, unitCost: 5.239 },
+      approval: { ...approval, approvedAmount: 5.239 },
+    });
+
+    expect(erp.unitCost).toBe(4.23);
+    expect(fallback.unitCost).toBe(5.23);
+  });
 });
 
 describe("selection reference cost", () => {
@@ -143,5 +160,11 @@ describe("selection reference cost", () => {
       erpHistory: [{ id: "ERP-PENDING", unitCost: 4.1, resolutionStatus: "pending", unresolvedAnomalyCount: 1 }],
       supplierLandedCost: { id: "SUP-1", unitCost: 5.6 },
     })).toMatchObject({ id: "SUP-1", authoritativeSource: "1688_reference" });
+  });
+
+  it("does not rewrite the stored cost on finalized profit history", () => {
+    expect(selectSelectionReferenceCost({
+      finalizedProfitHistory: [{ id: "FINAL-PRECISION", unitCost: 5.239, finalizedAt: "2026-08-08T08:00:00.000Z" }],
+    })).toMatchObject({ id: "FINAL-PRECISION", unitCost: 5.239, referenceKind: "finalized_profit_history" });
   });
 });

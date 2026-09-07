@@ -33,7 +33,7 @@ function recoverySelectionContext(context = {}) {
   const role = String(context.role ?? "").trim().toLowerCase();
   const actor = String(context.actor ?? "").trim();
   const canSeeAllSelection = context.canSeeAllSelection == null
-    ? (!actor && !role) || ["admin", "operations", "finance"].includes(role)
+    ? Boolean(actor) && ["admin", "operations", "finance"].includes(role)
     : Boolean(context.canSeeAllSelection);
   return {
     actor,
@@ -102,6 +102,11 @@ export function buildPostgresRecoveryPlan(workspaceId, context = {}) {
       rollback: "rollback",
     },
     queries: TABLE_QUERIES.map(([table, baseText]) => {
+      if (table === "auditEvents") return {
+        table,
+        text: baseText.replace("where workspace_id = $1", "where workspace_id = $1 and public.audit_event_visible_to(workspace_id, action, object_type, object_id, before_snapshot, after_snapshot, $2)"),
+        values: [normalizedWorkspaceId, selectionContext.actor || null],
+      };
       const text = selectionContext.canSeeAllSelection || !SELECTION_VISIBILITY_QUERIES[table]
         ? baseText
         : SELECTION_VISIBILITY_QUERIES[table];

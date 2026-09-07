@@ -12,6 +12,16 @@ describe("product catalog", () => {
     })).toBe(5);
   });
 
+  it("直接舍弃 1688 落地单件成本的小数点后两位", () => {
+    expect(calculateSupplierLandedUnitCost({
+      purchaseUnitPrice: 10.999,
+      shippingAmount: 1,
+      totalPurchasePacks: 3,
+      handlingFee: 0,
+      unitsPerPack: 1,
+    })).toBe(11.33);
+  });
+
   it("把平台 SKU 重复视为阻断项，但允许先保存待补资料的商品档案", () => {
     const validation = validateProductDraft({
       name: "测试商品",

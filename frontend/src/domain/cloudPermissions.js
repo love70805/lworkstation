@@ -11,9 +11,10 @@ const OPERATIONS_FINANCE = ["admin", "operations", "finance"];
 export const CLOUD_PERMISSION_MATRIX = Object.freeze({
   workspaces: { read: READ_ALL, update: ADMIN },
   workspace_members: { read: READ_ALL, insert: ADMIN, update: ADMIN, delete: ADMIN },
-  products: { read: READ_ALL, insert: SELECTION, update: SELECTION },
+  products: { read: READ_ALL, insert: SELECTION, update: SELECTION, delete: SELECTION },
   platform_skus: { read: READ_ALL, insert: SELECTION, update: SELECTION },
   supplier_offers: { read: READ_ALL, insert: SELECTION, update: SELECTION, delete: SELECTION },
+  catalog_manual_costs: { read: READ_ALL, insert: SELECTION, update: SELECTION },
   captures: { read: READ_ALL, insert: ["admin", "selection", "operations"], update: ["admin", "selection", "operations"], delete: ["admin", "selection", "operations"] },
   ledgers: { read: READ_ALL, insert: ["admin", "operations", "finance"], update: ["admin", "operations", "finance"], delete: ["admin", "operations", "finance"] },
   import_batches: { read: READ_ALL, insert: OPERATIONS, update: OPERATIONS, delete: OPERATIONS },

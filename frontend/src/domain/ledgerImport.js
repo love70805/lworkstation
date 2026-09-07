@@ -86,7 +86,7 @@ export function aggregateLedgerRows(rows) {
     }
 
     if (row.hasDirectUnitCost) {
-      sku.legacyImportedUnitCost = money(row.directUnitCost).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber();
+      sku.legacyImportedUnitCost = money(row.directUnitCost).toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber();
     }
     if (row.hasDirectPenalty) {
       sku.penalty = money(row.directPenalty);
@@ -98,8 +98,8 @@ export function aggregateLedgerRows(rows) {
     skus: [...group.skus.values()].map((sku) => ({
       ...sku,
       quantity: sku.quantity.toNumber(),
-      revenue: sku.revenue.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
-      penalty: sku.penalty.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
+      revenue: sku.revenue.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
+      penalty: sku.penalty.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
       realOrderCount: sku.orderIds.size,
       orderIds: [...sku.orderIds],
     })),
@@ -153,8 +153,8 @@ export function summarizeLedgerRows(rows) {
     groupCount: new Set(flattened.map((row) => row.groupKey)).size,
     skuLineCount: flattened.length,
     quantity: summary.quantity.toNumber(),
-    revenue: summary.revenue.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
-    penalty: summary.penalty.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber(),
+    revenue: summary.revenue.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
+    penalty: summary.penalty.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
     sourceRowCount: summary.sourceRowCount,
     realOrderCount: summary.realOrderIds.size,
   };
