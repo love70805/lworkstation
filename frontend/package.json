@@ -25,7 +25,7 @@
     "deploy:check": "node ../tools/deployment-check.mjs",
     "cloud:check": "node ../tools/cloud-preflight.mjs",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=2"
   },
   "dependencies": {
     "@fontsource/inter": "5.2.8",
