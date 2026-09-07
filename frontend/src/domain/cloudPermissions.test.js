@@ -26,7 +26,7 @@ describe("cloud role permission matrix", () => {
 
   it("矩阵对所有表显式给出四类操作结果", () => {
     const snapshot = cloudRoleMatrixSnapshot();
-    expect(snapshot.products).toEqual({ read: ["admin", "selection", "operations", "finance", "viewer"], insert: ["admin", "selection"], update: ["admin", "selection"], delete: [] });
+    expect(snapshot.products).toEqual({ read: ["admin", "selection", "operations", "finance", "viewer"], insert: ["admin", "selection"], update: ["admin", "selection"], delete: ["admin", "selection"] });
     expect(snapshot.profit_lines.delete).toEqual(["admin", "finance"]);
   });
 });
