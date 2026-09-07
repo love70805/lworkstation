@@ -2,7 +2,7 @@ name: Shopeers quality
 
 on:
   push:
-    branches: ["main", "master", "develop"]
+    branches: ["main", "master", "develop", "codex/selection-profit-erp-sync"]
   pull_request:
 
 permissions:
@@ -35,3 +35,33 @@ jobs:
 
       - name: Run release checks
         run: pnpm release:check
+
+  desktop-verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Install desktop dependencies
+        run: pnpm --dir desktop install --frozen-lockfile
+
+      - name: Verify desktop contracts and lifecycle
+        run: pnpm --dir desktop verify

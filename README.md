@@ -23,6 +23,8 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
+当前公开测试版为 [`0.2.6-beta.7`](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，属于 GitHub prerelease。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
 ```powershell
@@ -30,21 +32,23 @@ pnpm --dir desktop install
 pnpm --dir desktop dev
 ```
 
-`dev` 会启动 Vite 和 Electron。生产安装包会先构建 `frontend/dist`：
+`dev` 会启动 Vite 和 Electron。当前 beta 候选使用 `release:build`，先构建 `frontend/dist`，再打入受控 beta 更新配置：
 
 ```powershell
 pnpm --dir desktop verify
-pnpm --dir desktop build
+pnpm --dir desktop release:build
 pnpm --dir desktop smoke:packaged
 pnpm --dir desktop release:organize
 pnpm --dir desktop release:check
 ```
 
-主线正式发布后，Lworkstation 安装包按 `Lworkstation Setup <版本>.exe` 整理到 `releases/latest/`，历史版本位于 `releases/history/<版本号>/`。完成 `release:organize` 和 `release:check` 前，`desktop/release/` 中的构建产物仅是候选包，不代表已经发布；当前正式发布状态以 `docs/RELEASE_STATUS.md` 为准。安装时可直接覆盖旧版，不需要先卸载，原有 ERP / 1688 登录会话会继续保存在对应 `persist:` 分区。当前内部测试版尚未配置 Windows 代码签名，首次安装时系统可能显示“未知发布者”；确认文件来自本项目构建目录后再继续安装。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
+Beta 安装包命名为 `Lworkstation-Setup-<版本>.exe`，由 `desktop/release-test/<版本>/` 整理到 `releases/prerelease/<版本>/`，更新元数据为 `beta.yml`。稳定版本使用 `pnpm --dir desktop build`，安装包命名为 `Lworkstation Setup <版本>.exe`，整理到 `releases/latest/`，历史稳定版本位于 `releases/history/<版本>/`，更新元数据为 `latest.yml`。具体目录规则见 [releases/README.md](releases/README.md)。
 
-正式桌面包只从集成分支构建。专职 Worktree 生成的安装包仅用于模块验收，不代表项目已发布；主线构建后先运行 `pnpm --dir desktop release:organize` 整理最新/历史版本，再运行 `pnpm --dir desktop release:check`，确认 `desktop/release-plan.json` 中的 UI/桌面提交均已合入、版本一致，并输出最终安装包大小与 SHA-256。
+正式桌面包只从集成分支构建。专职 Worktree 产物仅用于模块验收；主线构建后运行 `release:organize` 和 `release:check`，检查 `desktop/release-plan.json` 中的必需提交、版本、安装包与更新元数据，并输出大小和 SHA-256。这些本地命令不上传 GitHub Release，完成本地检查不代表已经发布。
 
-桌面壳保留基于通用 HTTPS 静态源的更新能力，但 `0.2.5` 仍按已确认范围延期启用自动更新，不会主动检查或下载。后续稳定版本启用时，再配置 `desktop/update-config.json` 并发布 `latest.yml`、安装包和 blockmap；客户端不得保存 GitHub Token。
+安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前测试版尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
+
+beta.6 的已发布包未启用更新源，需要手工安装 beta.7 一次。beta.7 通过 GitHub beta 通道检查后续预发布版，发现更新后由用户确认下载并显式重启安装；自动下载和退出即装均关闭。稳定通道 `desktop/update-config.json` 继续保持关闭，客户端不得保存 GitHub Token。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
 
 生产版工作站通过 Electron 内部 `shopeers://` 安全协议读取前端资源；ERP / 1688 采集回传只监听 `127.0.0.1` 本机回环地址，默认端口为 `8790`，测试或受控启动可使用运行时端口。桌面会把实际 inbox origin 注入内置扩展，不接受局域网连接，通常不需要放行 Windows 防火墙。开发模式仍由 Vite 提供热更新页面。
 
@@ -71,7 +75,7 @@ pnpm --dir frontend test
 pnpm --dir frontend release:check
 ```
 
-GitHub Actions 会在推送和 Pull Request 时自动执行 `release:check`。
+GitHub Actions 在 `main`、`master`、`develop`、`codex/selection-profit-erp-sync` 分支推送以及 Pull Request 时运行两项检查：Ubuntu 执行前端 `release:check`，Windows 执行桌面 `verify`。桌面检查覆盖静态约束、IPC、扩展运行时、导航、inbox 生命周期和更新/发布产物契约；打包 smoke、真实 ERP/1688 采集与真实更新安装仍需单独验收。
 
 ## 上云
 

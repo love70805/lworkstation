@@ -43,9 +43,9 @@ pnpm --dir desktop build:update-fixtures
 pnpm --dir desktop smoke:update
 ```
 
-夹具写入 `desktop/release-test/0.2.6-beta.1/` 与 `desktop/release-test/0.2.6-beta.2/`，不会写入 `releases/latest/`，也不代表用户可下载安装。`release-internal/` 仅为历史夹具，不能作为 beta 发布说明。
+夹具版本由 `desktop/update-test-config.json` 的 `sourceVersion` 与 `targetVersion` 决定，当前为 `0.2.6-beta.3 -> 0.2.6-beta.4`，分别写入 `desktop/release-test/<版本>/`。`build:update-fixtures` 会重建整个 `desktop/release-test/`，运行前应先整理其中需要保留的已验收候选。测试夹具不会写入 `releases/latest/`，也不代表用户可下载安装；`release-internal/` 仅为历史夹具。
 
-packaged smoke 必须从 beta.1 的真实打包配置启动，读取 `beta.yml`，并验证：检查失败可手动重试、available 不自动下载、下载可取消和重试、稍后不会在普通退出时安装、仅显式操作才调用安装。服务器直接按 `beta.yml` 请求的同名文件读取磁盘，缺失时返回 404 并使测试失败。
+`smoke:update` 从配置中的源版本打包应用启动，读取目标版本的 `beta.yml`，并验证：检查失败可手动重试、available 不自动下载、下载可取消和重试、稍后不会在普通退出时安装、仅显式操作才调用安装。服务器直接按 `beta.yml` 请求的同名文件读取磁盘，缺失时返回 404 并使测试失败。
 
 ## 线上 beta 验收
 
