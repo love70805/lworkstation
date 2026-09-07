@@ -13,6 +13,8 @@
 
 ## 2026-09-07 集成维护验收
 
+- 已批准的后续安全修复正在独立分支 `codex/security-hardening` 执行；范围、数据权限契约、分工和上线验收信号见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。此前验收记录不代表安全补丁已完成或已上线。
+
 - 范围：质量工作流增加集成分支 push 触发与 Windows `desktop verify`；发布文档统一 Beta 构建、归档和更新夹具说明，旧候选与旧回归标记为历史记录。业务代码、公共 contract、数据库与发布版本未变。
 - 本机验证：Windows，Node.js `24.20.0`、pnpm `11.25.0`；`pnpm --dir frontend release:check` 通过（71 个测试文件、493 项测试、生产构建、ERP bridge/inbox、同步与部署门禁），`pnpm --dir desktop verify` 通过。补丁完成后复核工作流 YAML、锁文件路径、文档链接、夹具版本，以及 desktop 静态验证与部署检查，均通过。
 - 验收边界：新增 GitHub Windows job 尚待推送后执行；CI 使用 Node.js 22、pnpm 11.16.0。本轮未构建安装包或执行打包 smoke，未做真实 ERP/1688 账号、安装更新及页面视觉验收；这些项目仍按发布状态文件单独验收。
