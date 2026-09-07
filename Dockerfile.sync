@@ -13,6 +13,7 @@ RUN cd /app/frontend && pnpm install --prod --frozen-lockfile
 COPY frontend/src /app/frontend/src
 COPY frontend/supabase /app/frontend/supabase
 COPY tools/sync-production-server.mjs /app/tools/sync-production-server.mjs
+COPY tools/sync-database-config.mjs /app/tools/sync-database-config.mjs
 
 EXPOSE 8787
 CMD ["node", "/app/tools/sync-production-server.mjs"]
