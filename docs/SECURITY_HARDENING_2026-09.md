@@ -1,6 +1,6 @@
 # 2026-09 安全修复与验收
 
-状态：用户已于 2026-09-07 批准修复、测试和集成，随后进行上线验收。起始基线 `108890d7f171d35811d71f208c894fc170050faf`。
+状态：用户已于 2026-09-07 批准修复、测试和集成，并指定先验收本机 Windows 桌面候选版。安全代码已合入集成分支与 `main`。起始基线 `108890d7f171d35811d71f208c894fc170050faf`。
 
 ## 已确认范围与契约
 
@@ -47,10 +47,31 @@
 - 独立空工作区的 `/workspace`、`/products`、`/products?view=reference`、`/profit`、`/ledger`、`/cost-matching` 在 1440×900 与 390×844 下均正常加载，未出现页面异常或整页横向溢出；截图留于本机 `qa/security-ui/`。本轮未使用真实业务数据做页面验收。
 - 桌面模块 Windows x64 预览 NSIS 构建、打包 smoke 和更新夹具 smoke 通过，ERP/1688 扩展加载、隔离及 ERP v2 evidence acknowledge 正常。更新 smoke 会截获安装调用，不能代替真实覆盖安装与重启验收。
 - 推荐 ERP 扩展包更新为 v8.0.16：38,999 bytes，SHA-256 `CD5D824B61A71DCBE31D780E2BE0031D4564654B5674C7500326D0DECDEFDD53`；已发布 v8.0.15 归档保持不变。
-- GitHub 集成、受保护分支 CI 与合并结果待本次 PR 完成后补记。官方桌面版本仍为 0.2.6-beta.7，安全候选未发布。
+- GitHub [PR #1](https://github.com/love70805/lworkstation/pull/1) 已将安全修复合入集成分支，合并提交 `f68ee37`；[PR #2](https://github.com/love70805/lworkstation/pull/2) 已同步至 `main`，合并提交 `3dc1448`。两项必要检查 `release-check`、`desktop-verify` 均通过，`main` 合并后 [CI](https://github.com/love70805/lworkstation/actions/runs/34109075520) 也通过。本机原工作区已同步修复及锁定依赖。
+- `main` 与 `codex/selection-profit-erp-sync` 已配置必须经 PR、分支最新、两项 GitHub Actions 检查通过、对管理员生效、禁止强推/删除、解决审查讨论。当前为单维护者，未要求额外审批人数。Dependabot 告警/安全更新、secret scanning/push protection 已启用；合入主分支后开放依赖安全告警和 secret 告警均为 **0**。普通版本更新 PR 留给后续维护。
+- 官方桌面版本仍为 `0.2.6-beta.7`。本机安全 QA 包使用独立应用身份和 `0.2.6-beta.8` 测试版本，仅用于本轮验收，未上传 GitHub Release 或修改公开更新源。
+
+## 本机 Windows 桌面安装验收
+
+2026-09-07 18:10（UTC+8）完成并通过实际 NSIS 安装验收。源 QA 包来自起始提交 `108890d`，目标 QA 包来自安全集成提交 `f68ee37`；`main` 的 `3dc1448` 包含相同产品代码。两者使用独立 `com.shopeers.workstation.securityqa` 身份、安装目录、userData、缓存和 ERP inbox 端口，构建指定 `--publish never`。
+
+| 实测阶段 | 应用版本 | Electron | 结果 |
+| --- | --- | --- | --- |
+| NSIS 首次静默安装并写入合成数据 | beta.7 | 36.9.5 | 安装和应用退出码均为 0 |
+| 旧版实际重启 | beta.7 | 36.9.5 | 数据和偏好保留，退出码 0 |
+| NSIS 同目录覆盖并启动新版 | beta.8 QA | 44.2.0 | 安装和应用退出码均为 0 |
+| 新版再次实际重启 | beta.8 QA | 44.2.0 | 数据和偏好保留，退出码 0 |
+
+- 通过 `Start-Process -WindowStyle Hidden -Wait` 实际执行安装包 `/S /D=<隔离目录>`；QA 注册项身份未变，安装版本由 beta.7 变为 beta.8。该项实际安装测试不依赖更新 smoke 对安装调用的截获。
+- 实际 IndexedDB `shopeers-workstation` 中的合成商品、SKU、CNY 售价、设置与 localStorage 在四阶段摘要完全一致：SHA-256 `4a9c1a9ddc1c113bce2dc6862ef22ed2a7281ac98d0a7653d3bad8337d5090de`。新版页面显示该商品；深色外观和 ERP 100% 缩放保留。
+- 已安装程序实测为 packaged app、Electron 44.2.0 / Chromium 152；工作站 `sandbox=true`、`contextIsolation=true`、`nodeIntegration=false`。
+- 正式 beta.7 安装注册项、EXE 和 app.asar 哈希复核未变；没有访问正式业务数据库或登录态。验收结束后 QA 进程和测试 inbox 监听均退出，未生成 QA 桌面/开始菜单快捷方式。隔离 QA 安装和合成数据保留供后续复查。
+- 候选产物：`desktop/release/security-qa/Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。主线已独立回读哈希、审查测试脚本与原始 JSON，并检查新版重启截图。
+- 原始 JSON、前后截图、正式安装隔离核对及复用启动脚本保存在本机 `Lworkstation-security-qa-beta7/qa/install-upgrade-acceptance/`，不提交安装包、运行配置或数据库。复用时使用该目录的 `launch-qa.ps1` 继续加载隔离合成数据。
 
 ## 上线验收前置条件
 
-- 未发现本机服务端环境配置、GitHub deployment secrets 或部署记录，因此尚未操作线上数据库、云端 API 或正式发布资产。真实 ERP/1688 登录、目标数据库迁移及证书、真实 NSIS 覆盖安装/重启仍待目标环境确认。
+- 本轮验收目标已由用户确定为本机 Windows 桌面候选版。未发现本机服务端环境配置、GitHub deployment secrets 或部署记录，尚未操作线上数据库、云端 API 或正式发布资产。
+- 真实 ERP/1688 账号登录与业务数据验收、目标数据库迁移及证书、公开 beta 更新安装链仍作为后续正式发布门禁，不以合成数据或隔离安装结果替代。
 - 数据库必须先迁移再切 API，完整备份包括内部删除权限元数据；具体步骤见 [数据库安全配置](integration/DATABASE_SECURITY_SETUP.md)。
 - 本次提交的 `__fixtures__/tls/localhost-test-key.pem` 仅为新生成的公开测试夹具，从未用于真实服务；真实业务密钥、数据库和备份未提交。
