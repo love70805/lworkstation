@@ -67,7 +67,7 @@
 - 已安装程序实测为 packaged app、Electron 44.2.0 / Chromium 152；工作站 `sandbox=true`、`contextIsolation=true`、`nodeIntegration=false`。
 - 正式 beta.7 安装注册项、EXE 和 app.asar 哈希复核未变；没有访问正式业务数据库或登录态。验收结束后 QA 进程和测试 inbox 监听均退出，未生成 QA 桌面/开始菜单快捷方式。隔离 QA 安装和合成数据保留供后续复查。
 - 候选产物：`desktop/release/security-qa/Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。主线已独立回读哈希、审查测试脚本与原始 JSON，并检查新版重启截图。
-- 原始 JSON、前后截图、正式安装隔离核对及复用启动脚本保存在本机 `Lworkstation-security-qa-beta7/qa/install-upgrade-acceptance/`，不提交安装包、运行配置或数据库。复用时使用该目录的 `launch-qa.ps1` 继续加载隔离合成数据。
+- 原始 JSON、前后截图、正式安装隔离核对及复用启动脚本保存在本机 `Lworkstation-security-qa-beta7/qa/install-upgrade-acceptance/`，不提交安装包、运行配置或数据库。复用时使用该目录的 `launch-qa.ps1` 继续加载隔离合成数据；已另行验证可见主窗口和独立 inbox 监听。脚本仅设置子进程环境，交互应用正常显示，辅助控制台保持隐藏。
 
 ## 上线验收前置条件
 
