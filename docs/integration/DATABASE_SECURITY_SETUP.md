@@ -2,6 +2,8 @@
 
 本次修复追加 `0010_security_authorization_and_audit_privacy.sql`，不改写历史审计事件、哈希或月度利润。先在预发布数据库执行迁移及角色验收，再部署同步 API，最后发布前端与桌面候选版本。新 API 依赖迁移中的安全函数，不能提前切流。
 
+迁移新增仅服务端使用的 `catalog_access_tombstones` 权限元数据表。数据库触发器在删除商品时从实际记录保存归属和可见性；同步与直接 RLS 写入都禁止复用已删除商品 ID、修改商品 ID 或跨工作区移动记录。精确重试仍按原事件 ID 幂等处理。完整 PostgreSQL 备份须包含该表；管理端恢复应恢复完整数据库状态，不能把已删除对象 ID 当作新商品重复创建。
+
 ## 本地 PostgreSQL
 
 在仓库根目录复制 `.env.example` 为 `.env`，为 `SHOPEERS_POSTGRES_PASSWORD` 设置独立随机密码。`.env` 被 Git 忽略；不要把密码写进命令历史或 `VITE_` 变量。

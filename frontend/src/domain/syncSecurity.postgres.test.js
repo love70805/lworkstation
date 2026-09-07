@@ -61,6 +61,7 @@ describe("security against a real PostgreSQL engine", () => {
     }
     // Model Supabase's normal table grants without undoing the audit insert revoke.
     await db.exec("grant select, update, delete on all tables in schema public to authenticated");
+    await db.exec("grant insert on public.products to authenticated");
     client = { query: async (sql, params) => {
       const result = await db.query(sql, params);
       return { ...result, rowCount: result.affectedRows || result.rows.length };
@@ -206,5 +207,61 @@ describe("security against a real PostgreSQL engine", () => {
       expect(recovery.baseline.tables.auditEvents.map((row) => row.eventId).sort()).toEqual([...expected].sort());
     }
     expect((await db.query("select count(*)::int as n from public.audit_events")).rows[0].n).toBe(3);
+  });
+
+  it("denies private references with missing historical owner metadata instead of treating SQL NULL as permission", async () => {
+    await db.exec("insert into public.products(id,workspace_id,name,visibility) values ('ownerless','w1','旧私有记录','private')");
+    await seedAudit("ownerless-created", { action: "product_created", objectId: "ownerless",
+      after: { snapshot: { product: { id: "ownerless", visibility: "private" } } } });
+    await seedAudit("ownerless-bulk", { action: "product_sales_status_bulk_updated", objectType: "products", objectId: "bulk",
+      after: { productIds: ["ownerless"] } });
+    for (const deleted of [false, true]) {
+      if (deleted) await db.exec("delete from public.products where id='ownerless'");
+      const result = await asAuthenticated("viewer", () => db.query("select event_id from public.audit_events"));
+      expect(result.rows).toEqual([]);
+    }
+  });
+
+  it("rejects forged empty deletions and deleted-ID reuse, deriving deletion access from the locked database row", async () => {
+    const privateSnapshot = product("sealed", { visibility: "private", ownerId: actors.other });
+    privateSnapshot.platformSkus = [{ id: "sealed-sku", productId: "sealed", platformSku: "SEALED-SKU", canonicalPlatformSku: "SEALED-SKU", createdAt, updatedAt: createdAt }];
+    await submit([event("product_created", "sealed", privateSnapshot, "other")], "other");
+    const cost = { id: "sealed-cost", productId: "sealed", platformSkuId: "sealed-sku", platformSku: "SEALED-SKU",
+      canonicalPlatformSku: "SEALED-SKU", amount: 777.66, confirmedAt: createdAt, confirmedBy: actors.other };
+    await submit([event("catalog_manual_cost_confirmed", cost.id, { catalogManualCost: cost }, "other", "catalog_manual_cost")], "other");
+    const deleted = event("product_deleted", "sealed", null, "other");
+    deleted.before = { snapshot: { id: "sealed", visibility: "workspace", ownerId: actors.selection } };
+    await submit([deleted], "other");
+    const forged = event("product_deleted", "sealed");
+    forged.before = deleted.before;
+    for (const attempt of [forged, event("product_created", "sealed", product("sealed")), event("product_updated", "sealed", product("sealed"))]) {
+      await expect(submit([attempt])).rejects.toMatchObject({ status: 403 });
+    }
+    expect((await db.query("select owner_id, visibility from public.catalog_access_tombstones where entity_id='sealed'")).rows)
+      .toEqual([{ owner_id: actors.other, visibility: "private" }]);
+    for (const role of ["viewer", "selection", "other"]) {
+      const direct = await asAuthenticated(role, () => db.query("select event_id from public.audit_events"));
+      const recovery = await loadPostgresRecovery("w1", { client, context: { actor: actors[role], role: role === "other" ? "selection" : role } });
+      expect(direct.rows).toHaveLength(role === "other" ? 3 : 0);
+      expect(recovery.baseline.tables.auditEvents).toHaveLength(role === "other" ? 3 : 0);
+    }
+    await asAuthenticated("selection", async () => {
+      await expect(db.query("insert into public.products(id,workspace_id,name,visibility) values ('sealed','w1','复用旧标识','workspace')"))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(db.query("update public.products set id='sealed' where id='shared'"))
+        .rejects.toMatchObject({ code: "42501" });
+    });
+  });
+
+  it("records authoritative deletion permissions even for direct RLS writes without audit snapshots", async () => {
+    await asAuthenticated("selection", async () => {
+      await db.query("insert into public.products(id,workspace_id,name,visibility,owner_id) values ('direct','w1','私有记录','private',$1)", [actors.selection]);
+      expect((await db.query("delete from public.products where id='direct' returning id")).rows).toHaveLength(1);
+      await expect(db.query("insert into public.products(id,workspace_id,name,visibility) values ('direct','w1','复用旧标识','workspace')"))
+        .rejects.toMatchObject({ code: "42501" });
+      expect((await db.query("select entity_id from public.catalog_access_tombstones")).rows).toEqual([]);
+    });
+    expect((await db.query("select owner_id,visibility from public.catalog_access_tombstones where entity_id='direct'")).rows)
+      .toEqual([{ owner_id: actors.selection, visibility: "private" }]);
   });
 });

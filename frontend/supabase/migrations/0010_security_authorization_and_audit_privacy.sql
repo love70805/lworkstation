@@ -1,5 +1,49 @@
 -- Forward-only security repair. Stored audit snapshots and hashes are unchanged.
 
+-- Internal authorization state, never a client-supplied business snapshot. It is
+-- retained with the workspace so an absent row cannot reset historical access.
+create table public.catalog_access_tombstones (
+  entity_type text not null check (entity_type in ('product', 'capture')),
+  entity_id text not null,
+  workspace_id text not null references public.workspaces(id) on delete cascade,
+  owner_id text,
+  visibility text not null check (visibility in ('workspace', 'private')),
+  deleted_at timestamptz not null default now(),
+  primary key (entity_type, entity_id)
+);
+alter table public.catalog_access_tombstones enable row level security;
+alter table public.catalog_access_tombstones force row level security;
+revoke all on public.catalog_access_tombstones from public, anon, authenticated;
+
+-- Apply the same boundary to direct Supabase writes, which do not call the
+-- sync adapter. Deleted identities cannot be recycled to expose old child audits.
+create or replace function public.guard_catalog_product_identity()
+returns trigger language plpgsql security definer set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    insert into public.catalog_access_tombstones(entity_type, entity_id, workspace_id, owner_id, visibility)
+      values ('product', old.id, old.workspace_id, old.owner_id, old.visibility)
+      on conflict (entity_type, entity_id) do update set workspace_id = excluded.workspace_id,
+        owner_id = excluded.owner_id, visibility = excluded.visibility, deleted_at = now();
+    return old;
+  elsif tg_op = 'UPDATE' then
+    if new.id <> old.id or new.workspace_id <> old.workspace_id then
+      raise exception '商品标识与工作区不能变更' using errcode = '42501';
+    end if;
+  elsif not exists (select 1 from public.products p where p.id = new.id) and (
+    exists (select 1 from public.catalog_access_tombstones t where t.entity_type = 'product' and t.entity_id = new.id)
+    or exists (select 1 from public.audit_events a where a.object_id = new.id
+      and a.action in ('product_created','product_updated','product_merged','product_deleted'))
+  ) then raise exception '已删除商品标识不能复用' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+create trigger guard_catalog_product_identity before insert or update or delete on public.products
+  for each row execute function public.guard_catalog_product_identity();
+revoke all on function public.guard_catalog_product_identity() from public, anon, authenticated;
+
 create or replace function public.audit_snapshot_visible_to(value jsonb, actor text)
 returns boolean language plpgsql immutable set search_path = public
 as $$
@@ -39,8 +83,15 @@ begin
   else return false;
   end if;
   if current_object.workspace_id is not null then
-    return current_object.workspace_id = target_workspace
-      and (current_object.visibility = 'workspace' or current_object.owner_id = actor);
+    return coalesce(current_object.workspace_id = target_workspace
+      and (current_object.visibility = 'workspace' or current_object.owner_id = actor), false);
+  end if;
+  select t.workspace_id, t.visibility, t.owner_id into current_object
+    from public.catalog_access_tombstones t where t.entity_type = catalog_entity_visible_to.entity_type
+      and t.entity_id = catalog_entity_visible_to.entity_id;
+  if current_object.workspace_id is not null then
+    return coalesce(current_object.workspace_id = target_workspace
+      and (current_object.visibility = 'workspace' or current_object.owner_id = actor), false);
   end if;
 
   select state.snapshot into last_snapshot from public.audit_events a
@@ -54,10 +105,12 @@ begin
         or (entity_type = 'capture' and a.action in ('capture_created','capture_draft_saved','capture_confirmed','capture_ignored','capture_product_relinked')))
       and state.snapshot->>'id' = entity_id
     -- Server-assigned insertion order follows applied state; client clocks do not.
-    order by a.id desc limit 1;
+    -- For pre-migration deletions, prefer applied after state over a client's
+    -- claimed deletion before state. New deletions use the server tombstone.
+    order by (a.action <> 'product_deleted') desc, a.id desc limit 1;
   if last_snapshot is null then return false; end if;
-  return coalesce(last_snapshot->>'visibility', last_snapshot #>> '{draft,visibility}', 'workspace') = 'workspace'
-    or coalesce(last_snapshot->>'ownerId', last_snapshot->>'owner_id', last_snapshot #>> '{draft,ownerId}') = actor;
+  return coalesce(coalesce(last_snapshot->>'visibility', last_snapshot #>> '{draft,visibility}', 'workspace') = 'workspace'
+    or coalesce(last_snapshot->>'ownerId', last_snapshot->>'owner_id', last_snapshot #>> '{draft,ownerId}') = actor, false);
 end;
 $$;
 
@@ -154,7 +207,7 @@ create or replace function public.assert_catalog_sync_access(
 )
 returns void language plpgsql security definer set search_path = public
 as $$
-declare member_role text; existing record; candidate jsonb; parent_id text;
+declare member_role text; existing record; candidate jsonb; parent_id text; object_kind text;
 begin
   select wm.role into member_role from public.workspace_members wm
     where wm.workspace_id = target_workspace and wm.user_id::text = actor and wm.status = 'active';
@@ -166,6 +219,7 @@ begin
     end if;
     return;
   elsif event_action in ('capture_created', 'capture_draft_saved', 'capture_confirmed', 'capture_ignored', 'capture_product_relinked') then
+    object_kind := 'capture';
     if member_role not in ('admin', 'selection', 'operations') then
       raise exception '无权修改采集记录' using errcode = '42501';
     end if;
@@ -174,6 +228,7 @@ begin
       'visibility', coalesce(snapshot->>'visibility', snapshot->'draft'->>'visibility', 'workspace'),
       'ownerId', coalesce(snapshot->>'ownerId', snapshot->'draft'->>'ownerId'));
   elsif event_action in ('product_created', 'product_updated', 'product_merged', 'product_deleted') then
+    object_kind := 'product';
     if member_role not in ('admin', 'selection') then
       raise exception '无权修改商品' using errcode = '42501';
     end if;
@@ -194,6 +249,15 @@ begin
     existing.workspace_id <> target_workspace
     or (member_role <> 'admin' and existing.visibility = 'private' and existing.owner_id is distinct from actor)
   ) then raise exception '无权修改该私有或跨工作区对象' using errcode = '42501'; end if;
+  if event_action = 'product_deleted' and existing.workspace_id is null then
+    raise exception '商品不存在，拒绝产生新的删除事件' using errcode = '42501';
+  end if;
+  if existing.workspace_id is null and object_kind is not null and (
+    exists (select 1 from public.catalog_access_tombstones t where t.entity_type = object_kind and t.entity_id = event_object)
+    or exists (select 1 from public.audit_events a where a.object_id = event_object
+      and ((object_kind = 'product' and a.action in ('product_created','product_updated','product_merged','product_deleted'))
+        or (object_kind = 'capture' and a.action in ('capture_created','capture_draft_saved','capture_confirmed','capture_ignored','capture_product_relinked'))))
+  ) then raise exception '已删除对象的标识不能复用，请先恢复工作区状态' using errcode = '42501'; end if;
   if member_role <> 'admin' and not public.audit_snapshot_visible_to(candidate, actor) then
     raise exception '无权写入他人的私有快照' using errcode = '42501';
   end if;
