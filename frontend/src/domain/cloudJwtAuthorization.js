@@ -62,15 +62,15 @@ export function createClaimsAuthorizer({
     const membership = await resolveMembership({ userId, workspaceId, claims });
     const role = String(membership?.role ?? (allowClaimRoleFallback ? claimRole(claims) : "")).trim().toLowerCase();
     if (!membership && !allowClaimRoleFallback) return false;
-    if (!isCloudRole(role) || membership?.status === "suspended") return false;
+    if (!isCloudRole(role) || (membership && membership.status !== "active")) return false;
     if (["preflight", "import"].includes(operation)) return canCloudRole(role, "workspaces", "update");
     if (operation === "recovery") return canCloudRole(role, "workspaces", "read");
     if (operation === "audit_events") return events.every((event) => {
       if (event.actorIdProvided === false || !String(event.actorId ?? "").trim() || String(event.actorId).trim() !== userId) return false;
       const permissions = auditActionPermissions(event);
-      return permissions.every((permission) => canCloudRole(role, permission.table, permission.operation));
+      return Boolean(permissions?.length) && permissions.every((permission) => canCloudRole(role, permission.table, permission.operation));
     });
-    return canCloudRole(role, "audit_events", "insert");
+    return false;
   };
 }
 

@@ -13,7 +13,7 @@ function client({ fail = false } = {}) {
     if (text.startsWith("begin") || text === "commit" || text === "rollback") return { rows: [] };
     if (text.includes("from public.workspaces")) return { rows: [{ id: workspaceId, name: "恢复工作区", default_currency: "CNY", timezone: "Asia/Shanghai", selection_status_definitions: [{ id: "testing", label: "测品" }], created_at: createdAt, updated_at: createdAt }] };
     if (text.includes("from public.audit_events")) return { rows: [{ id: "1", workspace_id: workspaceId, event_id: "E-1", object_type: "product", object_id: "P-1", action: "product_created", actor_id: "u1", before_snapshot: null, after_snapshot: { snapshot: { product: { id: "P-1", workspaceId, name: "商品" }, platformSkus: [], supplierOffers: [] } }, created_at: createdAt, sync_version: "10" }] };
-    if (text.includes("from public.products")) return { rows: [{ id: "P-1", workspace_id: workspaceId, name: "商品", status: "active", currency: "CNY", created_at: createdAt, updated_at: createdAt }] };
+    if (text.includes("from public.products where")) return { rows: [{ id: "P-1", workspace_id: workspaceId, name: "商品", status: "active", currency: "CNY", created_at: createdAt, updated_at: createdAt }] };
     return { rows: [] };
   });
   return { query, calls };

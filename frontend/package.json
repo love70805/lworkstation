@@ -25,7 +25,7 @@
     "deploy:check": "node ../tools/deployment-check.mjs",
     "cloud:check": "node ../tools/cloud-preflight.mjs",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=2"
   },
   "dependencies": {
     "@fontsource/inter": "5.2.8",
@@ -42,15 +42,16 @@
     "pg": "8.13.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-router-dom": "7.1.1",
-    "xlsx": "^0.18.5",
+    "react-router-dom": "7.18.3",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@vitejs/plugin-react": "4.3.4",
     "fake-indexeddb": "6.0.0",
-    "happy-dom": "18.0.1",
-    "vite": "6.0.7",
+    "happy-dom": "20.8.9",
+    "vite": "6.4.3",
     "vitest": "^4.1.10"
   }
 }

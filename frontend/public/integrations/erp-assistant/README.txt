@@ -1,7 +1,7 @@
-Shopeers ERP Assistant v8.0.15 桥接扩展
+Shopeers ERP Assistant v8.0.16 桥接扩展
 
 安装步骤：
-1. 解压 ERP-Assistant-v8.0.15-shopeers-bridge.zip。
+1. 解压 ERP-Assistant-v8.0.16-shopeers-bridge.zip。
 2. 在 Chrome 打开 chrome://extensions/。
 3. 开启开发者模式。
 4. 点击“加载已解压的扩展程序”，选择解压后能看到 manifest.json 的文件夹。
@@ -16,3 +16,4 @@ Shopeers ERP Assistant v8.0.15 桥接扩展
 6. 单价为 0 或 1 的记录会显示疑似异常提示，但不会阻止复制、导出或自动回传。
 7. 扩展会回传最近三次预览值、全部有效历史采购记录和排除原因；价格修正、真实 1 元确认与正式成本发布由 Shopeers 利润核算页处理。
 8. 本机收件端口由工作站配置；回传失败会有限重试并缓存补发，同一核算结果不会重复创建成本批次。
+9. CSV 中公式或控制字符开头的文本会添加前导单引号；成本数值和回传原始证据保持不变。编辑并重新保存 CSV 后，表格软件可能移除文本标记。

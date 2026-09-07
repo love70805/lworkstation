@@ -1,0 +1,82 @@
+:root {
+  color-scheme: light;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  color: #18212f;
+  background: #f6f8fb;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 310px;
+  margin: 0;
+  background: #f6f8fb;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 18px;
+  background: #fff;
+  border-bottom: 1px solid #e4e9f0;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background: #137c70;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+h1, p { margin: 0; letter-spacing: 0; }
+h1 { font-size: 16px; line-height: 1.35; }
+p { margin-top: 2px; color: #778293; font-size: 12px; }
+
+.version {
+  padding: 3px 6px;
+  border: 1px solid #d6dde7;
+  border-radius: 4px;
+  color: #687486;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+section { padding: 14px 18px 18px; }
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: #4b586b;
+  font-size: 13px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #16a085;
+  box-shadow: 0 0 0 3px #d9f2ed;
+}
+
+a {
+  display: block;
+  padding: 9px 12px;
+  border-radius: 6px;
+  background: #137c70;
+  color: #fff;
+  text-align: center;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+a:hover { background: #0f6a60; }

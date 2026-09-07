@@ -58,10 +58,11 @@ function supplierOfferKey(row = {}, productId) {
 function insertOrUpdate({ table, columns, values, updates, eventId }) {
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
   const assignments = updates.map((column) => `${column} = excluded.${column}`).join(", ");
+  const scopeColumn = table === TABLES.workspace ? "id" : "workspace_id";
   return {
     eventId,
     table,
-    text: `insert into public.${table} (${columns.join(", ")}) values (${placeholders}) on conflict (id) do update set ${assignments} where public.${table}.workspace_id = excluded.workspace_id`,
+    text: `insert into public.${table} (${columns.join(", ")}) values (${placeholders}) on conflict (id) do update set ${assignments} where public.${table}.${scopeColumn} = excluded.${scopeColumn}`,
     values,
   };
 }
@@ -110,6 +111,7 @@ function ledgerUpsert(row, workspaceId, eventId) {
 function workspacePlan(snapshot, workspaceId, eventId, entityId) {
   const workspace = assertWorkspace(snapshot, workspaceId, "工作区配置");
   assertEntityId(workspace, entityId, "工作区配置");
+  assertEntityId(workspace, workspaceId, "工作区配置");
   const columns = ["id", "name", "default_currency", "timezone", "selection_status_definitions", "created_at", "updated_at"];
   return [insertOrUpdate({
     table: TABLES.workspace,
@@ -162,6 +164,9 @@ function productPlan(snapshot, workspaceId, eventId, entityId) {
   assertEntityId(product, entityId, "商品");
   const platformSkus = (snapshot.platformSkus ?? []).map((row) => assertWorkspace(row, workspaceId, "平台 SKU"));
   const supplierOffers = (snapshot.supplierOffers ?? []).map((row) => assertWorkspace(row, workspaceId, "供应商报价"));
+  if ([...platformSkus, ...supplierOffers].some((row) => row.productId != null && String(row.productId) !== String(product.id))) {
+    throw new SyncContractError("商品子记录不能归属其他商品。", { code: "ENTITY_ID_MISMATCH", status: 409 });
+  }
   const productColumns = ["id", "workspace_id", "name", "english_title", "sales_platform", "publication_status", "platform_skc", "canonical_platform_skc", "store", "image_url", "supplier_code", "supplier_name", "source_product_id", "source_url", "owner_id", "visibility", "status", "currency", "attributes", "created_at", "updated_at"];
   const attributes = {
     ...(product.attributes ?? {}),
@@ -694,6 +699,20 @@ export async function applySyncEnvelopeWithPostgresClient(payload, {
     const pending = plan.eventPlans.filter(({ event }) => !existing.has(event.eventId));
     configurePendingVoidReopenPairs(pending);
     for (const eventPlan of pending) {
+      const projection = projectSyncEvent(eventPlan.event);
+      if (["workspace", "product", "capture", "catalog_manual_cost"].includes(projection.entityType)) {
+        try {
+          await client.query("select public.assert_catalog_sync_access($1, $2, $3, $4::jsonb, $5)", [
+            plan.workspaceId, eventPlan.event.action, projection.entityId,
+            JSON.stringify(projection.snapshot), eventPlan.event.actorId,
+          ]);
+        } catch (error) {
+          if (error.code !== "42501") throw error;
+          throw new SyncContractError("当前身份无权修改该选品对象。", {
+            code: "WORKSPACE_FORBIDDEN", status: 403, eventIds: [eventPlan.event.eventId],
+          });
+        }
+      }
       for (const operation of eventPlan.operations) {
         const result = await client.query(operation.text, operation.values);
         if (["delete_guard", "finalize_guard"].includes(operation.kind)) {
