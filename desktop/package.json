@@ -19,8 +19,8 @@
     "build": "pnpm --dir ../frontend build && pnpm brand:icons && electron-builder --config.electronDist=./node_modules/electron/dist"
   },
   "devDependencies": {
-    "electron": "^36.3.1",
-    "electron-builder": "^26.0.12"
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.shopeers.workstation",

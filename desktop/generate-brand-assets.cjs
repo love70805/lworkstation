@@ -11,6 +11,8 @@ const pngPath = path.join(assetsDirectory, "lworkstation.png");
 const icoPath = path.join(assetsDirectory, "lworkstation.ico");
 
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
+// Render build-time icons with the software compositor, independent of GPU drivers.
+app.disableHardwareAcceleration();
 
 function sha256(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex").toUpperCase();

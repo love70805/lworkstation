@@ -703,7 +703,7 @@ async function loadExtension(tabId, tabSession, extensionDirectory) {
       runtimeId: tabId,
       userDataPath: app.getPath("userData"),
     });
-    const loaded = await tabSession.loadExtension(runtimeDirectory, { allowFileAccess: true });
+    const loaded = await tabSession.extensions.loadExtension(runtimeDirectory, { allowFileAccess: true });
     nextExtension = { ...extension, status: "loaded", id: loaded.id, name: loaded.name, path: runtimeDirectory };
     setStatus(tabId, { extension: nextExtension });
     const contextToConfigure = activeWorkspaceContext || workspaceContextCoordinator.getPendingContext();
