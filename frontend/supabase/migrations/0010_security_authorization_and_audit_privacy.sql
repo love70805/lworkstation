@@ -24,6 +24,43 @@ begin
 end;
 $$;
 
+-- Deleted objects keep their last recorded visibility/owner through immutable
+-- audit snapshots. Missing current rows must neither expose earlier public
+-- snapshots nor hide the owner's complete history (including SKU references).
+create or replace function public.catalog_entity_visible_to(entity_type text, target_workspace text, entity_id text, actor text)
+returns boolean language plpgsql stable security definer set search_path = public
+as $$
+declare current_object record; last_snapshot jsonb;
+begin
+  if entity_type = 'product' then
+    select p.workspace_id, p.visibility, p.owner_id into current_object from public.products p where p.id = entity_id;
+  elsif entity_type = 'capture' then
+    select c.workspace_id, c.visibility, c.owner_id into current_object from public.captures c where c.id = entity_id;
+  else return false;
+  end if;
+  if current_object.workspace_id is not null then
+    return current_object.workspace_id = target_workspace
+      and (current_object.visibility = 'workspace' or current_object.owner_id = actor);
+  end if;
+
+  select state.snapshot into last_snapshot from public.audit_events a
+    cross join lateral (select case
+      when a.action = 'product_deleted' then coalesce(a.before_snapshot #> '{snapshot,product}', a.before_snapshot->'snapshot', a.before_snapshot->'product', a.before_snapshot)
+      when entity_type = 'product' then coalesce(a.after_snapshot #> '{snapshot,product}', a.after_snapshot->'product')
+      else coalesce(a.after_snapshot->'snapshot', a.after_snapshot)
+    end as snapshot) state
+    where a.workspace_id = target_workspace and a.object_id = entity_id
+      and ((entity_type = 'product' and a.action in ('product_created','product_updated','product_merged','product_deleted'))
+        or (entity_type = 'capture' and a.action in ('capture_created','capture_draft_saved','capture_confirmed','capture_ignored','capture_product_relinked')))
+      and state.snapshot->>'id' = entity_id
+    -- Server-assigned insertion order follows applied state; client clocks do not.
+    order by a.id desc limit 1;
+  if last_snapshot is null then return false; end if;
+  return coalesce(last_snapshot->>'visibility', last_snapshot #>> '{draft,visibility}', 'workspace') = 'workspace'
+    or coalesce(last_snapshot->>'ownerId', last_snapshot->>'owner_id', last_snapshot #>> '{draft,ownerId}') = actor;
+end;
+$$;
+
 create or replace function public.audit_catalog_references_visible_to(value jsonb, target_workspace text, actor text)
 returns boolean language plpgsql stable security definer set search_path = public
 as $$
@@ -34,16 +71,12 @@ begin
     for pair in select k, v from jsonb_each(value) as t(k, v) loop
       if pair.k in ('productId', 'product_id', 'confirmedProductId') then
         product_ref := nullif(pair.v #>> '{}', '');
-        if product_ref is not null and not exists (
-          select 1 from public.products p where p.workspace_id = target_workspace and p.id = product_ref
-            and (p.visibility = 'workspace' or p.owner_id = actor)
-        ) then return false; end if;
+        if product_ref is not null and not public.catalog_entity_visible_to('product', target_workspace, product_ref, actor)
+          then return false; end if;
       elsif pair.k = 'productIds' and jsonb_typeof(pair.v) = 'array' then
         for child in select v from jsonb_array_elements(pair.v) as t(v) loop
-          if not exists (
-            select 1 from public.products p where p.workspace_id = target_workspace and p.id = (child #>> '{}')
-              and (p.visibility = 'workspace' or p.owner_id = actor)
-          ) then return false; end if;
+          if not public.catalog_entity_visible_to('product', target_workspace, child #>> '{}', actor)
+            then return false; end if;
         end loop;
       end if;
       if not public.audit_catalog_references_visible_to(pair.v, target_workspace, actor) then return false; end if;
@@ -63,7 +96,7 @@ create or replace function public.audit_event_visible_to(
 )
 returns boolean language plpgsql stable security definer set search_path = public
 as $$
-declare member_role text; catalog_event boolean;
+declare member_role text; catalog_event boolean; parent_id text;
 begin
   select wm.role into member_role from public.workspace_members wm
     where wm.workspace_id = target_workspace and wm.user_id::text = actor and wm.status = 'active';
@@ -79,14 +112,17 @@ begin
   if not catalog_event then return true; end if;
   if not public.audit_catalog_references_visible_to(before_value, target_workspace, actor)
     or not public.audit_catalog_references_visible_to(after_value, target_workspace, actor) then return false; end if;
-  if exists (select 1 from public.products p where p.id = event_object
-      and (p.workspace_id <> target_workspace or (p.visibility = 'private' and p.owner_id is distinct from actor)))
-    or exists (select 1 from public.captures c where c.id = event_object
-      and (c.workspace_id <> target_workspace or (c.visibility = 'private' and c.owner_id is distinct from actor)))
-    or exists (select 1 from public.catalog_manual_costs c join public.products p
-      on p.workspace_id = c.workspace_id and p.id = c.product_id where c.id = event_object
-      and (c.workspace_id <> target_workspace or (p.visibility = 'private' and p.owner_id is distinct from actor)))
-    then return false;
+  if event_action in ('product_created','product_updated','product_merged','product_deleted') or event_type = 'product' then
+    return public.catalog_entity_visible_to('product', target_workspace, event_object, actor);
+  elsif event_action in ('capture_created','capture_draft_saved','capture_confirmed','capture_ignored','capture_product_relinked') or event_type = 'capture' then
+    return public.catalog_entity_visible_to('capture', target_workspace, event_object, actor);
+  elsif event_action in ('catalog_manual_cost_confirmed','catalog_manual_cost_relinked') or event_type = 'catalog_manual_cost' then
+    select c.product_id into parent_id from public.catalog_manual_costs c
+      where c.workspace_id = target_workspace and c.id = event_object;
+    parent_id := coalesce(parent_id, after_value #>> '{snapshot,catalogManualCost,productId}',
+      after_value #>> '{snapshot,productId}', after_value #>> '{catalogManualCost,productId}', after_value->>'productId',
+      before_value #>> '{snapshot,catalogManualCost,productId}', before_value #>> '{snapshot,productId}');
+    return coalesce(public.catalog_entity_visible_to('product', target_workspace, parent_id, actor), false);
   end if;
   return true;
 end;
@@ -188,6 +224,7 @@ create policy products_delete on public.products for delete to authenticated
       or (select public.has_workspace_role(workspace_id, array['admin']))));
 
 revoke all on function public.audit_catalog_references_visible_to(jsonb, text, text) from public, anon, authenticated;
+revoke all on function public.catalog_entity_visible_to(text, text, text, text) from public, anon, authenticated;
 revoke all on function public.audit_event_visible_to(text, text, text, text, jsonb, jsonb, text) from public, anon, authenticated;
 revoke all on function public.assert_catalog_sync_access(text, text, text, jsonb, text) from public, anon, authenticated;
 revoke all on function public.can_read_audit_event(text, text, text, text, jsonb, jsonb) from public, anon;

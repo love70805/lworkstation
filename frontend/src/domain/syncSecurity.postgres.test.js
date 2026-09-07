@@ -154,7 +154,7 @@ describe("security against a real PostgreSQL engine", () => {
     await seedAudit(hidden[0], { after: { snapshot: { product: { id: "private", name: "历史共享名称", visibility: "workspace" } } } });
     await seedAudit(hidden[1], { action: "product_deleted", objectId: "gone", before: { snapshot: { id: "gone", name: "已删除私有内容", visibility: "private", ownerId: actors.other } } });
     await seedAudit(hidden[2], { objectId: "shared", before: { snapshot: { product: product("gone", { visibility: "private", ownerId: actors.other }).product } } });
-    await seedAudit(hidden[3], { objectId: "old-cost", objectType: "catalog_manual_cost", after: { snapshot: { catalogManualCost: { productId: "private", amount: 888 } } } });
+    await seedAudit(hidden[3], { action: "catalog_manual_cost_confirmed", objectId: "old-cost", objectType: "catalog_manual_cost", after: { snapshot: { catalogManualCost: { productId: "private", amount: 888 } } } });
     await seedAudit(hidden[4], { objectType: "products", objectId: "bulk", action: "product_sales_status_bulk_updated", after: { productIds: ["shared", "private"] } });
     await seedAudit("shared-safe", { objectId: "shared", after: { snapshot: product("shared") } });
     await seedAudit("finance-fact", { objectType: "monthly_ledger", objectId: "ledger", action: "finalized", after: { profit: 18 } });
@@ -184,5 +184,27 @@ describe("security against a real PostgreSQL engine", () => {
       expect((await db.query("delete from public.products where id='private' returning id")).rows).toHaveLength(0);
       expect((await db.query("delete from public.products where id='owned' returning id")).rows).toHaveLength(1);
     });
+  });
+
+  it("preserves deletion-time privacy and the owner's history when product and SKU rows no longer exist", async () => {
+    const snapshot = product("historical", { ownerId: actors.other });
+    const created = event("product_created", "historical", snapshot, "other");
+    created.createdAt = "2090-01-01T00:00:00.000Z"; // An old device clock must not outrank the deletion state.
+    await submit([created], "other");
+    const privateSnapshot = { ...snapshot, product: { ...snapshot.product, visibility: "private" },
+      platformSkus: [{ id: "hist-sku", productId: "historical", platformSku: "HIST-SKU", canonicalPlatformSku: "HIST-SKU", createdAt, updatedAt: createdAt }] };
+    const privatized = event("product_updated", "historical", privateSnapshot, "other");
+    await submit([privatized], "other");
+    const deleted = event("product_deleted", "historical", null, "other");
+    deleted.before = { snapshot: privateSnapshot.product };
+    await submit([deleted], "other");
+    for (const role of ["viewer", "selection", "other"]) {
+      const direct = await asAuthenticated(role, () => db.query("select event_id from public.audit_events order by id"));
+      const recovery = await loadPostgresRecovery("w1", { client, context: { actor: actors[role], role: role === "other" ? "selection" : role } });
+      const expected = role === "other" ? [created.eventId, privatized.eventId, deleted.eventId] : [];
+      expect(direct.rows.map((row) => row.event_id)).toEqual(expected);
+      expect(recovery.baseline.tables.auditEvents.map((row) => row.eventId).sort()).toEqual([...expected].sort());
+    }
+    expect((await db.query("select count(*)::int as n from public.audit_events")).rows[0].n).toBe(3);
   });
 });
