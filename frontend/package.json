@@ -50,7 +50,7 @@
     "@vitejs/plugin-react": "4.3.4",
     "fake-indexeddb": "6.0.0",
     "happy-dom": "18.0.1",
-    "vite": "6.0.7",
+    "vite": "6.4.3",
     "vitest": "^4.1.10"
   }
 }
