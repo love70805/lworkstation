@@ -8,12 +8,15 @@
 - 集成分支：`codex/selection-profit-erp-sync`
 - beta.7 发布代码提交：`40e4da8`；发布记录提交：`46792e5`。后续维护以集成分支当前 HEAD 为准，PR 状态以 GitHub 实时记录为准。
 - 本地开发地址：`http://127.0.0.1:5173`
-- 官方桌面版本：`0.2.6-beta.7`；下一候选：待规划
+- 官方桌面版本：`0.2.6-beta.7`；本机安全 QA：`0.2.6-beta.8`（独立应用身份，未公开发布）
 - 发布状态入口：`desktop/release-plan.json` 与 `docs/RELEASE_STATUS.md`
 
 ## 2026-09-07 集成维护验收
 
-- 安全修复已在独立分支 `codex/security-hardening` 完成代码、独立审查与本机回归，待本次 GitHub PR 集成。前端 73 文件 / 510 项测试、完整发布检查、桌面 verify 通过；两端依赖审计均为 0 告警。范围、数据权限契约、删除后审计保护和上线验收前置条件见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。尚未发布安全候选或执行线上数据库迁移。
+- 安全修复经 [PR #1](https://github.com/love70805/lworkstation/pull/1) 合入集成分支 `f68ee37`，经 [PR #2](https://github.com/love70805/lworkstation/pull/2) 合入 `main` 的 `3dc1448`，Linux/Windows 必要 CI 与主分支合并后 CI 均通过。前端 73 文件 / 510 项测试、完整发布检查、桌面 verify 通过；两端依赖审计、GitHub 开放依赖安全告警和 secret 告警均为 0。两条分支已开启 PR/CI 防护，Dependabot 已开启。范围、数据权限契约、删除后审计保护和验收记录见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。
+- 用户指定的本机 Windows 隔离安装验收已通过：旧版 beta.7 首装、beta.8 QA 同目录覆盖、新旧版实际重启成功，合成 IndexedDB/localStorage 数据及外观/缩放偏好保留。正式 beta.7 程序与注册项复核未变；安装报告和复用启动入口见安全验收记录。未公开发布安全候选或执行线上数据库迁移。
+
+### 同日安全修复前的集成维护（历史记录）
 
 - 范围：质量工作流增加集成分支 push 触发与 Windows `desktop verify`；发布文档统一 Beta 构建、归档和更新夹具说明，旧候选与旧回归标记为历史记录。业务代码、公共 contract、数据库与发布版本未变。
 - 本机验证：Windows，Node.js `24.20.0`、pnpm `11.25.0`；`pnpm --dir frontend release:check` 通过（71 个测试文件、493 项测试、生产构建、ERP bridge/inbox、同步与部署门禁），`pnpm --dir desktop verify` 通过。补丁完成后复核工作流 YAML、锁文件路径、文档链接、夹具版本，以及 desktop 静态验证与部署检查，均通过。
@@ -34,7 +37,7 @@
 - 软件内更新：`acacf2e` 已加入受控更新状态机，`a412684` 隔离更新 smoke 缓存；beta.1 至 beta.7 已公开为 GitHub prerelease，`autoDownload=false`、`autoInstallOnAppQuit=false`，发现更新后仍由用户确认下载并显式重启安装。beta.6 的已发布安装包未启用 beta 更新源，须手工安装 beta.7 一次；beta.7 之后继续使用 beta 通道更新，稳定源默认关闭。
 - `0.2.5` 历史交付：安全壳、ERP/1688 内置扩展、ERP 成本复制回退、未映射证据折叠和证据不完整原因/补齐指引已纳入后续版本；桌面层不执行异常判断、人工确认或正式成本发布。
 - 历史集成提交：全局 UI `edac462`、桌面壳 `d112b08`、利润/ERP `18d4bd4` 与桌面 smoke `0f00b4f`。当前发布检查所需提交以 `desktop/release-plan.json` 的 `requiredCommits` 为准。
-- ERP Assistant：`v8.0.15`，38,645 bytes，SHA-256 `EDA7774D60791FCAF02AA25D47645E4C39A578C2656DED7BC1BE36FB0EDB900C`。该版支持采购页 iframe 注入，并在 ERP 替换页面 DOM 后自动恢复右下角核算按钮。
+- 当前推荐 ERP Assistant：`v8.0.16`，38,999 bytes，SHA-256 `CD5D824B61A71DCBE31D780E2BE0031D4564654B5674C7500326D0DECDEFDD53`，新增 CSV 公式安全处理。历史 `v8.0.15` 归档未变：38,645 bytes，SHA-256 `EDA7774D60791FCAF02AA25D47645E4C39A578C2656DED7BC1BE36FB0EDB900C`，包含采购页 iframe 注入和 DOM 替换后恢复核算按钮。
 - beta.7 安装包已发布：`Lworkstation-Setup-0.2.6-beta.7.exe`，88,799,017 bytes，SHA-256 `753A8C876C77D021AA633F8EF3076E7B93D50511A27AAC5D11D4EBAFB1E85560`。beta.6 不能替换已下载的同名资产，需手工安装 beta.7 一次，之后从 beta 通道接收后续软件内更新。
 - 历史 UI/桌面集成：全局 UI `ca4ceda`、桌面壳/缩放 `15c8db5`、Windows 品牌与图标 `cf3c36a`、发布与偏好恢复加固 `3657664`、发布定位文档 `b9936d2` 与 `5acae7d` 已合入并纳入后续发布。旧 `0.2.5` 本地候选不再列为待发布版本；下一候选统一以 `docs/RELEASE_STATUS.md` 为准。
 - 待人工验收：真实 ERP 登录态跨重启、采购页扩展注入、真实分页、SKU/SKC/仓库 SKU 映射、供应商与 1688 链接、真实 `warehouseEvidence` 完整性。
@@ -68,7 +71,7 @@
 
 验收重点：开发命令显示现有工作站；ERP、1688 可分别打开/切换/刷新/前进/后退并在重启后保留登录会话；1688 站内新窗口在当前受控标签中打开；非活动视图从窗口视图树移除，异常只显示状态栏且不能覆盖工作站；远程页没有 Node 或文件能力；导航、弹窗和权限受宿主白名单限制；扩展加载结果明确可见且失败不影响工作站；自动更新检查通过可配置 HTTPS 静态源运行且客户端不保存仓库令牌；运行 `pnpm --dir desktop verify` 和 packaged smoke，并完成 README 中的手工检查。
 
-扩展兼容记录：当前 POC 对 `erp-assistant-extension` 和 `1688-selection-extension` 使用 Electron `session.loadExtension()` 加载解压 MV3 目录。ERP 的 MAIN world 内容脚本、1688 的 service worker / action popup 仍需在真实 ERP 和 1688 登录页做运行时确认；不兼容时记录状态，不回退到无提示白屏。
+扩展兼容记录：当前对 `erp-assistant-extension` 和 `1688-selection-extension` 使用 Electron 44 的 `session.extensions.loadExtension()` 加载解压 MV3 目录。ERP 的 MAIN world 内容脚本、1688 的 service worker / action popup 仍需在真实 ERP 和 1688 登录页做运行时确认；不兼容时记录状态，不回退到无提示白屏。
 
 ## 总控流程
 
