@@ -21,7 +21,7 @@
 ## 验收门禁
 
 - [x] QA 快捷方式创建并回读，指向隔离 PowerShell 启动器；包内更新仍 enabled=false。
-- [ ] 桌面专职提交审查与定向测试。
+- [x] 桌面专职 `ac61143`，主线承接 `33fc968`，审查通过；desktop verify 10 个脚本通过。实际 AppUpdater/provider 内存响应覆盖跨通道、降级、元数据错配和缓存错配；不代替真实安装。
 - [ ] 前端 test / build、desktop verify。
 - [ ] 正式 packaged smoke、稳定与 Beta 检查下载链、跨通道和降级拒绝。
 - [ ] 隔离安装升级和合成数据保留；不得以截获 quitAndInstall 冒充实际安装。

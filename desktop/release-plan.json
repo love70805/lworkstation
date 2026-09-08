@@ -4,6 +4,10 @@
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
+      "module": "strict-update-channels",
+      "commit": "33fc968"
+    },
+    {
       "module": "security-hardening",
       "commit": "f68ee37"
     },
