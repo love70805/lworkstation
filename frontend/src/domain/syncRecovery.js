@@ -117,7 +117,7 @@ function initialState(workspace, baselineTables = {}) {
 
 function normalizedRecovery(payload) {
   if (!payload || typeof payload !== "object") throw new Error("同步恢复包内容无效。");
-  if (payload.format !== SYNC_RECOVERY_FORMAT) throw new Error("这不是 Shopeers 同步恢复包。");
+  if (payload.format !== SYNC_RECOVERY_FORMAT) throw new Error("这不是 Lworkstation 同步恢复包。");
   if (Number(payload.formatVersion) !== SYNC_RECOVERY_VERSION) throw new Error("同步恢复包版本不受支持。");
   const workspaceId = requiredText(payload.workspaceId, "恢复工作区");
   if (payload.currency !== "CNY") throw new Error("同步恢复包币种必须为人民币（CNY）。");

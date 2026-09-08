@@ -12,7 +12,7 @@ if (-not $node -and (Test-Path $bundledNode)) { $node = $bundledNode }
 $vite = Get-ChildItem (Join-Path $frontendRoot "node_modules\.pnpm\vite@*\node_modules\vite\bin\vite.js") -ErrorAction SilentlyContinue | Select-Object -First 1
 
 if (-not $node -or -not $vite) {
-    Write-Error "Shopeers startup failed: bundled Node.js or Vite was not found."
+    Write-Error "Lworkstation startup failed: bundled Node.js or Vite was not found."
     exit 1
 }
 
@@ -34,7 +34,7 @@ do {
 } until (($frontendListening -and $erpInboxListening) -or (Get-Date) -ge $deadline)
 
 if (-not $frontendListening -or -not $erpInboxListening) {
-    Write-Error "Shopeers startup timed out."
+    Write-Error "Lworkstation startup timed out."
     exit 1
 }
 

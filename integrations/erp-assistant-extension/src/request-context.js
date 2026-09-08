@@ -107,7 +107,7 @@
       return sameSkcs(request?.platformSkcs, normalizedQuerySkcs);
     });
     if (candidates.length > 1) {
-      throw requestError('ERP_REQUEST_AMBIGUOUS', '多个 ERP 请求同时匹配当前工作区、账本时间和完整 SKC 集合，请从 Shopeers 重新复制本次查询范围。');
+      throw requestError('ERP_REQUEST_AMBIGUOUS', '多个 ERP 请求同时匹配当前工作区、账本时间和完整 SKC 集合，请从 Lworkstation 重新复制本次查询范围。');
     }
     if (candidates.length === 0) return null;
     const request = candidates[0];

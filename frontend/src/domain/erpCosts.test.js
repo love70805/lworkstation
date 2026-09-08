@@ -225,7 +225,7 @@ describe("ERP cost reconciliation", () => {
     });
   });
 
-  it("keeps a one-yuan anomaly preview-only and matches it after Shopeers resolution", () => {
+  it("keeps a one-yuan anomaly preview-only and matches it after Lworkstation resolution", () => {
     const costRows = [{
       platformSku: "SKU-A",
       warehouseSku: "WH-A",

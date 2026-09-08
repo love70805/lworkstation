@@ -1,4 +1,4 @@
-Shopeers ERP Assistant v8.0.16 桥接扩展
+Lworkstation ERP Assistant v8.0.16 桥接扩展
 
 安装步骤：
 1. 解压 ERP-Assistant-v8.0.16-shopeers-bridge.zip。

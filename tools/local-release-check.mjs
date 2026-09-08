@@ -40,7 +40,7 @@ function run(label, command, args) {
   });
 }
 
-console.log("Shopeers 本地发布候选验收开始");
+console.log("Lworkstation 本地发布候选验收开始");
 console.log(`工作区: ${root}`);
 
 for (const [label, command, args] of commands) {

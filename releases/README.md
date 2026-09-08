@@ -6,7 +6,7 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开版本为 `0.2.6-beta.7`。下载入口、发布状态与待验收事项以 [发布状态](../docs/RELEASE_STATUS.md) 为准；本地整理产物不等于已经上传 GitHub Release。
+仓库正式版号为 `0.2.6`，尚未整理稳定安装包。最近公开版本仍为 `0.2.6-beta.7`。下载入口、发布状态与待验收事项以 [发布状态](../docs/RELEASE_STATUS.md) 为准；本地整理产物不等于已经上传 GitHub Release。
 
 ## 版本清单
 
@@ -14,6 +14,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.2.6` | 仓库版本元数据，未构建安装包、未发布 | [发布状态](../docs/RELEASE_STATUS.md)；稳定更新通道关闭 |
 | `0.2.6-beta.7` | 已公开预发布，当前公开 Beta | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，本机 `prerelease/0.2.6-beta.7/` |
 | `0.2.6-beta.8` Security QA | 本机隔离安装、覆盖升级与重启验收通过；未公开发布 | 本机 `candidates/0.2.6-beta.8-security-qa/`，详见 [安全验收记录](../docs/SECURITY_HARDENING_2026-09.md) |
 

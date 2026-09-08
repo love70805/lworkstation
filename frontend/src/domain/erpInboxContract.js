@@ -115,7 +115,7 @@ export function parseErpInboxMessage(message, options = {}) {
   if (typeof message === "string") {
     try { payload = JSON.parse(message); } catch { throw new Error("ERP 收件消息 JSON 无法解析。"); }
   }
-  if (payload?.type !== ERP_INBOX_MESSAGE_TYPE) throw new Error("不是 Shopeers ERP 成本收件消息。");
+  if (payload?.type !== ERP_INBOX_MESSAGE_TYPE) throw new Error("不是 Lworkstation ERP 成本收件消息。");
   return validateErpCostInboxEnvelope(payload, options);
 }
 
