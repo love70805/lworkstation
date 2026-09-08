@@ -37,7 +37,7 @@
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",
     "jose": "5.10.0",
-    "lucide-react": "0.468.0",
+    "lucide-react": "1.40.0",
     "papaparse": "^5.5.4",
     "pg": "8.23.0",
     "react": "18.3.1",
