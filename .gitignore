@@ -1,5 +1,6 @@
 # Dependencies and generated build output
 .pnpm-store/
+.worktrees/
 node_modules/
 frontend/node_modules/
 frontend/dist/
@@ -8,6 +9,7 @@ desktop/release/
 releases/latest/
 releases/history/
 releases/prerelease/
+releases/candidates/
 archive/
 
 # Environment files and secrets

@@ -58,6 +58,8 @@ Shopeers 是组内使用的中文经营管理工作台，整合选品商品档�
 - 先阅读现有实现和 `docs/CODEX_TASK_BOARD.md`，再编辑。
 - 每个任务只修改自己的范围；跨范围修改必须在提交说明中列出原因。
 - 中大型、跨模块和发布任务使用独立分支与 Worktree；小型、隔离修复可在当前工作区完成。提交信息使用简短的 Conventional Commit 风格。
+- 临时 Worktree 优先使用应用管理的工作区目录；手动创建时放在主仓库的 `.worktrees/<任务>/`，不再新增桌面同级临时目录。交付后先归档不可重建的产物和验收证据、核对哈希与未提交内容，再通过 `git worktree remove` 移除工作区；保留必要提交与分支。
+- 本机 QA 候选统一登记在 `releases/README.md`，安装包放在 `releases/candidates/<版本与用途>/`，原始验收证据放在 `archive/<任务>/`。候选验收完成、代码合并和 GitHub Release 发布分别记录；只有上传并回读公开资产后才标记已发布。
 - 不提交 `.env`、Cookie、Token、ERP 登录信息、业务 Excel、备份和本机数据库。
 - 根据影响范围运行验证：业务/共享组件/发布任务至少运行 `pnpm --dir frontend test` 与 `pnpm --dir frontend build`；桌面任务运行 `pnpm --dir desktop verify` 和相关 smoke；小型隔离修复运行最窄的有效测试或视觉检查。
 - 最终合并前补充回归说明，并检查中文界面、桌面端和移动端布局。

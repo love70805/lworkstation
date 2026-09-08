@@ -66,8 +66,14 @@
 - 实际 IndexedDB `shopeers-workstation` 中的合成商品、SKU、CNY 售价、设置与 localStorage 在四阶段摘要完全一致：SHA-256 `4a9c1a9ddc1c113bce2dc6862ef22ed2a7281ac98d0a7653d3bad8337d5090de`。新版页面显示该商品；深色外观和 ERP 100% 缩放保留。
 - 已安装程序实测为 packaged app、Electron 44.2.0 / Chromium 152；工作站 `sandbox=true`、`contextIsolation=true`、`nodeIntegration=false`。
 - 正式 beta.7 安装注册项、EXE 和 app.asar 哈希复核未变；没有访问正式业务数据库或登录态。验收结束后 QA 进程和测试 inbox 监听均退出，未生成 QA 桌面/开始菜单快捷方式。隔离 QA 安装和合成数据保留供后续复查。
-- 候选产物：`desktop/release/security-qa/Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。主线已独立回读哈希、审查测试脚本与原始 JSON，并检查新版重启截图。
-- 原始 JSON、前后截图、正式安装隔离核对及复用启动脚本保存在本机 `Lworkstation-security-qa-beta7/qa/install-upgrade-acceptance/`，不提交安装包、运行配置或数据库。复用时使用该目录的 `launch-qa.ps1` 继续加载隔离合成数据；已另行验证可见主窗口和独立 inbox 监听。脚本仅设置子进程环境，交互应用正常显示，辅助控制台保持隐藏。
+- 候选产物现归档于主仓库 `releases/candidates/0.2.6-beta.8-security-qa/Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。主线已独立回读哈希、审查测试脚本与原始 JSON，并检查新版重启截图。
+- 原始 JSON、前后截图、正式安装隔离核对及复用启动脚本已归档至主仓库 `archive/security-hardening-2026-09/Lworkstation-security-qa-beta7/qa/install-upgrade-acceptance/`，不提交安装包、运行配置或数据库。候选目录的 `launch-qa.ps1` 可继续加载隔离合成数据；已另行验证可见主窗口和独立 inbox 监听。脚本仅设置子进程环境，交互应用正常显示，辅助控制台保持隐藏。
+
+## 工作区收口与版本清单
+
+- 2026-09-08 用户要求治理桌面临时工作区。四个工作区的未提交内容检查均为空；66 个不可重建文件共 554,737,935 bytes 已逐项按 SHA-256 核对后归档至主仓库 `archive/security-hardening-2026-09/`，清单为 `archive-manifest.json`。依赖、前端构建输出和 `win-unpacked` 属于可重建产物，随临时工作区清理；修复提交及必要分支保留。
+- `archive/` 保留原始证据及历史路径，候选目录提供当前可用入口。归档不迁移正式应用或 QA 应用的数据库、登录态和安装位置。
+- [版本清单](../releases/README.md) 明确区分公开 beta.7 和仅本机验收的 beta.8 QA；代码合入 GitHub 不等于创建 Release。后续临时 Worktree 位置及交付清理规则已写入 `AGENTS.md`。
 
 ## 上线验收前置条件
 

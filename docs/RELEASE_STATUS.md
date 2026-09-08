@@ -1,6 +1,6 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-07
+更新时间：2026-09-08
 
 ## 已发布公开 Beta
 
@@ -31,7 +31,8 @@
 ## 下一候选
 
 - 安全代码已通过 PR 合入集成分支及 `main`。用户选择先验收本机 Windows 桌面候选版；本机包使用独立身份 `com.shopeers.workstation.securityqa`、名称 `Lworkstation Security QA` 和测试版本 `0.2.6-beta.8`。它未公开发布，官方 `package.json`、`release-plan.json` 与更新源仍为 beta.7。
-- 本机安全 QA 包：`Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。修复、测试、GitHub 集成与本机安装验收详见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。
+- 本机安全 QA 包已归档至 `releases/candidates/0.2.6-beta.8-security-qa/`：`Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。本机目录包含校验清单、说明和隔离启动入口；修复、测试、GitHub 集成与安装验收详见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。
+- [版本清单](../releases/README.md) 同时列明公开 Beta 与本机候选。2026-09-08 回读 GitHub Releases，最新公开条目仍为 beta.7；beta.8 QA 从未上传，不能将本机验收状态标记为公开发布。
 - 下一公开 beta 必须基于 beta.7 的受控 beta 更新配置继续验证真实软件内更新，并按正式发布流程另行推进元数据和构建；本机隔离安装不代替公开更新链验收。
 - beta.6 的线上资产已有下载，不能替换或原地修复；需要手工安装 beta.7 一次。
 
