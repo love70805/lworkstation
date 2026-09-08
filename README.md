@@ -23,7 +23,7 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
-当前仓库版本为 `0.2.6`。最近一次公开测试版仍为 [`0.2.6-beta.7`](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，属于 GitHub prerelease；本仓库尚未上传 `0.2.6` 安装包。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前稳定版为 [`0.2.6`](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.6/Lworkstation-Setup-0.2.6.exe)，退出应用后手工安装；稳定更新通道保持关闭。历史 Beta 保留。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
