@@ -11,6 +11,12 @@
 - 官方桌面版本：`0.2.6-beta.7`；本机安全 QA：`0.2.6-beta.8`（独立应用身份，未公开发布）
 - 发布状态入口：`desktop/release-plan.json` 与 `docs/RELEASE_STATUS.md`
 
+## 2026-09-08 工作区治理与发布清单
+
+- 安全修复的 66 个本机产物与验收文件已逐项核对 SHA-256，归档至主仓库 `archive/security-hardening-2026-09/`；候选包、报告和隔离启动入口集中至 `releases/candidates/0.2.6-beta.8-security-qa/`。临时 Worktree 按归档、未提交内容检查、Git 注销的顺序收口，保留必要分支与修复提交。
+- 后续临时 Worktree 使用应用管理目录或主仓库 `.worktrees/`，不再新增桌面同级目录；规范以 `AGENTS.md` 为准。
+- [版本清单](../releases/README.md) 已补上仅本机验收的 beta.8 QA。GitHub Releases 回读结果仍为公开 beta.7；本次目录治理没有创建公开 Release、覆盖既有资产或改变正式应用更新源。
+
 ## 2026-09-07 集成维护验收
 
 - 安全修复经 [PR #1](https://github.com/love70805/lworkstation/pull/1) 合入集成分支 `f68ee37`，经 [PR #2](https://github.com/love70805/lworkstation/pull/2) 合入 `main` 的 `3dc1448`，Linux/Windows 必要 CI 与主分支合并后 CI 均通过。前端 73 文件 / 510 项测试、完整发布检查、桌面 verify 通过；两端依赖审计、GitHub 开放依赖安全告警和 secret 告警均为 0。两条分支已开启 PR/CI 防护，Dependabot 已开启。范围、数据权限契约、删除后审计保护和验收记录见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。
