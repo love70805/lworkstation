@@ -23,7 +23,7 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
-当前稳定版为 [`0.2.6`](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.6/Lworkstation-Setup-0.2.6.exe)，退出应用后手工安装；稳定更新通道保持关闭。历史 Beta 保留。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前稳定版为 [`0.2.7`](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.7/Lworkstation-Setup-0.2.7.exe)，退出应用后手工安装一次；本版默认开启稳定更新检查，下载和安装仍需用户操作。历史版本保留。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
@@ -48,7 +48,7 @@ Beta 安装包命名为 `Lworkstation-Setup-<版本>.exe`，由 `desktop/release
 
 安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
 
-beta.6 的已发布包未启用更新源，需要手工安装 beta.7 一次。beta.7 通过 GitHub beta 通道检查后续预发布版，发现更新后由用户确认下载并显式重启安装；自动下载和退出即装均关闭。稳定通道 `desktop/update-config.json` 继续保持关闭，客户端不得保存 GitHub Token。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
+0.2.7 起稳定检查默认开启；新 Beta 构建默认开启 beta 检查，两个通道禁止互跳和降级。下载和安装需用户操作，客户端不保存 GitHub Token。旧 0.2.6 关闭检查，需手工安装新版；旧 beta.7 仍带旧更新策略，需要继续 Beta 时应等待并手工安装包含本修复的新 Beta，本轮未发布新 Beta。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
 
 生产版工作站通过 Electron 内部 `shopeers://` 安全协议读取前端资源；ERP / 1688 采集回传只监听 `127.0.0.1` 本机回环地址，默认端口为 `8790`，测试或受控启动可使用运行时端口。桌面会把实际 inbox origin 注入内置扩展，不接受局域网连接，通常不需要放行 Windows 防火墙。开发模式仍由 Vite 提供热更新页面。
 
