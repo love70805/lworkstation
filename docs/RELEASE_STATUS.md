@@ -1,17 +1,25 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-08
+更新时间：2026-09-09
 
 ## 当前仓库版本
 
 - 产品名称：Lworkstation
-- 正式版号：`0.2.7`，已写入 `desktop/package.json` 与 `desktop/release-plan.json`
+- 正式版号：`0.2.8`，已写入 `desktop/package.json` 与 `desktop/release-plan.json`
 - 状态：已构建并整理到 `releases/latest/`，已公开为 GitHub Latest 稳定版，四个资产下载回读校验通过
 - 稳定更新通道：`desktop/update-config.json` 默认开启；严格同通道升级，用户确认下载与安装
 - Windows 安装身份、内部协议与本机数据库名保持不变，以便覆盖安装保留数据
-- 最近公开稳定版为 `0.2.7`；历史稳定版与 Beta 保留
+- 最近公开稳定版为 `0.2.8`，本机正式安装已升级；历史稳定版与 Beta 保留
 
 ## 当前公开稳定版
+
+- [v0.2.8](https://github.com/love70805/lworkstation/releases/tag/v0.2.8)，2026-09-09 01:00:17（UTC+8）公开为 GitHub Latest，四个资产匿名下载回读通过。
+- 构建标签 `8591b5191e5489d87e7d12f4892f29f9f397e2b1`；利润精度、ERP 异常搜索/四位显示、窗口化按钮与单实例修复已交付。
+- [Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.8/Lworkstation-Setup-0.2.8.exe)：116,376,271 bytes；SHA-256 `59E8AFBB96A9492FE59A2B0D8596124F634BB071A64E212B6CF4CFF7966C7877`。
+- 552 项测试及发布门禁通过。本机使用公开包覆盖原 0.2.7，404 个载荷哈希一致，849 个数据文件在安装过程中未变；启动/重启、业务表指纹、重复启动与快捷方式验收通过。详见 [0.2.8 验收](RELEASE_0.2.8.md)。
+- 默认检查稳定更新，0.2.7 可发现新版；Beta 不接收该包。Windows 未签名，0011 云端精度迁移尚未线上执行。
+
+## 历史稳定版 0.2.7
 
 - [v0.2.7](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)，发布于 2026-09-08 20:55:26（UTC+8），非草稿、非预发布，GitHub Latest。
 - 发布基线 `b223fb7a82b742c687ede0abd2dc1bad0c1878fe`。默认开启稳定检查；新 Beta 构建严格 beta 通道。禁止跨通道和降级，不自动下载、不退出即装。
