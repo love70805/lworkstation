@@ -7,6 +7,7 @@ import {
   normalizePlatformSku,
 } from "../../domain/identifiers";
 import { summarizeLedgerRows } from "../../domain/ledgerImport";
+import { planSalesImports, prepareSalesImportItems } from "../../domain/batchSalesImport";
 import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
 import { calculateWarehouseCostDecision } from "../../domain/erpCostResolution";
@@ -117,6 +118,74 @@ export async function createOrGetMonthlyLedger({
   });
 
   return ledger;
+}
+
+async function readSalesImportPlan(workspaceId, period, items) {
+  const ledgerId = monthlyLedgerId(workspaceId, period);
+  const ledger = await db.ledgers.get(ledgerId);
+  const existingRows = await db.salesRows.where("ledgerId").equals(ledgerId).toArray();
+  const batches = await db.importBatches.where("ledgerId").equals(ledgerId).toArray();
+  return { ledger, existingRows, plan: planSalesImports({ ledger, existingRows, batches, items, ledgerId }) };
+}
+
+export async function previewSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, period, items }) {
+  const normalizedPeriod = normalizeLedgerPeriod(period);
+  const prepared = prepareSalesImportItems(items);
+  return db.transaction("r", db.ledgers, db.salesRows, db.importBatches, async () => {
+    const { plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared);
+    return plan;
+  });
+}
+
+export async function saveSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, period, items, preview, overwriteSignature = null, importedBy = "local-user" }) {
+  const normalizedPeriod = normalizeLedgerPeriod(period);
+  // Clone the payload before any asynchronous work, so caller edits cannot change a pending write.
+  const prepared = prepareSalesImportItems(structuredClone(items));
+  const auditActor = await resolveProfitAuditActor(importedBy);
+  return db.transaction("rw", db.workspaces, db.ledgers, db.importBatches, db.salesRows, db.auditEvents, async () => {
+    const { ledger, existingRows, plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared);
+    if (!preview || preview.ledgerId !== plan.ledgerId || preview.inputSignature !== plan.inputSignature) {
+      throw new Error("导入配置已变化，请重新校验整批文件。");
+    }
+    // A successful identical retry is a no-op even though its first commit changed the target.
+    if (plan.items.every((item) => item.status === "skipped_duplicate")) return plan;
+    if (preview.targetSignature !== plan.targetSignature) throw new Error("账本数据已变化，预览已过期，请刷新后重新确认。");
+    if (plan.requiresOverwrite && overwriteSignature !== plan.targetSignature) throw new Error("请明确确认本次预览中的覆盖范围。");
+    await ensureDefaultWorkspace();
+    const createdAt = new Date().toISOString();
+    const pending = prepared.filter((item, index) => plan.items[index].status !== "skipped_duplicate");
+    const keys = new Set(pending.flatMap((item) => item.rows.map((row) => row.groupKey)));
+    const replacementIds = existingRows.filter((row) => keys.has(row.groupKey)).map((row) => row.id);
+    if (replacementIds.length) await db.salesRows.bulkDelete(replacementIds);
+    const savedLedger = {
+      ...(ledger ?? { id: plan.ledgerId, workspaceId, period: normalizedPeriod, type: "monthly_profit", currency: "CNY", warehouseRate: 0.7, createdBy: auditActor, createdAt }),
+      status: "cost_pending", updatedAt: createdAt, summary: plan.finalSummary,
+    };
+    await db.ledgers.put(savedLedger);
+    for (const item of pending) {
+      const result = plan.items.find((entry) => entry.itemId === item.itemId);
+      const batchId = makeId("IMP");
+      const savedBatch = {
+        id: batchId, ledgerId: plan.ledgerId, workspaceId, fileName: item.fileName, fileHash: item.fileHash,
+        mapping: item.mapping, filterOptions: item.filterOptions ?? null, createdAt, status: "completed", store: item.storeName, period: normalizedPeriod,
+        sourceRowCount: item.summary.sourceRowCount, validRowCount: item.rows.length,
+        ignoredRowCount: item.summary.ignoredCount ?? 0, errorCount: 0, skippedRowCount: item.summary.ignoredCount ?? 0,
+        replacedGroupCount: result.replacedGroupCount, addedGroupCount: result.addedGroupCount,
+      };
+      await db.importBatches.add(savedBatch);
+      await db.salesRows.bulkAdd(item.rows.map((row) => ({ ...row, workspaceId, ledgerId: plan.ledgerId, batchId, importedAt: createdAt })));
+      const persistedRows = await db.salesRows.where("batchId").equals(batchId).toArray();
+      await db.auditEvents.add({
+        workspaceId, objectType: "sales_import_batch", objectId: batchId, action: "imported", actorId: auditActor, createdAt,
+        after: { ledgerId: plan.ledgerId, fileName: item.fileName, validRowCount: item.rows.length,
+          replacedGroupCount: result.replacedGroupCount, addedGroupCount: result.addedGroupCount,
+          snapshot: { ...savedBatch, importBatch: savedBatch, salesRows: persistedRows, ledger: savedLedger } },
+      });
+      result.status = "imported";
+      result.batchId = batchId;
+    }
+    return plan;
+  });
 }
 
 export async function saveSalesImport({
