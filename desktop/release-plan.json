@@ -4,6 +4,22 @@
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
+      "module": "security-hardening",
+      "commit": "f68ee37"
+    },
+    {
+      "module": "verified-dependency-upgrades",
+      "commit": "ca112c9"
+    },
+    {
+      "module": "lworkstation-branding",
+      "commit": "641f5fa"
+    },
+    {
+      "module": "atomic-multi-store-ledger-import",
+      "commit": "c35593b"
+    },
+    {
       "module": "open-source-baseline",
       "commit": "89f4849"
     },
