@@ -2,11 +2,13 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createOrGetMonthlyLedger,
+  createWorkspaceBackupPayload,
   db,
   DEFAULT_WORKSPACE_ID,
   deleteMonthlyLedger,
   finalizeMonthlyLedger,
   getLatestLedgerCosts,
+  getLedgerSnapshot,
   markErpCostInboxStatus,
   receiveErpCostInboxEnvelope,
   rejectErpCostInboxBatches,
@@ -19,8 +21,58 @@ import {
 import { buildErpCostRequest, reconcileErpCostRows } from "../domain/erpCosts";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope, parseErpInboxMessage } from "../domain/erpInboxContract";
+import { calculateExactProfitLine, PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
+import { resolveFormalCostDecision } from "../domain/costPolicy";
+import { savedProfitRows, savedProfitSummary, buildProfitExportRows } from "../lib/profitPrecision";
+import { buildSyncEnvelope } from "../domain/syncEnvelope";
+import { buildSyncPostgresPlan } from "../domain/syncPostgresPlan";
 
 const period = "2026-08";
+
+it("publishes true low cost without correction, finalizes exact values and reloads immutable snapshots", async () => {
+  const { ledger, request } = await context();
+  const purchaseRecords = [record("A", 0.01, 100, "2026-07-03"), record("B", 0.009, 5, "2026-07-02"), record("C", 0.009, 30, "2026-07-01")];
+  const source = sourceEnvelope({ ledger, request, purchaseRecords });
+  const saved = await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }), sourceEnvelope: source });
+  const cost = (await getLatestLedgerCosts(ledger.id))[0];
+  expect(cost).toMatchObject({ unitCost: 0.0097, resolutionStatus: "resolved", resolutions: [] });
+  expect(cost.costDecision.resolutionVersion).toContain("unit-4dp");
+  expect(cost.purchaseRecords.map((row) => row.unitPrice)).toEqual([0.01, 0.009, 0.009]);
+  const decision = resolveFormalCostDecision({ platformSku: "SKU-AUDIT", erpCost: cost });
+  const exact = calculateExactProfitLine({ quantity: 1.234567, revenue: 1, warehouseRate: 0, costDecision: decision });
+  expect(exact.purchaseCost).toBe(0.0119752999);
+  const summary = { quantity: 1.234567, revenue: 1, purchaseCost: 0.01, warehouseCost: 0, penalty: 0, profit: 0.98 };
+  const args = { ledgerId: ledger.id, formulaVersion: PROFIT_FORMULA_VERSION, profitSummary: summary,
+    profitLines: [{ ...exact, platformSku: "SKU-AUDIT", store: "合成测试" }] };
+  await finalizeMonthlyLedger(args);
+  const snapshot = await getLedgerSnapshot(ledger.id);
+  expect(snapshot.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001, formulaVersion: PROFIT_FORMULA_VERSION });
+  expect(snapshot.ledger.profitSummary).toEqual(summary);
+  const exported = buildProfitExportRows(savedProfitRows(snapshot.profitLines), snapshot.ledger, savedProfitSummary(summary));
+  expect(exported[0]["总件数*成本"]).toBe(0.0119752999);
+  await expect(finalizeMonthlyLedger(args)).rejects.toThrow("显式重开");
+  expect((await getLedgerSnapshot(ledger.id)).profitLines).toEqual(snapshot.profitLines);
+  const backup = JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));
+  expect(backup.tables.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001 });
+  expect(backup.tables.erpCostRows[0].unitCost).toBe(0.0097);
+  const audit = (await db.auditEvents.toArray()).find((event) => event.action === "finalized");
+  const envelope = buildSyncEnvelope({ workspaceId: DEFAULT_WORKSPACE_ID, events: [{ ...audit, eventId: `EVENT-${audit.id}` }], generatedAt: audit.createdAt });
+  const plan = await buildSyncPostgresPlan(envelope);
+  const operation = plan.eventPlans[0].operations.find((item) => item.table === "profit_lines");
+  expect(JSON.parse(operation.values[1])[0]).toMatchObject({ purchase_cost: 0.0119752999, profit: 0.9880247001 });
+  expect(await db.erpCostBatches.get(saved.batchId)).toMatchObject({ status: "published", sourceContract: { algorithmVersion: source.algorithmVersion, resolutionVersion: "shopeers-cost-resolution@2-unit-4dp" } });
+});
+
+it("independently rejects subprecision prices even when the page claims matched", async () => {
+  const { ledger, request } = await context();
+  const purchaseRecords = [record("TINY", 0.00009, 1)];
+  const source = sourceEnvelope({ ledger, request, purchaseRecords });
+  const reconciliation = reconcile({ purchaseRecords });
+  await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source })).rejects.toThrow("0.0001");
+  reconciliation.matches[0] = { ...reconciliation.matches[0], status: "matched", unitCost: 0.0001 };
+  await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source })).rejects.toThrow("0.0001");
+  expect(await db.erpCostRows.count()).toBe(0);
+});
 
 function record(recordId, unitPrice, quantity = 1, purchaseDate = "2026-07-01") {
   return {

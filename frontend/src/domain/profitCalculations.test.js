@@ -69,7 +69,7 @@ describe("exact and reference profit", () => {
     });
   });
 
-  it("truncates every calculated monetary input and result to two decimals", () => {
+  it("keeps exact ERP line amounts and existing revenue warehouse penalty rules", () => {
     const result = calculateExactProfitLine({
       revenue: 20.999,
       quantity: 3,
@@ -88,12 +88,12 @@ describe("exact and reference profit", () => {
 
     expect(result).toMatchObject({
       revenue: 20.99,
-      unitCost: 4.23,
-      purchaseCost: 12.69,
+      unitCost: 4.239,
+      purchaseCost: 12.717,
       warehouseCost: 2.34,
       penalty: 0.23,
-      profit: 5.73,
-      profitRate: 27.29,
+      profit: 5.703,
+      profitRate: 27.17,
     });
   });
 });

@@ -14,7 +14,7 @@ import { resolveFormalCostDecision } from "../domain/costPolicy";
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { calculateExactProfitLine, calculateReferenceProfitLine, PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
-import { sumMoney } from "../lib/money";
+import { buildProfitExportRows, formatErpUnitCost, formatProfitAmount, isProfitSnapshot, savedProfitRows, savedProfitSummary, summarizeProfitRows } from "../lib/profitPrecision";
 import { groupImportedSales, groupProfitRowsBySkc } from "../lib/profit";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildCostMatchingHref, filterProfitRows, readProfitFilter, saveProfitFilter } from "../lib/profitFilter";
@@ -90,23 +90,6 @@ function SupplierMultiSelect({ options, selection, onChange }) {
   );
 }
 
-function summarizeProfitRows(rows, costBySku) {
-  const missingSkuKeys = new Set(rows.filter((row) => !row.finalizable).map((row) => row.canonicalPlatformSku));
-  const formalRows = rows.filter((row) => row.finalizable);
-  return {
-    revenue: sumMoney(rows.map((row) => row.revenue)),
-    totalUnits: rows.reduce((sum, row) => sum + row.qty, 0),
-    purchaseCosts: sumMoney(formalRows.map((row) => row.purchaseCost)),
-    warehouseFees: sumMoney(rows.map((row) => row.warehouseCost)),
-    penalties: sumMoney(rows.map((row) => row.penalty)),
-    matchedProfit: sumMoney(formalRows.map((row) => row.profit)),
-    missing: missingSkuKeys.size,
-    missingErp: new Set(rows
-      .filter((row) => !costBySku.has(row.canonicalPlatformSku))
-      .map((row) => row.canonicalPlatformSku)).size,
-  };
-}
-
 function prepareProfitTableRows(rows) {
   let previousGroupKey = null;
   const groupCounts = new Map();
@@ -171,7 +154,8 @@ export default function ProfitPanel() {
     saveProfitFilter(snapshot.ledger.id, { query, storeFilter, supplierSelection, missingOnly });
   }, [missingOnly, query, snapshot?.ledger?.id, storeFilter, supplierSelection]);
 
-  const sourceRows = useMemo(() => snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot]);
+  const locked = isProfitSnapshot(snapshot?.ledger);
+  const sourceRows = useMemo(() => !locked && snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot, locked]);
   const costBySku = useMemo(() => new Map((snapshot?.costs ?? []).map((cost) => [
     cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku),
     cost,
@@ -188,7 +172,7 @@ export default function ProfitPanel() {
     return latest;
   }, [snapshot?.approvals]);
 
-  const calculated = useMemo(() => sourceRows.map((row) => {
+  const calculated = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : sourceRows.map((row) => {
     const erpCost = costBySku.get(row.canonicalPlatformSku);
     const approval = approvalBySku.get(row.canonicalPlatformSku) ?? null;
     const importedReference = Number(row.legacyImportedUnitCost) > 0 ? {
@@ -244,7 +228,7 @@ export default function ProfitPanel() {
       approval,
       reference1688Cost,
     };
-  }), [approvalBySku, costBySku, snapshot?.ledger?.id, sourceRows, warehouseRate]);
+  }), [approvalBySku, costBySku, snapshot?.ledger?.id, snapshot?.profitLines, locked, sourceRows, warehouseRate]);
 
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
   const suppliers = useMemo(() => [...new Set(calculated.map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated]);
@@ -252,10 +236,10 @@ export default function ProfitPanel() {
   const filtered = useMemo(() => filterProfitRows(calculated, filterState), [calculated, filterState]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
   const tableRows = useMemo(() => prepareProfitTableRows(filtered), [filtered]);
-  const filteredSummary = useMemo(() => summarizeProfitRows(filtered, costBySku), [costBySku, filtered]);
+  const filteredSummary = useMemo(() => locked && filtered.length === calculated.length && snapshot?.ledger?.profitSummary ? savedProfitSummary(snapshot.ledger.profitSummary) : summarizeProfitRows(filtered, costBySku), [costBySku, filtered, calculated.length, locked, snapshot?.ledger?.profitSummary]);
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
   const { revenue, totalUnits, purchaseCosts, warehouseFees, penalties, matchedProfit, missing, missingErp } = filteredSummary;
-  const locked = ["finalized", "locked"].includes(snapshot?.ledger?.status);
+
   const canFinalize = Boolean(calculated.length) && ledgerSummary.missing === 0 && !locked;
   const costMatchingHref = useMemo(() => buildCostMatchingHref({ ledgerId: snapshot?.ledger?.id, ...filterState }), [filterState, snapshot?.ledger?.id]);
 
@@ -372,7 +356,7 @@ export default function ProfitPanel() {
       enableSorting: false,
       size: 118,
       meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
-      cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <Badge tone="danger"><AlertCircle size={12} />缺失</Badge>,
+      cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{row.original.costSource === "erp" ? formatErpUnitCost(row.original.unitCost) : currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <Badge tone="danger"><AlertCircle size={12} />缺失</Badge>,
     },
     {
       accessorKey: "purchaseCost",
@@ -380,7 +364,7 @@ export default function ProfitPanel() {
       enableSorting: false,
       size: 118,
       meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
-      cell: ({ getValue }) => getValue() != null ? <span className="mono table-number">{currency(getValue())}</span> : <span className="pending-text">待成本</span>,
+      cell: ({ getValue }) => getValue() != null ? <span className="mono table-number">{formatProfitAmount(getValue())}</span> : <span className="pending-text">待成本</span>,
     },
     {
       accessorKey: "warehouseCost",
@@ -404,7 +388,7 @@ export default function ProfitPanel() {
       enableSorting: false,
       size: 118,
       meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
-      cell: ({ getValue }) => getValue() == null ? <span className="pending-text">待补成本</span> : <strong className={`mono table-number ${Number(getValue()) < 0 ? "profit-negative" : "profit-positive"}`}>{currency(getValue())}</strong>,
+      cell: ({ getValue }) => getValue() == null ? <span className="pending-text">待补成本</span> : <strong className={`mono table-number ${Number(getValue()) < 0 ? "profit-negative" : "profit-positive"}`}>{formatProfitAmount(getValue())}</strong>,
     },
     {
       id: "costStatus",
@@ -425,20 +409,7 @@ export default function ProfitPanel() {
     if (!snapshot?.ledger) return;
     setExporting(true);
     try {
-      await exportWorkbook(filtered.map((row) => ({
-        SKC: row.groupSkc,
-        SKU: row.platformSku,
-        属性: row.attribute,
-        数量: row.qty,
-        金额: row.revenue,
-        "1688单号": row.orderNumber ?? "",
-        成本口径: row.costSource === "erp" ? "ERP 正式成本" : row.costSource === "approved_1688" ? "人工参考，未计正式利润" : "待 ERP 成本",
-        单件平均成本: row.unitCost ?? row.reference1688Cost?.unitCost ?? "缺失",
-        "总件数*成本": row.purchaseCost ?? "缺失",
-        仓储成本: row.warehouseCost,
-        客退罚款: row.penalty,
-        利润: row.profit ?? "未完成",
-      })), `profit-${snapshot.ledger.period}-${snapshot.ledger.status}.xlsx`, "利润明细");
+      await exportWorkbook(buildProfitExportRows(filtered, snapshot.ledger, filteredSummary), `profit-${snapshot.ledger.period}-${snapshot.ledger.status}.xlsx`, "利润明细");
       notify(`已导出当前筛选的 ${filtered.length} 条 SKU 利润明细。`);
     } catch (error) {
       notify(`导出失败：${error.message}`, "error");
@@ -474,7 +445,7 @@ export default function ProfitPanel() {
           warehouseCost: ledgerSummary.warehouseFees,
           penalty: ledgerSummary.penalties,
           profit: ledgerSummary.matchedProfit,
-          profitRate: ledgerSummary.revenue === 0 ? null : Number(((ledgerSummary.matchedProfit / ledgerSummary.revenue) * 100).toFixed(2)),
+          profitRate: ledgerSummary.profitRate,
           missingSkuCount: 0,
         },
         profitLines: calculated.map((row) => ({
@@ -514,7 +485,10 @@ export default function ProfitPanel() {
     return <AppShell pageClass="profit-page"><Panel className="route-loader">正在读取月度账本...</Panel></AppShell>;
   }
 
-  if (!snapshot?.ledger || sourceRows.length === 0) {
+  if (locked && (!snapshot?.profitLines?.length || !snapshot.ledger.profitSummary)) {
+    return <AppShell pageClass="profit-page"><Panel><EmptyState icon={AlertCircle} title="历史定稿快照缺失" description="该账本缺少已保存的利润明细或汇总，暂不能展示和导出。请恢复完整备份；系统不会按当前成本重算历史。" /></Panel></AppShell>;
+  }
+  if (!snapshot?.ledger || (!locked && sourceRows.length === 0)) {
     return (
       <AppShell pageClass="profit-page">
         <PageHeader title="利润核算面板" description="导入月度台账后，系统会按平台 SKC/SKU 建立精确利润核算。" />
@@ -528,7 +502,7 @@ export default function ProfitPanel() {
       <PageHeader
         eyebrow={`月度利润核算 · ${snapshot.ledger.period}`}
         title="利润核算面板"
-        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${sourceRows.length} 条 SKU 明细 · 销售金额、采购成本、仓储成本和总利润一览`}
+        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "ERP单价四位；金额先精确累计，汇总后截两位"}`}
         actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>导出利润表</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} loading={finalizing} disabled={!canFinalize || finalizing} onClick={finalizeLedger}>定稿本月</Button>}</>}
       />
 
