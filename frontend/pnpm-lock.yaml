@@ -33,8 +33,8 @@ importers:
         specifier: ^4.4.0
         version: 4.4.0(dexie@4.4.4)(react@18.3.1)
       jose:
-        specifier: 5.10.0
-        version: 5.10.0
+        specifier: 6.2.11
+        version: 6.2.11
       lucide-react:
         specifier: 1.40.0
         version: 1.40.0(react@18.3.1)
@@ -723,8 +723,8 @@ packages:
     resolution: {integrity: sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA==}
     engines: {node: '>=20.0.0'}
 
-  jose@5.10.0:
-    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
+  jose@6.2.11:
+    resolution: {integrity: sha512-A5NPn7g8EAzGU3IzRs+Yiq8K5n3ypYS75M5+KKiVHdUexfpWK1kP4ZMq7QnTGDoMj6TJ1dtcEJjW60yZDXS4hg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -1600,7 +1600,7 @@ snapshots:
 
   iceberg-js@0.8.1: {}
 
-  jose@5.10.0: {}
+  jose@6.2.11: {}
 
   js-tokens@4.0.0: {}
 
