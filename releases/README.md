@@ -6,15 +6,17 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.7](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)，安装包已整理至 `latest/`，四个公开资产下载回读校验通过，默认开启稳定检查。下载入口、发布状态与待验收事项以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
+当前公开稳定版为 [0.2.8](https://github.com/love70805/lworkstation/releases/tag/v0.2.8)，安装包已整理至 `latest/`，四个公开资产下载回读校验通过，本机正式安装已从 0.2.7 升级，默认开启稳定检查。下载入口、发布状态与验收边界以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
 
 ## 版本清单
 
-核对日期：2026-09-08。
+核对日期：2026-09-09。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.2.7` | 已公开稳定版，GitHub Latest；默认开启稳定检查 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)；旧版首次需手工安装 |
+| `0.2.8` | 已公开稳定版，GitHub Latest；本机升级与重启验收通过 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.8)；[验收记录](../docs/RELEASE_0.2.8.md) |
+| `0.2.8` stable acceptance | 已完成本机候选验收、代码集成和公开发布，候选与公开包相同 | 本机 `candidates/0.2.8-stable-acceptance/` |
+| `0.2.7` | 历史稳定版；可通过稳定更新源发现 0.2.8 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.7) |
 | `0.2.6` | 历史稳定版；原资产保留 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)；该旧包更新关闭 |
 | `0.2.6-beta.7` | 已公开预发布，当前公开 Beta | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，本机 `prerelease/0.2.6-beta.7/` |
 | `0.2.6-beta.8` Security QA | 本机隔离安装、覆盖升级与重启验收通过；未公开发布 | 本机 `candidates/0.2.6-beta.8-security-qa/`，详见 [安全验收记录](../docs/SECURITY_HARDENING_2026-09.md) |
