@@ -1,3 +1,5 @@
+const { versionChannel, canUpdate } = require("./update-policy.cjs");
+const { ChannelGitHubProvider } = require("./update-provider.cjs");
 const RELEASES_ORIGIN = "https://github.com";
 const RELEASES_PATH_PREFIX = "/love70805/lworkstation/releases/";
 const PRODUCTION_FEED_CONFIG = Object.freeze({
@@ -139,17 +141,22 @@ function createUpdateRuntime({
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
 }) {
-  const currentIsPrerelease = isPrereleaseVersion(currentVersion);
-  const safeFeedConfig = normalizeFeedConfig(feedConfig ?? feedUrl, {
+  const currentIsPrerelease = versionChannel(currentVersion) === "beta";
+  let safeFeedConfig = normalizeFeedConfig(feedConfig ?? feedUrl, {
     allowLoopback,
     allowPrerelease: currentIsPrerelease,
   });
+  const channel = versionChannel(currentVersion);
+  if (!channel || safeFeedConfig?.channel !== channel) safeFeedConfig = null;
   let state = createInitialUpdateState({ currentVersion, enabled: enabled && Boolean(safeFeedConfig) });
   let checkPromise = null;
   let downloadPromise = null;
   let downloadToken = null;
   let schedule = null;
   let cancelRequested = false;
+  let acceptedVersion = null;
+  let downloadedVersion = null;
+  const validTarget = (version) => enabled && Boolean(safeFeedConfig) && canUpdate(currentVersion, version, channel);
 
   const publish = (patch) => {
     state = { ...state, ...patch };
@@ -168,7 +175,19 @@ function createUpdateRuntime({
   updater.allowPrerelease = currentIsPrerelease && safeFeedConfig?.channel === "beta";
   updater.disableDifferentialDownload = allowLoopback;
   updater.channel = safeFeedConfig?.channel || "latest";
-  if (safeFeedConfig) updater.setFeedURL(safeFeedConfig);
+  updater.allowDowngrade = false; // channel's setter enables it implicitly.
+  const originalSupported = updater.isUpdateSupported?.bind(updater);
+  updater.isUpdateSupported = (info) => validTarget(info?.version) && (!originalSupported || originalSupported(info));
+  if (safeFeedConfig) updater.setFeedURL(safeFeedConfig.provider === "github"
+    ? { ...safeFeedConfig, provider: "custom", updateProvider: ChannelGitHubProvider }
+    : safeFeedConfig);
+
+  const rejectTarget = () => {
+    acceptedVersion = null;
+    downloadedVersion = null;
+    publish({ status: "error", availableVersion: null, release: null, progress: 0,
+      message: "更新版本不符合当前通道或升级顺序", retryAction: "check" });
+  };
 
   updater.on("checking-for-update", () => publish({ status: "checking", message: "正在检查更新", retryAction: null }));
   updater.on("update-not-available", () => publish({
@@ -181,6 +200,9 @@ function createUpdateRuntime({
     lastCheckedAt: new Date(now()).toISOString(),
   }));
   updater.on("update-available", (info) => {
+    if (!validTarget(info?.version)) { rejectTarget(); return; }
+    acceptedVersion = info.version;
+    downloadedVersion = null;
     const release = sanitizeUpdateInfo(info);
     publish({
       status: "available",
@@ -203,7 +225,9 @@ function createUpdateRuntime({
   });
   updater.on("update-downloaded", (info) => {
     if (cancelRequested) return;
-    const release = state.release || sanitizeUpdateInfo(info);
+    if (state.status !== "downloading" || !validTarget(info?.version) || info.version !== acceptedVersion) { rejectTarget(); return; }
+    downloadedVersion = info.version;
+    const release = sanitizeUpdateInfo(info);
     publish({
       status: "downloaded",
       availableVersion: release.version,
@@ -223,6 +247,9 @@ function createUpdateRuntime({
     if (state.status === "disabled") return { ok: false, error: state.message };
     if (downloadPromise || state.status === "downloaded") return { ok: false, error: "当前状态不能检查更新" };
     if (checkPromise) return checkPromise;
+    acceptedVersion = null;
+    downloadedVersion = null;
+    cancelRequested = false;
     if (!silent) publish({ status: "checking", message: "正在检查更新", retryAction: null });
     checkPromise = updater.checkForUpdates()
       .then((result) => ({ ok: true, available: state.status === "available", result: Boolean(result) }))
@@ -238,6 +265,11 @@ function createUpdateRuntime({
     if (downloadPromise) return downloadPromise;
     if (!["available", "canceled"].includes(state.status) && !(state.status === "error" && state.retryAction === "download")) {
       return { ok: false, error: "当前没有可下载的更新" };
+    }
+    const internalVersion = updater.updateInfoAndProvider?.info?.version;
+    if (!validTarget(acceptedVersion) || (internalVersion !== undefined && internalVersion !== acceptedVersion)) {
+      rejectTarget();
+      return { ok: false, error: state.message };
     }
     cancelRequested = false;
     downloadToken = new CancellationToken();
@@ -291,6 +323,10 @@ function createUpdateRuntime({
   return {
     get feedUrl() { return safeFeedConfig?.url || null; },
     get feedConfig() { return safeFeedConfig ? { ...safeFeedConfig } : null; },
+    canInstall: () => state.status === "downloaded" && validTarget(downloadedVersion)
+      && downloadedVersion === acceptedVersion
+      && (updater.updateInfoAndProvider?.info?.version === undefined || updater.updateInfoAndProvider.info.version === downloadedVersion)
+      && (!updater.downloadedUpdateHelper || updater.downloadedUpdateHelper.versionInfo?.version === downloadedVersion),
     snapshot,
     check,
     download,

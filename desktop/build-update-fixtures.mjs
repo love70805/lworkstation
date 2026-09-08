@@ -74,6 +74,8 @@ run(process.execPath, [pnpmCli, "--dir", "../frontend", "build"]);
 run(process.execPath, [pnpmCli, "brand:icons"]);
 
 const common = [
+  "--publish",
+  "never",
   "--win",
   "nsis",
   "--config.electronDist=./node_modules/electron/dist",

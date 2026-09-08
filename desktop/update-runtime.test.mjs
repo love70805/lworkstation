@@ -111,7 +111,7 @@ const disabledProductionRuntime = createUpdateRuntime({
   enabled: false,
   feedConfig: PRODUCTION_FEED_CONFIG,
 });
-assert.deepEqual(productionUpdater.feed, PRODUCTION_FEED_CONFIG);
+assert.equal(productionUpdater.feed.provider, "custom");
 assert.equal(disabledProductionRuntime.snapshot().status, "disabled");
 assert.equal(productionUpdater.allowPrerelease, false);
 assert.equal(productionUpdater.channel, "latest");
@@ -138,7 +138,8 @@ const githubBetaRuntime = createUpdateRuntime({
   feedConfig: { ...PRODUCTION_FEED_CONFIG, channel: "beta" },
 });
 assert.equal(githubBetaRuntime.snapshot().status, "idle");
-assert.deepEqual(githubBetaUpdater.feed, { ...PRODUCTION_FEED_CONFIG, channel: "beta" });
+assert.equal(githubBetaUpdater.feed.provider, "custom");
+assert.equal(githubBetaUpdater.feed.channel, "beta");
 assert.equal(githubBetaUpdater.allowPrerelease, true);
 assert.equal(githubBetaUpdater.channel, "beta");
 
@@ -188,6 +189,7 @@ assert.equal(retryDownload.ok, true);
 assert.equal(runtime.snapshot().status, "downloaded");
 assert.equal(runtime.snapshot().progress, 100);
 assert.equal(updater.downloadCalls, 2);
+assert.equal(runtime.canInstall(), true);
 assert.equal(runtime.postpone().ok, true);
 assert.match(runtime.snapshot().message, /稍后/);
 
