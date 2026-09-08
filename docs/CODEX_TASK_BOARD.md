@@ -171,3 +171,7 @@
 ## 2026-09-08 同月多店铺批量台账导入
 
 用户已批准：一批一个月、一文件一店铺、多文件统一预览、明确重复和覆盖、整批事务写入、已定稿保护。金额口径为销售原额。主线 contract、基线、任务边界和验收见 [批量导入任务包](integration/BATCH_LEDGER_IMPORT.md)。当前处于 contract 已准备、实现待分工状态；本机未发现可复用的利润与 ERP 专职任务。
+
+### 专职任务已建立并接单
+
+2026-09-08：用户授权建立长期任务‘利润与 ERP’，任务 ID 01a07ff8-148a-7bc3-b8ee-2b4458a60878。已在应用管理的 f861/Lworkstation Worktree 开始实施，分支 codex/profit-batch-ledger；同步集成基线 77b839f 后承接 contract 9380ec0（专职分支对应提交 5b8edf0）。主责 ImportPreview、利润 repository、导入 Worker/client、局部导入样式和测试；其他业务任务不受影响。按 BATCH_LEDGER_IMPORT.md 完成防重复、覆盖确认、整批事务、定稿保护和多文件浏览器验收，交付独立提交，由项目主线审查、完整回归后集成。此前‘实现待分工’状态已结束，目前实施中。
