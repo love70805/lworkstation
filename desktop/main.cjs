@@ -12,6 +12,13 @@ if (smokeCachePath) {
   app.setPath("cache", smokeCachePath);
   process.env.LOCALAPPDATA = smokeCachePath;
 }
+const { acquireDesktopInstance } = require("./single-instance.cjs");
+const desktopInstance = acquireDesktopInstance(app);
+if (!desktopInstance.acquired) {
+  // Stop evaluating this module: even top-level preferences/services must not load.
+  app.exit(0);
+  return;
+}
 const { autoUpdater, CancellationToken } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -1445,6 +1452,7 @@ async function createWindow() {
   createWorkspaceView(workspaceUrl);
   resizeViews();
   mainWindow.show();
+  desktopInstance.windowReady(mainWindow);
   configureAutoUpdater();
   if (updateSmokeReportPath) {
     await writeUpdateSmokeReport();
