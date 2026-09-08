@@ -34,7 +34,7 @@
     "@tanstack/react-table": "^9.0.0",
     "@tanstack/react-virtual": "^3.14.9",
     "decimal.js": "^10.6.0",
-    "dexie": "^4.4.4",
+    "dexie": "^4.4.5",
     "dexie-react-hooks": "^4.4.0",
     "jose": "6.2.11",
     "lucide-react": "1.40.0",
