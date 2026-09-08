@@ -8,7 +8,7 @@ export const salesFields = [
   { key: "attribute", label: "属性/规格", description: "与平台 SKU 共同组成利润明细分组。", required: false, aliases: ["属性集", "属性", "规格", "颜色", "attribute", "variant"] },
   { key: "movementType", label: "变动类型", description: "识别盘亏、扣款、罚款和违约记录。", required: false, aliases: ["变动类型", "movementtype", "movement_type", "type"] },
   { key: "quantity", label: "数量", description: "主数量字段；为 0 时回退到客单发货与平台客单之和。", required: false, aliases: ["数量", "件数", "购买数量", "quantity", "qty", "units", "soldquantity"] },
-  { key: "unitPrice", label: "单价", description: "标准台账报表的结算单价；可与数量相乘得到销售金额。", required: false, aliases: ["单价", "unitprice", "unit_price", "price"] },
+  { key: "unitPrice", label: "单价", description: "标准台账报表的单价；可与数量相乘得到销售原额。", required: false, aliases: ["单价", "unitprice", "unit_price", "price"] },
   { key: "customerShipmentQuantity", label: "客单发货", description: "数量回退字段。", required: false, aliases: ["客单发货", "customershipment", "customer_shipment"] },
   { key: "platformOrderQuantity", label: "平台客单", description: "数量回退字段。", required: false, aliases: ["平台客单", "platformorderquantity", "platform_order_quantity"] },
   { key: "amount", label: "金额", description: "主金额字段；为 0 时回退到客单金额与平台金额之和。", required: false, aliases: ["金额", "实付金额", "单据金额", "amount", "revenue", "totalrevenue", "total_revenue", "salesamount"] },
@@ -131,6 +131,7 @@ export function validateSalesRows(rawRows, mapping, {
   movementTypes,
   supplierNumbers,
   deriveAmountFromUnitPrice = false,
+  enforceSingleStore = false,
 } = {}) {
   const rows = [];
   const errors = [];
@@ -159,6 +160,11 @@ export function validateSalesRows(rawRows, mapping, {
     const attribute = normalizedText(mappedValue(rawRow, mapping, "attribute"));
     const movementType = normalizedText(mappedValue(rawRow, mapping, "movementType"));
     const groupSkc = platformSkc || supplierNumber;
+
+    if (enforceSingleStore && store.toUpperCase() !== normalizedText(defaultStore).toUpperCase()) {
+      errors.push({ sourceRow, messages: ["店铺列与确认店铺不一致；一文件只能属于一个店铺"] });
+      return;
+    }
 
     if (movementTypeFilter && !movementTypeFilter.has(movementType)) {
       ignored.push({ sourceRow, reason: "movement_type_filtered", value: movementType });
@@ -198,6 +204,10 @@ export function validateSalesRows(rawRows, mapping, {
     }
 
     if (quantity === 0 && amount === 0) {
+      if (issues.length) {
+        errors.push({ sourceRow, messages: [...new Set(issues)] });
+        return;
+      }
       ignored.push({ sourceRow, reason: "zero_quantity_and_amount" });
       return;
     }

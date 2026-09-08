@@ -13,8 +13,9 @@ function parseWorkbook(buffer, extension) {
       delimiter: extension === "tsv" ? "\t" : "",
       transformHeader: (header) => header.trim(),
     });
-    if (result.errors.some((error) => error.type === "Quotes")) {
-      throw new Error(result.errors[0].message);
+    const parseError = result.errors.find((error) => ["Quotes", "FieldMismatch"].includes(error.type));
+    if (parseError) {
+      throw new Error(`文件格式错误：${parseError.message}`);
     }
     return result.data;
   }
@@ -28,15 +29,20 @@ function parseWorkbook(buffer, extension) {
 self.onmessage = ({ data }) => {
   const { type, requestId } = data;
   try {
+    if (type === "release") {
+      jobs.delete(data.jobId);
+      self.postMessage({ type: "released", requestId });
+      return;
+    }
     if (type === "parse") {
-      self.postMessage({ type: "progress", requestId, value: 15 });
+      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 15 });
       const rows = parseWorkbook(data.buffer, data.extension);
       if (!rows.length) throw new Error("所选文件中没有数据行。");
       const headers = [...new Set(rows.slice(0, 100).flatMap((row) => Object.keys(row)))];
       jobs.set(data.jobId, rows);
       const ledgerReport = detectLedgerReport(headers);
       const suggestedMapping = ledgerReport ? suggestLedgerReportMapping(headers) : suggestMappings(headers);
-      self.postMessage({ type: "progress", requestId, value: 100 });
+      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 100 });
       self.postMessage({
         type: "parsed",
         requestId,
@@ -53,9 +59,9 @@ self.onmessage = ({ data }) => {
     if (type === "validate") {
       const rows = jobs.get(data.jobId);
       if (!rows) throw new Error("导入预览已失效，请重新选择文件。");
-      self.postMessage({ type: "progress", requestId, value: 20 });
+      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 20 });
       const result = validateSalesRows(rows, data.mapping, data.options);
-      self.postMessage({ type: "progress", requestId, value: 100 });
+      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 100 });
       self.postMessage({
         type: "validated",
         requestId,

@@ -199,3 +199,38 @@
   .selection-install-content .erp-install-actions { display: grid; grid-template-columns: 1fr; }
 }
 
+
+/* Same-month multi-store import; scoped to the import page. */
+.batch-import .batch-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.batch-import .wizard-intro { margin-bottom: 24px; }
+.batch-import .batch-period { max-width: 300px; margin: 24px 32px; }
+.batch-import .batch-files { padding: 0 32px; }
+.batch-import .batch-file { padding: 20px 0; border-top: 1px solid var(--border); }
+.batch-import .batch-file-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.batch-import .batch-file-heading strong { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.batch-import .batch-store { display: grid; gap: 10px; max-width: 520px; margin: 18px 0; }
+.batch-import details { margin-top: 14px; }
+.batch-import summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.batch-import .mapping-select { width: 100%; }
+.batch-import .mapping-row { gap: 16px; }
+.batch-import .mapping-row > div:first-child { display: block; }
+.batch-import .mapping-row small { display: block; }
+.batch-import .mapping-row code { overflow-wrap: anywhere; }
+.batch-import .batch-filters > div { display: flex; flex-wrap: wrap; gap: 12px; max-height: 180px; overflow: auto; padding: 8px 0; }
+.batch-import input[type="checkbox"] { margin-right: 8px; }
+.batch-import .batch-preview { padding: 24px 32px; margin-top: 24px; }
+.batch-import .batch-preview article { border-bottom: 1px solid var(--border); padding: 18px 0; overflow-wrap: anywhere; }
+.batch-import .batch-preview p { margin: 10px 0; }
+.batch-import .batch-overlap { margin-top: 12px; padding: 12px; background: var(--warning-bg); border-radius: 6px; }
+.batch-import .batch-overwrite { display: block; margin: 18px 0; }
+.batch-import .import-error { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .batch-import .wizard-content { width: calc(100% - 24px); margin: 24px auto; }
+  .batch-import .wizard-topbar { padding: 0 12px; gap: 12px; }
+  .batch-import .batch-files, .batch-import .batch-preview { padding: 16px; }
+  .batch-import .batch-period { margin: 16px; }
+  .batch-import .import-dropzone { flex-wrap: wrap; margin: 16px; padding: 16px; }
+  .batch-import .import-dropzone > div { min-width: 0; flex: 1 1 180px; }
+  .batch-import .mapping-row { grid-template-columns: 1fr; padding: 12px 0; }
+  .batch-import .wizard-card-footer { flex-wrap: wrap; padding: 16px; gap: 12px; }
+}
