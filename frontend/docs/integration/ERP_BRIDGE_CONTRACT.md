@@ -22,7 +22,7 @@
 - CNY；
 - ERP Assistant v8.0.0 基线和 `erp-v8.0-compatible@1` 算法版本。
 
-真实 v8.0 扩展仍输出 4 列剪贴板 TSV 或 10 列 CSV。Shopeers 不要求扩展伪造 JSON；导入时会使用当前账本中已存在的平台 SKU → 平台 SKC 关系，把原始文本包装为本地可审计批次。
+真实 v8.0 扩展仍输出 4 列剪贴板 TSV 或 10 列 CSV。Lworkstation 不要求扩展伪造 JSON；导入时会使用当前账本中已存在的平台 SKU → 平台 SKC 关系，把原始文本包装为本地可审计批次。
 
 ## 回传包
 

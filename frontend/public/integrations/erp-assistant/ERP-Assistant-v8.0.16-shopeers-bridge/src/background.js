@@ -45,7 +45,7 @@
     const capability = String(stored[INBOX_CAPABILITY_KEY] || '').trim();
     const workspaceId = String(stored[INBOX_WORKSPACE_ID_KEY] || '').trim();
     if (!baseUrl || capability.length < 32 || !workspaceId) {
-      throw Object.assign(new Error('ERP_INBOX_NOT_CONFIGURED：Shopeers 桌面运行时尚未配置安全收件通道。'), {
+      throw Object.assign(new Error('ERP_INBOX_NOT_CONFIGURED：Lworkstation 桌面运行时尚未配置安全收件通道。'), {
         code: 'ERP_INBOX_NOT_CONFIGURED',
         status: 503,
       });
@@ -81,7 +81,7 @@
         payload = await response.json();
       } catch (error) {
         if (error?.name === 'AbortError') throw error;
-        throw loopbackError('ERP_LOOPBACK_INVALID_RESPONSE', 'Shopeers 本机收件服务返回了无效 JSON。', 502);
+        throw loopbackError('ERP_LOOPBACK_INVALID_RESPONSE', 'Lworkstation 本机收件服务返回了无效 JSON。', 502);
       }
       if (!response.ok) {
         throw Object.assign(new Error(String(payload?.message || `HTTP ${response.status}`)), {
@@ -97,12 +97,12 @@
         new Promise((_, reject) => {
           timeoutId = setTimeout(() => {
             controller.abort();
-            reject(loopbackError('ERP_LOOPBACK_TIMEOUT', '连接 Shopeers 本机收件服务超时。', 408));
+            reject(loopbackError('ERP_LOOPBACK_TIMEOUT', '连接 Lworkstation 本机收件服务超时。', 408));
           }, LOOPBACK_REQUEST_TIMEOUT_MS);
         }),
       ]);
     } catch (error) {
-      if (error?.name === 'AbortError') throw loopbackError('ERP_LOOPBACK_TIMEOUT', '连接 Shopeers 本机收件服务超时。', 408);
+      if (error?.name === 'AbortError') throw loopbackError('ERP_LOOPBACK_TIMEOUT', '连接 Lworkstation 本机收件服务超时。', 408);
       throw error;
     } finally {
       if (timeoutId !== null) clearTimeout(timeoutId);
@@ -313,7 +313,7 @@
         ok: false,
         status: 'cached',
         code: error?.code || 'ERP_INBOX_NOT_CONFIGURED',
-        message: error?.message || 'Shopeers 本机收件服务尚未配置。',
+        message: error?.message || 'Lworkstation 本机收件服务尚未配置。',
       };
     }
     const createdAt = Date.parse(String(record.createdAt || ''));
@@ -364,7 +364,7 @@
         ok: false,
         status: retryable(error) || workspaceBlocked ? 'cached' : 'failed',
         code: error?.code || 'ERP_LOOPBACK_DELIVERY_FAILED',
-        message: error?.message || 'Shopeers 本机收件服务暂不可用。',
+        message: error?.message || 'Lworkstation 本机收件服务暂不可用。',
       };
     }
   }
@@ -412,7 +412,7 @@
         ok: false,
         status: 'failed',
         code: error?.code || 'ERP_INBOX_NOT_CONFIGURED',
-        message: error?.message || 'Shopeers 桌面运行时尚未配置安全收件通道。',
+        message: error?.message || 'Lworkstation 桌面运行时尚未配置安全收件通道。',
       };
     }
     const querySkcs = normalizedSkcs(input?.querySkcs ?? input?.meta?.querySkcs);

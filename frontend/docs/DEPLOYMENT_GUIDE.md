@@ -1,4 +1,4 @@
-# Shopeers 开发与部署指南
+# Lworkstation 开发与部署指南
 
 当前版本默认是本机 IndexedDB 模式。未配置云端变量时，应用不会上传业务数据；`sync:dev` 只提供本机开发合同服务。
 

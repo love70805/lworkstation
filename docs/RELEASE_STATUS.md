@@ -2,6 +2,15 @@
 
 更新时间：2026-09-08
 
+## 当前仓库版本
+
+- 产品名称：Lworkstation
+- 正式版号：`0.2.6`，已写入 `desktop/package.json` 与 `desktop/release-plan.json`
+- 状态：版本号与对外名称已切换；稳定安装包未构建、未整理到 `releases/latest/`、未上传 GitHub Release
+- 稳定更新通道：`desktop/update-config.json` 保持关闭
+- Windows 安装身份、内部协议与本机数据库名保持不变，以便覆盖安装保留数据
+- 最近公开包仍为 `0.2.6-beta.7`
+
 ## 已发布公开 Beta
 
 - 公开仓库：love70805/lworkstation
@@ -30,7 +39,7 @@
 
 ## 下一候选
 
-- 安全代码已通过 PR 合入集成分支及 `main`。用户选择先验收本机 Windows 桌面候选版；本机包使用独立身份 `com.shopeers.workstation.securityqa`、名称 `Lworkstation Security QA` 和测试版本 `0.2.6-beta.8`。它未公开发布，官方 `package.json`、`release-plan.json` 与更新源仍为 beta.7。
+- 安全代码已通过 PR 合入集成分支及 `main`。用户选择先验收本机 Windows 桌面候选版；本机包使用独立身份 `com.shopeers.workstation.securityqa`、名称 `Lworkstation Security QA` 和测试版本 `0.2.6-beta.8`。它未公开发布。仓库正式版号现为 `0.2.6`，公开更新源仍指向已发布的 beta.7；稳定通道保持关闭。
 - 本机安全 QA 包已归档至 `releases/candidates/0.2.6-beta.8-security-qa/`：`Lworkstation-Security-QA-0.2.6-beta.8.exe`，116,143,571 bytes，SHA-256 `4DFE7B2FD97DFF7759017E01ED73FD5022196946623D45C6C38EB26BC4FC9D86`。本机目录包含校验清单、说明和隔离启动入口；修复、测试、GitHub 集成与安装验收详见 [安全修复与验收](SECURITY_HARDENING_2026-09.md)。
 - [版本清单](../releases/README.md) 同时列明公开 Beta 与本机候选。2026-09-08 回读 GitHub Releases，最新公开条目仍为 beta.7；beta.8 QA 从未上传，不能将本机验收状态标记为公开发布。
 - 下一公开 beta 必须基于 beta.7 的受控 beta 更新配置继续验证真实软件内更新，并按正式发布流程另行推进元数据和构建；本机隔离安装不代替公开更新链验收。
@@ -39,7 +48,10 @@
 ## 发布门禁
 
 - [x] 公开仓库基线、更新时间安全修复和预发布发布工具已合入集成分支。
-- [x] 桌面版本与 `release-plan.json` 推进到 `0.2.6-beta.7`；历史更新夹具继续固定为 beta.4 回归链。
+- [x] 桌面版本与 `release-plan.json` 曾推进到 `0.2.6-beta.7`；历史更新夹具继续固定为 beta.4 回归链。
+- [x] 仓库正式版号与对外产品名已切换为 `0.2.6` / Lworkstation；内部 `appId`、协议与数据库名未改。
+- [ ] `0.2.6` 稳定安装包构建、`release:organize` 与 `release:check`；完成本地检查不代表已经发布。
+- [ ] GitHub 稳定 Release 上传 `Lworkstation Setup 0.2.6.exe`、blockmap、`latest.yml`。
 - [x] 前端生产构建。
 - [x] Desktop verify、update smoke 与发布产物契约测试。
 - [x] beta.7 安装包构建、`release:organize` 与 `release:check`。

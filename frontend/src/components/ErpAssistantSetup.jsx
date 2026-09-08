@@ -226,7 +226,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
         <div className="erp-flow-list">
           <div><span>01</span><p><strong>利润核算 → ERP 成本核对</strong><small>按销售人员或供方货号筛选后，复制平台 SKC。</small></p></div>
           <div><span>02</span><p><strong>卓麟 ERP → 采购管理</strong><small>将平台 SKC 粘贴到查询框，点击“查询”，再点击“核算 SKU 成本”。</small></p></div>
-          <div><span>03</span><p><strong>回到 Shopeers</strong><small>等待自动收件，解析并核对，确认无误后发布正式 ERP 成本。</small></p></div>
+          <div><span>03</span><p><strong>回到 Lworkstation</strong><small>等待自动收件，解析并核对，确认无误后发布正式 ERP 成本。</small></p></div>
         </div>
         <div className="erp-flow-note"><Check size={17} />ERP 成本为正式成本；1688 成本只作参考，不会自动替代 ERP 成本。</div>
       </Panel>

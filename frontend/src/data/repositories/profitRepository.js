@@ -293,7 +293,7 @@ export async function savePublishedErpCostBatch({
   }
   const matchedRows = reconciliation.matches.filter((row) => row.status === "matched");
   if (reconciliation.matches.some((row) => row.status === "anomaly_pending")) {
-    throw new Error("仍有采购成本异常或不完整证据未在 Shopeers 完成处置，不能发布为 ERP 正式成本。");
+    throw new Error("仍有采购成本异常或不完整证据未在 Lworkstation 完成处置，不能发布为 ERP 正式成本。");
   }
   const sourceEvidenceByWarehouseSku = new Map(verifiedSourceEnvelope.warehouseEvidence.map((entry) => [
     canonicalWarehouseSku(entry.warehouseSku),

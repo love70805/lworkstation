@@ -134,7 +134,7 @@ assert.deepEqual(betaUpdateConfig, { enabled: true, provider: "github", owner: "
 assert.doesNotMatch(read("update-beta-config.json"), /token/i);
 const releaseAfterPack = createRequire(import.meta.url)("./release-after-pack.cjs");
 assert.deepEqual(releaseAfterPack.loadReleaseBetaConfig(root), betaUpdateConfig);
-assert.equal(releaseAfterPack.isPrereleaseVersion(releasePlan.version), true);
+assert.equal(releaseAfterPack.isPrereleaseVersion(releasePlan.version), false);
 assert.match(read("release-after-pack.cjs"), /Refusing to enable beta updates for non-prerelease/);
 assert.match(read("release-build.mjs"), /--config\.afterPack=\.\/release-after-pack\.cjs/);
 assert.match(read("release-build.mjs"), /--config\.publish\.channel=beta/);

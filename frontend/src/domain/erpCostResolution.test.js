@@ -84,7 +84,7 @@ describe("ERP warehouse cost anomaly detection", () => {
   });
 });
 
-describe("ERP Shopeers-owned resolutions", () => {
+describe("ERP Lworkstation-owned resolutions", () => {
   it("allows a real one-yuan price to be confirmed without changing it", () => {
     const purchaseRecords = [
       record("ONE", "2026-07-03", 1, 2),

@@ -404,7 +404,7 @@ describe("ERP cost repository independent recalculation", () => {
       requestId: request.id,
       reconciliation,
       sourceEnvelope: sourceEnvelope({ ledger, request, purchaseRecords: [record("ONE", 1)], previewUnitCost: 99 }),
-    })).rejects.toThrow("未在 Shopeers 完成处置");
+    })).rejects.toThrow("未在 Lworkstation 完成处置");
   });
 
   it("publishes a verified one-yuan true price with immutable evidence and resolution audit", async () => {

@@ -58,21 +58,21 @@ async function hasRuntimeConfig() {
 async function testConnection({requestPermission = false} = {}) {
     testButton.disabled = true;
     testButton.textContent = '重新检测连接';
-    render('idle', '正在连接...', '读取 Shopeers 桌面连接配置');
+    render('idle', '正在连接...', '读取 Lworkstation 桌面连接配置');
     try {
-        if (!await hasRuntimeConfig()) return render('warning', '等待工作站配置', '请先启动 Shopeers 工作站并等待安全连接配置注入');
+        if (!await hasRuntimeConfig()) return render('warning', '等待工作站配置', '请先启动 Lworkstation 工作站并等待安全连接配置注入');
         let permitted = await hasLocalHostPermission();
         if (!permitted && requestPermission) permitted = await requestLocalHostPermission();
         if (!permitted) {
             testButton.textContent = '授权并连接';
-            return render('warning', '需要本机访问权限', '点击下方按钮，允许扩展连接 Shopeers');
+            return render('warning', '需要本机访问权限', '点击下方按钮，允许扩展连接 Lworkstation');
         }
 
         const result = await sendMessage({type: 'testConnection'});
-        if (!result.ok) return render('error', result.code === 'not_configured' ? '等待工作站配置' : '未连接工作台', result.error || '请先启动 Shopeers');
+        if (!result.ok) return render('error', result.code === 'not_configured' ? '等待工作站配置' : '未连接工作台', result.error || '请先启动 Lworkstation');
         render('connected', '已连接工作台', '采集结果会自动进入待确认队列');
     } catch (error) {
-        render('error', '本地连接被阻止', '请确认 Shopeers 已启动，并允许扩展访问本地网络');
+        render('error', '本地连接被阻止', '请确认 Lworkstation 已启动，并允许扩展访问本地网络');
     } finally {
         testButton.disabled = false;
     }

@@ -121,7 +121,7 @@ function inspectTables(tables, workspaceId) {
 export function buildCloudSeedPayload(backupPayload, { generatedAt = new Date().toISOString() } = {}) {
   if (!backupPayload || typeof backupPayload !== "object") throw new Error("本机备份内容无效。不能生成云端种子包。");
   if (backupPayload.format !== WORKSPACE_BACKUP_FORMAT || Number(backupPayload.formatVersion) !== WORKSPACE_BACKUP_VERSION) {
-    throw new Error("只能从受支持的 Shopeers 本机备份生成云端种子包。");
+    throw new Error("只能从受支持的 Lworkstation 本机备份生成云端种子包。");
   }
   validateWorkspaceBackupPayload(backupPayload, {
     tableNames: [...CLOUD_SEED_TABLES, ...CLOUD_SEED_EXCLUDED_TABLES],
@@ -155,7 +155,7 @@ export function buildCloudSeedPayload(backupPayload, { generatedAt = new Date().
 
 export function validateCloudSeedPayload(payload, { tableNames = CLOUD_SEED_TABLES } = {}) {
   if (!payload || typeof payload !== "object") throw new Error("云端种子包内容无效。");
-  if (payload.format !== CLOUD_SEED_FORMAT) throw new Error("这不是 Shopeers 云端种子包。");
+  if (payload.format !== CLOUD_SEED_FORMAT) throw new Error("这不是 Lworkstation 云端种子包。");
   if (Number(payload.formatVersion) !== CLOUD_SEED_VERSION) throw new Error("云端种子包版本不受支持。");
   const workspaceId = requiredText(payload.workspaceId, "种子包工作区");
   if (payload.currency !== "CNY") throw new Error("云端种子包币种必须为人民币（CNY）。");

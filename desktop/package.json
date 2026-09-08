@@ -1,9 +1,9 @@
 {
   "name": "shopeers-desktop",
-  "version": "0.2.6-beta.7",
+  "version": "0.2.6",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
-  "author": "Shopeers Team",
+  "author": "Lworkstation Team",
   "main": "main.cjs",
   "scripts": {
     "dev": "node dev.mjs",
