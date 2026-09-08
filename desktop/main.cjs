@@ -1311,6 +1311,8 @@ function readUpdateSettings({ allowLoopback = false } = {}) {
       },
     };
   }
+  // Smoke/QA without an explicit loopback feed must never reach public updates.
+  if (allowLoopback || smokeUserDataPath || smokeReportPath || VISUAL_SMOKE) return { enabled: false, feedConfig: null };
   const configPath = app.isPackaged
     ? path.join(process.resourcesPath, "update-config.json")
     : path.join(__dirname, "update-config.json");
@@ -1371,7 +1373,7 @@ function openDesktopReleaseNotes() {
 }
 
 async function installDownloadedUpdate() {
-  if (updateState.status !== "downloaded") return { ok: false, error: "更新尚未下载完成" };
+  if (!updateRuntime?.canInstall()) return { ok: false, error: "更新尚未下载完成" };
   updateInstallInvocationCount += 1;
   if (process.env.SHOPEERS_DESKTOP_UPDATE_SMOKE === "1") return { ok: true, installInvoked: true, smoke: true };
   closeUpdatePopover({ returnFocus: false });

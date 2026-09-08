@@ -12,12 +12,18 @@ importers:
 
   .:
     dependencies:
+      builder-util-runtime:
+        specifier: 9.7.0
+        version: 9.7.0(supports-color@7.2.0)
       electron-updater:
         specifier: 6.8.9
         version: 6.8.9(supports-color@7.2.0)
       lucide:
         specifier: 1.40.0
         version: 1.40.0
+      semver:
+        specifier: 7.7.4
+        version: 7.7.4
     devDependencies:
       electron:
         specifier: 44.2.0

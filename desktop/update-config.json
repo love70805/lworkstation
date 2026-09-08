@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "provider": "github",
   "owner": "love70805",
   "repo": "lworkstation",
