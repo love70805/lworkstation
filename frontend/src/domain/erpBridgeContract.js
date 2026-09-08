@@ -144,7 +144,7 @@ export function validateErpBridgeResponse(payload, requestPayload, options = {})
   return { request, batch: batch.envelope, rows: batch.rows };
 }
 
-/** Wrap the real v8.0 TSV/CSV output in the audited Shopeers batch envelope. */
+/** Wrap the real v8.0 TSV/CSV output in the audited Lworkstation batch envelope. */
 export function buildErpBridgeBatchEnvelope({
   requestPayload,
   rows,

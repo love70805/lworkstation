@@ -78,7 +78,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`Shopeers sync dev server listening on http://127.0.0.1:${port}`);
+  console.log(`Lworkstation sync dev server listening on http://127.0.0.1:${port}`);
 });
 
 process.on("SIGINT", () => server.close(() => process.exit(0)));

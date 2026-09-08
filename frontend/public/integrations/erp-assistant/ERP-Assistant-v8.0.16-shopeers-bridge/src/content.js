@@ -305,8 +305,8 @@
             }
         }
         const messages = {
-            sending: '正在回传 Shopeers 成本证据',
-            success: '成本证据已回传 Shopeers',
+            sending: '正在回传 Lworkstation 成本证据',
+            success: '成本证据已回传 Lworkstation',
             cached: '回传暂未成功，已缓存等待有限补发',
             failed: '成本证据回传失败，请保留本页结果并稍后重试'
         };
@@ -1237,7 +1237,7 @@
             const reasons = warningReasons(detail);
             const hasWarning = reasons.length > 0;
             const warningState = hasWarning
-                ? '<span class="erpa-anomaly-badge erpa-anomaly-pending">疑似异常</span><small class="erpa-anomaly-note">' + escapeHtml(formatWarningReasons(reasons)) + '，请在 Shopeers 利润核算中处理</small>'
+                ? '<span class="erpa-anomaly-badge erpa-anomaly-pending">疑似异常</span><small class="erpa-anomaly-note">' + escapeHtml(formatWarningReasons(reasons)) + '，请在 Lworkstation 利润核算中处理</small>'
                 : '<span class="erpa-muted">正常</span>';
             return '<tr class="' + (hasWarning ? 'erpa-detail-anomaly' : '') + '"><td>' + escapeHtml(detail.date) + '</td>' +
             '<td>' + escapeHtml(detail.sourceType) + '</td>' +
@@ -1439,7 +1439,7 @@
         }
         banner.className = 'erpa-anomaly-banner erpa-visible';
         banner.innerHTML = '<span class="erpa-anomaly-copy"><strong>发现 ' + warningCount + ' 条疑似成本异常</strong>' +
-            '<small>扩展仅作提示和预览，仍会复制、导出并自动回传完整原始证据。修正、确认与正式发布请在 Shopeers 利润核算页处理。</small></span>';
+            '<small>扩展仅作提示和预览，仍会复制、导出并自动回传完整原始证据。修正、确认与正式发布请在 Lworkstation 利润核算页处理。</small></span>';
     }
 
     function updateActionState() {
@@ -1491,7 +1491,7 @@
             '<section class="erpa-panel" role="dialog" aria-modal="true" aria-label="SKU 采购成本预览">' +
                 '<header class="erpa-header"><div class="erpa-title-wrap">' +
                     '<div class="erpa-title-line"><h2 class="erpa-title">SKU 采购成本预览</h2><span class="erpa-badge">API v8.0</span></div>' +
-                    '<p class="erpa-subtitle">最近三次用于预览，全部有效历史和排除证据回传 Shopeers</p></div>' +
+                    '<p class="erpa-subtitle">最近三次用于预览，全部有效历史和排除证据回传 Lworkstation</p></div>' +
                     '<button class="erpa-icon-button" id="erpa-close" type="button" title="关闭" aria-label="关闭">×</button></header>' +
                 '<div class="erpa-anomaly-banner" id="erpa-anomaly-banner" role="alert"></div>' +
                 '<div class="erpa-toolbar">' +

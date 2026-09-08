@@ -1,4 +1,4 @@
-# Shopeers 上云与协作手册
+# Lworkstation 上云与协作手册
 
 这份手册只描述可复现的上传流程。当前工作区没有自动创建 GitHub、Supabase 或 Vercel 资源；执行外部写入前，必须先确认仓库名称、可见性、组织、数据库区域和数据迁移范围。
 
@@ -32,7 +32,7 @@ git diff --cached --name-only
 确认清单无敏感文件后再提交：
 
 ```powershell
-git commit -m "chore: initial Shopeers workstation"
+git commit -m "chore: initial Lworkstation workstation"
 gh repo create <owner>/<repository> --private --source . --remote origin --push
 ```
 

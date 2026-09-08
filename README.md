@@ -1,4 +1,4 @@
-# Shopeers 经营管理工作台
+# Lworkstation 经营管理工作台
 
 选品工作台与利润核算面板的一体化内部工具。Lworkstation Windows 桌面安装版是正式交付入口，内置工作站、ERP 和 1688 受控标签；浏览器构建继续保留用于前端开发与调试。云端同步和账号隔离已准备好，未配置云端变量时不会上传业务数据。
 
@@ -23,7 +23,7 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
-当前公开测试版为 [`0.2.6-beta.7`](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，属于 GitHub prerelease。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前仓库版本为 `0.2.6`。最近一次公开测试版仍为 [`0.2.6-beta.7`](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，属于 GitHub prerelease；本仓库尚未上传 `0.2.6` 安装包。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
@@ -32,11 +32,11 @@ pnpm --dir desktop install
 pnpm --dir desktop dev
 ```
 
-`dev` 会启动 Vite 和 Electron。当前 beta 候选使用 `release:build`，先构建 `frontend/dist`，再打入受控 beta 更新配置：
+`dev` 会启动 Vite 和 Electron。稳定版使用 `pnpm --dir desktop build`。历史 beta 候选使用 `release:build`，先构建 `frontend/dist`，再打入受控 beta 更新配置：
 
 ```powershell
 pnpm --dir desktop verify
-pnpm --dir desktop release:build
+pnpm --dir desktop build
 pnpm --dir desktop smoke:packaged
 pnpm --dir desktop release:organize
 pnpm --dir desktop release:check
@@ -46,7 +46,7 @@ Beta 安装包命名为 `Lworkstation-Setup-<版本>.exe`，由 `desktop/release
 
 正式桌面包只从集成分支构建。专职 Worktree 产物仅用于模块验收；主线构建后运行 `release:organize` 和 `release:check`，检查 `desktop/release-plan.json` 中的必需提交、版本、安装包与更新元数据，并输出大小和 SHA-256。这些本地命令不上传 GitHub Release，完成本地检查不代表已经发布。
 
-安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前测试版尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
+安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
 
 beta.6 的已发布包未启用更新源，需要手工安装 beta.7 一次。beta.7 通过 GitHub beta 通道检查后续预发布版，发现更新后由用户确认下载并显式重启安装；自动下载和退出即装均关闭。稳定通道 `desktop/update-config.json` 继续保持关闭，客户端不得保存 GitHub Token。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
 
@@ -54,7 +54,7 @@ beta.6 的已发布包未启用更新源，需要手工安装 beta.7 一次。be
 
 桌面版会尝试加载仓库中的解压 MV3 扩展：`integrations/erp-assistant-extension` 与 `integrations/1688-selection-extension`。扩展加载失败不会影响工作站、ERP 或 1688 页面继续使用。`0.2.2` 起 Electron 会自动启动并管理本机收件服务，并把实际端口同步给内置扩展；若已有兼容服务则复用，若端口被其他程序占用则明确提示且不会终止该程序。左上 ERP 状态圆点及其紧凑浮窗显示通道正常、处理和错误状态；成本异常处置和成本核对仍在工作站业务页面完成，桌面状态浮窗不执行重试或业务跳转。
 
-ERP inbox transport v2 与 batch `formatVersion: 2` 会保留 `warehouseEvidence` 和证据完整状态。旧版 v1 只显示为 `legacy_partial` 预览，不能由桌面层标记为正式成本；正式成本仍只能在 Shopeers `CostMatching` / `profitRepository` 中处理和发布，`unitCost` 仅为兼容预览值。
+ERP inbox transport v2 与 batch `formatVersion: 2` 会保留 `warehouseEvidence` 和证据完整状态。旧版 v1 只显示为 `legacy_partial` 预览，不能由桌面层标记为正式成本；正式成本仍只能在 Lworkstation `CostMatching` / `profitRepository` 中处理和发布，`unitCost` 仅为兼容预览值。
 
 自动 packaged smoke 会使用随机本机端口和可控 v2 fixture 验证“扩展格式回传 -> inbox 接收 -> 工作站轮询读取并确认 -> ERP 状态进入待核对阶段”。真实环境仍需手工检查：启动后确认工作站正常显示；分别打开 ERP / 1688 标签并完成一次真实登录；在 ERP 采购页完成一次分页采集，确认扩展注入、平台 SKU/SKC 映射、完整 `warehouseEvidence` 和供应商 1688 链接均已回传；重启桌面应用后确认登录态仍在；点击 1688 搜索结果和商品链接，确认站内新窗口留在当前标签；在任一远程页加载失败时切回“工作站”确认不受影响。最后运行 `pnpm --dir frontend test`、`pnpm --dir frontend build`、`pnpm --dir frontend erp:bridge:test`、`pnpm --dir frontend erp:inbox:test`、`pnpm --dir desktop verify` 和 `pnpm --dir desktop smoke:packaged`。
 

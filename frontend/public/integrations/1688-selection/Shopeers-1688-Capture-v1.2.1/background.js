@@ -37,7 +37,7 @@ async function readRuntimeConfig() {
 }
 
 function requireRuntimeConfig(config) {
-    if (!config) throw extensionError('not_configured', '桌面连接配置不可用，请先启动 Shopeers 工作站');
+    if (!config) throw extensionError('not_configured', '桌面连接配置不可用，请先启动 Lworkstation 工作站');
     return config;
 }
 

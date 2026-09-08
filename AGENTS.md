@@ -1,8 +1,8 @@
-# Shopeers 项目开发规则
+# Lworkstation 项目开发规则
 
 ## 项目定位
 
-Shopeers 是组内使用的中文经营管理工作台，整合选品商品档案、1688 参考采集、ERP 成本回传和月度利润核算。
+Lworkstation 是组内使用的中文经营管理工作台，整合选品商品档案、1688 参考采集、ERP 成本回传和月度利润核算。
 
 ## 不可改变的业务口径
 
@@ -73,7 +73,7 @@ Shopeers 是组内使用的中文经营管理工作台，整合选品商品档�
 - 确认后在批准范围内连续完成实现、测试、审查、提交和集成，不为常规步骤重复请求批准；只有出现新的用户决策或实质性扩展范围时才重新确认。
 - `grill-with-docs` 和 `domain-modeling` 在访谈期间只准备草稿，确认后才更新 `CONTEXT.md` 或 ADR。
 - `to-spec`、`to-tickets` 和 `wayfinder` 默认接入 `docs/CODEX_TASK_BOARD.md` 及现有专职任务，不自动创建 GitHub Issue。
-- Shopeers 的人工配置向导使用 PowerShell；通用行为由 `shopeers-development-workflow` Skill 规定。
+- Lworkstation 的人工配置向导使用 PowerShell；通用行为由 `shopeers-development-workflow` Skill 规定。
 
 ### 对话自动路由与同步
 

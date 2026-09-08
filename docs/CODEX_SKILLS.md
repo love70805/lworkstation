@@ -1,6 +1,6 @@
-# Shopeers Codex Skills
+# Lworkstation Codex Skills
 
-The project defines three core Shopeers-specific skills under `$CODEX_HOME/skills`. The React UI skill is optional and may be disabled; its absence must not block ordinary UI work.
+The project defines three core Lworkstation-specific skills under `$CODEX_HOME/skills`. The React UI skill is optional and may be disabled; its absence must not block ordinary UI work.
 
 - `shopeers-electron-security`: Electron shell trust boundaries, remote views, extensions, navigation, updates, inbox lifecycle, and packaged verification.
 - `shopeers-profit-erp-contracts`: Ledger, ERP evidence, formal cost, manual confirmation, anomaly handling, versioned contracts, and finalized-profit invariants.

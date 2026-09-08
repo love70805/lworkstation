@@ -138,7 +138,7 @@ function createInboxServiceController({
     publish({
       status: "online",
       apiVersion: Number(payload.apiVersion) || null,
-      message: state.ownership === "managed" ? "ERP 收件服务由桌面应用管理" : "已连接现有 Shopeers 收件服务",
+      message: state.ownership === "managed" ? "ERP 收件服务由桌面应用管理" : "已连接现有 Lworkstation 收件服务",
       lastCheckedAt: new Date().toISOString(),
       latestRequest: payload.latestRequest ?? null,
       latestBatch: payload.latestBatch ?? null,

@@ -47,7 +47,7 @@ async function waitForTransport(operation, signal) {
 export async function requestInbox(request, { signal } = {}) {
   const transport = activeTransport();
   if (!transport) {
-    throw transportError("当前环境未提供受控本机收件接口。请使用 Shopeers 桌面版。", {
+    throw transportError("当前环境未提供受控本机收件接口。请使用 Lworkstation 桌面版。", {
       code: "INBOX_TRANSPORT_UNAVAILABLE",
     });
   }

@@ -25,7 +25,7 @@ let spoolWriteChain = Promise.resolve();
 let latestTransportError = null;
 
 if (inboxCapability.length < 32) {
-  console.error("Shopeers ERP inbox requires SHOPEERS_ERP_INBOX_CAPABILITY with at least 32 characters.");
+  console.error("Lworkstation ERP inbox requires SHOPEERS_ERP_INBOX_CAPABILITY with at least 32 characters.");
   process.exit(1);
 }
 
@@ -1098,7 +1098,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const request = chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs });
-      if (!request) return json(res, 409, { error: "ERP_REQUEST_NOT_FOUND", message: "没有可关联的 Shopeers ERP 成本请求。" });
+      if (!request) return json(res, 409, { error: "ERP_REQUEST_NOT_FOUND", message: "没有可关联的 Lworkstation ERP 成本请求。" });
       const queriedSkcs = requestSkcSet(request);
       const expectedBySku = normalizedExpectedSkus(request.expectedSkus);
       const rows = rawRows.map((rawRow, index) => {
@@ -1320,7 +1320,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, bindHost, () => {
-  console.log(`Shopeers ERP inbox listening on http://${bindHost}:${port}/erp/v1/cost-batches`);
+  console.log(`Lworkstation ERP inbox listening on http://${bindHost}:${port}/erp/v1/cost-batches`);
   console.log(`ERP inbox spool: ${spoolPath}`);
 });
 

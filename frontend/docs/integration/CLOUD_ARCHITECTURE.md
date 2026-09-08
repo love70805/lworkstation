@@ -1,4 +1,4 @@
-# Shopeers 云端协作架构
+# Lworkstation 云端协作架构
 
 状态：目标架构；本机 outbox 与开发同步合同已实现，尚未创建外部资源
 
@@ -18,7 +18,7 @@
 
 ```mermaid
 flowchart LR
-  U["组内用户"] --> WEB["Shopeers Web"]
+  U["组内用户"] --> WEB["Lworkstation Web"]
   WEB --> API["应用 API"]
   API --> DB["PostgreSQL"]
   API --> OBJ["对象存储"]
@@ -83,7 +83,7 @@ flowchart LR
 
 ### ERP 扩展
 
-1. 用户在 Shopeers 创建平台 SKC 成本请求。
+1. 用户在 Lworkstation 创建平台 SKC 成本请求。
 2. 扩展读取请求或接收一次性任务码。
 3. 用户在 ERP 页面执行实际查询。
 4. 扩展在本地完成完整性校验和 v8.0 成本计算。

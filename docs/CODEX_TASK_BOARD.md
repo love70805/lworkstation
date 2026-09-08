@@ -8,8 +8,17 @@
 - 集成分支：`codex/selection-profit-erp-sync`
 - beta.7 发布代码提交：`40e4da8`；发布记录提交：`46792e5`。后续维护以集成分支当前 HEAD 为准，PR 状态以 GitHub 实时记录为准。
 - 本地开发地址：`http://127.0.0.1:5173`
-- 官方桌面版本：`0.2.6-beta.7`；本机安全 QA：`0.2.6-beta.8`（独立应用身份，未公开发布）
+- 仓库正式版号：`0.2.6`（未上传 GitHub Release）；最近公开包：`0.2.6-beta.7`；本机安全 QA：`0.2.6-beta.8`（独立应用身份，未公开发布）
 - 发布状态入口：`desktop/release-plan.json` 与 `docs/RELEASE_STATUS.md`
+
+## 2026-09-08 名称与 0.2.6 元数据审查候选
+
+- 分支：`codex/branding-0.2.6`；基线：集成分支 `a4ad756`。本机原有 57 个未提交文件已逐项备份并核对 SHA-256，原工作区未改动；通过三方补丁迁移，保留安全修复、工作区治理和 Dependabot 更新。
+- 跨模块原因：仅同步用户可见名称、帮助文档、错误提示和必要版本元数据，不改变业务逻辑。桌面版本为 `0.2.6`；包名、appId、协议、数据库、存储键、备份/同步格式、桥接 API 和扩展版本均不变。
+- 当前源码附带的 ERP v8.0.16 ZIP 仅同步名称：39,884 bytes，SHA-256 `F4A3EDCE17B2C42481F3FD1E3C72A818D7C6BEFADE45C3BDA960A8D22C113886`。1688 v1.2.1 ZIP：40,388 bytes，SHA-256 `6621E2201EEFF09F227C2836DA2F26A50E100D6BAF952001D4DC2EBA18A1D8F1`。沿用本机已有 ZIP，22 个文件与解压源码逐项一致；本轮未重新生成仓库下载包，也未覆盖 GitHub Release 资产。
+- 验证：按最新锁文件安装依赖，前端 74 文件 / 516 测试、前端生产构建、desktop verify 全部九个脚本、ERP bridge、ERP inbox 和 1688 扩展测试通过。使用 Node.js 26.8.1 / pnpm 11.16.0；测试因 npm 启动审批超时改为直接执行 package scripts 对应的本地入口。
+- 遗留：前端构建仍有大 chunk 提示，测试有 Node localStorage 实验性提示；未做本轮浏览器视觉、真实 ERP/1688 账号、安装覆盖和真实更新验收。同版本扩展 ZIP 的名称变更不会触发扩展版本升级，已安装扩展需后续交付时重新加载。
+- 交付边界：仅提交分支及草稿 PR 供项目主线审查；不合并、不构建安装包、不发布 Release、不启用稳定更新通道。下方安全验收及历史扩展哈希保持当时记录，不代表本候选已完成安装验收。
 
 ## 2026-09-08 工作区治理与发布清单
 
@@ -35,7 +44,7 @@
 - 主责实现：原始证据职责调整从 `039ba21` 起步；精确回传、证据合同、自动载入与恢复链路最终收口于 `18d4bd4`，由项目开发主线合并为 `ef6cd14`。
 - 总控范围：公共 `erpCostBatchEnvelope`、`erpBridgeContract`、ERP inbox payload 与 `profitRepository` 发布契约的审查、合并和完整回归。
 - ERP 扩展职责：只采集、提示异常、预览并回传完整原始证据；异常不得阻止复制、导出或回传，扩展不得确认、修正或发布正式成本。
-- Shopeers 职责：`CostMatching` 负责 median/MAD 异常检测、修正、真实价确认和审计；repository 独立复算，并阻止未处置异常、零价或篡改成本发布。
+- Lworkstation 职责：`CostMatching` 负责 median/MAD 异常检测、修正、真实价确认和审计；repository 独立复算，并阻止未处置异常、零价或篡改成本发布。
 - 成本口径：正式成本继续使用最近最多三次有效采购记录按数量加权；全部有效历史只用于异常基线；ERP 正式、1688 参考的业务口径不变。新产生的 ERP/1688 单件成本、采购成本、仓储、扣款、利润与利润率统一直接舍弃小数点后两位，不四舍五入；已结算历史数据保持原值。
 - Contract 状态：ERP batch envelope `formatVersion: 2`，inbox transport v2；`requestId + ledgerId + 完整 SKC 集合` 必须精确匹配。同一仓库 SKU 可共享给多个平台 SKU/SKC；当前账本使用的行标记为 `ledgerScopeRole: expected`，同查询 SKC 下但本账本未使用的额外变体标记为 `auxiliary`。辅助变体只保留预览与审计，不参与匹配兜底、证据完整性阻断或正式成本发布。任一层 v1 均只按 `legacy_partial` 预览；非法警告、重复证据身份、无效币种或负成本在落盘前拒绝，正式发布必须使用完整 v2 `warehouseEvidence`。
 - 集成结果：利润/ERP 最终链路 `18d4bd4`、ERP 证据归属修复 `e216f29`、桌面 packaged smoke 适配 `0f00b4f`、1688 心跳兼容修复 `92d10ac`、ERP 复制回退 `b4b4859`、未映射证据折叠 `dc75782`、证据状态区分 `b5e2682` 与共享仓库映射修复 `8020c8e` 已合入集成分支；`0.2.5` 正式发布提交为 `9f002fb`。
@@ -43,7 +52,7 @@
 - 软件内更新：`acacf2e` 已加入受控更新状态机，`a412684` 隔离更新 smoke 缓存；beta.1 至 beta.7 已公开为 GitHub prerelease，`autoDownload=false`、`autoInstallOnAppQuit=false`，发现更新后仍由用户确认下载并显式重启安装。beta.6 的已发布安装包未启用 beta 更新源，须手工安装 beta.7 一次；beta.7 之后继续使用 beta 通道更新，稳定源默认关闭。
 - `0.2.5` 历史交付：安全壳、ERP/1688 内置扩展、ERP 成本复制回退、未映射证据折叠和证据不完整原因/补齐指引已纳入后续版本；桌面层不执行异常判断、人工确认或正式成本发布。
 - 历史集成提交：全局 UI `edac462`、桌面壳 `d112b08`、利润/ERP `18d4bd4` 与桌面 smoke `0f00b4f`。当前发布检查所需提交以 `desktop/release-plan.json` 的 `requiredCommits` 为准。
-- 当前推荐 ERP Assistant：`v8.0.16`，38,999 bytes，SHA-256 `CD5D824B61A71DCBE31D780E2BE0031D4564654B5674C7500326D0DECDEFDD53`，新增 CSV 公式安全处理。历史 `v8.0.15` 归档未变：38,645 bytes，SHA-256 `EDA7774D60791FCAF02AA25D47645E4C39A578C2656DED7BC1BE36FB0EDB900C`，包含采购页 iframe 注入和 DOM 替换后恢复核算按钮。
+- 安全验收时推荐 ERP Assistant：`v8.0.16`，38,999 bytes，SHA-256 `CD5D824B61A71DCBE31D780E2BE0031D4564654B5674C7500326D0DECDEFDD53`，新增 CSV 公式安全处理。历史 `v8.0.15` 归档未变：38,645 bytes，SHA-256 `EDA7774D60791FCAF02AA25D47645E4C39A578C2656DED7BC1BE36FB0EDB900C`，包含采购页 iframe 注入和 DOM 替换后恢复核算按钮。
 - beta.7 安装包已发布：`Lworkstation-Setup-0.2.6-beta.7.exe`，88,799,017 bytes，SHA-256 `753A8C876C77D021AA633F8EF3076E7B93D50511A27AAC5D11D4EBAFB1E85560`。beta.6 不能替换已下载的同名资产，需手工安装 beta.7 一次，之后从 beta 通道接收后续软件内更新。
 - 历史 UI/桌面集成：全局 UI `ca4ceda`、桌面壳/缩放 `15c8db5`、Windows 品牌与图标 `cf3c36a`、发布与偏好恢复加固 `3657664`、发布定位文档 `b9936d2` 与 `5acae7d` 已合入并纳入后续发布。旧 `0.2.5` 本地候选不再列为待发布版本；下一候选统一以 `docs/RELEASE_STATUS.md` 为准。
 - 待人工验收：真实 ERP 登录态跨重启、采购页扩展注入、真实分页、SKU/SKC/仓库 SKU 映射、供应商与 1688 链接、真实 `warehouseEvidence` 完整性。
@@ -119,7 +128,7 @@
 | 商品档案、SKC/SKU、多供应商、1688 参考成本 | 选品工作台 | 需要 ERP 历史成本或共享采集 contract 时通知利润/ERP与总控 |
 | 台账导入、月度利润、ERP 正式成本、成本回传 | 利润核算与 ERP | 改动选品参考读模型或桌面桥接时通知对应对话与总控 |
 | React 工作站导航、页面布局、响应式、设计令牌 | 全局 UI 与导航 | 同时影响 Electron 外壳视觉规范时通知桌面主线 |
-| Electron 外壳、内置 ERP/1688、扩展加载、安装包 | Shopeers 桌面化主线 | 需要业务页面或数据 contract 配合时通知对应业务对话与总控 |
+| Electron 外壳、内置 ERP/1688、扩展加载、安装包 | Lworkstation 桌面化主线 | 需要业务页面或数据 contract 配合时通知对应业务对话与总控 |
 | 数据库迁移、公共 contract、云端同步、跨模块决策 | 项目开发主线总控 | 主线定义 contract 和顺序，再分别派发给受影响的专职对话 |
 
 执行协议：需求确认后，单模块任务自动发送到主责对话并向用户报告去向；跨模块任务由项目主线保留总控、定义 contract、拆分任务并安排合并顺序。转发内容必须包含用户原始需求或确认后的目标、代码基线、影响范围、不可改变的业务口径、验收标准和验证命令。对话之间通过消息同步意图，通过独立提交与集成分支同步代码，不能假定不同 Worktree 会自动获得彼此提交。
@@ -144,7 +153,7 @@
 ## 新任务模板
 
 ```text
-项目：Shopeers 经营管理工作台
+项目：Lworkstation 经营管理工作台
 基线：codex/selection-profit-erp-sync
 任务范围：
 不修改：

@@ -30,7 +30,7 @@ const maxEventBytes = 2 * 1024 * 1024;
 const maxSeedBytes = 25 * 1024 * 1024;
 
 function printHelp() {
-  console.log(`Shopeers PostgreSQL sync server\n\nRequired environment:\n  SHOPEERS_DATABASE_URL       PostgreSQL connection string\n  SHOPEERS_JWKS_URL           JWT JWKS endpoint\n  SHOPEERS_JWT_ISSUER         JWT issuer\n  SHOPEERS_JWT_AUDIENCE       JWT audience (default: authenticated)\n  SHOPEERS_SYNC_CORS_ORIGINS  comma-separated allowed browser origins\n\nOptional:\n  SHOPEERS_SYNC_PORT=8787\n  SHOPEERS_DATABASE_SSL=require\n  SHOPEERS_DB_POOL_MAX=10`);
+  console.log(`Lworkstation PostgreSQL sync server\n\nRequired environment:\n  SHOPEERS_DATABASE_URL       PostgreSQL connection string\n  SHOPEERS_JWKS_URL           JWT JWKS endpoint\n  SHOPEERS_JWT_ISSUER         JWT issuer\n  SHOPEERS_JWT_AUDIENCE       JWT audience (default: authenticated)\n  SHOPEERS_SYNC_CORS_ORIGINS  comma-separated allowed browser origins\n\nOptional:\n  SHOPEERS_SYNC_PORT=8787\n  SHOPEERS_DATABASE_SSL=require\n  SHOPEERS_DB_POOL_MAX=10`);
 }
 
 function required(value, name) {
@@ -171,7 +171,7 @@ if (process.argv.includes("--help")) {
       }
     });
     serverHandle = server;
-    server.listen(port, "0.0.0.0", () => console.log(`Shopeers PostgreSQL sync server listening on port ${port}`));
+    server.listen(port, "0.0.0.0", () => console.log(`Lworkstation PostgreSQL sync server listening on port ${port}`));
     let shuttingDown = false;
     const shutdown = async () => {
       if (shuttingDown) return;
