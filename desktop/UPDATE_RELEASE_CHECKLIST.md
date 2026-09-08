@@ -1,4 +1,6 @@
-# Lworkstation 0.2.6 beta 更新测试清单
+# Lworkstation 更新验证清单
+
+当前实现与 0.2.7 交付验收见 [通道隔离验收](UPDATE_CHANNELS.md)。下方为已发布 0.2.6/beta 历史记录，不能作为新运行时的验证结果。
 
 状态：beta.1 至 beta.7 已发布为 GitHub prerelease；beta.7 是后续软件内 beta 更新的引导版。生产稳定更新源继续关闭（`desktop/update-config.json` 的 `enabled: false`、`channel: latest`）。
 
