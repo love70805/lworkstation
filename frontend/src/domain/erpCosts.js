@@ -12,7 +12,9 @@ import {
 } from "./identifiers";
 import { calculateWarehouseCostDecision } from "./erpCostResolution";
 
+// The extension wire version is stable; the local preview algorithm has its own version.
 export const ERP_COST_ALGORITHM_VERSION = "erp-v8.0-compatible@1";
+export const ERP_COST_CALCULATION_VERSION = "erp-v8.0-compatible@2-unit-4dp";
 export const DEFAULT_CURRENCY = "CNY";
 export const ERP_LEDGER_SCOPE_EXPECTED = "expected";
 export const ERP_LEDGER_SCOPE_AUXILIARY = "auxiliary";
@@ -166,9 +168,9 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions) {
     canonicalPlatformSku: platformSkuText ? canonicalPlatformSku(platformSkuText) : null,
     warehouseSku: warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null,
     canonicalWarehouseSku: warehouseSkuText ? canonicalWarehouseSku(warehouseSkuText) : null,
-    previewUnitCost: previewCost?.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() ?? null,
-    unitCost: decision?.unitCost ?? previewCost?.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() ?? null,
-    formalUnitCost: decision?.formalUnitCost ?? (trustedPublishedLegacy ? previewCost.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() : null),
+    previewUnitCost: previewCost?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null,
+    unitCost: decision?.unitCost ?? previewCost?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null,
+    formalUnitCost: decision?.formalUnitCost ?? (trustedPublishedLegacy ? previewCost.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() : null),
     currency,
     orderNumber: optionalText(row.orderNumber ?? row.orderNo ?? row.order1688),
     orderType: optionalText(row.orderType ?? row.sourceType),
@@ -370,9 +372,9 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
       dateRange: newest.date === oldest.date ? newest.date : `${oldest.date} ~ ${newest.date}`,
       totalQuantity: totalQuantity.toNumber(),
       totalPrice: totalPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
-      unitCost: totalPrice.div(totalQuantity).toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
+      unitCost: totalPrice.div(totalQuantity).toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber(),
       selectedRecordIds: selected.map((record) => record.id),
-      algorithmVersion: ERP_COST_ALGORITHM_VERSION,
+      algorithmVersion: ERP_COST_CALCULATION_VERSION,
       currency: DEFAULT_CURRENCY,
     };
   }).toSorted((a, b) => a.warehouseSku.localeCompare(b.warehouseSku, "zh-CN", { numeric: true }));

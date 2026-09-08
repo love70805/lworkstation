@@ -10,7 +10,7 @@ import { summarizeLedgerRows } from "../../domain/ledgerImport";
 import { planSalesImports, prepareSalesImportItems } from "../../domain/batchSalesImport";
 import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
-import { calculateWarehouseCostDecision } from "../../domain/erpCostResolution";
+import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../../domain/erpCostResolution";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
@@ -362,6 +362,9 @@ export async function savePublishedErpCostBatch({
   }
   const matchedRows = reconciliation.matches.filter((row) => row.status === "matched");
   if (reconciliation.matches.some((row) => row.status === "anomaly_pending")) {
+    if (reconciliation.matches.some((row) => row.costDecision?.unitCost === 0 && row.costDecision?.selectedRecords?.every((record) => record.effectiveUnitPrice > 0))) {
+      throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
+    }
     throw new Error("仍有采购成本异常或不完整证据未在 Lworkstation 完成处置，不能发布为 ERP 正式成本。");
   }
   const sourceEvidenceByWarehouseSku = new Map(verifiedSourceEnvelope.warehouseEvidence.map((entry) => [
@@ -396,6 +399,9 @@ export async function savePublishedErpCostBatch({
       currentYearMonth: Number(verifiedSourceEnvelope.generatedAt.slice(0, 4)) * 100
         + Number(verifiedSourceEnvelope.generatedAt.slice(5, 7)),
     });
+    if (decision.unitCost === 0 && decision.selectedRecords.every((record) => record.effectiveUnitPrice > 0)) {
+      throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
+    }
     if (decision.resolutionStatus !== "resolved" || decision.unresolvedAnomalyCount > 0 || !(decision.formalUnitCost > 0)) {
       throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 的采购证据或异常处置尚未满足正式成本要求。`);
     }
@@ -485,6 +491,7 @@ export async function savePublishedErpCostBatch({
       complete: verifiedSourceEnvelope.complete,
       baseline: verifiedSourceEnvelope.baseline,
       algorithmVersion: verifiedSourceEnvelope.algorithmVersion,
+      resolutionVersion: ERP_COST_RESOLUTION_VERSION,
       query: verifiedSourceEnvelope.query,
       summary: verifiedSourceEnvelope.summary,
       sourceMeta: verifiedSourceEnvelope.sourceMeta,
@@ -1104,7 +1111,7 @@ export async function finalizeMonthlyLedger({
   await db.transaction("rw", db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.profitLines, db.auditEvents, async () => {
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger) throw new Error("找不到对应的月度账本。");
-    if (ledger.status === "locked") throw new Error("已锁定账本不能重新定稿。");
+    if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能重新定稿，请先显式重开。");
     const coverage = await readLedgerCostCoverage(ledgerId);
     if (coverage.missingCount > 0 || profitLines.some((line) => !line.finalizable)) {
       throw new Error("仍有平台 SKU 缺少正式成本，账本不能定稿。");
@@ -1316,13 +1323,14 @@ export async function voidPublishedErpCostBatch({
 export async function getLedgerSnapshot(ledgerId) {
   const ledger = await db.ledgers.get(ledgerId);
   if (!ledger) return null;
-  const [rows, batches, costs, approvals] = await Promise.all([
+  const [rows, batches, costs, approvals, profitLines] = await Promise.all([
     db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
     db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
     getLatestLedgerCosts(ledgerId),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
+    db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  return { ledger, rows, batches, costs, approvals };
+  return { ledger, rows, batches, costs, approvals, profitLines };
 }
 
 export async function getLatestLedgerSnapshot() {
