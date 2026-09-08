@@ -1,6 +1,6 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
@@ -42,6 +42,26 @@
     {
       "module": "v12-data-preservation",
       "commit": "a180e13"
+    },
+    {
+      "module": "precise-erp-profit",
+      "commit": "2d83e60"
+    },
+    {
+      "module": "cloud-exact-amounts-migration",
+      "commit": "ef734cd"
+    },
+    {
+      "module": "windowed-product-controls",
+      "commit": "d1bc55d"
+    },
+    {
+      "module": "erp-unit-cost-display",
+      "commit": "dc68a0a"
+    },
+    {
+      "module": "desktop-single-instance",
+      "commit": "2b02063"
     }
   ]
 }
