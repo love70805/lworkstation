@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
 
-export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@1";
+export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@2-unit-4dp";
 export const ERP_HISTORY_MIN_SAMPLES = 6;
 export const ERP_PREVIEW_RECORD_LIMIT = 3;
 
@@ -66,8 +66,8 @@ function normalizedResolution(resolution, warehouseSku, record) {
   if (!["correct_price", "confirm_true_price"].includes(action)) return null;
   const resolvedAt = text(resolution.resolvedAt);
   const resolvedBy = text(resolution.resolvedBy);
-  const originalUnitPrice = roundPrice(resolution.originalUnitPrice);
-  const resolvedUnitPrice = roundPrice(resolution.resolvedUnitPrice);
+  const originalUnitPrice = finiteNumber(resolution.originalUnitPrice);
+  const resolvedUnitPrice = action === "confirm_true_price" ? finiteNumber(resolution.resolvedUnitPrice) : roundPrice(resolution.resolvedUnitPrice);
   if (!resolvedAt || !Number.isFinite(Date.parse(resolvedAt)) || !resolvedBy) return null;
   if (originalUnitPrice == null || originalUnitPrice !== record.unitPrice) return null;
   if (resolvedUnitPrice == null || resolvedUnitPrice <= 0) return null;
@@ -93,7 +93,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const warehouseSkuText = text(record?.warehouseSku ?? fallbackWarehouseSku);
   const warehouseSku = warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null;
   const quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
-  const unitPrice = roundPrice(record?.unitPrice ?? record?.purchaseUnitPrice);
+  const unitPrice = finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
   const totalPriceValue = finiteNumber(record?.totalPrice ?? record?.price);
   const exclusionReasons = [...new Set((Array.isArray(record?.exclusionReasons) ? record.exclusionReasons : [])
     .map((reason) => text(reason))
@@ -258,7 +258,7 @@ export function calculateWarehouseCostDecision({
   const unresolvedAnomalyCount = anomalies.filter((anomaly) => anomaly.status === "pending").length;
   const hasNonPositivePrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice) || record.effectiveUnitPrice <= 0);
   const computedUnitCost = totalQuantity.gt(0)
-    ? totalPrice.div(totalQuantity).toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber()
+    ? totalPrice.div(totalQuantity).toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber()
     : null;
   const resolutionStatus = evidenceComplete
     && selectedRecords.length > 0

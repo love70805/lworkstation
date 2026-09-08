@@ -105,7 +105,7 @@ describe("ERP Lworkstation-owned resolutions", () => {
         resolvedAt: "2026-08-12T08:00:00.000Z",
       }],
     });
-    expect(result).toMatchObject({ resolutionStatus: "resolved", unresolvedAnomalyCount: 0, unitCost: 1.07 });
+    expect(result).toMatchObject({ resolutionStatus: "resolved", unresolvedAnomalyCount: 0, unitCost: 1.075 });
   });
 
   it("does not allow a zero price to be confirmed as true", () => {
@@ -165,7 +165,7 @@ describe("ERP Lworkstation-owned resolutions", () => {
     expect(result).toMatchObject({ resolutionStatus: "pending", anomalyCount: 0, formalUnitCost: null, unitCost: 2 });
   });
 
-  it("truncates the formal weighted unit cost to two decimals", () => {
+  it("preserves four decimals in formal weighted unit cost", () => {
     const result = calculateWarehouseCostDecision({
       warehouseSku: "WH-1",
       evidenceComplete: true,
@@ -175,7 +175,7 @@ describe("ERP Lworkstation-owned resolutions", () => {
       ],
     });
 
-    expect(result).toMatchObject({ totalPrice: 3.71, unitCost: 1.23, formalUnitCost: 1.23 });
+    expect(result).toMatchObject({ totalPrice: 3.71, unitCost: 1.239, formalUnitCost: 1.239 });
   });
 
   it("independently excludes cancelled, current-month and invalid records", () => {

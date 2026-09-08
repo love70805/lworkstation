@@ -25,6 +25,26 @@ export function filterCostMatches(matches = [], query = "") {
   return matches.filter((match) => matchesCostQuery(match, query));
 }
 
+// One purchase decision per warehouse, but every linked platform identity is searchable.
+export function groupCostAnomalies(matches = [], salesLines = []) {
+  const groups = new Map();
+  for (const match of matches) {
+    if (!match.sourceWarehouseSku) continue;
+    if (!groups.has(match.sourceWarehouseSku)) groups.set(match.sourceWarehouseSku, []);
+    groups.get(match.sourceWarehouseSku).push({ ...match, attribute: match.attribute || salesLines
+      .filter((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(match.platformSku))
+      .map((row) => row.attribute).filter(Boolean).join("、") });
+  }
+  return [...groups.values()].flatMap((variants) => {
+    const representative = variants.find((match) => match.status === "anomaly_pending" || match.resolvedAnomalyCount);
+    return representative ? [{ ...representative, variants }] : [];
+  });
+}
+
+export function filterCostAnomalyGroups(groups = [], query = "") {
+  return groups.filter((group) => group.variants.some((match) => matchesCostQuery(match, query)));
+}
+
 export function filterCostMatchGroups(groups = [], query = "") {
   const normalizedQuery = normalizedSearch(query);
   if (!normalizedQuery) return groups;

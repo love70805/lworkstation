@@ -1,3 +1,4 @@
+import { formatErpUnitCost } from "../lib/profitPrecision";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -20,11 +21,12 @@ import { buildLedgerErpCostRequest } from "../lib/erpRequest";
 import { registerErpBridgeRequest } from "../lib/erpInboxTransport";
 import { buildProfitHref, filterProfitRows, readProfitFilter } from "../lib/profitFilter";
 import { exportWorkbook } from "../lib/spreadsheetExport";
-import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, filterCostMatches, groupAuxiliaryCostRows, groupCostMatchesBySkc, hasMappingIdentityIssue, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft } from "../lib/costMatching";
+import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, filterCostAnomalyGroups, groupCostAnomalies, groupAuxiliaryCostRows, groupCostMatchesBySkc, hasMappingIdentityIssue, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft } from "../lib/costMatching";
 import { clearCostDraft, invalidateLegacyCostDrafts, readRestorableCostDraft, writeCostDraft } from "../lib/costMatchingDraft";
 import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchingVoidBatchDialog } from "./CostMatchingInboxDialogs";
 
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
+const purchaseCurrency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2, maximumFractionDigits: 20 });
 async function sha256Text(value) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -537,15 +539,7 @@ export default function CostMatching() {
     }
   };
 
-  const anomalyGroups = useMemo(() => {
-    const groups = new Map();
-    (reconciliation?.matches ?? []).forEach((match) => {
-      if (!match.sourceWarehouseSku || groups.has(match.sourceWarehouseSku)) return;
-      if (match.status !== "anomaly_pending" && !match.resolvedAnomalyCount) return;
-      groups.set(match.sourceWarehouseSku, match);
-    });
-    return [...groups.values()];
-  }, [reconciliation?.matches]);
+  const anomalyGroups = useMemo(() => groupCostAnomalies(reconciliation?.matches ?? [], salesLines), [reconciliation?.matches, salesLines]);
 
   const openResolution = (match, anomaly, action) => {
     const record = match.costDecision?.selectedRecords?.find((item) => item.recordId === anomaly.recordId);
@@ -607,7 +601,7 @@ export default function CostMatching() {
         return <div className="cost-group-skc"><span className="cost-group-skc-label">{unmappedCount ? <button className="cost-group-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedUnmappedGroups((current) => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })} title={expanded ? "收起未映射证据" : "展开查看未映射原始证据"}>{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<strong className="mono">{group.platformSkc}</strong></button> : <strong className="mono">{group.platformSkc}</strong>}<small>{group.skuCount} 个 SKU{unmappedCount ? ` · ${unmappedCount} 条未映射` : ""}</small></span>{expanded ? <EvidencePreview variants={group.variants} /> : null}</div>;
       } },
       { id: "platformSku", header: "平台 SKU / 属性", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><strong className="mono" title={item.platformSku}>{item.platformSku}</strong><small>{item.attribute || "未提供属性"}</small></div>) },
-      { id: "unitCost", header: "成本预览", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}>{item.unitCost != null ? <span className="mono table-number">{currency(item.unitCost)}</span> : <span className="pending-text">--</span>}</div>), meta: { cellStyle: { textAlign: "right" } } },
+      { id: "unitCost", header: "成本预览", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}>{item.unitCost != null ? <span className="mono table-number">{formatErpUnitCost(item.unitCost)}</span> : <span className="pending-text">--</span>}</div>), meta: { cellStyle: { textAlign: "right" } } },
       { id: "warehouseSku", header: "仓库 SKU", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><span className="mono">{item.sourceWarehouseSku || "--"}</span></div>) },
       { id: "evidence", header: "核算证据", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}>{item.calculationCount ? <span><strong className="mono">{item.calculationCount} 条记录</strong><small className="row-subtitle">{item.dateRange || `${item.totalQuantity ?? "--"} 件 · ${currency(item.totalPrice ?? 0)}`}</small></span> : <span className="pending-text">兼容输入</span>}</div>) },
       { id: "status", header: "核对状态", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><div className="cost-status-stack">{item.status === "matched" ? <Badge tone={item.requiresReview ? "warning" : "success"}>{item.resolvedAnomalyCount > 0 ? "异常已在 Lworkstation 处置" : item.requiresReview ? "仓库 SKU 兜底" : "平台 SKU 匹配"}</Badge> : item.status === "anomaly_pending" ? <Badge tone="danger"><AlertCircle size={12} />{item.evidenceComplete ? "成本异常待处置" : "采购证据不完整"}</Badge> : <Badge tone="danger"><AlertCircle size={12} />缺少 ERP 成本</Badge>}{item.evidenceComplete === false ? <EvidenceDetails match={item} /> : null}</div></div>) },
@@ -617,7 +611,7 @@ export default function CostMatching() {
   const groupedMatches = useMemo(() => groupCostMatchesBySkc(reconciliation?.matches ?? []), [reconciliation?.matches]);
   const mappingIdentityIssue = useMemo(() => hasMappingIdentityIssue(reconciliation?.matches ?? []), [reconciliation?.matches]);
   const visibleGroupedMatches = useMemo(() => filterCostMatchGroups(groupedMatches, resultQuery), [groupedMatches, resultQuery]);
-  const visibleAnomalyGroups = useMemo(() => filterCostMatches(anomalyGroups, resultQuery), [anomalyGroups, resultQuery]);
+  const visibleAnomalyGroups = useMemo(() => filterCostAnomalyGroups(anomalyGroups, resultQuery), [anomalyGroups, resultQuery]);
 
   const resolutionDialog = (
     <Modal
@@ -629,9 +623,9 @@ export default function CostMatching() {
       footer={<><Button variant="ghost" onClick={() => setResolutionDraft(null)}>取消</Button><Button variant="primary" onClick={saveResolution}>保存并重新核算</Button></>}
     >
       {resolutionDraft ? <div className="cost-resolution-form">
-        <div className="cost-resolution-context"><span><small>仓库 SKU</small><strong className="mono">{resolutionDraft.warehouseSku}</strong></span><span><small>采购日期</small><strong>{resolutionDraft.purchaseDate || "--"}</strong></span><span><small>原采购单价</small><strong className="mono">{currency(resolutionDraft.originalUnitPrice)}</strong></span></div>
+        <div className="cost-resolution-context"><span><small>仓库 SKU</small><strong className="mono">{resolutionDraft.warehouseSku}</strong></span><span><small>采购日期</small><strong>{resolutionDraft.purchaseDate || "--"}</strong></span><span><small>原采购单价</small><strong className="mono">{purchaseCurrency(resolutionDraft.originalUnitPrice)}</strong></span></div>
         <div className="cost-resolution-reasons">{resolutionDraft.reasons.map((reason) => <Badge tone="warning" key={reason}>{ERP_COST_ANOMALY_LABELS[reason] ?? reason}</Badge>)}</div>
-        {resolutionDraft.baseline?.enabled ? <p className="cost-resolution-baseline">历史正价样本 {resolutionDraft.baseline.sampleCount} 条，中位价 {currency(resolutionDraft.baseline.median)}，参考区间 {currency(resolutionDraft.baseline.lowerBound)} 至 {currency(resolutionDraft.baseline.upperBound)}。</p> : <p className="cost-resolution-baseline">历史正价样本不足 6 条，本次仅依据 0 元或 1 元强提醒进行核对。</p>}
+        {resolutionDraft.baseline?.enabled ? <p className="cost-resolution-baseline">历史正价样本 {resolutionDraft.baseline.sampleCount} 条，中位价 {currency(resolutionDraft.baseline.median)}，参考区间 {currency(resolutionDraft.baseline.lowerBound)} 至 {currency(resolutionDraft.baseline.upperBound)}。</p> : <p className="cost-resolution-baseline">历史正价样本不足 6 条；本次仅核对零价或一元采购价。</p>}
         <div className="form-field"><label>{resolutionDraft.action === "confirm_true_price" ? "确认价格" : "修正后单价（CNY）"}</label><input className="text-input mono" type="number" min="0.0001" step="0.0001" disabled={resolutionDraft.action === "confirm_true_price"} value={resolutionDraft.resolvedUnitPrice} onChange={(event) => setResolutionDraft((current) => ({ ...current, resolvedUnitPrice: event.target.value }))} /></div>
         <div className="form-field"><label>核对说明（可选）</label><textarea className="text-area" rows="3" value={resolutionDraft.reason} onChange={(event) => setResolutionDraft((current) => ({ ...current, reason: event.target.value }))} placeholder="例如：供应商真实调价，已与采购单据核对" /></div>
       </div> : null}
@@ -734,17 +728,19 @@ export default function CostMatching() {
         actions={<><Button icon={platformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || locked || platformSkcs.length === 0} onClick={copySkcs}>{platformSkcs.length ? `复制 ${platformSkcs.length} 个平台 SKC` : "待补平台 SKC"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前成本" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></>}
       />
 
-      {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 尚不能发布正式成本</strong><small>{reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；请先核对 ERP 与当前账本的 SKU/SKC，再重新采集。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；请使用 ERP Assistant v8.0.15 重新抓取。` : `Lworkstation 发现 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请在下方完成修正或确认真实价格。`}</small></span></div> : null}
+      {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 尚不能发布正式成本</strong><small>{reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；请先核对 ERP 与当前账本的 SKU/SKC，再重新采集。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；请使用 ERP Assistant v8.0.15 重新抓取。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的正式单价，不能发布；请保留真实采购价格。" : `Lworkstation 发现 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请在下方完成修正或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}
 
       {visibleAnomalyGroups.length > 0 ? <Panel className="cost-resolution-panel">
         <div className="panel-header"><div className="panel-title"><AlertCircle size={19} /><h2>采购成本异常处置</h2></div><Badge tone="warning">Lworkstation 核对</Badge></div>
         <div className="cost-resolution-list">{visibleAnomalyGroups.map((match) => <section className="cost-resolution-group" key={match.sourceWarehouseSku}>
-          <header><span><small>仓库 SKU</small><strong className="mono">{match.sourceWarehouseSku}</strong></span><span><small>当前预览成本</small><strong className="mono">{match.unitCost == null ? "--" : currency(match.unitCost)}</strong></span>{match.baseline?.enabled ? <span><small>历史参考区间</small><strong className="mono">{currency(match.baseline.lowerBound)} - {currency(match.baseline.upperBound)}</strong></span> : <span><small>历史基线</small><strong>样本不足</strong></span>}</header>
+          <header><span><small>仓库 SKU</small><strong className="mono">{match.sourceWarehouseSku}</strong></span><span><small>当前预览成本</small><strong className="mono">{match.unitCost == null ? "--" : formatErpUnitCost(match.unitCost)}</strong></span>{match.baseline?.enabled ? <span><small>历史参考区间</small><strong className="mono">{currency(match.baseline.lowerBound)} - {currency(match.baseline.upperBound)}</strong></span> : <span><small>历史基线</small><strong>样本不足</strong></span>}</header>
+          {match.costDecision?.unitCost === 0 ? <p role="alert">正式成本按四位小数向零截断后为 ¥0.0000，不能发布。真实正价低于 0.0001 元时超出当前支持精度，请保留真实采购价格；实际零价按采购证据核对。</p> : null}
+          <p>关联平台 SKU：{match.variants.map((variant) => [variant.platformSku, variant.platformSkc, variant.attribute].filter(Boolean).join(" / ")).join("；")}</p>
           {!match.evidenceComplete ? <div className="cost-resolution-empty"><AlertCircle size={17} /><div><strong>当前批次没有完整采购历史</strong><small>旧版批次和手工汇总只能预览，不能通过人工确认变成 ERP 正式成本。</small><EvidenceDetails match={match} /></div></div> : <div className="cost-resolution-records">{(match.costDecision?.anomalies ?? []).map((anomaly) => {
             const record = match.costDecision?.selectedRecords?.find((item) => item.recordId === anomaly.recordId);
             return <article className={`cost-resolution-record ${anomaly.status === "resolved" ? "resolved" : "pending"}`} key={anomaly.recordId}>
-              <div><strong>{record?.purchaseDate || "日期未知"} · <span className="mono">{currency(anomaly.originalUnitPrice)}</span></strong><small>{anomaly.reasons.map((reason) => ERP_COST_ANOMALY_LABELS[reason] ?? reason).join("；")}</small>{anomaly.resolution ? <small>已由 {anomaly.resolution.resolvedBy} 于 {new Date(anomaly.resolution.resolvedAt).toLocaleString("zh-CN")} {anomaly.resolution.action === "confirm_true_price" ? "确认真实价格" : `修正为 ${currency(anomaly.resolution.resolvedUnitPrice)}`}</small> : null}</div>
-              <div className="cost-resolution-actions">{anomaly.status === "resolved" ? <Badge tone="success">已处置</Badge> : <><Button icon={Pencil} onClick={() => openResolution(match, anomaly, "correct_price")}>修正价格</Button>{anomaly.originalUnitPrice > 0 ? <Button variant="ghost" onClick={() => openResolution(match, anomaly, "confirm_true_price")}>确认真实价格</Button> : null}</>}</div>
+              <div><strong>{record?.purchaseDate || "日期未知"} · <span className="mono">{purchaseCurrency(anomaly.originalUnitPrice)}</span></strong><small>{anomaly.reasons.map((reason) => ERP_COST_ANOMALY_LABELS[reason] ?? reason).join("；")}</small>{anomaly.resolution ? <small>已由 {anomaly.resolution.resolvedBy} 于 {new Date(anomaly.resolution.resolvedAt).toLocaleString("zh-CN")} {anomaly.resolution.action === "confirm_true_price" ? "确认真实价格" : `修正为 ${purchaseCurrency(anomaly.resolution.resolvedUnitPrice)}`}</small> : null}</div>
+              <div className="cost-resolution-actions">{anomaly.status === "resolved" && match.costDecision?.unitCost > 0 ? <Badge tone="success">已处置</Badge> : <><Button icon={Pencil} onClick={() => openResolution(match, anomaly, "correct_price")}>修正价格</Button>{anomaly.originalUnitPrice > 0 ? <Button variant="ghost" onClick={() => openResolution(match, anomaly, "confirm_true_price")}>确认真实价格</Button> : null}</>}</div>
             </article>;
           })}</div>}
         </section>)}</div>
