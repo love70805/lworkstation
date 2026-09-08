@@ -6,7 +6,7 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.6](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)，安装包已整理至 `latest/`，四个公开资产下载回读校验通过。下载入口、发布状态与待验收事项以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
+当前公开稳定版为 [0.2.7](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)，安装包已整理至 `latest/`，四个公开资产下载回读校验通过，默认开启稳定检查。下载入口、发布状态与待验收事项以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
 
 ## 版本清单
 
@@ -14,11 +14,14 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.2.6` | 已公开稳定版，GitHub Latest；手工安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)；稳定更新通道关闭 |
+| `0.2.7` | 已公开稳定版，GitHub Latest；默认开启稳定检查 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)；旧版首次需手工安装 |
+| `0.2.6` | 历史稳定版；原资产保留 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)；该旧包更新关闭 |
 | `0.2.6-beta.7` | 已公开预发布，当前公开 Beta | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，本机 `prerelease/0.2.6-beta.7/` |
 | `0.2.6-beta.8` Security QA | 本机隔离安装、覆盖升级与重启验收通过；未公开发布 | 本机 `candidates/0.2.6-beta.8-security-qa/`，详见 [安全验收记录](../docs/SECURITY_HARDENING_2026-09.md) |
 
 QA 包使用独立应用身份，不能作为正式应用的更新包上传。GitHub Releases 只列出实际创建的发布条目；合并代码和更新本清单不会自动创建 Release。安装包、运行日志及数据库不提交 Git，本机目录仅在归档机器上存在。
+
+本机 beta.8 QA 已补“Lworkstation QA beta.8（仅测试）”桌面快捷方式，使用隔离启动器且公开更新关闭。0.2.7 临时安装验收应用已卸载，只保留证据。旧公开 beta.7 没有本轮通道修复，本轮未发布新 Beta。
 
 ## 公开 Beta 构建与归档
 
