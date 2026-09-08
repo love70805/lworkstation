@@ -175,3 +175,7 @@
 ### 专职任务已建立并接单
 
 2026-09-08：用户授权建立长期任务‘利润与 ERP’，任务 ID 01a07ff8-148a-7bc3-b8ee-2b4458a60878。已在应用管理的 f861/Lworkstation Worktree 开始实施，分支 codex/profit-batch-ledger；同步集成基线 77b839f 后承接 contract 9380ec0（专职分支对应提交 5b8edf0）。主责 ImportPreview、利润 repository、导入 Worker/client、局部导入样式和测试；其他业务任务不受影响。按 BATCH_LEDGER_IMPORT.md 完成防重复、覆盖确认、整批事务、定稿保护和多文件浏览器验收，交付独立提交，由项目主线审查、完整回归后集成。此前‘实现待分工’状态已结束，目前实施中。
+
+### 批量台账导入主线验收通过
+
+利润与 ERP 独立交付 964f395，主线承接 c35593b；主线 Spec/Standards 审查、77 文件 / 532 项测试、前端完整 release:check 与 desktop verify 均通过。四格式四店专职浏览器验收及主线独立双文件实际入账通过，记录见 [批量导入任务包](integration/BATCH_LEDGER_IMPORT.md)。当前进入 GitHub PR 集成；未打包、未发布。专职停止实现等待审查结果。
