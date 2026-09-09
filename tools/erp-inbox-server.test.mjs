@@ -1194,3 +1194,5 @@ try {
   child.kill("SIGINT");
   await fs.rm(spoolPath, { force: true });
 }
+
+await import("./erp-inbox-spool.test.mjs");

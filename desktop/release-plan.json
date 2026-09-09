@@ -1,6 +1,6 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
@@ -62,6 +62,10 @@
     {
       "module": "desktop-single-instance",
       "commit": "2b02063"
+    },
+    {
+      "commit": "6c74307",
+      "module": "erp-inbox-atomic-windows-recovery"
     }
   ]
 }

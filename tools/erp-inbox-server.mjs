@@ -41,9 +41,30 @@ async function readSpool() {
 
 async function writeSpool(records) {
   await fs.mkdir(path.dirname(spoolPath), { recursive: true });
-  const temporaryPath = `${spoolPath}.tmp`;
-  await fs.writeFile(temporaryPath, JSON.stringify(records, null, 2), "utf8");
-  await fs.rename(temporaryPath, spoolPath);
+  const temporaryPath = `${spoolPath}.${crypto.randomUUID()}.tmp`;
+  let owned = false;
+  try {
+    const handle = await fs.open(temporaryPath, "wx");
+    owned = true;
+    try {
+      await handle.writeFile(JSON.stringify(records, null, 2), "utf8");
+    } finally {
+      await handle.close();
+    }
+    // Windows may briefly deny replacement while a scanner holds the target.
+    // Never delete the committed file: an exhausted retry leaves it intact.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await fs.rename(temporaryPath, spoolPath);
+        break;
+      } catch (error) {
+        if (!["EPERM", "EACCES", "EBUSY"].includes(error.code) || attempt >= 5) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20 * 2 ** attempt));
+      }
+    }
+  } finally {
+    if (owned) await fs.rm(temporaryPath, { force: true }).catch(() => {});
+  }
 }
 
 function json(res, status, payload) {
@@ -847,13 +868,14 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return json(res, 204, null);
 
   let releaseSpool = null;
-  if (req.method === "POST") {
+  try {
+    // Receive the bounded body before reserving the spool; a slow sender must
+    // not block status polling or other completed requests.
+    const payload = req.method === "POST" ? JSON.parse(await readBody(req)) : null;
     const previousWrite = spoolWriteChain;
     spoolWriteChain = new Promise((resolve) => { releaseSpool = resolve; });
     await previousWrite;
-  }
-
-  try {
+    // GET can expire requests too, so every read/modify/write shares this queue.
     const records = await readSpool();
     const expiredChanged = expireRegisteredRequests(records);
     if (expiredChanged) await writeSpool(records);
@@ -921,7 +943,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method !== "POST") return json(res, 405, { error: "METHOD_NOT_ALLOWED" });
-    const payload = JSON.parse(await readBody(req));
     const requestUrl = new URL(req.url, `http://${bindHost}:${port}`);
     if (requestUrl.pathname === "/selection/v1/extension-status") {
       const extensionId = String(payload?.extensionId ?? "selection-1688-capture").trim();
