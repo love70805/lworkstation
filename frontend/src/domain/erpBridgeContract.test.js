@@ -39,7 +39,7 @@ describe("ERP bridge contract", () => {
     expect(() => validateErpBridgeRequest({ ...request, summary: { querySkcCount: 9 } })).toThrow("数量校验失败");
   });
 
-  it("requires response query scope to equal the request scope", () => {
+  it("accepts a nonempty registered subset and rejects queries outside the request", () => {
     const request = buildErpBridgeRequest({ request: requestFixture() });
     const response = buildErpCostBatchEnvelope({
       batchId: "ERP-BATCH-1",
@@ -52,7 +52,8 @@ describe("ERP bridge contract", () => {
       warehouseEvidence: [{ warehouseSku: "WH-1", evidenceComplete: true, purchaseRecords: [{ recordId: "R-1", quantity: 2, unitPrice: 4, purchaseDate: "2026-06-01" }] }],
     });
     expect(validateErpBridgeResponse(response, request).rows).toHaveLength(1);
-    expect(() => validateErpBridgeResponse({ ...response, query: { ...response.query, platformSkcs: [{ platformSkc: "SKC-1" }] }, summary: { ...response.summary, querySkcCount: 1 } }, request)).toThrow("集合");
+    expect(validateErpBridgeResponse({ ...response, query: { ...response.query, platformSkcs: [{ platformSkc: "SKC-1" }] }, summary: { ...response.summary, querySkcCount: 1 } }, request).rows).toHaveLength(1);
+    expect(() => validateErpBridgeResponse({ ...response, query: { ...response.query, platformSkcs: [{ platformSkc: "OUTSIDE" }] }, summary: { ...response.summary, querySkcCount: 1 } }, request)).toThrow();
   });
 
   it("wraps the real v8.0 legacy rows and enriches SKC only from the ledger mapping", () => {

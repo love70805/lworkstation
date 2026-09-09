@@ -54,7 +54,7 @@ function assertExpected(actual, expected, label) {
 function sameSkcSet(left, right) {
   const a = new Set(left.map((item) => item.canonicalPlatformSkc));
   const b = new Set(right.map((item) => item.canonicalPlatformSkc));
-  return a.size === b.size && [...a].every((value) => b.has(value));
+  return a.size > 0 && [...a].every((value) => b.has(value));
 }
 
 export function buildErpBridgeRequest({ request } = {}) {

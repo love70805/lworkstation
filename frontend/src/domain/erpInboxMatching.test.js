@@ -21,7 +21,12 @@ const inbox = {
 };
 
 describe("ERP 收件批次严格匹配", () => {
-  it("requires ledger, request, and the complete canonical SKC set", () => {
+  it("keeps explicitly unloaded batches manual and rejects workspace mismatch", () => {
+    const ledger = { id: "LEDGER-1", status: "cost_pending" };
+    expect(evaluateErpInboxMatch({ inbox: { ...inbox, autoLoadSuppressed: true }, request, ledger })).toMatchObject({ scopeMatched: true, canAutoLoad: false, reason: "manually_unloaded" });
+    expect(evaluateErpInboxMatch({ inbox: { ...inbox, workspaceId: "OTHER" }, request, ledger })).toMatchObject({ scopeMatched: false, reason: "workspace_mismatch" });
+  });
+  it("requires ledger and request identity and accepts a nonempty registered SKC subset", () => {
     expect(evaluateErpInboxMatch({ inbox, request, ledger: { id: "LEDGER-1", status: "cost_pending" } })).toMatchObject({
       scopeMatched: true,
       canAutoLoad: true,
@@ -38,7 +43,7 @@ describe("ERP 收件批次严格匹配", () => {
       inbox: { ...inbox, envelope: { batch: { ...inbox.envelope.batch, query: { platformSkcs: [{ platformSkc: "SKC-1" }] } } } },
       request,
       ledger: { id: "LEDGER-1", status: "cost_pending" },
-    })).toMatchObject({ scopeMatched: false, canAutoLoad: false, reason: "skc_mismatch" });
+    })).toMatchObject({ scopeMatched: true, canAutoLoad: true, reason: "matched" });
   });
 
   it("keeps matched batches pending for finalized or locked ledgers", () => {

@@ -354,7 +354,7 @@ try {
   response = await post("/erp/v1/requests", request("A", "SKU-A"));
   assert.equal(response.status, 202);
   response = await post("/erp/v1/requests", request("A", "SKU-A"));
-  assert.deepEqual(await response.json(), { accepted: true, idempotent: true, requestId: "A" });
+  assert.deepEqual(await response.json(), { accepted: true, idempotent: true, requestId: "A", status: "registered" });
   response = await fetch(`${base}/erp/v1/requests?includeHistory=true`);
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "INVALID_ERP_REQUEST_QUERY");
@@ -1174,6 +1174,23 @@ try {
   assert.equal(sharedScopeBatch.evidenceStatus, "complete");
   assert.equal(sharedScopeBatch.sourceMeta.evidenceComplete, true);
 
+  const subsetRequest = { id: "SUBSET", workspaceId: "workspace-subset", ledgerId: "ledger-subset", platformSkcs: ["SKC-A", "SKC-B"] };
+  response = await post("/erp/v1/requests", { request: subsetRequest, expectedSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-A" }, { platformSku: "SKU-B", platformSkc: "SKC-B" }] });
+  assert.equal(response.status, 202);
+  const subsetDelivery = { ...acceptedResultPayload, requestId: "SUBSET", workspaceId: "workspace-subset", ledgerId: "ledger-subset", resultDeliveryId: "RESULT-SUBSET-1" };
+  response = await post("/erp/v1/cost-results", subsetDelivery);
+  assert.equal(response.status, 202, "registered two-SKC scope accepts one-SKC evidence");
+  assert.equal((await response.json()).envelope.batch.query.platformSkcs.length, 1);
+  response = await post("/erp/v1/cost-results", { ...subsetDelivery, resultDeliveryId: "RESULT-SUBSET-2" });
+  assert.equal(response.status, 202, "same query with a new delivery remains usable without re-registration");
+  response = await post("/erp/v1/cost-results", subsetDelivery);
+  assert.equal((await response.json()).idempotent, true);
+  response = await post("/erp/v1/cost-results", { ...subsetDelivery, resultDeliveryId: "RESULT-SUBSET-OUTSIDE", querySkcs: ["OUTSIDE"] });
+  assert.equal(response.status, 409);
+  response = await post("/erp/v1/requests", { request: { ...subsetRequest, workspaceId: "WRONG", cancel: true } });
+  assert.equal(response.status, 409);
+  response = await post("/erp/v1/requests", { request: { ...subsetRequest, cancel: true } });
+  assert.equal((await response.json()).status, "superseded");
   await post("/erp/v1/requests", request("EXPIRED", "SKU-EXPIRED"));
   const spool = JSON.parse(await fs.readFile(spoolPath, "utf8"));
   const expired = spool.find((item) => item.kind === "request" && item.requestId === "EXPIRED");
