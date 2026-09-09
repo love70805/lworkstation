@@ -17,14 +17,14 @@ export function ensureAutoErpRequest(input, { latest, save, register, isCurrent 
     if (!isCurrent()) return null;
     const sameScope = existing && erpRequestScopeKey({ ...existing, ledger: input.ledger }) === erpRequestScopeKey(input);
     const reusable = sameScope && now() - Date.parse(existing.requestedAt) < 90 * 60 * 1000;
-    let request = reusable ? existing : { ...buildLedgerErpCostRequest(input), supersedesRequestId: existing?.id ?? null };
+    let request = { ...(reusable ? existing : { ...buildLedgerErpCostRequest(input), supersedesRequestId: existing?.id ?? null }), replaceLedgerScope: true };
     await save(request);
     if (!isCurrent()) return null;
     let response = await register({ request, expectedSkus: input.expectedSkus });
     if (!response?.accepted) throw new Error("本机服务尚未确认登记请求");
     if (!isCurrent()) { await register({ request: { ...request, cancel: true } }); return null; }
     if (response.status && response.status !== "registered") {
-      request = { ...buildLedgerErpCostRequest(input), supersedesRequestId: request.id };
+      request = { ...buildLedgerErpCostRequest(input), supersedesRequestId: request.id, replaceLedgerScope: true };
       await save(request);
       if (!isCurrent()) return null;
       response = await register({ request, expectedSkus: input.expectedSkus });
@@ -42,7 +42,7 @@ export function cancelAutoErpRequest(ledger, { latest, register }) {
   const key = `${ledger.workspaceId}:${ledger.id}`;
   const run = (chains.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => {
     const request = await latest(ledger.id);
-    if (request?.workspaceId === ledger.workspaceId) return register({ request: { ...request, cancel: true } });
+    if (request?.workspaceId === ledger.workspaceId) return register({ request: { ...request, cancel: true, replaceLedgerScope: true } });
     return null;
   });
   chains.set(key, run);

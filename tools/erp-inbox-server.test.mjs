@@ -1175,6 +1175,27 @@ try {
   assert.equal(sharedScopeBatch.sourceMeta.evidenceComplete, true);
 
   const subsetRequest = { id: "SUBSET", workspaceId: "workspace-subset", ledgerId: "ledger-subset", platformSkcs: ["SKC-A", "SKC-B"] };
+  const lineageRequest = { id: "LINEAGE-R1", workspaceId: "workspace-lineage", ledgerId: "ledger-lineage", platformSkcs: ["SKC-A", "SKC-B", "SKC-C"], replaceLedgerScope: true };
+  await post("/erp/v1/requests", { request: lineageRequest });
+  await post("/erp/v1/requests", { request: { ...lineageRequest, id: "LINEAGE-OTHER-LEDGER", ledgerId: "other-ledger", platformSkcs: ["UNRELATED"] } });
+  await post("/erp/v1/requests", { request: { ...lineageRequest, id: "LINEAGE-OTHER-WORKSPACE", workspaceId: "other-workspace" } });
+  // R2 was saved locally while offline; the server never received it.
+  const lineageR3 = { ...lineageRequest, id: "LINEAGE-R3", supersedesRequestId: "LINEAGE-R2-OFFLINE", platformSkcs: ["SKC-A"] };
+  response = await post("/erp/v1/requests", { request: lineageR3 });
+  assert.equal(response.status, 202);
+  let lineageHistory = await (await fetch(`${base}/erp/v1/requests?workspaceId=workspace-lineage&includeHistory=true`)).json();
+  assert.equal(lineageHistory.records.find((item) => item.requestId === "LINEAGE-R1").status, "superseded");
+  assert.deepEqual(lineageHistory.records.filter((item) => item.status === "registered" && item.ledgerId === "ledger-lineage").map((item) => item.requestId), ["LINEAGE-R3"]);
+  assert.equal(lineageHistory.records.filter((item) => item.status === "registered" && item.platformSkcs.includes("SKC-A")).length, 1);
+  assert.equal(lineageHistory.records.find((item) => item.requestId === "LINEAGE-OTHER-LEDGER").status, "registered");
+  // Cancellation must also work when the latest local ID never reached the server.
+  response = await post("/erp/v1/requests", { request: { ...lineageR3, id: "LINEAGE-R4-OFFLINE", cancel: true } });
+  assert.equal(response.status, 200);
+  lineageHistory = await (await fetch(`${base}/erp/v1/requests?workspaceId=workspace-lineage&includeHistory=true`)).json();
+  assert.equal(lineageHistory.records.filter((item) => item.status === "registered" && item.ledgerId === "ledger-lineage").length, 0);
+  assert.equal(lineageHistory.records.find((item) => item.requestId === "LINEAGE-OTHER-LEDGER").status, "registered");
+  const otherWorkspaceHistory = await (await fetch(`${base}/erp/v1/requests?workspaceId=other-workspace&includeHistory=true`)).json();
+  assert.equal(otherWorkspaceHistory.records.find((item) => item.requestId === "LINEAGE-OTHER-WORKSPACE").status, "registered");
   response = await post("/erp/v1/requests", { request: subsetRequest, expectedSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-A" }, { platformSku: "SKU-B", platformSkc: "SKC-B" }] });
   assert.equal(response.status, 202);
   const subsetDelivery = { ...acceptedResultPayload, requestId: "SUBSET", workspaceId: "workspace-subset", ledgerId: "ledger-subset", resultDeliveryId: "RESULT-SUBSET-1" };

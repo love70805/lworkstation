@@ -37,4 +37,15 @@ describe("automatic ERP request lifecycle", () => {
     const deps = dependencies(); deps.register.mockResolvedValue({ accepted: false });
     await expect(ensureAutoErpRequest(input(), deps)).rejects.toThrow("尚未确认");
   });
+  it("replaces the remote ledger scope after an intermediate offline local request", async () => {
+    const scope = input(); const deps = dependencies();
+    const r1 = await ensureAutoErpRequest({ ...scope, platformSkcs: ["A", "B", "C"] }, deps);
+    deps.register.mockRejectedValueOnce(new Error("offline"));
+    await expect(ensureAutoErpRequest(scope, deps)).rejects.toThrow("offline");
+    const r3 = await ensureAutoErpRequest({ ...scope, platformSkcs: ["A"] }, deps);
+    expect(r3.supersedesRequestId).not.toBe(r1.id);
+    expect(deps.register.mock.calls.at(-1)[0].request).toMatchObject({ id: r3.id, replaceLedgerScope: true, workspaceId: "W", ledgerId: scope.ledger.id });
+    await cancelAutoErpRequest(scope.ledger, deps);
+    expect(deps.register.mock.calls.at(-1)[0].request).toMatchObject({ cancel: true, replaceLedgerScope: true });
+  });
 });

@@ -1039,8 +1039,24 @@ const server = http.createServer(async (req, res) => {
       const ledgerId = payload?.request?.ledgerId ?? payload?.ledgerId ?? null;
       const platformSkcs = Array.isArray(payload?.request?.platformSkcs) ? payload.request.platformSkcs : [];
       const expectedSkus = Array.isArray(payload?.expectedSkus) ? payload.expectedSkus : [];
+      const replaceLedgerScope = payload?.request?.replaceLedgerScope === true;
+      if (replaceLedgerScope && (!requestId || !workspaceId || !String(ledgerId ?? "").trim())) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "替换账本关联必须提供工作区、账本与请求标识。" });
+      const supersedeLedgerRequests = (exceptRequestId = null) => {
+        let changed = false;
+        for (const record of records) {
+          if (record.kind === "request" && record.status === "registered" && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) {
+            record.status = "superseded"; changed = true;
+          }
+        }
+        return changed;
+      };
       if (payload?.request?.cancel === true) {
         const existing = records.find((item) => item.kind === "request" && item.requestId === requestId);
+        if (replaceLedgerScope) {
+          if (existing && (existing.workspaceId !== workspaceId || existing.ledgerId !== ledgerId)) return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "取消请求的工作区或账本不匹配。" });
+          if (supersedeLedgerRequests()) await writeSpool(records);
+          return json(res, 200, { accepted: true, requestId, status: "superseded" });
+        }
         if (!existing || existing.workspaceId !== workspaceId || existing.ledgerId !== ledgerId) return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "取消请求的工作区或账本不匹配。" });
         if (existing.status === "registered") { existing.status = "superseded"; await writeSpool(records); }
         return json(res, 200, { accepted: true, requestId, status: existing.status });
@@ -1062,10 +1078,12 @@ const server = http.createServer(async (req, res) => {
             requestId,
           });
         }
+        if (replaceLedgerScope && existingRequest.status === "registered" && supersedeLedgerRequests(requestId)) await writeSpool(records);
         return json(res, 200, { accepted: true, idempotent: true, requestId, status: existingRequest.status });
       }
       const superseded = records.find((item) => item.kind === "request" && item.requestId === payload.request?.supersedesRequestId);
       if (superseded && superseded.workspaceId === workspaceId && superseded.ledgerId === ledgerId) superseded.status = "superseded";
+      if (replaceLedgerScope) supersedeLedgerRequests(requestId);
       records.push({
         kind: "request",
         requestId,
