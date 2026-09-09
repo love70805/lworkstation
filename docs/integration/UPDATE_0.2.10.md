@@ -54,3 +54,7 @@
 4. 桌面：pnpm --dir desktop verify、相关 popup/update/installer smoke；前端适配需 frontend test/build 与窗口视觉证据。
 5. 主线 pnpm --dir frontend test、build、release:check；desktop verify 与 packaged/update smoke；合成数据端到端覆盖采集→接收→核对→人工更正→定稿→撤销保护，安装向导与升级路径验收。
 6. 版本预定 0.2.10 稳定版。安装包仅主工作区集成分支构建，登记 releases/candidates，代码 PR 与 CI 完成后公开资产回读哈希，才标记发布。真实 ERP 账号现场验证不足应如实记录。
+
+## 交付范围收口
+
+用户确认纯本机版本交付：本轮保持默认 local 运行时，取消 SQL 0012 迁移文件与测试，不连接或部署云端数据库。同步适配代码保留但不据此承诺云端人工成本兼容。继续受保护分支集成、正式稳定包构建、安装与发布验收。
