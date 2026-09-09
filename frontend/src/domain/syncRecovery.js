@@ -299,7 +299,8 @@ export function replaySyncRecoveryPayload(payload) {
         );
         break;
       }
-      case "reopened_for_cost_recalculation": {
+      case "reopened_for_cost_recalculation":
+      case "ledger_reopened_for_cost_correction": {
         const ledger = cloneRecord(snapshot);
         putRecord(state.ledgers, ledger, "月度账本");
         state.profitLines = state.profitLines.filter((row) => row.ledgerId !== ledger.id);

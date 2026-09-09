@@ -9,6 +9,7 @@ import {
   revokeApproved1688Fallback,
   saveApproved1688Fallback,
   updateLedgerWarehouseRate,
+  reopenLedgerForCostCorrection,
 } from "../data/database";
 import { resolveFormalCostDecision } from "../domain/costPolicy";
 import { canonicalPlatformSku } from "../domain/identifiers";
@@ -109,6 +110,10 @@ function prepareProfitTableRows(rows) {
 
 export function ProfitWorkspaceContent() {
   const [manualTarget, setManualTarget] = useState(null);
+  const [reopenDialog, setReopenDialog] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopening, setReopening] = useState(false);
+  const [reopenError, setReopenError] = useState("");
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { notify } = useToast();
@@ -496,6 +501,16 @@ export function ProfitWorkspaceContent() {
     }
   };
 
+  const reopenLedger = async () => {
+    setReopening(true); setReopenError("");
+    try {
+      await reopenLedgerForCostCorrection({ ledgerId: snapshot.ledger.id, reason: reopenReason });
+      setReopenDialog(false);
+      notify("本月全部店铺已重开，原定稿快照保留在审计中。更正完成后请重新核对并定稿。");
+    } catch (error) { setReopenError(error.message); }
+    finally { setReopening(false); }
+  };
+
   if (snapshot === undefined) {
     return <><Panel className="route-loader">正在读取月度账本...</Panel></>;
   }
@@ -558,9 +573,15 @@ export function ProfitWorkspaceContent() {
         </div>
         <DataTable className="profit-table" columns={columns} data={tableRows} getRowId={(row) => row.id} getRowProps={(row) => ({ className: `${row.groupStart ? "profit-group-start " : ""}${!row.finalizable ? "missing-profit-row" : ""}` })} />
       </Panel>
+
+      {snapshot.ledger.status === "finalized" ? <Button icon={RotateCcw} onClick={() => { setReopenReason(""); setReopenError(""); setReopenDialog(true); }}>重开本月全部店铺核算</Button> : null}
       </details>
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本；定稿后不能直接修改。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
       {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={manualTarget} onClose={() => setManualTarget(null)} /> : null}
+      <Modal open={reopenDialog} title="确认重开本月全部店铺" description="重开后可更正成本并重新定稿。原定稿明细保留在审计记录中，已发布 ERP 成本继续有效。" onClose={() => { if (!reopening) setReopenDialog(false); }} footer={<><Button disabled={reopening} onClick={() => setReopenDialog(false)}>取消</Button><Button variant="primary" disabled={!reopenReason.trim() || reopening} loading={reopening} onClick={reopenLedger}>确认重开</Button></>}>
+        <div className="form-field"><label htmlFor="profit-reopen-reason">重开原因</label><input id="profit-reopen-reason" className="text-input" value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} /></div>
+        {reopenError ? <p role="alert">{reopenError}</p> : null}
+      </Modal>
       <Modal
         open={Boolean(approvalTarget)}
         title="确认人工参考成本"

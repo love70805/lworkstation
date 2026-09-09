@@ -573,7 +573,7 @@ function businessOperations(projection, workspaceId) {
     values: [workspaceId, entityId],
   }];
   if (entityType === "monthly_ledger" && event.action === "finalized") return finalizedLedgerPlan(snapshot, workspaceId, event.eventId, entityId);
-  if (entityType === "monthly_ledger" && event.action === "reopened_for_cost_recalculation") return reopenedLedgerPlan(snapshot, workspaceId, event.eventId, entityId, event);
+  if (entityType === "monthly_ledger" && ["reopened_for_cost_recalculation", "ledger_reopened_for_cost_correction"].includes(event.action)) return reopenedLedgerPlan(snapshot, workspaceId, event.eventId, entityId, event);
   if (entityType === "monthly_ledger") {
     assertEntityId(snapshot, entityId, "月度账本");
     return [ledgerUpsert(snapshot, workspaceId, event.eventId)];

@@ -30,6 +30,7 @@ export const SYNC_ACTION_RULES = Object.freeze({
   revoked: business("cost_approval", [["cost_approvals", "update"]]),
   finalized: business("monthly_ledger", [["profit_lines", "insert"]]),
   reopened_for_cost_recalculation: business("monthly_ledger", [["ledgers", "update"], ["profit_lines", "delete"]]),
+  ledger_reopened_for_cost_correction: business("monthly_ledger", [["ledgers", "update"], ["profit_lines", "delete"]]),
   // Explicitly supported metadata events never project into business tables.
   backup_exported: audit(),
   cloud_seed_exported: audit(),

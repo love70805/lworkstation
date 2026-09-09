@@ -1261,6 +1261,32 @@ export async function getLatestLedgerCosts(ledgerId) {
   return [...latest.values()].filter((row) => batchStatus.get(row.batchId) === "published");
 }
 
+export async function reopenLedgerForCostCorrection({ ledgerId, reason } = {}) {
+  const normalizedReason = String(reason ?? "").trim();
+  if (!normalizedReason) throw new Error("重开账本必须填写原因。");
+  return db.transaction("rw", db.settings, db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.profitLines, db.auditEvents, async () => {
+    const member = await getActiveMemberContext();
+    const ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || ledger.workspaceId !== member.workspaceId || !["admin", "finance"].includes(member.role)) throw new Error("当前成员无此账本的财务写权限。");
+    if (ledger.status !== "finalized") throw new Error("只有已定稿且未锁定的账本可以重开。");
+    const profitLines = await db.profitLines.where("ledgerId").equals(ledgerId).toArray();
+    if (!profitLines.length || !ledger.profitSummary) throw new Error("定稿快照缺失，不能重开账本。");
+    const updatedAt = new Date().toISOString();
+    const { profitSummary: _summary, finalizedAt: _at, finalizedBy: _by, formulaVersion: _formula, ...draft } = ledger;
+    const coverage = await readLedgerCostCoverage(ledgerId);
+    const savedLedger = { ...draft, ...buildLedgerCoveragePatch(draft, coverage, updatedAt) };
+    await db.auditEvents.add({
+      workspaceId: ledger.workspaceId, objectType: "monthly_ledger", objectId: ledgerId,
+      action: "ledger_reopened_for_cost_correction", actorId: member.memberId, createdAt: updatedAt,
+      before: { status: ledger.status, snapshot: { ledger, profitLines } },
+      after: { status: savedLedger.status, reason: normalizedReason, snapshot: savedLedger },
+    });
+    await db.profitLines.where("ledgerId").equals(ledgerId).delete();
+    await db.ledgers.put(savedLedger);
+    return savedLedger;
+  });
+}
+
 export async function voidPublishedErpCostBatch({
   inboxId,
   reason,
