@@ -43,7 +43,9 @@ function formatDate(value) {
 }
 
 function requestResize() {
-  const height = Math.ceil(card?.scrollHeight || 0) + 8;
+  const style = card ? getComputedStyle(card) : null;
+  const borders = style ? parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) : 0;
+  const height = Math.ceil((card?.scrollHeight || 0) + borders) + 8;
   if (height > 0) void window.updatePopover.resize(height);
 }
 
@@ -54,6 +56,7 @@ function render(state) {
   const update = state.update;
   const release = update.release || {};
   currentVersion.textContent = update.currentVersion ? `v${String(update.currentVersion).replace(/^v/i, "")}` : "--";
+  document.querySelector("#update-channel").textContent = /-beta(?:[.+]|$)/.test(update.currentVersion || "") ? "Beta" : "稳定版";
   message.textContent = update.message || "更新状态不可用";
   stateBadge.textContent = statusLabels[update.status] || "未知";
   stateBadge.dataset.tone = update.status === "error" ? "danger" : ["available", "downloading", "downloaded"].includes(update.status) ? "primary" : "muted";
@@ -70,7 +73,7 @@ function render(state) {
   progressBar.style.width = `${progress}%`;
   progressValue.textContent = `${Math.round(progress)}%`;
 
-  notesSection.hidden = !release.notes && !release.releaseUrl;
+  notesSection.hidden = !release.notes && !release.releaseUrl && !release.size && !release.releaseDate;
   releaseNotes.hidden = !release.notes;
   releaseNotes.textContent = release.notes || "";
   releaseNotesAction.hidden = !release.releaseUrl;
@@ -116,6 +119,7 @@ document.addEventListener("keydown", (event) => {
   event.preventDefault();
   void window.updatePopover.close();
 });
+notesSection.addEventListener("toggle", requestResize);
 window.updatePopover.onState(render);
 window.updatePopover.getState().then(render);
 window.addEventListener("load", () => { card?.focus(); requestResize(); });

@@ -52,7 +52,9 @@ async function loadExtension(extensionRoot, { cache, fetchImpl } = {}) {
   if (cache) window.localStorage.setItem(cacheKey, JSON.stringify(cache));
   try {
     for (const file of ["result-policy.js", "request-context.js", "content.js"]) {
-      window.eval(await readFile(path.join(extensionRoot, "src", file), "utf8"));
+      let source = await readFile(path.join(extensionRoot, "src", file), "utf8");
+      if (file === "content.js") source = source.replace("function handleDeliveryStatus(detail = {}) {", "window.__deliveryStatus = handleDeliveryStatus; function handleDeliveryStatus(detail = {}) {");
+      window.eval(source);
     }
   } catch (error) {
     await window.happyDOM.close();
@@ -187,6 +189,22 @@ async function verifyCalculatedCsv(extensionRoot) {
 export async function verifyCsvExport(extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension")) {
   await verifyCachedCsv(extensionRoot);
   await verifyCalculatedCsv(extensionRoot);
+  const extension = await loadExtension(extensionRoot, { cache: { timestamp: Date.now(), results: [cachedResult("CURRENT-SKU")], meta: { filters: {} }, resultDeliveryId: "ERP-RESULT-CURRENT" } });
+  try {
+    const { window } = extension;
+    let copied = "";
+    Object.defineProperty(window.navigator, "clipboard", { value: { writeText: async (text) => { copied = text; } }, configurable: true });
+    window.__deliveryStatus({ resultDeliveryId: "ERP-RESULT-OLD", status: "success", envelope: { batchId: "OLD" } });
+    window.document.getElementById("erpa-copy").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(copied.includes("CURRENT-SKU"), "old ACK must not replace the current TSV with old JSON");
+    assert.ok(!copied.includes('"batchId":"OLD"'));
+    window.__deliveryStatus({ resultDeliveryId: "ERP-RESULT-CURRENT", status: "success", envelope: { batchId: "CURRENT" } });
+    window.document.getElementById("erpa-copy").click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(JSON.parse(copied).batchId, "CURRENT");
+    assert.equal(JSON.parse(window.localStorage.getItem(cacheKey)).importEnvelope.batchId, "CURRENT");
+  } finally { await extension.close(); }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

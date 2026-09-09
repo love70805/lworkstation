@@ -254,6 +254,7 @@ export function replaySyncRecoveryPayload(payload) {
         break;
       }
       case "skcs_copied":
+      case "request_prepared":
         putRecord(state.erpCostRequests, snapshot, "ERP 成本请求");
         break;
       case "published": {
@@ -280,6 +281,8 @@ export function replaySyncRecoveryPayload(payload) {
         break;
       }
       case "approved_1688_fallback":
+      case "manual_override_saved":
+      case "manual_override_revoked":
       case "revoked": {
         const approval = cloneRecord(snapshot, ["ledger"]);
         putRecord(state.costApprovals, approval, "成本审批");
@@ -296,7 +299,8 @@ export function replaySyncRecoveryPayload(payload) {
         );
         break;
       }
-      case "reopened_for_cost_recalculation": {
+      case "reopened_for_cost_recalculation":
+      case "ledger_reopened_for_cost_correction": {
         const ledger = cloneRecord(snapshot);
         putRecord(state.ledgers, ledger, "月度账本");
         state.profitLines = state.profitLines.filter((row) => row.ledgerId !== ledger.id);

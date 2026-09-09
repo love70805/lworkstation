@@ -1,8 +1,9 @@
 import Decimal from "decimal.js";
 import { canonicalPlatformSku, normalizePlatformSku } from "./identifiers";
 import { DEFAULT_CURRENCY } from "./erpCosts";
+import { validManualOverride } from "./manualCostOverride";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@6-erp-4dp";
+export const COST_POLICY_VERSION = "formal-cost-policy@7-store-manual-override";
 
 function text(value) {
   const normalized = String(value ?? "").trim();
@@ -104,6 +105,9 @@ function latestValidCost(items, kind) {
 }
 
 export function resolveFormalCostDecision({
+  workspaceId,
+  store,
+  manualOverride = null,
   ledgerId,
   platformSku,
   erpCost = null,
@@ -113,6 +117,12 @@ export function resolveFormalCostDecision({
   const normalizedSku = normalizePlatformSku(platformSku);
   const canonicalSku = canonicalPlatformSku(normalizedSku);
   const reasons = [];
+  if (validManualOverride(manualOverride, { workspaceId, ledgerId, store, platformSku })) {
+    return { status: "final", calculationMode: "exact", eligibleForExactProfit: true,
+      workspaceId, ledgerId, store, platformSku: normalizedSku, canonicalPlatformSku: canonicalSku,
+      source: "manual_override", unitCost: Number(manualOverride.approvedAmount), currency: DEFAULT_CURRENCY,
+      sourceRecordId: manualOverride.id, approvalId: manualOverride.id, reasons: [], policyVersion: COST_POLICY_VERSION };
+  }
   const normalizedErp = normalizeCandidate(erpCost, canonicalSku, "erp");
   reasons.push(...normalizedErp.issues);
 

@@ -31,6 +31,8 @@ const period = "2026-08";
 
 it("publishes true low cost without correction, finalizes exact values and reloads immutable snapshots", async () => {
   const { ledger, request } = await context();
+  await db.ledgers.update(ledger.id, { warehouseRate: 0 });
+  await db.salesRows.add({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, platformSku: "SKU-AUDIT", platformSkc: "SKC-AUDIT", store: "合成测试", quantity: 1.234567, amount: 1, penalty: 0 });
   const purchaseRecords = [record("A", 0.01, 100, "2026-07-03"), record("B", 0.009, 5, "2026-07-02"), record("C", 0.009, 30, "2026-07-01")];
   const source = sourceEnvelope({ ledger, request, purchaseRecords });
   const saved = await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }), sourceEnvelope: source });
@@ -43,11 +45,11 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   expect(exact.purchaseCost).toBe(0.0119752999);
   const summary = { quantity: 1.234567, revenue: 1, purchaseCost: 0.01, warehouseCost: 0, penalty: 0, profit: 0.98 };
   const args = { ledgerId: ledger.id, formulaVersion: PROFIT_FORMULA_VERSION, profitSummary: summary,
-    profitLines: [{ ...exact, platformSku: "SKU-AUDIT", store: "合成测试" }] };
+    profitLines: [{ ...exact, platformSku: "SKU-AUDIT", store: "合成测试", costSourceRecordId: decision.sourceRecordId, costApprovalId: null }] };
   await finalizeMonthlyLedger(args);
   const snapshot = await getLedgerSnapshot(ledger.id);
   expect(snapshot.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001, formulaVersion: PROFIT_FORMULA_VERSION });
-  expect(snapshot.ledger.profitSummary).toEqual(summary);
+  expect(snapshot.ledger.profitSummary).toMatchObject(summary);
   const exported = buildProfitExportRows(savedProfitRows(snapshot.profitLines), snapshot.ledger, savedProfitSummary(summary));
   expect(exported[0]["总件数*成本"]).toBe(0.0119752999);
   await expect(finalizeMonthlyLedger(args)).rejects.toThrow("显式重开");

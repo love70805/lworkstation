@@ -1,6 +1,6 @@
 {
   "name": "shopeers-desktop",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
   "author": "Lworkstation Team",
@@ -17,7 +17,7 @@
     "smoke:single-instance": "node single-instance-smoke.mjs",
     "smoke:packaged": "node smoke.mjs",
     "smoke:update": "node update-smoke.mjs",
-    "build": "pnpm --dir ../frontend build && pnpm brand:icons && electron-builder --config.electronDist=./node_modules/electron/dist"
+    "build": "pnpm --dir ../frontend build && pnpm brand:icons && electron-builder --publish never --config.electronDist=./node_modules/electron/dist"
   },
   "devDependencies": {
     "electron": "44.2.0",
@@ -93,7 +93,10 @@
       "artifactName": "Lworkstation Setup ${version}.${ext}"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "include": "installer.nsh",
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": false,
       "perMachine": false,
       "installerIcon": "assets/lworkstation.ico",
       "installerHeaderIcon": "assets/lworkstation.ico",

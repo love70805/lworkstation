@@ -2,6 +2,7 @@ import Decimal from "decimal.js";
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { createLedgerGroupKey } from "../domain/ledgerImport";
 import { PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
+import { storeSkuKey } from "../domain/manualCostOverride";
 
 const sum = (rows, key) => rows.reduce((total, row) => total.plus(row[key] ?? 0), new Decimal(0));
 const money = (value) => value.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() || 0;
@@ -19,7 +20,7 @@ export function summarizeProfitRows(rows, costBySku = new Map()) {
     penalties: money(sum(rows, "penalty")),
     matchedProfit: money(profit),
     profitRate: revenue.isZero() ? null : money(profit.div(revenue).times(100)),
-    missing: new Set(rows.filter((row) => !row.finalizable).map((row) => row.canonicalPlatformSku)).size,
+    missing: new Set(rows.filter((row) => !row.finalizable).map((row) => storeSkuKey(row.store, row.canonicalPlatformSku))).size,
     missingErp: new Set(rows.filter((row) => !row.finalizable && !costBySku.has(row.canonicalPlatformSku)).map((row) => row.canonicalPlatformSku)).size,
   };
 }
@@ -56,6 +57,7 @@ export function formatProfitAmount(value) {
 }
 
 export const formatErpUnitCost = (value) => `¥${new Decimal(value).toDecimalPlaces(4, Decimal.ROUND_DOWN).toFixed(4)}`;
+export const formatManualUnitCost = (value) => `¥${new Decimal(value).toFixed()}`;
 
 export function buildProfitExportRows(rows, ledger, summary) {
   const version = isProfitSnapshot(ledger) ? ledger.formulaVersion : PROFIT_FORMULA_VERSION;
@@ -65,7 +67,8 @@ export function buildProfitExportRows(rows, ledger, summary) {
   return [...rows.map((row) => ({
     SKC: row.groupSkc, SKU: row.platformSku, 属性: row.attribute,
     数量: row.qty, 金额: row.revenue, "1688单号": row.orderNumber ?? "",
-    成本口径: row.costSource === "erp" ? "ERP 正式成本" : row.costSource === "approved_1688" ? "人工参考，未计正式利润" : "待 ERP 成本",
+    店铺: row.store,
+    成本口径: row.costSource === "manual_override" ? "人工更正" : row.costSource === "erp" ? "ERP 正式成本" : row.costSource === "approved_1688" ? "人工参考，未计正式利润" : "待 ERP 成本",
     单件平均成本: row.unitCost ?? row.reference1688Cost?.unitCost ?? "缺失",
     "总件数*成本": row.purchaseCost ?? "缺失", 仓储成本: row.warehouseCost,
     客退罚款: row.penalty, 利润: row.profit ?? "未完成",

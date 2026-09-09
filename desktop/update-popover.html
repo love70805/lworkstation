@@ -18,10 +18,9 @@
       </header>
 
       <dl class="release-details">
-        <div><dt>当前版本</dt><dd id="current-version">--</dd></div>
+        <div><dt>当前版本</dt><dd><span id="current-version">--</span> <span id="update-channel" class="channel-label"></span></dd></div>
         <div id="latest-row" hidden><dt>最新版本</dt><dd id="latest-version">--</dd></div>
-        <div id="size-row" hidden><dt>安装包</dt><dd id="package-size">--</dd></div>
-        <div id="date-row" hidden><dt>发布日期</dt><dd id="release-date">--</dd></div>
+
       </dl>
 
       <div id="progress-row" class="progress-row" hidden>
@@ -29,10 +28,15 @@
         <span id="progress-value">0%</span>
       </div>
 
-      <section id="notes-section" class="notes-section" hidden aria-label="版本说明">
+      <details id="notes-section" class="notes-section" hidden>
+        <summary>更新详情</summary>
+        <dl class="release-details">
+          <div id="size-row" hidden><dt>安装包</dt><dd id="package-size">--</dd></div>
+          <div id="date-row" hidden><dt>发布日期</dt><dd id="release-date">--</dd></div>
+        </dl>
         <p id="release-notes"></p>
         <button id="release-notes-action" class="link-button" type="button">查看完整说明</button>
-      </section>
+      </details>
 
       <div class="update-actions">
         <button data-update-action="check" class="secondary-button" type="button">检查更新</button>

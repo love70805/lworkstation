@@ -59,9 +59,9 @@ const DESKTOP_ICON_PATH = path.join(__dirname, "assets", "lworkstation.ico");
 const INBOX_POPOVER_MIN_HEIGHT = 43;
 const INBOX_POPOVER_MAX_HEIGHT = 220;
 const INBOX_POPOVER_WIDTH = 175;
-const UPDATE_POPOVER_MIN_HEIGHT = 168;
-const UPDATE_POPOVER_MAX_HEIGHT = 420;
-const UPDATE_POPOVER_WIDTH = 324;
+const UPDATE_POPOVER_MIN_HEIGHT = 132;
+const UPDATE_POPOVER_MAX_HEIGHT = 340;
+const UPDATE_POPOVER_WIDTH = 296;
 const DEV_URL = process.env.SHOPEERS_DESKTOP_DEV_URL;
 const VISUAL_SMOKE = process.env.SHOPEERS_DESKTOP_VISUAL_SMOKE === "1";
 const visualDimension = (name, fallback, min, max) => VISUAL_SMOKE

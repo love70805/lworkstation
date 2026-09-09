@@ -186,7 +186,7 @@ describe("同一平台 SKC 下多个平台 SKU 的 ERP 收件到利润回流", (
     const profitLines = salesLines.map((salesLine) => {
       const erpCost = snapshot.costs.find((row) => row.platformSku === salesLine.platformSku);
       const decision = resolveFormalCostDecision({ ledgerId: ledger.id, platformSku: salesLine.platformSku, erpCost });
-      const exact = calculateExactProfitLine({ revenue: salesLine.revenue, quantity: salesLine.qty, costDecision: decision, warehouseRate: 0.5, penalty: salesLine.penalty });
+      const exact = calculateExactProfitLine({ revenue: salesLine.revenue, quantity: salesLine.qty, costDecision: decision, warehouseRate: snapshot.ledger.warehouseRate, penalty: salesLine.penalty });
       return {
         platformSku: salesLine.platformSku,
         canonicalPlatformSku: salesLine.canonicalPlatformSku,

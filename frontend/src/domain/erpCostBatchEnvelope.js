@@ -357,15 +357,14 @@ export function validateErpCostBatchEnvelope(payload, {
   if (payload.query?.unit !== "platform_skc") throw new Error("ERP 成本批次查询单位必须为平台 SKC。");
   const platformSkcs = normalizeQuerySkcs(payload.query.platformSkcs);
   const queriedSkcs = new Set(platformSkcs.map((item) => item.canonicalPlatformSkc));
-  const expectedScopeBySku = normalizeExpectedSkuScope(expectedSkus);
-  if (expectedScopeBySku && [...expectedScopeBySku.values()].some((item) => !queriedSkcs.has(item.canonicalPlatformSkc))) {
-    throw new Error("ERP 成本请求的 expectedSkus 包含不在完整平台 SKC 查询范围内的项目。");
-  }
+  const registeredScope = normalizeExpectedSkuScope(expectedSkus);
+  const expectedScopeBySku = registeredScope == null ? null : new Map([...registeredScope].filter(([, item]) => queriedSkcs.has(item.canonicalPlatformSkc)));
+  if (expectedPlatformSkcs == null && registeredScope && registeredScope.size !== expectedScopeBySku.size) throw new Error("ERP 成本请求的 expectedSkus 包含不在完整平台 SKC 查询范围内的项目。");
   if (expectedPlatformSkcs != null) {
     const expected = normalizeQuerySkcs(expectedPlatformSkcs);
     const actualSet = new Set(platformSkcs.map((item) => item.canonicalPlatformSkc));
     const expectedSet = new Set(expected.map((item) => item.canonicalPlatformSkc));
-    if (actualSet.size !== expectedSet.size || [...actualSet].some((value) => !expectedSet.has(value))) {
+    if (actualSet.size === 0 || [...actualSet].some((value) => !expectedSet.has(value))) {
       throw new Error("ERP 成本批次查询 SKC 集合与当前页面不一致。");
     }
   }

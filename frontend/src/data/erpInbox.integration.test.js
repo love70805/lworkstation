@@ -152,8 +152,8 @@ describe("ERP 本机收件箱", () => {
   it("loads a matching pending inbox through the CostMatching import path and leaves unmatched batches pending", async () => {
     await receiveErpCostInboxEnvelope({ envelope: envelopeFixture() });
     const [candidate] = await listErpCostInbox({ ledgerId: "LEDGER-IT", statuses: ["pending"] });
-    const request = { id: "ERP-REQ-IT", ledgerId: "LEDGER-IT", platformSkcs: ["SKC-IT"] };
-    const ledger = { id: "LEDGER-IT", status: "cost_pending" };
+    const request = { id: "ERP-REQ-IT", workspaceId: "workspace-default", ledgerId: "LEDGER-IT", platformSkcs: ["SKC-IT"] };
+    const ledger = { id: "LEDGER-IT", workspaceId: "workspace-default", status: "cost_pending" };
     const queue = buildErpInboxQueue({ inboxes: [candidate], requests: [request], ledger, currentPlatformSkcs: ["SKC-IT"] });
     expect(queue.autoLoad?.inbox.id).toBe(candidate.id);
 

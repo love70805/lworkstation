@@ -1,4 +1,7 @@
 import { formatErpUnitCost } from "../lib/profitPrecision";
+import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
+import { selectManualOverride } from "../domain/manualCostOverride";
+import ManualCostDialog from "./ManualCostDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -17,7 +20,6 @@ import { canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
 import { groupImportedSales } from "../lib/profit";
-import { buildLedgerErpCostRequest } from "../lib/erpRequest";
 import { registerErpBridgeRequest } from "../lib/erpInboxTransport";
 import { buildProfitHref, filterProfitRows, readProfitFilter } from "../lib/profitFilter";
 import { exportWorkbook } from "../lib/spreadsheetExport";
@@ -144,6 +146,10 @@ export default function CostMatching() {
   const [parseError, setParseError] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [copyingSkcs, setCopyingSkcs] = useState(false);
+  const [registrationState, setRegistrationState] = useState({ status: "idle", message: "" });
+  const [registrationRetry, setRegistrationRetry] = useState(0);
+  const [incomingCandidate, setIncomingCandidate] = useState(null);
+  const [manualTarget, setManualTarget] = useState(null);
   const [exportingTemplate, setExportingTemplate] = useState(false);
   const [erpAssistantOpen, setErpAssistantOpen] = useState(false);
   const [manualInputOpen, setManualInputOpen] = useState(false);
@@ -160,8 +166,14 @@ export default function CostMatching() {
   const [resultHighlighted, setResultHighlighted] = useState(false);
   const [expandedUnmappedGroups, setExpandedUnmappedGroups] = useState(() => new Set());
   const restoredDraftLedgerRef = useRef(null);
+  const draftReadyLedgerRef = useRef(null);
+  const [draftReadyLedger, setDraftReadyLedger] = useState(null);
+  const previousRegistrationRef = useRef(null);
+  const unloadedInboxIdsRef = useRef(new Set());
+  const ledgerIdentityRef = useRef(null);
+  ledgerIdentityRef.current = snapshot?.ledger?.id;
   const effectiveRequestId = costRequestId ?? latestRequest?.id ?? null;
-  const requestForImport = costRequest ?? latestRequest ?? null;
+  const requestForImport = requestRecords.find((request) => request.id === batchEnvelope?.requestId) ?? costRequest ?? latestRequest ?? null;
   const workspaceInboxRecords = useMemo(() => allInboxRecords.filter((record) => (
     !snapshot?.ledger?.workspaceId || record.workspaceId === snapshot.ledger.workspaceId
   )), [allInboxRecords, snapshot?.ledger?.workspaceId]);
@@ -171,7 +183,10 @@ export default function CostMatching() {
 
   const persistedCostRows = useMemo(() => snapshot?.costs ?? [], [snapshot?.costs]);
   const effectiveCostRows = useMemo(() => {
-    if (parsedRows !== null) return parsedRows;
+    if (parsedRows !== null) {
+      const incoming = new Set(parsedRows.filter((row) => row.platformSku).map((row) => canonicalPlatformSku(row.platformSku)));
+      return [...persistedCostRows.filter((row) => !incoming.has(canonicalPlatformSku(row.platformSku))), ...parsedRows];
+    }
     if (sourceText.trim()) return [];
     return persistedCostRows.length > 0 ? persistedCostRows : null;
   }, [parsedRows, persistedCostRows, sourceText]);
@@ -184,11 +199,16 @@ export default function CostMatching() {
     const currentLedgerId = snapshot?.ledger?.id;
     if (!currentLedgerId || restoredDraftLedgerRef.current === currentLedgerId) return;
     restoredDraftLedgerRef.current = currentLedgerId;
+    draftReadyLedgerRef.current = null;
+    setDraftReadyLedger(null);
+    setSourceText(""); setParsedRows(null); setBatchEnvelope(null); setLoadedInboxId(null); setCostRequest(null); setCostRequestId(null);
     let cancelled = false;
     const restore = async () => {
       const draft = await readRestorableCostDraft(currentLedgerId, { getInbox: getErpCostInbox });
-      if (!draft) return;
       if (cancelled) return;
+      draftReadyLedgerRef.current = currentLedgerId;
+      setDraftReadyLedger(currentLedgerId);
+      if (!draft) return;
       setSourceText(draft.sourceText);
       setSourceName(draft.sourceName || "已恢复成本草稿");
       setParsedRows(Array.isArray(draft.parsedRows) ? draft.parsedRows : null);
@@ -204,7 +224,8 @@ export default function CostMatching() {
 
   useEffect(() => {
     const currentLedgerId = snapshot?.ledger?.id;
-    if (!currentLedgerId || !sourceText.trim()) return;
+    if (!currentLedgerId || draftReadyLedgerRef.current !== currentLedgerId) return;
+    if (!sourceText.trim()) { clearCostDraft(currentLedgerId); return; }
     writeCostDraft(currentLedgerId, { sourceText, sourceName, parsedRows, batchEnvelope, resolutions, loadedInboxId });
   }, [batchEnvelope, loadedInboxId, parsedRows, resolutions, snapshot?.ledger?.id, sourceName, sourceText]);
 
@@ -232,6 +253,31 @@ export default function CostMatching() {
   }, [filteredSalesLines]);
   const erpQueryScope = useMemo(() => collectErpPlatformSkcs(filteredSalesLines), [filteredSalesLines]);
   const { platformSkcs, missingCount: missingPlatformSkcCount } = erpQueryScope;
+  const registrationScope = erpRequestScopeKey({ ledger: snapshot?.ledger, platformSkcs, expectedSkus });
+  useEffect(() => {
+    if (locked || !snapshot?.ledger || !platformSkcs.length) return;
+    const timer = window.setInterval(() => setRegistrationRetry((value) => value + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, [registrationScope, locked]);
+  useEffect(() => {
+    const previous = previousRegistrationRef.current;
+    previousRegistrationRef.current = snapshot?.ledger ?? null;
+    if (previous && (previous.id !== snapshot?.ledger?.id || locked || !platformSkcs.length)) {
+      void cancelAutoErpRequest(previous, { latest: getLatestErpCostRequest, register: registerErpBridgeRequest }).catch((error) => setRegistrationState({ status: "failed", message: `旧回传关联取消失败：${error.message}` }));
+    }
+    if (!snapshot?.ledger || locked || !platformSkcs.length) return;
+    let cancelled = false;
+    setRegistrationState({ status: "registering", message: "正在准备 ERP 回传关联" });
+    void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs, expectedSkus }, {
+      latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest,
+      isCurrent: () => !cancelled,
+    }).then((request) => {
+      if (!request || cancelled) return;
+      if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(request.id); setCostRequest(request); }
+      setRegistrationState({ status: "registered", message: "回传关联已登记，可在已选范围内分批查询" });
+    }).catch((error) => { if (!cancelled) setRegistrationState({ status: "failed", message: `登记失败：${error.message}` }); });
+    return () => { cancelled = true; };
+  }, [registrationScope, registrationRetry, locked]);
   const inboxQueue = useMemo(() => buildErpInboxQueue({
     inboxes: inboxRecords,
     requests: requestRecords,
@@ -247,10 +293,11 @@ export default function CostMatching() {
     });
   }, [inboxRecords]);
 
-  const loadInboxRecord = useCallback(async (queueItem, { automatic = false } = {}) => {
+  const loadInboxRecord = useCallback(async (queueItem, { automatic = false, discardDraft = false } = {}) => {
     const inbox = queueItem?.inbox;
     const request = queueItem?.request;
     if (!inbox?.id || !inbox.envelope || !snapshot?.ledger || !request) return;
+    if (sourceText.trim() && loadedInboxId !== inbox.id && !discardDraft) { setIncomingCandidate(queueItem); return; }
     if (!queueItem.scopeMatched || locked) {
       notify(locked ? "当前账本已定稿或锁定，ERP 批次继续保留在待处理列表。" : `该批次暂不能载入：${ERP_INBOX_MATCH_REASONS[queueItem.reason] ?? queueItem.reason}`, "error");
       return;
@@ -274,6 +321,7 @@ export default function CostMatching() {
           sourceName: sourceLabel,
         }),
       });
+      if (ledgerIdentityRef.current !== inbox.ledgerId) { await markErpCostInboxStatus(inbox.id, "pending", { unloadedAt: new Date().toISOString() }); return; }
       setSourceText(envelopeText);
       setSourceName(sourceLabel);
       setParsedRows(result.rows);
@@ -291,7 +339,7 @@ export default function CostMatching() {
       setParseError(error.message);
       notify(`ERP 批次核对失败，已继续保留待处理：${error.message}`, "error");
     }
-  }, [expectedSkus, inboxRecords, locked, notify, snapshot?.ledger]);
+  }, [expectedSkus, inboxRecords, locked, notify, snapshot?.ledger, sourceText, loadedInboxId]);
 
   useEffect(() => {
     if (!locked) return;
@@ -302,14 +350,15 @@ export default function CostMatching() {
   }, [inboxRecords, locked, snapshot?.ledger?.id]);
 
   useEffect(() => {
-    if (loadedInboxId || sourceText.trim()) return;
-    const recoverable = inboxQueue.items.find((item) => item.inbox?.status === "loaded" && item.scopeMatched && item.filterScopeMatched !== false);
+    if (draftReadyLedger !== snapshot?.ledger?.id || loadedInboxId || sourceText.trim()) return;
+    const recoverable = inboxQueue.items.find((item) => item.inbox?.status === "loaded" && !unloadedInboxIdsRef.current.has(item.inbox.id) && item.scopeMatched && item.filterScopeMatched !== false);
     const candidate = recoverable ?? inboxQueue.autoLoad;
-    if (candidate) void loadInboxRecord(candidate, { automatic: true });
-  }, [inboxQueue.autoLoad, inboxQueue.items, loadInboxRecord, loadedInboxId, sourceText]);
+    if (candidate && !unloadedInboxIdsRef.current.has(candidate.inbox.id)) void loadInboxRecord(candidate, { automatic: true });
+  }, [draftReadyLedger, snapshot?.ledger?.id, inboxQueue.autoLoad, inboxQueue.items, loadInboxRecord, loadedInboxId, sourceText]);
 
   const releaseLoadedInbox = useCallback(() => {
-    if (loadedInboxId) void markErpCostInboxStatus(loadedInboxId, "pending", { unloadedAt: new Date().toISOString() });
+    if (loadedInboxId) unloadedInboxIdsRef.current.add(loadedInboxId);
+    if (loadedInboxId) void markErpCostInboxStatus(loadedInboxId, "pending", { unloadedAt: new Date().toISOString(), autoLoadSuppressed: true });
     setLoadedInboxId(null);
   }, [loadedInboxId]);
 
@@ -402,6 +451,7 @@ export default function CostMatching() {
       resolutions,
     });
   }, [effectiveCostRows, expectedSkus, resolutions, snapshot]);
+  const publicationReconciliation = useMemo(() => parsedRows == null || !snapshot?.ledger ? null : reconcileErpCostRows({ workspaceId: snapshot.ledger.workspaceId, expectedSkus, costRows: parsedRows, batchId: "preview", resolutions }), [parsedRows, expectedSkus, resolutions, snapshot?.ledger]);
   const auxiliaryGroups = useMemo(() => groupAuxiliaryCostRows(reconciliation?.auxiliaryCostRows), [reconciliation?.auxiliaryCostRows]);
 
   const parseSource = () => {
@@ -470,17 +520,8 @@ export default function CostMatching() {
     if (!snapshot?.ledger || platformSkcs.length === 0) return;
     setCopyingSkcs(true);
     try {
-      const request = buildLedgerErpCostRequest({
-        ledger: snapshot.ledger,
-        platformSkcs,
-        expectedSkus,
-      });
-      await writeClipboardText(request.platformSkcs.map((item) => item.platformSkc).join("\n"));
-      await saveErpCostRequest(request);
-      try { await registerErpBridgeRequest({ request, expectedSkus }); } catch { /* HTTP 收件服务可选，保留剪贴板降级 */ }
-      setCostRequestId(request.id);
-      setCostRequest(request);
-      notify(`已复制 ${request.platformSkcs.length} 个平台 SKC，并记录本次 ERP 成本请求。`);
+      await writeClipboardText(platformSkcs.map((item) => item.platformSkc).join("\n"));
+      notify(`已复制 ${platformSkcs.length} 个平台 SKC。`);
     } catch (error) {
       notify(`复制 SKC 失败：${error.message}`, "error");
     } finally {
@@ -514,7 +555,7 @@ export default function CostMatching() {
       return;
     }
     if (!effectiveRequestId && !batchEnvelope?.requestId) {
-      notify("发布前必须先复制平台 SKC，建立本次成本查询关联。", "error");
+      notify("发布前需要已登记的成本查询关联，请重试登记或查看回传批次。", "error");
       return;
     }
     setPublishing(true);
@@ -524,7 +565,7 @@ export default function CostMatching() {
         workspaceId: snapshot.ledger.workspaceId,
         inboxId: loadedInbox?.id && loadedInbox.batchId === batchEnvelope?.batchId ? loadedInbox.id : null,
         requestId: batchEnvelope?.requestId ?? effectiveRequestId,
-        reconciliation,
+        reconciliation: publicationReconciliation ?? reconciliation,
         sourceName,
         inputHash: await sha256Text(sourceText),
         sourceEnvelope: batchEnvelope,
@@ -720,6 +761,8 @@ export default function CostMatching() {
 
   return (
     <AppShell pageClass="cost-page">
+      {!locked ? <p role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
+      {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>服务端已接收新批次并保存。当前手动草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>保留草稿，查看返回批次</Button></Panel> : null}
       <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>{desktop ? "ERP 扩展状态" : "安装 ERP 助手"}</Button></div>
       <PageHeader
         eyebrow={`月度利润 › ${snapshot.ledger.period}`}
@@ -731,6 +774,7 @@ export default function CostMatching() {
       {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 尚不能发布正式成本</strong><small>{reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；请先核对 ERP 与当前账本的 SKU/SKC，再重新采集。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；请使用 ERP Assistant v8.0.15 重新抓取。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的正式单价，不能发布；请保留真实采购价格。" : `Lworkstation 发现 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请在下方完成修正或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}
 
       {visibleAnomalyGroups.length > 0 ? <Panel className="cost-resolution-panel">
+        {!locked ? <Button onClick={() => document.getElementById("manual-cost-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}>按店铺人工更正成本</Button> : null}
         <div className="panel-header"><div className="panel-title"><AlertCircle size={19} /><h2>采购成本异常处置</h2></div><Badge tone="warning">Lworkstation 核对</Badge></div>
         <div className="cost-resolution-list">{visibleAnomalyGroups.map((match) => <section className="cost-resolution-group" key={match.sourceWarehouseSku}>
           <header><span><small>仓库 SKU</small><strong className="mono">{match.sourceWarehouseSku}</strong></span><span><small>当前预览成本</small><strong className="mono">{match.unitCost == null ? "--" : formatErpUnitCost(match.unitCost)}</strong></span>{match.baseline?.enabled ? <span><small>历史参考区间</small><strong className="mono">{currency(match.baseline.lowerBound)} - {currency(match.baseline.upperBound)}</strong></span> : <span><small>历史基线</small><strong>样本不足</strong></span>}</header>
@@ -768,11 +812,19 @@ export default function CostMatching() {
         </Panel>
       </div>
       {inboxQueueDialog}
+      {!locked ? <details open id="manual-cost-actions"><summary>逐店 SKU 状态与人工更正</summary>{filteredSalesLines.map((row) => {
+        const match = reconciliation?.matches.find((item) => item.canonicalPlatformSku === row.canonicalPlatformSku);
+        const manualOverride = selectManualOverride(snapshot?.approvals, { workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store: row.store, platformSku: row.platformSku });
+        const reason = manualOverride ? "人工更正有效" : match?.status === "matched" ? "ERP 成本已匹配" : match?.costDecision?.selectedRecords?.some((record) => record.unitPrice === 0) ? "采购记录存在零价" : match?.evidenceComplete === false ? "证据不完整" : match?.purchaseRecords?.length === 0 ? "尚无可用采购记录，需核对 ERP" : "尚未收到可用成本，原因待查";
+        return <div className="cost-resolution-record" key={row.id}><span>{row.store} · {row.platformSku} · {reason}</span><Button onClick={() => setManualTarget({ ...row, unitCost: manualOverride?.approvedAmount ?? match?.unitCost, manualOverride })}>{manualOverride ? "更正 / 撤销" : "人工更正"}</Button></div>;
+      })}</details> : null}
+      {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={manualTarget} onClose={() => setManualTarget(null)} /> : null}
       {deleteBatchDialog}
       {voidBatchDialog}
       {manualInputDialog}
       {erpAssistantDialog}
       {resolutionDialog}
+      <Modal open={Boolean(incomingCandidate)} onClose={() => setIncomingCandidate(null)} title="已收到 ERP 成本结果" description="新批次已持久保存；载入将替换当前未发布草稿。" footer={<><Button onClick={() => setIncomingCandidate(null)}>保留草稿</Button><Button variant="primary" onClick={() => { const candidate = incomingCandidate; setIncomingCandidate(null); void loadInboxRecord(candidate, { discardDraft: true }); }}>丢弃草稿并载入结果</Button></>}><p>{incomingCandidate?.inbox?.batchId}</p></Modal>
     </AppShell>
   );
 }
