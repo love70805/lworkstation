@@ -105,7 +105,7 @@ function prepareProfitTableRows(rows) {
   });
 }
 
-export default function ProfitPanel() {
+export function ProfitWorkspaceContent() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { notify } = useToast();
@@ -482,23 +482,23 @@ export default function ProfitPanel() {
   };
 
   if (snapshot === undefined) {
-    return <AppShell pageClass="profit-page"><Panel className="route-loader">正在读取月度账本...</Panel></AppShell>;
+    return <><Panel className="route-loader">正在读取月度账本...</Panel></>;
   }
 
   if (locked && (!snapshot?.profitLines?.length || !snapshot.ledger.profitSummary)) {
-    return <AppShell pageClass="profit-page"><Panel><EmptyState icon={AlertCircle} title="历史定稿快照缺失" description="该账本缺少已保存的利润明细或汇总，暂不能展示和导出。请恢复完整备份；系统不会按当前成本重算历史。" /></Panel></AppShell>;
+    return <><Panel><EmptyState icon={AlertCircle} title="历史定稿快照缺失" description="该账本缺少已保存的利润明细或汇总，暂不能展示和导出。请恢复完整备份；系统不会按当前成本重算历史。" /></Panel></>;
   }
   if (!snapshot?.ledger || (!locked && sourceRows.length === 0)) {
     return (
-      <AppShell pageClass="profit-page">
+      <>
         <PageHeader title="利润核算面板" description="导入月度台账后，系统会按平台 SKC/SKU 建立精确利润核算。" />
         <Panel><EmptyState icon={CalendarDays} title="还没有可核算的月度台账" description="先导入 CSV/XLSX 台账，再复制平台 SKC 到 ERP 获取正式成本。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell pageClass="profit-page">
+    <>
       <PageHeader
         eyebrow={`月度利润核算 · ${snapshot.ledger.period}`}
         title="利润核算面板"
@@ -574,6 +574,10 @@ export default function ProfitPanel() {
           <div className="form-field approval-reason"><label className="required">撤销原因</label><textarea className="text-input" rows="3" value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} placeholder="说明为什么撤销本次成本审批。" /></div>
         </div>
       </Modal>
-    </AppShell>
+    </>
   );
+}
+
+export default function ProfitPanel() {
+  return <AppShell pageClass="profit-page"><ProfitWorkspaceContent /></AppShell>;
 }
