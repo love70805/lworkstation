@@ -5,13 +5,21 @@
 ## 当前仓库版本
 
 - 产品名称：Lworkstation
-- 正式版号：`0.2.8`，已写入 `desktop/package.json` 与 `desktop/release-plan.json`
+- 正式版号：`0.2.9`，已写入 `desktop/package.json` 与 `desktop/release-plan.json`
 - 状态：已构建并整理到 `releases/latest/`，已公开为 GitHub Latest 稳定版，四个资产下载回读校验通过
 - 稳定更新通道：`desktop/update-config.json` 默认开启；严格同通道升级，用户确认下载与安装
 - Windows 安装身份、内部协议与本机数据库名保持不变，以便覆盖安装保留数据
-- 最近公开稳定版为 `0.2.8`，本机正式安装已升级；历史稳定版与 Beta 保留
+- 最近公开稳定版为 `0.2.9`；本机正式安装此前为0.2.8，本轮未执行安装；异常电脑待用户升级验收。历史稳定版与 Beta 保留
 
 ## 当前公开稳定版
+
+- [v0.2.9](https://github.com/love70805/lworkstation/releases/tag/v0.2.9)，2026-09-09 11:52:44（UTC+8）公开为GitHub Latest，四个资产匿名下载回读通过。
+- 修复ERP收件并发写入和Windows短暂拒绝替换的恢复缺口；失败保留原文件，后续回传保持幂等。
+- [Windows x64安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.9/Lworkstation-Setup-0.2.9.exe)：116,376,621 bytes；SHA-256 `739524B980EE295D27B5E7544FD9D611123D2A2DC4DFA130E27A962F198F04B0`。
+- 552项测试、完整门禁、打包smoke、打包服务并发/原生Windows拒绝复测及实际NSIS下载校验通过。0.2.8可发现新版，异常电脑升级后的真实回传结果待用户验收。详见 [0.2.9验收](RELEASE_0.2.9.md)。
+- 开发测试依赖Vitest已补到4.1.11；不改变利润规则、数据库和安装身份，未执行云端迁移。
+
+## 历史稳定版 0.2.8
 
 - [v0.2.8](https://github.com/love70805/lworkstation/releases/tag/v0.2.8)，2026-09-09 01:00:17（UTC+8）公开为 GitHub Latest，四个资产匿名下载回读通过。
 - 构建标签 `8591b5191e5489d87e7d12f4892f29f9f397e2b1`；利润精度、ERP 异常搜索/四位显示、窗口化按钮与单实例修复已交付。
