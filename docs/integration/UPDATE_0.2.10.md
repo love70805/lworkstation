@@ -24,11 +24,12 @@
 
 - 仅输入非负有限 CNY 单件成本和非空更正说明；不强制附件、链接、来源表单或额外复核人。操作人从成员上下文获取，遵守已有财务写权限，不新增提权。
 - 显式人工更正优先于 ERP，允许 0 和微小正数，参加精确核算；不把缺失转换为 0。现有精确累计/最后截断保留，不提前截断人工小数为 0。
-- 作用域为 workspaceId + ledgerId（当前月/店账本）+ canonical SKU；如历史账本包含多店，需明确 store scope 并覆盖所有读取/定稿/同步路径，不能从页面筛选推断保存作用域。
+- 作用域为 workspaceId + ledgerId（当前月份）+ store + canonical SKU；同月多店是正常账本模型，店铺作用域必须覆盖所有读取/定稿/同步路径，不能从页面筛选推断保存作用域。
 - 保存原值/新值/说明/操作人/时间，可撤销；撤销恢复最新可用 ERP，缺失则待补。ERP 后续数据仍保存，但不能覆盖人工有效值。审计和核算在同一事务完成。
 - 使用明确的新人工类型标记，如 referenceSnapshot.kind = manual_override；旧 approved_1688 记录保持参考语义。最终 decision.source 使用 manual_override，不能冒充 erp。更新 policy/formula 版本而不重算旧定稿。
 - 复用 costApprovals/audit 容器；新增事件需要同步 registry、plan、recovery、seed/backup 往返和权限测试。不把只有本地生效的更正当作完整交付。SQL 若需兼容零价/人工来源，先报告精确追加迁移内容；本轮不执行在线迁移。
 - 已定稿/锁定账本写入口均拒绝修改；通过现有显式重开流程后允许。UI、repository、导出和定稿选择相同成本，撤销/更正后摘要刷新。
+- 集成审查补齐显式重开契约：纯人工或混合成本账本均可明确确认重开，不以作废 ERP 批次为前提。新增审计 action `ledger_reopened_for_cost_correction`、entity `monthly_ledger`；`before.snapshot={ledger,profitLines}` 保留原定稿，`after.snapshot` 为重开账本，记录说明、操作人和时间。同步 registry/plan/recovery 映射已有 `reopen_ledger_for_cost_recalculation` SQL 函数，不新增 SQL，不改变旧 void/reopen 成对约束。未重开时保持写保护；重开后重新定稿须独立复核。
 
 ## C. 首页整合与跨页上下文
 
