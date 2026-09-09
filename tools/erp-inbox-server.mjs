@@ -798,6 +798,26 @@ function requestSkcSet(request) {
   return new Set((request?.platformSkcs ?? []).map((item) => normalizeSkc(item?.platformSkc ?? item)).filter(Boolean));
 }
 
+function queryWithinRequest(request, queried) {
+  const registered = requestSkcSet(request);
+  return queried.size > 0 && [...queried].every((skc) => registered.has(skc));
+}
+
+function scopedRequest(request, queried) {
+  return { ...request,
+    platformSkcs: request.platformSkcs.filter((item) => queried.has(normalizeSkc(item?.platformSkc ?? item))),
+    expectedSkus: (request.expectedSkus ?? []).filter((item) => queried.has(normalizeSkc(item.platformSkc))),
+  };
+}
+
+function recordCompletedQuery(records, index, queried) {
+  if (index < 0) return;
+  const request = records[index];
+  const completedSkcs = [...new Set([...(request.completedSkcs ?? []), ...queried])];
+  const complete = [...requestSkcSet(request)].every((skc) => completedSkcs.includes(skc));
+  records[index] = { ...request, completedSkcs, status: "registered", ...(complete ? { lastCompletedAt: new Date().toISOString() } : {}) };
+}
+
 function scopeMismatch(message) {
   return Object.assign(new Error(message), { status: 409, code: "ERP_REQUEST_SCOPE_MISMATCH" });
 }
@@ -810,7 +830,7 @@ function chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs })
     item.requestId === requestId
     && String(item.ledgerId ?? "").trim() === ledgerId
     && String(item.workspaceId ?? "").trim() === workspaceId
-    && sameSet(requestSkcSet(item), queriedSkcs)
+    && queryWithinRequest(item, queriedSkcs)
   ));
   if (candidates.length > 1) {
     throw Object.assign(new Error("多个 ERP 请求同时匹配 requestId、ledgerId、工作区和完整 SKC 集合。"), {
@@ -819,7 +839,7 @@ function chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs })
       candidates: candidates.map(publicRequest),
     });
   }
-  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 1) return scopedRequest(candidates[0], queriedSkcs);
   const sameId = active.find((item) => item.requestId === requestId);
   if (sameId) throw scopeMismatch("成本结果的 ledgerId、工作区或平台 SKC 集合与 ERP 请求不完整匹配。");
   return null;
@@ -855,11 +875,11 @@ function findDirectRequestContext(records, batch) {
     && item.requestId === String(batch?.requestId ?? "").trim()
     && String(item.ledgerId ?? "").trim() === String(batch?.ledgerId ?? "").trim()
     && String(item.workspaceId ?? "").trim() === String(batch?.workspaceId ?? "").trim()
-    && sameSet(requestSkcSet(item), requestedSkcs));
+    && queryWithinRequest(item, requestedSkcs));
   if (candidates.length > 1) {
     throw Object.assign(new Error("多个 ERP 请求同时匹配 direct 成本批次上下文。"), { status: 409, code: "ERP_REQUEST_AMBIGUOUS" });
   }
-  return candidates[0] ?? null;
+  return candidates[0] ? scopedRequest(candidates[0], requestedSkcs) : null;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1019,6 +1039,28 @@ const server = http.createServer(async (req, res) => {
       const ledgerId = payload?.request?.ledgerId ?? payload?.ledgerId ?? null;
       const platformSkcs = Array.isArray(payload?.request?.platformSkcs) ? payload.request.platformSkcs : [];
       const expectedSkus = Array.isArray(payload?.expectedSkus) ? payload.expectedSkus : [];
+      const replaceLedgerScope = payload?.request?.replaceLedgerScope === true;
+      if (replaceLedgerScope && (!requestId || !workspaceId || !String(ledgerId ?? "").trim())) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "替换账本关联必须提供工作区、账本与请求标识。" });
+      const supersedeLedgerRequests = (exceptRequestId = null) => {
+        let changed = false;
+        for (const record of records) {
+          if (record.kind === "request" && record.status === "registered" && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) {
+            record.status = "superseded"; changed = true;
+          }
+        }
+        return changed;
+      };
+      if (payload?.request?.cancel === true) {
+        const existing = records.find((item) => item.kind === "request" && item.requestId === requestId);
+        if (replaceLedgerScope) {
+          if (existing && (existing.workspaceId !== workspaceId || existing.ledgerId !== ledgerId)) return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "取消请求的工作区或账本不匹配。" });
+          if (supersedeLedgerRequests()) await writeSpool(records);
+          return json(res, 200, { accepted: true, requestId, status: "superseded" });
+        }
+        if (!existing || existing.workspaceId !== workspaceId || existing.ledgerId !== ledgerId) return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "取消请求的工作区或账本不匹配。" });
+        if (existing.status === "registered") { existing.status = "superseded"; await writeSpool(records); }
+        return json(res, 200, { accepted: true, requestId, status: existing.status });
+      }
       if (!requestId || !workspaceId || platformSkcs.length === 0) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "请求缺少 requestId、workspaceId 或平台 SKC。" });
       const queryScope = querySkcSet(platformSkcs);
       const normalizedExpectedScope = normalizedExpectedSkus(expectedSkus, { strict: expectedSkus.length > 0 });
@@ -1036,8 +1078,12 @@ const server = http.createServer(async (req, res) => {
             requestId,
           });
         }
-        return json(res, 200, { accepted: true, idempotent: true, requestId });
+        if (replaceLedgerScope && existingRequest.status === "registered" && supersedeLedgerRequests(requestId)) await writeSpool(records);
+        return json(res, 200, { accepted: true, idempotent: true, requestId, status: existingRequest.status });
       }
+      const superseded = records.find((item) => item.kind === "request" && item.requestId === payload.request?.supersedesRequestId);
+      if (superseded && superseded.workspaceId === workspaceId && superseded.ledgerId === ledgerId) superseded.status = "superseded";
+      if (replaceLedgerScope) supersedeLedgerRequests(requestId);
       records.push({
         kind: "request",
         requestId,
@@ -1051,7 +1097,7 @@ const server = http.createServer(async (req, res) => {
         status: "registered",
       });
       await writeSpool(records);
-      return json(res, 202, { accepted: true, idempotent: false, requestId });
+      return json(res, 202, { accepted: true, idempotent: false, requestId, status: "registered" });
     }
     if (requestUrl.pathname === "/erp/v1/extension-status") {
       const extensionId = String(payload?.extensionId ?? "erp-assistant").trim();
@@ -1116,6 +1162,7 @@ const server = http.createServer(async (req, res) => {
           deliveryId: duplicate.deliveryId,
           batchId: duplicate.batchId,
           requestId: duplicate.requestId,
+          envelope: duplicate.envelope,
         });
       }
       const request = chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs });
@@ -1235,10 +1282,10 @@ const server = http.createServer(async (req, res) => {
         envelope,
       });
       const requestIndex = records.findIndex((item) => item.kind === "request" && item.requestId === request.requestId);
-      if (requestIndex >= 0) records[requestIndex] = { ...records[requestIndex], status: "used", usedAt: new Date().toISOString() };
+      recordCompletedQuery(records, requestIndex, querySkcSet(payload.querySkcs));
       await writeSpool(records);
       latestTransportError = null;
-      return json(res, 202, { accepted: true, idempotent: false, resultDeliveryId, deliveryId: envelope.deliveryId, batchId, requestId: request.requestId });
+      return json(res, 202, { accepted: true, idempotent: false, resultDeliveryId, deliveryId: envelope.deliveryId, batchId, requestId: request.requestId, envelope });
     }
     if (requestUrl.pathname !== "/erp/v1/cost-batches") return json(res, 404, { error: "NOT_FOUND" });
     const deliveryId = String(payload?.deliveryId ?? "").trim();
@@ -1315,9 +1362,7 @@ const server = http.createServer(async (req, res) => {
     };
     records.push(record);
     const directRequestIndex = records.findIndex((item) => item.kind === "request" && item.requestId === directRequest.requestId);
-    if (directRequestIndex >= 0) {
-      records[directRequestIndex] = { ...records[directRequestIndex], status: "used", usedAt: new Date().toISOString() };
-    }
+    recordCompletedQuery(records, directRequestIndex, querySkcSet(sanitizedPayload.batch.query.platformSkcs));
     await writeSpool(records);
     latestTransportError = null;
     return json(res, 202, { accepted: true, idempotent: false, deliveryId, batchId });

@@ -7,7 +7,7 @@ describe("profit filter context", () => {
     const params = new URL(href, "http://localhost").searchParams;
     const filter = readProfitFilter(params, "L-1");
     expect(filter).toEqual({ query: "SKC-1", storeFilter: "680店", supplierSelection: ["YW-A", "YW-B"], missingOnly: true });
-    expect(buildProfitHref({ ledgerId: "L-1", ...filter })).toContain("/profit?");
+    expect(buildProfitHref({ ledgerId: "L-1", ...filter })).toContain("/workspace?");
   });
 
   it("keeps an explicitly empty supplier selection when moving to ERP", () => {

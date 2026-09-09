@@ -20,13 +20,15 @@ import {
   ShieldCheck,
   Sun,
   WalletCards,
+  Warehouse,
   X,
 } from "lucide-react";
-import { createWorkspaceBackupPayload, getWorkspaceOperationalSummary, recordWorkspaceBackupExport } from "../data/database";
+import { createWorkspaceBackupPayload, db, getActiveMemberContext, getWorkspaceOperationalSummary, recordWorkspaceBackupExport } from "../data/database";
 import { runtimeConfig } from "../config/runtimeConfig";
 import { useCloudAuth } from "../hooks/useCloudAuth";
 import { downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
 import { normalizeAppearance, toggleAppearance } from "../lib/uiState";
+import { validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
 import { Button, IconButton, Modal, useToast } from "./UI";
 
@@ -40,7 +42,8 @@ const SIDEBAR_COMPACT_QUERY = "(max-width: 1200px)";
 const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace"] },
   { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
-  { id: "profit", label: "利润核算", path: "/profit", icon: WalletCards, match: ["/profit", "/cost-matching", "/import-preview", "/ledger", "/erp-assistant"] },
+  { id: "ledger", label: "月度账本", path: "/ledger", icon: WalletCards, match: ["/ledger", "/import-preview"] },
+  { id: "cost", label: "成本核对", path: "/cost-matching", icon: Warehouse, match: ["/cost-matching", "/erp-assistant"] },
   { id: "diagnostics", label: "系统诊断与备份", path: "/diagnostics", icon: Activity, match: ["/diagnostics", "/data-security"] },
 ];
 
@@ -91,6 +94,14 @@ export default function AppShell({ children, pageClass = "" }) {
   const [supportCopied, setSupportCopied] = useState(false);
   const [appearance, setAppearance] = useState(() => normalizeAppearance(localStorage.getItem("shopeers-appearance")));
   const workspaceSummary = useLiveQuery(getWorkspaceOperationalSummary, [], null);
+  const requestedLedgerId = new URLSearchParams(location.search).get("ledger");
+  const navigationContext = useLiveQuery(async () => {
+    const context = await getActiveMemberContext();
+    const ledger = requestedLedgerId ? await db.ledgers.get(requestedLedgerId) : null;
+    return { requestedLedgerId, ledger, workspaceId: context.workspaceId };
+  }, [requestedLedgerId], null);
+  const navigationSearch = navigationContext?.requestedLedgerId === requestedLedgerId
+    ? validatedLedgerSearch(location.search, navigationContext.ledger, navigationContext.workspaceId) : "";
   const cloudAuth = useCloudAuth();
   const cloudEnvironment = runtimeConfig.syncProvider === "supabase"
     ? (cloudAuth.user ? "环境：云端" : "环境：待登录")
@@ -100,11 +111,13 @@ export default function AppShell({ children, pageClass = "" }) {
   const backTarget = useMemo(() => {
     if (baseNavigation.some((item) => item.path === pathname)) return null;
     if (pathname.startsWith("/products") || pathname.startsWith("/capture")) return "/products";
-    if (pathname.startsWith("/profit") || pathname.startsWith("/cost-matching") || pathname.startsWith("/import-preview") || pathname.startsWith("/ledger") || pathname.startsWith("/erp-assistant")) return "/profit";
+    if (pathname.startsWith("/import-preview")) return `/ledger${navigationSearch}`;
+    if (pathname.startsWith("/erp-assistant")) return `/cost-matching${navigationSearch}`;
+    if (pathname.startsWith("/profit")) return `/workspace${navigationSearch}`;
     if (pathname.startsWith("/data-security")) return "/diagnostics";
     if (pathname.startsWith("/diagnostics")) return "/workspace";
     return "/workspace";
-  }, [pathname]);
+  }, [pathname, navigationSearch]);
 
   const goBack = () => {
     if (backTarget) navigate(backTarget);
@@ -113,8 +126,8 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigation = useMemo(() => baseNavigation.map((item) => (
     item.id === "products"
       ? { ...item, count: workspaceSummary?.pendingCaptureCount ?? 0 }
-      : item
-  )), [workspaceSummary?.pendingCaptureCount]);
+      : ["workspace", "ledger", "cost"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
+  )), [workspaceSummary?.pendingCaptureCount, navigationSearch]);
 
   const notifications = useMemo(() => {
     if (!workspaceSummary) return [];
@@ -144,7 +157,7 @@ export default function AppShell({ children, pageClass = "" }) {
         tone: "success",
         title: `${workspaceSummary.latestOpenLedger.period} 账本可定稿`,
         detail: "正式成本已完整，等待最终复核",
-        path: `/profit?ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`,
+        path: `/workspace?ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`,
       });
     }
     return items;

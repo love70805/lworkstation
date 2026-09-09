@@ -13,19 +13,17 @@ function normalizedSkcSet(values = []) {
   return result;
 }
 
-function sameSet(left, right) {
-  return left.size === right.size && [...left].every((value) => right.has(value));
-}
-
 export const ERP_INBOX_MATCH_REASONS = Object.freeze({
-  matched: "范围完全匹配",
+  matched: "查询属于已登记范围",
+  workspace_mismatch: "工作区不匹配",
   ledger_closed: "账本已定稿或锁定",
   ledger_mismatch: "账本不匹配",
   request_mismatch: "ERP 请求不匹配",
-  skc_mismatch: "平台 SKC 集合不完整或不匹配",
+  skc_mismatch: "查询为空或超出已登记平台 SKC 范围",
   request_missing: "找不到关联的 ERP 请求",
   current_filter_mismatch: "与当前页面筛选 SKC 范围不同，需手动载入",
   inbox_not_pending: "批次已载入或处理",
+  manually_unloaded: "已保留待处理，需手动载入",
 });
 
 export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformSkcs = null } = {}) {
@@ -37,6 +35,8 @@ export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformS
   const requestLedgerId = String(request.ledgerId ?? "").trim();
   const requestId = String(request.id ?? request.requestId ?? "").trim();
   const ledgerId = String(ledger?.id ?? "").trim();
+  const workspaceIds = [ledger?.workspaceId, request.workspaceId, inbox?.workspaceId, batch.workspaceId];
+  if (workspaceIds.some(Boolean) && (!workspaceIds.every(Boolean) || new Set(workspaceIds).size !== 1)) return { scopeMatched: false, canAutoLoad: false, reason: "workspace_mismatch" };
 
   if (!ledgerId || inboxLedgerId !== ledgerId || requestLedgerId !== ledgerId) {
     return { scopeMatched: false, canAutoLoad: false, reason: "ledger_mismatch" };
@@ -47,7 +47,8 @@ export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformS
 
   const requestSkcs = normalizedSkcSet(request.platformSkcs);
   const inboxSkcs = normalizedSkcSet(batch.query?.platformSkcs);
-  if (requestSkcs.size === 0 || !sameSet(requestSkcs, inboxSkcs)) {
+  if (![request.platformSkcs, batch.query?.platformSkcs].every((values) => Array.isArray(values) && values.every((item) => typeof item === "string" ? item.trim() : typeof item?.platformSkc === "string" && item.platformSkc.trim()))) return { scopeMatched: false, canAutoLoad: false, reason: "skc_mismatch" };
+  if (inboxSkcs.size === 0 || [...inboxSkcs].some((skc) => !requestSkcs.has(skc))) {
     return { scopeMatched: false, canAutoLoad: false, reason: "skc_mismatch" };
   }
 
@@ -55,12 +56,13 @@ export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformS
     return { scopeMatched: true, canAutoLoad: false, reason: "ledger_closed" };
   }
   const currentSkcs = currentPlatformSkcs == null ? null : normalizedSkcSet(currentPlatformSkcs);
-  if (currentSkcs && (currentSkcs.size === 0 || !sameSet(requestSkcs, currentSkcs))) {
+  if (currentSkcs && (currentSkcs.size === 0 || [...inboxSkcs].some((skc) => !currentSkcs.has(skc)))) {
     return { scopeMatched: true, filterScopeMatched: false, canAutoLoad: false, reason: "current_filter_mismatch" };
   }
   if (inbox?.status !== "pending") {
     return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "inbox_not_pending" };
   }
+  if (inbox.autoLoadSuppressed) return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "manually_unloaded" };
   return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: true, reason: "matched" };
 }
 

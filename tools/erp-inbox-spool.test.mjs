@@ -140,7 +140,8 @@ fs.rename=async function(from,to) {
   assert.equal((await (await request("/erp/v1/cost-batches", delivery)).json()).idempotent, true);
   records = JSON.parse(await fs.readFile(spool, "utf8"));
   assert.equal(records.filter((row) => row.kind === "batch" && row.batchId === batch.batchId).length, 1);
-  assert.equal(records.find((row) => row.requestId === batch.requestId && row.kind === "request").status, "used");
+  assert.equal(records.find((row) => row.requestId === batch.requestId && row.kind === "request").status, "registered");
+  assert.ok(records.find((row) => row.requestId === batch.requestId && row.kind === "request").lastCompletedAt);
   assert.equal(await fs.readFile(`${spool}.tmp`, "utf8"), "foreign temporary data");
   assert.deepEqual((await fs.readdir(directory)).filter((name) => name.endsWith(".tmp")), ["inbox.json.tmp"]);
   const names = (await events()).filter((event) => event.kind === "rename" && event.attempt === 1).map((event) => event.from);

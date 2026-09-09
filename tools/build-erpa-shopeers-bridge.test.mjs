@@ -76,7 +76,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.16" }),
+      getManifest: () => ({ version: "8.0.17" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -181,9 +181,9 @@ function resultInput(overrides = {}) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.16");
+  assert.equal(manifest.version, "8.0.17");
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.16";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.17";/, "the download action must recommend the patched package");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
@@ -231,13 +231,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.16-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.17-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.16");
+    assert.equal(manifest.version, "8.0.17");
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -658,7 +658,8 @@ async function verifyRetryRestartAndConflicts() {
   });
   const conflict = await conflictBackground.api.submitCostResult(resultInput(), sender);
   assert.equal(conflict.status, "failed");
-  assert.deepEqual(conflictBackground.storage.shopeersErpPendingCostResultsV2, []);
+  assert.equal(conflictBackground.storage.shopeersErpPendingCostResultsV2[0].deliveryTerminal, true);
+  assert.ok(conflictBackground.storage.shopeersErpPendingCostResultsV2[0].warehouseEvidence);
 }
 
 async function verifyTimeoutAndInvalidJsonReleaseOwner() {

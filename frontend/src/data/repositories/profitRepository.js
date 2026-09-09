@@ -22,7 +22,11 @@ import {
   normalizeLedgerPeriod,
 } from "../db/constants";
 import { makeId } from "../db/utils";
-import { ensureDefaultWorkspace } from "./selectionRepository";
+import { ensureDefaultWorkspace, getActiveMemberContext } from "./selectionRepository";
+import { manualSnapshot, selectManualOverride, storeIdentity } from "../../domain/manualCostOverride";
+import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
+import { PROFIT_FORMULA_VERSION } from "../../domain/profitCalculations";
+import { summarizeProfitRows } from "../../lib/profitPrecision";
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
 
@@ -53,7 +57,63 @@ async function readLedgerCostCoverage(ledgerId) {
     getLatestLedgerCosts(ledgerId),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals });
+  const ledger = await db.ledgers.get(ledgerId);
+  return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals, workspaceId: ledger?.workspaceId, ledgerId });
+}
+
+export async function saveManualCostOverride({ ledgerId, store, platformSku, unitCost, reason }) {
+  return mutateManualCostOverride({ ledgerId, store, platformSku, unitCost, reason });
+}
+
+export async function revokeManualCostOverride({ ledgerId, approvalId }) {
+  return mutateManualCostOverride({ ledgerId, approvalId, revoke: true });
+}
+
+async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost, reason, approvalId, revoke = false }) {
+  const amount = Number(unitCost);
+  if (!revoke && (unitCost == null || String(unitCost).trim() === "" || !Number.isFinite(amount) || amount < 0)) throw new Error("人工更正成本必须是非负有限数值。");
+  if (!revoke && !String(reason ?? "").trim()) throw new Error("请填写更正说明。");
+  return db.transaction("rw", db.settings, db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+    const member = await getActiveMemberContext();
+    const ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || ledger.workspaceId !== member.workspaceId || !["admin", "finance"].includes(member.role)) throw new Error("当前成员无此账本的财务写权限。");
+    if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或锁定账本不能更正或撤销成本，请先显式重开。");
+    const approvals = await db.costApprovals.where("ledgerId").equals(ledgerId).toArray();
+    const target = revoke ? approvals.find((item) => item.id === approvalId && item.workspaceId === ledger.workspaceId && manualSnapshot(item)?.kind === "manual_override" && item.status === "approved") : null;
+    if (revoke && !target) throw new Error("找不到当前账本有效的人工更正。");
+    const scopedStore = storeIdentity(revoke ? manualSnapshot(target).store : store);
+    const sku = normalizePlatformSku(revoke ? target.platformSku : platformSku);
+    const rows = await db.salesRows.where("ledgerId").equals(ledgerId).toArray();
+    if (!scopedStore || !rows.some((row) => storeIdentity(row.store) === scopedStore && canonicalPlatformSku(row.platformSku ?? row.sku) === canonicalPlatformSku(sku))) throw new Error("店铺和 SKU 不属于当前账本。");
+    const now = new Date().toISOString();
+    const scope = { workspaceId: ledger.workspaceId, ledgerId, store: scopedStore, platformSku: sku };
+    const previous = selectManualOverride(approvals, scope);
+    const erpCost = (await getLatestLedgerCosts(ledgerId)).find((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(sku));
+    const oldDecision = resolveFormalCostDecision({ ...scope, manualOverride: previous, erpCost });
+    const auditActor = await resolveProfitAuditActor();
+    const revokedRecords = approvals.filter((item) => item.status === "approved" && manualSnapshot(item)?.kind === "manual_override" && storeIdentity(manualSnapshot(item).store) === scopedStore && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(sku));
+    for (const item of revokedRecords) {
+      const revoked = { ...item, status: "revoked", revokedAt: now, revokedBy: auditActor, revokeReason: revoke ? "撤销人工更正" : "由新人工更正替代" };
+      await db.costApprovals.put(revoked);
+      await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: "cost_approval", objectId: item.id, action: "manual_override_revoked", actorId: auditActor, createdAt: now, before: { snapshot: item }, after: { snapshot: revoked } });
+    }
+    let saved = null;
+    if (!revoke) {
+      const referenceId = makeId("MANUAL-COST");
+      saved = { id: makeId("OVERRIDE"), workspaceId: ledger.workspaceId, ledgerId, platformSku: sku, canonicalPlatformSku: canonicalPlatformSku(sku), referenceCostId: referenceId, approvedAmount: amount, currency: "CNY", reason: String(reason).trim(), approvedBy: auditActor, approvedAt: now, status: "approved",
+        referenceCost: { id: referenceId, kind: "manual_override", store: scopedStore, unitCost: amount, currency: "CNY", previousUnitCost: oldDecision.unitCost, previousSource: oldDecision.source } };
+      await db.costApprovals.add(saved);
+    }
+    const coverage = await readLedgerCostCoverage(ledgerId);
+    const savedLedger = { ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, now) };
+    await db.ledgers.put(savedLedger);
+    if (saved) await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: "cost_approval", objectId: saved.id, action: "manual_override_saved", actorId: auditActor, createdAt: now, before: { unitCost: oldDecision.unitCost, source: oldDecision.source, store: scopedStore }, after: { snapshot: { ...saved, ledger: savedLedger } } });
+    else {
+      const event = (await db.auditEvents.where("objectId").equals(target.id).toArray()).filter((item) => item.action === "manual_override_revoked").at(-1);
+      await db.auditEvents.update(event.id, { after: { snapshot: { ...await db.costApprovals.get(target.id), ledger: savedLedger } } });
+    }
+    return saved;
+  });
 }
 
 function buildLedgerCoveragePatch(ledger, coverage, updatedAt, extraSummary = {}) {
@@ -685,7 +745,7 @@ export async function saveApproved1688Fallback({
       }
 
       const activeApprovals = (await db.costApprovals.where("ledgerId").equals(ledgerId).toArray())
-        .filter((item) => item.status === "approved" && canonicalPlatformSku(item.platformSku) === canonicalSku);
+        .filter((item) => manualSnapshot(item)?.kind !== "manual_override" && item.status === "approved" && canonicalPlatformSku(item.platformSku) === canonicalSku);
       for (const item of activeApprovals) {
         const revokedApproval = {
           ...item,
@@ -810,6 +870,7 @@ export async function revokeApproved1688Fallback({
       if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能撤销成本审批。");
       const approval = await db.costApprovals.get(approvalId);
       if (!approval || approval.ledgerId !== ledgerId) throw new Error("找不到对应的成本审批记录。");
+      if (manualSnapshot(approval)?.kind === "manual_override") throw new Error("人工更正须通过逐店成本更正入口撤销。");
       if (approval.status !== "approved") throw new Error("该成本审批已经失效。");
 
       const revokedApproval = {
@@ -854,10 +915,16 @@ export async function saveErpCostRequest(request) {
   await db.transaction("rw", db.ledgers, db.erpCostRequests, db.auditEvents, async () => {
     const ledger = request.ledgerId ? await db.ledgers.get(request.ledgerId) : null;
     if (request.ledgerId && !ledger) throw new Error("找不到对应的月度账本。");
+    if (ledger && (ledger.workspaceId !== request.workspaceId || ["finalized", "locked"].includes(ledger.status))) throw new Error("账本工作区不匹配或已定稿，不能登记核算请求。");
+    const existing = await db.erpCostRequests.get(request.id);
+    if (existing) {
+      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
+      return;
+    }
 
     await db.erpCostRequests.put({
       ...savedRequest,
-      status: "copied",
+      status: "draft",
       createdAt,
       updatedAt: createdAt,
     });
@@ -865,13 +932,13 @@ export async function saveErpCostRequest(request) {
       workspaceId: request.workspaceId,
       objectType: "erp_cost_request",
       objectId: request.id,
-      action: "skcs_copied",
+      action: "request_prepared",
       actorId: auditActor,
       createdAt,
       after: {
         ledgerId: request.ledgerId,
         platformSkcCount: request.platformSkcs.length,
-        snapshot: { ...savedRequest, status: "copied", createdAt, updatedAt: createdAt },
+        snapshot: { ...savedRequest, status: "draft", createdAt, updatedAt: createdAt },
       },
     });
   });
@@ -1112,6 +1179,18 @@ export async function finalizeMonthlyLedger({
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger) throw new Error("找不到对应的月度账本。");
     if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能重新定稿，请先显式重开。");
+    const initialCoverage = await readLedgerCostCoverage(ledgerId);
+    if (initialCoverage.missingCount > 0 || profitLines.some((line) => !line.finalizable)) throw new Error("仍有平台 SKU 缺少正式成本，账本不能定稿。");
+    const currentApprovals = await db.costApprovals.where("ledgerId").equals(ledgerId).toArray();
+    const hasManual = currentApprovals.some((item) => manualSnapshot(item)?.kind === "manual_override");
+    if (hasManual && formulaVersion !== PROFIT_FORMULA_VERSION) throw new Error("人工更正需使用当前利润公式，请刷新后重试。");
+    if (formulaVersion === PROFIT_FORMULA_VERSION) {
+      const exact = calculateFormalLedgerRows({ ledger, salesRows: await db.salesRows.where("ledgerId").equals(ledgerId).toArray(), erpCosts: await getLatestLedgerCosts(ledgerId), approvals: currentApprovals });
+      if (JSON.stringify(comparableProfitLines(profitLines)) !== JSON.stringify(comparableProfitLines(exact))) throw new Error("成本或台账已变化，请刷新核对后重新定稿。");
+      const totals = summarizeProfitRows(exact);
+      profitSummary = { revenue: totals.revenue, quantity: totals.totalUnits, purchaseCost: totals.purchaseCosts, warehouseCost: totals.warehouseFees, penalty: totals.penalties, profit: totals.matchedProfit, profitRate: totals.profitRate, missingSkuCount: totals.missing };
+      profitLines = exact;
+    }
     const coverage = await readLedgerCostCoverage(ledgerId);
     if (coverage.missingCount > 0 || profitLines.some((line) => !line.finalizable)) {
       throw new Error("仍有平台 SKU 缺少正式成本，账本不能定稿。");
@@ -1180,6 +1259,32 @@ export async function getLatestLedgerCosts(ledgerId) {
     latest.set(row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku), row);
   });
   return [...latest.values()].filter((row) => batchStatus.get(row.batchId) === "published");
+}
+
+export async function reopenLedgerForCostCorrection({ ledgerId, reason } = {}) {
+  const normalizedReason = String(reason ?? "").trim();
+  if (!normalizedReason) throw new Error("重开账本必须填写原因。");
+  return db.transaction("rw", db.settings, db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.profitLines, db.auditEvents, async () => {
+    const member = await getActiveMemberContext();
+    const ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || ledger.workspaceId !== member.workspaceId || !["admin", "finance"].includes(member.role)) throw new Error("当前成员无此账本的财务写权限。");
+    if (ledger.status !== "finalized") throw new Error("只有已定稿且未锁定的账本可以重开。");
+    const profitLines = await db.profitLines.where("ledgerId").equals(ledgerId).toArray();
+    if (!profitLines.length || !ledger.profitSummary) throw new Error("定稿快照缺失，不能重开账本。");
+    const updatedAt = new Date().toISOString();
+    const { profitSummary: _summary, finalizedAt: _at, finalizedBy: _by, formulaVersion: _formula, ...draft } = ledger;
+    const coverage = await readLedgerCostCoverage(ledgerId);
+    const savedLedger = { ...draft, ...buildLedgerCoveragePatch(draft, coverage, updatedAt) };
+    await db.auditEvents.add({
+      workspaceId: ledger.workspaceId, objectType: "monthly_ledger", objectId: ledgerId,
+      action: "ledger_reopened_for_cost_correction", actorId: member.memberId, createdAt: updatedAt,
+      before: { status: ledger.status, snapshot: { ledger, profitLines } },
+      after: { status: savedLedger.status, reason: normalizedReason, snapshot: savedLedger },
+    });
+    await db.profitLines.where("ledgerId").equals(ledgerId).delete();
+    await db.ledgers.put(savedLedger);
+    return savedLedger;
+  });
 }
 
 export async function voidPublishedErpCostBatch({
@@ -1323,6 +1428,8 @@ export async function voidPublishedErpCostBatch({
 export async function getLedgerSnapshot(ledgerId) {
   const ledger = await db.ledgers.get(ledgerId);
   if (!ledger) return null;
+  const member = await getActiveMemberContext();
+  if (ledger.workspaceId !== member.workspaceId) return null;
   const [rows, batches, costs, approvals, profitLines] = await Promise.all([
     db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
     db.importBatches.where("ledgerId").equals(ledgerId).toArray(),

@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { assertDomain } from "./errors";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 
-export const PROFIT_FORMULA_VERSION = "monthly-profit@3-erp-4dp-exact-sum";
+export const PROFIT_FORMULA_VERSION = "monthly-profit@4-manual-exact-sum";
 export const DEFAULT_WAREHOUSE_RATE = 0.7;
 
 function finiteDecimal(value, label) {
@@ -16,10 +16,11 @@ function finiteDecimal(value, label) {
   return amount;
 }
 
-function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty, erpPrecision = false }) {
+function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty, erpPrecision = false, manualPrecision = false }) {
   const revenueValue = finiteDecimal(revenue, "销售金额").toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const quantityValue = finiteDecimal(quantity, "销量");
-  const costValue = finiteDecimal(unitCost, "单件成本").toDecimalPlaces(erpPrecision ? 4 : 2, Decimal.ROUND_DOWN);
+  const rawCost = finiteDecimal(unitCost, "单件成本");
+  const costValue = manualPrecision ? rawCost : rawCost.toDecimalPlaces(erpPrecision ? 4 : 2, Decimal.ROUND_DOWN);
   const warehouseRateValue = finiteDecimal(warehouseRate, "仓储费率").toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const penaltyValue = finiteDecimal(penalty, "扣款").toDecimalPlaces(2, Decimal.ROUND_DOWN);
 
@@ -70,7 +71,7 @@ export function calculateExactProfitLine({
     };
   }
 
-  const values = calculateValues({ revenue, quantity, unitCost: costDecision.unitCost, warehouseRate, penalty, erpPrecision: true });
+  const values = calculateValues({ revenue, quantity, unitCost: costDecision.unitCost, warehouseRate, penalty, erpPrecision: true, manualPrecision: costDecision.source === "manual_override" });
   return {
     ...values,
     calculationMode: "exact",

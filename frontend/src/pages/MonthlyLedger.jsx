@@ -127,7 +127,7 @@ export default function MonthlyLedger() {
                   <span>正式利润 <strong className="mono">{ledger.profitSummary?.profit != null ? money(ledger.profitSummary.profit) : "待核算"}</strong></span>
                   {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`ERP 成本完整度 ${progress}%`} /> : null}
                 </div>
-                <div className="ledger-card-footer"><Button icon={locked ? LockKeyhole : BarChart3} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(ledger.id)}`)}>{locked ? "查看归档" : finalized ? "查看本月" : "继续核算"}</Button></div>
+                <div className="ledger-card-footer"><Button icon={locked ? LockKeyhole : BarChart3} onClick={() => navigate(`/workspace?ledger=${encodeURIComponent(ledger.id)}`)}>{locked ? "查看归档" : finalized ? "查看本月" : "继续核算"}</Button></div>
               </Panel>
             );
           })}
