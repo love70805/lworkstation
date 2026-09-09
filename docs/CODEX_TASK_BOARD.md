@@ -4,6 +4,16 @@
 
 ## 当前基线
 
+### 2026-09-10 0.2.10 更新实施中
+
+用户已批准执行成本回传、人工更正、经营首页整合、安装路径向导与版本弹窗更新。合同见 [0.2.10 更新任务包](integration/UPDATE_0.2.10.md)。当前公开版仍为 0.2.9，以下旧版记录不代表新候选已完成。
+
+- 代码基线：`3d364acddeb1a3894a0950ef2ffa48216080929c`；主线准备分支 `codex/release-0.2.10`，Worktree `.worktrees/release-0.2.10/`。
+- 利润与 ERP（`01a07ff8-148a-7bc3-b8ee-2b4458a60878`）负责回传协议、草稿/接收、复制导入、人工更正/撤销、精确核算、同步适配及可嵌入利润内容。
+- 桌面化（`01a08103-9373-70e0-89dc-746707e8bd40`）负责安装向导、版本弹窗，并承接合同指定的 AppShell/App/WorkspacePortal 组合适配。全局 UI 专职在本机不可用，不新增长期任务；本次跨模块原因及文件所有权见合同。
+- 合并依赖：利润公共出口/数据合同先于首页组合适配；各自独立提交、主线审查。旧 1688 审批不自动提升为正式成本，已定稿快照不变；不执行线上迁移。
+- 验收：frontend test/build/release:check、desktop verify 与 packaged/update/installer smoke，以及合同内合成端到端、桌面/窄屏视觉。当前仅实施开始，未测试交付、未发布新版本。
+
 - GitHub 仓库：`love70805/lworkstation`
 - 集成分支：`codex/selection-profit-erp-sync`
 - beta.7 发布代码提交：`40e4da8`；发布记录提交：`46792e5`。后续维护以集成分支当前 HEAD 为准，PR 状态以 GitHub 实时记录为准。
