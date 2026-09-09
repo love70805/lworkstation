@@ -1,0 +1,45 @@
+// @vitest-environment happy-dom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { Simulate } from "react-dom/test-utils";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ProfitWorkspaceContent } from "./ProfitPanel";
+import { ToastProvider } from "../components/UI";
+
+const mocks = vi.hoisted(() => ({ updateRate: vi.fn() }));
+vi.mock("../data/database", () => ({ updateLedgerWarehouseRate: mocks.updateRate }));
+vi.mock("../hooks/useLatestSalesImport", () => ({ useLatestSalesImport: () => ({
+  ledger: { id: "L", workspaceId: "W", period: "2026-08", status: "cost_pending", warehouseRate: 0.7 },
+  rows: [{ store: "甲", platformSkc: "SKC", platformSku: "SKU", quantity: 2, amount: 10, penalty: 0 }],
+  costs: [], approvals: [], profitLines: [],
+}) }));
+let container, root;
+const findButton = (text) => [...container.querySelectorAll("button")].find((button) => button.textContent === text);
+beforeEach(async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear(); mocks.updateRate.mockReset().mockResolvedValue({});
+  container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  await act(async () => root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+});
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+it("opens the warehouse dialog outside collapsed details, cancels, and applies through the visible action", async () => {
+  expect(container.querySelector("details").open).toBe(false);
+  await act(async () => container.querySelector(".profit-summary-action").click());
+  let dialog = container.querySelector('[role="dialog"]');
+  expect(dialog).not.toBeNull();
+  expect(dialog.textContent).toContain("修改仓储费率");
+  expect(dialog.closest("details:not([open])")).toBeNull();
+  await act(async () => findButton("取消").click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(mocks.updateRate).not.toHaveBeenCalled();
+  await act(async () => container.querySelector(".profit-summary-action").click());
+  dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.closest("details:not([open])")).toBeNull();
+  await act(async () => Simulate.change(dialog.querySelector('input[type="number"]'), { target: { value: "1.2" } }));
+  await act(async () => findButton("应用费率").click());
+  expect(mocks.updateRate).toHaveBeenCalledTimes(1);
+  expect(mocks.updateRate).toHaveBeenCalledWith("L", 1.2);
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.querySelector("details").open).toBe(false);
+});
