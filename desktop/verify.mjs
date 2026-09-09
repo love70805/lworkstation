@@ -439,3 +439,12 @@ for (const manifest of ["../integrations/erp-assistant-extension/manifest.json",
   assert.equal(parsed.manifest_version, 3);
 }
 console.log("desktop POC static verification passed");
+
+assert.equal(pkg.build.nsis.oneClick, false);
+assert.equal(pkg.build.nsis.allowToChangeInstallationDirectory, true);
+assert.equal(pkg.build.nsis.allowElevation, false);
+assert.equal(pkg.build.nsis.perMachine, false);
+assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
+assert.equal(pkg.build.nsis.include, "installer.nsh");
+assert.match(pkg.scripts.build, /--publish never/);
+assert.match(read("installer.nsh"), /ReadRegStr \$R0 SHELL_CONTEXT.*InstallLocation/);
