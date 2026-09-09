@@ -254,6 +254,7 @@ export function replaySyncRecoveryPayload(payload) {
         break;
       }
       case "skcs_copied":
+      case "request_prepared":
         putRecord(state.erpCostRequests, snapshot, "ERP 成本请求");
         break;
       case "published": {
@@ -280,6 +281,8 @@ export function replaySyncRecoveryPayload(payload) {
         break;
       }
       case "approved_1688_fallback":
+      case "manual_override_saved":
+      case "manual_override_revoked":
       case "revoked": {
         const approval = cloneRecord(snapshot, ["ledger"]);
         putRecord(state.costApprovals, approval, "成本审批");
