@@ -4,6 +4,38 @@
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
+      "module": "scoped-manual-cost-overrides",
+      "commit": "a5ab985"
+    },
+    {
+      "module": "erp-automatic-return-and-copy",
+      "commit": "0f93ba5"
+    },
+    {
+      "module": "erp-offline-request-recovery",
+      "commit": "e021c4c"
+    },
+    {
+      "module": "explicit-profit-correction-reopening",
+      "commit": "1325a10"
+    },
+    {
+      "module": "profit-workspace-home",
+      "commit": "cc11371"
+    },
+    {
+      "module": "assisted-installation-and-compact-updater",
+      "commit": "c524d08"
+    },
+    {
+      "module": "compact-updater-border-measurement",
+      "commit": "a1b04dd"
+    },
+    {
+      "module": "accessible-profit-rate-dialog",
+      "commit": "1998696"
+    },
+    {
       "module": "strict-update-channels",
       "commit": "33fc968"
     },
