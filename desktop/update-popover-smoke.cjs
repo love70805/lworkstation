@@ -28,14 +28,27 @@ if (process.type === "renderer") {
           release: { notes: "更新说明".repeat(50), size: 100000, releaseDate: "2026-09-10", releaseUrl: "https://github.com/love70805/lworkstation/releases/" } } };
         await window.webContents.executeJavaScript(`render(${JSON.stringify(state)})`);
         await new Promise(resolve => setTimeout(resolve, 100));
-        const layout = await window.webContents.executeJavaScript(`({actions:[...document.querySelectorAll('[data-update-action]')].filter(b=>!b.hidden).map(b=>b.dataset.updateAction).sort(), channel:document.querySelector('#update-channel').textContent, overflow:document.querySelector('.update-card').scrollWidth>document.querySelector('.update-card').clientWidth})`);
+        const layout = await window.webContents.executeJavaScript(`({actions:[...document.querySelectorAll('[data-update-action]')].filter(b=>!b.hidden).map(b=>b.dataset.updateAction).sort(), channel:document.querySelector('#update-channel').textContent, overflow:card.scrollWidth>card.clientWidth, verticalOverflow:card.scrollHeight>card.clientHeight})`);
         assert.deepEqual(layout.actions, actions.toSorted());
         assert.equal(layout.channel, "Beta");
         assert.equal(layout.overflow, false);
+        if (["idle", "current", "downloaded"].includes(status)) assert.equal(layout.verticalOverflow, false, `${status}: short content must not scroll`);
         for (const action of actions) await window.webContents.executeJavaScript(`runAction(${JSON.stringify(action)})`);
         await window.webContents.executeJavaScript("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
         if (["idle", "downloaded", "error"].includes(status)) fs.writeFileSync(path.join(output, `${appearance}-${status}.png`), (await window.webContents.capturePage()).toPNG());
         evidence.push({ appearance, status, ...layout, size: window.getSize() });
+        if (status === "downloaded") {
+          const collapsedHeight = window.getSize()[1];
+          await window.webContents.executeJavaScript("notesSection.open = true; requestResize()");
+          await new Promise(resolve => setTimeout(resolve, 150));
+          const expanded = await window.webContents.executeJavaScript(`({notesScroll:releaseNotes.scrollHeight>releaseNotes.clientHeight, reachable:[...document.querySelectorAll('[data-update-action]')].filter(b=>!b.hidden).every(b=>{const r=b.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight-4;})})`);
+          assert.equal(expanded.notesScroll, true);
+          assert.equal(expanded.reachable, true);
+          await window.webContents.executeJavaScript("notesSection.open = false; requestResize()");
+          await new Promise(resolve => setTimeout(resolve, 150));
+          assert.equal(await window.webContents.executeJavaScript("card.scrollHeight<=card.clientHeight"), true);
+          assert.equal(window.getSize()[1], collapsedHeight);
+        }
       }
     }
     const invoked = await window.webContents.executeJavaScript("window.__actions");

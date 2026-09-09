@@ -43,7 +43,9 @@ function formatDate(value) {
 }
 
 function requestResize() {
-  const height = Math.ceil(card?.scrollHeight || 0) + 8;
+  const style = card ? getComputedStyle(card) : null;
+  const borders = style ? parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth) : 0;
+  const height = Math.ceil((card?.scrollHeight || 0) + borders) + 8;
   if (height > 0) void window.updatePopover.resize(height);
 }
 
