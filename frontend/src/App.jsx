@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
+import LegacyProfitRedirect from "./components/LegacyProfitRedirect";
 import { ToastProvider } from "./components/UI";
 import { RuntimeConfigurationGate } from "./components/RuntimeConfigurationGate";
 import { CloudAuthenticationGate, hasAuthenticatedCloudIdentity, useCloudAuthenticationState } from "./components/CloudAuthenticationGate";
@@ -23,7 +24,7 @@ const ImportPreview = lazy(() => import("./pages/ImportPreview"));
 const MonthlyLedger = lazy(() => import("./pages/MonthlyLedger"));
 const ProductEditor = lazy(() => import("./pages/ProductEditor"));
 const ProductLibrary = lazy(() => import("./pages/ProductLibrary"));
-const ProfitPanel = lazy(() => import("./pages/ProfitPanel"));
+
 const WorkspacePortal = lazy(() => import("./pages/WorkspacePortal"));
 
 function RouteLoader() {
@@ -160,7 +161,7 @@ export default function App() {
                   <Route path="/products" element={<ProductLibrary />} />
                   <Route path="/capture" element={<CaptureQueue />} />
                   <Route path="/products/edit" element={<ProductEditor />} />
-                  <Route path="/profit" element={<ProfitPanel />} />
+                  <Route path="/profit" element={<LegacyProfitRedirect />} />
                   <Route path="/cost-matching" element={<CostMatching />} />
                   <Route path="/import-preview" element={<ImportPreview />} />
                   <Route path="/ledger" element={<MonthlyLedger />} />
