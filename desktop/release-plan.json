@@ -4,6 +4,10 @@
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
     {
+      "module": "workspace-summary-isolation",
+      "commit": "69c9e37"
+    },
+    {
       "module": "restored-operating-overview",
       "commit": "4b54813"
     },
