@@ -62,11 +62,13 @@ app.whenReady().then(async () => {
     }
     await db.ledgers.put({id:'FOREIGN',workspaceId:'another-workspace',period:'2099-12',status:'draft'});
     await db.auditEvents.put({id:'foreign-audit',workspaceId:'another-workspace',action:'created',after:{period:'FOREIGN-SECRET'},createdAt:'2099-12-01'});
+    await db.platformSkus.put({id:'synthetic-sku',workspaceId:member.workspaceId,platformSku:'SKU-0',canonicalPlatformSku:'SKU-0',platformSkc:'SKC-0',status:'active'});
     return ids;
   })()`);
   await window.loadURL(`${origin}/workspace?ledger=${encodeURIComponent(ids[0])}&store=甲店`);
   await checkOverview("populated");
   assert.equal(await evaluate("document.querySelectorAll('.dashboard-chart-point').length"), 2);
+  assert.ok(await evaluate("document.querySelectorAll('.reference-mini-row').length>0 && document.querySelectorAll('.activity-row').length>0 && document.querySelectorAll('.task-item').length>0"));
   await until("document.querySelector('.side-navigation a[href^=\"/profit\"]')?.getAttribute('href').includes('ledger=')");
   await evaluate("document.querySelector('.side-navigation a[href^=\"/profit\"]').click()");
   await until("location.pathname==='/profit' && document.querySelector('.workspace-profit-content')");
