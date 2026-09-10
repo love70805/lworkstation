@@ -6,15 +6,16 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.10](https://github.com/love70805/lworkstation/releases/tag/v0.2.10)，安装包已整理至 `latest/`，四个公开资产下载回读校验通过，0.2.9可经稳定通道发现新版。用户要求本机暂不安装，正式应用仍为0.2.9。下载入口、发布状态与验收边界以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
+当前公开稳定版为 [0.2.11](https://github.com/love70805/lworkstation/releases/tag/v0.2.11)，安装包已整理至 `latest/`，四个公开资产下载回读校验通过，0.2.10可经稳定通道发现新版。用户要求本机暂不安装，正式应用仍为0.2.9。下载入口、发布状态与验收边界以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
 
 ## 版本清单
 
-核对日期：2026-09-10。0.2.10 已公开发布；本机按用户要求暂不安装，正式版仍为 0.2.9。
+核对日期：2026-09-10。0.2.11 已公开发布；本机按用户要求暂不安装，正式版仍为 0.2.9。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.2.10` local desktop | 已公开 GitHub Latest，581测试/CI/打包运行/更新下载与四资产回读通过；本机暂不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.10)；本机 `candidates/0.2.10-local-desktop/`；[验收记录](../docs/RELEASE_0.2.10.md) |
+| `0.2.11` restore overview | 已公开 GitHub Latest；582测试/CI/页面/打包/下载与四资产回读通过，本机不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.11)；本机 candidates/0.2.11-restore-overview；[验收记录](../docs/RELEASE_0.2.11.md) |
+| `0.2.10` local desktop | 历史稳定版，581测试/CI/打包运行/更新下载与四资产回读通过；本机暂不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.10)；本机 `candidates/0.2.10-local-desktop/`；[验收记录](../docs/RELEASE_0.2.10.md) |
 | `0.2.9` | 历史稳定版，本机当前安装版；ERP写入修复 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.9)；[验收记录](../docs/RELEASE_0.2.9.md) |
 | `0.2.9` ERP inbox recovery | 候选验收、代码合并和公开资产回读已完成 | 本机 `candidates/0.2.9-erp-inbox-recovery/` |
 | `0.2.8` | 历史稳定版；本机升级与重启验收通过 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.8)；[验收记录](../docs/RELEASE_0.2.8.md) |
