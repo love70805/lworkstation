@@ -79,7 +79,7 @@ export function buildProfitQuery({ ledgerId, query = "", storeFilter = "all", su
 
 export function buildProfitHref(filter = {}) {
   const query = buildProfitQuery(filter).toString();
-  return `/workspace${query ? `?${query}` : ""}`;
+  return `/profit${query ? `?${query}` : ""}`;
 }
 
 export function buildCostMatchingHref(filter = {}) {
