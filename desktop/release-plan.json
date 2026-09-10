@@ -1,8 +1,20 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
+    {
+      "module": "workspace-summary-isolation",
+      "commit": "69c9e37"
+    },
+    {
+      "module": "restored-operating-overview",
+      "commit": "4b54813"
+    },
+    {
+      "module": "restored-profit-return-paths",
+      "commit": "7e7a03d"
+    },
     {
       "module": "scoped-manual-cost-overrides",
       "commit": "a5ab985"

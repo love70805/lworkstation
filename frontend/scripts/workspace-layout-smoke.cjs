@@ -28,8 +28,28 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(output, `${name}.png`), (await window.webContents.capturePage()).toPNG());
   }
   await window.loadURL(`${origin}/workspace`);
+  const overviewHeadings = ["经营概览", "月度销售趋势", "最近活动", "当前待办", "商品成本观察", "健康状态", "快捷操作"];
+  async function checkOverview(state) {
+    await until("document.body.innerText.includes('经营概览') && !document.querySelector('.workspace-load-state')");
+    for (const [width, height] of [[1024, 768], [1280, 800], [390, 780]]) {
+      window.setContentSize(width, height);
+      await delay(300);
+      const overview = await evaluate(`({headings:[...document.querySelectorAll('h1,h2')].map(e=>e.textContent),shells:document.querySelectorAll('.app-shell').length,overflow:document.documentElement.scrollWidth>innerWidth,profit:!!document.querySelector('.workspace-profit-content'),text:document.body.innerText})`);
+      for (const heading of overviewHeadings) assert.ok(overview.headings.includes(heading), heading);
+      assert.equal(overview.shells, 1);
+      assert.equal(overview.overflow, false);
+      assert.equal(overview.profit, false);
+      assert.equal(overview.text.includes('FOREIGN-SECRET'), false);
+      assert.equal(overview.text.includes('2099-12'), false, "foreign latest month must not enter overview summary");
+      await capture(`overview-${state}-${width}`);
+      await evaluate("document.querySelector('.quick-panel').scrollIntoView({block:'end'})");
+      await capture(`overview-${state}-${width}-bottom`);
+      await evaluate("scrollTo(0,0)");
+    }
+  }
+  await checkOverview("empty");
+  await window.loadURL(`${origin}/profit`);
   await until("document.body.innerText.includes('还没有月度账本')");
-  await capture("empty-1024");
   const ids = await evaluate(`(async()=>{
     const {db, createOrGetMonthlyLedger, getActiveMemberContext}=await import('/src/data/database.js');
     const member=await getActiveMemberContext();
@@ -37,16 +57,26 @@ app.whenReady().then(async () => {
     for (const period of ['2026-09','2026-08']) {
       const ledger=await createOrGetMonthlyLedger({workspaceId:member.workspaceId,period});
       ids.push(ledger.id);
+      await db.ledgers.update(ledger.id,{summary:{revenue:400,quantity:16},costSummary:{missingCount:8}});
       await db.salesRows.bulkPut(Array.from({length:8},(_,i)=>({id:period+'-'+i,ledgerId:ledger.id,workspaceId:member.workspaceId,store:i%2?'乙店':'甲店',platformSku:'SKU-'+i,platformSkc:'SKC-'+Math.floor(i/2),supplierNumber:'供应商A',attribute:'合成测试商品',quantity:2,amount:50,penalty:0})));
     }
     await db.ledgers.put({id:'FOREIGN',workspaceId:'another-workspace',period:'2099-12',status:'draft'});
+    await db.auditEvents.put({id:'foreign-audit',workspaceId:'another-workspace',action:'created',after:{period:'FOREIGN-SECRET'},createdAt:'2099-12-01'});
+    await db.platformSkus.put({id:'synthetic-sku',workspaceId:member.workspaceId,platformSku:'SKU-0',canonicalPlatformSku:'SKU-0',platformSkc:'SKC-0',status:'active'});
     return ids;
   })()`);
+  await window.loadURL(`${origin}/workspace?ledger=${encodeURIComponent(ids[0])}&store=甲店`);
+  await checkOverview("populated");
+  assert.equal(await evaluate("document.querySelectorAll('.dashboard-chart-point').length"), 2);
+  assert.ok(await evaluate("document.querySelectorAll('.reference-mini-row').length>0 && document.querySelectorAll('.activity-row').length>0 && document.querySelectorAll('.task-item').length>0"));
+  await until("document.querySelector('.side-navigation a[href^=\"/profit\"]')?.getAttribute('href').includes('ledger=')");
+  await evaluate("document.querySelector('.side-navigation a[href^=\"/profit\"]').click()");
+  await until("location.pathname==='/profit' && document.querySelector('.workspace-profit-content')");
   await window.loadURL(`${origin}/profit?ledger=${encodeURIComponent(ids[0])}&store=甲店&missing=1#details`);
-  await until("location.pathname==='/workspace' && document.querySelector('[aria-label=核算月份]')?.options.length===2 && document.querySelector('.workspace-profit-content')");
+  await until("location.pathname==='/profit' && document.querySelector('[aria-label=核算月份]')?.options.length===2 && document.querySelector('.workspace-profit-content')");
   await evaluate(`{const select=[...document.querySelectorAll('.workspace-profit-content select')].find(s=>[...s.options].some(o=>o.value==='乙店'));if(!select)throw new Error('store selector missing');select.value='乙店';select.dispatchEvent(new Event('change',{bubbles:true}));}`);
   await until("new URLSearchParams(location.search).get('store')==='乙店'");
-  await until("[...document.querySelectorAll('.side-navigation a')].filter(a=>['/workspace','/ledger','/cost-matching'].includes(new URL(a.href).pathname)).every(a=>new URL(a.href).searchParams.get('store')==='乙店')");
+  await until("[...document.querySelectorAll('.side-navigation a')].filter(a=>['/workspace','/profit','/ledger','/cost-matching'].includes(new URL(a.href).pathname)).every(a=>new URL(a.href).searchParams.get('store')==='乙店')");
   const evidence = [];
   for (const [width, height] of [[1024, 768], [1280, 800], [390, 780]]) {
     window.setContentSize(width, height);
@@ -57,7 +87,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(layout.months, ["2026-09", "2026-08"]);
     assert.ok(layout.nav.some(item => item.label === "月度账本"));
     assert.ok(layout.nav.some(item => item.label === "成本核对"));
-    assert.ok(layout.nav.every(item => !item.href.startsWith("/profit")));
+    assert.ok(layout.nav.some(item => item.label === "利润核算" && item.href.startsWith("/profit")));
     for (const label of ["月度账本", "成本核对"]) assert.equal(new URL(layout.nav.find(item => item.label === label).href, origin).searchParams.get("ledger"), ids[0]);
     assert.ok(layout.buttons.every(button => button.left >= 0 && button.right <= width));
     evidence.push(layout);
@@ -79,11 +109,23 @@ app.whenReady().then(async () => {
   await until("location.pathname==='/ledger'");
   assert.equal(await evaluate("new URLSearchParams(location.search).get('ledger')"), ids[1]);
   await evaluate("document.querySelector('.side-navigation a[href^=\"/workspace\"]').click()");
-  await until("location.pathname==='/workspace' && document.querySelector('.workspace-profit-content')");
+  await until("location.pathname==='/workspace' && document.querySelector('.dashboard-layout')");
+  await until("document.querySelector('.side-navigation a[href^=\"/profit\"]')?.getAttribute('href').includes('ledger=')");
+  await evaluate("document.querySelector('.side-navigation a[href^=\"/profit\"]').click()");
+  await until("location.pathname==='/profit' && document.querySelector('.workspace-profit-content')");
+  assert.equal(await evaluate("new URLSearchParams(location.search).get('store')"), "乙店");
+  await evaluate("document.querySelector('.side-navigation a[href^=\"/cost-matching\"]').click()");
+  await until("location.pathname==='/cost-matching'");
+  await until("document.querySelector('.side-navigation a[href^=\"/profit\"]')?.getAttribute('href').includes('ledger=')");
+  await evaluate("document.querySelector('.side-navigation a[href^=\"/profit\"]').click()");
+  await until("location.pathname==='/profit' && document.querySelector('.workspace-profit-content')");
   await window.loadURL(`${origin}/workspace?ledger=FOREIGN&store=secret&q=secret`);
+  await checkOverview("foreign");
+  assert.equal(await evaluate("[...document.querySelectorAll('.side-navigation a')].some(a=>a.href.includes('secret')||a.href.includes('FOREIGN'))"), false);
+  await window.loadURL(`${origin}/profit?ledger=FOREIGN&store=secret&q=secret`);
   await until(`new URLSearchParams(location.search).get('ledger')===${JSON.stringify(ids[0])} && document.querySelector('.workspace-profit-content')`);
   assert.equal(await evaluate("location.search.includes('secret')"), false);
-  fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ ok: true, evidence, checks: ["single shell", "legacy route", "user store change updates all three navigation links", "workspace month selection", "valid filters preserved", "foreign context cleared"] }, null, 2));
+  fs.writeFileSync(path.join(output, "result.json"), JSON.stringify({ ok: true, evidence, checks: ["empty and populated overview modules", "independent profit route", "single shell", "store change updates navigation", "month selection", "overview profit ledger cost round trip", "foreign activity and months excluded", "foreign context cleared"] }, null, 2));
   console.log(`Workspace layout smoke passed: ${output}`);
   app.exit(0);
 }).catch(error => { fs.writeFileSync(path.join(output, "error.txt"), error.stack); console.error(error); app.exit(1); });

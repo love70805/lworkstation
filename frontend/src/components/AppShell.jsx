@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Sun,
   WalletCards,
+  CircleDollarSign,
   Warehouse,
   X,
 } from "lucide-react";
@@ -42,6 +43,7 @@ const SIDEBAR_COMPACT_QUERY = "(max-width: 1200px)";
 const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace"] },
   { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
+  { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit"] },
   { id: "ledger", label: "月度账本", path: "/ledger", icon: WalletCards, match: ["/ledger", "/import-preview"] },
   { id: "cost", label: "成本核对", path: "/cost-matching", icon: Warehouse, match: ["/cost-matching", "/erp-assistant"] },
   { id: "diagnostics", label: "系统诊断与备份", path: "/diagnostics", icon: Activity, match: ["/diagnostics", "/data-security"] },
@@ -126,7 +128,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigation = useMemo(() => baseNavigation.map((item) => (
     item.id === "products"
       ? { ...item, count: workspaceSummary?.pendingCaptureCount ?? 0 }
-      : ["workspace", "ledger", "cost"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
+      : ["workspace", "profit", "ledger", "cost"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
   )), [workspaceSummary?.pendingCaptureCount, navigationSearch]);
 
   const notifications = useMemo(() => {
@@ -157,7 +159,7 @@ export default function AppShell({ children, pageClass = "" }) {
         tone: "success",
         title: `${workspaceSummary.latestOpenLedger.period} 账本可定稿`,
         detail: "正式成本已完整，等待最终复核",
-        path: `/workspace?ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`,
+        path: `/profit?ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`,
       });
     }
     return items;

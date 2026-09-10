@@ -7,7 +7,10 @@ describe("profit filter context", () => {
     const params = new URL(href, "http://localhost").searchParams;
     const filter = readProfitFilter(params, "L-1");
     expect(filter).toEqual({ query: "SKC-1", storeFilter: "680店", supplierSelection: ["YW-A", "YW-B"], missingOnly: true });
-    expect(buildProfitHref({ ledgerId: "L-1", ...filter })).toContain("/workspace?");
+    const profitUrl = new URL(buildProfitHref({ ledgerId: "L-1", ...filter }), "http://localhost");
+    expect(profitUrl.pathname).toBe("/profit");
+    expect(profitUrl.searchParams.get("ledger")).toBe("L-1");
+    expect(readProfitFilter(profitUrl.searchParams, "L-1")).toEqual(filter);
   });
 
   it("keeps an explicitly empty supplier selection when moving to ERP", () => {

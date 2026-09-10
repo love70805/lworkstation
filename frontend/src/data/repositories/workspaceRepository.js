@@ -18,20 +18,33 @@ import {
   selectionRecordVisible,
 } from "./selectionRepository";
 export async function getWorkspaceOperationalSummary() {
-  const [captures, products, platformSkus, ledgers, auditEvents, tableCountEntries, context] = await Promise.all([
+  const context = await getActiveMemberContext();
+  const inWorkspace = (record) => record.workspaceId === context.workspaceId;
+  const ledgers = await db.ledgers.where("workspaceId").equals(context.workspaceId).toArray();
+  const ledgerIds = ledgers.map((ledger) => ledger.id);
+  const [captures, products, platformSkus, auditEvents, tableCountEntries] = await Promise.all([
     db.captures.toArray(),
     db.products.toArray(),
     db.platformSkus.toArray(),
-    db.ledgers.toArray(),
-    db.auditEvents.toArray(),
-    Promise.all(db.tables.map(async (table) => [table.name, await table.count()])),
-    getActiveMemberContext(),
+    db.auditEvents.where("workspaceId").equals(context.workspaceId).toArray(),
+    Promise.all(db.tables.map(async (table) => {
+      if (table.name === "workspaces") return [table.name, await table.where("id").equals(context.workspaceId).count()];
+      // Settings are device metadata. Keep their existing global count semantics.
+      if (table.name === "settings") return [table.name, await table.count()];
+      if (table.schema.idxByName.workspaceId) return [table.name, await table.where("workspaceId").equals(context.workspaceId).count()];
+      // Legacy ERP rows have no workspace index; derive ownership through their ledger.
+      if (table.name === "erpCostRows") return [table.name, await table.where("ledgerId").anyOf(ledgerIds).filter((row) => !row.workspaceId || inWorkspace(row)).count()];
+      return [table.name, 0];
+    })),
   ]);
 
   const visibleProducts = products.filter((product) => selectionRecordVisible(product, context));
   const visibleProductIds = new Set(visibleProducts.map((product) => product.id));
   const visibleCaptures = captures.filter((capture) => selectionRecordVisible(capture, context));
-  const visibleSkus = platformSkus.filter((sku) => !sku.productId || visibleProductIds.has(sku.productId));
+  const visibleSkus = platformSkus.filter((sku) => (
+    (inWorkspace(sku) || (!sku.workspaceId && sku.productId && visibleProductIds.has(sku.productId)))
+    && (!sku.productId || visibleProductIds.has(sku.productId))
+  ));
   const tableCounts = Object.fromEntries(tableCountEntries);
   tableCounts.products = visibleProducts.length;
   tableCounts.captures = visibleCaptures.length;
@@ -41,8 +54,8 @@ export async function getWorkspaceOperationalSummary() {
     captures: visibleCaptures,
     products: visibleProducts,
     platformSkus: visibleSkus,
-    ledgers,
-    auditEvents,
+    ledgers: ledgers.filter(inWorkspace),
+    auditEvents: auditEvents.filter(inWorkspace),
     tableCounts,
   });
 }
