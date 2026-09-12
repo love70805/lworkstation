@@ -20,7 +20,6 @@ import {
   RefreshCw,
   ShoppingCart,
   TriangleAlert,
-  TrendingUp,
   Warehouse,
 } from "lucide-react";
 import AppShell from "../components/AppShell";
@@ -29,6 +28,9 @@ import { db, getActiveMemberContext, getSelectionReferenceSnapshot, getWorkspace
 import { describeAuditEvent } from "../domain/auditEvents";
 import { resolveWorkspacePrimaryAction } from "../lib/workspaceActions";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
+import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
+import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
+import SalesAnalytics from './SalesAnalytics';
 
 const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", {
   style: "currency",
@@ -70,75 +72,23 @@ function formatBytes(value) {
   return `${(bytes / (1024 ** unitIndex)).toFixed(unitIndex > 1 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
-function formatCompactMoney(value) {
-  const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) return "--";
-  if (Math.abs(amount) >= 10000) return `¥${(amount / 10000).toFixed(1)}万`;
-  return `¥${Math.round(amount).toLocaleString("zh-CN")}`;
-}
-
-function formatPeriodLabel(period) {
-  return period ? `${Number(String(period).slice(5))}月` : "--";
-}
-
-function TrendChart({ items, onOpenLedger }) {
-  const width = 640;
-  const height = 176;
-  const padding = { top: 16, right: 14, bottom: 28, left: 44 };
-  const plotWidth = width - padding.left - padding.right;
-  const plotHeight = height - padding.top - padding.bottom;
-  const values = items.map((item) => Math.max(0, Number(item.summary?.revenue ?? 0)));
-  const max = Math.max(...values, 1);
-  const points = items.map((item, index) => ({
-    x: padding.left + (items.length <= 1 ? plotWidth / 2 : (plotWidth * index) / (items.length - 1)),
-    y: padding.top + plotHeight - (values[index] / max) * plotHeight,
-    value: values[index],
-    label: formatPeriodLabel(item.period),
-  }));
-  const polyline = points.map((point) => `${point.x},${point.y}`).join(" ");
-  const area = points.length > 0
-    ? `${points[0].x},${padding.top + plotHeight} ${polyline} ${points.at(-1).x},${padding.top + plotHeight}`
-    : "";
-
-  if (items.length === 0) {
-    return <div className="dashboard-chart-empty"><TrendingUp size={22} /><div><strong>还没有可展示的销售趋势</strong><span>导入第一份月度销售台账后，这里会按月份汇总销售额。</span></div><Button icon={FileUp} onClick={onOpenLedger}>管理账本</Button></div>;
-  }
-
-  return (
-    <div className="dashboard-chart-wrap">
-      <svg className="dashboard-trend-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="月度销售额趋势图">
-        <title>月度销售额趋势图</title>
-        {[0, 0.5, 1].map((ratio) => {
-          const y = padding.top + plotHeight * ratio;
-          return <g key={ratio}><line x1={padding.left} x2={width - padding.right} y1={y} y2={y} /><text x={padding.left - 10} y={y + 4} textAnchor="end">{formatCompactMoney(max * (1 - ratio))}</text></g>;
-        })}
-        {area ? <polygon className="dashboard-chart-area" points={area} /> : null}
-        {polyline ? <polyline className="dashboard-chart-line" points={polyline} /> : null}
-        {points.map((point) => <g key={point.label}><circle className="dashboard-chart-point" cx={point.x} cy={point.y} r="4" /><text className="dashboard-chart-label" x={point.x} y={height - 10} textAnchor="middle">{point.label}</text></g>)}
-      </svg>
-      <div className="dashboard-chart-caption"><span><i className="chart-legend-dot" />销售金额</span><strong>{formatCompactMoney(values.at(-1))} <small>最近月份</small></strong></div>
-    </div>
-  );
-}
-
 export default function WorkspacePortal() {
   const navigate = useNavigate();
   const { notify } = useToast();
+  const ledgerScope = useWorkspaceLedgerScope();
   const [checkingHealth, setCheckingHealth] = useState(false);
   const [healthChecked, setHealthChecked] = useState(false);
   const [storageStatus, setStorageStatus] = useState(null);
   const portalData = useLiveQuery(async () => {
     const { workspaceId } = await getActiveMemberContext();
-    const [summary, auditEvents, ledgers, referenceSnapshot] = await Promise.all([
+    const [summary, auditEvents, referenceSnapshot] = await Promise.all([
       getWorkspaceOperationalSummary(),
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
-      db.ledgers.orderBy("period").reverse().filter(ledger => ledger.workspaceId === workspaceId).limit(8).toArray(),
       getSelectionReferenceSnapshot(),
     ]);
     return {
       summary,
       auditEvents,
-      ledgers: ledgers.toSorted((left, right) => String(left.period).localeCompare(String(right.period))),
       referenceRows: buildSelectionReferenceRows(referenceSnapshot),
     };
   }, [], null);
@@ -153,7 +103,7 @@ export default function WorkspacePortal() {
     id: event.id,
     time: formatRelativeTime(event.createdAt),
   }));
-  const trendLedgers = portalData?.ledgers ?? [];
+
   const referenceRows = useMemo(() => (portalData?.referenceRows ?? [])
     .toSorted((left, right) => Number(right.recentRevenue ?? 0) - Number(left.recentRevenue ?? 0))
     .slice(0, 5), [portalData?.referenceRows]);
@@ -247,13 +197,12 @@ export default function WorkspacePortal() {
 
       {alert ? <div className="workspace-status-strip"><span className="workspace-status-icon"><AlertIcon size={18} /></span><span><strong>需要处理</strong><small>{alert.text}</small></span><Button variant="ghost" onClick={() => navigate(alert.path)}>{alert.action}<ChevronRight size={16} /></Button></div> : null}
 
+      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')} />
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
-          <Panel className="dashboard-widget trend-widget">
-            <div className="panel-header"><div className="panel-title"><TrendingUp size={19} /><h2>月度销售趋势</h2></div><button className="widget-more" aria-label="查看月度账本" title="查看月度账本" onClick={() => navigate("/ledger")}><ArrowUpRight size={18} /></button></div>
-            <div className="widget-subtitle">按已导入月度台账汇总销售金额，利润定稿状态不会被改变。</div>
-            <TrendChart items={trendLedgers} onOpenLedger={() => navigate("/ledger")} />
-          </Panel>
+          <section className="workspace-daily-trend" aria-label="每日销售趋势">
+            {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} /> : <Panel><h2>每日销售趋势</h2><div className="dashboard-chart-empty">{ledgerScope.ready ? '选择或导入月度账本后查看每日销售趋势。' : '正在读取账本范围…'}</div></Panel>}
+          </section>
 
           <Panel className="activity-panel dashboard-widget">
             <div className="panel-header">
