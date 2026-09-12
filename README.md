@@ -1,6 +1,13 @@
 # Lworkstation 经营管理工作台
 
-选品工作台与利润核算面板的一体化内部工具。Lworkstation Windows 桌面安装版是正式交付入口，内置工作站、ERP 和 1688 受控标签；浏览器构建继续保留用于前端开发与调试。云端同步和账号隔离已准备好，未配置云端变量时不会上传业务数据。
+选品工作台与利润核算面板的一体化内部工具。Lworkstation Windows 桌面安装版是正式交付入口，内置工作站、ERP 和 1688 受控标签；浏览器构建继续保留用于前端开发与调试。当前交付为纯本机版本，无需云端数据库。
+
+## 下载与项目入口
+
+- [最新稳定版与安装包](https://github.com/love70805/lworkstation/releases/latest)
+- [当前发布状态](docs/RELEASE_STATUS.md) · [历史版本与本机候选登记](releases/README.md)
+- [下一版待改动](docs/NEXT_UPDATE.md)：需求与静态预览已整理，尚未实施，不代表当前版本功能。
+- [开发任务看板](docs/CODEX_TASK_BOARD.md) · [跨电脑续接指南](docs/CODEX_RESTART_GUIDE.md)
 
 ## 浏览器开发调试
 
@@ -23,7 +30,7 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
-当前稳定版为 [`0.2.7`](https://github.com/love70805/lworkstation/releases/tag/v0.2.7)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.7/Lworkstation-Setup-0.2.7.exe)，退出应用后手工安装一次；本版默认开启稳定更新检查，下载和安装仍需用户操作。历史版本保留。发布记录与待验收事项统一见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前稳定版为 [`0.2.11`](https://github.com/love70805/lworkstation/releases/tag/v0.2.11)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.11/Lworkstation-Setup-0.2.11.exe)。本版恢复原经营概览，保留独立利润页及人工成本、ERP 回传修复；首次安装可选择安装位置，稳定更新检查默认开启，下载和安装仍需用户操作。历史版本保留。发布记录与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
@@ -63,8 +70,8 @@ ERP inbox transport v2 与 batch `formatVersion: 2` 会保留 `warehouseEvidence
 - 平台 SKC 是商品父级标识。
 - 平台 SKU 是工作区全局唯一标识，也是 SKC 下的属性分支。
 - 利润核算从月度台账提取 SKC、SKU、属性、数量和金额。
-- ERP 采集成本是正式成本；1688 成本只作参考。
-- ERP 缺失时，人工确认的落地成本才可用于正式定稿。
+- 默认使用 ERP 正式成本；1688 成本只作参考。
+- 显式人工更正优先于 ERP，仅需非负单件成本和更正说明，允许真实零值与微小正数；限定当前工作区、月份、店铺和平台 SKU，可撤销并保留审计。后续回传不得覆盖人工有效值，也不得静默覆盖已定稿利润。
 - 默认币种为人民币。
 
 ## 验收命令
@@ -77,9 +84,9 @@ pnpm --dir frontend release:check
 
 GitHub Actions 在 `main`、`master`、`develop`、`codex/selection-profit-erp-sync` 分支推送以及 Pull Request 时运行两项检查：Ubuntu 执行前端 `release:check`，Windows 执行桌面 `verify`。桌面检查覆盖静态约束、IPC、扩展运行时、导航、inbox 生命周期和更新/发布产物契约；打包 smoke、真实 ERP/1688 采集与真实更新安装仍需单独验收。
 
-## 上云
+## 可选云端开发资料
 
-代码上传、Vercel、Supabase、同步 API 和数据迁移流程见 [docs/CLOUD_UPLOAD_GUIDE.md](docs/CLOUD_UPLOAD_GUIDE.md) 与 [frontend/docs/DEPLOYMENT_GUIDE.md](frontend/docs/DEPLOYMENT_GUIDE.md)。
+仓库保留云端实验与部署资料：[docs/CLOUD_UPLOAD_GUIDE.md](docs/CLOUD_UPLOAD_GUIDE.md) 与 [frontend/docs/DEPLOYMENT_GUIDE.md](frontend/docs/DEPLOYMENT_GUIDE.md)。这些资料不是当前纯本机版的安装前置条件；现有资料不代表用户已配置云端，也不授权执行云端迁移。
 
 ## Codex 多任务续接
 
