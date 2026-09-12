@@ -18,7 +18,7 @@ export default function SalesAnalytics({ workspaceId, ledgerId, store = "all" })
   const max = Math.max(1, ...data.daily.map((day) => Math.abs(Number(day[metric]))));
   return <Panel className="sales-analytics">
     <div className="sales-analytics-heading"><div><h2>每日销售</h2><p>{data.period} · {store === "all" ? "全部店铺" : store} · 按台账添加时间</p></div><div role="group" aria-label="趋势指标"><Button aria-pressed={metric === "revenueExact"} onClick={() => setMetric("revenueExact")}>销售额</Button><Button aria-pressed={metric === "quantityExact"} onClick={() => setMetric("quantityExact")}>销量</Button></div></div>
-    <p>销售原额 ¥{show(data.monthTotalsExact.revenueExact)} · 销量 {show(data.monthTotalsExact.quantityExact, 6)} 件</p>
+    <p>{data.coverage.status === "unknown" ? "销售原额待查 · 销量待查" : <>销售原额 ¥{show(data.monthTotalsExact.revenueExact)} · 销量 {show(data.monthTotalsExact.quantityExact, 6)} 件</>}</p>
     {data.coverage.status !== "complete" ? <p role="status">{data.coverage.status === "unknown" ? "尚未取得销售数据，空白日期未视为零。" : `${data.undated.count} 条销售记录缺少有效月内添加日期（含 ${data.outOfPeriod.count} 条超月），金额 ¥${show(data.undated.revenueExact)}、销量 ${show(data.undated.quantityExact, 6)} 件未定位到日期。请核对添加时间映射和账本月份，再重新导入；空白日期待查。`}</p> : null}
     <div className="sales-daily-chart" aria-label={metric === "revenueExact" ? "每日销售额" : "每日销量"}>
       {data.daily.map((day) => <div className="sales-daily-bar" key={day.date} title={`${day.date}：${day[metric]}${metric === "revenueExact" ? " 元" : " 件"}`}><span className={Number(day[metric]) < 0 ? "is-negative" : ""} style={{ height: `${Math.max(0, Math.abs(Number(day[metric])) / max * 100)}px` }} /><small>{day.date.slice(8)}</small></div>)}
