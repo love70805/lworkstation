@@ -28,7 +28,8 @@ import { createWorkspaceBackupPayload, db, getActiveMemberContext, getWorkspaceO
 import { runtimeConfig } from "../config/runtimeConfig";
 import { useCloudAuth } from "../hooks/useCloudAuth";
 import { downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
-import { normalizeAppearance, toggleAppearance } from "../lib/uiState";
+import { toggleAppearance } from "../lib/uiState";
+import { applyAppearance, readAppearance } from '../lib/appearance';
 import { validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
 import { Button, IconButton, Modal, useToast } from "./UI";
@@ -94,7 +95,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const [backingUp, setBackingUp] = useState(false);
   const [supportCopied, setSupportCopied] = useState(false);
-  const [appearance, setAppearance] = useState(() => normalizeAppearance(localStorage.getItem("shopeers-appearance")));
+  const [appearance, setAppearance] = useState(readAppearance);
   const workspaceSummary = useLiveQuery(getWorkspaceOperationalSummary, [], null);
   const requestedLedgerId = new URLSearchParams(location.search).get("ledger");
   const navigationContext = useLiveQuery(async () => {
@@ -186,9 +187,7 @@ export default function AppShell({ children, pageClass = "" }) {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.appearance = appearance;
-    localStorage.setItem("shopeers-appearance", appearance);
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", appearance === "dark" ? "#121821" : "#f6f7f9");
+    applyAppearance(appearance);
   }, [appearance]);
 
   useEffect(() => {

@@ -254,3 +254,15 @@ input:focus-visible {
     animation-iteration-count: 1 !important;
   }
 }
+#startup { position: fixed; inset: 80px 0 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #eef2f6; color: #273449; }
+#startup[hidden], #startup-actions[hidden], #lifecycle-notice[hidden] { display: none; }
+#startup img { border-radius: 12px; animation: startup-breathe 1.4s ease-in-out infinite alternate; }
+#startup h1 { font-size: 20px; margin: 20px 0 0; }
+#startup p { font-size: 13px; max-width: 80%; text-align: center; }
+#startup-actions { display: flex; gap: 12px; }
+#startup-actions button { padding: 10px 16px; border-radius: 6px; cursor: pointer; }
+#startup[data-status=error] img { animation: none; }
+#lifecycle-notice { position: fixed; top: 36px; right: 12px; z-index: 10; padding: 6px 12px; background: #fff2d4; color: #684300; font-size: 12px; }
+html[data-appearance=dark] #startup { background: #0e1319; color: #d7e0ea; }
+@keyframes startup-breathe { from { opacity: .6; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { #startup img { animation: none; } }
