@@ -8,7 +8,8 @@
     <script>
       (function () {
         try {
-          var appearance = localStorage.getItem("shopeers-appearance");
+          var appearance = localStorage.getItem("shopeers-appearance") || window.shopeersDesktopRuntime?.appearance;
+          document.documentElement.dataset.appearance = appearance === "dark" || appearance === "soft" ? "dark" : "light";
           if (appearance === "dark" || appearance === "soft") {
             document.documentElement.dataset.appearance = "dark";
             document.querySelector('meta[name="theme-color"]').setAttribute("content", "#121821");

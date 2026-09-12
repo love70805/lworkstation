@@ -353,3 +353,18 @@
 .workspace-month-picker .select-input { min-width:120px; }
 
 .workspace-month-picker > span { white-space:nowrap; }
+.workspace-ledger-controls { margin-bottom: 20px; padding: 20px; }
+.workspace-ledger-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+.workspace-ledger-heading h2 { margin: 0 0 6px; font-size: 17px; }
+.workspace-ledger-heading p { margin: 0; color: var(--text-muted); font-size: 13px; }
+.workspace-ledger-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin: 20px 0; }
+.workspace-ledger-filters label { display: grid; gap: 6px; min-width: 170px; font-size: 13px; }
+.workspace-ledger-status { display: grid; gap: 6px; font-size: 13px; padding-bottom: 4px; }
+.workspace-ledger-status span { color: var(--text-muted); }
+.workspace-ledger-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+@media (max-width: 600px) {
+  .workspace-ledger-heading { flex-direction: column; }
+  .workspace-ledger-filters label { width: 100%; min-width: 0; }
+  .workspace-ledger-actions .button { flex: 1 1 100%; text-align: center; }
+}
+.workspace-daily-trend .sales-analytics { margin: 0; }

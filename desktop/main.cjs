@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, Menu, WebContentsView, ipcMain, nativeTheme, net, protocol, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, Menu, Tray, WebContentsView, ipcMain, nativeTheme, net, protocol, session, shell } = require("electron");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const smokeUserDataPath = process.env.SHOPEERS_DESKTOP_SMOKE_USER_DATA
@@ -27,6 +27,7 @@ const { pathToFileURL } = require("node:url");
 const { normalizeAllowedRemoteUrl, resolveRemotePopup } = require("./remote-navigation.cjs");
 const { isAllowedWorkspaceUrl } = require("./workspace-navigation.cjs");
 const { createInboxServiceController } = require("./inbox-service.cjs");
+const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecycle.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
 const { createInboxPopoverLifecycle } = require("./inbox-popover-lifecycle.cjs");
@@ -75,6 +76,9 @@ const tabState = {
   "1688": { id: "1688", title: "1688", status: "loading", url: "https://www.1688.com/" },
 };
 let mainWindow;
+let desktopLifecycle;
+let lifecycleNotice = '';
+const startup = createStartupState({ changed: () => { resizeViews(); publishState(); } });
 let inboxPopoverWindow;
 let updatePopoverWindow;
 let activeTab = "workspace";
@@ -163,6 +167,8 @@ function publicState() {
     inboxPopoverOpen: Boolean(inboxPopoverWindow && !inboxPopoverWindow.isDestroyed()),
     updatePopoverOpen: Boolean(updatePopoverWindow && !updatePopoverWindow.isDestroyed()),
     appearance: shellAppearance,
+    startup: startup.getState(),
+    lifecycleNotice,
     version: app.getVersion(),
     erpZoom: { percent: erpZoomPercent, min: ERP_ZOOM_MIN, max: ERP_ZOOM_MAX, step: ERP_ZOOM_STEP },
   };
@@ -189,7 +195,7 @@ function resizeViews() {
   if (!mainWindow) return;
   const [width, height] = mainWindow.getContentSize();
   for (const [id, view] of views) {
-    const shouldAttach = id === activeTab;
+    const shouldAttach = id === activeTab && (id !== 'workspace' || startup.getState().status === 'ready');
     const isAttached = attachedViews.has(id);
     if (shouldAttach && !isAttached) {
       mainWindow.contentView.addChildView(view);
@@ -379,6 +385,8 @@ function closeInboxPopover({ returnFocus = true } = {}) {
 }
 
 async function shutdownDesktop() {
+  desktopLifecycle?.dispose();
+  startup.dispose();
   updateRuntime?.stop();
 
   const service = inboxService;
@@ -684,6 +692,7 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
   });
 
   await loadExtension(tabId, tabSession, extensionDirectory);
+  if (desktopLifecycle?.getState().quitting || view.webContents.isDestroyed()) return view;
   navigateRemoteView(tabId, tabState[tabId].url, "初始页面");
   return view;
 }
@@ -790,7 +799,8 @@ function createWorkspaceView(url) {
   const view = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, "workspace-preload.cjs"),
-      additionalArguments: [`--shopeers-version=${app.getVersion()}`],
+      additionalArguments: [`--shopeers-version=${app.getVersion()}`, `--shopeers-appearance=${shellAppearance}`],
+      backgroundThrottling: false,
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -820,8 +830,12 @@ function createWorkspaceView(url) {
     return { action: "deny" };
   });
   view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (isMainFrame && errorCode !== -3) setStatus("workspace", { status: "error", url: validatedURL, error: `工作站加载失败：${errorDescription}` });
+    if (isMainFrame && errorCode !== -3) {
+      setStatus("workspace", { status: "error", url: validatedURL, error: `工作站加载失败：${errorDescription}` });
+      startup.fail(`工作站加载失败：${errorDescription}。请重试或退出。`);
+    }
   });
+  view.webContents.on('render-process-gone', () => startup.fail('工作站进程已退出，请重试或退出。'));
   view.webContents.loadURL(url).then(() => setStatus("workspace", { status: "ready", url })).catch((error) => {
     setStatus("workspace", { status: "error", error: error.message });
   });
@@ -1383,6 +1397,7 @@ async function installDownloadedUpdate() {
   if (!updateRuntime?.canInstall()) return { ok: false, error: "更新尚未下载完成" };
   updateInstallInvocationCount += 1;
   if (process.env.SHOPEERS_DESKTOP_UPDATE_SMOKE === "1") return { ok: true, installInvoked: true, smoke: true };
+  desktopLifecycle?.beginQuit();
   closeUpdatePopover({ returnFocus: false });
   await shutdownDesktop();
   shutdownComplete = true;
@@ -1433,6 +1448,21 @@ async function createWindow() {
     },
   });
   await mainWindow.loadFile(path.join(__dirname, "shell.html"), { query: { appearance: shellAppearance } });
+  desktopLifecycle = createDesktopLifecycle({ app, window: mainWindow, Tray, Menu, icon: DESKTOP_ICON_PATH,
+    userDataPath: app.getPath('userData'),
+    onHide: () => { closeInboxPopover({ returnFocus: false }); closeUpdatePopover({ returnFocus: false }); },
+    onError: message => { lifecycleNotice = message; publishState(); },
+  });
+  mainWindow.on('resize', () => { resizeViews(); positionInboxPopover(); positionUpdatePopover(); });
+  mainWindow.on('move', () => { positionInboxPopover(); positionUpdatePopover(); });
+  mainWindow.on('closed', () => {
+    closeInboxPopover({ returnFocus: false });
+    closeUpdatePopover({ returnFocus: false });
+    mainWindow = null;
+  });
+  startup.start();
+  mainWindow.show();
+  desktopInstance.windowReady(mainWindow);
   const inboxScript = app.isPackaged
     ? path.join(process.resourcesPath, "runtime", "erp-inbox-server.mjs")
     : projectPath("tools", "erp-inbox-server.mjs");
@@ -1449,30 +1479,33 @@ async function createWindow() {
     },
   });
   await inboxService.start();
+  if (desktopLifecycle?.getState().quitting || !mainWindow || mainWindow.isDestroyed()) return;
   createWorkspaceView(workspaceUrl);
   resizeViews();
-  mainWindow.show();
-  desktopInstance.windowReady(mainWindow);
   configureAutoUpdater();
   if (updateSmokeReportPath) {
     await writeUpdateSmokeReport();
     return;
   }
   await buildRemoteView("erp", "persist:erp", "erp-assistant-extension");
+  if (desktopLifecycle?.getState().quitting || !mainWindow || mainWindow.isDestroyed()) return;
   await buildRemoteView("1688", "persist:1688", "1688-selection-extension");
-  mainWindow.on("resize", () => { resizeViews(); positionInboxPopover(); positionUpdatePopover(); });
-  mainWindow.on("move", () => { positionInboxPopover(); positionUpdatePopover(); });
-  mainWindow.on("closed", () => {
-    closeInboxPopover({ returnFocus: false });
-    closeUpdatePopover({ returnFocus: false });
-    mainWindow = null;
-  });
+  if (desktopLifecycle?.getState().quitting || !mainWindow || mainWindow.isDestroyed()) return;
   resizeViews();
   publishState();
   await writeSmokeReport();
 }
 
 ipcMain.handle("desktop:get-state", () => publicState());
+ipcMain.handle('desktop:startup-action', (event, action) => {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
+  if (action === 'quit') { desktopLifecycle?.quit(); return { ok: true }; }
+  if (action === 'retry') { startup.start(); views.get('workspace')?.webContents.reload(); return { ok: true }; }
+  return { ok: false };
+});
+ipcMain.on('workspace:ready', event => {
+  if (event.sender === views.get('workspace')?.webContents && event.senderFrame === event.sender.mainFrame) startup.ready();
+});
 ipcMain.handle("desktop:request-inbox", async (event, input) => {
   if (event.sender !== views.get("workspace")?.webContents) {
     return { status: 403, body: { error: "UNTRUSTED_INBOX_SENDER", message: "仅允许工作站页面访问本机收件接口。" } };
@@ -1617,7 +1650,7 @@ ipcMain.handle("desktop:retry-extension", async (_event, tabId) => {
 });
 
 ipcMain.on("workspace:appearance", (event, appearance) => {
-  if (event.sender !== views.get("workspace")?.webContents) return;
+  if (event.sender !== views.get("workspace")?.webContents || event.senderFrame !== event.sender.mainFrame) return;
   shellAppearance = appearance === "dark" ? "dark" : "light";
   try {
     saveAppearancePreference({ userDataPath: app.getPath("userData"), appearance: shellAppearance });
@@ -1642,12 +1675,14 @@ ipcMain.on("workspace:appearance", (event, appearance) => {
 
 app.setAppUserModelId("com.shopeers.workstation");
 app.whenReady().then(createWindow).catch((error) => {
+  if (desktopLifecycle?.getState().quitting) { app.quit(); return; }
   console.error("桌面应用启动失败：", error);
   dialog.showErrorBox("Lworkstation 无法启动", error?.message || String(error));
   app.quit();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("before-quit", (event) => {
+  desktopLifecycle?.beginQuit();
   if (shutdownComplete) return;
   event.preventDefault();
   if (shutdownPromise) return;

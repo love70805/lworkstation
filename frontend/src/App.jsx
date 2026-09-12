@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
+import LegacyCostRedirect from './components/LegacyCostRedirect';
 import { ToastProvider } from "./components/UI";
 import { RuntimeConfigurationGate } from "./components/RuntimeConfigurationGate";
 import { CloudAuthenticationGate, hasAuthenticatedCloudIdentity, useCloudAuthenticationState } from "./components/CloudAuthenticationGate";
@@ -15,7 +16,6 @@ import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectio
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 
 const CaptureQueue = lazy(() => import("./pages/CaptureQueue"));
-const CostMatching = lazy(() => import("./pages/CostMatching"));
 const DataSecurity = lazy(() => import("./pages/DataSecurity"));
 const Diagnostics = lazy(() => import("./pages/Diagnostics"));
 const ErpAssistantPage = lazy(() => import("./pages/ErpAssistantPage"));
@@ -162,7 +162,7 @@ export default function App() {
                   <Route path="/capture" element={<CaptureQueue />} />
                   <Route path="/products/edit" element={<ProductEditor />} />
                   <Route path="/profit" element={<ProfitWorkspacePage />} />
-                  <Route path="/cost-matching" element={<CostMatching />} />
+                  <Route path="/cost-matching" element={<LegacyCostRedirect />} />
                   <Route path="/import-preview" element={<ImportPreview />} />
                   <Route path="/ledger" element={<MonthlyLedger />} />
                   <Route path="/data-security" element={<DataSecurity />} />

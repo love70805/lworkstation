@@ -12,7 +12,7 @@ assert.ok(fs.existsSync(executable), "set SHOPEERS_DESKTOP_SINGLE_INSTANCE_ELECT
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lworkstation-single-instance-"));
 const children = [];
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const page = http.createServer((_request, response) => response.end("<!doctype html><title>Synthetic workspace</title><p>single-instance fixture</p>"));
+const page = http.createServer((_request, response) => response.end("<!doctype html><title>Synthetic workspace</title><div id=root><main class=app-shell>single-instance fixture</main></div>"));
 await new Promise(resolve => page.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${page.address().port}/`;
 const report = id => { try { return JSON.parse(fs.readFileSync(path.join(root, `${id}.json`), "utf8")); } catch (_) { return {}; } };
