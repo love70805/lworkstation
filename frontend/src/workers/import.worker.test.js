@@ -11,6 +11,18 @@ afterEach(() => vi.unstubAllGlobals());
 const headers = ['店铺','供方货号','SKC','平台SKU','数量','金额'];
 const mapping = {store:'店铺',supplierNumber:'供方货号',platformSkc:'SKC',platformSku:'平台SKU',quantity:'数量',amount:'金额'};
 describe('batch import Worker jobs', () => {
+  it('retains underlying decimals, real source rows, added date and activity without changing legacy amounts', async () => {
+    const send = await worker();
+    const book = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([['店铺','供方货号','SKC','平台SKU','数量','单价','添加时间','活动'], ['甲','供方','父','001',0.5,0.009,46235,'促销'], [], ['甲','供方','父','002',1,2,'2026-09-01','']]);
+    sheet.F2.z = '0.00';
+    XLSX.utils.book_append_sheet(book, sheet, '台账');
+    const parsed = send({type:'parse',jobId:'exact',extension:'xlsx',buffer:XLSX.write(book,{type:'array',bookType:'xlsx'})});
+    expect(parsed.headers).not.toContain('__salesSource');
+    const result = send({type:'validate',jobId:'exact',mapping:parsed.suggestedMapping,options:{deriveAmountFromUnitPrice:true,period:'2026-08'}});
+    expect(result.rows[0]).toMatchObject({sourceSheet:'台账',sourceRow:2,quantityExact:'0.5',unitPriceRaw:'0.009',amountExact:'0.0045',activityStatus:'known',activityRaw:'促销'});
+    expect(result.rows[1]).toMatchObject({sourceRow:4,dateStatus:'out_of_period',activityStatus:'missing'});
+  });
   it('keeps four formats/jobs isolated, preserves Chinese/leading zero and only reads the first worksheet', async () => {
     const send = await worker();
     for (const extension of ['csv','tsv','xlsx','xls']) {

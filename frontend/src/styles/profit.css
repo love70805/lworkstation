@@ -1,4 +1,22 @@
 /* Profit panel */
+.profit-view-tabs, .sales-analytics-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+.profit-view-tabs label { display:flex; align-items:center; gap:8px; white-space:nowrap; }
+.profit-view-tabs [aria-current="page"] { border-color:var(--accent, #4578c8); }
+.sales-analytics { margin-top:20px; min-width:0; padding:20px; }
+.sales-analytics h2 { margin:0 0 6px; font-size:18px; }
+.sales-analytics p { margin:8px 0; line-height:1.6; }
+.sales-daily-chart { display:flex; align-items:flex-end; gap:6px; height:135px; overflow-x:auto; padding:8px 0; }
+.sales-daily-bar { display:flex; flex-direction:column; justify-content:flex-end; align-items:center; min-width:18px; flex:1; height:120px; }
+.sales-daily-bar > span { display:block; width:100%; background:var(--accent, #4578c8); border-radius:3px 3px 0 0; }
+.sales-daily-bar > span.is-negative { background:#c62828; }
+.sales-daily-bar small { margin-top:5px; }
+.sales-analytics-tables { overflow:auto; max-height:480px; }
+.sales-analytics table { border-collapse:collapse; width:100%; margin:12px 0; }
+.sales-analytics th, .sales-analytics td { padding:10px; text-align:left; border-bottom:1px solid var(--border, #ddd); }
+.sales-analytics td small { display:block; }
+.profit-skc-group { margin:12px 0; border-bottom:1px solid var(--border, #ddd); }
+.profit-skc-group > summary { padding:14px 4px; cursor:pointer; }
+.profit-skc-group > summary span { display:block; padding-top:6px; }
 .profit-page,
 .profit-page .page-container,
 .profit-page .profit-table-panel,
