@@ -1,6 +1,6 @@
 # 0.2.12 完整月度核算与桌面体验
 
-状态：候选准备中，尚未公开发布、尚未安装本机。当前公开稳定版仍为0.2.11。完整范围及逐项验收见 [实施合同](integration/FULL_UPDATE_CONTRACT.md)、[验收清单](integration/FULL_UPDATE_ACCEPTANCE.md)。
+状态：候选已构建并通过打包运行和更新下载检查，正在完成候选实际操作及GitHub集成；尚未公开发布、尚未安装本机。当前公开稳定版仍为0.2.11。完整范围及逐项验收见 [实施合同](integration/FULL_UPDATE_CONTRACT.md)、[验收清单](integration/FULL_UPDATE_ACCEPTANCE.md)。
 
 ## 版本内容
 
@@ -15,7 +15,15 @@
 - 桌面体验9174805、利润分析f33a390、首页8c07dec/a957992、ERP用户链路b488a33、利润报告59beb33已由主线审查并承接。
 - 59beb33组合基线：主线frontend release:check通过，包含96文件612项测试、生产构建、ERP bridge/inbox及本机合同门禁；desktop verify全部12组通过。日志位于archive/full-update-regression-2026-09-13/。
 - ERP隔离用户链路通过自动登记、非空草稿收件、复制解析、整个进程关闭后恢复证据与发布；只用合成ERP数据，不声称已覆盖用户真实ERP登录采集。
-- 专职报告30项合成文件/截图/JSON证据已逐项哈希归档至archive/profit-frozen-reports-2026-09-13/specialist/。最终正式外壳完整报告操作验收、候选运行、更新链、GitHub CI和公开资产回读仍待完成。
+- 专职报告30项合成文件/截图/JSON证据已逐项哈希归档至archive/profit-frozen-reports-2026-09-13/specialist/。最终源码外壳报表操作及24项证据通过，主线独立读取四份实际下载验证金额、文本长单号、动态页签及旧文件字节不变。
+- 4b08da3主工作区构建0.2.12，packaged smoke及资产检查通过；实际NsisUpdater下载116540543字节并验证哈希，未触发安装。新隔离更新夹具的取消/重试/稍后安装/退出检查通过。候选自带前端完整报告链、GitHub CI和公开回读待完成。
+
+## 候选记录
+
+- 本机目录：releases/candidates/0.2.12-complete-local-update/。
+- 安装包：Lworkstation Setup 0.2.12.exe，116540543字节。
+- SHA256：55E54E5583C05238681F43C9308952D391918050E8B575F1B3E09AF9620CB717。
+- 候选、blockmap、latest.yml及SHA256.txt已逐一复制校验。releases/latest是本机新构建暂存，不表示GitHub已发布。
 
 ## 交付边界
 
