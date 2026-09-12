@@ -18,6 +18,7 @@ import { collectErpPlatformSkcs } from "../domain/erpQueryScope";
 import { buildErpInboxQueue, ERP_INBOX_MATCH_REASONS } from "../domain/erpInboxMatching";
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
+import { useLedgerIdentity } from "../hooks/useLedgerIdentity";
 import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
 import { groupImportedSales } from "../lib/profit";
 import { registerErpBridgeRequest } from "../lib/erpInboxTransport";
@@ -181,9 +182,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const [draftReadyLedger, setDraftReadyLedger] = useState(null);
   const previousRegistrationRef = useRef(null);
   const unloadedInboxIdsRef = useRef(new Set());
-  const ledgerIdentityRef = useRef(null);
-  ledgerIdentityRef.current = snapshot?.ledger?.id;
-  useEffect(() => () => { ledgerIdentityRef.current = null; }, [snapshot?.ledger?.id]);
+  const ledgerIdentityRef = useLedgerIdentity(snapshot?.ledger?.id);
   const effectiveRequestId = costRequestId ?? latestRequest?.id ?? null;
   const requestForImport = requestRecords.find((request) => request.id === batchEnvelope?.requestId) ?? costRequest ?? latestRequest ?? null;
   const workspaceInboxRecords = useMemo(() => allInboxRecords.filter((record) => (
