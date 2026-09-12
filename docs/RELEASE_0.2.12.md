@@ -1,6 +1,6 @@
 # 0.2.12 完整月度核算与桌面体验
 
-状态：候选已构建并通过打包运行和更新下载检查，正在完成候选实际操作及GitHub集成；尚未公开发布、尚未安装本机。当前公开稳定版仍为0.2.11。完整范围及逐项验收见 [实施合同](integration/FULL_UPDATE_CONTRACT.md)、[验收清单](integration/FULL_UPDATE_ACCEPTANCE.md)。
+状态：候选已通过完整操作、打包运行和更新下载验收，正在完成GitHub集成；尚未公开发布、尚未安装本机。当前公开稳定版仍为0.2.11。完整范围及逐项验收见 [实施合同](integration/FULL_UPDATE_CONTRACT.md)、[验收清单](integration/FULL_UPDATE_ACCEPTANCE.md)。
 
 ## 版本内容
 
@@ -16,7 +16,8 @@
 - 59beb33组合基线：主线frontend release:check通过，包含96文件612项测试、生产构建、ERP bridge/inbox及本机合同门禁；desktop verify全部12组通过。日志位于archive/full-update-regression-2026-09-13/。
 - ERP隔离用户链路通过自动登记、非空草稿收件、复制解析、整个进程关闭后恢复证据与发布；只用合成ERP数据，不声称已覆盖用户真实ERP登录采集。
 - 专职报告30项合成文件/截图/JSON证据已逐项哈希归档至archive/profit-frozen-reports-2026-09-13/specialist/。最终源码外壳报表操作及24项证据通过，主线独立读取四份实际下载验证金额、文本长单号、动态页签及旧文件字节不变。
-- 4b08da3主工作区构建0.2.12，packaged smoke及资产检查通过；实际NsisUpdater下载116540543字节并验证哈希，未触发安装。新隔离更新夹具的取消/重试/稍后安装/退出检查通过。候选自带前端完整报告链、GitHub CI和公开回读待完成。
+- 4b08da3主工作区构建0.2.12，packaged smoke及资产检查通过；实际NsisUpdater下载116540543字节并验证哈希，未触发安装。新隔离更新夹具的取消/重试/稍后安装/退出检查通过。
+- 15c9b75候选测试由主线独立复跑：实际shopeers://workstation打包前端完成CSV本人选取、未扣款冻结、正负扣款财务、重开r2和旧r1原字节重下载。关窗入托盘、第二实例唤回原窗口、主题内外一致及quit偏好重启退出通过。9项主线证据存于archive/packaged-report-ui-0.2.12-2026-09-13/main-integration；EXE/asar测试前后哈希不变。GitHub CI和公开回读待完成。
 
 ## 候选记录
 
