@@ -6,7 +6,7 @@
 
 ### 下一版需求入口
 
-桌面动画、托盘、首页账本、导航及利润面板的完整待改动清单见 [NEXT_UPDATE.md](NEXT_UPDATE.md)。当前为需求和预览阶段，尚未实施；已发布行为以 [发布状态](RELEASE_STATUS.md) 为准。
+桌面动画、托盘、首页账本、导航及利润面板的完整清单见 [NEXT_UPDATE.md](NEXT_UPDATE.md)。用户已批准一次完整更新及本机v15报告留存方案，现处于实现、审查与集成阶段；最新范围以 [实施合同](integration/FULL_UPDATE_CONTRACT.md)、[集成进度](integration/FULL_UPDATE_PROGRESS.md) 和 [验收清单](integration/FULL_UPDATE_ACCEPTANCE.md) 为准。下方需求/预览阶段文字是历史记录，不撤销后续执行授权。已发布行为以 [发布状态](RELEASE_STATUS.md) 为准。
 
 ### 2026-09-13 全对话复审与导出规划收口
 

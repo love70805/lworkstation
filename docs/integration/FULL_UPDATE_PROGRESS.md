@@ -72,3 +72,11 @@
 - 精度边界独立复现：实际在制legacyReportLine将profitExact=0.0099999999999999999转换为Number 0.01，若页面继续汇总profit数字则显示0.01，报告精确截断为0.00。已退回利润专职，要求新公式页面/SKC/快照出口优先exact字符串，旧历史公式保持；交付必须用跨两位边界测试关闭。
 - 最后用户样本的样式元数据与源文件SHA256已只读抽取至archive/full-update-report-review-2026-09-13/approved-template-style.json，不含业务单元格值。扣款文本仍深色，仅金额及合计红色；已同步专职。
 - 2026-09-13对当前集成依赖执行frontend及desktop的pnpm audit --audit-level=low，均返回No known vulnerabilities found；若后续依赖变化需重新验证。GitHub只读回读仍为v0.2.11 Latest，未提前创建新Release。
+
+## ERP 用户链路主线独立复跑
+
+- 专职62f597d仅新增三个desktop测试/验收文件，审查后承接b488a33。测试实际React登记、workspace preload、IPC、inbox HTTP、扩展bridge/background VM和扩展原复制函数，未直接写请求、收件或正式成本。
+- 主线在准备Worktree、5197端口独立运行node desktop/erp-ui-smoke.cjs通过。未点击复制SKC即自动登记；非空草稿仍收件且不被覆盖；复制输出可解析；整个Electron/bridge VM退出后同隔离profile恢复、无证据重新注入，界面发布成功，0.009×1000=9；旧工作区结果不进入新工作区。
+- 主线9项PNG/JSON与SHA256逐一回读并归档archive/erp-ui-acceptance-2026-09-13/main-integration（原临时KtR3gF）；专职9项归档也已回读一致。仅合成数据，不保留profile/数据库，不代替真实ERP采集现场验收或最终packaged回归。
+- 主线目视恢复截图发现状态提示与ERP扩展按钮重叠：裸status段落后复用page-back-row的-8px上边距；已退回利润专职局部修正。同时手动导入仍写“先复制SKC建立关联”，须改为实际自动登记/重试状态，不能延续误导。
+- 报告交付审查仍要求实际v14→v15旧行不变、旧备份兼容、坏父子引用/跨scope/重复采用拒绝且不损现库，以及新公式摘要/SKC/定稿快照的两位边界精度。当前在制测试标题不作为这些要求已通过的证据。
