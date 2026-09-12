@@ -147,8 +147,8 @@ export default function AppShell({ children, pageClass = "" }) {
       items.push({
         id: `costs:${workspaceSummary.latestOpenLedger.id}:${workspaceSummary.latestOpenLedger.updatedAt ?? "none"}:${workspaceSummary.missingCostCount}`,
         tone: "danger",
-        title: `${workspaceSummary.missingCostCount} 个 SKU 缺少正式成本`,
-        detail: `${workspaceSummary.latestOpenLedger.period} 账本暂不能定稿`,
+        title: `工作区合计 ${workspaceSummary.missingCostCount} 条 SKU 待补正式成本`,
+        detail: `查看 ${workspaceSummary.latestOpenLedger.period} 成本核对`,
         path: profitWorkspaceHref(`ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`, 'cost'),
       });
     } else if (workspaceSummary.latestOpenLedger?.status === "ready") {

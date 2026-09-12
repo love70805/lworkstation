@@ -115,7 +115,7 @@ export default function WorkspacePortal() {
       items.push({ icon: Hourglass, tone: "warning", title: "待确认采集", detail: `${summary.pendingCaptureCount} 条记录等待人工确认`, action: "打开队列", path: "/products?view=pending" });
     }
     if ((summary?.missingCostCount ?? 0) > 0 && latestOpenLedger) {
-      items.push({ icon: Warehouse, tone: "warning", title: "正式成本待补齐", detail: `${latestOpenLedger.period} 账本缺少 ${summary.missingCostCount} 个 SKU 成本`, action: "进入核对", path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
+      items.push({ icon: Warehouse, tone: "warning", title: "正式成本待补齐", detail: `工作区合计 ${summary.missingCostCount} 条 SKU 待补正式成本`, action: `查看 ${latestOpenLedger.period}`, path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
     }
     if (latestOpenLedger?.status === "ready") {
       items.push({ icon: CircleDollarSign, tone: "success", title: "账本可以定稿", detail: `${latestOpenLedger.period} 正式成本已完整`, action: "打开账本", path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
@@ -158,8 +158,8 @@ export default function WorkspacePortal() {
   } else if ((summary?.missingCostCount ?? 0) > 0 && latestOpenLedger) {
     alert = {
       icon: TriangleAlert,
-      text: `${latestOpenLedger.period} 账本仍有 ${summary.missingCostCount} 个平台 SKU 缺少正式成本。`,
-      action: "进入 ERP 成本核对",
+      text: `工作区合计仍有 ${summary.missingCostCount} 条平台 SKU 待补正式成本。`,
+      action: `查看 ${latestOpenLedger.period} 成本`,
       path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}`,
     };
   } else if (latestOpenLedger?.status === "ready") {

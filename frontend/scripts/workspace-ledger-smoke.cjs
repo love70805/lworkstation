@@ -46,6 +46,7 @@ app.whenReady().then(async()=>{
  await wait("document.querySelector('[aria-label=首页核算月份]')?.options.length===6 && document.querySelector('.sales-analytics')?.innerText.includes('甲店')");
  await wait("document.querySelector('.sales-analytics')?.innerText.includes('缺少有效月内添加日期')");
  await overview('partial');
+ assert.ok(await run("document.querySelector('.workspace-status-strip').innerText.includes('工作区合计仍有 15') && document.querySelector('.workspace-ledger-status').innerText.includes('整月 3')"));
  assert.equal(await run("new URL(document.querySelector('.workspace-ledger-actions a:last-child').href).searchParams.get('store')"),'甲店');
  await run("document.querySelector('.workspace-ledger-actions a:last-child').click()");
  await wait("location.pathname==='/profit' && new URLSearchParams(location.search).get('view')==='detail' && document.querySelector('.workspace-profit-content')");
@@ -62,7 +63,9 @@ app.whenReady().then(async()=>{
  await wait("Boolean(document.querySelector('[aria-label=首页核算月份]'))");
  await run(`{const s=document.querySelector('[aria-label=首页核算月份]');for(const id of ${JSON.stringify([ids[1],ids[2],ids[5]])}){s.value=id;s.dispatchEvent(new Event('change',{bubbles:true}));}const store=document.querySelector('[aria-label=首页店铺]');store.value='乙店';store.dispatchEvent(new Event('change',{bubbles:true}));}`);
  await wait(`document.querySelector('[aria-label=首页核算月份]')?.value===${JSON.stringify(ids[5])}`);
- await run("{const s=document.querySelector('[aria-label=首页店铺]');s.value='乙店';s.dispatchEvent(new Event('change',{bubbles:true}));}");
+ assert.equal(await run("new URLSearchParams(location.search).get('ledger')"),ids[5]);
+ assert.equal(await run("new URLSearchParams(location.search).get('store')"),'乙店');
+ assert.equal(await run("document.querySelector('[aria-label=首页店铺]').value"),'乙店');
  await wait("document.querySelector('.sales-analytics')?.innerText.includes('2026-04 · 乙店')");
  assert.ok(await run("[...document.querySelectorAll('.sales-daily-bar')].some(e=>e.title.includes('2026-04-01：0'))"));
  await run("document.querySelector('.workspace-daily-trend').scrollIntoView({block:'start'})");await capture('confirmed-zero');
