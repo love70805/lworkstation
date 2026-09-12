@@ -88,6 +88,13 @@ function saveAppearancePreference({ userDataPath, appearance, operations = fs })
 }
 
 module.exports = {
+  loadCloseBehavior: ({ userDataPath }) => readPreferences(preferencesPath({ userDataPath })).closeBehavior === 'quit' ? 'quit' : 'tray',
+  saveCloseBehavior: ({ userDataPath, behavior }) => {
+    const file = preferencesPath({ userDataPath });
+    const value = behavior === 'quit' ? 'quit' : 'tray';
+    writePreferences(file, { ...readPreferences(file), closeBehavior: value });
+    return value;
+  },
   ERP_ZOOM_DEFAULT,
   ERP_ZOOM_MIN,
   ERP_ZOOM_MAX,

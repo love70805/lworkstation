@@ -1,8 +1,28 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
+    {
+      "module": "desktop-theme-startup-and-tray",
+      "commit": "9174805"
+    },
+    {
+      "module": "daily-sales-and-integrated-cost-review",
+      "commit": "f33a390"
+    },
+    {
+      "module": "overview-ledger-navigation",
+      "commit": "8c07dec"
+    },
+    {
+      "module": "overview-scope-and-rapid-navigation",
+      "commit": "a957992"
+    },
+    {
+      "module": "local-v15-frozen-monthly-reports",
+      "commit": "59beb33"
+    },
     {
       "module": "workspace-summary-isolation",
       "commit": "69c9e37"

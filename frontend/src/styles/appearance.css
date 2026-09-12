@@ -1,0 +1,8 @@
+/* One theme animation owns the surface; table cells and controls must not each
+   start their hover/color transitions when the palette changes. */
+.appearance-changing, .appearance-changing body, .appearance-changing #root,
+.appearance-changing .app-shell,
+.appearance-changing .app-shell * { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  html, body, #root, .app-shell, .app-shell * { transition: none !important; animation: none !important; }
+}

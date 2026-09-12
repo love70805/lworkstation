@@ -18,6 +18,7 @@ import { collectErpPlatformSkcs } from "../domain/erpQueryScope";
 import { buildErpInboxQueue, ERP_INBOX_MATCH_REASONS } from "../domain/erpInboxMatching";
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
+import { useLedgerIdentity } from "../hooks/useLedgerIdentity";
 import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
 import { groupImportedSales } from "../lib/profit";
 import { registerErpBridgeRequest } from "../lib/erpInboxTransport";
@@ -28,6 +29,17 @@ import { clearCostDraft, invalidateLegacyCostDrafts, readRestorableCostDraft, wr
 import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchingVoidBatchDialog } from "./CostMatchingInboxDialogs";
 
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
+
+export function CostMatchingContent({ validatedContext, onPublished }) {
+  const snapshot = useLatestSalesImport(validatedContext?.ledgerId);
+  if (snapshot === undefined) return <Panel>正在验证成本核对范围...</Panel>;
+  if (!validatedContext?.ledgerId || snapshot?.ledger?.id !== validatedContext.ledgerId || snapshot?.ledger?.workspaceId !== validatedContext.workspaceId || (validatedContext.store !== "all" && !snapshot.rows.some((row) => row.store === validatedContext.store))) return <Panel><p role="alert">账本或店铺不属于当前工作区，请重新选择。</p></Panel>;
+  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}/${validatedContext.store}`} validatedContext={validatedContext} onPublished={onPublished} />;
+}
+
+export default function CostMatching() {
+  return <AppShell pageClass="cost-page"><CostMatchingBody /></AppShell>;
+}
 const purchaseCurrency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2, maximumFractionDigits: 20 });
 async function sha256Text(value) {
   const bytes = new TextEncoder().encode(value);
@@ -121,15 +133,15 @@ function EvidencePreview({ variants }) {
   );
 }
 
-export default function CostMatching() {
+function CostMatchingBody({ validatedContext, onPublished }) {
   const desktop = isDesktopRuntime();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { notify } = useToast();
   const fileInputRef = useRef(null);
-  const ledgerId = searchParams.get("ledger");
+  const ledgerId = validatedContext?.ledgerId ?? searchParams.get("ledger");
   const filterSearchKey = searchParams.toString();
-  const profitFilter = useMemo(() => readProfitFilter(searchParams, ledgerId), [filterSearchKey, ledgerId]);
+  const profitFilter = useMemo(() => ({ ...readProfitFilter(searchParams, ledgerId), ...(validatedContext ? { storeFilter: validatedContext.store } : {}) }), [filterSearchKey, ledgerId, validatedContext]);
   const profitHref = useMemo(() => buildProfitHref({ ledgerId, ...profitFilter }), [ledgerId, profitFilter]);
   const snapshot = useLatestSalesImport(ledgerId);
   const latestRequest = useLiveQuery(() => getLatestErpCostRequest(ledgerId), [ledgerId], null);
@@ -170,8 +182,7 @@ export default function CostMatching() {
   const [draftReadyLedger, setDraftReadyLedger] = useState(null);
   const previousRegistrationRef = useRef(null);
   const unloadedInboxIdsRef = useRef(new Set());
-  const ledgerIdentityRef = useRef(null);
-  ledgerIdentityRef.current = snapshot?.ledger?.id;
+  const ledgerIdentityRef = useLedgerIdentity(snapshot?.ledger?.id);
   const effectiveRequestId = costRequestId ?? latestRequest?.id ?? null;
   const requestForImport = requestRecords.find((request) => request.id === batchEnvelope?.requestId) ?? costRequest ?? latestRequest ?? null;
   const workspaceInboxRecords = useMemo(() => allInboxRecords.filter((record) => (
@@ -560,6 +571,8 @@ export default function CostMatching() {
     }
     setPublishing(true);
     try {
+      const inputHash = await sha256Text(sourceText);
+      if (ledgerIdentityRef.current !== snapshot.ledger.id) return;
       const result = await savePublishedErpCostBatch({
         ledgerId: snapshot.ledger.id,
         workspaceId: snapshot.ledger.workspaceId,
@@ -567,12 +580,15 @@ export default function CostMatching() {
         requestId: batchEnvelope?.requestId ?? effectiveRequestId,
         reconciliation: publicationReconciliation ?? reconciliation,
         sourceName,
-        inputHash: await sha256Text(sourceText),
+        inputHash,
         sourceEnvelope: batchEnvelope,
       });
       notify(`ERP 成本批次 ${result.batchId} 已发布，匹配 ${result.matchedCount} 个平台 SKU。`);
       clearCostDraft(snapshot.ledger.id);
-      navigate(profitHref);
+      if (ledgerIdentityRef.current === snapshot.ledger.id) {
+        if (onPublished) onPublished(result);
+        else navigate(profitHref);
+      }
     } catch (error) {
       notify(`成本批次发布失败：${error.message}`, "error");
     } finally {
@@ -738,30 +754,30 @@ export default function CostMatching() {
       <textarea className="cost-textarea cost-manual-textarea mono" value={sourceText} disabled={locked} onChange={(event) => { setSourceText(event.target.value); setSourceName("手动输入"); setParsedRows(null); setBatchEnvelope(null); releaseLoadedInbox(); setParseError(""); }} placeholder={buildErpCostTemplate()} aria-label="手动输入 ERP 成本批次 JSON、TSV 或 CSV" />
       {parseError ? <div className="import-error" role="alert"><AlertCircle size={18} />{parseError}</div> : null}
       <div className="cost-source-actions cost-manual-actions"><Button icon={ClipboardPaste} disabled={locked} onClick={pasteFromClipboard}>粘贴 ERP 结果</Button><Button variant="ghost" disabled={locked} onClick={() => { setSourceText(buildErpCostTemplate()); setSourceName("template.tsv"); setParsedRows(null); setBatchEnvelope(null); releaseLoadedInbox(); setParseError(""); }}>插入列模板</Button><Button variant="ghost" icon={FileUp} disabled={locked} onClick={() => fileInputRef.current?.click()}>导入成本文件</Button></div>
-      {effectiveRequestId ? <p className="cost-request-note">已关联 ERP 请求：<code>{effectiveRequestId}</code></p> : <p className="cost-request-note warning-text">发布前请先复制平台 SKC，以建立查询关联。</p>}
+      {effectiveRequestId ? <p className="cost-request-note">已关联 ERP 请求：<code>{effectiveRequestId}</code></p> : <p className="cost-request-note warning-text">{registrationState.status === "failed" ? "回传关联登记失败，请关闭此窗口后点击“重试登记”。" : "正在自动登记回传关联，请等待登记完成。"}复制平台 SKC 仅用于方便 ERP 查询。</p>}
     </Modal>
   );
 
   if (snapshot === undefined) {
-    return <AppShell pageClass="cost-page"><Panel className="route-loader">正在读取月度账本...</Panel></AppShell>;
+    return <Panel className="route-loader">正在读取月度账本...</Panel>;
   }
 
   if (!snapshot?.ledger || salesLines.length === 0) {
     return (
-      <AppShell pageClass="cost-page">
+      <>
         <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>{desktop ? "ERP 扩展状态" : "安装 ERP 助手"}</Button></div>
         <PageHeader title="ERP 成本核对" description="先导入月度销售台账，才能生成平台 SKC 查询并核对正式成本。" />
         <Panel><EmptyState icon={Warehouse} title="没有可核对的月度销售明细" description="导入台账后，本页会按平台 SKU 列出所有需要 ERP 成本的明细。" action={<Button variant="primary" icon={Upload} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
         {erpAssistantDialog}
         {deleteBatchDialog}
         {voidBatchDialog}
-      </AppShell>
+      </>
     );
   }
 
   return (
-    <AppShell pageClass="cost-page">
-      {!locked ? <p role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
+    <>
+      {!locked ? <p className="cost-registration-status" role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
       {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>服务端已接收新批次并保存。当前手动草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>保留草稿，查看返回批次</Button></Panel> : null}
       <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>{desktop ? "ERP 扩展状态" : "安装 ERP 助手"}</Button></div>
       <PageHeader
@@ -825,6 +841,6 @@ export default function CostMatching() {
       {erpAssistantDialog}
       {resolutionDialog}
       <Modal open={Boolean(incomingCandidate)} onClose={() => setIncomingCandidate(null)} title="已收到 ERP 成本结果" description="新批次已持久保存；载入将替换当前未发布草稿。" footer={<><Button onClick={() => setIncomingCandidate(null)}>保留草稿</Button><Button variant="primary" onClick={() => { const candidate = incomingCandidate; setIncomingCandidate(null); void loadInboxRecord(candidate, { discardDraft: true }); }}>丢弃草稿并载入结果</Button></>}><p>{incomingCandidate?.inbox?.batchId}</p></Modal>
-    </AppShell>
+    </>
   );
 }

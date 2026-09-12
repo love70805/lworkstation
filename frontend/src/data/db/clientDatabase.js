@@ -350,6 +350,14 @@ db.version(14).stores(CLIENT_DATABASE_V11_STORES).upgrade(async (transaction) =>
   }
 });
 
+db.version(15).stores({
+  ...CLIENT_DATABASE_V11_STORES,
+  monthlySupplementBatches: "id,workspaceId,ledgerId,[ledgerId+kind+status]",
+  monthlySupplementRows: "id,workspaceId,ledgerId,batchId,[ledgerId+kind]",
+  profitReports: "id,workspaceId,ledgerId,[ledgerId+kind],[ledgerId+revision],baseReportId",
+  profitReportLines: "id,workspaceId,ledgerId,reportId,[reportId+lineKind],[reportId+store]",
+});
+
 db.auditEvents.hook("creating", (_primaryKey, event) => {
   if (!event.eventId) event.eventId = makeId("EVT");
   if (!event.syncState) event.syncState = SYNC_STATES.PENDING;

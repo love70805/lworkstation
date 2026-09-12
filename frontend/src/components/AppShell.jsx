@@ -21,15 +21,15 @@ import {
   Sun,
   WalletCards,
   CircleDollarSign,
-  Warehouse,
   X,
 } from "lucide-react";
 import { createWorkspaceBackupPayload, db, getActiveMemberContext, getWorkspaceOperationalSummary, recordWorkspaceBackupExport } from "../data/database";
 import { runtimeConfig } from "../config/runtimeConfig";
 import { useCloudAuth } from "../hooks/useCloudAuth";
 import { downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
-import { normalizeAppearance, toggleAppearance } from "../lib/uiState";
-import { validatedLedgerSearch } from "../lib/workspaceNavigation";
+import { toggleAppearance } from "../lib/uiState";
+import { applyAppearance, readAppearance } from '../lib/appearance';
+import { profitWorkspaceHref, validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
 import { Button, IconButton, Modal, useToast } from "./UI";
 
@@ -41,11 +41,9 @@ const SIDEBAR_COLLAPSED_KEY = "shopeers-sidebar-collapsed";
 const SIDEBAR_COMPACT_QUERY = "(max-width: 1200px)";
 
 const baseNavigation = [
-  { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace"] },
+  { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
   { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
-  { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit"] },
-  { id: "ledger", label: "月度账本", path: "/ledger", icon: WalletCards, match: ["/ledger", "/import-preview"] },
-  { id: "cost", label: "成本核对", path: "/cost-matching", icon: Warehouse, match: ["/cost-matching", "/erp-assistant"] },
+  { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
   { id: "diagnostics", label: "系统诊断与备份", path: "/diagnostics", icon: Activity, match: ["/diagnostics", "/data-security"] },
 ];
 
@@ -94,7 +92,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const [backingUp, setBackingUp] = useState(false);
   const [supportCopied, setSupportCopied] = useState(false);
-  const [appearance, setAppearance] = useState(() => normalizeAppearance(localStorage.getItem("shopeers-appearance")));
+  const [appearance, setAppearance] = useState(readAppearance);
   const workspaceSummary = useLiveQuery(getWorkspaceOperationalSummary, [], null);
   const requestedLedgerId = new URLSearchParams(location.search).get("ledger");
   const navigationContext = useLiveQuery(async () => {
@@ -113,8 +111,8 @@ export default function AppShell({ children, pageClass = "" }) {
   const backTarget = useMemo(() => {
     if (baseNavigation.some((item) => item.path === pathname)) return null;
     if (pathname.startsWith("/products") || pathname.startsWith("/capture")) return "/products";
-    if (pathname.startsWith("/import-preview")) return `/ledger${navigationSearch}`;
-    if (pathname.startsWith("/erp-assistant")) return `/cost-matching${navigationSearch}`;
+    if (pathname.startsWith("/import-preview") || pathname.startsWith('/ledger')) return `/workspace${navigationSearch}`;
+    if (pathname.startsWith("/erp-assistant")) return profitWorkspaceHref(navigationSearch, 'cost');
     if (pathname.startsWith("/profit")) return `/workspace${navigationSearch}`;
     if (pathname.startsWith("/data-security")) return "/diagnostics";
     if (pathname.startsWith("/diagnostics")) return "/workspace";
@@ -128,7 +126,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigation = useMemo(() => baseNavigation.map((item) => (
     item.id === "products"
       ? { ...item, count: workspaceSummary?.pendingCaptureCount ?? 0 }
-      : ["workspace", "profit", "ledger", "cost"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
+      : ["workspace", "profit"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
   )), [workspaceSummary?.pendingCaptureCount, navigationSearch]);
 
   const notifications = useMemo(() => {
@@ -149,9 +147,9 @@ export default function AppShell({ children, pageClass = "" }) {
       items.push({
         id: `costs:${workspaceSummary.latestOpenLedger.id}:${workspaceSummary.latestOpenLedger.updatedAt ?? "none"}:${workspaceSummary.missingCostCount}`,
         tone: "danger",
-        title: `${workspaceSummary.missingCostCount} 个 SKU 缺少正式成本`,
-        detail: `${workspaceSummary.latestOpenLedger.period} 账本暂不能定稿`,
-        path: `/cost-matching?ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`,
+        title: `工作区合计 ${workspaceSummary.missingCostCount} 条 SKU 待补正式成本`,
+        detail: `查看 ${workspaceSummary.latestOpenLedger.period} 成本核对`,
+        path: profitWorkspaceHref(`ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`, 'cost'),
       });
     } else if (workspaceSummary.latestOpenLedger?.status === "ready") {
       items.push({
@@ -186,9 +184,7 @@ export default function AppShell({ children, pageClass = "" }) {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.appearance = appearance;
-    localStorage.setItem("shopeers-appearance", appearance);
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", appearance === "dark" ? "#121821" : "#f6f7f9");
+    applyAppearance(appearance);
   }, [appearance]);
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validatedLedgerSearch, workspaceLedgerQuery } from "./workspaceNavigation";
+import { profitWorkspaceHref, validatedLedgerSearch, workspaceLedgerQuery } from "./workspaceNavigation";
 describe("首页与账本侧栏上下文", () => {
   const ledger = { id: "L1", workspaceId: "W1" };
   it("只携带当前工作区已验证账本和筛选", () => {
@@ -11,6 +11,14 @@ describe("首页与账本侧栏上下文", () => {
     expect(validatedLedgerSearch("?ledger=L1", null, "W1")).toBe("");
     expect(validatedLedgerSearch("?ledger=L2", ledger, "W1")).toBe("");
     expect(validatedLedgerSearch("?q=秘密", ledger, "W1")).toBe("");
+  });
+  it('only preserves supported profit views and forces cost compatibility destination', () => {
+    expect(validatedLedgerSearch('?ledger=L1&view=cost', ledger, 'W1')).toBe('?ledger=L1&view=cost');
+    expect(validatedLedgerSearch('?ledger=L1&view=unknown', ledger, 'W1')).toBe('?ledger=L1');
+    const query = workspaceLedgerQuery('L1', '?view=detail&store=甲', [{store:'甲'}], true);
+    expect(query.get('view')).toBe('detail');
+    expect(profitWorkspaceHref(query, 'cost')).toContain('view=cost');
+    expect(profitWorkspaceHref('', 'unknown')).toBe('/profit?view=detail');
   });
   it("切换月份只保留新账本存在的店铺和货号，显式重置缺省值", () => {
     const rows = [{ store: "甲店", supplierNumber: "A" }];
