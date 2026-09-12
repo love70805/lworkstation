@@ -69,3 +69,6 @@
 - 在制审查退回：保留来源时直接引用current.sources后push会污染当前预览对象，需复制并验证重复预览/取消；用户已采用总代发数不能因保留明细而静默回退到明细合计，须保留人工意图或明确本次整月数。
 - 主线用当前XLSX库独立复现非A1有效范围B5:C6：header:1解析返回两行，若不保留范围起始行会将真实第6行记录为第2行。已要求补充源表解析保留真实行偏移并测试，UI表头选择也须对应原表。
 - 既有packaged smoke由main直接注册请求、VM调用扩展bridge，不能单独证明用户操作链。已向桌面化派发30836d0基线的独立测试任务：真实React自动SKC登记、受控IPC/inbox、非空手动草稿仍收件、载入并发布成本、完整证据接收后关闭采购上下文、复制解析及scope隔离；仅合成ERP，不使用真实账号。最终候选仍需重跑，发现业务bug退回利润专职。
+- 精度边界独立复现：实际在制legacyReportLine将profitExact=0.0099999999999999999转换为Number 0.01，若页面继续汇总profit数字则显示0.01，报告精确截断为0.00。已退回利润专职，要求新公式页面/SKC/快照出口优先exact字符串，旧历史公式保持；交付必须用跨两位边界测试关闭。
+- 最后用户样本的样式元数据与源文件SHA256已只读抽取至archive/full-update-report-review-2026-09-13/approved-template-style.json，不含业务单元格值。扣款文本仍深色，仅金额及合计红色；已同步专职。
+- 2026-09-13对当前集成依赖执行frontend及desktop的pnpm audit --audit-level=low，均返回No known vulnerabilities found；若后续依赖变化需重新验证。GitHub只读回读仍为v0.2.11 Latest，未提前创建新Release。
