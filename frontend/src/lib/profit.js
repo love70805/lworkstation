@@ -1,6 +1,8 @@
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { aggregateLedgerRows, flattenLedgerGroups } from "../domain/ledgerImport";
 import { sumMoney } from "./money";
+import Decimal from "decimal.js";
+const GroupExact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 
 export function groupImportedSales(rows, knownCosts = []) {
   const costs = new Map(knownCosts
@@ -59,6 +61,11 @@ export function groupProfitRowsBySkc(rows = []) {
       profit: allFinalizable ? sumMoney(variants.map((row) => row.profit)) : null,
       finalizable: allFinalizable,
       missingCount: variants.filter((row) => !row.finalizable).length,
+      ...(variants.some(row => row.revenueExact != null) ? {
+        quantityExact: variants.reduce((sum,row)=>sum.plus(row.quantityExact??row.qty),new GroupExact(0)).toFixed(),
+        revenueExact: variants.reduce((sum,row)=>sum.plus(row.revenueExact??row.revenue),new GroupExact(0)).toFixed(),
+        profitExact: allFinalizable ? variants.reduce((sum,row)=>sum.plus(row.profitExact??row.profit),new GroupExact(0)).toFixed() : null,
+      } : {}),
     };
   });
 }

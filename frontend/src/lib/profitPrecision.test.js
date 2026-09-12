@@ -5,6 +5,18 @@ import { calculateWarehouseCostDecision } from "../domain/erpCostResolution";
 import { buildProfitExportRows, formatErpUnitCost, formatProfitAmount, savedProfitRows, savedProfitSummary, summarizeProfitRows } from "./profitPrecision";
 import { groupProfitRowsBySkc } from "./profit";
 import { filterProfitRows } from "./profitFilter";
+import { legacyReportLine, reportTotals, displayMoney } from "../domain/profitReports";
+
+it("keeps UI, SKC summary and reloaded snapshot exact across a Number rounding boundary", () => {
+  const exactLine={lineKind:"product",store:"甲",platformSku:"SKU",groupSkc:"SKC",quantityExact:"1",revenueExact:"0.0099999999999999999",unitCostExact:"0",purchaseCostExact:"0",warehouseCostExact:"0",profitExact:"0.0099999999999999999"};
+  const ui=legacyReportLine(exactLine);
+  expect(ui.profit).toBe(0.01); // demonstrates why the numeric compatibility field is not authoritative
+  expect(summarizeProfitRows([ui]).matchedProfit).toBe(0);
+  const group=groupProfitRowsBySkc([ui])[0];
+  expect(displayMoney(group.profitExact)).toBe("0.00");
+  const restored=savedProfitRows([{...ui,quantity:1}]);
+  expect(displayMoney(summarizeProfitRows(restored).exactTotals.profit)).toBe(displayMoney(reportTotals([exactLine],"0","0").profitExact));
+});
 
 function line(unitCost, quantity, revenue = 0, platformSku = "SKU") {
   return { platformSku, canonicalPlatformSku: platformSku, qty: quantity, groupSkc: "SKC", store: "店铺",

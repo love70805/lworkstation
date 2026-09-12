@@ -19,10 +19,20 @@ let lastErpAnnouncement = "";
 let actionFeedbackTimer;
 
 window.lucide?.createIcons();
+document.querySelector('#startup-retry').addEventListener('click', () => window.desktop.startupAction('retry'));
+document.querySelector('#startup-quit').addEventListener('click', () => window.desktop.startupAction('quit'));
 
 function render(state) {
   if (!state) return;
   latestState = state;
+  const boot = state.startup || { status: 'ready' };
+  document.querySelector('#startup').hidden = boot.status === 'ready';
+  document.querySelector('#startup').dataset.status = boot.status;
+  document.querySelector('#startup-message').textContent = boot.message || '';
+  document.querySelector('#startup-actions').hidden = boot.status !== 'error';
+  const notice = document.querySelector('#lifecycle-notice');
+  notice.hidden = !state.lifecycleNotice;
+  notice.textContent = state.lifecycleNotice || '';
   document.documentElement.dataset.appearance = state.appearance === "dark" ? "dark" : "light";
   document.documentElement.dataset.activeTab = state.activeTab || "workspace";
   const version = state.version || "浏览器环境";

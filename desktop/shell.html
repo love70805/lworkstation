@@ -8,6 +8,12 @@
     <link rel="stylesheet" href="./shell.css" />
   </head>
   <body>
+    <section id="startup" role="status" aria-live="polite">
+      <img src="./assets/lworkstation.ico" width="56" height="56" alt="Lworkstation" />
+      <h1>Lworkstation</h1><p id="startup-message">正在启动工作站…</p>
+      <div id="startup-actions" hidden><button id="startup-retry">重新加载工作站</button><button id="startup-quit">退出应用</button></div>
+    </section>
+    <p id="lifecycle-notice" role="alert" hidden></p>
     <header class="app-chrome">
       <div class="titlebar">
         <button

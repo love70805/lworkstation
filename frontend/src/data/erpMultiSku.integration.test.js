@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { adoptZeroDispatch } from "../testFixtures/reportWorkflow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKSPACE_ID,
@@ -223,6 +224,7 @@ describe("同一平台 SKC 下多个平台 SKU 的 ERP 收件到利润回流", (
       missingSkuCount: 0,
     }), { revenue: 0, quantity: 0, purchaseCost: 0, warehouseCost: 0, penalty: 0, profit: 0, profitRate: 0, missingSkuCount: 0 });
     profitSummary.profitRate = profitSummary.revenue > 0 ? profitSummary.profit / profitSummary.revenue : 0;
+    await adoptZeroDispatch(ledger.id);
     await finalizeMonthlyLedger({ ledgerId: ledger.id, formulaVersion: PROFIT_FORMULA_VERSION, profitSummary, profitLines });
 
     const references = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());

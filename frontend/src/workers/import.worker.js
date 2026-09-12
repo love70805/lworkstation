@@ -9,21 +9,36 @@ function parseWorkbook(buffer, extension) {
     const text = new TextDecoder("utf-8").decode(buffer);
     const result = Papa.parse(text, {
       header: true,
-      skipEmptyLines: "greedy",
+      skipEmptyLines: false,
       delimiter: extension === "tsv" ? "\t" : "",
       transformHeader: (header) => header.trim(),
     });
-    const parseError = result.errors.find((error) => ["Quotes", "FieldMismatch"].includes(error.type));
+    const parseError = result.errors.find((error) => error.type === "Quotes" || (error.type === "FieldMismatch" && Object.values(result.data[error.row] ?? {}).some((value) => String(value ?? "").trim())));
     if (parseError) {
       throw new Error(`文件格式错误：${parseError.message}`);
     }
-    return result.data;
+    // Parse record boundaries separately so blank and multiline CSV records
+    // retain their real starting source line, without exposing metadata headers.
+    const starts = [];
+    let previousCursor = 0;
+    let line = 1;
+    Papa.parse(text, { delimiter: extension === "tsv" ? "\t" : "", step: ({ meta }) => { starts.push(line); line += (text.slice(previousCursor, meta.cursor).match(/\r\n|\n|\r/g) ?? []).length; previousCursor = meta.cursor; } });
+    return result.data.map((row, index) => {
+      Object.defineProperty(row, "__salesSource", { value: { sourceRow: starts[index + 1] ?? index + 2, sourceSheet: "", rawValues: row } });
+      return row;
+    }).filter((row) => Object.values(row).some((value) => String(value ?? "").trim()));
   }
 
   const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error("工作簿中没有可读取的工作表。");
-  return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "", raw: false });
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+  return rows.map((row, index) => {
+    Object.defineProperty(row, "__salesSource", { value: { sourceRow: row.__rowNum__ + 1, sourceSheet: sheetName, rawValues: rawRows[index], date1904: Boolean(workbook.Workbook?.WBProps?.date1904) } });
+    return row;
+  });
 }
 
 self.onmessage = ({ data }) => {

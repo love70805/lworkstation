@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { adoptZeroDispatch } from "../testFixtures/reportWorkflow";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { db, DEFAULT_WORKSPACE_ID as workspaceId, setActiveMemberContext, saveManualCostOverride, revokeManualCostOverride, getLedgerSnapshot, finalizeMonthlyLedger, createWorkspaceBackupPayload } from "./database";
 import { calculateFormalLedgerRows } from "../domain/ledgerProfit";
@@ -45,6 +46,7 @@ describe("manual exact cost overrides", () => {
     await save("甲", 0.0000002);
     await expect(finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines: old, profitSummary: {} })).rejects.toThrow("已变化");
     const current = await lines();
+    await adoptZeroDispatch(ledgerId);
     await finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines: current, profitSummary: { profit: 999 } });
     const snapshot = await getLedgerSnapshot(ledgerId);
     expect(snapshot.ledger.profitSummary).toMatchObject({ purchaseCost: 0.03, profit: 1.97 });

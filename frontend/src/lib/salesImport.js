@@ -1,6 +1,10 @@
 import { createLedgerGroupKey, createLedgerSkuKey } from "../domain/ledgerImport";
+import Decimal from "decimal.js";
+import { decimalSource, parseSalesAddedDate } from "../domain/salesAnalytics";
 
 export const salesFields = [
+  { key: "sourceAddedAt", label: "添加时间", description: "仅用于每日销售趋势，不使用交易或导入日期代替。", required: false, aliases: ["添加时间", "添加日期", "sourceAddedAt", "source_added_at"] },
+  { key: "activity", label: "活动", description: "保留台账实际活动信息；缺失不表示未参加。", required: false, aliases: ["活动", "活动信息", "活动名称", "活动类型", "是否活动", "activity"] },
   { key: "store", label: "店铺", description: "未映射时使用文件名或导入时填写的店铺。", required: false, aliases: ["store", "saleschannel", "sales_channel", "shop", "店铺"] },
   { key: "supplierNumber", label: "供方货号", description: "与平台 SKC 共同组成旧利润工具的一级分组。", required: false, aliases: ["供方货号", "货号", "商家编码", "suppliernumber", "supplier_number", "merchantcode"] },
   { key: "platformSkc", label: "平台 SKC", description: "ERP v8.0 查询使用的父级标识；缺失时仅保留供方货号分组，不能用于 ERP 查询。", required: false, aliases: ["skc", "商品skc", "平台skc", "platformskc", "platform_skc"] },
@@ -46,7 +50,7 @@ function hasValue(value) {
 }
 
 function parsedNumber(row, mapping, key, fallback, issues) {
-  const value = mappedValue(row, mapping, key);
+  const value = row.__salesSource?.rawValues?.[mapping[key]] ?? mappedValue(row, mapping, key);
   const parsed = parseNumericValue(value, fallback);
   if (!Number.isFinite(parsed)) issues.push(`${salesFields.find((field) => field.key === key)?.label ?? key}不是有效数字`);
   return parsed;
@@ -132,6 +136,7 @@ export function validateSalesRows(rawRows, mapping, {
   supplierNumbers,
   deriveAmountFromUnitPrice = false,
   enforceSingleStore = false,
+  period,
 } = {}) {
   const rows = [];
   const errors = [];
@@ -151,7 +156,7 @@ export function validateSalesRows(rawRows, mapping, {
   const supplierFilter = Array.isArray(supplierNumbers) ? new Set(supplierNumbers.map(normalizedText)) : null;
 
   rawRows.forEach((rawRow, index) => {
-    const sourceRow = index + 2;
+    const sourceRow = rawRow.__salesSource?.sourceRow ?? index + 2;
     const issues = [];
     const store = normalizedText(mappedValue(rawRow, mapping, "store")) || normalizedText(defaultStore);
     const supplierNumber = normalizedText(mappedValue(rawRow, mapping, "supplierNumber"));
@@ -190,7 +195,7 @@ export function validateSalesRows(rawRows, mapping, {
         + parsedNumber(rawRow, mapping, "platformOrderQuantity", 0, issues);
     }
 
-    const unitPriceRaw = mappedValue(rawRow, mapping, "unitPrice");
+    const unitPriceRaw = rawRow.__salesSource?.rawValues?.[mapping.unitPrice] ?? mappedValue(rawRow, mapping, "unitPrice");
     const hasUnitPrice = hasValue(unitPriceRaw);
     const unitPrice = hasUnitPrice ? parseNumericValue(unitPriceRaw, Number.NaN) : null;
     if (hasUnitPrice && (!Number.isFinite(unitPrice) || unitPrice < 0)) issues.push("单价必须大于或等于 0");
@@ -228,7 +233,22 @@ export function validateSalesRows(rawRows, mapping, {
     }
 
     const isDeduction = ["扣款", "罚款", "违约"].some((keyword) => movementType.includes(keyword));
+    const exactValue = (key) => decimalSource(rawRow.__salesSource?.rawValues?.[mapping[key]] ?? mappedValue(rawRow, mapping, key));
+    const Exact = Decimal.clone({ precision: 80 });
+    let quantityExact = exactValue("quantity");
+    if (new Exact(quantityExact).isZero()) quantityExact = new Exact(exactValue("customerShipmentQuantity")).plus(exactValue("platformOrderQuantity")).toFixed();
+    let amountExact = deriveAmountFromUnitPrice && hasUnitPrice ? new Exact(quantityExact).times(exactValue("unitPrice")).toFixed() : exactValue("amount");
+    if (!deriveAmountFromUnitPrice && new Exact(amountExact).isZero()) amountExact = new Exact(exactValue("customerAmount")).plus(exactValue("platformAmount")).toFixed();
+    const activityRaw = normalizedText(mappedValue(rawRow, mapping, "activity"));
+    const addedDate = parseSalesAddedDate(rawRow.__salesSource?.rawValues?.[mapping.sourceAddedAt] ?? mappedValue(rawRow, mapping, "sourceAddedAt"), { period, date1904: rawRow.__salesSource?.date1904 });
     const normalizedRow = {
+      ...addedDate,
+      sourceSheet: rawRow.__salesSource?.sourceSheet ?? "",
+      quantityExact: isDeduction ? "0" : quantityExact,
+      amountExact: isDeduction ? "0" : amountExact,
+      unitPriceRaw: hasUnitPrice ? exactValue("unitPrice") : null,
+      activityRaw,
+      activityStatus: activityRaw ? "known" : "missing",
       orderId: normalizedText(mappedValue(rawRow, mapping, "orderId")),
       orderDate: normalizedText(mappedValue(rawRow, mapping, "orderDate")),
       store,

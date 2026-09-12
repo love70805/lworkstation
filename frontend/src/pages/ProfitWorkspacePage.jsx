@@ -6,7 +6,8 @@ import AppShell from "../components/AppShell";
 import { EmptyState, Panel, useToast } from "../components/UI";
 import { db, getActiveMemberContext, listLedgerSummaries } from "../data/database";
 import { workspaceLedgerQuery } from "../lib/workspaceNavigation";
-import { ProfitWorkspaceContent } from "./ProfitPanel";
+import { ProfitViewsContent } from "./ProfitPanel";
+import { readProfitView } from "../lib/profitFilter";
 
 export default function ProfitWorkspacePage() {
   const location = useLocation();
@@ -23,7 +24,7 @@ export default function ProfitWorkspacePage() {
   const ready = context?.ledgerId === ledgerId;
   const selected = ready ? context.ledgers.find(ledger => ledger.id === ledgerId) : null;
   useEffect(() => {
-    if (!ready || selected) return;
+    if (!ready || selected || ledgerId) return;
     if (context.ledgers.length) setSearchParams(workspaceLedgerQuery(context.ledgers[0].id), { replace: true });
     else if (location.search) setSearchParams({}, { replace: true });
   }, [ready, selected, context, location.search, setSearchParams]);
@@ -37,7 +38,9 @@ export default function ProfitWorkspacePage() {
       const rows = await db.salesRows.where("ledgerId").equals(id).toArray();
       const member = await getActiveMemberContext();
       if (token !== generation.current || member.workspaceId !== context.workspaceId) return;
-      setSearchParams(workspaceLedgerQuery(id, location.search, rows, Boolean(selected)));
+      const next = workspaceLedgerQuery(id, location.search, rows, Boolean(selected));
+      next.set("view", readProfitView(new URLSearchParams(location.search)) ?? "detail");
+      setSearchParams(next);
     } catch (error) { notify(`切换月份失败：${error.message}`, "error"); }
     finally { if (token === generation.current) setSwitching(false); }
   }
@@ -56,8 +59,8 @@ export default function ProfitWorkspacePage() {
           <Link to="/products?view=pending"><Inbox size={16} />待确认采集</Link>
         </nav>
       </section>
-      {!ready || (context.ledgers.length > 0 && !selected) ? <div role="status">正在读取当前工作区账本…</div>
-        : selected ? <div className="workspace-profit-content"><ProfitWorkspaceContent key={selected.id} /></div>
+      {ready && ledgerId && !selected ? <Panel><p role="alert">账本不属于当前工作区或已不存在。</p><Link to="/profit">重新选择账本</Link></Panel> : !ready || (context.ledgers.length > 0 && !selected) ? <div role="status">正在读取当前工作区账本…</div>
+        : selected ? <div className="workspace-profit-content"><ProfitViewsContent key={`${context.workspaceId}/${selected.id}`} /></div>
           : <Panel><EmptyState title="还没有月度账本" description="先导入销售台账，再核对成本和利润。" action={<Link to="/import-preview" className="button primary">导入月度台账</Link>} /></Panel>}
     </AppShell>
   );

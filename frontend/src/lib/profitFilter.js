@@ -64,8 +64,14 @@ export function filterProfitRows(rows = [], filter = DEFAULT_PROFIT_FILTER) {
   });
 }
 
-export function buildProfitQuery({ ledgerId, query = "", storeFilter = "all", supplierSelection = null, missingOnly = false } = {}) {
+export function readProfitView(searchParams) {
+  const view = searchParams.get("view") ?? "detail";
+  return ["detail", "cost"].includes(view) ? view : null;
+}
+
+export function buildProfitQuery({ ledgerId, query = "", storeFilter = "all", supplierSelection = null, missingOnly = false, view } = {}) {
   const params = new URLSearchParams();
+  if (["detail", "cost"].includes(view)) params.set("view", view);
   if (ledgerId) params.set("ledger", ledgerId);
   if (query) params.set("q", query);
   if (storeFilter && storeFilter !== "all") params.set("store", storeFilter);
