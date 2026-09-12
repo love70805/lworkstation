@@ -1446,7 +1446,8 @@ export async function getLatestLedgerSnapshot() {
 }
 
 export async function listLedgerSummaries() {
-  return db.ledgers.orderBy("period").reverse().toArray();
+  const member = await getActiveMemberContext();
+  return db.ledgers.where("workspaceId").equals(member.workspaceId).reverse().sortBy("period");
 }
 
 export async function deleteMonthlyLedger(ledgerId, deletedBy = "local-user") {
