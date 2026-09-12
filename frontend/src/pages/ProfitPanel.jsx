@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, CalendarDays, Check, CheckCircle2, ChevronDown, Download, LockKeyhole, Plus, RotateCcw, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
+import { CostMatchingContent } from "./CostMatching";
+import SalesAnalytics from "./SalesAnalytics";
 import DataTable from "../components/DataTable";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
 import {
@@ -18,7 +20,7 @@ import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { buildProfitExportRows, formatErpUnitCost, formatManualUnitCost, formatProfitAmount, isProfitSnapshot, savedProfitRows, savedProfitSummary, summarizeProfitRows } from "../lib/profitPrecision";
 import { groupImportedSales, groupProfitRowsBySkc } from "../lib/profit";
 import { exportWorkbook } from "../lib/spreadsheetExport";
-import { buildCostMatchingHref, buildProfitQuery, filterProfitRows, readProfitFilter, saveProfitFilter } from "../lib/profitFilter";
+import { buildProfitHref, buildProfitQuery, filterProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
 import { manualSnapshot, selectManualOverride } from "../domain/manualCostOverride";
 import ManualCostDialog from "./ManualCostDialog";
 
@@ -246,20 +248,19 @@ export function ProfitWorkspaceContent() {
   const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, missingOnly }), [missingOnly, query, storeFilter, supplierSelection]);
   const changeFilter = (patch) => {
     const next = { ...filterState, ...patch };
-    const params = buildProfitQuery({ ledgerId: snapshot?.ledger?.id, ...next });
+    const params = buildProfitQuery({ ledgerId: snapshot?.ledger?.id, ...next, view: "detail" });
     params.set("store", next.storeFilter || "all");
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
   };
   const filtered = useMemo(() => filterProfitRows(calculated, filterState), [calculated, filterState]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
-  const tableRows = useMemo(() => prepareProfitTableRows(filtered), [filtered]);
   const filteredSummary = useMemo(() => locked && filtered.length === calculated.length && snapshot?.ledger?.profitSummary ? savedProfitSummary(snapshot.ledger.profitSummary) : summarizeProfitRows(filtered, costBySku), [costBySku, filtered, calculated.length, locked, snapshot?.ledger?.profitSummary]);
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
   const { revenue, totalUnits, purchaseCosts, warehouseFees, penalties, matchedProfit, missing, missingErp } = filteredSummary;
 
   const canFinalize = Boolean(calculated.length) && ledgerSummary.missing === 0 && !locked;
-  const costMatchingHref = useMemo(() => buildCostMatchingHref({ ledgerId: snapshot?.ledger?.id, ...filterState }), [filterState, snapshot?.ledger?.id]);
+  const costMatchingHref = useMemo(() => buildProfitHref({ ledgerId: snapshot?.ledger?.id, ...filterState, view: "cost" }), [filterState, snapshot?.ledger?.id]);
 
   const openApproval = useCallback((row) => {
     setApprovalTarget(row);
@@ -531,7 +532,7 @@ export function ProfitWorkspaceContent() {
     <>
       <PageHeader
         eyebrow={`月度利润核算 · ${snapshot.ledger.period}`}
-        title="利润核算面板"
+        title="利润核算"
         description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "ERP单价四位；金额先精确累计，汇总后截两位"}`}
         actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>导出利润表</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} loading={finalizing} disabled={!canFinalize || finalizing} onClick={finalizeLedger}>定稿本月全部店铺</Button>}</>}
       />
@@ -571,7 +572,7 @@ export function ProfitWorkspaceContent() {
           <label className="profit-filter-check"><input type="checkbox" checked={missingOnly} onChange={(event) => changeFilter({ missingOnly: event.target.checked })} />只看缺成本</label>
           <button className="profit-filter-reset" type="button" onClick={() => changeFilter({ query: "", storeFilter: "all", supplierSelection: null, missingOnly: false })}>重置筛选</button>
         </div>
-        <DataTable className="profit-table" columns={columns} data={tableRows} getRowId={(row) => row.id} getRowProps={(row) => ({ className: `${row.groupStart ? "profit-group-start " : ""}${!row.finalizable ? "missing-profit-row" : ""}` })} />
+        {groupedFiltered.map((group) => <details className="profit-skc-group" key={group.id}><summary><strong>{group.store} · SKC {group.groupSkc}</strong><span>{group.skuCount} 个 SKU · {group.qty} 件 · 销售 {currency(group.revenue)} · 利润 {group.finalizable ? currency(group.profit) : "待核对"}</span></summary><DataTable className="profit-table" columns={columns} data={prepareProfitTableRows(group.variants)} getRowId={(row) => row.id} getRowProps={(row) => ({ className: !row.finalizable ? "missing-profit-row" : "" })} /></details>)}
       </Panel>
 
       {snapshot.ledger.status === "finalized" ? <Button icon={RotateCcw} onClick={() => { setReopenReason(""); setReopenError(""); setReopenDialog(true); }}>重开本月全部店铺核算</Button> : null}
@@ -619,6 +620,28 @@ export function ProfitWorkspaceContent() {
   );
 }
 
+export function ProfitViewsContent() {
+  const [params, setParams] = useSearchParams();
+  const snapshot = useLatestSalesImport(params.get("ledger"));
+  const view = readProfitView(params);
+  const filter = readProfitFilter(params, snapshot?.ledger?.id);
+  const store = filter.storeFilter;
+  const stores = [...new Set((snapshot?.rows ?? []).map((row) => row.store))];
+  const valid = snapshot?.ledger && (store === "all" || stores.includes(store));
+  const change = (nextView, nextStore = store) => {
+    const next = buildProfitQuery({ ledgerId: snapshot.ledger.id, ...filter, storeFilter: nextStore, view: nextView });
+    next.set("store", nextStore);
+    next.set("missing", filter.missingOnly ? "1" : "0");
+    setParams(next);
+  };
+  return <>
+    {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p></Panel> : snapshot === undefined ? <Panel>正在读取月度账本...</Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button></Panel> : <>
+      <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button><label>店铺 <select className="select-input" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></nav>
+      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><SalesAnalytics key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} /></>}
+    </>}
+  </>;
+}
+
 export default function ProfitPanel() {
-  return <AppShell pageClass="profit-page"><ProfitWorkspaceContent /></AppShell>;
+  return <AppShell pageClass="profit-page"><ProfitViewsContent /></AppShell>;
 }

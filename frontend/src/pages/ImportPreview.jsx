@@ -107,7 +107,7 @@ export default function ImportPreview() {
       for (let index = 0; index < files.length; index += 1) {
         const item = files[index];
         setProgress({ value: index / files.length * 100, label: `校验 ${index + 1}/${files.length}：${item.fileName}` });
-        const validation = await clientRef.current.validate(item.itemId, item.mapping, { ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true });
+        const validation = await clientRef.current.validate(item.itemId, item.mapping, { ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true, period });
         setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, validation } : entry));
         hasErrors ||= validation.summary.errorCount > 0 || !validation.rows.length;
         items.push({ itemId: item.itemId, fileName: item.fileName, fileHash: item.fileHash, storeName: item.storeName,
