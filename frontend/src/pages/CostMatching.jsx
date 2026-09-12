@@ -754,7 +754,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       <textarea className="cost-textarea cost-manual-textarea mono" value={sourceText} disabled={locked} onChange={(event) => { setSourceText(event.target.value); setSourceName("手动输入"); setParsedRows(null); setBatchEnvelope(null); releaseLoadedInbox(); setParseError(""); }} placeholder={buildErpCostTemplate()} aria-label="手动输入 ERP 成本批次 JSON、TSV 或 CSV" />
       {parseError ? <div className="import-error" role="alert"><AlertCircle size={18} />{parseError}</div> : null}
       <div className="cost-source-actions cost-manual-actions"><Button icon={ClipboardPaste} disabled={locked} onClick={pasteFromClipboard}>粘贴 ERP 结果</Button><Button variant="ghost" disabled={locked} onClick={() => { setSourceText(buildErpCostTemplate()); setSourceName("template.tsv"); setParsedRows(null); setBatchEnvelope(null); releaseLoadedInbox(); setParseError(""); }}>插入列模板</Button><Button variant="ghost" icon={FileUp} disabled={locked} onClick={() => fileInputRef.current?.click()}>导入成本文件</Button></div>
-      {effectiveRequestId ? <p className="cost-request-note">已关联 ERP 请求：<code>{effectiveRequestId}</code></p> : <p className="cost-request-note warning-text">发布前请先复制平台 SKC，以建立查询关联。</p>}
+      {effectiveRequestId ? <p className="cost-request-note">已关联 ERP 请求：<code>{effectiveRequestId}</code></p> : <p className="cost-request-note warning-text">{registrationState.status === "failed" ? "回传关联登记失败，请关闭此窗口后点击“重试登记”。" : "正在自动登记回传关联，请等待登记完成。"}复制平台 SKC 仅用于方便 ERP 查询。</p>}
     </Modal>
   );
 
@@ -777,7 +777,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
 
   return (
     <>
-      {!locked ? <p role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
+      {!locked ? <p className="cost-registration-status" role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
       {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>服务端已接收新批次并保存。当前手动草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>保留草稿，查看返回批次</Button></Panel> : null}
       <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>{desktop ? "ERP 扩展状态" : "安装 ERP 助手"}</Button></div>
       <PageHeader

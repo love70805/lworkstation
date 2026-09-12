@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { adoptZeroDispatch } from "../testFixtures/reportWorkflow";
 import { liveQuery } from "dexie";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -627,6 +628,7 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
       currency: "CNY",
     });
 
+    await adoptZeroDispatch(ledger.id);
     await finalizeMonthlyLedger({
       ledgerId: ledger.id,
       formulaVersion: PROFIT_FORMULA_VERSION,
@@ -689,7 +691,7 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
     expect((await getLedgerSnapshot(ledger.id)).ledger.status).toBe("finalized");
 
     const auditRows = await db.auditEvents.orderBy("id").toArray();
-    const syncEvents = auditRows.map(auditEventToSyncEvent);
+    const syncEvents = auditRows.filter(event => !event.localOnly).map(auditEventToSyncEvent);
     expect(listBusinessProjectionGaps(syncEvents)).toEqual([]);
     const recoveryPayload = buildSyncRecoveryPayload({
       workspaceId: DEFAULT_WORKSPACE_ID,
@@ -747,19 +749,11 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
       }],
       ledger: { id: ledger.id, costSummary: { missingCount: 0 } },
     });
-    expect(projectedLedger).toMatchObject({
-      id: ledger.id,
-      status: "finalized",
-      currency: "CNY",
-      profitSummary: { profit: 53 },
-      profitLines: [{
-        id: expect.any(Number),
-        platformSku: "SKU-TEST-RED",
-        profit: 53,
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        ledgerId: ledger.id,
-      }],
-    });
+    expect(projectedLedger).toMatchObject({ id: ledger.id, status: "draft" });
+    expect(projectedLedger).not.toHaveProperty("profitSummary");
+    expect(auditRows.some(event => event.objectType === "local_profit_report" && event.localOnly)).toBe(true);
+    expect((await db.profitReports.toArray())[0]).toMatchObject({ period: ledger.period, totalsExact: { productProfitExact: "53" } });
+
 
     db.close();
     await db.delete();
@@ -780,7 +774,7 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
       offers: [{ landedUnitCost: 8, currency: "CNY" }],
     });
     expect(restoredLedger).toMatchObject({
-      ledger: { id: ledger.id, status: "finalized", currency: "CNY" },
+      ledger: { id: ledger.id, status: "ready", currency: "CNY" },
       rows: [{ platformSku: "SKU-TEST-RED", quantity: 10 }],
       costs: [{ platformSku: "SKU-TEST-RED", warehouseSku: "WH-TEST-RED", unitCost: 4 }],
     });
@@ -788,8 +782,9 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
       platformSku: "SKU-TEST-RED",
       authoritativeSource: "erp",
       referenceUnitCost: 4,
-      latestProfit: 53,
+      latestProfit: null,
     }]);
+    expect(await db.profitReports.count()).toBe(0); // local reports are restored only from a full local backup
     const restoredSourceEvents = (await db.auditEvents.toArray()).filter((event) => event.action !== "sync_recovery_restored");
     expect(restoredSourceEvents).toHaveLength(syncEvents.length);
     expect(restoredSourceEvents.every((event) => event.eventId && event.syncState === "synced")).toBe(true);
@@ -841,7 +836,7 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
     });
 
     const auditRows = await db.auditEvents.orderBy("id").toArray();
-    const syncEvents = auditRows.map(auditEventToSyncEvent);
+    const syncEvents = auditRows.filter(event => !event.localOnly).map(auditEventToSyncEvent);
     expect(listBusinessProjectionGaps(syncEvents)).toEqual([]);
     const syncStore = createSyncEventStore();
     syncStore.accept(buildSyncEnvelope({ workspaceId: DEFAULT_WORKSPACE_ID, events: syncEvents }));

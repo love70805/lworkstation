@@ -25,7 +25,6 @@ import { makeId } from "../db/utils";
 import { ensureDefaultWorkspace, getActiveMemberContext } from "./selectionRepository";
 import { manualSnapshot, selectManualOverride, storeIdentity } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
-import { PROFIT_FORMULA_VERSION } from "../../domain/profitCalculations";
 import { summarizeProfitRows } from "../../lib/profitPrecision";
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
@@ -1165,84 +1164,12 @@ export async function updateLedgerWarehouseRate(ledgerId, warehouseRate, updated
   });
 }
 
-export async function finalizeMonthlyLedger({
-  ledgerId,
-  profitLines,
-  profitSummary,
-  formulaVersion,
-  finalizedBy = "local-user",
-}) {
-  const finalizedAt = new Date().toISOString();
-  const auditActor = await resolveProfitAuditActor(finalizedBy);
-
-  await db.transaction("rw", db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.profitLines, db.auditEvents, async () => {
-    const ledger = await db.ledgers.get(ledgerId);
-    if (!ledger) throw new Error("找不到对应的月度账本。");
-    if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能重新定稿，请先显式重开。");
-    const initialCoverage = await readLedgerCostCoverage(ledgerId);
-    if (initialCoverage.missingCount > 0 || profitLines.some((line) => !line.finalizable)) throw new Error("仍有平台 SKU 缺少正式成本，账本不能定稿。");
-    const currentApprovals = await db.costApprovals.where("ledgerId").equals(ledgerId).toArray();
-    const hasManual = currentApprovals.some((item) => manualSnapshot(item)?.kind === "manual_override");
-    if (hasManual && formulaVersion !== PROFIT_FORMULA_VERSION) throw new Error("人工更正需使用当前利润公式，请刷新后重试。");
-    if (formulaVersion === PROFIT_FORMULA_VERSION) {
-      const exact = calculateFormalLedgerRows({ ledger, salesRows: await db.salesRows.where("ledgerId").equals(ledgerId).toArray(), erpCosts: await getLatestLedgerCosts(ledgerId), approvals: currentApprovals });
-      if (JSON.stringify(comparableProfitLines(profitLines)) !== JSON.stringify(comparableProfitLines(exact))) throw new Error("成本或台账已变化，请刷新核对后重新定稿。");
-      const totals = summarizeProfitRows(exact);
-      profitSummary = { revenue: totals.revenue, quantity: totals.totalUnits, purchaseCost: totals.purchaseCosts, warehouseCost: totals.warehouseFees, penalty: totals.penalties, profit: totals.matchedProfit, profitRate: totals.profitRate, missingSkuCount: totals.missing };
-      profitLines = exact;
-    }
-    const coverage = await readLedgerCostCoverage(ledgerId);
-    if (coverage.missingCount > 0 || profitLines.some((line) => !line.finalizable)) {
-      throw new Error("仍有平台 SKU 缺少正式成本，账本不能定稿。");
-    }
-
-    const savedProfitLines = profitLines.map((line) => ({
-      ...line,
-      workspaceId: ledger.workspaceId,
-      ledgerId,
-      period: ledger.period,
-      finalizedAt,
-      finalizedBy: auditActor,
-      formulaVersion,
-    }));
-    await db.profitLines.where("ledgerId").equals(ledgerId).delete();
-    if (savedProfitLines.length > 0) await db.profitLines.bulkAdd(savedProfitLines);
-    const persistedProfitLines = savedProfitLines.length > 0
-      ? await db.profitLines.where("ledgerId").equals(ledgerId).toArray()
-      : [];
-    const savedLedger = {
-      ...ledger,
-      status: "finalized",
-      costSummary: {
-        ...(ledger.costSummary ?? {}),
-        ...coverage,
-        matchedCount: coverage.erpMatchedCount,
-      },
-      profitSummary,
-      formulaVersion,
-      finalizedAt,
-      finalizedBy: auditActor,
-      updatedAt: finalizedAt,
-    };
-    await db.ledgers.put(savedLedger);
-    await db.auditEvents.add({
-      workspaceId: ledger.workspaceId,
-      objectType: "monthly_ledger",
-      objectId: ledgerId,
-      action: "finalized",
-      actorId: auditActor,
-      createdAt: finalizedAt,
-      after: {
-        ...profitSummary,
-        formulaVersion,
-        lineCount: profitLines.length,
-        snapshot: {
-          ...savedLedger,
-          profitLines: persistedProfitLines,
-        },
-      },
-    });
-  });
+export async function finalizeMonthlyLedger({ ledgerId, profitLines, formulaVersion, expectedFingerprint } = {}) {
+  const { previewProfitReport, saveProfitReport } = await import("./profitReportRepository");
+  const input = { ledgerId, kind: "pre_deduction", expectedLegacyLines: profitLines, legacyFormulaVersion: formulaVersion };
+  const preview = await previewProfitReport(input);
+  if (expectedFingerprint && expectedFingerprint !== preview.fingerprint) throw new Error("成本或台账已变化，请刷新后重新预览。");
+  return saveProfitReport(input, { expectedFingerprint: expectedFingerprint ?? preview.fingerprint });
 }
 
 export async function getLatestLedgerCosts(ledgerId) {
@@ -1272,11 +1199,12 @@ export async function reopenLedgerForCostCorrection({ ledgerId, reason } = {}) {
     const profitLines = await db.profitLines.where("ledgerId").equals(ledgerId).toArray();
     if (!profitLines.length || !ledger.profitSummary) throw new Error("定稿快照缺失，不能重开账本。");
     const updatedAt = new Date().toISOString();
-    const { profitSummary: _summary, finalizedAt: _at, finalizedBy: _by, formulaVersion: _formula, ...draft } = ledger;
+    const { profitSummary: _summary, finalizedAt: _at, finalizedBy: _by, formulaVersion: _formula, currentBaseReportId: _base, ...draft } = ledger;
     const coverage = await readLedgerCostCoverage(ledgerId);
-    const savedLedger = { ...draft, ...buildLedgerCoveragePatch(draft, coverage, updatedAt) };
+    const savedLedger = { ...draft, ...buildLedgerCoveragePatch(draft, coverage, updatedAt), reportReopenReason: normalizedReason };
     await db.auditEvents.add({
-      workspaceId: ledger.workspaceId, objectType: "monthly_ledger", objectId: ledgerId,
+      workspaceId: ledger.workspaceId, objectType: ledger.currentBaseReportId ? "local_profit_report" : "monthly_ledger", objectId: ledgerId,
+      ...(ledger.currentBaseReportId ? { localOnly: true, syncState: "local_only" } : {}),
       action: "ledger_reopened_for_cost_correction", actorId: member.memberId, createdAt: updatedAt,
       before: { status: ledger.status, snapshot: { ledger, profitLines } },
       after: { status: savedLedger.status, reason: normalizedReason, snapshot: savedLedger },
@@ -1322,6 +1250,7 @@ export async function voidPublishedErpCostBatch({
       const ledger = await db.ledgers.get(batch.ledgerId);
       if (!ledger) throw new Error("找不到对应的月度账本。");
       if (ledger.status === "locked") throw new Error("已锁定账本不能作废 ERP 正式成本。");
+      if (ledger.currentBaseReportId && ledger.status === "finalized") throw new Error("已有冻结报告，请先显式重开账本再作废成本；旧报告将保留。");
 
       const batchRows = await db.erpCostRows.where("batchId").equals(batch.id).toArray();
       const previousProfitLines = ledger.status === "finalized"
@@ -1454,6 +1383,7 @@ export async function deleteMonthlyLedger(ledgerId, deletedBy = "local-user") {
   const auditActor = await resolveProfitAuditActor(deletedBy);
   await db.transaction(
     "rw",
+    db.settings,
     db.ledgers,
     db.importBatches,
     db.salesRows,
@@ -1464,9 +1394,16 @@ export async function deleteMonthlyLedger(ledgerId, deletedBy = "local-user") {
     db.costApprovals,
     db.profitLines,
     db.auditEvents,
+    db.profitReports,
+    db.profitReportLines,
+    db.monthlySupplementBatches,
+    db.monthlySupplementRows,
     async () => {
       const ledger = await db.ledgers.get(ledgerId);
       if (!ledger) return;
+      const member = await getActiveMemberContext();
+      if (ledger.workspaceId !== member.workspaceId || !["admin", "finance"].includes(member.role)) throw new Error("当前成员无此账本的财务写权限。");
+      if (await db.profitReports.where("ledgerId").equals(ledgerId).count()) throw new Error("账本已有报告历史，不能普通删除；请保留原报告。");
       if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能删除。");
 
       const [costBatchRecords, inboxRecords] = await Promise.all([
@@ -1486,6 +1423,9 @@ export async function deleteMonthlyLedger(ledgerId, deletedBy = "local-user") {
       await db.erpCostBatches.bulkDelete(costBatches);
       await db.costApprovals.where("ledgerId").equals(ledgerId).delete();
       await db.profitLines.where("ledgerId").equals(ledgerId).delete();
+      await db.monthlySupplementRows.where("ledgerId").equals(ledgerId).delete();
+      await db.monthlySupplementBatches.where("ledgerId").equals(ledgerId).delete();
+      await db.profitReportLines.where("ledgerId").equals(ledgerId).delete();
       await db.ledgers.delete(ledgerId);
       await db.auditEvents.add({
         workspaceId: ledger.workspaceId,

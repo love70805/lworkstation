@@ -9,6 +9,7 @@ import { selectAtomicSyncEventSelection } from "../domain/syncLifecycleGroup";
 import { buildLegacyAuditActorRepairPatch } from "../domain/syncAuditActorRepair";
 
 function isRetryableEvent(event) {
+  if (event.localOnly) return false;
   const state = event.syncState ?? SYNC_STATES.PENDING;
   return state === SYNC_STATES.PENDING || (state === SYNC_STATES.FAILED && event.syncTerminal !== true);
 }
@@ -56,6 +57,7 @@ export async function getSyncStatusSnapshot({ workspaceId = DEFAULT_WORKSPACE_ID
     terminalFailed: 0,
   };
   for (const event of events) {
+    if (event.localOnly) continue;
     const state = event.syncState ?? SYNC_STATES.PENDING;
     if (state === SYNC_STATES.IN_FLIGHT) counts.inFlight += 1;
     else if (state === SYNC_STATES.SYNCED) counts.synced += 1;

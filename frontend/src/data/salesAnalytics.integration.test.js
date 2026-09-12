@@ -12,7 +12,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await db.delete(); });
 it("reads exact scoped rows and rejects foreign workspaces, ledgers and stores at repository", async () => {
-  expect(db.verno).toBe(14);
+  expect(db.verno).toBe(15);
   expect((await listLedgerSummaries()).map((ledger) => ledger.id)).toEqual(["L"]);
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L", store: "甲" })).monthTotalsExact.revenueExact).toBe("0.009");
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L" })).monthTotalsExact.revenueExact).toBe("4.009");

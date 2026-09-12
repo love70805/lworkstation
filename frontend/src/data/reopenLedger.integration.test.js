@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { adoptZeroDispatch } from "../testFixtures/reportWorkflow";
 import { beforeEach, afterEach, it, expect, vi } from "vitest";
 import { db, DEFAULT_WORKSPACE_ID as workspaceId, setActiveMemberContext, saveManualCostOverride, revokeManualCostOverride, getLedgerSnapshot, finalizeMonthlyLedger, reopenLedgerForCostCorrection } from "./database";
 import { calculateFormalLedgerRows } from "../domain/ledgerProfit";
@@ -14,6 +15,7 @@ const save = (store, unitCost) => saveManualCostOverride({ ledgerId, store, plat
 async function finalize() {
   const snapshot = await getLedgerSnapshot(ledgerId);
   const profitLines = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
+  await adoptZeroDispatch(ledgerId);
   return finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines, profitSummary: {} });
 }
 beforeEach(async () => {
@@ -76,7 +78,8 @@ it("rolls back the whole reopen when audit persistence fails", async () => {
   expect((await db.ledgers.get(ledgerId)).status).toBe("finalized");
 });
 
-it("selects, validates, projects and recovers the standalone action without weakening ERP lifecycle pairing", async () => {
+it("selects, validates, projects and recovers a legacy standalone action without weakening ERP lifecycle pairing", async () => {
+  await db.ledgers.update(ledgerId, { currentBaseReportId: null, reportWorkflowVersion: undefined });
   await reopenLedgerForCostCorrection({ ledgerId, reason: "独立成本复核" });
   const events = (await db.auditEvents.toArray()).map((event) => ({ ...event, eventId: `E-${event.id}` }));
   const reopened = events.find((event) => event.action === "ledger_reopened_for_cost_correction");

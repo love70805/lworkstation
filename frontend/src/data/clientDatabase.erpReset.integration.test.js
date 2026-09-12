@@ -550,7 +550,7 @@ describe("v12 database upgrade", () => {
       }
 
       await db.open();
-      expect(db.verno).toBe(14);
+      expect(db.verno).toBe(15);
 
       const restored = await db.auditEvents.where("eventId").equals("EVT-V13-MISCLASSIFIED-SYNCED").first();
       expect(restored).toMatchObject({

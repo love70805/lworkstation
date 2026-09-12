@@ -1,5 +1,7 @@
 import { buildCloudSeedPayload } from "../../domain/cloudSeed";
 import { CLOUD_SEED_TABLES } from "../../domain/cloudSeed";
+import { REPORT_TABLES } from "../../domain/profitReports";
+import { validateReportBackup } from "../../domain/profitReportBackup";
 import { replaySyncRecoveryPayload } from "../../domain/syncRecovery";
 import {
   validateWorkspaceBackupPayload,
@@ -63,7 +65,7 @@ export async function getWorkspaceOperationalSummary() {
 export async function createWorkspaceBackupPayload() {
   await ensureDefaultWorkspace();
   const generatedAt = new Date().toISOString();
-  const tableEntries = await Promise.all(db.tables.map(async (table) => [table.name, await table.toArray()]));
+  const tableEntries = await db.transaction("r", db.tables, () => Promise.all(db.tables.map(async (table) => [table.name, await table.toArray()])));
   const tables = Object.fromEntries(tableEntries);
   const recordCount = tableEntries.reduce((sum, [, rows]) => sum + rows.length, 0);
 
@@ -83,6 +85,8 @@ export async function createWorkspaceBackupPayload() {
 
 export async function createWorkspaceCloudSeedPayload() {
   const backupPayload = await createWorkspaceBackupPayload();
+  if (REPORT_TABLES.some(name => backupPayload.tables[name]?.length)) throw new Error("本机报告及补充来源不支持云端种子，请使用完整本机备份。");
+  for (const name of REPORT_TABLES) delete backupPayload.tables[name];
   return buildCloudSeedPayload(backupPayload);
 }
 
@@ -184,6 +188,7 @@ export async function getDataSecuritySnapshot() {
 export async function restoreWorkspaceBackupPayload(payload, restoredBy = "local-user") {
   const tableNames = db.tables.map((table) => table.name);
   const inspection = validateWorkspaceBackupPayload(payload, { tableNames });
+  await validateReportBackup(payload.tables);
   const restoredAt = new Date().toISOString();
 
   await db.transaction("rw", db.tables, async () => {
@@ -226,6 +231,7 @@ export async function restoreWorkspaceSyncRecoveryPayload(payload, restoredBy = 
   const restorableTables = CLOUD_SEED_TABLES.filter((name) => db.tables.some((table) => table.name === name));
 
   await db.transaction("rw", db.tables, async () => {
+    if ((await Promise.all(REPORT_TABLES.map(name => db.table(name).count()))).some(Boolean)) throw new Error("已有本机报告或补充来源，不能使用旧云恢复替换父账本；请恢复完整本机备份。");
     for (const tableName of restorableTables) await db.table(tableName).clear();
     for (const tableName of restorableTables) {
       const rows = recovery.tables[tableName] ?? [];

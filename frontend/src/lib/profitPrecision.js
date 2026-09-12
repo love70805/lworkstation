@@ -4,7 +4,9 @@ import { createLedgerGroupKey } from "../domain/ledgerImport";
 import { PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
 import { storeSkuKey } from "../domain/manualCostOverride";
 
-const sum = (rows, key) => rows.reduce((total, row) => total.plus(row[key] ?? 0), new Decimal(0));
+const ExactSummary = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
+const exactKeys = { qty: "quantityExact", revenue: "revenueExact", profit: "profitExact", purchaseCost: "purchaseCostExact", warehouseCost: "warehouseCostExact", penalty: "penaltyExact" };
+const sum = (rows, key) => rows.reduce((total, row) => total.plus(row[exactKeys[key]] ?? row[key] ?? 0), new ExactSummary(0));
 const money = (value) => value.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() || 0;
 
 // Only presentation/ledger exits truncate. Never accumulate these summaries.
@@ -13,6 +15,7 @@ export function summarizeProfitRows(rows, costBySku = new Map()) {
   const revenue = sum(rows, "revenue");
   const profit = sum(formal, "profit");
   return {
+    exactTotals: { revenue: revenue.toFixed(), quantity: sum(rows, "qty").toFixed(), purchaseCost: sum(formal,"purchaseCost").toFixed(), warehouseCost: sum(rows,"warehouseCost").toFixed(), penalty: sum(rows,"penalty").toFixed(), profit: profit.toFixed() },
     revenue: money(revenue),
     totalUnits: sum(rows, "qty").toNumber(),
     purchaseCosts: money(sum(formal, "purchaseCost")),
