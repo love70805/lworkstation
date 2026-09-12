@@ -1,4 +1,6 @@
 import "fake-indexeddb/auto";
+import { REPORT_FORMULA_VERSION } from "../domain/profitReports";
+import { adoptZeroDispatch } from "../testFixtures/reportWorkflow";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createOrGetMonthlyLedger,
@@ -46,9 +48,10 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   const summary = { quantity: 1.234567, revenue: 1, purchaseCost: 0.01, warehouseCost: 0, penalty: 0, profit: 0.98 };
   const args = { ledgerId: ledger.id, formulaVersion: PROFIT_FORMULA_VERSION, profitSummary: summary,
     profitLines: [{ ...exact, platformSku: "SKU-AUDIT", store: "合成测试", costSourceRecordId: decision.sourceRecordId, costApprovalId: null }] };
+  await adoptZeroDispatch(ledger.id);
   await finalizeMonthlyLedger(args);
   const snapshot = await getLedgerSnapshot(ledger.id);
-  expect(snapshot.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001, formulaVersion: PROFIT_FORMULA_VERSION });
+  expect(snapshot.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001, formulaVersion: REPORT_FORMULA_VERSION });
   expect(snapshot.ledger.profitSummary).toMatchObject(summary);
   const exported = buildProfitExportRows(savedProfitRows(snapshot.profitLines), snapshot.ledger, savedProfitSummary(summary));
   expect(exported[0]["总件数*成本"]).toBe(0.0119752999);
@@ -57,11 +60,8 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   const backup = JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));
   expect(backup.tables.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001 });
   expect(backup.tables.erpCostRows[0].unitCost).toBe(0.0097);
-  const audit = (await db.auditEvents.toArray()).find((event) => event.action === "finalized");
-  const envelope = buildSyncEnvelope({ workspaceId: DEFAULT_WORKSPACE_ID, events: [{ ...audit, eventId: `EVENT-${audit.id}` }], generatedAt: audit.createdAt });
-  const plan = await buildSyncPostgresPlan(envelope);
-  const operation = plan.eventPlans[0].operations.find((item) => item.table === "profit_lines");
-  expect(JSON.parse(operation.values[1])[0]).toMatchObject({ purchase_cost: 0.0119752999, profit: 0.9880247001 });
+  const audit = (await db.auditEvents.toArray()).find((event) => event.action === "report_saved");
+  expect(audit).toMatchObject({ localOnly: true, objectType: "local_profit_report" });
   expect(await db.erpCostBatches.get(saved.batchId)).toMatchObject({ status: "published", sourceContract: { algorithmVersion: source.algorithmVersion, resolutionVersion: "shopeers-cost-resolution@2-unit-4dp" } });
 });
 
@@ -745,13 +745,9 @@ describe("ERP cost repository independent recalculation", () => {
   it("reopens a finalized ledger with a reason and preserves the previous profit snapshot in audit", async () => {
     const { ledger, request } = await context();
     const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "DELIVERY-FINAL" });
-    await finalizeMonthlyLedger({
-      ledgerId: ledger.id,
-      profitLines: [{ platformSku: "SKU-AUDIT", canonicalPlatformSku: "SKU-AUDIT", finalizable: true, profit: 6 }],
-      profitSummary: { revenue: 10, purchaseCost: 4, profit: 6 },
-      formulaVersion: "profit@1",
-      finalizedBy: "finance-1",
-    });
+    // An existing pre-v15 snapshot keeps the legacy ERP void/reopen behavior.
+    await db.ledgers.update(ledger.id, { status: "finalized", profitSummary: { revenue: 10, purchaseCost: 4, profit: 6 }, finalizedAt: "2026-08-31", formulaVersion: "profit@1" });
+    await db.profitLines.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, platformSku: "SKU-AUDIT", profit: 6 });
 
     await expect(voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "", voidedBy: "finance-2" })).rejects.toThrow("必须填写原因");
     await voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "月末复核发现采购单关联错误", voidedBy: "finance-2" });

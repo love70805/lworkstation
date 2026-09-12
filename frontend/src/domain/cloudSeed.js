@@ -123,8 +123,10 @@ export function buildCloudSeedPayload(backupPayload, { generatedAt = new Date().
   if (backupPayload.format !== WORKSPACE_BACKUP_FORMAT || Number(backupPayload.formatVersion) !== WORKSPACE_BACKUP_VERSION) {
     throw new Error("只能从受支持的 Lworkstation 本机备份生成云端种子包。");
   }
+  const localReportTables = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
+  if (localReportTables.some(name => backupPayload.tables?.[name]?.length)) throw new Error("本机报告及补充来源不支持云端种子，请使用完整本机备份。");
   validateWorkspaceBackupPayload(backupPayload, {
-    tableNames: [...CLOUD_SEED_TABLES, ...CLOUD_SEED_EXCLUDED_TABLES],
+    tableNames: [...CLOUD_SEED_TABLES, ...CLOUD_SEED_EXCLUDED_TABLES, ...localReportTables],
   });
   const workspaceId = requiredText(backupPayload.workspaceId, "种子包工作区");
   const tables = Object.fromEntries(CLOUD_SEED_TABLES.map((name) => [

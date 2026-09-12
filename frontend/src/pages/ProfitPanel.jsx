@@ -4,10 +4,11 @@ import { AlertCircle, CalendarDays, Check, CheckCircle2, ChevronDown, Download, 
 import AppShell from "../components/AppShell";
 import { CostMatchingContent } from "./CostMatching";
 import SalesAnalytics from "./SalesAnalytics";
+import MonthlyReportManager from "./MonthlyReportManager";
+import { buildReportProducts, legacyReportLine, REPORT_FORMULA_VERSION, displayMoney } from "../domain/profitReports";
 import DataTable from "../components/DataTable";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
 import {
-  finalizeMonthlyLedger,
   revokeApproved1688Fallback,
   saveApproved1688Fallback,
   updateLedgerWarehouseRate,
@@ -24,7 +25,7 @@ import { buildProfitHref, buildProfitQuery, filterProfitRows, readProfitFilter, 
 import { manualSnapshot, selectManualOverride } from "../domain/manualCostOverride";
 import ManualCostDialog from "./ManualCostDialog";
 
-const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
+const currency = (value) => `¥${displayMoney(value)}`;
 
 const ledgerStatusLabels = {
   draft: "草稿",
@@ -133,7 +134,6 @@ export function ProfitWorkspaceContent() {
   const [rateDraft, setRateDraft] = useState("0.7");
   const [rateDialog, setRateDialog] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [finalizing, setFinalizing] = useState(false);
   const [approvalTarget, setApprovalTarget] = useState(null);
   const [approvalAmount, setApprovalAmount] = useState("");
   const [approvalSource, setApprovalSource] = useState("");
@@ -165,6 +165,7 @@ export function ProfitWorkspaceContent() {
   }, [missingOnly, query, snapshot?.ledger?.id, storeFilter, supplierSelection]);
 
   const locked = isProfitSnapshot(snapshot?.ledger);
+  const legacySnapshot = locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION;
   const sourceRows = useMemo(() => !locked && snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot, locked]);
   const costBySku = useMemo(() => new Map((snapshot?.costs ?? []).map((cost) => [
     cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku),
@@ -182,7 +183,7 @@ export function ProfitWorkspaceContent() {
     return latest;
   }, [snapshot?.approvals]);
 
-  const calculated = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : sourceRows.map((row) => {
+  const previousCalculated = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : sourceRows.map((row) => {
     const erpCost = costBySku.get(row.canonicalPlatformSku);
     const manualOverride = selectManualOverride(snapshot?.approvals, { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, store: row.store, platformSku: row.platformSku });
     const approval = approvalBySku.get(row.canonicalPlatformSku) ?? null;
@@ -243,6 +244,18 @@ export function ProfitWorkspaceContent() {
     };
   }), [approvalBySku, costBySku, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId, snapshot?.approvals, snapshot?.profitLines, locked, sourceRows, warehouseRate]);
 
+  const calculation = useMemo(() => {
+    if (locked || !snapshot?.rows?.length) return { rows: previousCalculated, error: null };
+    try {
+      const rows = buildReportProducts({ ledger: { ...snapshot.ledger, warehouseRate }, salesRows: snapshot.rows, erpCosts: snapshot.costs ?? [], approvals: snapshot.approvals ?? [], allowMissing: true }).map(line => {
+        const previous = previousCalculated.find(row => row.store === line.store && row.platformSku === line.platformSku && row.attribute === line.attribute) ?? {};
+        return { ...previous, ...legacyReportLine(line) };
+      });
+      return { rows, error: null };
+    } catch (error) { return { rows: [], error: error.message }; }
+  }, [locked, snapshot, previousCalculated, warehouseRate]);
+  const calculated = calculation.rows;
+
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
   const suppliers = useMemo(() => [...new Set(calculated.map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated]);
   const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, missingOnly }), [missingOnly, query, storeFilter, supplierSelection]);
@@ -255,7 +268,7 @@ export function ProfitWorkspaceContent() {
   };
   const filtered = useMemo(() => filterProfitRows(calculated, filterState), [calculated, filterState]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
-  const filteredSummary = useMemo(() => locked && filtered.length === calculated.length && snapshot?.ledger?.profitSummary ? savedProfitSummary(snapshot.ledger.profitSummary) : summarizeProfitRows(filtered, costBySku), [costBySku, filtered, calculated.length, locked, snapshot?.ledger?.profitSummary]);
+  const filteredSummary = useMemo(() => locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION && filtered.length === calculated.length && snapshot?.ledger?.profitSummary ? savedProfitSummary(snapshot.ledger.profitSummary) : summarizeProfitRows(filtered, costBySku), [costBySku, filtered, calculated.length, locked, snapshot?.ledger?.profitSummary]);
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
   const { revenue, totalUnits, purchaseCosts, warehouseFees, penalties, matchedProfit, missing, missingErp } = filteredSummary;
 
@@ -346,7 +359,7 @@ export function ProfitWorkspaceContent() {
       cell: ({ getValue }) => <span className="profit-attribute" title={getValue() || "未提供属性"}>{getValue() || "未提供属性"}</span>,
     },
     {
-      accessorKey: "qty",
+      id: "qty", accessorFn: row => row.quantityExact ?? row.qty,
       header: "数量",
       enableSorting: false,
       size: 78,
@@ -354,7 +367,7 @@ export function ProfitWorkspaceContent() {
       cell: ({ getValue }) => <span className="mono table-number">{Number(getValue() ?? 0).toLocaleString("zh-CN")}</span>,
     },
     {
-      accessorKey: "revenue",
+      id: "revenue", accessorFn: row => row.revenueExact ?? row.revenue,
       header: "金额",
       enableSorting: false,
       size: 112,
@@ -378,7 +391,7 @@ export function ProfitWorkspaceContent() {
       cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{row.original.costSource === "manual_override" ? formatManualUnitCost(row.original.unitCost) : row.original.costSource === "erp" ? formatErpUnitCost(row.original.unitCost) : currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <Badge tone="danger"><AlertCircle size={12} />缺失</Badge>,
     },
     {
-      accessorKey: "purchaseCost",
+      id: "purchaseCost", accessorFn: row => row.purchaseCostExact ?? row.purchaseCost,
       header: "总采购成本",
       enableSorting: false,
       size: 118,
@@ -386,7 +399,7 @@ export function ProfitWorkspaceContent() {
       cell: ({ getValue }) => getValue() != null ? <span className="mono table-number">{formatProfitAmount(getValue())}</span> : <span className="pending-text">待成本</span>,
     },
     {
-      accessorKey: "warehouseCost",
+      id: "warehouseCost", accessorFn: row => row.warehouseCostExact ?? row.warehouseCost,
       header: "仓储成本",
       enableSorting: false,
       size: 108,
@@ -402,7 +415,7 @@ export function ProfitWorkspaceContent() {
       cell: ({ getValue }) => <span className={`mono table-number ${Number(getValue() ?? 0) > 0 ? "profit-penalty" : ""}`}>{currency(getValue() ?? 0)}</span>,
     },
     {
-      accessorKey: "profit",
+      id: "profit", accessorFn: row => row.profitExact ?? row.profit,
       header: "总利润",
       enableSorting: false,
       size: 118,
@@ -427,6 +440,7 @@ export function ProfitWorkspaceContent() {
   ], [costMatchingHref, locked]);
 
   const exportProfit = async () => {
+    if (!locked || snapshot?.ledger?.currentBaseReportId) { document.getElementById("monthly-reports")?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     if (!snapshot?.ledger) return;
     setExporting(true);
     try {
@@ -452,55 +466,7 @@ export function ProfitWorkspaceContent() {
     }
   };
 
-  const finalizeLedger = async () => {
-    if (!snapshot?.ledger || !canFinalize) return;
-    setFinalizing(true);
-    try {
-      await finalizeMonthlyLedger({
-        ledgerId: snapshot.ledger.id,
-        formulaVersion: PROFIT_FORMULA_VERSION,
-        profitSummary: {
-          revenue: ledgerSummary.revenue,
-          quantity: ledgerSummary.totalUnits,
-          purchaseCost: ledgerSummary.purchaseCosts,
-          warehouseCost: ledgerSummary.warehouseFees,
-          penalty: ledgerSummary.penalties,
-          profit: ledgerSummary.matchedProfit,
-          profitRate: ledgerSummary.profitRate,
-          missingSkuCount: 0,
-        },
-        profitLines: calculated.map((row) => ({
-          platformSku: row.platformSku,
-          canonicalPlatformSku: row.canonicalPlatformSku,
-          platformSkc: row.platformSkc,
-          groupSkc: row.groupSkc,
-          supplierNumber: row.supplierNumber,
-          store: row.store,
-          attribute: row.attribute,
-          quantity: row.qty,
-          revenue: row.revenue,
-          penalty: row.penalty,
-          unitCost: row.unitCost,
-          purchaseCost: row.purchaseCost,
-          warehouseCost: row.warehouseCost,
-          profit: row.profit,
-          profitRate: row.profitRate,
-          costSource: row.costSource,
-          costSourceRecordId: row.costSourceRecordId,
-          costApprovalId: row.approvalId,
-          costPolicyVersion: row.costDecision.policyVersion,
-          orderNumber: row.orderNumber,
-          finalizable: row.finalizable,
-          calculationMode: "exact",
-        })),
-      });
-      notify(`${snapshot.ledger.period} 月度利润已定稿，并写入商品经营历史。`);
-    } catch (error) {
-      notify(`定稿失败：${error.message}`, "error");
-    } finally {
-      setFinalizing(false);
-    }
-  };
+  const finalizeLedger = () => document.getElementById("monthly-reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const reopenLedger = async () => {
     setReopening(true); setReopenError("");
@@ -519,10 +485,13 @@ export function ProfitWorkspaceContent() {
   if (locked && (!snapshot?.profitLines?.length || !snapshot.ledger.profitSummary)) {
     return <><Panel><EmptyState icon={AlertCircle} title="历史定稿快照缺失" description="该账本缺少已保存的利润明细或汇总，暂不能展示和导出。请恢复完整备份；系统不会按当前成本重算历史。" /></Panel></>;
   }
+  if (calculation.error) {
+    return <Panel><div role="alert"><h2>本月利润待处理</h2><p>{calculation.error}</p><p>当前台账不满足新报告口径，尚未计算商品利润。请核对原始数量与金额；旧扣款需从销售台账移出并登记为独立扣款来源。</p></div><Button onClick={() => navigate("/ledger")}>核对月度账本</Button><Button disabled>预览并定稿</Button></Panel>;
+  }
   if (!snapshot?.ledger || (!locked && sourceRows.length === 0)) {
     return (
       <>
-        <PageHeader title="利润核算面板" description="导入月度台账后，系统会按平台 SKC/SKU 建立精确利润核算。" />
+        <PageHeader title="利润核算" description="导入月度台账后，系统会按平台 SKC/SKU 建立精确利润核算。" />
         <Panel><EmptyState icon={CalendarDays} title="还没有可核算的月度台账" description="先导入 CSV/XLSX 台账，再复制平台 SKC 到 ERP 获取正式成本。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
       </>
     );
@@ -533,8 +502,8 @@ export function ProfitWorkspaceContent() {
       <PageHeader
         eyebrow={`月度利润核算 · ${snapshot.ledger.period}`}
         title="利润核算"
-        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "ERP单价四位；金额先精确累计，汇总后截两位"}`}
-        actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>导出利润表</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} loading={finalizing} disabled={!canFinalize || finalizing} onClick={finalizeLedger}>定稿本月全部店铺</Button>}</>}
+        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "商品金额精确累计，代发与扣款在本月报告归集"}`}
+        actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>报告与导出</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} disabled={!canFinalize} onClick={finalizeLedger}>预览并定稿</Button>}</>}
       />
 
       <Panel className="profit-purpose-strip">
@@ -542,8 +511,8 @@ export function ProfitWorkspaceContent() {
         <span className="profit-purpose-arrow">→</span>
         <div className="profit-purpose-step"><span className="profit-purpose-index">2</span><div><strong>ERP 采购成本</strong><small>人工更正优先 · ERP 原始成本 · 1688 仅参考</small></div></div>
         <span className="profit-purpose-arrow">→</span>
-        <div className="profit-purpose-step"><span className="profit-purpose-index">3</span><div><strong>月度利润表</strong><small>金额 − 总采购成本 − 仓储成本 − 客退罚款</small></div></div>
-        <div className="profit-purpose-formula mono">利润 = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元) − 客退罚款</div>
+        <div className="profit-purpose-step"><span className="profit-purpose-index">3</span><div><strong>月度利润表</strong><small>{legacySnapshot ? "金额 − 总采购成本 − 仓储成本 − 客退罚款" : "商品利润 + 代发金额 − 独立扣款"}</small></div></div>
+        <div className="profit-purpose-formula mono">{legacySnapshot ? "利润" : "商品利润"} = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元){legacySnapshot ? " − 客退罚款" : ""}</div>
       </Panel>
 
       <div className="profit-filter-bar">
@@ -552,11 +521,11 @@ export function ProfitWorkspaceContent() {
         <span>概览随筛选变化；定稿覆盖本月全部店铺。</span>
       </div>
       <div className="profit-summary-strip">
-        <div className="profit-summary-item"><span>销售金额</span><strong>{currency(revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
-        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
-        <button className="profit-summary-item profit-summary-action" disabled={locked} onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
-        <div className="profit-summary-item"><span>客退罚款</span><strong className={penalties > 0 ? "profit-negative" : ""}>{currency(penalties)}</strong><small>台账扣款汇总</small></div>
-        <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>总利润</span><strong>{missing ? "待补正式成本" : currency(matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : "金额 − 采购 − 仓储 − 客退"}</small></div>
+        <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
+        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
+        <button className="profit-summary-item profit-summary-action" disabled={locked} onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
+        <div className="profit-summary-item"><span>{legacySnapshot ? "客退罚款" : "独立扣款"}</span><strong className={legacySnapshot && penalties > 0 ? "profit-negative" : ""}>{legacySnapshot ? currency(penalties) : "见本月报告"}</strong><small>{legacySnapshot ? "台账扣款汇总" : "按整月采用来源归集"}</small></div>
+        <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>{legacySnapshot ? "总利润" : "商品利润"}</span><strong>{missing ? "待补正式成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : legacySnapshot ? "金额 − 采购 − 仓储 − 客退" : "金额 − 采购 − 仓储"}</small></div>
       </div>
 
       {missing ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>当前总利润暂不能定稿。可等待 ERP 回传，或在明细中填写人工更正；1688 参考不会自动转为正式成本。</small></span><Button variant="ghost" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>进入 ERP 成本核对</Button></div> : null}
@@ -572,7 +541,7 @@ export function ProfitWorkspaceContent() {
           <label className="profit-filter-check"><input type="checkbox" checked={missingOnly} onChange={(event) => changeFilter({ missingOnly: event.target.checked })} />只看缺成本</label>
           <button className="profit-filter-reset" type="button" onClick={() => changeFilter({ query: "", storeFilter: "all", supplierSelection: null, missingOnly: false })}>重置筛选</button>
         </div>
-        {groupedFiltered.map((group) => <details className="profit-skc-group" key={group.id}><summary><strong>{group.store} · SKC {group.groupSkc}</strong><span>{group.skuCount} 个 SKU · {group.qty} 件 · 销售 {currency(group.revenue)} · 利润 {group.finalizable ? currency(group.profit) : "待核对"}</span></summary><DataTable className="profit-table" columns={columns} data={prepareProfitTableRows(group.variants)} getRowId={(row) => row.id} getRowProps={(row) => ({ className: !row.finalizable ? "missing-profit-row" : "" })} /></details>)}
+        {groupedFiltered.map((group) => <details className="profit-skc-group" key={group.id}><summary><strong>{group.store} · SKC {group.groupSkc}</strong><span>{group.skuCount} 个 SKU · {group.quantityExact ?? group.qty} 件 · 销售 {currency(group.revenueExact ?? group.revenue)} · 利润 {group.finalizable ? currency(group.profitExact ?? group.profit) : "待核对"}</span></summary><DataTable className="profit-table" columns={columns} data={prepareProfitTableRows(group.variants)} getRowId={(row) => row.id} getRowProps={(row) => ({ className: !row.finalizable ? "missing-profit-row" : "" })} /></details>)}
       </Panel>
 
       {snapshot.ledger.status === "finalized" ? <Button icon={RotateCcw} onClick={() => { setReopenReason(""); setReopenError(""); setReopenDialog(true); }}>重开本月全部店铺核算</Button> : null}
@@ -637,7 +606,7 @@ export function ProfitViewsContent() {
   return <>
     {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p></Panel> : snapshot === undefined ? <Panel>正在读取月度账本...</Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button></Panel> : <>
       <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button><label>店铺 <select className="select-input" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></nav>
-      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><SalesAnalytics key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} /></>}
+      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><MonthlyReportManager key={snapshot.ledger.id} ledgerId={snapshot.ledger.id} /><SalesAnalytics key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} /></>}
     </>}
   </>;
 }

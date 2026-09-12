@@ -17,6 +17,19 @@
 .profit-skc-group { margin:12px 0; border-bottom:1px solid var(--border, #ddd); }
 .profit-skc-group > summary { padding:14px 4px; cursor:pointer; }
 .profit-skc-group > summary span { display:block; padding-top:6px; }
+.monthly-report-manager { margin-top:20px; padding:20px; scroll-margin-top:80px; }
+.monthly-report-manager h2 { margin:0 0 10px; font-size:18px; }
+.monthly-report-manager p { line-height:1.6; margin:10px 0; }
+.report-sources-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin:16px 0; }
+.report-source { margin:12px 0; padding:10px; border:1px solid var(--border,#ddd); overflow-wrap:anywhere; }
+.report-source label { display:block; margin:8px 0; }
+.report-source select { max-width:100%; }
+.report-mapping { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+.report-mapping select { display:block; width:100%; }
+.report-adoption-preview { margin:16px 0; padding:12px; }
+.report-preview-rows { overflow:auto; max-height:240px; }
+.report-preview-rows td, .report-preview-rows th { padding:8px; white-space:nowrap; }
+.report-history-row { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:12px 0; }
 .profit-page,
 .profit-page .page-container,
 .profit-page .profit-table-panel,
