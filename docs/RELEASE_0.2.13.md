@@ -1,6 +1,6 @@
 # Lworkstation 0.2.13
 
-状态：2026-09-14 已完成主线集成、完整回归和 Windows 候选验收；尚未公开发布，本机未安装。
+状态：2026-09-14 已公开为 GitHub Latest，四资产匿名下载回读与稳定 / Beta 更新通道检查通过；本机未安装。
 
 ## 更新内容
 
@@ -36,7 +36,17 @@ SHA-256：`08BCF45777DB4F13943CD795EB241C3132141D310FC4AA99F242AC0C32C9F44A`。
 
 验收边界：使用合成数据和隔离网络；按钮为可信原生鼠标事件，选择 / 输入为 DOM 事件，CSV 使用 File / DataTransfer，托盘恢复通过同 profile 第二实例。未运行安装器、实际升级或真实 ERP，不把网络阻断环境中的 ERP 登记提示作为真实通道验收。第一次桌面 QA 仅脚本选择器引号错误，修正脚本后使用全新 profile 完整重跑；候选程序未改，前次错误单独留档。
 
-最终证据：`archive/update-0.2.13/desktop/REPORT.md`、`candidate-manifest.json`、`qa/result.json`、`qa/clipboard-guard.json` 和主线 `main-final-verification.json`。集成临时工作树已移除，相关提交与必要验收证据保留。代码已在本机主线集成，尚未推送本轮提交或创建 GitHub Release；公开最新版仍为 0.2.12。
+最终候选证据：`archive/update-0.2.13/desktop/REPORT.md`、`candidate-manifest.json`、`qa/result.json`、`qa/clipboard-guard.json` 和主线 `main-final-verification.json`。集成临时工作树已移除，相关提交与必要验收证据保留。
+
+## 公开发布
+
+- 用户明确批准发布后，[PR #62](https://github.com/love70805/lworkstation/pull/62) 合入 main，合并提交 / 发布标签 `bff1f8ae80bf9de18aa3defad624d7c9966880be`。与已验收构建 `25b43cf` 的 frontend / desktop / integrations / tools / workflows 无差异；使用原候选字节，没有重打包。
+- PR 和 main CI 均通过，运行编号分别为 `34780382287`、`34780465081`，包含前端发布检查、依赖审计与 Windows 桌面检查。
+- [GitHub v0.2.13](https://github.com/love70805/lworkstation/releases/tag/v0.2.13) 于 2026-09-14 04:22:52（UTC+8）公开为 Latest，非 Beta、非草稿。
+- 四个公开文件为 `Lworkstation-Setup-0.2.13.exe`、同名 blockmap、`latest.yml` 和 `SHA256.txt`；全部匿名完整下载，大小及 SHA-256 与上传清单一致，installer 与候选同字节。公开 SHA256 清单使用实际公开文件名。
+- 生产更新 provider / runtime 配合匿名真实 GitHub 请求验证：0.2.12 稳定通道发现 0.2.13，0.2.13 不重复提示；0.2.6-beta.7 仅访问 Beta 元数据，未选中稳定版。没有自动下载或退出安装。此检查不是实际安装替换验收。
+- 本机 `releases/latest/` 已整理为 0.2.13，0.2.12 保存于 `releases/history/0.2.12/`，旧候选保留；本机按用户要求未安装，未修改真实业务数据。
+- 发布证据位于 `archive/release-0.2.13/`：上传清单、公开 Release 元数据、`public-readback.json`、`channel-verification.json`、标签与 CI 记录。通道检查初次使用的验证适配器漏传 Accept header，修正验证脚本并完整重跑后通过；未修改产品代码或已发布资产。
 
 候选登记目录：`releases/candidates/0.2.13-daily-sales/`。
 原始证据目录：`archive/update-0.2.13/`。
