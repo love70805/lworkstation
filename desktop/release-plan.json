@@ -1,8 +1,32 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
+    {
+      "module": "profit-store-sibling-lifecycle",
+      "commit": "8fda4bc"
+    },
+    {
+      "module": "skc-clipboard-copy",
+      "commit": "b2002b1"
+    },
+    {
+      "module": "simplified-ledger-import",
+      "commit": "e8f980d"
+    },
+    {
+      "module": "immediate-import-preview",
+      "commit": "7ab9569"
+    },
+    {
+      "module": "scoped-daily-sales-details",
+      "commit": "70e20f9"
+    },
+    {
+      "module": "homepage-daily-sales-store",
+      "commit": "c6175e5"
+    },
     {
       "module": "desktop-theme-startup-and-tray",
       "commit": "9174805"
