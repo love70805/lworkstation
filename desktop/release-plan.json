@@ -1,8 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
+    {
+      "module": "daily-skc-and-concise-activities",
+      "commit": "f34c53b"
+    },
     {
       "module": "profit-store-sibling-lifecycle",
       "commit": "8fda4bc"
