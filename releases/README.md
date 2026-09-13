@@ -10,10 +10,11 @@
 
 ## 版本清单
 
-核对日期：2026-09-13。0.2.12已公开Latest并验证下载与更新通道；本机按用户要求暂不安装。
+核对日期：2026-09-14。0.2.12已公开Latest并验证下载与更新通道；0.2.13候选已验收，尚未发布。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.2.13` daily sales | 已在本机主线集成；640测试、12组浏览器布局/交互、Windows实际候选和资产哈希验证通过；尚未公开发布，本机未安装 | 本机 `candidates/0.2.13-daily-sales/`，含新win-unpacked和artifacts；[更新与验收](../docs/RELEASE_0.2.13.md) |
 | `0.2.12` complete local update | 已公开GitHub Latest；612测试、完整候选操作、CI、四资产回读与通道隔离通过；本机不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.12)；本机 `candidates/0.2.12-complete-local-update/`；[验收](../docs/RELEASE_0.2.12.md) |
 | `0.2.11` restore overview | 历史稳定版；582测试/CI/页面/打包/下载与四资产回读通过，本机不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.11)；本机 candidates/0.2.11-restore-overview；[验收记录](../docs/RELEASE_0.2.11.md) |
 | `0.2.10` local desktop | 历史稳定版，581测试/CI/打包运行/更新下载与四资产回读通过；本机暂不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.10)；本机 `candidates/0.2.10-local-desktop/`；[验收记录](../docs/RELEASE_0.2.10.md) |
