@@ -6,16 +6,16 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.12](https://github.com/love70805/lworkstation/releases/tag/v0.2.12)，四个公开资产匿名下载回读通过，0.2.11可经稳定通道发现新版。本机 `latest/` 保存该构建，0.2.11归入 `history/0.2.11/`。用户要求本机暂不安装，正式应用仍为0.2.9。下载入口、发布状态与验收边界以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
+当前公开稳定版为 [0.2.13](https://github.com/love70805/lworkstation/releases/tag/v0.2.13)，四个公开资产匿名下载回读通过，0.2.12可经稳定通道发现新版。本机 `latest/` 保存该构建，0.2.12归入 `history/0.2.12/`，历史候选保留。用户要求本机暂不安装。下载入口、发布状态与验收边界以 [发布状态](../docs/RELEASE_STATUS.md) 为准。
 
 ## 版本清单
 
-核对日期：2026-09-14。0.2.12已公开Latest并验证下载与更新通道；0.2.13候选已验收，尚未发布。本机按用户要求暂不安装。
+核对日期：2026-09-14。0.2.13已公开Latest并验证下载与更新通道，本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.2.13` daily sales | 已在本机主线集成；640测试、12组浏览器布局/交互、Windows实际候选和资产哈希验证通过；尚未公开发布，本机未安装 | 本机 `candidates/0.2.13-daily-sales/`，含新win-unpacked和artifacts；[更新与验收](../docs/RELEASE_0.2.13.md) |
-| `0.2.12` complete local update | 已公开GitHub Latest；612测试、完整候选操作、CI、四资产回读与通道隔离通过；本机不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.12)；本机 `candidates/0.2.12-complete-local-update/`；[验收](../docs/RELEASE_0.2.12.md) |
+| `0.2.13` daily sales | 已公开GitHub Latest；640测试、CI、12组浏览器布局/交互、Windows实际候选、四资产匿名回读与通道隔离通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.13)；本机 `candidates/0.2.13-daily-sales/`；[更新与验收](../docs/RELEASE_0.2.13.md) |
+| `0.2.12` complete local update | 历史稳定版；612测试、完整候选操作、CI、四资产回读与通道隔离通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.12)；本机 `candidates/0.2.12-complete-local-update/`；[验收](../docs/RELEASE_0.2.12.md) |
 | `0.2.11` restore overview | 历史稳定版；582测试/CI/页面/打包/下载与四资产回读通过，本机不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.11)；本机 candidates/0.2.11-restore-overview；[验收记录](../docs/RELEASE_0.2.11.md) |
 | `0.2.10` local desktop | 历史稳定版，581测试/CI/打包运行/更新下载与四资产回读通过；本机暂不安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.10)；本机 `candidates/0.2.10-local-desktop/`；[验收记录](../docs/RELEASE_0.2.10.md) |
 | `0.2.9` | 历史稳定版，本机当前安装版；ERP写入修复 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.9)；[验收记录](../docs/RELEASE_0.2.9.md) |
