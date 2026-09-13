@@ -199,38 +199,76 @@
   .selection-install-content .erp-install-actions { display: grid; grid-template-columns: 1fr; }
 }
 
-
-/* Same-month multi-store import; scoped to the import page. */
-.batch-import .batch-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+/* Same-month multi-store import; keep all overrides local to this page. */
+.batch-import { color: var(--text); background: var(--surface-bg); }
+.batch-import .wizard-content { width: min(1080px, calc(100% - 48px)); margin: 32px auto; }
+.batch-import .wizard-topbar button, .batch-import .button { min-height: 44px; }
 .batch-import .wizard-intro { margin-bottom: 24px; }
-.batch-import .batch-period { max-width: 300px; margin: 24px 32px; }
-.batch-import .batch-files { padding: 0 32px; }
-.batch-import .batch-file { padding: 20px 0; border-top: 1px solid var(--border); }
-.batch-import .batch-file-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.batch-import .batch-file-heading strong { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
-.batch-import .batch-store { display: grid; gap: 10px; max-width: 520px; margin: 18px 0; }
-.batch-import details { margin-top: 14px; }
-.batch-import summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
-.batch-import .mapping-select { width: 100%; }
-.batch-import .mapping-row { gap: 16px; }
+.batch-import .batch-eyebrow { color: var(--primary); font-size: 12px; font-weight: 600; }
+.batch-import .wizard-intro h1 { margin-top: 6px; font-size: 26px; font-weight: 650; line-height: 1.35; }
+.batch-import .wizard-intro p { font-size: 14px; line-height: 1.7; }
+.batch-import .batch-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.batch-import .batch-period { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.batch-import .batch-period label { font-weight: 600; }
+.batch-import .batch-period p, .batch-import .batch-store small { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.batch-import .batch-period input { width: 210px; min-height: 44px; }
+.batch-import .import-dropzone { margin: 20px 24px; min-height: 100px; padding: 18px; border-radius: 10px; }
+.batch-import .import-dropzone > svg { flex: 0 0 auto; color: var(--primary); }
+.batch-import .import-dropzone strong { white-space: normal; overflow-wrap: anywhere; }
+.batch-import .batch-files { display: grid; gap: 12px; padding: 0 24px 20px; }
+.batch-import .batch-file { min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.batch-import .batch-file-heading { display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(200px, 280px) auto; align-items: center; gap: 14px; }
+.batch-import .batch-file-heading > div { min-width: 0; }
+.batch-import .batch-file-heading strong { display: block; font-size: 14px; overflow-wrap: anywhere; line-height: 1.6; }
+.batch-import .batch-file-icon { display: grid; place-items: center; width: 40px; height: 44px; border-radius: 8px; color: var(--primary); background: var(--primary-soft); }
+.batch-import .batch-file-status { display: block; margin-top: 5px; color: var(--text-muted); font-size: 12px; }
+.batch-import .batch-store { display: grid; gap: 5px; margin: 0; }
+.batch-import .batch-store label { font-size: 12px; font-weight: 600; }
+.batch-import .text-input { min-width: 0; min-height: 44px; width: 100%; background: var(--surface-bg); color: var(--text); }
+.batch-import .batch-period .text-input { width: 210px; }
+.batch-import [aria-invalid="true"] { border-color: var(--danger); }
+.batch-import details { margin-top: 10px; }
+.batch-import summary { min-height: 44px; padding: 12px 0; cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.batch-import .batch-advanced { border-top: 1px solid var(--border); margin-top: 14px; }
+.batch-import .batch-advanced > summary { color: var(--text-muted); }
+.batch-import .mapping-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; min-height: 80px; padding: 12px 0; }
 .batch-import .mapping-row > div:first-child { display: block; }
 .batch-import .mapping-row small { display: block; }
-.batch-import .mapping-row code { overflow-wrap: anywhere; }
-.batch-import .batch-filters > div { display: flex; flex-wrap: wrap; gap: 12px; max-height: 180px; overflow: auto; padding: 8px 0; }
-.batch-import input[type="checkbox"] { margin-right: 8px; }
-.batch-import .batch-preview { padding: 24px 32px; margin-top: 24px; }
-.batch-import .batch-preview article { border-bottom: 1px solid var(--border); padding: 18px 0; overflow-wrap: anywhere; }
-.batch-import .batch-preview p { margin: 10px 0; }
-.batch-import .batch-overlap { margin-top: 12px; padding: 12px; background: var(--warning-bg); border-radius: 6px; }
-.batch-import .batch-overwrite { display: block; margin: 18px 0; }
-.batch-import .import-error { overflow-wrap: anywhere; }
-@media (max-width: 640px) {
+.batch-import .mapping-select { width: 100%; }
+.batch-import .mapping-row code { overflow-wrap: anywhere; white-space: normal; }
+.batch-import .batch-filters > div { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; padding: 8px 0; }
+.batch-import .batch-filters label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-bg); overflow-wrap: anywhere; cursor: pointer; }
+.batch-import input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--primary); }
+.batch-import .batch-validation { padding: 10px 12px; background: var(--surface-bg); border-radius: 6px; font-size: 13px; line-height: 1.7; }
+.batch-import .wizard-card-footer { padding: 16px 24px; gap: 16px; border-top: 1px solid var(--border); background: var(--surface-bg); }
+.batch-import .wizard-card-footer > span { font-size: 13px; color: var(--text-muted); }
+.batch-import .batch-preview { padding: 24px; margin-top: 20px; }
+.batch-import .batch-preview h2 { font-size: 19px; }
+.batch-import .batch-preview article { padding: 16px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
+.batch-import .batch-preview h3 { font-size: 14px; }
+.batch-import .batch-preview p { margin: 10px 0; line-height: 1.7; }
+.batch-import .batch-overlap { margin-top: 12px; padding: 12px; background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 8px; }
+.batch-import .batch-overwrite { display: flex; align-items: center; gap: 12px; min-height: 56px; margin: 18px 0; padding: 14px; border: 1px solid var(--warning-border); border-radius: 8px; background: var(--warning-bg); cursor: pointer; line-height: 1.7; }
+.batch-import .batch-submit { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid var(--border); margin-top: 18px; padding-top: 18px; }
+.batch-import .batch-submit p { font-size: 13px; color: var(--text-muted); }
+.batch-import .batch-submit .button { min-width: 150px; }
+.batch-import .import-error { margin: 12px 0; color: var(--danger); border-color: var(--danger-border); overflow-wrap: anywhere; line-height: 1.7; }
+.batch-import :is(input, select, button, summary):focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+@media (max-width: 760px) {
   .batch-import .wizard-content { width: calc(100% - 24px); margin: 24px auto; }
   .batch-import .wizard-topbar { padding: 0 12px; gap: 12px; }
+  .batch-import .batch-period { padding: 16px; flex-wrap: wrap; gap: 12px; }
+  .batch-import .batch-period .text-input { width: 100%; }
   .batch-import .batch-files, .batch-import .batch-preview { padding: 16px; }
-  .batch-import .batch-period { margin: 16px; }
-  .batch-import .import-dropzone { flex-wrap: wrap; margin: 16px; padding: 16px; }
-  .batch-import .import-dropzone > div { min-width: 0; flex: 1 1 180px; }
+  .batch-import .batch-file { padding: 14px; }
+  .batch-import .batch-file-heading { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; }
+  .batch-import .batch-file-icon { width: 32px; }
+  .batch-import .batch-store { grid-column: 1 / -1; grid-row: 2; margin-top: 6px; }
+  .batch-import .batch-file-heading > .button { grid-column: 3; grid-row: 1; }
+  .batch-import .import-dropzone { margin: 16px; padding: 16px; gap: 12px; }
+  .batch-import .import-dropzone > div { flex: auto; }
   .batch-import .mapping-row { grid-template-columns: 1fr; padding: 12px 0; }
-  .batch-import .wizard-card-footer { flex-wrap: wrap; padding: 16px; gap: 12px; }
+  .batch-import .wizard-card-footer, .batch-import .batch-submit { flex-direction: column; align-items: stretch; padding: 16px; gap: 12px; }
+  .batch-import .batch-submit { padding: 16px 0 0; }
+  .batch-import .batch-submit .button { width: 100%; }
 }
