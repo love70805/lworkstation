@@ -2,7 +2,16 @@
 
 更新时间：2026-09-14
 
-## 当前公开稳定版 0.2.13
+## 当前公开稳定版 0.2.14
+
+- 每日商品明细改用 SKC 并支持搜索；活动名称简写、去重，去掉时间和价格等冗长内容。首页与利润页同步生效，计算口径和原始证据保留，无数据库迁移。
+- 643 项测试、完整发布检查、桌面 verify / packaged smoke、12 组浏览器布局和实际 Windows 候选验收通过。详见 [0.2.14 验收](RELEASE_0.2.14.md)。
+- [GitHub v0.2.14](https://github.com/love70805/lworkstation/releases/tag/v0.2.14) 已于 2026-09-14 05:14:16（UTC+8）公开为 Latest。PR #65 和 main CI 通过；标签 `86913ee` 与候选 `c6d3313` 生产文件一致。
+- 四资产匿名回读通过，稳定版 0.2.13 能发现新版，当前版不重复提示、Beta 不接收稳定包。
+- [Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.14/Lworkstation-Setup-0.2.14.exe)，116,544,500 字节；SHA-256 `3BBC5BD786CBE8597B381F60B497236DACDC08FC96E6644F9752563B1DAE46F0`。
+- 本机未安装。候选 `releases/candidates/0.2.14-daily-details/`，旧稳定版归档，真实业务数据不变。
+
+## 历史稳定版 0.2.13
 
 - SKC 复制、批量导入简化与 UI、每日销售明细 / 店铺筛选及切店重复概览修复已在本机主线集成。
 - 99 文件 / 640 测试、生产构建、12 组 Edge 布局与交互、desktop verify 及实际 Windows 新包验收通过；详见 [0.2.13 验收](RELEASE_0.2.13.md)。
