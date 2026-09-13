@@ -46,7 +46,7 @@ export default function ImportPreview() {
   useEffect(() => {
     if (!preview) return;
     previewRef.current?.focus({ preventScroll: true });
-    previewRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    previewRef.current?.scrollIntoView?.({ behavior: "auto", block: "start" });
   }, [preview]);
 
   useEffect(() => {
