@@ -30,7 +30,7 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
-当前稳定版为 [`0.2.12`](https://github.com/love70805/lworkstation/releases/tag/v0.2.12)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.12/Lworkstation-Setup-0.2.12.exe)。本版保留经营概览并融入月度账本和每日趋势，利润页融合成本核对，支持代发/独立扣款导入、两阶段 Excel 报告及历史文件留存；增加主题过渡、启动反馈和默认关闭进入托盘。首次安装可选择位置，稳定更新检查默认开启，下载和安装仍需用户操作。历史版本保留。发布记录与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前稳定版为 [`0.2.14`](https://github.com/love70805/lworkstation/releases/tag/v0.2.14)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.14/Lworkstation-Setup-0.2.14.exe)。本版每日明细使用 SKC，活动名称简写并去重；保留经营概览并融入月度账本和每日趋势，利润页融合成本核对，支持代发/独立扣款导入、两阶段 Excel 报告及历史文件留存；增加主题过渡、启动反馈和默认关闭进入托盘。首次安装可选择位置，稳定更新检查默认开启，下载和安装仍需用户操作。历史版本保留。发布记录与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
