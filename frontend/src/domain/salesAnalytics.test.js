@@ -16,6 +16,13 @@ describe("sales date evidence", () => {
 
 describe("selected day sales", () => {
   const scope = { period: "2026-08", date: "2026-08-01" };
+  it("carries source SKCs without merging attribute SKUs or borrowing another day's SKC", () => {
+    const source = [row({platformSkc:"skc-a"}), row({platformSku:"sku-b",platformSkc:"skc-a"}), row({platformSkc:"skc-a"}), row({platformSku:"sku-c"}), row({platformSkc:"other-day",sourceAddedDate:"2026-08-02"})];
+    const details = aggregateDailySalesDetails(source, scope);
+    expect(details.rows).toHaveLength(3);
+    expect(details.rows.map(item => item.platformSkcs)).toEqual([["skc-a"], ["skc-a"], []]);
+    expect(details.totalsExact).toMatchObject({quantityExact:"4",revenueExact:"0.036"});
+  });
   it("aggregates only that day by store and SKU with exact fractions, negative values and activity evidence", () => {
     const source = [row({ quantityExact:"0.5",amountExact:"0.0099999999999999999",activityStatus:'known',activityRaw:'当日活动',attribute:'红' }),row({quantityExact:'1.5',amountExact:'-0.001',attribute:'蓝'}),row({store:'乙',quantityExact:'0',amountExact:'0'}),row({sourceAddedDate:'2026-08-02',activityStatus:'known',activityRaw:'其他日活动'}),row({sourceAddedDate:null}),row({sourceAddedDate:'2026-09-01'}),row({movementType:'盘亏'})];
     const daily = aggregateDailySalesDetails(source,scope);

@@ -115,13 +115,15 @@ export function aggregateDailySalesDetails(rows = [], { period, date } = {}) {
     add(totals, row);
     const sku = canonicalPlatformSku(row.platformSku ?? row.sku);
     const key = JSON.stringify([String(row.store ?? "").normalize("NFKC").trim().toUpperCase(), sku]);
-    if (!groups.has(key)) groups.set(key, { ...emptyTotal(), key, store: row.store, platformSku: sku, attributes: new Set(), activities: [] });
+    if (!groups.has(key)) groups.set(key, { ...emptyTotal(), key, store: row.store, platformSku: sku, platformSkcs: new Set(), attributes: new Set(), activities: [] });
     const group = groups.get(key);
     add(group, row);
+    const skc = String(row.platformSkc ?? "").normalize("NFKC").trim();
+    if (skc) group.platformSkcs.add(skc);
     if (row.attribute) group.attributes.add(row.attribute);
     if (row.activityStatus === "known" && String(row.activityRaw ?? "").trim()) group.activities.push({ raw: row.activityRaw, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow });
   }
   const status = totals.count ? "data" : sourceCount && !unlocatedCount ? "known_zero" : "unknown";
   return { date, period, status, unlocatedCount, totalsExact: status === "unknown" ? { quantityExact: null, revenueExact: null, count: 0 } : totals,
-    rows: [...groups.values()].map(({ attributes, ...group }) => ({ ...group, attributes: [...attributes], averagePriceExact: new Exact(group.quantityExact).isZero() ? null : new Exact(group.revenueExact).div(group.quantityExact).toFixed(), activityStatus: group.activities.length === group.count ? "complete" : group.activities.length ? "partial" : "missing" })) };
+    rows: [...groups.values()].map(({ attributes, platformSkcs, ...group }) => ({ ...group, platformSkcs: [...platformSkcs], attributes: [...attributes], averagePriceExact: new Exact(group.quantityExact).isZero() ? null : new Exact(group.revenueExact).div(group.quantityExact).toFixed(), activityStatus: group.activities.length === group.count ? "complete" : group.activities.length ? "partial" : "missing" })) };
 }
