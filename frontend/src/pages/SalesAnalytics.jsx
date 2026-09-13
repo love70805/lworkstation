@@ -3,23 +3,19 @@ import { useLiveQuery } from "dexie-react-hooks";
 import Decimal from "decimal.js";
 import { Panel, Button } from "../components/UI";
 import { readLedgerSalesAnalytics, readLedgerDailySalesDetails } from "../data/repositories/salesAnalyticsRepository";
+import { activityName, shortActivityName } from "./salesActivitySummary";
 
 const show = (value, digits = 2) => value == null ? "待查" : new Decimal(value).toDecimalPlaces(digits, Decimal.ROUND_DOWN).toFixed();
 const pair = day => `销售原额 ${day?.revenueExact == null ? "待查" : `¥${new Decimal(day.revenueExact).toFixed()}`} · 销量 ${day?.quantityExact == null ? "待查" : `${new Decimal(day.quantityExact).toFixed()} 件`}`;
 const PAGE_SIZE = 12;
 
-function ActivityEntry({ activity }) {
-  const [open, setOpen] = useState(false);
-  return <details onToggle={event => setOpen(event.currentTarget.open)}><summary>{String(activity.raw).slice(0, 60)}{String(activity.raw).length > 60 ? "…" : ""}</summary>{open ? <><p className="sales-activity-original">{activity.raw}</p>{activity.sourceRow != null ? <small>{activity.sourceSheet || "来源"} · 第 {activity.sourceRow} 行</small> : null}</> : null}</details>;
-}
-
 function ActivityDetails({ row }) {
   const [page, setPage] = useState(0);
-  if (!row.activities.length) return <span className="sales-pending">活动待查</span>;
-  return <details className="sales-activities"><summary>活动详情 · {row.activities.length} 条</summary>
-    <p>已取得 {row.activities.length}/{row.count} 行；缺失不代表未参加。</p>
-    {row.activities.slice(page * 5, page * 5 + 5).map((activity, index) => <ActivityEntry key={page * 5 + index} activity={activity} />)}
-    {row.activities.length > 5 ? <div className="sales-pagination"><Button disabled={!page} onClick={() => setPage(page - 1)}>上一组活动</Button><span>{page + 1}/{Math.ceil(row.activities.length / 5)}</span><Button disabled={(page + 1) * 5 >= row.activities.length} onClick={() => setPage(page + 1)}>下一组活动</Button></div> : null}
+  const names = useMemo(() => [...new Set(row.activities.map(activity => activityName(activity.raw)))], [row.activities]);
+  if (!names.length) return <span className="sales-pending">活动待查</span>;
+  return <details className="sales-activities"><summary>活动 · {names.length} 项</summary>
+    {names.slice(page * 5, page * 5 + 5).map(name => <p key={name}>{shortActivityName(name)}</p>)}
+    {names.length > 5 ? <div className="sales-pagination"><Button disabled={!page} onClick={() => setPage(page - 1)}>上一组活动</Button><span>{page + 1}/{Math.ceil(names.length / 5)}</span><Button disabled={(page + 1) * 5 >= names.length} onClick={() => setPage(page + 1)}>下一组活动</Button></div> : null}
   </details>;
 }
 
@@ -28,7 +24,7 @@ function DailyDetails({ data, close }) {
   const searchId = useId(), sortId = useId();
   const filtered = useMemo(() => {
     const search = query.trim().normalize("NFKC").toLocaleLowerCase();
-    return data.rows.filter(row => [row.platformSku, row.store, ...row.attributes].some(value => String(value).normalize("NFKC").toLocaleLowerCase().includes(search)))
+    return data.rows.filter(row => [...(row.platformSkcs ?? []), row.platformSku, row.store, ...row.attributes].some(value => String(value).normalize("NFKC").toLocaleLowerCase().includes(search)))
       .toSorted((a, b) => new Decimal(b[sort]).cmp(a[sort]) || a.key.localeCompare(b.key));
   }, [data.rows, query, sort]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)), current = Math.min(page, pages - 1);
@@ -36,9 +32,9 @@ function DailyDetails({ data, close }) {
     <div className="sales-details-heading"><div><h3>{data.date} 商品明细</h3><p>{pair(data.totalsExact)}</p></div><Button onClick={close}>返回全月</Button></div>
     {data.status === "unknown" ? <p role="status">当天数据待查；尚有未定位到日期的记录或未取得销售来源，空白未按零计算。</p> : data.status === "known_zero" ? <p>当天已知销售额与销量为 0，无商品记录。</p> : <>
       {data.unlocatedCount ? <p role="status">仅含已定位到当天的记录；另有 {data.unlocatedCount} 条未定位记录待查。</p> : null}
-      <div className="sales-details-controls"><label htmlFor={searchId}>查找商品<input id={searchId} value={query} placeholder="SKU、店铺或属性" onChange={event => { setQuery(event.target.value); setPage(0); }} /></label><label htmlFor={sortId}>排序<select id={sortId} value={sort} onChange={event => { setSort(event.target.value); setPage(0); }}><option value="revenueExact">销售额从高到低</option><option value="quantityExact">销量从高到低</option></select></label></div>
+      <div className="sales-details-controls"><label htmlFor={searchId}>查找商品<input id={searchId} value={query} placeholder="SKC、店铺或属性" onChange={event => { setQuery(event.target.value); setPage(0); }} /></label><label htmlFor={sortId}>排序<select id={sortId} value={sort} onChange={event => { setSort(event.target.value); setPage(0); }}><option value="revenueExact">销售额从高到低</option><option value="quantityExact">销量从高到低</option></select></label></div>
       <p className="sales-list-scope">{query.trim() ? "搜索结果" : "当天全部商品"} {filtered.length}/{data.rows.length} 项 · 当日合计不随搜索变化</p>
-      <div className="sales-day-table"><table><thead><tr><th>商品 / 店铺</th><th>销量</th><th>销售原额</th><th>均价</th></tr></thead><tbody>{filtered.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE).map(row => <tr key={row.key}><td><strong>{row.platformSku}</strong><small>{row.store} · {row.attributes.join("、") || "属性待查"}</small><ActivityDetails key={row.key} row={row} /></td><td>{show(row.quantityExact, 6)}</td><td>¥{show(row.revenueExact)}</td><td title={row.averagePriceExact ?? "待查"}>{show(row.averagePriceExact)}</td></tr>)}</tbody></table></div>
+      <div className="sales-day-table"><table><thead><tr><th>SKC / 店铺</th><th>销量</th><th>销售原额</th><th>均价</th></tr></thead><tbody>{filtered.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE).map(row => <tr key={row.key}><td><strong>{row.platformSkcs?.join("、") || "SKC 待补充"}</strong><small>{row.store} · {row.attributes.join("、") || "属性待查"}</small><ActivityDetails key={row.key} row={row} /></td><td>{show(row.quantityExact, 6)}</td><td>¥{show(row.revenueExact)}</td><td title={row.averagePriceExact ?? "待查"}>{show(row.averagePriceExact)}</td></tr>)}</tbody></table></div>
       {!filtered.length ? <p>没有匹配的当天商品。</p> : null}
       <div className="sales-pagination"><Button disabled={!current} onClick={() => setPage(current - 1)}>上一页</Button><span>第 {current + 1}/{pages} 页 · 每页 {PAGE_SIZE} 项</span><Button disabled={current + 1 >= pages} onClick={() => setPage(current + 1)}>下一页</Button></div>
     </>}
