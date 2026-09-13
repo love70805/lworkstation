@@ -531,7 +531,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     if (!snapshot?.ledger || platformSkcs.length === 0) return;
     setCopyingSkcs(true);
     try {
-      await writeClipboardText(platformSkcs.map((item) => item.platformSkc).join("\n"));
+      await writeClipboardText(platformSkcs.join("\n"));
       notify(`已复制 ${platformSkcs.length} 个平台 SKC。`);
     } catch (error) {
       notify(`复制 SKC 失败：${error.message}`, "error");
@@ -784,7 +784,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         eyebrow={`月度利润 › ${snapshot.ledger.period}`}
         title="ERP 成本核对"
         description={`当前筛选：${describeProfitFilter(profitFilter)}。先复制 ${platformSkcs.length} 个平台 SKC 到卓麟 ERP 查询；扩展回传采购证据后，由本页核对并发布正式成本。`}
-        actions={<><Button icon={platformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || locked || platformSkcs.length === 0} onClick={copySkcs}>{platformSkcs.length ? `复制 ${platformSkcs.length} 个平台 SKC` : "待补平台 SKC"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前成本" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></>}
+        actions={<><Button icon={platformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || platformSkcs.length === 0} onClick={copySkcs}>{platformSkcs.length ? `复制 ${platformSkcs.length} 个平台 SKC` : "待补平台 SKC"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前成本" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></>}
       />
 
       {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 尚不能发布正式成本</strong><small>{reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；请先核对 ERP 与当前账本的 SKU/SKC，再重新采集。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；请使用 ERP Assistant v8.0.15 重新抓取。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的正式单价，不能发布；请保留真实采购价格。" : `Lworkstation 发现 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请在下方完成修正或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}

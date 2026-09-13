@@ -2,18 +2,61 @@
 .profit-view-tabs, .sales-analytics-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
 .profit-view-tabs label { display:flex; align-items:center; gap:8px; white-space:nowrap; }
 .profit-view-tabs [aria-current="page"] { border-color:var(--accent, #4578c8); }
-.sales-analytics { margin-top:20px; min-width:0; padding:20px; }
+.sales-analytics { margin-top:20px; min-width:0; padding:20px; container-type:inline-size; }
 .sales-analytics h2 { margin:0 0 6px; font-size:18px; }
 .sales-analytics p { margin:8px 0; line-height:1.6; }
-.sales-daily-chart { display:flex; align-items:flex-end; gap:6px; height:135px; overflow-x:auto; padding:8px 0; }
-.sales-daily-bar { display:flex; flex-direction:column; justify-content:flex-end; align-items:center; min-width:18px; flex:1; height:120px; }
-.sales-daily-bar > span { display:block; width:100%; background:var(--accent, #4578c8); border-radius:3px 3px 0 0; }
-.sales-daily-bar > span.is-negative { background:#c62828; }
-.sales-daily-bar small { margin-top:5px; }
-.sales-analytics-tables { overflow:auto; max-height:480px; }
-.sales-analytics table { border-collapse:collapse; width:100%; margin:12px 0; }
-.sales-analytics th, .sales-analytics td { padding:10px; text-align:left; border-bottom:1px solid var(--border, #ddd); }
-.sales-analytics td small { display:block; }
+.sales-analysis-controls, .sales-analysis-controls > label, .sales-pagination { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.sales-analysis-controls select, .sales-details-controls input, .sales-details-controls select { min-width:0; min-height:40px; padding:8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); }
+.sales-analysis-controls [aria-pressed="true"] { border-color:var(--primary); background:var(--primary-soft); color:var(--primary); }
+.sales-analysis-body { display:grid; gap:20px; align-items:start; }
+.sales-chart-panel { min-width:0; container-type:inline-size; }
+.sales-hover-summary { display:flex; flex-wrap:wrap; align-content:center; gap:6px 14px; min-height:62px; font-size:13px; color:var(--text-muted); }
+.sales-hover-summary strong { color:var(--text); }
+.sales-hover-summary span, .sales-details-heading p { overflow-wrap:anywhere; }
+.sales-daily-chart { display:grid; grid-template-columns:48px minmax(0,1fr); height:220px; padding:8px 4px 26px 0; }
+.sales-chart-axis { position:relative; margin-right:8px; color:var(--text-muted); font-size:11px; }
+.sales-chart-axis > span { position:absolute; top:0; right:0; transform:translateY(-50%); max-width:100%; overflow-wrap:anywhere; }
+.sales-chart-axis > .sales-axis-min { top:100%; }
+.sales-chart-plot { position:relative; min-width:0; }
+.sales-zero-line { position:absolute; left:0; right:0; height:1px; background:var(--border-strong); pointer-events:none; }
+.sales-chart-bars { display:flex; height:100%; gap:3px; }
+.sales-daily-bar { position:relative; display:block; flex:1 1 0; min-width:0; height:100%; padding:0; border:0; background:transparent; cursor:pointer; color:var(--text-muted); }
+.sales-bar-fill { position:absolute; left:12%; width:76%; background:var(--primary); border-radius:2px; pointer-events:none; }
+.sales-bar-fill.is-negative { background:var(--danger); }
+.sales-bar-fill.is-zero { background:var(--text-muted); }
+.sales-unknown-mark { position:absolute; left:0; right:0; text-align:center; color:var(--text-muted); line-height:1; pointer-events:none; }
+.sales-daily-bar:is(:hover,:focus-visible,.is-selected) { background:var(--primary-soft); }
+.sales-daily-bar.is-selected { box-shadow:inset 0 0 0 1px var(--primary); }
+.sales-daily-bar small { position:absolute; top:calc(100% + 9px); left:50%; transform:translateX(-50%); font-size:10px; pointer-events:none; }
+.sales-chart-note, .sales-list-scope { color:var(--text-muted); font-size:12px; }
+.sales-day-details { min-width:0; padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--surface-bg); }
+.sales-details-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.sales-details-heading h3 { margin:0; font-size:16px; }
+.sales-details-heading p { font-size:13px; }
+.sales-details-controls { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; margin:14px 0; }
+.sales-details-controls label { display:grid; gap:6px; font-size:12px; }
+.sales-analytics table { border-collapse:collapse; table-layout:fixed; width:100%; margin:12px 0; font-size:12px; }
+.sales-analytics th, .sales-analytics td { padding:10px 5px; text-align:left; vertical-align:top; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+.sales-analytics th:first-child { width:43%; }
+.sales-analytics td small { display:block; color:var(--text-muted); margin-top:5px; }
+.sales-activities { margin-top:8px; }
+.sales-activities summary { padding:6px 0; cursor:pointer; overflow-wrap:anywhere; color:var(--primary); }
+.sales-activities > p, .sales-pending { font-size:11px; color:var(--text-muted); }
+.sales-activity-original { white-space:pre-wrap; overflow-wrap:anywhere; max-height:180px; overflow:auto; }
+.sales-pagination { justify-content:space-between; font-size:12px; }
+.sales-analytics :is(button,input,select,summary):focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+@container (min-width:900px) {
+  .sales-analysis-body.has-day { grid-template-columns:minmax(0,1fr) minmax(400px,1.15fr); }
+}
+@container (max-width:680px) {
+  .sales-daily-bar small:not(.sales-date-major) { visibility:hidden; }
+}
+@container (max-width:380px) {
+  .sales-day-details { padding:12px; }
+  .sales-analysis-controls { width:100%; }
+  .sales-details-controls { grid-template-columns:1fr; }
+  .sales-chart-bars { gap:2px; }
+}
 .profit-skc-group { margin:12px 0; border-bottom:1px solid var(--border, #ddd); }
 .profit-skc-group > summary { padding:14px 4px; cursor:pointer; }
 .profit-skc-group > summary span { display:block; padding-top:6px; }
@@ -230,4 +273,3 @@
   .profit-filter-bar > * { flex: 1 1 100%; }
   .profit-filter-check { justify-content: flex-start; }
 }
-

@@ -1,8 +1,17 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-13
+更新时间：2026-09-14
 
-## 当前公开稳定版 0.2.12
+## 当前公开稳定版 0.2.13
+
+- SKC 复制、批量导入简化与 UI、每日销售明细 / 店铺筛选及切店重复概览修复已在本机主线集成。
+- 99 文件 / 640 测试、生产构建、12 组 Edge 布局与交互、desktop verify 及实际 Windows 新包验收通过；详见 [0.2.13 验收](RELEASE_0.2.13.md)。
+- 候选构建基线 `25b43cf`，目录 `releases/candidates/0.2.13-daily-sales/`，安装包 116,544,308 字节，SHA-256 `08BCF45777DB4F13943CD795EB241C3132141D310FC4AA99F242AC0C32C9F44A`。
+- [GitHub v0.2.13](https://github.com/love70805/lworkstation/releases/tag/v0.2.13) 已于 2026-09-14 04:22:52（UTC+8）公开为 Latest；PR #62 合并与标签基线 `bff1f8a`，生产文件与候选构建 `25b43cf` 相同，PR / main CI 均通过。
+- 四资产匿名完整下载与 SHA-256 回读通过。0.2.12 稳定通道可发现 0.2.13，0.2.13 不重复提示，Beta 保持隔离；没有运行本机安装或实际更新替换。
+- [Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.13/Lworkstation-Setup-0.2.13.exe)。本机 `releases/latest/` 已更新，0.2.12 归档到 history，旧候选与真实业务数据保留，无迁移。
+
+## 历史稳定版 0.2.12
 
 - [GitHub v0.2.12](https://github.com/love70805/lworkstation/releases/tag/v0.2.12) 于2026-09-13 07:55:42（UTC+8）公开为Latest；发布标签基线6cd8b1b，候选构建基线4b08da3，两者生产文件一致。
 - 完整交付主题/启动/托盘、首页账本与每日趋势、利润内成本核对、代发/独立扣款、两阶段Excel及本机v15报告留存和备份恢复。详见 [验收记录](RELEASE_0.2.12.md)。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateDailySales, parseSalesAddedDate } from "./salesAnalytics";
+import { aggregateDailySales, aggregateDailySalesDetails, parseSalesAddedDate } from "./salesAnalytics";
 
 const row = (patch = {}) => ({ store: "甲", platformSku: "sku-a", quantity: 1, quantityExact: "1", amount: 0.009, amountExact: "0.009", unitPriceRaw: "0.009", sourceAddedDate: "2026-08-01", ...patch });
 describe("sales date evidence", () => {
@@ -12,6 +12,26 @@ describe("sales date evidence", () => {
     expect(parseSalesAddedDate("").dateStatus).toBe("missing");
     expect(parseSalesAddedDate("2026-09-01", { period: "2026-08" }).dateStatus).toBe("out_of_period");
   });
+});
+
+describe("selected day sales", () => {
+  const scope = { period: "2026-08", date: "2026-08-01" };
+  it("aggregates only that day by store and SKU with exact fractions, negative values and activity evidence", () => {
+    const source = [row({ quantityExact:"0.5",amountExact:"0.0099999999999999999",activityStatus:'known',activityRaw:'当日活动',attribute:'红' }),row({quantityExact:'1.5',amountExact:'-0.001',attribute:'蓝'}),row({store:'乙',quantityExact:'0',amountExact:'0'}),row({sourceAddedDate:'2026-08-02',activityStatus:'known',activityRaw:'其他日活动'}),row({sourceAddedDate:null}),row({sourceAddedDate:'2026-09-01'}),row({movementType:'盘亏'})];
+    const daily = aggregateDailySalesDetails(source,scope);
+    expect(daily.status).toBe('data');expect(daily.rows).toHaveLength(2);
+    expect(daily.totalsExact).toEqual({quantityExact:'2',revenueExact:'0.0089999999999999999',count:3});
+    expect(daily.rows[0]).toMatchObject({attributes:['红','蓝'],averagePriceExact:'0.00449999999999999995',activityStatus:'partial'});
+    expect(daily.rows[0].activities.map(item=>item.raw)).toEqual(['当日活动']);
+    expect(daily.rows[1].averagePriceExact).toBeNull();expect(daily.unlocatedCount).toBe(2);
+    expect(aggregateDailySales(source,{period:scope.period}).daily[0].revenueExact).toBe(daily.totalsExact.revenueExact);
+  });
+  it('distinguishes known empty days and zero rows from unavailable dates',()=>{
+    expect(aggregateDailySalesDetails([row({sourceAddedDate:'2026-08-02'})],scope)).toMatchObject({status:'known_zero',totalsExact:{quantityExact:'0',revenueExact:'0'},rows:[]});
+    for(const rows of [[],[row({sourceAddedDate:null})],[row({sourceAddedDate:'2026-09-01'})]])expect(aggregateDailySalesDetails(rows,scope)).toMatchObject({status:'unknown',totalsExact:{quantityExact:null,revenueExact:null},rows:[]});
+    expect(aggregateDailySalesDetails([row({quantityExact:'0',amountExact:'0'})],scope)).toMatchObject({status:'data',totalsExact:{quantityExact:'0',revenueExact:'0',count:1}});
+  });
+  it.each(['2026-09-01','2026-08-32','2026-8-1','2026-02-30',''])('rejects invalid or foreign-month date %s',date=>expect(()=>aggregateDailySalesDetails([],{...scope,date})).toThrow('有效日期'));
 });
 describe("daily and SKU analytics", () => {
   it("reconciles exact days plus all undated amounts without rounding tiny values", () => {
