@@ -45,6 +45,7 @@ export function parseSalesAddedDate(value, { period, date1904 = false } = {}) {
 }
 
 const emptyTotal = () => ({ quantityExact: "0", revenueExact: "0", count: 0 });
+const isSale = row => !row.isDeduction && !/盘亏|扣款|罚款|违约/.test(row.movementType ?? "");
 function add(total, row) {
   total.quantityExact = new Exact(total.quantityExact).plus(row.quantityExact ?? row.quantity ?? 0).toFixed();
   total.revenueExact = new Exact(total.revenueExact).plus(row.amountExact ?? row.amount ?? 0).toFixed();
@@ -60,7 +61,7 @@ export function aggregateDailySales(rows = [], { period } = {}) {
   for (const row of rows) {
     // Standard imports already select the two shipment types. Generic imports
     // retain their established sale semantics, excluding losses and deductions.
-    if (row.isDeduction || /盘亏|扣款|罚款|违约/.test(row.movementType ?? "")) continue;
+    if (!isSale(row)) continue;
     add(monthTotalsExact, row);
     const parsed = parseSalesAddedDate(row.sourceAddedDate, { period });
     if (parsed.dateStatus === "valid") {
@@ -97,4 +98,30 @@ export function aggregateDailySales(rows = [], { period } = {}) {
   }
   return { period, timezone: SALES_TIMEZONE, coverage, daily: [...dailyMap].sort(([a], [b]) => a.localeCompare(b)).map(([date, total]) => ({ date, quantityExact: total.quantityExact, revenueExact: total.revenueExact, sourceRowCount: total.count })), undated, outOfPeriod, monthTotalsExact,
     skuStats: [...skus.values()].map(({ prices, attributes, activities, ...stat }) => ({ ...stat, attributes: [...attributes], activities: [...activities], averagePriceExact: new Exact(stat.quantityExact).isZero() ? null : new Exact(stat.revenueExact).div(stat.quantityExact).toFixed(), minPriceExact: prices.length ? Exact.min(...prices).toFixed() : null, maxPriceExact: prices.length ? Exact.max(...prices).toFixed() : null, priceRowCount: prices.length, activityStatus: stat.knownActivityCount === stat.count ? "complete" : stat.knownActivityCount ? "partial" : "missing" })) };
+}
+
+// Only selected-day rows enter SKU/attribute/activity aggregation. A source with
+// unlocated dates cannot establish that an otherwise empty day was zero.
+export function aggregateDailySalesDetails(rows = [], { period, date } = {}) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period ?? "") || !/^\d{4}-\d{2}-\d{2}$/.test(date ?? "") || parseSalesAddedDate(date, { period }).dateStatus !== "valid") throw new Error("请选择账本月份内的有效日期。");
+  const totals = emptyTotal(), groups = new Map();
+  let sourceCount = 0, unlocatedCount = 0;
+  for (const row of rows) {
+    if (!isSale(row)) continue;
+    sourceCount++;
+    const parsed = parseSalesAddedDate(row.sourceAddedDate, { period });
+    if (parsed.dateStatus !== "valid") { unlocatedCount++; continue; }
+    if (parsed.sourceAddedDate !== date) continue;
+    add(totals, row);
+    const sku = canonicalPlatformSku(row.platformSku ?? row.sku);
+    const key = JSON.stringify([String(row.store ?? "").normalize("NFKC").trim().toUpperCase(), sku]);
+    if (!groups.has(key)) groups.set(key, { ...emptyTotal(), key, store: row.store, platformSku: sku, attributes: new Set(), activities: [] });
+    const group = groups.get(key);
+    add(group, row);
+    if (row.attribute) group.attributes.add(row.attribute);
+    if (row.activityStatus === "known" && String(row.activityRaw ?? "").trim()) group.activities.push({ raw: row.activityRaw, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow });
+  }
+  const status = totals.count ? "data" : sourceCount && !unlocatedCount ? "known_zero" : "unknown";
+  return { date, period, status, unlocatedCount, totalsExact: status === "unknown" ? { quantityExact: null, revenueExact: null, count: 0 } : totals,
+    rows: [...groups.values()].map(({ attributes, ...group }) => ({ ...group, attributes: [...attributes], averagePriceExact: new Exact(group.quantityExact).isZero() ? null : new Exact(group.revenueExact).div(group.quantityExact).toFixed(), activityStatus: group.activities.length === group.count ? "complete" : group.activities.length ? "partial" : "missing" })) };
 }
