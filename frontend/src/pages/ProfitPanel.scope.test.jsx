@@ -31,4 +31,3 @@ it('replaces scoped siblings through all → 甲 → 乙 without retaining prior
  }
  expect(errors.mock.calls.flat().join(' ')).not.toContain('same key');
 });
-
