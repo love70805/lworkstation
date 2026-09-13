@@ -1,8 +1,16 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-10
+更新时间：2026-09-13
 
-## 当前公开稳定版 0.2.11
+## 当前公开稳定版 0.2.12
+
+- [GitHub v0.2.12](https://github.com/love70805/lworkstation/releases/tag/v0.2.12) 于2026-09-13 07:55:42（UTC+8）公开为Latest；发布标签基线6cd8b1b，候选构建基线4b08da3，两者生产文件一致。
+- 完整交付主题/启动/托盘、首页账本与每日趋势、利润内成本核对、代发/独立扣款、两阶段Excel及本机v15报告留存和备份恢复。详见 [验收记录](RELEASE_0.2.12.md)。
+- PR #57/#59集成、#58合入main；主分支CI、612测试、12组桌面验证、实际候选报表/托盘/更新检查通过。四个公开资产匿名下载回读一致，0.2.11稳定通道可发现新版，0.2.12不重复提示，Beta不接收稳定包。
+- [Windows x64安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.12/Lworkstation-Setup-0.2.12.exe)：116540543字节；SHA256 `55E54E5583C05238681F43C9308952D391918050E8B575F1B3E09AF9620CB717`。
+- 本机候选为releases/candidates/0.2.12-complete-local-update，已公开包同字节。本机按用户要求不安装，现有0.2.9及业务数据保留；纯本机，不新增或执行云SQL。真实ERP账号采集现场保留用户复验边界。
+
+## 历史稳定版 0.2.11
 
 - 原经营概览已恢复，利润页独立，保留 0.2.10 成本与 ERP 修复。582测试、CI、三尺寸页面、打包运行及真实更新下载通过。
 - [GitHub v0.2.11](https://github.com/love70805/lworkstation/releases/tag/v0.2.11) 已公开 Latest，四资产匿名回读一致；候选 candidates/0.2.11-restore-overview。见 [验收记录](RELEASE_0.2.11.md)。
