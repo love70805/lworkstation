@@ -1,8 +1,9 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { getLatestLedgerSnapshot, getLedgerSnapshot } from "../data/database";
 
-export function useLatestSalesImport(ledgerId = null) {
+export function useLatestSalesImport(ledgerId = null, suppliedSnapshot = undefined) {
   return useLiveQuery(async () => {
+    if (suppliedSnapshot !== undefined) return suppliedSnapshot;
     const snapshot = ledgerId
       ? await getLedgerSnapshot(ledgerId)
       : await getLatestLedgerSnapshot();
@@ -13,5 +14,5 @@ export function useLatestSalesImport(ledgerId = null) {
       ...snapshot,
       batch,
     };
-  }, [ledgerId]);
+  }, [ledgerId, suppliedSnapshot]);
 }

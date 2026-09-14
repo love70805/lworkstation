@@ -1,8 +1,16 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "integrationBranch": "codex/selection-profit-erp-sync",
   "requiredCommits": [
+    {
+      "module": "modal-focus-lifecycle",
+      "commit": "a075e53"
+    },
+    {
+      "module": "profit-layout-and-scoped-read-reuse",
+      "commit": "f363c6cfb9443b9c315c5a48ad8665ee764c8776"
+    },
     {
       "module": "daily-skc-and-concise-activities",
       "commit": "f34c53b"
