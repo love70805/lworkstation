@@ -31,7 +31,7 @@
     "@fontsource/inter": "5.2.8",
     "@fontsource/jetbrains-mono": "5.2.8",
     "@supabase/supabase-js": "2.112.2",
-    "@tanstack/react-table": "^9.0.0",
+    "@tanstack/react-table": "^9.2.4",
     "@tanstack/react-virtual": "^3.14.9",
     "decimal.js": "^10.6.0",
     "dexie": "^4.4.5",
