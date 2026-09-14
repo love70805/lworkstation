@@ -128,3 +128,18 @@ it('falls back to correct calculation and source reads when optional cache stora
     expect((await readLedgerSalesRows('W', 'L'))[0].amountExact).toBe('0.009');
   } finally { get.mockRestore(); revisionGet.mockRestore(); }
 });
+
+it('caches worker chart output and distinguishes a missing comparison store from known zero', async () => {
+  const scope = { workspaceId: 'W', ledgerId: 'L' };
+  const data = await readLedgerSalesAnalytics(scope);
+  expect(data.chartMonth.daily[0].revenueExact).toBe('0.009');
+  const missing = await readLedgerSalesAnalytics({ ...scope, store: 'missing', allowMissingStore: true });
+  expect(missing.chartMonth.missingStore).toBe(true);
+  expect(missing.chartMonth.daily[0].revenueExact).toBeNull();
+  await expect(readLedgerSalesAnalytics({ ...scope, store: 'missing' })).rejects.toThrow('店铺');
+  await db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', store: 'ALL', platformSku: 'B', quantity: 0, amountExact: '0', sourceAddedDate: '2026-08-01' });
+  expect((await readLedgerSalesAnalytics(scope)).monthTotalsExact.revenueExact).toBe('0.009');
+  const zero = await readLedgerSalesAnalytics({ ...scope, store: 'ALL' });
+  expect(zero.chartMonth.missingStore).toBe(false);
+  expect(zero.monthTotalsExact.revenueExact).toBe('0');
+});
