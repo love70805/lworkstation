@@ -1,4 +1,4 @@
-import { buildSalesMonth, salesScale, salesStoreKey, salesStoreColor } from '../domain/salesChartModel';
+import { buildSalesMonth, salesGroupedScale, salesStoreKey, salesStoreColor } from '../domain/salesChartModel';
 import { SalesMonthChart, SalesHoverSummary } from './SalesMonthChart';
 import { listLedgerSummaries } from '../data/repositories/profitRepository';
 import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from "react";
@@ -49,10 +49,11 @@ function DailyDetails({ data, close }) {
 
 function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreChange }) {
   const [metric, setMetric] = useState('revenueExact'), [selected, setSelected] = useState(null), [compareId, setCompareId] = useState(''), [hovered, setHovered] = useState(null);
+  const [view, setView] = useState('daily'), [hiddenStores, setHiddenStores] = useState([]);
   const [changing, setChanging] = useState(false), [storeError, setStoreError] = useState('');
   const alive = useRef(true), storeId = useId(), compareSelectId = useId(), chartRef = useRef(null), previousBar = useRef(null), barMotion = useRef(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => { setSelected(null); setHovered(null); setStoreError(""); setChanging(false); }, [store]);
+  useEffect(() => { setSelected(null); setHovered(null); setStoreError(""); setChanging(false); setHiddenStores([]); }, [store]);
   const scope = JSON.stringify([workspaceId, ledgerId, store]);
   const ledgers = useLiveQuery(() => listLedgerSummaries(), [workspaceId]);
   const result = useLiveQuery(async () => {
@@ -70,7 +71,9 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const month = useMemo(() => data ? data.chartMonth ?? buildSalesMonth(data, { store }) : null, [data, store]);
   const compareMonth = useMemo(() => compareData ? compareData.chartMonth ?? buildSalesMonth(compareData, { store }) : null, [compareData, store]);
   const months = useMemo(() => [month, compareMonth].filter(Boolean), [month, compareMonth]);
-  const scale = useMemo(() => salesScale(months, metric), [months, metric]);
+  const storeNames = useMemo(() => [...new Map(months.flatMap(item => item.stores.length ? item.stores : item.daily.flatMap(day => day.segments.map(segment => segment.store))).map(name => [salesStoreKey(name), name])).values()].sort((a,b) => salesStoreKey(a).localeCompare(salesStoreKey(b))), [months]);
+  const scale = useMemo(() => salesGroupedScale(months, metric, { monthly: view === 'monthly', hiddenStores }), [months, metric, view, hiddenStores]);
+  const monthlyChart = useMemo(() => ({ period: '月度对比', stores: storeNames, daily: [...months].sort((a,b) => a.period.localeCompare(b.period)).map(item => ({ date: item.period, status: item.coverage === 'unknown' ? 'unknown' : 'data', segments: item.monthlySegments ?? [], revenueExact: item.coverage === 'unknown' ? null : item.monthTotalsExact.revenueExact, quantityExact: item.coverage === 'unknown' ? null : item.monthTotalsExact.quantityExact })) }), [months, storeNames]);
   const chosenData = selected?.ledgerId === ledgerId ? data : selected?.ledgerId === compareId ? compareData : null;
   const chosenMonth = selected?.ledgerId === ledgerId ? month : selected?.ledgerId === compareId ? compareMonth : null;
   const date = selected && chosenMonth?.period === selected.date.slice(0, 7) ? selected.date : null;
@@ -116,17 +119,19 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   if (!result || result.scope !== scope) return <Panel>正在读取每日销售...</Panel>;
   if (result.error) return <Panel><p role="alert">{result.error}</p></Panel>;
   return <Panel className="sales-analytics">
-    <div className="sales-analytics-heading"><div><h2>每日销售</h2><p>{data.period} · {store === 'all' ? '全部店铺' : store} · 按台账添加时间</p></div><div className="sales-analysis-controls">{onStoreChange ? <label htmlFor={storeId}>店铺<select id={storeId} aria-label="每日销售店铺" value={store} disabled={changing} onChange={event => void changeStore(event.target.value)}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label> : null}<label htmlFor={compareSelectId}>对比月份<select id={compareSelectId} value={compareId} onChange={event => { setCompareId(event.target.value); setSelected(null); setHovered(null); }}><option value="">不对比</option>{(Array.isArray(ledgers) ? ledgers : []).filter(ledger => ledger.id !== ledgerId && ledger.workspaceId === workspaceId).map(ledger => <option key={ledger.id} value={ledger.id}>{ledger.period}</option>)}</select></label><div role="group" aria-label="趋势指标"><Button aria-pressed={metric === 'revenueExact'} onClick={() => setMetric('revenueExact')}>销售额</Button><Button aria-pressed={metric === 'quantityExact'} onClick={() => setMetric('quantityExact')}>销量</Button></div></div></div>
+    <div className="sales-analytics-heading"><div><h2>{view === 'monthly' ? '月度销售' : '每日销售'}</h2><p>{data.period} · {store === 'all' ? '全部店铺' : store} · 按台账添加时间</p></div><div className="sales-analysis-controls">{onStoreChange ? <label htmlFor={storeId}>店铺<select id={storeId} aria-label="每日销售店铺" value={store} disabled={changing} onChange={event => void changeStore(event.target.value)}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label> : null}<label htmlFor={compareSelectId}>对比月份<select id={compareSelectId} value={compareId} onChange={event => { setCompareId(event.target.value); setSelected(null); setHovered(null); }}><option value="">不对比</option>{(Array.isArray(ledgers) ? ledgers : []).filter(ledger => ledger.id !== ledgerId && ledger.workspaceId === workspaceId).map(ledger => <option key={ledger.id} value={ledger.id}>{ledger.period}</option>)}</select></label><div role="group" aria-label="时间粒度"><Button aria-pressed={view === 'daily'} onClick={() => { setView('daily'); setHovered(null); }}>每日</Button><Button aria-pressed={view === 'monthly'} onClick={() => { setView('monthly'); setSelected(null); setHovered(null); }}>每月</Button></div><div role="group" aria-label="趋势指标"><Button aria-pressed={metric === 'revenueExact'} onClick={() => setMetric('revenueExact')}>销售额</Button><Button aria-pressed={metric === 'quantityExact'} onClick={() => setMetric('quantityExact')}>销量</Button></div></div></div>
     {changing ? <p role="status">正在切换店铺...</p> : null}{storeError ? <p role="alert">{storeError}</p> : null}
     <div className="sales-month-totals">{months.map(item => <p key={item.period}><strong>{item.period}</strong> · {item.missingStore ? '该店不存在于本月来源' : item.coverage === 'unknown' ? '销售原额待查 · 销量待查' : <>销售原额 ¥{show(item.monthTotalsExact.revenueExact)} · 销量 {show(item.monthTotalsExact.quantityExact, 6)} 件</>}{item.isCurrent ? ` · 未完月份，统计截止 ${item.cutoff || "尚无有效日期"}` : ""}</p>)}</div>
     {month.coverage !== 'complete' ? <p role="status">{month.coverage === 'unknown' ? '尚未取得销售数据，空白日期未视为零。' : `${month.unlocated} 条销售记录缺少有效月内添加日期；仅显示已定位记录，空白日期待查。请核对添加时间映射和账本月份。`}</p> : null}
     {compareMonth?.coverage === 'partial' ? <p role="status">对比月有 {compareMonth.unlocated} 条记录未定位到日期，空白日期待查。</p> : null}
     {compareId && !compareData ? <p role={comparison?.error ? 'alert' : 'status'}>{comparison?.scope === compareScope && comparison.error ? comparison.error : '正在读取对比月份...'}</p> : null}
-    {!date ? <div className="sales-store-legend" aria-label="店铺颜色">{[...new Set(months.flatMap(item => item.stores))].sort().map(name => <span key={name}><i style={{ background: salesStoreColor(name) }} />{name}</span>)}</div> : null}
+    <div className="sales-store-legend" aria-label="店铺颜色">{storeNames.map(name => <button key={name} type="button" aria-pressed={!hiddenStores.includes(salesStoreKey(name))} onClick={() => setHiddenStores(current => current.includes(salesStoreKey(name)) ? current.filter(key => key !== salesStoreKey(name)) : [...current, salesStoreKey(name)])}><i style={{ background: salesStoreColor(name) }} />{name}</button>)}</div>
+    {storeNames.length > 0 && storeNames.every(name => hiddenStores.includes(salesStoreKey(name))) ? <p role="status">店铺柱已全部隐藏，点击图例可重新显示；合计与明细保持原范围。</p> : null}
+    {view === 'monthly' && !compareId ? <p className="sales-chart-note">选择对比月份，可并排比较两个月各店销售。</p> : null}
     <div ref={chartRef} className={`sales-analysis-body${date ? ' has-day' : ''}`}>
-      <div className="sales-charts-area"><div className={`sales-month-charts${!date && months.length > 1 ? ' is-comparing' : ''}`}>
-        {(date ? [chosenMonth] : months).map(item => <SalesMonthChart key={item.period} month={item} metric={metric} scale={scale} selectedDay={date} hovered={hovered} onHover={setHovered} onSelect={next => select(item === month ? ledgerId : compareId, next)} />)}
-      </div>{(!date || hovered) ? <div className={date ? "sales-day-tooltip" : ""}><SalesHoverSummary months={date ? [chosenMonth] : months} dayNumber={hovered} metric={metric} /></div> : null}</div>
+      <div className="sales-charts-area"><div className={`sales-month-charts${!date && view === 'daily' && months.length > 1 ? ' is-comparing' : ''}`}>
+        {(view === 'monthly' ? [monthlyChart] : date ? [chosenMonth] : months).map(item => <SalesMonthChart key={item.period} month={item} metric={metric} scale={scale} monthly={view === 'monthly'} hiddenStores={hiddenStores} storeNames={storeNames} selectedDay={date} hovered={hovered} onHover={setHovered} onSelect={next => { if (view === 'monthly') { setView('daily'); setHovered(null); requestAnimationFrame(() => chartRef.current?.querySelector(`[data-period="${next}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'instant' })); } else select(item === month ? ledgerId : compareId, next); }} />)}
+      </div>{view === 'monthly' ? <div className="sales-hover-summary" role="status">{hovered ? (() => { const group = monthlyChart.daily.find(item => item.date === hovered); return group ? <div><strong>{group.date}</strong><span>{pair(group)}</span>{storeNames.map(name => { const segment = group.segments.find(item => salesStoreKey(item.store) === salesStoreKey(name)); return <small key={name}>{name} · {segment ? pair(segment) : '无销售来源'}</small>; })}</div> : null; })() : '悬停或聚焦月份查看各店销售额与销量'}</div> : null}{view === 'daily' && (!date || hovered) ? <div className={date ? "sales-day-tooltip" : ""}><SalesHoverSummary months={date ? [chosenMonth] : months} dayNumber={hovered} metric={metric} /></div> : null}</div>
       {date ? !details || details.scope !== detailScope ? <section className="sales-day-details" aria-busy="true"><p>正在读取 {date} 商品明细...</p><Button onClick={close}>返回全月</Button></section> : details.error ? <section className="sales-day-details"><p role="alert">{details.error}</p><Button onClick={close}>返回全月</Button></section> : <DailyDetails key={detailScope} data={details.data} close={close} /> : null}
     </div>
   </Panel>;
