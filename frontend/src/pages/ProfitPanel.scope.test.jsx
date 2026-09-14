@@ -25,7 +25,7 @@ it('replaces scoped siblings through all → 甲 → 乙 without retaining prior
   expect(container.querySelectorAll('.profit-summary-strip')).toHaveLength(1);
   expect(container.querySelectorAll('.sales-analytics')).toHaveLength(1);
   expect(container.querySelector('.profit-summary-item strong').textContent).toBe(`¥${revenue}.00`);
-  expect(container.querySelector('#profit-store').value).toBe(store);
+  expect(container.querySelector('.profit-view-tabs select').value).toBe(store);
   expect(container.querySelector('.sales-analytics').textContent).toContain(`销售原额 ¥${revenue} · 销量 ${quantity} 件`);
   expect(container.querySelector('[aria-label="每日销售店铺"]').value).toBe(store);
  }

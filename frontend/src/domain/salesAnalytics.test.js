@@ -41,6 +41,12 @@ describe("selected day sales", () => {
   it.each(['2026-09-01','2026-08-32','2026-8-1','2026-02-30',''])('rejects invalid or foreign-month date %s',date=>expect(()=>aggregateDailySalesDetails([],{...scope,date})).toThrow('有效日期'));
 });
 describe("daily and SKU analytics", () => {
+  it("can omit unused monthly SKU/price/activity aggregation without changing exact daily totals", () => {
+    const rows = [row(), row({quantityExact:'0.5',amountExact:'-0.001'}),row({sourceAddedDate:null})];
+    const full=aggregateDailySales(rows,{period:'2026-08'});
+    const quick=aggregateDailySales(rows,{period:'2026-08',includeSkuStats:false});
+    expect(quick).toEqual({...full,skuStats:[]});
+  });
   it("reconciles exact days plus all undated amounts without rounding tiny values", () => {
     const result = aggregateDailySales([row(), row(), row({ sourceAddedDate: null }), row({ sourceAddedDate: "2026-09-02" }), row({ movementType: "盘亏" }), row({ isDeduction: true })], { period: "2026-08" });
     expect(result.daily).toEqual([{ date: "2026-08-01", quantityExact: "2", revenueExact: "0.018", sourceRowCount: 2 }]);

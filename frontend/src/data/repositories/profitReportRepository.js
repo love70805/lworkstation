@@ -25,7 +25,12 @@ const localAudit = (context,action,objectId,after,before=null) => db.auditEvents
 
 export async function readMonthlyReportState(ledgerId){
   return db.transaction('r',tables(),async()=>{
-    const context=await sourceContext(ledgerId);
+    const {ledger}=await scope(ledgerId);
+    // The source editor needs stores and adopted batches, not ERP cost rows or
+    // a complete calculation context. Keep those reads for actual previews.
+    const [salesRows,dispatch,deduction,reports]=await Promise.all([db.salesRows.where('ledgerId').equals(ledgerId).toArray(),adopted(ledgerId,'dispatch'),adopted(ledgerId,'deduction'),db.profitReports.where('ledgerId').equals(ledgerId).toArray()]);
+    if(salesRows.some(row=>row.workspaceId!==ledger.workspaceId))throw new Error("台账存在跨工作区来源记录，请恢复完整备份后再核算。");
+    const context={ledger,salesRows,dispatch,deduction,reports};
     const batches=await db.monthlySupplementBatches.where('ledgerId').equals(ledgerId).toArray();
     const adoptedRows=await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[context.dispatch?.id,context.deduction?.id].includes(row.batchId)).toArray();
     return {ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))],dispatch:context.dispatch,deduction:context.deduction,batches,adoptedRows,reports:context.reports.map(({fileBase64,...report})=>report).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))};

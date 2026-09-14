@@ -15,7 +15,9 @@ async function readScopedSales({ workspaceId, ledgerId, store = "all" }, aggrega
 }
 
 export async function readLedgerSalesAnalytics(scope) {
-  return readScopedSales(scope, (rows, period) => aggregateDailySales(rows, { period }));
+  // Keep this live-query result as the selected scope's read-only source. Date
+  // clicks can reuse it without cloning the full ledger from IndexedDB again.
+  return readScopedSales(scope, (rows, period) => ({ ...aggregateDailySales(rows, { period, includeSkuStats: false }), sourceRows: rows }));
 }
 
 export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store = "all", date }) {
