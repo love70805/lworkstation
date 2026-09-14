@@ -77,6 +77,7 @@ it('reuses the live scoped source for date clicks and refreshes it when the scop
  await render({ledgerId:'cached'});
  await click(dayButton());
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
+ await click(button('返回全月'));
  await click(container.querySelectorAll('.sales-daily-bar')[1]);
  expect(container.querySelector('.sales-details-heading p').textContent).toContain('¥-0.009');
  expect(mocks.day).not.toHaveBeenCalled();

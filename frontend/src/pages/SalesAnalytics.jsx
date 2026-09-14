@@ -52,6 +52,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const [changing, setChanging] = useState(false), [storeError, setStoreError] = useState('');
   const alive = useRef(true), storeId = useId(), compareSelectId = useId(), chartRef = useRef(null), previousBar = useRef(null), barMotion = useRef(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { setSelected(null); setHovered(null); setStoreError(""); setChanging(false); }, [store]);
   const scope = JSON.stringify([workspaceId, ledgerId, store]);
   const ledgers = useLiveQuery(() => listLedgerSummaries(), [workspaceId]);
   const result = useLiveQuery(async () => {

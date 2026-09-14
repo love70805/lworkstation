@@ -43,6 +43,7 @@ export function buildSalesMonth(data, { store = 'all', today = new Date().toLoca
     const date = `${period}-${String(index + 1).padStart(2, '0')}`;
     const segments = [...(byDay.get(date)?.values() ?? [])].sort((a,b) => a.key.localeCompare(b.key));
     const legacy = fallback ? data.daily.find(day => day.date === date) : null;
+    if (legacy?.sourceRowCount) segments.push({ store: store === 'all' ? '店铺合计' : store, key: 'legacy-total', revenueExact: legacy.revenueExact, quantityExact: legacy.quantityExact });
     const status = date > today ? 'future' : segments.length || legacy?.sourceRowCount ? 'data' : current && (!cutoff || date > cutoff) ? 'unobserved' : coverage === 'complete' ? 'known_zero' : 'unknown';
     const sums = segments.reduce((sum, segment) => ({ revenueExact: new Exact(sum.revenueExact).plus(segment.revenueExact).toFixed(), quantityExact: new Exact(sum.quantityExact).plus(segment.quantityExact).toFixed() }), total());
     const known = status === 'data' || status === 'known_zero';
