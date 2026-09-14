@@ -9,16 +9,20 @@ import { ToastProvider } from "../components/UI";
 
 const mocks = vi.hoisted(() => ({ updateRate: vi.fn(), reopen: vi.fn(), status: "cost_pending" }));
 vi.mock("../data/database", () => ({ updateLedgerWarehouseRate: mocks.updateRate, reopenLedgerForCostCorrection: mocks.reopen }));
-vi.mock("../hooks/useLatestSalesImport", () => ({ useLatestSalesImport: () => ({
-  ledger: { id: "L", workspaceId: "W", period: "2026-08", status: mocks.status, warehouseRate: 0.7, profitSummary: { revenue: 10, quantity: 2, purchaseCost: 0, warehouseCost: 1.4, penalty: 0, profit: 8.6 } },
+const snapshots = new Map();
+function snapshotForStatus() {
+  if (!snapshots.has(mocks.status)) snapshots.set(mocks.status, {  ledger: { id: "L", workspaceId: "W", period: "2026-08", status: mocks.status, warehouseRate: 0.7, profitSummary: { revenue: 10, quantity: 2, purchaseCost: 0, warehouseCost: 1.4, penalty: 0, profit: 8.6 } },
   rows: [{ store: "甲", platformSkc: "SKC", platformSku: "SKU", quantity: 2, amount: 10, penalty: 0 }],
   costs: [], approvals: [], profitLines: [{ id: 1, store: "甲", platformSku: "SKU", platformSkc: "SKC", quantity: 2, revenue: 10, unitCost: 0, purchaseCost: 0, warehouseCost: 1.4, penalty: 0, profit: 8.6, costSource: "manual_override", finalizable: true }],
-}) }));
+});
+  return snapshots.get(mocks.status);
+}
+vi.mock("../hooks/useLatestSalesImport", () => ({ useLatestSalesImport: () => snapshotForStatus() }));
 let container, root;
 const findButton = (text) => [...container.querySelectorAll("button")].find((button) => button.textContent === text);
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  localStorage.clear(); mocks.status = "cost_pending"; mocks.updateRate.mockReset().mockResolvedValue({}); mocks.reopen.mockReset().mockResolvedValue({});
+  localStorage.clear(); snapshots.clear(); mocks.status = "cost_pending"; mocks.updateRate.mockReset().mockResolvedValue({}); mocks.reopen.mockReset().mockResolvedValue({});
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
 });
@@ -56,4 +60,30 @@ it("opens the warehouse dialog outside collapsed details, cancels, and applies t
   expect(mocks.updateRate).toHaveBeenCalledWith("L", 1.2);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(container.querySelector("details").open).toBe(false);
+});
+it('preserves an in-progress manual draft when a new ERP snapshot triggers recalculation', async()=>{
+  const details=[...container.querySelectorAll('details')].find(el=>el.querySelector('summary')?.textContent.startsWith('查看利润明细'));
+  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
+  const group=container.querySelector('.profit-skc-group');
+  await act(async()=>{group.open=true;group.dispatchEvent(new Event('toggle'));});
+  await act(async()=>findButton('人工更正').click());
+  const input=container.querySelector('#manual-cost-value');
+  input.focus();
+  await act(async()=>Simulate.change(input,{target:{value:'0.009'}}));
+  await act(async()=>Simulate.change(container.querySelector('#manual-cost-reason'),{target:{value:'正在输入的核算说明'}}));
+  const previous=snapshotForStatus();
+  snapshots.set(mocks.status,{...previous,rows:previous.rows.map(row=>({...row,amount:20}))});
+  await act(async()=>root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+  expect(container.querySelector('#manual-cost-value')).toBe(input);
+  expect(input.value).toBe('0.009');
+  expect(container.querySelector('#manual-cost-reason').value).toBe('正在输入的核算说明');
+  expect(container.querySelector('.profit-skc-group').open).toBe(true);
+});
+
+it('renders initial asynchronous snapshot loading without dereferencing an empty calculation', async()=>{
+  await act(async()=>root.unmount());
+  mocks.status='loading';snapshots.set('loading',undefined);root=createRoot(container);
+  await act(async()=>root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+  expect(container.textContent).toContain('正在读取月度账本');
+  expect(container.querySelector('.profit-summary-strip')).toBeNull();
 });

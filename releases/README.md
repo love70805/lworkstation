@@ -6,15 +6,16 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.15](https://github.com/love70805/lworkstation/releases/tag/v0.2.15)，四资产回读及稳定更新检查通过，旧 Beta 的列表限制见 [发布状态](../docs/RELEASE_STATUS.md)。latest/ 保存新包，0.2.14 归入 history/0.2.14/，本机未安装。
+当前公开稳定版为 [0.2.16](https://github.com/love70805/lworkstation/releases/tag/v0.2.16)，四资产回读及稳定更新检查通过，旧 Beta 列表限制见 [发布状态](../docs/RELEASE_STATUS.md)。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-14。0.2.15已公开Latest并验证下载及稳定更新，本机按用户要求暂不安装。
+核对日期：2026-09-15。0.2.16已公开Latest并验证下载及稳定更新，本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.2.15` profit usability | 已公开 GitHub Latest；649测试、CI、Windows候选、四资产回读/稳定更新通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.15)；`candidates/0.2.15-profit-usability/`；[验收](../docs/RELEASE_0.2.15.md) |
+| `0.2.16` UI/cache | 已公开 GitHub Latest；681测试、CI、Windows候选、四资产回读及稳定通道通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.16)；`candidates/0.2.16-ui-cache/`；[验收](../docs/RELEASE_0.2.16.md) |
+| `0.2.15` profit usability | 历史稳定版；649测试、CI、Windows候选、四资产回读/稳定更新通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.15)；`candidates/0.2.15-profit-usability/`；[验收](../docs/RELEASE_0.2.15.md) |
 | `0.2.14` daily details | 历史稳定版；643 测试、CI、Windows 候选及四资产回读 / 更新通道通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.14)；本机 `candidates/0.2.14-daily-details/`；[验收](../docs/RELEASE_0.2.14.md) |
 | `0.2.13` daily sales | 历史稳定版；640测试、CI、12组浏览器布局/交互、Windows实际候选、四资产匿名回读与通道隔离通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.13)；本机 `candidates/0.2.13-daily-sales/`；[更新与验收](../docs/RELEASE_0.2.13.md) |
 | `0.2.12` complete local update | 历史稳定版；612测试、完整候选操作、CI、四资产回读与通道隔离通过；本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.12)；本机 `candidates/0.2.12-complete-local-update/`；[验收](../docs/RELEASE_0.2.12.md) |

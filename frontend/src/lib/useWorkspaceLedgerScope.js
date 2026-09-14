@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getActiveMemberContext, listLedgerSummaries } from '../data/database';
+import { getActiveMemberContext, listLedgerSummaries } from '../data/database';
+import { readLedgerSalesRows } from '../data/repositories/ledgerReadCache';
 import { workspaceLedgerQuery } from './workspaceNavigation';
 
 export function useWorkspaceLedgerScope() {
@@ -17,7 +18,7 @@ export function useWorkspaceLedgerScope() {
       const ledgers = (await listLedgerSummaries()).filter(item => item.workspaceId === member.workspaceId);
       const requested = ledgers.find(item => item.id === new URLSearchParams(search).get('ledger'));
       const selected = requested || ledgers[0] || null;
-      const rows = selected ? await db.salesRows.where('ledgerId').equals(selected.id).toArray() : [];
+      const rows = selected ? await readLedgerSalesRows(member.workspaceId, selected.id) : [];
       if ((await getActiveMemberContext()).workspaceId !== member.workspaceId) return null;
       const query = selected ? workspaceLedgerQuery(selected.id, search, rows, Boolean(requested)) : new URLSearchParams();
       return { search, workspaceId: member.workspaceId, ledgers, selected, stores: [...new Set(rows.map(row => row.store).filter(Boolean))].sort(), store: query.get('store') || 'all', query: query.toString() };

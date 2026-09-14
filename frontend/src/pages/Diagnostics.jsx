@@ -247,6 +247,8 @@ export default function Diagnostics() {
           <div className="panel-title"><Activity size={20} /><h2>近期操作记录</h2><Badge>最近 20 条</Badge></div>
           <div className="action-row"><Button icon={Copy} onClick={copySummary}>复制摘要</Button><Button icon={Download} onClick={exportReport}>导出摘要</Button></div>
         </div>
+        <details className="diagnostic-log-details">
+          <summary>查看操作详情（{recentEvents.length} 条）</summary>
         <div className="terminal-log">
           {recentEvents.map((event) => {
             const item = describeAuditEvent(event);
@@ -255,6 +257,7 @@ export default function Diagnostics() {
           })}
           {recentEvents.length === 0 ? <p className="log-awaiting">暂无本机操作记录。导入销售台账、保存商品或导出备份后会显示在这里。</p> : null}
         </div>
+        </details>
       </Panel>
 
       <div className="diagnostic-links"><span>诊断与备份已整合到本模块</span><span>数据模式：<code>本机 IndexedDB</code></span><span>云端协作：<code>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</code></span></div>

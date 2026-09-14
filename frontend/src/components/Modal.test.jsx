@@ -143,4 +143,47 @@ describe("Modal focus lifecycle", () => {
       trigger.remove();
     }
   });
+  it("cycles Tab within the dialog and blocks focus behind it", async () => {
+    await renderEditor();
+    const trigger = await openEditor();
+    const close = container.querySelector('[aria-label="关闭对话框"]');
+    const last = container.querySelector("textarea");
+    last.focus();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+    expect(document.activeElement).toBe(close);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true }));
+    expect(document.activeElement).toBe(last);
+    trigger.focus();
+    expect(document.activeElement).toBe(close);
+  });
+
+  it("closes only the top dialog and keeps the background scroll locked until both close", async () => {
+    function Stacked() {
+      const [parentOpen, setParentOpen] = useState(true);
+      const [childOpen, setChildOpen] = useState(false);
+      return <>
+        <Modal open={parentOpen} title="整理档案" onClose={() => setParentOpen(false)}>
+          <button onClick={() => setChildOpen(true)}>确认合并</button>
+        </Modal>
+        <Modal open={childOpen} title="再次确认" onClose={() => setChildOpen(false)} />
+      </>;
+    }
+    document.body.style.overflow = "auto";
+    await act(async () => root.render(<Stacked />));
+    await act(async () => vi.runOnlyPendingTimers());
+    const trigger = [...container.querySelectorAll("button")].find((item) => item.textContent === "确认合并");
+    trigger.focus();
+    await act(async () => trigger.click());
+    await act(async () => vi.runOnlyPendingTimers());
+    expect(document.body.style.overflow).toBe("hidden");
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.activeElement).toBe(trigger);
+    expect(document.body.style.overflow).toBe("hidden");
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+    expect(document.body.style.overflow).toBe("auto");
+    document.body.style.overflow = "";
+  });
+
 });

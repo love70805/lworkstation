@@ -14,6 +14,8 @@ import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
+import { readLedgerSalesRows } from './ledgerReadCache';
+import { sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -1355,18 +1357,24 @@ export async function voidPublishedErpCostBatch({
 }
 
 export async function getLedgerSnapshot(ledgerId) {
+  return retrySourceRead(() => readLedgerSnapshot(ledgerId));
+}
+
+async function readLedgerSnapshot(ledgerId) {
+  const dataVersion = sourceRevision();
   const ledger = await db.ledgers.get(ledgerId);
   if (!ledger) return null;
   const member = await getActiveMemberContext();
   if (ledger.workspaceId !== member.workspaceId) return null;
   const [rows, batches, costs, approvals, profitLines] = await Promise.all([
-    db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
+    readLedgerSalesRows(member.workspaceId, ledgerId),
     db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
     getLatestLedgerCosts(ledgerId),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  return { ledger, rows, batches, costs, approvals, profitLines };
+  assertSourceRevision(dataVersion);
+  return { ledger, rows, batches, costs, approvals, profitLines, dataVersion };
 }
 
 export async function getLatestLedgerSnapshot() {

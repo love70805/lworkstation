@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { AlertCircle, CheckCircle2, ChevronRight, ExternalLink, Image, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
 import AppShell from "../components/AppShell";
+import { productLibraryReturnPath } from "../components/productLibraryViewState";
 import { Badge, Button, Modal, Panel, ProgressBar, useToast } from "../components/UI";
 import { getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
 import { calculateSupplierLandedUnitCost, validateProductDraft, validateProductSalesReadiness } from "../domain/productCatalog";
@@ -155,6 +156,8 @@ function modeLabel(snapshot) {
 
 export default function ProductEditor() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = productLibraryReturnPath(location.state?.productLibraryReturnTo);
   const [searchParams] = useSearchParams();
   const { notify } = useToast();
   const captureId = searchParams.get("capture");
@@ -380,7 +383,7 @@ export default function ProductEditor() {
         notify(status === "active" ? "商品修改已保存。" : "商品草稿已保存到本机。", "success");
         if (snapshot.mode === "new") {
           loadedKeyRef.current = "";
-          navigate(`/products/edit?product=${encodeURIComponent(result.product.id)}`, { replace: true });
+          navigate(`/products/edit?product=${encodeURIComponent(result.product.id)}`, { replace: true, state: { productLibraryReturnTo: returnTo } });
         }
       }
       setSaved(true);
@@ -402,7 +405,7 @@ export default function ProductEditor() {
       });
       setConfirmDialog(false);
       notify(`${result.product.name} 已写入正式商品库；1688 成本仅作为选品参考。`, "success");
-      navigate("/products?view=official");
+      navigate(returnTo);
     } catch (error) {
       notify(`确认入库失败：${error.message}`, "error");
     } finally {
@@ -410,7 +413,7 @@ export default function ProductEditor() {
     }
   };
 
-  const breadcrumbTarget = snapshot.mode === "capture" ? "/products?view=pending" : "/products?view=official";
+  const breadcrumbTarget = productLibraryReturnPath(location.state?.productLibraryReturnTo, snapshot.mode === "capture" ? "/products?view=pending" : "/products?view=official");
   const referenceCostCount = referenceCosts.filter((value) => Number.isFinite(value) && value > 0).length;
 
   return (
