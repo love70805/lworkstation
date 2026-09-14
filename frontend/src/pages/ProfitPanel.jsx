@@ -181,7 +181,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
     return () => { active = false; };
   }, [snapshot, warehouseRate, locked, retryCalculation]);
   const savedRows = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : [], [locked, snapshot?.profitLines]);
-  const sameLedger = computed?.snapshot?.ledger?.id === snapshot?.ledger?.id && computed?.snapshot?.ledger?.workspaceId === snapshot?.ledger?.workspaceId;
+  const sameLedger = Boolean(computed?.snapshot?.ledger?.id && snapshot?.ledger?.id && computed.snapshot.ledger.id === snapshot.ledger.id && computed.snapshot.ledger.workspaceId === snapshot.ledger.workspaceId);
   const calculation = locked ? { rows: savedRows } : computed?.snapshot === snapshot && computed?.warehouseRate === warehouseRate ? computed : { rows: sameLedger ? computed.rows : [], loading: Boolean(snapshot?.rows?.length) };
   const calculated = calculation.rows;
 

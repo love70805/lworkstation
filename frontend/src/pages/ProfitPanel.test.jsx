@@ -79,3 +79,11 @@ it('preserves an in-progress manual draft when a new ERP snapshot triggers recal
   expect(container.querySelector('#manual-cost-reason').value).toBe('正在输入的核算说明');
   expect(container.querySelector('.profit-skc-group').open).toBe(true);
 });
+
+it('renders initial asynchronous snapshot loading without dereferencing an empty calculation', async()=>{
+  await act(async()=>root.unmount());
+  mocks.status='loading';snapshots.set('loading',undefined);root=createRoot(container);
+  await act(async()=>root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+  expect(container.textContent).toContain('正在读取月度账本');
+  expect(container.querySelector('.profit-summary-strip')).toBeNull();
+});
