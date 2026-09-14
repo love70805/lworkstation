@@ -1,19 +1,26 @@
-/* Sales-only layout: narrow daily plot, broad product evidence. */
+/* Keep the original chart/details proportions; store bars share a zero baseline. */
 .sales-analytics .sales-analysis-body { grid-template-columns: minmax(0, 1fr); }
-.sales-analytics .sales-analysis-body.has-day { grid-template-columns: minmax(200px, .3fr) minmax(0, 1fr); }
+@container (min-width: 600px) {
+  .sales-analytics .sales-analysis-body.has-day { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
+}
 .sales-charts-area, .sales-month-charts { min-width: 0; }
 .sales-month-charts { display: grid; gap: 20px; }
-.sales-month-charts.is-comparing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sales-month-charts.is-comparing { grid-template-columns: minmax(0, 1fr); }
 .sales-stack-chart h3 { font-size: 14px; margin: 0 0 14px; }
-.sales-stack-chart .sales-daily-chart { height: 246px; padding: 0 2px 26px 0; }
-.sales-stack-chart.is-day .sales-daily-chart { height: 216px; }
-.sales-stack-chart.is-day .sales-chart-bars { max-width: 200px; margin: auto; }
+.sales-stack-chart .sales-daily-chart { height: 300px; padding: 8px 2px 32px 0; }
+.sales-stack-chart.is-day .sales-chart-bars { max-width: 340px; margin: auto; }
 .sales-stack-segment { position: absolute; left: 10%; width: 80%; border-radius: 2px; box-shadow: inset 0 -1px rgb(255 255 255 / .4); color: white; transition: top 220ms ease, height 220ms ease; overflow: hidden; }
 .sales-segment-label { display: flex; height: 100%; align-items: center; justify-content: center; padding: 0 3px; font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; }
-.sales-stack-chart.is-day .sales-stack-segment { left: 0; width: 100%; }
+.sales-grouped-segment { min-height: 0; }
+.sales-grouped-segment.is-zero { overflow: visible; }
+.sales-missing-slot { position: absolute; color: var(--text-muted); font-size: 10px; transform: translateY(-100%); }
+.sales-day-store-label { position: absolute; top: calc(100% + 8px); font-size: 10px; overflow-wrap: anywhere; }
+.sales-zero-tick { position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: var(--text-muted); }
 .sales-known-zero { position: absolute; left: 0; right: 0; text-align: center; font-size: 11px; transform: translateY(-100%); }
 .sales-store-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 22px; font-size: 12px; }
-.sales-store-legend > span { display: inline-flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.sales-store-legend > button { display: inline-flex; align-items: center; gap: 6px; overflow-wrap: anywhere; padding: 6px 8px; min-height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; }
+.sales-store-legend > button:hover { background: var(--primary-soft); }
+.sales-store-legend > button[aria-pressed="false"] { color: var(--text-muted); text-decoration: line-through; opacity: .55; }
 .sales-store-legend i { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 .sales-month-totals { display: flex; flex-wrap: wrap; gap: 4px 24px; }
 .sales-analytics .sales-hover-summary { min-height: 40px; max-height: 160px; overflow: auto; align-items: start; padding: 6px 0; }
@@ -27,12 +34,11 @@
 .sales-analytics .sales-daily-bar:active { opacity: .8; }
 @keyframes sales-detail-enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
 @container (max-width: 850px) {
-  .sales-analytics .sales-analysis-body.has-day { grid-template-columns: minmax(180px, .32fr) minmax(0, 1fr); gap: 14px; }
   .sales-month-charts.is-comparing { grid-template-columns: minmax(0, 1fr); }
 }
 @container (max-width: 600px) {
   .sales-analytics .sales-analysis-body.has-day { grid-template-columns: minmax(0, 1fr); }
-  .sales-stack-chart.is-day { max-width: 300px; width: 100%; margin: auto; }
+  .sales-stack-chart.is-day { width: 100%; }
   .sales-analysis-controls select { max-width: 160px; }
 }
 @media (prefers-reduced-motion: reduce) {
