@@ -569,6 +569,7 @@ export default function ProductLibrary() {
             {referenceRows.length ? (
               <DataTable
                 className="selection-reference-table"
+                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly])}
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
@@ -623,6 +624,7 @@ export default function ProductLibrary() {
             ) : null}
             <DataTable
               className="product-table"
+              paginationResetKey={JSON.stringify([query, store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort])}
               columns={productColumns}
               data={filteredProducts}
               getRowId={(row) => row.id}
@@ -634,6 +636,7 @@ export default function ProductLibrary() {
       ) : <CaptureQueueContent query={query} onQueryChange={setQuery} />}
       <Modal
         open={bulkConfirmOpen}
+        size="small"
         title="确认批量更新选品状态"
         description={`将 ${selectedProductIds.length} 条商品更新为“${salesStatusLabel(bulkStatus)}”。此操作会写入商品操作记录。`}
         onClose={() => setBulkConfirmOpen(false)}
@@ -700,6 +703,7 @@ export default function ProductLibrary() {
       </Modal>
       <Modal
         open={mergeConfirmOpen}
+        size="small"
         title="确认合并重复 SKC"
         description={`确认将 ${mergePreview?.sourceProducts.length ?? 0} 份来源档案并入“${mergePreview?.primaryName ?? "主商品档案"}”？来源商品档案会从商品库移除，但供应商报价历史和人工成本会保留并转入主档。`}
         tone="danger"

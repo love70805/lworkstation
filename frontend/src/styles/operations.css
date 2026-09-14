@@ -77,14 +77,14 @@
 .diagnostic-extension-group .erp-assistant-status-card { min-height: 90px; padding: 14px 16px; box-shadow: none; }
 .diagnostic-extension-group .selection-install-content { gap: 12px; }
 .diagnostic-extension-group .erp-install-actions { justify-content: flex-start; }
-.diagnostic-card { position: relative; min-height: 205px; padding: 20px; }
+.diagnostic-card { position: relative; display: flex; flex-direction: column; min-height: 205px; padding: 20px; }
 .diagnostic-card > svg { position: absolute; top: 24px; left: 20px; }
 .diagnostic-card > div { display: flex; min-height: 52px; align-items: flex-start; justify-content: space-between; gap: 8px; padding-left: 34px; }
 .diagnostic-card h2 { max-width: 130px; font-size: 16px; line-height: 22px; text-transform: uppercase; }
-.diagnostic-card .badge { padding-inline: 4px; background: transparent; font-size: 9px; }
+.diagnostic-card .badge { padding-inline: 4px; background: transparent; font-size: 12px; }
 .diagnostic-card > strong { display: block; margin-top: 17px; font-size: 19px; font-weight: 400; }
 .diagnostic-card > p { margin-top: 5px; color: var(--text-muted); }
-.diagnostic-card footer { position: absolute; right: 20px; bottom: 16px; left: 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
+.diagnostic-card footer { position: static; margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
 .diagnostic-card footer button { padding: 0; border: 0; background: transparent; color: var(--primary); }
 .diagnostic-card-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .diagnostic-sync-button { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -107,7 +107,7 @@
 .cloud-auth-session strong { overflow-wrap: anywhere; }
 .cloud-auth-session small { color: var(--text-muted); }
 .trace-panel { overflow: hidden; }
-.terminal-log { min-height: 430px; padding: 20px; overflow: auto; background: #1f1f1f; color: #d7d7d7; font-family: "JetBrains Mono", monospace; font-size: 12px; line-height: 22px; }
+.terminal-log { max-height: 360px; min-height: 100px; padding: 20px; overflow: auto; background: #1f1f1f; color: #d7d7d7; font-family: "JetBrains Mono", monospace; font-size: 12px; line-height: 22px; }
 .log-line { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
 .log-time { color: #59a8df; }
 .log-warn { color: #d9915d; }
@@ -136,6 +136,11 @@
   .trace-panel .panel-header { align-items: flex-start; flex-direction: column; }
   .diagnostic-section-heading { align-items: flex-start; flex-direction: column; }
   .diagnostic-extension-group { padding: 14px; }
-  .terminal-log { min-height: 360px; }
+  .terminal-log { max-height: 280px; }
 }
 
+
+.diagnostic-log-details > summary { padding: 14px 20px; cursor: pointer; color: var(--text-muted); font-size: 13px; }
+.diagnostic-log-details[open] > summary { border-bottom: 1px solid var(--border); }
+.diagnostic-card > p { margin-bottom: 16px; overflow-wrap: anywhere; }
+.diagnostic-card footer button { min-height: 32px; }

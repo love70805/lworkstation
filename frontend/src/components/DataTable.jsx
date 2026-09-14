@@ -46,7 +46,7 @@ function TableHeader({ table, fixedWidths = false }) {
               ? { width, minWidth: width, maxWidth: width, flex: `0 0 ${width}px`, ...headerStyle }
               : headerStyle;
             return (
-              <th key={header.id} style={style}>
+              <th key={header.id} style={style} aria-sort={sortable ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
                 {header.isPlaceholder ? null : sortable ? (
                   <button className="sortable-header" onClick={header.column.getToggleSortingHandler()}>
                     <table.FlexRender header={header} />
@@ -142,7 +142,10 @@ export default function DataTable({
   pageSize = 20,
   virtualizeThreshold = 100,
   estimateSize = 64,
+  paginationResetKey,
 }) {
+  const regionRef = useRef(null);
+  const previousPageRef = useRef(0);
   const [sorting, setSorting] = useState([]);
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
   const stableColumns = useMemo(() => columns, [columns]);
@@ -159,6 +162,18 @@ export default function DataTable({
     const maxPageIndex = Math.max(0, Math.ceil(data.length / pagination.pageSize) - 1);
     setPagination((current) => current.pageIndex > maxPageIndex ? { ...current, pageIndex: maxPageIndex } : current);
   }, [data.length, pagination.pageSize]);
+  useEffect(() => {
+    setPagination((current) => current.pageIndex === 0 ? current : { ...current, pageIndex: 0 });
+  }, [paginationResetKey, sorting]);
+  useEffect(() => {
+    if (previousPageRef.current === pagination.pageIndex) return;
+    previousPageRef.current = pagination.pageIndex;
+    const scrollArea = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+    if (scrollArea) {
+      scrollArea.scrollTop = 0;
+      scrollArea.scrollIntoView?.({ block: "start", behavior: "auto" });
+    }
+  }, [pagination.pageIndex]);
   const rows = table.getRowModel().rows;
   const totalRows = table.getRowCount();
   const pageCount = table.getPageCount();
@@ -170,7 +185,7 @@ export default function DataTable({
   const shouldVirtualize = rows.length >= virtualizeThreshold;
 
   return (
-    <>
+    <div className="data-table-region" ref={regionRef}>
       {shouldVirtualize ? (
         <VirtualBody table={table} rows={rows} getRowProps={getRowProps} estimateSize={estimateSize} className={className} />
       ) : (
@@ -182,20 +197,20 @@ export default function DataTable({
         </div>
       )}
       <div className="table-footer">
-        <span>显示第 {start} 至 {end} 条，共 {totalRows} 条</span>
+        <span role="status" aria-live="polite">显示第 {start} 至 {end} 条，共 {totalRows} 条</span>
         {pageCount > 1 ? (
-          <div className="pagination">
+          <nav className="pagination" aria-label="表格分页">
             <button aria-label="上一页" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}><ChevronLeft size={17} /></button>
             {pageNumbers.map((page, index) => (
               <span className="pagination-slot" key={page}>
                 {index > 0 && page - pageNumbers[index - 1] > 1 ? <i>...</i> : null}
-                <button className={page === pagination.pageIndex ? "active" : ""} onClick={() => table.setPageIndex(page)}>{page + 1}</button>
+                <button aria-label={`第 ${page + 1} 页`} aria-current={page === pagination.pageIndex ? "page" : undefined} className={page === pagination.pageIndex ? "active" : ""} onClick={() => table.setPageIndex(page)}>{page + 1}</button>
               </span>
             ))}
             <button aria-label="下一页" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}><ChevronRight size={17} /></button>
-          </div>
+          </nav>
         ) : null}
       </div>
-    </>
+    </div>
   );
 }

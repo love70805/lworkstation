@@ -134,7 +134,7 @@ export default function MonthlyLedger() {
         </div>
       )}
 
-      <Modal open={Boolean(deleteTarget)} title="删除月度草稿？" description="将删除该月份的销售明细、成本批次和未完成审批，其他月份不受影响。" onClose={() => setDeleteTarget(null)} footer={<><Button onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" onClick={deleteLedger}>删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定账本不能通过此操作删除。</p></Modal>
+      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度草稿？" description="将删除该月份的销售明细、成本批次和未完成审批，其他月份不受影响。" onClose={() => setDeleteTarget(null)} footer={<><Button onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" onClick={deleteLedger}>删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定账本不能通过此操作删除。</p></Modal>
     </AppShell>
   );
 }
