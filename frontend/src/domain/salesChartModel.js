@@ -11,12 +11,13 @@ export function salesStoreColor(name) {
 }
 export function buildSalesMonth(data, { store = 'all', today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } = {}) {
   const period = data.period, byDay = new Map(), stores = new Map();
-  let sourceCount = 0, unlocated = 0, lastDate = null;
+  let sourceCount = 0, unlocated = 0, lastDate = null, storePresent = false;
   const monthTotalsExact = total();
   for (const row of data.sourceRows ?? []) {
-    if (row.isDeduction || /盘亏|扣款|罚款|违约/.test(row.movementType ?? '')) continue;
     const key = salesStoreKey(row.store);
     if (store !== 'all' && key !== salesStoreKey(store)) continue;
+    storePresent = true;
+    if (row.isDeduction || /盘亏|扣款|罚款|违约/.test(row.movementType ?? '')) continue;
     stores.set(key, row.store || '店铺待查'); sourceCount++;
     const revenue = new Exact(row.amountExact ?? row.amount ?? 0), quantity = new Exact(row.quantityExact ?? row.quantity ?? 0);
     monthTotalsExact.revenueExact = new Exact(monthTotalsExact.revenueExact).plus(revenue).toFixed();
@@ -24,7 +25,7 @@ export function buildSalesMonth(data, { store = 'all', today = new Date().toLoca
     const parsed = parseSalesAddedDate(row.sourceAddedDate, { period });
     if (parsed.dateStatus !== 'valid') { unlocated++; continue; }
     const date = parsed.sourceAddedDate;
-    if (!lastDate || date > lastDate) lastDate = date;
+    if (date <= today && (!lastDate || date > lastDate)) lastDate = date;
     if (!byDay.has(date)) byDay.set(date, new Map());
     const day = byDay.get(date);
     if (!day.has(key)) day.set(key, { ...total(), store: stores.get(key), key });
@@ -47,7 +48,7 @@ export function buildSalesMonth(data, { store = 'all', today = new Date().toLoca
     const known = status === 'data' || status === 'known_zero';
     return { date, status, segments, revenueExact: known ? legacy?.revenueExact ?? sums.revenueExact : null, quantityExact: known ? legacy?.quantityExact ?? sums.quantityExact : null };
   });
-  return { period, daily, stores: [...stores.values()], coverage, unlocated, cutoff: current ? lastDate : null, isCurrent: current, missingStore: store !== 'all' && !sourceCount && !fallback, monthTotalsExact: fallback ? data.monthTotalsExact : monthTotalsExact };
+  return { period, daily, stores: [...stores.values()], coverage, unlocated, cutoff: current ? lastDate : null, isCurrent: current, missingStore: store !== 'all' && !storePresent && !fallback, monthTotalsExact: fallback ? data.monthTotalsExact : monthTotalsExact };
 }
 function nice(value) {
   if (!value) return 0;

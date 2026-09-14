@@ -24,6 +24,7 @@ describe('sales chart semantic model', () => {
     expect(model(rows).daily[1]).toMatchObject({ status: 'known_zero', revenueExact: '0' });
     expect(model([...rows, row('甲', null, '1')]).daily[1].status).toBe('unknown');
     expect(model([]).daily[0].status).toBe('unknown');
+    expect(model([{ ...rows[0], isDeduction: true }], '2026-08', '甲')).toMatchObject({ missingStore: false, coverage: 'unknown' });
   });
   it('does not claim future/unobserved days are zero in an unfinished month', () => {
     const month = model([row('甲', '2026-09-01', '5')], '2026-09');
