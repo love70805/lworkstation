@@ -5,6 +5,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --primary: #2563eb;
+  --on-primary: #ffffff;
   --primary-hover: #1d4ed8;
   --primary-bright: #2a6fdb;
   --primary-soft: #eaf2ff;
@@ -46,6 +47,7 @@
 html[data-appearance="dark"] {
   color-scheme: dark;
   --primary: #5a9cff;
+  --on-primary: #102135;
   --primary-hover: #7eb2ff;
   --primary-bright: #77aeff;
   --primary-soft: #173a67;
@@ -98,7 +100,7 @@ body {
   background: var(--surface-bg);
   color: var(--text);
   font-size: 14px;
-  line-height: 1.45;
+  line-height: 1.5;
   letter-spacing: 0;
 }
 
@@ -543,15 +545,16 @@ textarea::placeholder {
 .page-container {
   width: 100%;
   margin: 0;
-  padding: 20px 24px 40px;
+  padding: 18px 24px 32px;
 }
 
 .page-heading {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .page-back-row {
@@ -620,13 +623,13 @@ textarea::placeholder {
 }
 
 .button:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.98);
 }
 
 .button-primary {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .button:focus-visible,
@@ -793,15 +796,17 @@ textarea::placeholder {
   scrollbar-gutter: stable both-edges;
 }
 
+.data-table { font-variant-numeric: tabular-nums; }
+
 .data-table th {
   height: 40px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-bg);
   color: var(--text-muted);
-  font-size: 11px;
-  line-height: 16px;
-  font-weight: 700;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
   text-align: left;
   text-transform: uppercase;
 }
@@ -820,6 +825,8 @@ textarea::placeholder {
 .data-table tbody tr {
   transition: background 120ms ease;
 }
+
+.data-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--surface-soft) 45%, var(--surface)); }
 
 .data-table tbody tr:hover {
   background: var(--surface-hover);
@@ -876,7 +883,7 @@ textarea::placeholder {
 
 .pagination button.active {
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .pagination button:hover:not(:disabled):not(.active) {
@@ -1049,20 +1056,29 @@ textarea::placeholder {
   place-items: center;
   padding: 20px;
   background: rgb(15 23 42 / 0.48);
-  backdrop-filter: blur(2px);
+  animation: dialog-backdrop-enter 180ms ease-out;
 }
 
 .modal {
-  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
   max-height: min(720px, calc(100vh - 40px));
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
   box-shadow: var(--shadow-md);
+  animation: dialog-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.modal-size-small { width: min(440px, 100%); }
+.modal-size-large { width: min(880px, 100%); }
+@keyframes dialog-backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dialog-enter { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+
 .modal-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1087,10 +1103,16 @@ textarea::placeholder {
 }
 
 .modal-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 20px;
 }
 
 .modal-footer {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
@@ -1338,3 +1360,19 @@ textarea::placeholder {
   .toast-stack { right: 16px; bottom: 16px; width: calc(100vw - 32px); }
 }
 
+
+/* Shared keyboard and press feedback, including raw table and filter controls. */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--primary-bright); outline-offset: 2px; }
+.icon-button, .pagination button { transition: background 140ms ease, color 140ms ease, transform 100ms ease; }
+.icon-button:active:not(:disabled), .pagination button:active:not(:disabled) { transform: scale(0.96); }
+.modal-header > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 650px) {
+  .modal-backdrop { padding: 12px; }
+  .modal { max-width: 100%; max-height: calc(100dvh - 24px); }
+  .modal-header, .modal-body { padding: 16px; }
+  .modal-footer { padding: 12px 16px; }
+  .pagination { flex-wrap: wrap; }
+}
+
+.data-table-region { min-width: 0; }
+.data-table-region > .table-wrap, .data-table-region > .virtual-table-scroll { scroll-margin-top: calc(var(--topbar-height) + 12px); }

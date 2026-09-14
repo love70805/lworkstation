@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import { installDerivedInvalidation } from './derivedCache';
 import { createLedgerGroupKey, summarizeLedgerRows } from "../../domain/ledgerImport";
 import { canonicalPlatformSku } from "../../domain/identifiers";
 import { SYNC_STATES } from "../../domain/syncEnvelope";
@@ -20,6 +21,7 @@ import {
 export const CLIENT_DATABASE_NAME = "shopeers-workstation";
 export const ERP_TEST_DATA_RESET_ACTION = "erp_test_data_reset_0_2_6_beta_1";
 export const db = new Dexie(CLIENT_DATABASE_NAME);
+installDerivedInvalidation(db);
 
 db.version(1).stores({
   importBatches: "id,createdAt,status,store,fileName",

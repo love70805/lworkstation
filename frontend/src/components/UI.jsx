@@ -3,6 +3,8 @@ import { AlertCircle, Check, Info, LoaderCircle, Search, X } from "lucide-react"
 import { createToastKey, createToastState, dismissToast, enqueueToast } from "../lib/uiState";
 
 const ToastContext = createContext(null);
+const openDialogs = [];
+let previousBodyOverflow = "";
 
 export function ToastProvider({ children }) {
   const [toastState, setToastState] = useState(createToastState);
@@ -110,11 +112,11 @@ export function PageHeader({ eyebrow, title, description, actions, className = "
   );
 }
 
-export function SearchInput({ value, onChange, placeholder = "搜索...", className = "", shortcut }) {
+export function SearchInput({ value, onChange, placeholder = "搜索...", className = "", shortcut, label = placeholder }) {
   return (
     <label className={`search-input ${className}`}>
       <Search size={18} />
-      <input value={value} onChange={onChange} placeholder={placeholder} />
+      <input aria-label={label} value={value} onChange={onChange} placeholder={placeholder} />
       {shortcut ? <kbd>{shortcut}</kbd> : null}
     </label>
   );
@@ -129,11 +131,13 @@ export function ProgressBar({ value, tone = "primary", label }) {
   );
 }
 
-export function Modal({ open, title, description, children, footer, onClose, tone = "default", className = "" }) {
+export function Modal({ open, title, description, children, footer, onClose, tone = "default", className = "", size = "medium" }) {
+  const dialogRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousFocusRef = useRef(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
+  const descriptionId = useId();
 
   // Inline close handlers change during editing; keep Escape current without
   // restarting the dialog's initial focus and focus restoration lifecycle.
@@ -143,14 +147,50 @@ export function Modal({ open, title, description, children, footer, onClose, ton
 
   useEffect(() => {
     if (!open) return undefined;
+    const dialog = dialogRef.current;
     previousFocusRef.current = document.activeElement;
-    const listener = (event) => event.key === "Escape" && onCloseRef.current?.();
+    if (!openDialogs.length) {
+      previousBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    openDialogs.push(dialog);
+    const isTopDialog = () => openDialogs.at(-1) === dialog;
+    const focusInside = () => closeButtonRef.current?.focus({ preventScroll: true });
+    const listener = (event) => {
+      if (!isTopDialog() || event.isComposing) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current?.();
+      }
+      if (event.key !== "Tab") return;
+      const controls = [...dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]')]
+        .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled, [hidden], input[type="hidden"]') && !element.closest('[hidden], [inert]') && window.getComputedStyle(element).visibility !== "hidden" && window.getComputedStyle(element).display !== "none");
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (!first) { event.preventDefault(); dialog.focus(); return; }
+      if (!dialog.contains(document.activeElement) || (event.shiftKey && document.activeElement === first)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const containFocus = (event) => {
+      if (isTopDialog() && !dialog.contains(event.target)) focusInside();
+    };
     window.addEventListener("keydown", listener);
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    document.addEventListener("focusin", containFocus);
+    const focusTimer = window.setTimeout(() => { if (isTopDialog()) focusInside(); }, 0);
     return () => {
+      const wasTop = isTopDialog();
       window.removeEventListener("keydown", listener);
+      document.removeEventListener("focusin", containFocus);
       window.clearTimeout(focusTimer);
-      previousFocusRef.current?.focus?.();
+      const index = openDialogs.indexOf(dialog);
+      if (index >= 0) openDialogs.splice(index, 1);
+      if (!openDialogs.length) document.body.style.overflow = previousBodyOverflow;
+      if (wasTop && previousFocusRef.current?.isConnected) previousFocusRef.current.focus?.({ preventScroll: true });
     };
   }, [open]);
 
@@ -158,11 +198,11 @@ export function Modal({ open, title, description, children, footer, onClose, ton
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
-      <div className={`modal modal-${tone} ${className}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className={`modal modal-${tone} modal-size-${size} ${className}`} role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined}>
         <div className="modal-header">
           <div>
             <h2 id={titleId}>{title}</h2>
-            {description ? <p>{description}</p> : null}
+            {description ? <p id={descriptionId}>{description}</p> : null}
           </div>
           <IconButton ref={closeButtonRef} icon={X} label="关闭对话框" onClick={onClose} />
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -46,7 +46,7 @@ function TableHeader({ table, fixedWidths = false }) {
               ? { width, minWidth: width, maxWidth: width, flex: `0 0 ${width}px`, ...headerStyle }
               : headerStyle;
             return (
-              <th key={header.id} style={style}>
+              <th key={header.id} style={style} aria-sort={sortable ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
                 {header.isPlaceholder ? null : sortable ? (
                   <button className="sortable-header" onClick={header.column.getToggleSortingHandler()}>
                     <table.FlexRender header={header} />
@@ -132,7 +132,7 @@ function VirtualBody({ table, rows, getRowProps, estimateSize, className = "" })
   );
 }
 
-export default function DataTable({
+const DataTable = forwardRef(function DataTable({
   data,
   columns,
   className = "",
@@ -142,9 +142,24 @@ export default function DataTable({
   pageSize = 20,
   virtualizeThreshold = 100,
   estimateSize = 64,
-}) {
-  const [sorting, setSorting] = useState([]);
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
+  paginationResetKey,
+  initialViewState,
+  dataReady = true,
+}, ref) {
+  const regionRef = useRef(null);
+  const initialPage = Math.max(0, Math.floor(Number(initialViewState?.pageIndex) || 0));
+  const previousPageRef = useRef(initialPage);
+  const restoringRef = useRef(Boolean(initialViewState));
+  const resetScopeRef = useRef(paginationResetKey);
+  const [sorting, setSorting] = useState(initialViewState?.sorting ?? []);
+  const previousSortingRef = useRef(sorting);
+  const [pagination, setPagination] = useState({ pageIndex: initialPage, pageSize });
+  useImperativeHandle(ref, () => ({
+    getViewState: () => {
+      const area = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+      return { pageIndex: pagination.pageIndex, sorting, scrollTop: area?.scrollTop ?? 0, scrollLeft: area?.scrollLeft ?? 0, windowScrollY: window.scrollY };
+    },
+  }), [pagination.pageIndex, sorting]);
   const stableColumns = useMemo(() => columns, [columns]);
   const table = useTable({
     features,
@@ -153,12 +168,44 @@ export default function DataTable({
     state: { sorting, pagination },
     onSortingChange: setSorting,
     onPaginationChange: setPagination,
+    autoResetPageIndex: paginationResetKey === undefined && !initialViewState,
     getRowId,
   });
   useEffect(() => {
+    if (!dataReady) return;
     const maxPageIndex = Math.max(0, Math.ceil(data.length / pagination.pageSize) - 1);
     setPagination((current) => current.pageIndex > maxPageIndex ? { ...current, pageIndex: maxPageIndex } : current);
-  }, [data.length, pagination.pageSize]);
+  }, [data.length, pagination.pageSize, dataReady]);
+  useEffect(() => {
+    if (resetScopeRef.current === paginationResetKey && previousSortingRef.current === sorting) return;
+    resetScopeRef.current = paginationResetKey;
+    previousSortingRef.current = sorting;
+    restoringRef.current = false;
+    setPagination((current) => current.pageIndex === 0 ? current : { ...current, pageIndex: 0 });
+  }, [paginationResetKey, sorting]);
+  useLayoutEffect(() => {
+    if (!restoringRef.current || !dataReady) return;
+    const maxPage = Math.max(0, Math.ceil(data.length / pagination.pageSize) - 1);
+    if (pagination.pageIndex > maxPage) return;
+    const area = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+    if (area) {
+      area.scrollTop = initialViewState.scrollTop ?? 0;
+      area.scrollLeft = initialViewState.scrollLeft ?? 0;
+    }
+    window.scrollTo({ top: initialViewState.windowScrollY ?? 0, behavior: "auto" });
+    previousPageRef.current = pagination.pageIndex;
+    restoringRef.current = false;
+  }, [dataReady, data.length, pagination.pageIndex, pagination.pageSize, initialViewState]);
+  useEffect(() => {
+    if (restoringRef.current || previousPageRef.current === pagination.pageIndex) return;
+    previousPageRef.current = pagination.pageIndex;
+    const scrollArea = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+    if (scrollArea) {
+      scrollArea.scrollTop = 0;
+      const top = scrollArea.getBoundingClientRect().top;
+      if (top < 64 || top >= window.innerHeight) scrollArea.scrollIntoView?.({ block: "start", behavior: "auto" });
+    }
+  }, [pagination.pageIndex]);
   const rows = table.getRowModel().rows;
   const totalRows = table.getRowCount();
   const pageCount = table.getPageCount();
@@ -170,7 +217,7 @@ export default function DataTable({
   const shouldVirtualize = rows.length >= virtualizeThreshold;
 
   return (
-    <>
+    <div className="data-table-region" ref={regionRef}>
       {shouldVirtualize ? (
         <VirtualBody table={table} rows={rows} getRowProps={getRowProps} estimateSize={estimateSize} className={className} />
       ) : (
@@ -182,20 +229,22 @@ export default function DataTable({
         </div>
       )}
       <div className="table-footer">
-        <span>显示第 {start} 至 {end} 条，共 {totalRows} 条</span>
+        <span role="status" aria-live="polite">显示第 {start} 至 {end} 条，共 {totalRows} 条</span>
         {pageCount > 1 ? (
-          <div className="pagination">
+          <nav className="pagination" aria-label="表格分页">
             <button aria-label="上一页" disabled={!table.getCanPreviousPage()} onClick={() => table.previousPage()}><ChevronLeft size={17} /></button>
             {pageNumbers.map((page, index) => (
               <span className="pagination-slot" key={page}>
                 {index > 0 && page - pageNumbers[index - 1] > 1 ? <i>...</i> : null}
-                <button className={page === pagination.pageIndex ? "active" : ""} onClick={() => table.setPageIndex(page)}>{page + 1}</button>
+                <button aria-label={`第 ${page + 1} 页`} aria-current={page === pagination.pageIndex ? "page" : undefined} className={page === pagination.pageIndex ? "active" : ""} onClick={() => table.setPageIndex(page)}>{page + 1}</button>
               </span>
             ))}
             <button aria-label="下一页" disabled={!table.getCanNextPage()} onClick={() => table.nextPage()}><ChevronRight size={17} /></button>
-          </div>
+          </nav>
         ) : null}
       </div>
-    </>
+    </div>
   );
-}
+});
+
+export default DataTable;

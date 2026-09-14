@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
+import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
-import { bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
+import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
 import { matchesSelectionSearch } from "../lib/selectionSearch";
@@ -43,9 +44,11 @@ const dataStatusLabels = {
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
 
-function readProductFilters() {
+const productFiltersKey = (workspaceId, view) => `${PRODUCT_FILTERS_KEY}:${JSON.stringify([workspaceId, view])}`;
+
+function readProductFilters(workspaceId, view) {
   try {
-    const saved = JSON.parse(localStorage.getItem(PRODUCT_FILTERS_KEY) ?? "{}");
+    const saved = JSON.parse(localStorage.getItem(productFiltersKey(workspaceId, view)) ?? "{}");
     return {
       store: saved.store ?? "all",
       status: saved.status ?? "all",
@@ -89,11 +92,27 @@ function SelectionDomainSearch({ value, onChange, label }) {
 }
 
 export default function ProductLibrary() {
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const context = useLiveQuery(getActiveMemberContext, [], null);
+  const [params] = useSearchParams();
+  const requestedView = params.get("view");
+  const view = requestedView === "reference" ? "reference" : requestedView === "pending" ? "pending" : "official";
+  if (!context) return <AppShell pageClass="product-library-page"><p role="status">正在读取选品工作区…</p></AppShell>;
+  return <ProductLibraryView key={`${context.workspaceId}:${view}`} workspaceId={context.workspaceId} view={view} />;
+}
+
+function ProductLibraryView({ workspaceId, view }) {
+  const routeNavigate = useNavigate();
+  const tableRef = useRef(null);
+  const savedView = useMemo(() => readProductLibraryViewState(workspaceId, view), [workspaceId, view]);
+  const navigationSnapshotRef = useRef(null);
+  const navigate = useCallback((target) => {
+    saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState() });
+    routeNavigate(target, { state: { productLibraryReturnTo: `/products?view=${view}` } });
+  }, [routeNavigate, workspaceId, view]);
+  const [, setSearchParams] = useSearchParams();
   const { notify } = useToast();
-  const initialFilters = useMemo(readProductFilters, []);
-  const [query, setQuery] = useState("");
+  const initialFilters = useMemo(() => savedView?.filters ?? readProductFilters(workspaceId, view), [savedView, workspaceId, view]);
+  const [query, setQuery] = useState(savedView?.query ?? "");
   const [store, setStore] = useState(initialFilters.store);
   const [status, setStatus] = useState(initialFilters.status);
   const [publicationStatus, setPublicationStatus] = useState(initialFilters.publicationStatus);
@@ -119,9 +138,8 @@ export default function ProductLibrary() {
   const [mergePreview, setMergePreview] = useState(null);
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
   const [mergingSkcRecords, setMergingSkcRecords] = useState(false);
-  const requestedView = searchParams.get("view");
-  const view = requestedView === "reference" ? "reference" : requestedView === "pending" ? "pending" : "official";
-  const catalogProducts = useLiveQuery(listProductCatalogRecords, [], []);
+  const catalogSnapshot = useLiveQuery(listProductCatalogRecords, [], undefined);
+  const catalogProducts = catalogSnapshot ?? [];
   const pendingCaptures = useLiveQuery(listPendingCaptureRecords, [], []);
   const salesStatusDefinitions = useLiveQuery(getSelectionStatusDefinitions, [], []);
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
@@ -144,12 +162,14 @@ export default function ProductLibrary() {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  const referenceRows = useLiveQuery(async () => (
+  const referenceSnapshot = useLiveQuery(async () => (
     buildSelectionReferenceRows(await getSelectionReferenceSnapshot())
-  ), [], []);
+  ), [], undefined);
+  const referenceRows = referenceSnapshot ?? [];
+  navigationSnapshotRef.current = { query, filters: { store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly } };
 
   useEffect(() => {
-    localStorage.setItem(PRODUCT_FILTERS_KEY, JSON.stringify({
+    localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
       store,
       status,
       publicationStatus,
@@ -160,7 +180,7 @@ export default function ProductLibrary() {
       referenceSource,
       negativeOnly,
     }));
-  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, productSort, publicationStatus, referenceSource, status, store]);
+  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, productSort, publicationStatus, referenceSource, status, store, workspaceId, view]);
 
   useEffect(() => {
     if (statusManagerOpen) setStatusDraft(salesStatusDefinitions);
@@ -569,6 +589,10 @@ export default function ProductLibrary() {
             {referenceRows.length ? (
               <DataTable
                 className="selection-reference-table"
+                ref={tableRef}
+                initialViewState={savedView?.table}
+                dataReady={referenceSnapshot !== undefined}
+                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly])}
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
@@ -623,6 +647,10 @@ export default function ProductLibrary() {
             ) : null}
             <DataTable
               className="product-table"
+              ref={tableRef}
+              initialViewState={savedView?.table}
+              dataReady={catalogSnapshot !== undefined}
+              paginationResetKey={JSON.stringify([query, store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort])}
               columns={productColumns}
               data={filteredProducts}
               getRowId={(row) => row.id}
@@ -634,6 +662,7 @@ export default function ProductLibrary() {
       ) : <CaptureQueueContent query={query} onQueryChange={setQuery} />}
       <Modal
         open={bulkConfirmOpen}
+        size="small"
         title="确认批量更新选品状态"
         description={`将 ${selectedProductIds.length} 条商品更新为“${salesStatusLabel(bulkStatus)}”。此操作会写入商品操作记录。`}
         onClose={() => setBulkConfirmOpen(false)}
@@ -700,6 +729,7 @@ export default function ProductLibrary() {
       </Modal>
       <Modal
         open={mergeConfirmOpen}
+        size="small"
         title="确认合并重复 SKC"
         description={`确认将 ${mergePreview?.sourceProducts.length ?? 0} 份来源档案并入“${mergePreview?.primaryName ?? "主商品档案"}”？来源商品档案会从商品库移除，但供应商报价历史和人工成本会保留并转入主档。`}
         tone="danger"

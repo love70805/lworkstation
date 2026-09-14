@@ -280,3 +280,19 @@
   .profit-filter-bar > * { flex: 1 1 100%; }
   .profit-filter-check { justify-content: flex-start; }
 }
+
+/* Bound long lists independently of the chart and report sections. */
+.profit-groups-scroll { max-height: min(560px, 65vh); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.profit-groups-pagination { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; padding:12px 16px; border-top:1px solid var(--border); }
+.profit-groups-pagination > span { margin-right:auto; color:var(--text-muted); font-size:12px; }
+.profit-skc-group > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; cursor:pointer; }
+.profit-skc-group > summary strong { overflow-wrap:anywhere; }
+.profit-skc-group > summary span { color:var(--text-muted); font-size:12px; text-align:right; }
+.profit-skc-group:nth-child(even) { background:var(--surface-soft); }
+.profit-skc-group[open] > summary { background:var(--selection-bg); }
+.profit-table-panel > .profit-filter-bar { margin-bottom:0; }
+.monthly-report-manager .report-sources-summary > div { min-width:0; border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--surface-soft); }
+.monthly-report-manager > p { color:var(--text-muted); font-size:12px; margin:6px 0 14px; }
+.report-history-row { gap:12px; padding:10px; border-bottom:1px solid var(--border); }
+.report-history-row:nth-child(even) { background:var(--surface-soft); }
+@media(max-width:760px) { .profit-skc-group > summary { align-items:flex-start; flex-direction:column; gap:6px; } .profit-skc-group > summary span { text-align:left; } }

@@ -1,8 +1,36 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.15",
-  "integrationBranch": "codex/selection-profit-erp-sync",
+  "version": "0.2.16",
+  "integrationBranch": "codex/update-0.2.16",
   "requiredCommits": [
+    {
+      "module": "commit-safe-cache-read",
+      "commit": "1dba743"
+    },
+    {
+      "module": "scoped-product-return-state",
+      "commit": "6cc76cb"
+    },
+    {
+      "module": "persistent-derived-cache",
+      "commit": "7809805"
+    },
+    {
+      "module": "background-sales-model",
+      "commit": "6ef1f2b"
+    },
+    {
+      "module": "stacked-sales-month-comparison",
+      "commit": "a137f18"
+    },
+    {
+      "module": "shared-desktop-ui",
+      "commit": "603db90"
+    },
+    {
+      "module": "cached-profit-and-lazy-details",
+      "commit": "ee33d01"
+    },
     {
       "module": "modal-focus-lifecycle",
       "commit": "a075e53"
