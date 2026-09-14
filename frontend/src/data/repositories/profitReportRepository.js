@@ -1,4 +1,6 @@
 import { db } from "../db/clientDatabase";
+import { readLedgerSalesRows } from './ledgerReadCache';
+import { cachedDerived, sourceRevision, assertSourceRevision } from '../db/derivedCache';
 import { makeId } from "../db/utils";
 import { getActiveMemberContext } from "./selectionRepository";
 import { getLatestLedgerCosts } from "./profitRepository";
@@ -24,17 +26,17 @@ async function sourceContext(ledgerId,write=false){
 const localAudit = (context,action,objectId,after,before=null) => db.auditEvents.add({workspaceId:context.ledger.workspaceId,objectType:'local_profit_report',objectId,action,actorId:context.member.memberId,createdAt:new Date().toISOString(),localOnly:true,syncState:'local_only',before,after});
 
 export async function readMonthlyReportState(ledgerId){
-  return db.transaction('r',tables(),async()=>{
+    const revision = sourceRevision();
     const {ledger}=await scope(ledgerId);
     // The source editor needs stores and adopted batches, not ERP cost rows or
     // a complete calculation context. Keep those reads for actual previews.
-    const [salesRows,dispatch,deduction,reports]=await Promise.all([db.salesRows.where('ledgerId').equals(ledgerId).toArray(),adopted(ledgerId,'dispatch'),adopted(ledgerId,'deduction'),db.profitReports.where('ledgerId').equals(ledgerId).toArray()]);
+    const [salesRows,dispatch,deduction,reports]=await Promise.all([readLedgerSalesRows(ledger.workspaceId,ledgerId,{strict:true}),adopted(ledgerId,'dispatch'),adopted(ledgerId,'deduction'),cachedDerived({scope:[ledger.workspaceId,ledgerId],formula:'report-headers@1',revision,compute:async()=>(await db.profitReports.where('ledgerId').equals(ledgerId).toArray()).map(({fileBase64,...report})=>report)})]);
     if(salesRows.some(row=>row.workspaceId!==ledger.workspaceId))throw new Error("台账存在跨工作区来源记录，请恢复完整备份后再核算。");
     const context={ledger,salesRows,dispatch,deduction,reports};
     const batches=await db.monthlySupplementBatches.where('ledgerId').equals(ledgerId).toArray();
     const adoptedRows=await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[context.dispatch?.id,context.deduction?.id].includes(row.batchId)).toArray();
-    return {ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))],dispatch:context.dispatch,deduction:context.deduction,batches,adoptedRows,reports:context.reports.map(({fileBase64,...report})=>report).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))};
-  });
+    assertSourceRevision(revision);
+    return {ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))],dispatch:context.dispatch,deduction:context.deduction,batches,adoptedRows,reports:context.reports.toSorted((a,b)=>b.createdAt.localeCompare(a.createdAt))};
 }
 export async function readSavedProfitReport(reportId){
   return db.transaction('r',tables(),async()=>{const report=await db.profitReports.get(reportId);if(!report)throw new Error("报告不存在。");await scope(report.ledgerId);return report;});
