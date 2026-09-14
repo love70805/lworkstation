@@ -5,8 +5,8 @@ import AppShell from "../components/AppShell";
 import { CostMatchingContent } from "./CostMatching";
 import SalesAnalytics from "./SalesAnalytics";
 import MonthlyReportManager from "./MonthlyReportManager";
-import { buildReportProducts, legacyReportLine, REPORT_FORMULA_VERSION, displayMoney } from "../domain/profitReports";
-import DataTable from "../components/DataTable";
+import { REPORT_FORMULA_VERSION, displayMoney } from "../domain/profitReports";
+import ProfitGroups from "./ProfitGroups";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
 import {
   revokeApproved1688Fallback,
@@ -14,15 +14,14 @@ import {
   updateLedgerWarehouseRate,
   reopenLedgerForCostCorrection,
 } from "../data/database";
-import { resolveFormalCostDecision } from "../domain/costPolicy";
+import { readCachedReportProducts } from "../data/repositories/derivedComputationService";
+import { presentReportProducts } from "../lib/profitPresentation";
 import { canonicalPlatformSku } from "../domain/identifiers";
-import { calculateExactProfitLine, calculateReferenceProfitLine, PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { buildProfitExportRows, formatErpUnitCost, formatManualUnitCost, formatProfitAmount, isProfitSnapshot, savedProfitRows, savedProfitSummary, summarizeProfitRows } from "../lib/profitPrecision";
-import { groupImportedSales, groupProfitRowsBySkc } from "../lib/profit";
+import { groupProfitRowsBySkc } from "../lib/profit";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildProfitHref, buildProfitQuery, filterProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
-import { manualSnapshot, selectManualOverride } from "../domain/manualCostOverride";
 import ManualCostDialog from "./ManualCostDialog";
 
 const currency = (value) => `¥${displayMoney(value)}`;
@@ -113,6 +112,7 @@ function prepareProfitTableRows(rows) {
 
 export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   const [manualTarget, setManualTarget] = useState(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [reopenDialog, setReopenDialog] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
   const [reopening, setReopening] = useState(false);
@@ -166,94 +166,20 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
 
   const locked = isProfitSnapshot(snapshot?.ledger);
   const legacySnapshot = locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION;
-  const sourceRows = useMemo(() => !locked && snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot, locked]);
-  const costBySku = useMemo(() => new Map((snapshot?.costs ?? []).map((cost) => [
-    cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku),
-    cost,
-  ])), [snapshot?.costs]);
-  const approvalBySku = useMemo(() => {
-    const latest = new Map();
-    (snapshot?.approvals ?? [])
-      .filter((approval) => approval.status === "approved" && manualSnapshot(approval)?.kind !== "manual_override")
-      .toSorted((a, b) => String(a.approvedAt).localeCompare(String(b.approvedAt)))
-      .forEach((approval) => latest.set(
-        approval.canonicalPlatformSku ?? canonicalPlatformSku(approval.platformSku),
-        approval,
-      ));
-    return latest;
-  }, [snapshot?.approvals]);
-
-  const previousCalculated = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : sourceRows.map((row) => {
-    const erpCost = costBySku.get(row.canonicalPlatformSku);
-    const manualOverride = selectManualOverride(snapshot?.approvals, { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, store: row.store, platformSku: row.platformSku });
-    const approval = approvalBySku.get(row.canonicalPlatformSku) ?? null;
-    const importedReference = Number(row.legacyImportedUnitCost) > 0 ? {
-      id: `IMPORT-REF-${snapshot?.ledger?.id}-${row.canonicalPlatformSku}`,
-      kind: "supplier_landed",
-      platformSku: row.platformSku,
-      unitCost: Number(row.legacyImportedUnitCost),
-      currency: "CNY",
-      source: "月度台账历史参考",
-      orderNumber: row.order1688 ?? null,
-    } : null;
-    const reference1688Cost = approval?.referenceCost ?? importedReference;
-    const costDecision = resolveFormalCostDecision({
-      workspaceId: snapshot?.ledger?.workspaceId, store: row.store, manualOverride,
-      ledgerId: snapshot?.ledger?.id,
-      platformSku: row.platformSku,
-      erpCost: erpCost ? {
-        id: erpCost.id,
-        platformSku: erpCost.platformSku,
-        unitCost: erpCost.unitCost,
-        currency: erpCost.currency,
-        resolutionStatus: erpCost.resolutionStatus,
-        unresolvedAnomalyCount: erpCost.unresolvedAnomalyCount,
-      } : null,
-      reference1688Cost,
-      approval,
+  const costBySku = useMemo(() => new Map((snapshot?.costs ?? []).map(cost => [cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku), cost])), [snapshot?.costs]);
+  const [computed, setComputed] = useState(null);
+  useEffect(() => {
+    if (locked || !snapshot?.rows?.length) return;
+    let active = true;
+    readCachedReportProducts({ snapshot, warehouseRate }).then(lines => {
+      if (active) setComputed({ snapshot, warehouseRate, rows: presentReportProducts(lines, snapshot), error: null });
+    }).catch(error => {
+      if (active) setComputed({ snapshot, warehouseRate, rows: [], error: error.message });
     });
-    const result = costDecision.source === "approved_1688"
-      ? calculateReferenceProfitLine({
-        revenue: row.revenue,
-        quantity: row.qty,
-        referenceCost: costDecision,
-        warehouseRate,
-        penalty: row.penalty,
-      })
-      : calculateExactProfitLine({
-        revenue: row.revenue,
-        quantity: row.qty,
-        costDecision,
-        warehouseRate,
-        penalty: row.penalty,
-      });
-
-    return {
-      ...row,
-      ...result,
-      costDecision,
-      manualOverride,
-      unitCost: costDecision.unitCost,
-      costSource: costDecision.source,
-      costSourceRecordId: costDecision.sourceRecordId,
-      orderNumber: erpCost?.orderNumber ?? reference1688Cost?.orderNumber ?? null,
-      warehouseSku: erpCost?.warehouseSku ?? null,
-      approvalId: costDecision.approvalId,
-      approval,
-      reference1688Cost,
-    };
-  }), [approvalBySku, costBySku, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId, snapshot?.approvals, snapshot?.profitLines, locked, sourceRows, warehouseRate]);
-
-  const calculation = useMemo(() => {
-    if (locked || !snapshot?.rows?.length) return { rows: previousCalculated, error: null };
-    try {
-      const rows = buildReportProducts({ ledger: { ...snapshot.ledger, warehouseRate }, salesRows: snapshot.rows, erpCosts: snapshot.costs ?? [], approvals: snapshot.approvals ?? [], allowMissing: true }).map(line => {
-        const previous = previousCalculated.find(row => row.store === line.store && row.platformSku === line.platformSku && row.attribute === line.attribute) ?? {};
-        return { ...previous, ...legacyReportLine(line) };
-      });
-      return { rows, error: null };
-    } catch (error) { return { rows: [], error: error.message }; }
-  }, [locked, snapshot, previousCalculated, warehouseRate]);
+    return () => { active = false; };
+  }, [snapshot, warehouseRate, locked]);
+  const savedRows = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : [], [locked, snapshot?.profitLines]);
+  const calculation = locked ? { rows: savedRows } : computed?.snapshot === snapshot && computed?.warehouseRate === warehouseRate ? computed : { rows: [], loading: Boolean(snapshot?.rows?.length) };
   const calculated = calculation.rows;
 
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
@@ -485,10 +411,11 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   if (locked && (!snapshot?.profitLines?.length || !snapshot.ledger.profitSummary)) {
     return <><Panel><EmptyState icon={AlertCircle} title="历史定稿快照缺失" description="该账本缺少已保存的利润明细或汇总，暂不能展示和导出。请恢复完整备份；系统不会按当前成本重算历史。" /></Panel></>;
   }
+  if (calculation.loading) return <Panel className="route-loader" role="status">正在准备本月利润…已保存的计算结果会自动复用。</Panel>;
   if (calculation.error) {
     return <Panel><div role="alert"><h2>本月利润待处理</h2><p>{calculation.error}</p><p>当前台账不满足新报告口径，尚未计算商品利润。请核对原始数量与金额；旧扣款需从销售台账移出并登记为独立扣款来源。</p></div><Button onClick={() => navigate("/ledger")}>核对月度账本</Button><Button disabled>预览并定稿</Button></Panel>;
   }
-  if (!snapshot?.ledger || (!locked && sourceRows.length === 0)) {
+  if (!snapshot?.ledger || (!locked && !snapshot.rows?.length)) {
     return (
       <>
         <PageHeader title="利润核算" description="导入月度台账后，系统会按平台 SKC/SKU 建立精确利润核算。" />
@@ -530,7 +457,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
 
       {missing ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>当前总利润暂不能定稿。可等待 ERP 回传，或在明细中填写人工更正；1688 参考不会自动转为正式成本。</small></span><Button variant="ghost" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>进入 ERP 成本核对</Button></div> : null}
 
-      <details><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary><Panel className="profit-table-panel">
+      <details onToggle={event => setDetailsOpen(event.currentTarget.open)}><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary>{detailsOpen ? <Panel className="profit-table-panel">
         <div className="profit-table-heading">
           <div><h2>月度利润明细</h2><p>每个 SKU 一行，SKC 用分组标识；金额和成本均为人民币 CNY。</p></div>
           <span className="profit-filter-count">当前 {groupedFiltered.length} 个 SKC · {filtered.length} 个 SKU</span>
@@ -541,11 +468,11 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
           <label className="profit-filter-check"><input type="checkbox" checked={missingOnly} onChange={(event) => changeFilter({ missingOnly: event.target.checked })} />只看缺成本</label>
           <button className="profit-filter-reset" type="button" onClick={() => changeFilter({ query: "", storeFilter: "all", supplierSelection: null, missingOnly: false })}>重置筛选</button>
         </div>
-        {groupedFiltered.map((group) => <details className="profit-skc-group" key={group.id}><summary><strong>{group.store} · SKC {group.groupSkc}</strong><span>{group.skuCount} 个 SKU · {group.quantityExact ?? group.qty} 件 · 销售 {currency(group.revenueExact ?? group.revenue)} · 利润 {group.finalizable ? currency(group.profitExact ?? group.profit) : "待核对"}</span></summary><DataTable className="profit-table" columns={columns} data={prepareProfitTableRows(group.variants)} getRowId={(row) => row.id} getRowProps={(row) => ({ className: !row.finalizable ? "missing-profit-row" : "" })} /></details>)}
-      </Panel>
+        <ProfitGroups key={JSON.stringify(filterState)} groups={groupedFiltered} columns={columns} prepareRows={prepareProfitTableRows} />
+      </Panel> : null}
+      </details>
 
       {snapshot.ledger.status === "finalized" ? <Button icon={RotateCcw} onClick={() => { setReopenReason(""); setReopenError(""); setReopenDialog(true); }}>重开本月全部店铺核算</Button> : null}
-      </details>
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本；定稿后不能直接修改。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
       {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={manualTarget} onClose={() => setManualTarget(null)} /> : null}
       <Modal open={reopenDialog} title="确认重开本月全部店铺" description="重开后可更正成本并重新定稿。原定稿明细保留在审计记录中，已发布 ERP 成本继续有效。" onClose={() => { if (!reopening) setReopenDialog(false); }} footer={<><Button disabled={reopening} onClick={() => setReopenDialog(false)}>取消</Button><Button variant="primary" disabled={!reopenReason.trim() || reopening} loading={reopening} onClick={reopenLedger}>确认重开</Button></>}>

@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { canonicalPlatformSku } from "./identifiers";
 import { createLedgerGroupKey, createLedgerSkuKey } from "./ledgerImport";
 import { resolveFormalCostDecision } from "./costPolicy";
-import { selectManualOverride } from "./manualCostOverride";
+import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
 export const REPORT_TEMPLATE_VERSION = "profit-zebra@1";
@@ -30,6 +30,13 @@ export async function sha256(value) {
 export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, allowMissing = false }) {
   const costs = new Map(erpCosts.map(row => [canonicalPlatformSku(row.platformSku), row]));
   const groups = new Map();
+  const manualGroups = new Map();
+  for (const approval of approvals ?? []) {
+    if (manualSnapshot(approval)?.kind !== "manual_override") continue;
+    const key = storeSkuKey(manualSnapshot(approval).store, approval.platformSku);
+    if (!manualGroups.has(key)) manualGroups.set(key, []);
+    manualGroups.get(key).push(approval);
+  }
   for (const source of salesRows) {
     if (/盘亏/.test(source.movementType ?? "")) continue;
     if (source.isDeduction || Number(source.penalty ?? 0) !== 0 || /扣款|罚款|违约/.test(source.movementType ?? "")) throw new Error("台账含旧罚款记录，请重新导入纯销售台账，并将扣款登记到独立扣款来源，避免重复扣款。");
@@ -45,7 +52,7 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
   return [...groups.values()].map(row => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const cost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveFormalCostDecision({ ...scope, erpCost: cost, manualOverride: selectManualOverride(approvals, scope) });
+    const decision = resolveFormalCostDecision({ ...scope, erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
     if (!decision.eligibleForExactProfit) {
       if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId };
       throw new Error(`${row.store} / ${row.platformSku} 尚缺正式成本，不能生成报告。`);

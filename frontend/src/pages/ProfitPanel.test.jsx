@@ -9,11 +9,15 @@ import { ToastProvider } from "../components/UI";
 
 const mocks = vi.hoisted(() => ({ updateRate: vi.fn(), reopen: vi.fn(), status: "cost_pending" }));
 vi.mock("../data/database", () => ({ updateLedgerWarehouseRate: mocks.updateRate, reopenLedgerForCostCorrection: mocks.reopen }));
-vi.mock("../hooks/useLatestSalesImport", () => ({ useLatestSalesImport: () => ({
-  ledger: { id: "L", workspaceId: "W", period: "2026-08", status: mocks.status, warehouseRate: 0.7, profitSummary: { revenue: 10, quantity: 2, purchaseCost: 0, warehouseCost: 1.4, penalty: 0, profit: 8.6 } },
+const snapshots = new Map();
+function snapshotForStatus() {
+  if (!snapshots.has(mocks.status)) snapshots.set(mocks.status, {  ledger: { id: "L", workspaceId: "W", period: "2026-08", status: mocks.status, warehouseRate: 0.7, profitSummary: { revenue: 10, quantity: 2, purchaseCost: 0, warehouseCost: 1.4, penalty: 0, profit: 8.6 } },
   rows: [{ store: "甲", platformSkc: "SKC", platformSku: "SKU", quantity: 2, amount: 10, penalty: 0 }],
   costs: [], approvals: [], profitLines: [{ id: 1, store: "甲", platformSku: "SKU", platformSkc: "SKC", quantity: 2, revenue: 10, unitCost: 0, purchaseCost: 0, warehouseCost: 1.4, penalty: 0, profit: 8.6, costSource: "manual_override", finalizable: true }],
-}) }));
+});
+  return snapshots.get(mocks.status);
+}
+vi.mock("../hooks/useLatestSalesImport", () => ({ useLatestSalesImport: () => snapshotForStatus() }));
 let container, root;
 const findButton = (text) => [...container.querySelectorAll("button")].find((button) => button.textContent === text);
 beforeEach(async () => {
