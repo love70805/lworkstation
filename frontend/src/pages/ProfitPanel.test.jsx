@@ -22,7 +22,7 @@ let container, root;
 const findButton = (text) => [...container.querySelectorAll("button")].find((button) => button.textContent === text);
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  localStorage.clear(); mocks.status = "cost_pending"; mocks.updateRate.mockReset().mockResolvedValue({}); mocks.reopen.mockReset().mockResolvedValue({});
+  localStorage.clear(); snapshots.clear(); mocks.status = "cost_pending"; mocks.updateRate.mockReset().mockResolvedValue({}); mocks.reopen.mockReset().mockResolvedValue({});
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
 });
@@ -60,4 +60,22 @@ it("opens the warehouse dialog outside collapsed details, cancels, and applies t
   expect(mocks.updateRate).toHaveBeenCalledWith("L", 1.2);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(container.querySelector("details").open).toBe(false);
+});
+it('preserves an in-progress manual draft when a new ERP snapshot triggers recalculation', async()=>{
+  const details=[...container.querySelectorAll('details')].find(el=>el.querySelector('summary')?.textContent.startsWith('查看利润明细'));
+  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
+  const group=container.querySelector('.profit-skc-group');
+  await act(async()=>{group.open=true;group.dispatchEvent(new Event('toggle'));});
+  await act(async()=>findButton('人工更正').click());
+  const input=container.querySelector('#manual-cost-value');
+  input.focus();
+  await act(async()=>Simulate.change(input,{target:{value:'0.009'}}));
+  await act(async()=>Simulate.change(container.querySelector('#manual-cost-reason'),{target:{value:'正在输入的核算说明'}}));
+  const previous=snapshotForStatus();
+  snapshots.set(mocks.status,{...previous,rows:previous.rows.map(row=>({...row,amount:20}))});
+  await act(async()=>root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+  expect(container.querySelector('#manual-cost-value')).toBe(input);
+  expect(input.value).toBe('0.009');
+  expect(container.querySelector('#manual-cost-reason').value).toBe('正在输入的核算说明');
+  expect(container.querySelector('.profit-skc-group').open).toBe(true);
 });

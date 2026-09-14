@@ -168,18 +168,21 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   const legacySnapshot = locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION;
   const costBySku = useMemo(() => new Map((snapshot?.costs ?? []).map(cost => [cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku), cost])), [snapshot?.costs]);
   const [computed, setComputed] = useState(null);
+  const [calculationStatus, setCalculationStatus] = useState("reading");
+  const [retryCalculation, setRetryCalculation] = useState(0);
   useEffect(() => {
     if (locked || !snapshot?.rows?.length) return;
     let active = true;
-    readCachedReportProducts({ snapshot, warehouseRate }).then(lines => {
+    readCachedReportProducts({ snapshot, warehouseRate, onStatus: status => { if (active) setCalculationStatus(status); } }).then(lines => {
       if (active) setComputed({ snapshot, warehouseRate, rows: presentReportProducts(lines, snapshot), error: null });
     }).catch(error => {
-      if (active) setComputed({ snapshot, warehouseRate, rows: [], error: error.message });
+      if (active) setComputed(previous => ({ snapshot, warehouseRate, rows: previous?.snapshot?.ledger?.id === snapshot.ledger.id && previous?.snapshot?.ledger?.workspaceId === snapshot.ledger.workspaceId ? previous.rows : [], error: error.message }));
     });
     return () => { active = false; };
-  }, [snapshot, warehouseRate, locked]);
+  }, [snapshot, warehouseRate, locked, retryCalculation]);
   const savedRows = useMemo(() => locked ? savedProfitRows(snapshot?.profitLines) : [], [locked, snapshot?.profitLines]);
-  const calculation = locked ? { rows: savedRows } : computed?.snapshot === snapshot && computed?.warehouseRate === warehouseRate ? computed : { rows: [], loading: Boolean(snapshot?.rows?.length) };
+  const sameLedger = computed?.snapshot?.ledger?.id === snapshot?.ledger?.id && computed?.snapshot?.ledger?.workspaceId === snapshot?.ledger?.workspaceId;
+  const calculation = locked ? { rows: savedRows } : computed?.snapshot === snapshot && computed?.warehouseRate === warehouseRate ? computed : { rows: sameLedger ? computed.rows : [], loading: Boolean(snapshot?.rows?.length) };
   const calculated = calculation.rows;
 
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
@@ -198,7 +201,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
   const { revenue, totalUnits, purchaseCosts, warehouseFees, penalties, matchedProfit, missing, missingErp } = filteredSummary;
 
-  const canFinalize = Boolean(calculated.length) && ledgerSummary.missing === 0 && !locked;
+  const canFinalize = Boolean(calculated.length) && ledgerSummary.missing === 0 && !locked && !calculation.loading && !calculation.error;
   const costMatchingHref = useMemo(() => buildProfitHref({ ledgerId: snapshot?.ledger?.id, ...filterState, view: "cost" }), [filterState, snapshot?.ledger?.id]);
 
   const openApproval = useCallback((row) => {
@@ -411,9 +414,9 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   if (locked && (!snapshot?.profitLines?.length || !snapshot.ledger.profitSummary)) {
     return <><Panel><EmptyState icon={AlertCircle} title="历史定稿快照缺失" description="该账本缺少已保存的利润明细或汇总，暂不能展示和导出。请恢复完整备份；系统不会按当前成本重算历史。" /></Panel></>;
   }
-  if (calculation.loading) return <Panel className="route-loader" role="status">正在准备本月利润…已保存的计算结果会自动复用。</Panel>;
-  if (calculation.error) {
-    return <Panel><div role="alert"><h2>本月利润待处理</h2><p>{calculation.error}</p><p>当前台账不满足新报告口径，尚未计算商品利润。请核对原始数量与金额；旧扣款需从销售台账移出并登记为独立扣款来源。</p></div><Button onClick={() => navigate("/ledger")}>核对月度账本</Button><Button disabled>预览并定稿</Button></Panel>;
+  if (calculation.loading && !calculated.length && !manualTarget) return <Panel className="route-loader" role="status">{calculationStatus === "recalculating" ? "正在后台计算本月利润…" : "正在读取本月利润…"}</Panel>;
+  if (calculation.error && !calculated.length) {
+    return <Panel><div role="alert"><h2>本月利润待处理</h2><p>{calculation.error}</p><p>尚未计算商品利润，请按上方原因处理。若为来源数据错误，请核对台账；旧扣款需登记为独立扣款来源。</p></div><Button onClick={() => { setRetryCalculation(value => value + 1); }}>重新读取</Button><Button onClick={() => navigate("/ledger")}>核对月度账本</Button><Button disabled>预览并定稿</Button></Panel>;
   }
   if (!snapshot?.ledger || (!locked && !snapshot.rows?.length)) {
     return (
@@ -433,6 +436,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
         actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>报告与导出</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} disabled={!canFinalize} onClick={finalizeLedger}>预览并定稿</Button>}</>}
       />
 
+      {calculation.error ? <div role="alert" className="profit-refresh-status">读取失败：{calculation.error} 以下为上次结果，暂不能定稿。<Button onClick={() => setRetryCalculation(value => value + 1)}>重新读取</Button></div> : null}
+      {calculation.loading ? <p className="profit-refresh-status" role="status">正在更新计算，当前显示上次结果；更新完成后才能定稿。</p> : null}
       <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
         <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
         <span className="profit-purpose-arrow">→</span>
