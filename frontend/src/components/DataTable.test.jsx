@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from "react";
+import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DataTable from "./DataTable";
@@ -53,4 +53,21 @@ describe("DataTable navigation", () => {
     expect(container.querySelector('[aria-current="page"]').textContent).toBe("1");
     expect(container.querySelector("th").getAttribute("aria-sort")).toBe("ascending");
   });
+  it("restores the saved page only after data loads and clamps a changed list without replacing saved scroll", async () => {
+    const initialViewState = { pageIndex: 2, sorting: [], scrollTop: 0, scrollLeft: 80, windowScrollY: 420 };
+    const tableRef = createRef();
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    try {
+      await act(async () => root.render(<DataTable ref={tableRef} data={[]} dataReady={false} columns={columns} initialViewState={initialViewState} />));
+      expect(tableRef.current.getViewState().pageIndex).toBe(2);
+      expect(scrollTo).not.toHaveBeenCalled();
+      await act(async () => root.render(<DataTable ref={tableRef} data={data.slice(0, 25)} dataReady columns={columns} initialViewState={initialViewState} />));
+      expect(container.querySelector('[aria-current="page"]').textContent).toBe("2");
+      expect(container.querySelector("tbody tr").textContent).toBe("商品 21");
+      expect(container.querySelector(".table-wrap").scrollLeft).toBe(80);
+      expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 420, behavior: "auto" });
+      expect(tableRef.current.getViewState().pageIndex).toBe(1);
+    } finally { scrollTo.mockRestore(); }
+  });
+
 });

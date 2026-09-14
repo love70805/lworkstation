@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -132,7 +132,7 @@ function VirtualBody({ table, rows, getRowProps, estimateSize, className = "" })
   );
 }
 
-export default function DataTable({
+const DataTable = forwardRef(function DataTable({
   data,
   columns,
   className = "",
@@ -143,11 +143,23 @@ export default function DataTable({
   virtualizeThreshold = 100,
   estimateSize = 64,
   paginationResetKey,
-}) {
+  initialViewState,
+  dataReady = true,
+}, ref) {
   const regionRef = useRef(null);
-  const previousPageRef = useRef(0);
-  const [sorting, setSorting] = useState([]);
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize });
+  const initialPage = Math.max(0, Math.floor(Number(initialViewState?.pageIndex) || 0));
+  const previousPageRef = useRef(initialPage);
+  const restoringRef = useRef(Boolean(initialViewState));
+  const resetScopeRef = useRef(paginationResetKey);
+  const [sorting, setSorting] = useState(initialViewState?.sorting ?? []);
+  const previousSortingRef = useRef(sorting);
+  const [pagination, setPagination] = useState({ pageIndex: initialPage, pageSize });
+  useImperativeHandle(ref, () => ({
+    getViewState: () => {
+      const area = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+      return { pageIndex: pagination.pageIndex, sorting, scrollTop: area?.scrollTop ?? 0, scrollLeft: area?.scrollLeft ?? 0, windowScrollY: window.scrollY };
+    },
+  }), [pagination.pageIndex, sorting]);
   const stableColumns = useMemo(() => columns, [columns]);
   const table = useTable({
     features,
@@ -156,22 +168,42 @@ export default function DataTable({
     state: { sorting, pagination },
     onSortingChange: setSorting,
     onPaginationChange: setPagination,
+    autoResetPageIndex: paginationResetKey === undefined && !initialViewState,
     getRowId,
   });
   useEffect(() => {
+    if (!dataReady) return;
     const maxPageIndex = Math.max(0, Math.ceil(data.length / pagination.pageSize) - 1);
     setPagination((current) => current.pageIndex > maxPageIndex ? { ...current, pageIndex: maxPageIndex } : current);
-  }, [data.length, pagination.pageSize]);
+  }, [data.length, pagination.pageSize, dataReady]);
   useEffect(() => {
+    if (resetScopeRef.current === paginationResetKey && previousSortingRef.current === sorting) return;
+    resetScopeRef.current = paginationResetKey;
+    previousSortingRef.current = sorting;
+    restoringRef.current = false;
     setPagination((current) => current.pageIndex === 0 ? current : { ...current, pageIndex: 0 });
   }, [paginationResetKey, sorting]);
+  useLayoutEffect(() => {
+    if (!restoringRef.current || !dataReady) return;
+    const maxPage = Math.max(0, Math.ceil(data.length / pagination.pageSize) - 1);
+    if (pagination.pageIndex > maxPage) return;
+    const area = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+    if (area) {
+      area.scrollTop = initialViewState.scrollTop ?? 0;
+      area.scrollLeft = initialViewState.scrollLeft ?? 0;
+    }
+    window.scrollTo({ top: initialViewState.windowScrollY ?? 0, behavior: "auto" });
+    previousPageRef.current = pagination.pageIndex;
+    restoringRef.current = false;
+  }, [dataReady, data.length, pagination.pageIndex, pagination.pageSize, initialViewState]);
   useEffect(() => {
-    if (previousPageRef.current === pagination.pageIndex) return;
+    if (restoringRef.current || previousPageRef.current === pagination.pageIndex) return;
     previousPageRef.current = pagination.pageIndex;
     const scrollArea = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
     if (scrollArea) {
       scrollArea.scrollTop = 0;
-      scrollArea.scrollIntoView?.({ block: "start", behavior: "auto" });
+      const top = scrollArea.getBoundingClientRect().top;
+      if (top < 64 || top >= window.innerHeight) scrollArea.scrollIntoView?.({ block: "start", behavior: "auto" });
     }
   }, [pagination.pageIndex]);
   const rows = table.getRowModel().rows;
@@ -213,4 +245,6 @@ export default function DataTable({
       </div>
     </div>
   );
-}
+});
+
+export default DataTable;
