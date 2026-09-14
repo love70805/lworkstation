@@ -132,12 +132,19 @@ export function ProgressBar({ value, tone = "primary", label }) {
 export function Modal({ open, title, description, children, footer, onClose, tone = "default", className = "" }) {
   const closeButtonRef = useRef(null);
   const previousFocusRef = useRef(null);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
+
+  // Inline close handlers change during editing; keep Escape current without
+  // restarting the dialog's initial focus and focus restoration lifecycle.
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return undefined;
     previousFocusRef.current = document.activeElement;
-    const listener = (event) => event.key === "Escape" && onClose?.();
+    const listener = (event) => event.key === "Escape" && onCloseRef.current?.();
     window.addEventListener("keydown", listener);
     const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
     return () => {
@@ -145,7 +152,7 @@ export function Modal({ open, title, description, children, footer, onClose, ton
       window.clearTimeout(focusTimer);
       previousFocusRef.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
