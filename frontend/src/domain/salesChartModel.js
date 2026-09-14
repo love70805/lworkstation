@@ -10,7 +10,7 @@ export function salesStoreColor(name) {
   return `hsl(${(hash >>> 0) % 360} 52% 35%)`;
 }
 export function buildSalesMonth(data, { store = 'all', today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } = {}) {
-  const period = data.period, byDay = new Map(), stores = new Map();
+  const period = data.period, byDay = new Map(), stores = new Map(), byStore = new Map();
   let sourceCount = 0, unlocated = 0, lastDate = null, storePresent = false;
   const monthTotalsExact = total();
   for (const row of data.sourceRows ?? []) {
@@ -22,6 +22,11 @@ export function buildSalesMonth(data, { store = 'all', today = new Date().toLoca
     const revenue = new Exact(row.amountExact ?? row.amount ?? 0), quantity = new Exact(row.quantityExact ?? row.quantity ?? 0);
     monthTotalsExact.revenueExact = new Exact(monthTotalsExact.revenueExact).plus(revenue).toFixed();
     monthTotalsExact.quantityExact = new Exact(monthTotalsExact.quantityExact).plus(quantity).toFixed();
+    // Monthly bars belong to the ledger month, including rows without a usable day.
+    if (!byStore.has(key)) byStore.set(key, { ...total(), store: stores.get(key), key });
+    const monthly = byStore.get(key);
+    monthly.revenueExact = new Exact(monthly.revenueExact).plus(revenue).toFixed();
+    monthly.quantityExact = new Exact(monthly.quantityExact).plus(quantity).toFixed();
     const parsed = parseSalesAddedDate(row.sourceAddedDate, { period });
     if (parsed.dateStatus !== 'valid') { unlocated++; continue; }
     const date = parsed.sourceAddedDate;
@@ -49,7 +54,10 @@ export function buildSalesMonth(data, { store = 'all', today = new Date().toLoca
     const known = status === 'data' || status === 'known_zero';
     return { date, status, segments, revenueExact: known ? legacy?.revenueExact ?? sums.revenueExact : null, quantityExact: known ? legacy?.quantityExact ?? sums.quantityExact : null };
   });
-  return { period, daily, stores: [...stores.values()], coverage, unlocated, cutoff: current ? lastDate : null, isCurrent: current, missingStore: store !== 'all' && !storePresent && !fallback, monthTotalsExact: fallback ? data.monthTotalsExact : monthTotalsExact };
+  const monthlySegments = [...byStore.values()].sort((a, b) => a.key.localeCompare(b.key));
+  // Older aggregate-only callers cannot supply an invented per-store breakdown.
+  if (fallback && data.monthTotalsExact?.count > 0) monthlySegments.push({ store: store === 'all' ? '店铺合计' : store, key: 'legacy-total', revenueExact: data.monthTotalsExact.revenueExact, quantityExact: data.monthTotalsExact.quantityExact });
+  return { period, daily, monthlySegments, stores: [...stores.values()], coverage, unlocated, cutoff: current ? lastDate : null, isCurrent: current, missingStore: store !== 'all' && !storePresent && !fallback, monthTotalsExact: fallback ? data.monthTotalsExact : monthTotalsExact };
 }
 function nice(value) {
   if (!value) return 0;
@@ -75,6 +83,34 @@ export function salesSegments(day, metric, scale) {
     const top = value >= 0 ? scale.zero - positive - height : scale.zero + negative;
     if (value >= 0) positive += height; else negative += height;
     return { ...segment, height, top, percent: validPercent ? new Exact(segment[metric]).div(day[metric]).times(100).toDecimalPlaces(1).toFixed() : null };
+  });
+}
+export function salesGroupedScale(months, metric, { monthly = false, hiddenStores = [] } = {}) {
+  const hidden = new Set([...hiddenStores].map(salesStoreKey));
+  let high = 0, low = 0;
+  for (const month of months) {
+    if (month.missingStore) continue;
+    const groups = monthly ? [{ segments: month.monthlySegments ?? [] }] : month.daily;
+    for (const group of groups) {
+      if (!monthly && group[metric] == null) continue;
+      for (const segment of group.segments) {
+        if (hidden.has(salesStoreKey(segment.key)) || hidden.has(salesStoreKey(segment.store)) || segment[metric] == null) continue;
+        const value = Number(segment[metric]);
+        if (!Number.isFinite(value)) continue;
+        high = Math.max(high, value); low = Math.min(low, value);
+      }
+    }
+  }
+  const max = nice(high) || (low ? 0 : 1), min = -nice(-low), range = max - min;
+  return { max, min, range, zero: max / range * 100 };
+}
+export function salesGroupedSegments(day, metric, scale) {
+  if (day[metric] == null) return [];
+  const segments = day.segments.filter(segment => segment[metric] != null && Number.isFinite(Number(segment[metric])));
+  const validPercent = new Exact(day[metric]).gt(0) && segments.every(segment => new Exact(segment[metric]).gte(0));
+  return segments.map(segment => {
+    const value = Number(segment[metric]), height = Math.abs(value) / scale.range * 100;
+    return { ...segment, height, top: value >= 0 ? scale.zero - height : scale.zero, percent: validPercent ? new Exact(segment[metric]).div(day[metric]).times(100).toDecimalPlaces(1).toFixed() : null };
   });
 }
 export function salesDayDifference(a, b, metric) {
