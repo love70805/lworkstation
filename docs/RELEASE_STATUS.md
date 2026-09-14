@@ -2,7 +2,16 @@
 
 更新时间：2026-09-14
 
-## 当前公开稳定版 0.2.14
+## 当前公开稳定版 0.2.15
+
+- 修复代发件数输入跳焦；压缩利润页重复控件，日明细限高滚动，复用已加载来源以减少读取和聚合。
+- 649 项测试、完整发布门禁、Windows 实际输入/候选、12组浏览器布局通过；[验收记录](RELEASE_0.2.15.md)。PR #68 / main CI 通过，标签 `b7e2aa0` 与构建 `b83bda8` 生产文件一致。
+- [GitHub v0.2.15](https://github.com/love70805/lworkstation/releases/tag/v0.2.15) 已于 2026-09-14 09:32:37（UTC+8）公开 Latest，四资产匿名回读一致。0.2.14 能发现新版，当前版不重复提示。
+- 旧 Beta 已不在 GitHub 最近发布列表，提示“没有同通道版本”；未误取稳定版，本轮没有发布新 Beta。
+- [Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.15/Lworkstation-Setup-0.2.15.exe)，116,544,912 字节；SHA-256 `7277B553D2E9C33382E4C06B8AA5A387F30755C1F7B38E26997ADDC653E99047`。
+- 本机未安装，真实数据未改，无迁移。候选 `releases/candidates/0.2.15-profit-usability/`，历史稳定包保留。
+
+## 历史稳定版 0.2.14
 
 - 每日商品明细改用 SKC 并支持搜索；活动名称简写、去重，去掉时间和价格等冗长内容。首页与利润页同步生效，计算口径和原始证据保留，无数据库迁移。
 - 643 项测试、完整发布检查、桌面 verify / packaged smoke、12 组浏览器布局和实际 Windows 候选验收通过。详见 [0.2.14 验收](RELEASE_0.2.14.md)。
