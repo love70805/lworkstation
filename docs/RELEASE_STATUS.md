@@ -1,8 +1,15 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-14
+更新时间：2026-09-15
 
-## 当前公开稳定版 0.2.15
+## 当前公开稳定版 0.2.16
+
+- 每日分店铺图和月份对比、持久化缓存/后台计算、利润按需明细、输入和详情返回、共享 UI 与动效已交付。
+- 681 项 CI 测试、构建、发布合同、Windows 候选及公开四资产回读通过，见 [验收记录](RELEASE_0.2.16.md)。
+- [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.16) / [Windows 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.16/Lworkstation-Setup-0.2.16.exe)。稳定通道检查通过，旧 Beta feed 限制保持明确隔离。
+- 本机未安装；业务数据库仍为 v15，未改真实数据、未执行云端迁移。
+
+## 历史稳定版 0.2.15
 
 - 修复代发件数输入跳焦；压缩利润页重复控件，日明细限高滚动，复用已加载来源以减少读取和聚合。
 - 649 项测试、完整发布门禁、Windows 实际输入/候选、12组浏览器布局通过；[验收记录](RELEASE_0.2.15.md)。PR #68 / main CI 通过，标签 `b7e2aa0` 与构建 `b83bda8` 生产文件一致。
