@@ -49,3 +49,6 @@ pnpm --dir desktop release:check
 `release:build` 打入受控 beta 更新配置，将候选暂存于 `desktop/release-test/<版本>/`；`release:organize` 再将其整理至 `releases/prerelease/<版本>/`。稳定版构建使用 `pnpm --dir desktop build`，其余验证与整理步骤相同，由 `release-plan.json` 中的版本决定归档路径和更新元数据。
 
 专职 Worktree 的安装包仍然只是预览包；正式交付必须从集成分支执行对应流程。公开上传与真实安装验收见 [更新测试清单](../desktop/UPDATE_RELEASE_CHECKLIST.md)。
+
+## 0.2.17 分组销售图候选
+位置：releases/candidates/0.2.17-grouped-sales/。纯本机 Windows，待候选验收；未安装。详见 docs/RELEASE_0.2.17.md。

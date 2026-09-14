@@ -28,12 +28,12 @@ beforeEach(async () => {
   await act(async () => root.render(<SalesAnalytics workspaceId="W" ledgerId="L" />));
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
-it('replaces the month with one stack, retains wide SKC details and resets only list scroll on paging', async () => {
+it('replaces the month with grouped store bars, retains SKC details and resets only list scroll on paging', async () => {
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
   await act(async () => container.querySelector('.sales-daily-bar').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(1);
   expect(container.querySelectorAll('.sales-stack-segment')).toHaveLength(2);
-  expect(container.querySelector('.sales-store-legend')).toBeNull();
+  expect(container.querySelectorAll('.sales-store-legend button')).toHaveLength(2);
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
   expect(container.textContent).toContain('SKC1');
   const table = container.querySelector('.sales-day-table'); table.scrollTop = 200; document.documentElement.scrollTop = 400;
@@ -62,3 +62,33 @@ it('search changes reset pagination without destroying the input element', async
   expect(container.textContent).toContain('第 1/1 页');
 });
 
+
+it('compares monthly store totals and legend toggles only chart visibility', async () => {
+  await choose(container.querySelector('select'), 'P');
+  await act(async () => find('每月').click());
+  expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(2);
+  expect(container.querySelectorAll('.sales-grouped-segment')).toHaveLength(4);
+  expect(container.querySelector('.sales-month-totals').textContent).toContain('250');
+  const legend = container.querySelector('.sales-store-legend button');
+  await act(async () => legend.click());
+  expect(legend.getAttribute('aria-pressed')).toBe('false');
+  expect(container.querySelectorAll('.sales-grouped-segment')).toHaveLength(2);
+  expect(container.querySelector('.sales-month-totals').textContent).toContain('250');
+  await act(async () => find('每日').click());
+  await act(async () => container.querySelector('.sales-daily-bar').click());
+  expect(container.querySelector('.sales-list-scope').textContent).toContain('25/25');
+});
+
+it('monthly focus identifies one month and exposes each store value', async () => {
+  await choose(container.querySelector('select'), 'P');
+  await act(async () => find('每月').click());
+  const bars = container.querySelectorAll('.sales-daily-bar');
+  await act(async () => Simulate.focus(bars[0]));
+  expect(container.querySelectorAll('.sales-daily-bar.is-selected')).toHaveLength(1);
+  expect(container.querySelector('.sales-hover-summary').textContent).toContain('2026-07');
+  expect(container.querySelector('.sales-hover-summary').textContent).toContain('甲');
+  expect(bars[0].getAttribute('aria-label')).toContain('销售原额');
+  await act(async () => Simulate.focus(bars[1]));
+  expect(container.querySelectorAll('.sales-daily-bar.is-selected')).toHaveLength(1);
+  expect(container.querySelector('.sales-hover-summary').textContent).toContain('2026-08');
+});

@@ -27,7 +27,7 @@ export async function readLedgerSalesAnalytics(scope) {
   // clicks can reuse it without cloning the full ledger from IndexedDB again.
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   const store = scope.store ?? 'all';
-  return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today], formula: 'daily-sales@3-chart', revision: sourceRevision(), compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
+  return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today], formula: 'daily-sales@4-grouped', revision: sourceRevision(), compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
 }
 
 export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store = "all", date }) {

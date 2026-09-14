@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSalesMonth, salesScale, salesSegments, salesStoreColor, salesDayDifference } from './salesChartModel';
+import { buildSalesMonth, salesScale, salesSegments, salesStoreColor, salesDayDifference, salesGroupedScale, salesGroupedSegments } from './salesChartModel';
 const row = (store, date, amount, quantity = '1') => ({ store, sourceAddedDate: date, amountExact: amount, quantityExact: quantity });
 const model = (rows, period = '2026-08', store = 'all') => buildSalesMonth({ period, sourceRows: rows }, { store, today: '2026-09-14' });
 describe('sales chart semantic model', () => {
@@ -39,5 +39,49 @@ describe('sales chart semantic model', () => {
     expect(salesDayDifference(a.daily[0], b.daily[0], 'revenueExact')).toBe('-9.991');
     expect(salesDayDifference(a.daily[30], b.daily[30], 'revenueExact')).toBeNull();
     expect(salesScale([a,b], 'revenueExact').max).toBe(10);
+  });
+  it('includes undated and out-of-period rows in exact per-store monthly totals', () => {
+    const month = model([row('甲', '2026-08-01', '0.009', '0.1'), row('甲', null, '0.001', '0.2'), row('乙', '2026-07-31', '5'), { ...row('乙', null, '100'), isDeduction: true }]);
+    expect(month.monthlySegments.find(item => item.store === '甲')).toMatchObject({ revenueExact: '0.01', quantityExact: '0.3' });
+    expect(month.monthlySegments.find(item => item.store === '乙')).toMatchObject({ revenueExact: '5', quantityExact: '1' });
+    expect(month.monthTotalsExact).toEqual({ revenueExact: '5.01', quantityExact: '1.3' });
+    expect(month.unlocated).toBe(2);
+    expect(month.daily[0].revenueExact).toBe('0.009');
+  });
+  it('keeps missing and sales-unknown stores absent from monthly bars while retaining real zero', () => {
+    const rows = [row('甲', '2026-08-01', '0'), { ...row('乙', null, '1'), isDeduction: true }];
+    expect(model(rows, '2026-08', '丙').monthlySegments).toEqual([]);
+    expect(model(rows, '2026-08', '乙').monthlySegments).toEqual([]);
+    expect(model([]).monthlySegments).toEqual([]);
+    expect(model(rows).monthlySegments).toHaveLength(1);
+    expect(model(rows).monthlySegments[0].revenueExact).toBe('0');
+  });
+  it('scales grouped columns independently and starts each signed bar at zero', () => {
+    const month = model([row('甲', '2026-08-01', '6'), row('乙', '2026-08-01', '7'), row('丙', '2026-08-01', '-3')]);
+    const scale = salesGroupedScale([month], 'revenueExact');
+    expect(scale).toMatchObject({ max: 10, min: -5 });
+    const bars = salesGroupedSegments(month.daily[0], 'revenueExact', scale);
+    for (const bar of bars) {
+      if (Number(bar.revenueExact) >= 0) expect(bar.top + bar.height).toBeCloseTo(scale.zero);
+      else expect(bar.top).toBe(scale.zero);
+      expect(bar.percent).toBeNull();
+    }
+    expect(salesGroupedSegments(month.daily[1], 'revenueExact', scale)).toEqual([]);
+    expect(salesGroupedSegments({ revenueExact: null, segments: month.daily[0].segments }, 'revenueExact', scale)).toEqual([]);
+  });
+  it('uses monthly extrema and hidden store filters without changing source totals', () => {
+    const month = model([row('甲', '2026-08-01', '4'), row('甲', null, '7'), row('乙', '2026-08-01', '2')]);
+    expect(salesGroupedScale([month], 'revenueExact').max).toBe(5);
+    expect(salesGroupedScale([month], 'revenueExact', { monthly: true }).max).toBe(20);
+    expect(salesGroupedScale([month], 'revenueExact', { monthly: true, hiddenStores: [' 甲 '] }).max).toBe(2);
+    expect(salesGroupedScale([month], 'revenueExact', { monthly: true, hiddenStores: ['甲', '乙'] })).toMatchObject({ max: 1, min: -0, zero: 100 });
+    expect(month.monthTotalsExact.revenueExact).toBe('13');
+  });
+  it('preserves tiny values and a usable scale for negative-only grouped data', () => {
+    const positive = model([row('甲', '2026-08-01', '0.009')]);
+    const scale = salesGroupedScale([positive], 'revenueExact');
+    expect(scale.max).toBe(0.01);
+    expect(salesGroupedSegments(positive.daily[0], 'revenueExact', scale)[0]).toMatchObject({ revenueExact: '0.009', percent: '100' });
+    expect(salesGroupedScale([model([row('甲', '2026-08-01', '-2')])], 'revenueExact')).toMatchObject({ max: 0, min: -2, zero: 0 });
   });
 });

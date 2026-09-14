@@ -1,8 +1,16 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.16",
-  "integrationBranch": "codex/update-0.2.16",
+  "version": "0.2.17",
+  "integrationBranch": "codex/update-0.2.17",
   "requiredCommits": [
+    {
+      "module": "grouped-sales-ui",
+      "commit": "e945eda"
+    },
+    {
+      "module": "grouped-monthly-derived-cache",
+      "commit": "a0cd7e5"
+    },
     {
       "module": "commit-safe-cache-read",
       "commit": "1dba743"
