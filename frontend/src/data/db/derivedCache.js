@@ -44,6 +44,19 @@ export function assertSourceRevision(revision) {
   if (revision !== sourceRevision()) throw new StaleDerivedResultError();
 }
 
+// A write promise can settle just before the native transaction's complete
+// event rotates the revision. Retry a coherent read after that event, while
+// retaining a hard bound if another writer keeps changing the source.
+export async function retrySourceRead(read) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await read(); }
+    catch (error) {
+      if (!(error instanceof StaleDerivedResultError) || attempt >= 2) throw error;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  }
+}
+
 export function installDerivedInvalidation(database) {
   const observed = new WeakSet();
   database.use({ stack: 'dbcore', name: 'derived-cache-revision', create(down) {

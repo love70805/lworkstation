@@ -1,6 +1,6 @@
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
-import { cachedDerived, sourceRevision, assertSourceRevision } from '../db/derivedCache';
+import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import { makeId } from "../db/utils";
 import { getActiveMemberContext } from "./selectionRepository";
 import { getLatestLedgerCosts } from "./profitRepository";
@@ -26,6 +26,9 @@ async function sourceContext(ledgerId,write=false){
 const localAudit = (context,action,objectId,after,before=null) => db.auditEvents.add({workspaceId:context.ledger.workspaceId,objectType:'local_profit_report',objectId,action,actorId:context.member.memberId,createdAt:new Date().toISOString(),localOnly:true,syncState:'local_only',before,after});
 
 export async function readMonthlyReportState(ledgerId){
+  return retrySourceRead(() => readMonthlyReportStateOnce(ledgerId));
+}
+async function readMonthlyReportStateOnce(ledgerId){
     const revision = sourceRevision();
     const {ledger}=await scope(ledgerId);
     // The source editor needs stores and adopted batches, not ERP cost rows or

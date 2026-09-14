@@ -15,7 +15,7 @@ import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
-import { sourceRevision, assertSourceRevision } from '../db/derivedCache';
+import { sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -1357,6 +1357,10 @@ export async function voidPublishedErpCostBatch({
 }
 
 export async function getLedgerSnapshot(ledgerId) {
+  return retrySourceRead(() => readLedgerSnapshot(ledgerId));
+}
+
+async function readLedgerSnapshot(ledgerId) {
   const dataVersion = sourceRevision();
   const ledger = await db.ledgers.get(ledgerId);
   if (!ledger) return null;

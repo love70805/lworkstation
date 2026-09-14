@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { liveQuery } from 'dexie';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { db } from './db/clientDatabase';
-import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, StaleDerivedResultError } from './db/derivedCache';
+import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, StaleDerivedResultError, invalidateDerivedCache } from './db/derivedCache';
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { readLedgerSalesAnalytics } from './repositories/salesAnalyticsRepository';
 import { readLedgerSalesRows } from './repositories/ledgerReadCache';
@@ -142,4 +142,31 @@ it('caches worker chart output and distinguishes a missing comparison store from
   const zero = await readLedgerSalesAnalytics({ ...scope, store: 'ALL' });
   expect(zero.chartMonth.missingStore).toBe(false);
   expect(zero.monthTotalsExact.revenueExact).toBe('0');
+});
+
+it('retries a commit revision change during snapshot and sales reads but bounds continuous changes', async () => {
+  const original = db.ledgers.get.bind(db.ledgers);
+  const get = vi.spyOn(db.ledgers, 'get');
+  try {
+    get.mockImplementationOnce(async key => { const ledger = await original(key); invalidateDerivedCache(false); return ledger; });
+    expect((await getLedgerSnapshot('L')).ledger.id).toBe('L');
+    expect(get).toHaveBeenCalledTimes(2);
+    get.mockClear();
+    get.mockImplementationOnce(async key => { const ledger = await original(key); invalidateDerivedCache(false); return ledger; });
+    expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('0.009');
+    expect(get).toHaveBeenCalledTimes(2);
+    get.mockClear();
+    get.mockImplementation(async key => { const ledger = await original(key); invalidateDerivedCache(false); return ledger; });
+    await expect(getLedgerSnapshot('L')).rejects.toBeInstanceOf(StaleDerivedResultError);
+    expect(get).toHaveBeenCalledTimes(3);
+  } finally { get.mockRestore(); }
+});
+
+it('supports save followed immediately by fresh snapshot and sales reads', async () => {
+  for (let index = 0; index < 8; index++) {
+    await db.ledgers.update('L', { warehouseRate: String(index) });
+    expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(String(index));
+    await db.salesRows.where('ledgerId').equals('L').modify({ amountExact: String(index) });
+    expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe(String(index));
+  }
 });

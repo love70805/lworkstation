@@ -1,11 +1,15 @@
 import { db } from "../db/clientDatabase";
 import { getActiveMemberContext } from "./selectionRepository";
-import { cachedDerived, sourceRevision, assertSourceRevision } from '../db/derivedCache';
+import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { runDerivedComputation } from './derivedComputationService';
 import { canonicalStore } from "../../domain/batchSalesImport";
 
-async function readScopedSales({ workspaceId, ledgerId, store = "all", allowMissingStore = false }, aggregate) {
+function readScopedSales(scope, aggregate) {
+  return retrySourceRead(() => readScopedSalesOnce(scope, aggregate));
+}
+
+async function readScopedSalesOnce({ workspaceId, ledgerId, store = "all", allowMissingStore = false }, aggregate) {
     const revision = sourceRevision();
     const current = await getActiveMemberContext();
     const ledger = await db.ledgers.get(ledgerId);
