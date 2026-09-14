@@ -51,7 +51,7 @@ function add(total, row) {
   total.revenueExact = new Exact(total.revenueExact).plus(row.amountExact ?? row.amount ?? 0).toFixed();
   total.count += 1;
 }
-export function aggregateDailySales(rows = [], { period } = {}) {
+export function aggregateDailySales(rows = [], { period, includeSkuStats = true } = {}) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period ?? "")) throw new Error("分析月份无效。");
   const dailyMap = new Map();
   const monthTotalsExact = emptyTotal();
@@ -74,6 +74,7 @@ export function aggregateDailySales(rows = [], { period } = {}) {
         outOfPeriod.rows.push({ sourceSheet: row.sourceSheet, sourceRow: row.sourceRow, date: parsed.sourceAddedDate });
       }
     }
+    if (!includeSkuStats) continue;
     const sku = canonicalPlatformSku(row.platformSku ?? row.sku);
     const key = JSON.stringify([String(row.store ?? "").normalize("NFKC").trim().toUpperCase(), sku]);
     if (!skus.has(key)) skus.set(key, { ...emptyTotal(), store: row.store, platformSku: sku, attributes: new Set(), prices: [], activities: new Set(), knownActivityCount: 0 });

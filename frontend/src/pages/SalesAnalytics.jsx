@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 import { Panel, Button } from "../components/UI";
 import { readLedgerSalesAnalytics, readLedgerDailySalesDetails } from "../data/repositories/salesAnalyticsRepository";
 import { activityName, shortActivityName } from "./salesActivitySummary";
+import { aggregateDailySalesDetails } from "../domain/salesAnalytics";
 
 const show = (value, digits = 2) => value == null ? "待查" : new Decimal(value).toDecimalPlaces(digits, Decimal.ROUND_DOWN).toFixed();
 const pair = day => `销售原额 ${day?.revenueExact == null ? "待查" : `¥${new Decimal(day.revenueExact).toFixed()}`} · 销量 ${day?.quantityExact == null ? "待查" : `${new Decimal(day.quantityExact).toFixed()} 件`}`;
@@ -85,13 +86,14 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     catch (error) { return { scope, error: error.message }; }
   }, [workspaceId, ledgerId, store]);
   const period = result?.scope === scope ? result.data?.period : null;
+  const sourceRows = result?.scope === scope ? result.data?.sourceRows : undefined;
   const date = selected?.period === period ? selected.date : null;
   const detailScope = JSON.stringify([scope, period, date]);
   const details = useLiveQuery(async () => {
     if (!date) return null;
-    try { return { scope: detailScope, data: await readLedgerDailySalesDetails({ workspaceId, ledgerId, store, date }) }; }
+    try { return { scope: detailScope, data: sourceRows ? aggregateDailySalesDetails(sourceRows, { period, date }) : await readLedgerDailySalesDetails({ workspaceId, ledgerId, store, date }) }; }
     catch (error) { return { scope: detailScope, error: error.message }; }
-  }, [workspaceId, ledgerId, store, period, date]);
+  }, [workspaceId, ledgerId, store, period, date, sourceRows]);
   async function changeStore(next) {
     setSelected(null); setStoreError(""); setChanging(true);
     try { await onStoreChange(next); }

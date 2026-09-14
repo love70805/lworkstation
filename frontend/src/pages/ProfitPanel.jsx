@@ -111,7 +111,7 @@ function prepareProfitTableRows(rows) {
   });
 }
 
-export function ProfitWorkspaceContent() {
+export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   const [manualTarget, setManualTarget] = useState(null);
   const [reopenDialog, setReopenDialog] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
@@ -125,7 +125,7 @@ export function ProfitWorkspaceContent() {
   const initialFilterRef = useRef(null);
   if (initialFilterRef.current === null) initialFilterRef.current = readProfitFilter(searchParams, requestedLedgerId);
   const initialFilter = initialFilterRef.current;
-  const snapshot = useLatestSalesImport(requestedLedgerId);
+  const snapshot = useLatestSalesImport(requestedLedgerId, suppliedSnapshot);
   const [query, setQuery] = useState(initialFilter.query);
   const [storeFilter, setStoreFilter] = useState(initialFilter.storeFilter);
   const [supplierSelection, setSupplierSelection] = useState(initialFilter.supplierSelection);
@@ -506,20 +506,20 @@ export function ProfitWorkspaceContent() {
         actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>报告与导出</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} disabled={!canFinalize} onClick={finalizeLedger}>预览并定稿</Button>}</>}
       />
 
-      <Panel className="profit-purpose-strip">
+      <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
         <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
         <span className="profit-purpose-arrow">→</span>
         <div className="profit-purpose-step"><span className="profit-purpose-index">2</span><div><strong>ERP 采购成本</strong><small>人工更正优先 · ERP 原始成本 · 1688 仅参考</small></div></div>
         <span className="profit-purpose-arrow">→</span>
         <div className="profit-purpose-step"><span className="profit-purpose-index">3</span><div><strong>月度利润表</strong><small>{legacySnapshot ? "金额 − 总采购成本 − 仓储成本 − 客退罚款" : "商品利润 + 代发金额 − 独立扣款"}</small></div></div>
         <div className="profit-purpose-formula mono">{legacySnapshot ? "利润" : "商品利润"} = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元){legacySnapshot ? " − 客退罚款" : ""}</div>
-      </Panel>
+      </Panel></details>
 
-      <div className="profit-filter-bar">
+      {!suppliedSnapshot ? <div className="profit-filter-bar">
         <label htmlFor="profit-store">查看店铺</label>
         <select id="profit-store" className="select-input" value={storeFilter} onChange={(event) => changeFilter({ storeFilter: event.target.value })}><option value="all">全部店铺</option>{stores.map((store) => <option value={store} key={store}>{store}</option>)}</select>
         <span>概览随筛选变化；定稿覆盖本月全部店铺。</span>
-      </div>
+      </div> : null}
       <div className="profit-summary-strip">
         <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
         <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
@@ -606,7 +606,7 @@ export function ProfitViewsContent() {
   return <>
     {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p></Panel> : snapshot === undefined ? <Panel>正在读取月度账本...</Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button></Panel> : <>
       <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button><label>店铺 <select className="select-input" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></nav>
-      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} /><SalesAnalytics key={`sales/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} stores={stores} onStoreChange={(nextStore) => change(view, nextStore)} /></>}
+      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} /><SalesAnalytics key={`sales/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} stores={stores} onStoreChange={(nextStore) => change(view, nextStore)} /></>}
     </>}
   </>;
 }

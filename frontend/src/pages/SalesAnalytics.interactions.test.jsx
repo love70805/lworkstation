@@ -72,3 +72,16 @@ it('distinguishes a known zero day from an unlocated unknown day',async()=>{
  await click(button('返回全月'));mocks.day.mockResolvedValueOnce(aggregateDailySalesDetails([],{period,date}));
  await click(dayButton());expect(container.querySelector('.sales-day-details').textContent).toContain('销售原额 待查 · 销量 待查');
 });
+it('reuses the live scoped source for date clicks and refreshes it when the scope reloads',async()=>{
+ mocks.month.mockImplementation(async()=>({...aggregateDailySales(rows,{period,includeSkuStats:false}),sourceRows:rows}));
+ await render({ledgerId:'cached'});
+ await click(dayButton());
+ expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
+ await click(container.querySelectorAll('.sales-daily-bar')[1]);
+ expect(container.querySelector('.sales-details-heading p').textContent).toContain('¥-0.009');
+ expect(mocks.day).not.toHaveBeenCalled();
+ mocks.month.mockImplementation(async()=>({...aggregateDailySales([],{period,includeSkuStats:false}),sourceRows:[]}));
+ await render({ledgerId:'empty'});await click(dayButton());
+ expect(container.querySelector('.sales-day-details').textContent).toContain('待查');
+ expect(container.querySelector('tbody')).toBeNull();
+});
