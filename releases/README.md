@@ -50,5 +50,5 @@ pnpm --dir desktop release:check
 
 专职 Worktree 的安装包仍然只是预览包；正式交付必须从集成分支执行对应流程。公开上传与真实安装验收见 [更新测试清单](../desktop/UPDATE_RELEASE_CHECKLIST.md)。
 
-## 0.2.17 分组销售图候选
-位置：releases/candidates/0.2.17-grouped-sales/。纯本机 Windows，待候选验收；未安装。详见 docs/RELEASE_0.2.17.md。
+## 0.2.17 分组销售图
+位置：releases/candidates/0.2.17-grouped-sales/。纯本机 Windows，候选已验收并公开稳定版；本机未安装。详见 docs/RELEASE_0.2.17.md。
