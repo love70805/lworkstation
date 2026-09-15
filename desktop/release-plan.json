@@ -1,8 +1,16 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.17",
-  "integrationBranch": "codex/update-0.2.17",
+  "version": "0.2.18",
+  "integrationBranch": "codex/update-0.2.18",
   "requiredCommits": [
+    {
+      "module": "stacked-sales-stable-hover",
+      "commit": "42b46bb"
+    },
+    {
+      "module": "simplified-home",
+      "commit": "9437d5d"
+    },
     {
       "module": "grouped-sales-ui",
       "commit": "e945eda"
