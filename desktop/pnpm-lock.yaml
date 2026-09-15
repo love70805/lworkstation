@@ -22,8 +22,8 @@ importers:
         specifier: 1.40.0
         version: 1.40.0
       semver:
-        specifier: 7.7.4
-        version: 7.7.4
+        specifier: 7.8.5
+        version: 7.8.5
     devDependencies:
       electron:
         specifier: 44.2.0
