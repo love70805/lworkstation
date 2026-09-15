@@ -9,7 +9,7 @@ export default function WorkspaceLedgerControls({ scope, onError }) {
   const ledger = ready ? context.selected : null;
   const change = (field, value) => { void scope.change(field, value).catch(error => onError(error.message)); };
   return <Panel className="workspace-ledger-controls">
-    <div className="workspace-ledger-heading"><div><h2>月度账本管理</h2><p>选择核算月份与店铺，查看销售趋势并处理当月成本。</p></div><Link className="button button-secondary" to={`/ledger${context?.query ? `?${context.query}` : ''}`}>全部账本管理</Link></div>
+    <div className="workspace-ledger-heading"><h2>月度账本</h2><Link className="button button-secondary" to={`/ledger${context?.query ? `?${context.query}` : ''}`}>管理账本</Link></div>
     {!scope.ready ? <p role="status">正在读取当前工作区账本…</p> : context.error ? <p role="alert">账本读取失败：{context.error}</p> : !ledger ? <p>还没有月度账本，导入同月各店铺台账后开始核算。</p> : <>
       <div className="workspace-ledger-filters">
         <label>核算月份<select className="select-input" aria-label="首页核算月份" value={ledger.id} onChange={event => change('ledger', event.target.value)}>{context.ledgers.map(item => <option key={item.id} value={item.id}>{item.period}</option>)}</select></label>
