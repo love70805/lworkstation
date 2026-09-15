@@ -53,5 +53,5 @@ pnpm --dir desktop release:check
 ## 0.2.17 分组销售图
 位置：releases/candidates/0.2.17-grouped-sales/。纯本机 Windows，候选已验收并公开稳定版；本机未安装。详见 docs/RELEASE_0.2.17.md。
 
-## 0.2.18 堆叠销售候选
-位置：releases/candidates/0.2.18-stacked-sales/。待Windows候选验收，本机不安装。详见 docs/RELEASE_0.2.18.md。
+## 0.2.18 堆叠销售
+位置：releases/candidates/0.2.18-stacked-sales/。Windows候选已通过并公开发布，本机未安装。详见 docs/RELEASE_0.2.18.md。
