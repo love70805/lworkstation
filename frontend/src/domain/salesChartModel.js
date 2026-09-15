@@ -7,7 +7,10 @@ export const salesStoreKey = name => canonicalStore(name || '店铺待查');
 export function salesStoreColor(name) {
   let hash = 2166136261;
   for (const char of salesStoreKey(name)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
-  return `hsl(${(hash >>> 0) % 360} 52% 35%)`;
+  // Deliberately spaced hues keep common stores distinct without changing
+  // their color when the month, filter or legend visibility changes.
+  const hues = [217, 166, 270, 32, 140, 345, 190, 290, 48, 110, 15, 245];
+  return `hsl(${hues[(hash >>> 0) % hues.length]} 62% 35%)`;
 }
 export function buildSalesMonth(data, { store = 'all', today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } = {}) {
   const period = data.period, byDay = new Map(), stores = new Map(), byStore = new Map();

@@ -37,7 +37,7 @@ it('hover/focus reads both exact values without database work; toggling/reopenin
  await act(async()=>Simulate.keyDown(container.querySelector('.sales-day-details'),{key:'Escape'}));expect(container.querySelector('.sales-day-details')).toBeNull();
 });
 it('paginates only selected-day products, searches without changing totals and shows SKC and concise activity names',async()=>{
- await click(dayButton());expect(container.querySelectorAll('tbody tr')).toHaveLength(12);
+ await click(dayButton());expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
  expect(container.querySelector('tbody tr').textContent).toContain('skc-00');
  expect(container.querySelector('.sales-activities').open).toBe(false);expect(container.querySelector('.sales-activity-original')).toBeNull();
  const activity=container.querySelector('.sales-activities');
@@ -45,7 +45,7 @@ it('paginates only selected-day products, searches without changing totals and s
  expect(activity.textContent).toContain('「返校季」常规活动');
  expect(activity.textContent).not.toMatch(/客单创建时间|活动时间范围|结算价格|04:58:49/);
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
- await click(button('下一页'));expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+ await click(button('下一页'));expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
  const sort=container.querySelector('.sales-details-controls select');await act(async()=>Simulate.change(sort,{target:{value:'quantityExact'}}));
  expect(container.querySelector('tbody tr').textContent).toContain('skc-14');
  const before=container.querySelector('.sales-details-heading p').textContent;

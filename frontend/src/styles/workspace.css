@@ -68,6 +68,17 @@
   gap: 16px;
 }
 
+/* The home page is a short overview; secondary details open on demand. */
+.workspace-disclosure { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.workspace-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.workspace-disclosure > summary > span:first-child { display: inline-flex; align-items: center; gap: 8px; }
+.workspace-disclosure > summary::after { content: '展开'; color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.workspace-disclosure[open] > summary::after { content: '收起'; }
+.workspace-disclosure > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.workspace-page .task-empty { min-height: 64px; padding: 12px 16px; }
+.workspace-page .quick-actions button { min-height: 58px; padding: 9px 8px; }
+.workspace-page .activity-list { max-height: 280px; overflow: auto; }
+
 .dashboard-widget { box-shadow: var(--shadow-sm); }
 .widget-subtitle { margin: -6px 16px 10px; color: var(--text-muted); font-size: 11px; line-height: 17px; }
 .widget-count { color: var(--text-muted); font-size: 11px; }
@@ -356,15 +367,21 @@
 .workspace-month-picker .select-input { min-width:120px; }
 
 .workspace-month-picker > span { white-space:nowrap; }
-.workspace-ledger-controls { margin-bottom: 20px; padding: 20px; }
+.workspace-ledger-controls { margin-bottom: 16px; padding: 16px; }
 .workspace-ledger-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
 .workspace-ledger-heading h2 { margin: 0 0 6px; font-size: 17px; }
 .workspace-ledger-heading p { margin: 0; color: var(--text-muted); font-size: 13px; }
-.workspace-ledger-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin: 20px 0; }
-.workspace-ledger-filters label { display: grid; gap: 6px; min-width: 170px; font-size: 13px; }
+.workspace-ledger-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 12px 0; }
+.workspace-ledger-filters label { display: grid; gap: 6px; min-width: 140px; font-size: 13px; }
 .workspace-ledger-status { display: grid; gap: 6px; font-size: 13px; padding-bottom: 4px; }
 .workspace-ledger-status span { color: var(--text-muted); }
 .workspace-ledger-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+@media (min-width: 1200px) {
+  .workspace-ledger-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; }
+  .workspace-ledger-heading { grid-column: 1 / -1; align-items: center; }
+  .workspace-ledger-filters { margin: 0; }
+  .workspace-ledger-actions { align-self: end; margin: 0; }
+}
 @media (max-width: 600px) {
   .workspace-ledger-heading { flex-direction: column; }
   .workspace-ledger-filters label { width: 100%; min-width: 0; }
