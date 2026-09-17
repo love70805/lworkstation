@@ -10,7 +10,7 @@ export function salesStoreColor(name) {
   // Deliberately spaced hues keep common stores distinct without changing
   // their color when the month, filter or legend visibility changes.
   const hues = [217, 166, 270, 32, 140, 345, 190, 290, 48, 110, 15, 245];
-  return `hsl(${hues[(hash >>> 0) % hues.length]} 62% 35%)`;
+  return `hsl(${hues[(hash >>> 0) % hues.length]} 68% 46%)`;
 }
 export function buildSalesMonth(data, { store = 'all', today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } = {}) {
   const period = data.period, byDay = new Map(), stores = new Map(), byStore = new Map();
@@ -64,8 +64,8 @@ export function buildSalesMonth(data, { store = 'all', today = new Date().toLoca
 }
 function nice(value) {
   if (!value) return 0;
-  const power = 10 ** Math.floor(Math.log10(value)), fraction = value / power;
-  return ([1, 2, 5, 10].find(step => step >= fraction) ?? 10) * power;
+  // Keep the same headroom across metrics without coarse power-of-ten jumps.
+  return new Exact(value).times('1.08').toSignificantDigits(3, Decimal.ROUND_CEIL).toNumber();
 }
 export function salesScale(months, metric) {
   let high = 0, low = 0;

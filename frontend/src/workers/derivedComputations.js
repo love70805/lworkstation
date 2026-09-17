@@ -1,8 +1,10 @@
 import { aggregateDailySales, aggregateDailySalesDetails } from '../domain/salesAnalytics';
 import { buildReportProducts } from '../domain/profitReports';
 import { buildSalesMonth } from '../domain/salesChartModel';
+import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 
 export function computeDerived(kind, input) {
+  if (kind === 'period-detail') return aggregatePeriodSalesDetails(input.rows, input);
   if (kind === 'sales') {
     const result = aggregateDailySales(input.rows, { period: input.period, includeSkuStats: false });
     return { ...result, chartMonth: buildSalesMonth({ ...result, sourceRows: input.rows }, { store: input.store, today: input.today }) };

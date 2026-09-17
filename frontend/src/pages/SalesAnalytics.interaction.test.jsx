@@ -4,8 +4,17 @@ import { createRoot } from 'react-dom/client';
 import { Simulate } from 'react-dom/test-utils';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SalesAnalytics from './SalesAnalytics';
+import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 const mock = vi.hoisted(() => ({ read: vi.fn() }));
-vi.mock('../data/repositories/salesAnalyticsRepository', () => ({ readLedgerSalesAnalytics: mock.read, readLedgerDailySalesDetails: vi.fn() }));
+vi.mock('../data/repositories/salesAnalyticsRepository', () => ({
+  readLedgerSalesAnalytics: mock.read,
+  readWorkspaceSalesMonths: vi.fn(async () => []),
+  readLedgerPeriodSalesDetails: async scope => {
+    const period = scope.ledgerId === 'L' ? '2026-08' : '2026-07';
+    const rows = Array.from({ length: 25 }, (_, index) => ({ store: index % 2 ? '甲' : '乙', platformSku: `SKU${index}`, platformSkc: `SKC${index}`, sourceAddedDate: `${period}-01`, amountExact: '10', quantityExact: '1' }));
+    return aggregatePeriodSalesDetails(rows, { period, date: scope.date });
+  },
+}));
 vi.mock('../data/repositories/profitRepository', () => ({ listLedgerSummaries: async () => [{ id: 'L', workspaceId: 'W', period: '2026-08' }, { id: 'P', workspaceId: 'W', period: '2026-07' }] }));
 vi.mock('dexie-react-hooks', async () => {
   const { useState, useEffect } = await import('react');
@@ -29,18 +38,19 @@ beforeEach(async () => {
   await act(async () => root.render(<SalesAnalytics workspaceId="W" ledgerId="L" />));
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
-it('replaces the month with stacked store bars, retains SKC details and resets only list scroll on paging', async () => {
+it('replaces daily stacks with a store pie, retains SKC details and resets only list scroll on paging', async () => {
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
   await act(async () => container.querySelector('.sales-daily-bar').click());
-  expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(1);
-  expect(container.querySelectorAll('.sales-stack-segment')).toHaveLength(2);
-  expect(container.querySelectorAll('.sales-store-legend button')).toHaveLength(2);
+  expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(0);
+  expect(container.querySelectorAll('.sales-store-pie [role="button"]')).toHaveLength(2);
+  expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(2);
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
   expect(container.textContent).toContain('SKC1');
   const table = container.querySelector('.sales-day-table'); table.scrollTop = 200; document.documentElement.scrollTop = 400;
+  await act(async () => Simulate.scroll(table));
   await act(async () => find('下一页').click());
   expect(table.scrollTop).toBe(0); expect(document.documentElement.scrollTop).toBe(400);
-  await act(async () => find('返回全月').click());
+  await act(async () => find('返回总览').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
 });
 it('search changes reset pagination without destroying the input element', async () => {
@@ -55,9 +65,9 @@ it('search changes reset pagination without destroying the input element', async
 });
 
 
-it('removes monthly controls and queries, stacks stores on a shared column, and keeps hidden filters visual', async () => {
+it('keeps monthly data lazy, stacks daily stores on a shared column, and keeps hidden filters visual', async () => {
   expect(container.textContent).not.toContain('对比月份');
-  expect(find('每月')).toBeUndefined();
+  expect(find('月度')).toBeDefined();
   expect(mock.read).toHaveBeenCalledTimes(1);
   expect(mock.read.mock.calls[0][0].ledgerId).toBe('L');
   const segments = [...container.querySelector('.sales-daily-bar').querySelectorAll('.sales-stack-segment')];
@@ -86,7 +96,8 @@ it('hover and keyboard focus keep chart and details DOM stable without extra dat
   await act(async () => bar.click());
   const table = container.querySelector('.sales-day-table'), input = container.querySelector('input');
   table.scrollTop = 50;
-  await act(async () => Simulate.mouseEnter(container.querySelector('.sales-daily-bar')));
+  await act(async () => Simulate.scroll(table));
+  await act(async () => find('销量').click());
   expect(container.querySelector('.sales-day-table')).toBe(table);
   expect(container.querySelector('input')).toBe(input);
   expect(table.scrollTop).toBe(50);
