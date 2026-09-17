@@ -1,8 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "0.2.18",
-  "integrationBranch": "codex/update-0.2.18",
+  "version": "0.2.19",
+  "integrationBranch": "codex/sales-detail-0.2.19",
   "requiredCommits": [
+    {
+      "module": "monthly-sales-and-period-skc-details",
+      "commit": "1703951"
+    },
     {
       "module": "stacked-sales-stable-hover",
       "commit": "42b46bb"
