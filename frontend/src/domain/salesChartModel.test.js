@@ -13,7 +13,7 @@ describe('sales chart semantic model', () => {
     const month = model([row('甲', '2026-08-01', '10.009'), row('乙', '2026-08-01', '-10.009')]);
     expect(month.daily[0].revenueExact).toBe('0');
     const scale = salesScale([month], 'revenueExact');
-    expect(scale).toMatchObject({ max: 20, min: -20, zero: 50 });
+    expect(scale).toMatchObject({ max: 10.9, min: -10.9, zero: 50 });
     expect(salesSegments(month.daily[0], 'revenueExact', scale).every(item => item.percent === null)).toBe(true);
     expect(salesSegments(month.daily[0], 'quantityExact', salesScale([month], 'quantityExact')).map(item => item.percent)).toEqual(['50', '50']);
   });
@@ -38,7 +38,7 @@ describe('sales chart semantic model', () => {
     expect(a.daily).toHaveLength(29); expect(b.daily).toHaveLength(31);
     expect(salesDayDifference(a.daily[0], b.daily[0], 'revenueExact')).toBe('-9.991');
     expect(salesDayDifference(a.daily[30], b.daily[30], 'revenueExact')).toBeNull();
-    expect(salesScale([a,b], 'revenueExact').max).toBe(10);
+    expect(salesScale([a,b], 'revenueExact').max).toBe(10.8);
   });
   it('includes undated and out-of-period rows in exact per-store monthly totals', () => {
     const month = model([row('甲', '2026-08-01', '0.009', '0.1'), row('甲', null, '0.001', '0.2'), row('乙', '2026-07-31', '5'), { ...row('乙', null, '100'), isDeduction: true }]);
@@ -59,7 +59,7 @@ describe('sales chart semantic model', () => {
   it('scales grouped columns independently and starts each signed bar at zero', () => {
     const month = model([row('甲', '2026-08-01', '6'), row('乙', '2026-08-01', '7'), row('丙', '2026-08-01', '-3')]);
     const scale = salesGroupedScale([month], 'revenueExact');
-    expect(scale).toMatchObject({ max: 10, min: -5 });
+    expect(scale).toMatchObject({ max: 7.56, min: -3.24 });
     const bars = salesGroupedSegments(month.daily[0], 'revenueExact', scale);
     for (const bar of bars) {
       if (Number(bar.revenueExact) >= 0) expect(bar.top + bar.height).toBeCloseTo(scale.zero);
@@ -71,17 +71,29 @@ describe('sales chart semantic model', () => {
   });
   it('uses monthly extrema and hidden store filters without changing source totals', () => {
     const month = model([row('甲', '2026-08-01', '4'), row('甲', null, '7'), row('乙', '2026-08-01', '2')]);
-    expect(salesGroupedScale([month], 'revenueExact').max).toBe(5);
-    expect(salesGroupedScale([month], 'revenueExact', { monthly: true }).max).toBe(20);
-    expect(salesGroupedScale([month], 'revenueExact', { monthly: true, hiddenStores: [' 甲 '] }).max).toBe(2);
+    expect(salesGroupedScale([month], 'revenueExact').max).toBe(4.32);
+    expect(salesGroupedScale([month], 'revenueExact', { monthly: true }).max).toBe(11.9);
+    expect(salesGroupedScale([month], 'revenueExact', { monthly: true, hiddenStores: [' 甲 '] }).max).toBe(2.16);
     expect(salesGroupedScale([month], 'revenueExact', { monthly: true, hiddenStores: ['甲', '乙'] })).toMatchObject({ max: 1, min: -0, zero: 100 });
     expect(month.monthTotalsExact.revenueExact).toBe('13');
   });
   it('preserves tiny values and a usable scale for negative-only grouped data', () => {
     const positive = model([row('甲', '2026-08-01', '0.009')]);
     const scale = salesGroupedScale([positive], 'revenueExact');
-    expect(scale.max).toBe(0.01);
+    expect(scale.max).toBe(0.00972);
     expect(salesGroupedSegments(positive.daily[0], 'revenueExact', scale)[0]).toMatchObject({ revenueExact: '0.009', percent: '100' });
-    expect(salesGroupedScale([model([row('甲', '2026-08-01', '-2')])], 'revenueExact')).toMatchObject({ max: 0, min: -2, zero: 0 });
+    expect(salesGroupedScale([model([row('甲', '2026-08-01', '-2')])], 'revenueExact')).toMatchObject({ max: 0, min: -2.16, zero: 0 });
+  });
+  it('keeps matching headroom across differently sized revenue and quantity metrics', () => {
+    const month = model([row('甲', '2026-08-01', '500027', '100002')]);
+    for (const metric of ['revenueExact', 'quantityExact']) {
+      for (const scale of [salesScale([month], metric), salesGroupedScale([month], metric, { monthly: true })]) {
+        const ratio = scale.max / Number(month.monthTotalsExact[metric]);
+        expect(ratio).toBeGreaterThanOrEqual(1.08);
+        expect(ratio).toBeLessThan(1.09);
+        expect(scale.min).toBe(-0);
+        expect(scale.zero).toBe(100);
+      }
+    }
   });
 });

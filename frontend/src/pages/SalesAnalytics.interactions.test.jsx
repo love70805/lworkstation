@@ -5,9 +5,10 @@ import { Simulate } from 'react-dom/test-utils';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SalesAnalytics from './SalesAnalytics';
-import { aggregateDailySales, aggregateDailySalesDetails } from '../domain/salesAnalytics';
+import { aggregateDailySales } from '../domain/salesAnalytics';
+import { aggregatePeriodSalesDetails as aggregateDailySalesDetails } from '../domain/salesPeriodDetails';
 const mocks=vi.hoisted(()=>({month:vi.fn(),day:vi.fn()}));
-vi.mock('../data/repositories/salesAnalyticsRepository',()=>({readLedgerSalesAnalytics:mocks.month,readLedgerDailySalesDetails:mocks.day}));
+vi.mock('../data/repositories/salesAnalyticsRepository',()=>({readLedgerSalesAnalytics:mocks.month,readLedgerPeriodSalesDetails:mocks.day,readWorkspaceSalesMonths:vi.fn(async()=>[])}));
 let container,root;
 const period='2026-08',date='2026-08-01';
 const rows=Array.from({length:15},(_,i)=>({store:'甲',platformSku:`SKU-${String(i).padStart(2,'0')}`,platformSkc:`skc-${String(i).padStart(2,'0')}`,quantity:i+1,amount:15-i,sourceAddedDate:date,attribute:'红色',activityStatus:'known',activityRaw:'客单创建时间:2026-08-01 04:58:49, 参与活动:【shein全球大促】2026年「返校季」常规活动, 活动时间范围:2026-07-27 00:00:00~2026-08-10 23:59:59, 结算价格:13.25'}));
@@ -33,17 +34,13 @@ it('hover/focus reads both exact values without database work; toggling/reopenin
  const negative=container.querySelector('.is-negative');expect(negative.style.top).toBe(container.querySelector('.sales-zero-line').style.top);
  await click(dayButton());expect(container.querySelector('.sales-day-details').textContent).not.toContain('OTHER-DAY');
  await click(button('销量'));expect(mocks.day).toHaveBeenCalledTimes(1);expect(mocks.month).toHaveBeenCalledTimes(1);
- await click(button('返回全月'));await click(dayButton());expect(mocks.month).toHaveBeenCalledTimes(1);
+ await click(button('返回总览'));await click(dayButton());expect(mocks.month).toHaveBeenCalledTimes(1);
  await act(async()=>Simulate.keyDown(container.querySelector('.sales-day-details'),{key:'Escape'}));expect(container.querySelector('.sales-day-details')).toBeNull();
 });
-it('paginates only selected-day products, searches without changing totals and shows SKC and concise activity names',async()=>{
+it('paginates selected-period SKCs and searches without changing totals',async()=>{
  await click(dayButton());expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
  expect(container.querySelector('tbody tr').textContent).toContain('skc-00');
- expect(container.querySelector('.sales-activities').open).toBe(false);expect(container.querySelector('.sales-activity-original')).toBeNull();
- const activity=container.querySelector('.sales-activities');
- await act(async()=>{activity.open=true;activity.dispatchEvent(new Event('toggle'));});
- expect(activity.textContent).toContain('「返校季」常规活动');
- expect(activity.textContent).not.toMatch(/客单创建时间|活动时间范围|结算价格|04:58:49/);
+ expect(container.querySelector('.sales-activities')).toBeNull();
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
  await click(button('下一页'));expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
  const sort=container.querySelector('.sales-details-controls select');await act(async()=>Simulate.change(sort,{target:{value:'quantityExact'}}));
@@ -69,18 +66,18 @@ it('keeps store parent-controlled, displays async wait/failure and clears select
 });
 it('distinguishes a known zero day from an unlocated unknown day',async()=>{
  await click(container.querySelectorAll('.sales-daily-bar')[2]);expect(container.textContent).toContain('当天已知销售额与销量为 0');
- await click(button('返回全月'));mocks.day.mockResolvedValueOnce(aggregateDailySalesDetails([],{period,date}));
+ await click(button('返回总览'));mocks.day.mockResolvedValueOnce(aggregateDailySalesDetails([],{period,date}));
  await click(dayButton());expect(container.querySelector('.sales-day-details').textContent).toContain('销售原额 待查 · 销量 待查');
 });
-it('reuses the live scoped source for date clicks and refreshes it when the scope reloads',async()=>{
+it('uses the period read contract for date clicks and refreshes it when the scope reloads',async()=>{
  mocks.month.mockImplementation(async()=>({...aggregateDailySales(rows,{period,includeSkuStats:false}),sourceRows:rows}));
  await render({ledgerId:'cached'});
  await click(dayButton());
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
- await click(button('返回全月'));
+ await click(button('返回总览'));
  await click(container.querySelectorAll('.sales-daily-bar')[1]);
  expect(container.querySelector('.sales-details-heading p').textContent).toContain('¥-0.009');
- expect(mocks.day).not.toHaveBeenCalled();
+ expect(mocks.day).toHaveBeenCalledTimes(2);
  mocks.month.mockImplementation(async()=>({...aggregateDailySales([],{period,includeSkuStats:false}),sourceRows:[]}));
  await render({ledgerId:'empty'});await click(dayButton());
  expect(container.querySelector('.sales-day-details').textContent).toContain('待查');

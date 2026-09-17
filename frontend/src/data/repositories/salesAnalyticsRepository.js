@@ -34,3 +34,31 @@ export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store
   const scope = { workspaceId, ledgerId, store, date };
   return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date], formula: 'daily-details@1', revision: sourceRevision(), compute: () => runDerivedComputation('day', { rows, period, date }) }), scope }));
 }
+
+export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, store = 'all', date = null }) {
+  const scope = { workspaceId, ledgerId, store, date };
+  return readScopedSales({ ...scope, allowMissingStore: true }, async (rows, period) => ({
+    ...await cachedDerived({
+      scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date],
+      formula: 'period-skc-details@1', revision: sourceRevision(),
+      compute: () => runDerivedComputation('period-detail', { rows, period, date }),
+    }), scope,
+  }));
+}
+
+export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
+  return retrySourceRead(async () => {
+    const revision = sourceRevision();
+    const current = await getActiveMemberContext();
+    if (!workspaceId || current.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
+    const ledgers = await db.ledgers.where('workspaceId').equals(workspaceId).toArray();
+    const months = [];
+    // Bound source-row memory while walking historical ledgers.
+    for (const ledger of ledgers.sort((a, b) => a.period.localeCompare(b.period) || a.id.localeCompare(b.id))) {
+      const data = await readLedgerSalesAnalytics({ workspaceId, ledgerId: ledger.id, store, allowMissingStore: true });
+      months.push({ ...data.chartMonth, ledgerId: ledger.id });
+    }
+    assertSourceRevision(revision);
+    return months;
+  });
+}
