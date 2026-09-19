@@ -142,7 +142,16 @@ export default function ImportPreview() {
   return <main className="wizard-shell batch-import">
     <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate("/profit")}><X size={20} />{result ? "返回利润面板" : "取消导入"}</button><strong>月度台账批量导入</strong></header>
     <section className="wizard-content">
-      <div className="wizard-intro"><span className="batch-eyebrow">月度账本</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，核对归属后统一预览、一次导入。</p></div>
+      <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，核对归属后统一预览、一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
+      <section className="import-flow-guide" aria-label="月度核算流程">
+        <div className="import-flow-guide-heading"><strong>月度核算流程</strong><span>这里只是建立数据，最终是否采用由人工决定。</span></div>
+        <div className="import-flow-guide-steps">
+          <span className="active"><b>1</b><strong>导入销售台账</strong><small>当前步骤</small></span>
+          <span><b>2</b><strong>取得候选成本</strong><small>ERP、历史或人工</small></span>
+          <span><b>3</b><strong>人工确认成本</strong><small>人工结果优先</small></span>
+          <span><b>4</b><strong>确认利润</strong><small>核对后再定稿</small></span>
+        </div>
+      </section>
       {!result ? <>
         <section className="wizard-card">
           <fieldset disabled={busy} className="batch-fieldset">

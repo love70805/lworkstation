@@ -186,6 +186,59 @@ beforeEach(async () => {
   await db.open();
 });
 
+it("withdraws adopted ERP costs and reopens a frozen report in one confirmation while retaining the report", async () => {
+  const { ledger, request } = await context();
+  const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "FROZEN-WITHDRAW" });
+  await db.salesRows.where("ledgerId").equals(ledger.id).modify({ store: "测试店铺" });
+  await adoptZeroDispatch(ledger.id);
+  await finalizeMonthlyLedger({ ledgerId: ledger.id });
+  const frozen = await getLedgerSnapshot(ledger.id);
+  const report = await db.profitReports.get(frozen.ledger.currentBaseReportId);
+  const reportLines = await db.profitReportLines.where("reportId").equals(report.id).toArray();
+
+  const result = await voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "重新采集采购成本" });
+
+  expect(result.reopened).toBe(true);
+  const reopened = await getLedgerSnapshot(ledger.id);
+  expect(reopened.ledger.status).toBe("cost_pending");
+  expect(reopened.ledger.currentBaseReportId).toBeUndefined();
+  expect(reopened.profitLines).toEqual([]);
+  expect(reopened.costs).toEqual([]);
+  expect(await db.profitReports.get(report.id)).toEqual(report);
+  expect(await db.profitReportLines.where("reportId").equals(report.id).toArray()).toEqual(reportLines);
+  const audit = (await db.auditEvents.toArray()).find(event => event.action === "ledger_reopened_for_cost_correction");
+  expect(audit.before.snapshot.ledger).toEqual(frozen.ledger);
+  expect(audit.before.snapshot.profitLines).toEqual(frozen.profitLines);
+  expect(await db.erpCostInbox.get(applied.inboxId)).toMatchObject({ status: "voided" });
+});
+
+it("rolls back reopening and withdrawal together when the inbox write fails", async () => {
+  const { ledger, request } = await context();
+  const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "FROZEN-ROLLBACK" });
+  await db.salesRows.where("ledgerId").equals(ledger.id).modify({ store: "测试店铺" });
+  await adoptZeroDispatch(ledger.id);
+  await finalizeMonthlyLedger({ ledgerId: ledger.id });
+  const before = (await createWorkspaceBackupPayload()).tables;
+  const fail = vi.spyOn(db.erpCostInbox, "put").mockRejectedValueOnce(new Error("disk failure"));
+  try {
+    await expect(voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "重新采集" })).rejects.toThrow("disk failure");
+  } finally {
+    fail.mockRestore();
+  }
+  expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
+});
+
+it.each([
+  { workspaceId: DEFAULT_WORKSPACE_ID, role: "viewer" },
+  { workspaceId: "OTHER", role: "admin" },
+])("rejects ERP withdrawal outside financial scope: $role / $workspaceId", async ({ workspaceId, role }) => {
+  const { ledger, request } = await context();
+  const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "WITHDRAW-SCOPE" });
+  await setActiveMemberContext({ workspaceId, role, memberId: "other" });
+  await expect(voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "test" })).rejects.toThrow("权限");
+  expect(await db.erpCostInbox.get(applied.inboxId)).toMatchObject({ status: "applied" });
+});
+
 afterEach(async () => {
   db.close();
   await db.delete();
@@ -793,16 +846,14 @@ describe("ERP cost repository independent recalculation", () => {
     expect((await getLatestLedgerCosts(ledger.id))[0].unitCost).toBe(4);
   });
 
-  it("refuses to physically delete a ledger once it has an applied or voided ERP lifecycle", async () => {
+  it("allows a human to physically delete a non-finalized ledger after ERP lifecycle records exist", async () => {
     const { ledger, request } = await context();
     const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "DELIVERY-NODELETE" });
-    await expect(deleteMonthlyLedger(ledger.id)).rejects.toThrow("正式 ERP 成本生命周期");
-    expect(await db.ledgers.get(ledger.id)).toBeTruthy();
-    expect(await db.erpCostBatches.get(applied.batchId)).toMatchObject({ status: "published" });
+    await deleteMonthlyLedger(ledger.id);
 
-    await voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "验证作废记录仍不可物理删除" });
-    await expect(deleteMonthlyLedger(ledger.id)).rejects.toThrow("正式 ERP 成本生命周期");
-    expect(await db.erpCostInbox.get(applied.inboxId)).toMatchObject({ status: "voided" });
-    expect(await db.erpCostRows.where("batchId").equals(applied.batchId).count()).toBe(1);
+    expect(await db.ledgers.get(ledger.id)).toBeUndefined();
+    expect(await db.erpCostBatches.get(applied.batchId)).toBeUndefined();
+    expect(await db.erpCostInbox.get(applied.inboxId)).toBeUndefined();
+    expect(await db.erpCostRows.where("batchId").equals(applied.batchId).count()).toBe(0);
   });
 });

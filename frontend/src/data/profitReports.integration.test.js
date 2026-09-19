@@ -93,7 +93,8 @@ it('freezes pre-deduction atomically, adds late signed deductions on the same Au
  const second=await report('financial',base.id);expect(second.revision).toBe(2);expect(second.totalsExact.profitExact).toBe(base.totalsExact.preDeductionExact);
  expect((await readSavedProfitReport(base.id)).fileBase64).toBe(base.fileBase64);
  await reopenLedgerForCostCorrection({ledgerId:'L',reason:'显式修改代发'});await adopt('dispatch',{adoptedQuantityExact:'101'});const revised=await report();expect(revised.revision).toBe(2);expect(revised.supersedesReportId).toBe(base.id);
- await reopenLedgerForCostCorrection({ledgerId:'L',reason:'删除保护'});await expect(deleteMonthlyLedger('L')).rejects.toThrow('报告历史');
+ await reopenLedgerForCostCorrection({ledgerId:'L',reason:'人工确认删除'});await deleteMonthlyLedger('L');
+ expect(await db.ledgers.get('L')).toBeUndefined();expect(await db.profitReports.where('ledgerId').equals('L').count()).toBe(0);
 });
 it('round-trips original report files and rejects corrupt references/files without altering current data',async()=>{
  await adopt('dispatch');const base=await report();await adopt('deduction');await report('financial',base.id);
@@ -103,6 +104,23 @@ it('round-trips original report files and rejects corrupt references/files witho
  await restoreWorkspaceBackupPayload(backup);expect((await readSavedProfitReport(base.id)).fileSha256).toBe(base.fileSha256);
  await expect(createWorkspaceCloudSeedPayload()).rejects.toThrow('本机报告');
  const envelope=await claimPendingSyncEnvelope({workspaceId:'W'});expect(envelope.events.some(event=>event.objectType==='local_profit_report')).toBe(false);
+});
+it.each(['finalized','locked'])('deletes a %s ledger and all report data without requiring reopening',async status=>{
+ await adopt('dispatch');const base=await report();await adopt('deduction');await report('financial',base.id);
+ await db.ledgers.update('L',{status});
+ await db.ledgers.put({id:'OTHER',workspaceId:'W',period:'2026-09',status:'draft'});
+ await deleteMonthlyLedger('L');
+ expect(await db.ledgers.get('L')).toBeUndefined();
+ expect(await db.ledgers.get('OTHER')).toMatchObject({status:'draft'});
+ for(const name of [...REPORT_TABLES,'salesRows','costApprovals','profitLines'])expect(await db.table(name).where('ledgerId').equals('L').count(),name).toBe(0);
+ const backup=await createWorkspaceBackupPayload();await validateReportBackup(backup.tables);
+});
+it('rolls back deletion of reports and costs when the deletion audit cannot be saved',async()=>{
+ await adopt('dispatch');await report();
+ const before=(await createWorkspaceBackupPayload()).tables;
+ vi.spyOn(db.auditEvents,'add').mockRejectedValueOnce(new Error('disk failure'));
+ await expect(deleteMonthlyLedger('L')).rejects.toThrow('disk failure');
+ expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
 });
 it('rolls back finalization when any snapshot write fails',async()=>{
  await adopt('dispatch');const input={ledgerId:'L',kind:'pre_deduction'},preview=await previewProfitReport(input);

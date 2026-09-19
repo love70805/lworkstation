@@ -56,9 +56,6 @@ function assertFormalInboxSnapshot(inbox, batch, status, eventId) {
 }
 
 function removeLedgerFacts(state, ledgerId) {
-  const hasFormalLifecycle = [...state.erpCostBatches.values()].some((row) => row.ledgerId === ledgerId && ["published", "voided"].includes(row.status))
-    || [...state.erpCostInbox.values()].some((row) => row.ledgerId === ledgerId && ["applied", "voided"].includes(row.status));
-  if (hasFormalLifecycle) throw new Error("包含 ERP 正式成本生命周期的账本不能通过恢复事件物理删除。");
   state.ledgers.delete(ledgerId);
   const importIds = new Set([...state.importBatches.values()].filter((row) => row.ledgerId === ledgerId).map((row) => row.id));
   const costBatchIds = new Set([...state.erpCostBatches.values()].filter((row) => row.ledgerId === ledgerId).map((row) => row.id));

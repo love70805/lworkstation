@@ -10,10 +10,11 @@
 
 ## 版本清单
 
-核对日期：2026-09-18。0.2.19已公开Latest并验证下载及稳定更新，本机按用户要求暂不安装。
+核对日期：2026-09-20。0.3.0 Beta 本机候选验收通过，尚未公开；稳定版记录仍为 0.2.19。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.0-beta` human first | 本机候选通过；719 测试、12 组桌面验证、实际 Electron 交互及 packaged smoke 通过；等待 CI/集成/公开回读 | `candidates/0.3.0-beta-human-first/`；`prerelease/0.3.0-beta/`；[验收](../docs/RELEASE_0.3.0_BETA.md) |
 | `0.2.19` sales detail | 已公开 GitHub Latest；709 测试、CI、Windows packaged smoke、四资产回读/稳定通道通过；本机未安装 | `candidates/0.2.19-sales-detail/`；[验收](../docs/RELEASE_0.2.19.md) |
 | `0.2.18` stacked sales | 历史稳定版 | [验收](../docs/RELEASE_0.2.18.md) |
 | `0.2.17` grouped sales | 历史稳定版 | [验收](../docs/RELEASE_0.2.17.md) |

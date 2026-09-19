@@ -204,9 +204,9 @@ export async function rejectErpInboxBatchesForCostMatching({
 }
 
 const ERP_INBOX_HISTORY_STATUS_LABELS = {
-  applied: "已发布",
+  applied: "已采用",
   rejected: "已删除",
-  voided: "已作废",
+  voided: "已撤回",
 };
 
 export function buildErpInboxHistory(records = [], ledgerId = null) {

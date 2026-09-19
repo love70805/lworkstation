@@ -31,7 +31,8 @@ function run(command, args, cwd = root) {
 
 function runPnpm(args) {
   if (pnpmCli && fs.existsSync(pnpmCli)) {
-    run(process.execPath, [pnpmCli, ...args]);
+    if (path.extname(pnpmCli).toLowerCase() === ".exe") run(pnpmCli, args);
+    else run(process.execPath, [pnpmCli, ...args]);
     return;
   }
   run("pnpm", args);

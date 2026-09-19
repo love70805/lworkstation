@@ -33,7 +33,7 @@ const history = [{
   id: "INBOX-APPLIED",
   batchId: "B-APPLIED",
   status: "applied",
-  statusLabel: "已发布",
+  statusLabel: "已采用",
   appliedBatchId: "COST-1",
   historyAt: "2026-08-27T10:00:00.000Z",
   sourceLabel: "manual-v2-import",
@@ -124,10 +124,10 @@ describe("CostMatching ERP inbox dialogs", () => {
     const summary = container.querySelector(".cost-inbox-history > summary");
     await act(async () => { summary.click(); });
     expect(container.querySelector(".cost-inbox-history").open).toBe(true);
-    await act(async () => { findButton(container, "作废发布").click(); });
+    await act(async () => { findButton(container, "撤回本次采用").click(); });
     expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
     expect(container.textContent).toContain("该账本已定稿");
-    const confirmVoid = findButton(container, "确认作废并重新核算");
+    const confirmVoid = findButton(container, "确认撤回并重新核对");
     expect(confirmVoid.disabled).toBe(true);
     const reason = container.querySelector("textarea");
     await act(async () => {
@@ -135,7 +135,7 @@ describe("CostMatching ERP inbox dialogs", () => {
       reason.dispatchEvent(new Event("input", { bubbles: true }));
       reason.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(findButton(container, "确认作废并重新核算").disabled).toBe(false);
+    expect(findButton(container, "确认撤回并重新核对").disabled).toBe(false);
 
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);

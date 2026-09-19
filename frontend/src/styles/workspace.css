@@ -54,6 +54,74 @@
 .workspace-status-icon { display: grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: 4px; background: var(--surface-raised); color: var(--warning); }
 .workspace-status-strip .button { flex: 0 0 auto; color: var(--primary); }
 
+.workspace-flow {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.workspace-flow-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.workspace-flow-heading h2 { font-size: 15px; line-height: 21px; }
+.workspace-flow-heading p { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
+.workspace-flow-period { color: var(--primary); font-size: 12px; }
+
+.workspace-flow-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-flow-step {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-bg);
+  color: var(--text);
+  text-align: left;
+}
+
+.workspace-flow-step:hover,
+.workspace-flow-step.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.workspace-flow-step.done { border-color: var(--success-border); }
+.workspace-flow-index {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workspace-flow-step.done .workspace-flow-index { background: var(--success-bg); color: var(--success); }
+.workspace-flow-step.active .workspace-flow-index { background: var(--primary); color: #fff; }
+.workspace-flow-step > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.workspace-flow-step strong { overflow-wrap: anywhere; font-size: 12px; }
+.workspace-flow-step small { overflow-wrap: anywhere; color: var(--text-muted); font-size: 10px; line-height: 14px; }
+
 .workspace-layout {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
@@ -344,6 +412,9 @@
   .overview-alert,
   .workspace-status-strip { align-items: flex-start; flex-wrap: wrap; }
   .workspace-status-strip .button { width: 100%; justify-content: space-between; }
+  .workspace-flow { padding: 14px; }
+  .workspace-flow-steps { grid-template-columns: 1fr; gap: 6px; }
+  .workspace-flow-step { min-height: 52px; }
   .dashboard-chart-empty { align-items: center; flex-direction: column; }
   .activity-head { display: none; }
   .activity-row { grid-template-columns: 18px minmax(0, 1fr); gap: 8px; }

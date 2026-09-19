@@ -198,7 +198,14 @@ export async function previewSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, 
   });
 }
 
-export async function saveSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, period, items, preview, overwriteSignature = null, importedBy = "local-user" }) {
+export async function saveSalesImports({
+  workspaceId = DEFAULT_WORKSPACE_ID,
+  period,
+  items,
+  preview,
+  overwriteSignature = null,
+  importedBy = "local-user",
+}) {
   const normalizedPeriod = normalizeLedgerPeriod(period);
   // Clone the payload before any asynchronous work, so caller edits cannot change a pending write.
   const prepared = prepareSalesImportItems(structuredClone(items));
@@ -1225,13 +1232,14 @@ export async function voidPublishedErpCostBatch({
   const normalizedInboxId = String(inboxId ?? "").trim();
   const normalizedReason = String(reason ?? "").trim();
   const normalizedActor = await resolveProfitAuditActor(voidedBy);
-  if (!normalizedInboxId) throw new Error("请选择要作废的 ERP 发布批次。");
-  if (!normalizedReason) throw new Error("作废发布必须填写原因。");
+  if (!normalizedInboxId) throw new Error("请选择要撤回采用的 ERP 批次。");
+  if (!normalizedReason) throw new Error("撤回采用必须填写原因。");
   const voidedAt = new Date().toISOString();
   let result = null;
 
   await db.transaction(
     "rw",
+    db.settings,
     db.ledgers,
     db.salesRows,
     db.erpCostInbox,
@@ -1243,16 +1251,22 @@ export async function voidPublishedErpCostBatch({
     async () => {
       const inbox = await db.erpCostInbox.get(normalizedInboxId);
       if (!inbox || inbox.status !== "applied" || !inbox.appliedBatchId) {
-        throw new Error("只有已发布且尚未作废的 ERP 批次可以作废。");
+        throw new Error("只有已采用且尚未撤回的 ERP 批次可以撤回。");
       }
       const batch = await db.erpCostBatches.get(inbox.appliedBatchId);
       if (!batch || batch.status !== "published" || batch.ledgerId !== inbox.ledgerId) {
-        throw new Error("找不到与收件记录关联的有效 ERP 正式成本批次。");
+        throw new Error("找不到与收件记录关联的已采用 ERP 成本。");
       }
-      const ledger = await db.ledgers.get(batch.ledgerId);
+      let ledger = await db.ledgers.get(batch.ledgerId);
       if (!ledger) throw new Error("找不到对应的月度账本。");
-      if (ledger.status === "locked") throw new Error("已锁定账本不能作废 ERP 正式成本。");
-      if (ledger.currentBaseReportId && ledger.status === "finalized") throw new Error("已有冻结报告，请先显式重开账本再作废成本；旧报告将保留。");
+      const member = await getActiveMemberContext();
+      if (ledger.workspaceId !== member.workspaceId || !["admin", "finance"].includes(member.role)) throw new Error("当前成员无此账本的财务写权限。");
+      if (ledger.status === "locked") throw new Error("已锁定账本不能撤回 ERP 成本。");
+      const reopened = ledger.status === "finalized";
+      // Keep frozen report files intact; reopen and withdraw in one transaction.
+      if (ledger.currentBaseReportId && reopened) {
+        ledger = await reopenLedgerForCostCorrection({ ledgerId: ledger.id, reason: normalizedReason });
+      }
 
       const batchRows = await db.erpCostRows.where("batchId").equals(batch.id).toArray();
       const previousProfitLines = ledger.status === "finalized"
@@ -1349,7 +1363,7 @@ export async function voidPublishedErpCostBatch({
         ledgerStatus: savedLedger.status,
         affectedPlatformSkus: batchRows.map((row) => row.platformSku),
         missingCount: coverage.missingCount,
-        reopened: ledger.status === "finalized",
+        reopened,
       };
     },
   );
@@ -1411,29 +1425,18 @@ export async function deleteMonthlyLedger(ledgerId, deletedBy = "local-user") {
       if (!ledger) return;
       const member = await getActiveMemberContext();
       if (ledger.workspaceId !== member.workspaceId || !["admin", "finance"].includes(member.role)) throw new Error("当前成员无此账本的财务写权限。");
-      if (await db.profitReports.where("ledgerId").equals(ledgerId).count()) throw new Error("账本已有报告历史，不能普通删除；请保留原报告。");
-      if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能删除。");
-
-      const [costBatchRecords, inboxRecords] = await Promise.all([
-        db.erpCostBatches.where("ledgerId").equals(ledgerId).toArray(),
-        db.erpCostInbox.where("ledgerId").equals(ledgerId).toArray(),
-      ]);
-      if (costBatchRecords.some((batch) => ["published", "voided"].includes(batch.status))
-        || inboxRecords.some((inbox) => ["applied", "voided"].includes(inbox.status))) {
-        throw new Error("该账本已有正式 ERP 成本生命周期记录，不能物理删除；请保留证据并使用作废流程纠错。");
-      }
-      const costBatches = costBatchRecords.map((batch) => batch.id);
       await db.salesRows.where("ledgerId").equals(ledgerId).delete();
       await db.importBatches.where("ledgerId").equals(ledgerId).delete();
       await db.erpCostRequests.where("ledgerId").equals(ledgerId).delete();
       await db.erpCostRows.where("ledgerId").equals(ledgerId).delete();
       await db.erpCostInbox.where("ledgerId").equals(ledgerId).delete();
-      await db.erpCostBatches.bulkDelete(costBatches);
+      await db.erpCostBatches.where("ledgerId").equals(ledgerId).delete();
       await db.costApprovals.where("ledgerId").equals(ledgerId).delete();
       await db.profitLines.where("ledgerId").equals(ledgerId).delete();
       await db.monthlySupplementRows.where("ledgerId").equals(ledgerId).delete();
       await db.monthlySupplementBatches.where("ledgerId").equals(ledgerId).delete();
       await db.profitReportLines.where("ledgerId").equals(ledgerId).delete();
+      await db.profitReports.where("ledgerId").equals(ledgerId).delete();
       await db.ledgers.delete(ledgerId);
       await db.auditEvents.add({
         workspaceId: ledger.workspaceId,

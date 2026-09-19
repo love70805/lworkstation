@@ -189,6 +189,17 @@
 .profit-page .page-heading-copy { min-width: 0; }
 .profit-page .page-actions { align-items: center; gap: 8px; }
 .profit-page .page-actions .button { white-space: nowrap; }
+.profit-next-step { display: grid; gap: 12px; margin-bottom: 12px; padding: 13px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.profit-next-step > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.profit-next-step > div:first-child strong { font-size: 13px; }
+.profit-next-step > div:first-child span { color: var(--text-muted); font-size: 11px; }
+.profit-next-step-items { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.profit-next-step-items span { display: flex; min-width: 0; align-items: center; gap: 7px; color: var(--text-muted); font-size: 11px; }
+.profit-next-step-items b { display: grid; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; border-radius: 50%; background: var(--surface-strong); font-family: "JetBrains Mono", monospace; font-size: 10px; }
+.profit-next-step-items span.done { color: var(--success); }
+.profit-next-step-items span.done b { background: var(--success-bg); color: var(--success); }
+.profit-next-step-items span.active { color: var(--primary); font-weight: 700; }
+.profit-next-step-items span.active b { background: var(--primary); color: #fff; }
 .profit-purpose-strip { display: flex; min-height: 72px; align-items: center; gap: 14px; margin-bottom: 14px; padding: 14px 18px; border-color: var(--border); background: var(--surface-soft); }
 .profit-purpose-step { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .profit-purpose-step > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }

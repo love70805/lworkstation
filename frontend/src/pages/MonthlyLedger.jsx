@@ -12,9 +12,9 @@ const money = (value) => value.toLocaleString("zh-CN", { style: "currency", curr
 
 const ledgerStateLabels = {
   draft: "草稿",
-  cost_pending: "待补 ERP 成本",
-  approval_pending: "待人工审批",
-  ready: "可定稿",
+  cost_pending: "待核对成本",
+  approval_pending: "待确认成本",
+  ready: "待确认利润",
   finalized: "已定稿",
   locked: "已锁定",
 };
@@ -39,6 +39,7 @@ export default function MonthlyLedger() {
   const { notify } = useToast();
   const items = useLiveQuery(() => listLedgerSummaries(), [], []);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -52,13 +53,16 @@ export default function MonthlyLedger() {
   const pending = items.find((item) => !["finalized", "locked"].includes(item.status));
 
   const deleteLedger = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
     try {
-      await deleteMonthlyLedger(deleteTarget.id);
-      notify(`${formatLedgerPeriod(deleteTarget.period)}草稿及关联明细已删除。`);
+      await deleteMonthlyLedger(deleteTarget.id, "local-user");
+      notify(`${formatLedgerPeriod(deleteTarget.period)}账本及关联明细已删除。`);
       setDeleteTarget(null);
     } catch (error) {
       notify(error.message, "error");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -88,7 +92,7 @@ export default function MonthlyLedger() {
     <AppShell pageClass="ledger-page">
       <PageHeader
         title="月度账本"
-        description="每个自然月保存独立的导入批次、ERP 成本、审批和利润结果。"
+        description="每个自然月保存独立的销售数据、成本来源和利润结果，人工可以随时补充或修正。"
         actions={<><Button icon={Download} loading={exporting} disabled={exporting || items.length === 0} onClick={exportArchive}>导出归档</Button><Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>新建或导入账本</Button></>}
       />
 
@@ -105,7 +109,7 @@ export default function MonthlyLedger() {
       </div>
 
       {items.length === 0 ? (
-        <Panel><EmptyState icon={FileSpreadsheet} title="还没有月度账本" description="导入第一个月度销售台账后，系统会保存来源批次并进入 ERP 成本核对。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
+        <Panel><EmptyState icon={FileSpreadsheet} title="还没有月度账本" description="导入第一个月度销售台账后，系统会保存来源批次并进入成本核对。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
       ) : filteredItems.length === 0 ? (
         <Panel><EmptyState icon={FileSpreadsheet} title="没有匹配的月度账本" description="可按月份，例如“2026-08”，或账本状态搜索。" /></Panel>
       ) : (
@@ -119,13 +123,13 @@ export default function MonthlyLedger() {
                 <div className="ledger-card-head">
                   <span className="month-tile">{Number(ledger.period.slice(5))}月</span>
                   <div><h2>{formatLedgerPeriod(ledger.period)}</h2><Badge tone={ledgerStateTones[ledger.status] ?? "neutral"}>{ledgerStateLabels[ledger.status] ?? ledger.status}</Badge></div>
-                  {locked ? <LockKeyhole size={17} /> : !finalized ? <button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 草稿`} title="删除草稿" onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button> : null}
+                  <span className="ledger-card-head-actions">{locked ? <LockKeyhole size={17} title="已锁定" /> : null}<button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 账本`} title="删除账本" onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button></span>
                 </div>
                 <div className="ledger-metrics">
                   <span>销售金额 <strong className="mono">{money(ledger.summary?.revenue ?? 0)}</strong></span>
                   <span>总销量 <strong className="mono">{(ledger.summary?.quantity ?? 0).toLocaleString("zh-CN")}</strong></span>
-                  <span>正式利润 <strong className="mono">{ledger.profitSummary?.profit != null ? money(ledger.profitSummary.profit) : "待核算"}</strong></span>
-                  {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`ERP 成本完整度 ${progress}%`} /> : null}
+                  <span>月度利润 <strong className="mono">{ledger.profitSummary?.profit != null ? money(ledger.profitSummary.profit) : "待核算"}</strong></span>
+                  {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`成本确认进度 ${progress}%`} /> : null}
                 </div>
                 <div className="ledger-card-footer"><Button icon={locked ? LockKeyhole : BarChart3} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(ledger.id)}`)}>{locked ? "查看归档" : finalized ? "查看本月" : "继续核算"}</Button></div>
               </Panel>
@@ -134,7 +138,7 @@ export default function MonthlyLedger() {
         </div>
       )}
 
-      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度草稿？" description="将删除该月份的销售明细、成本批次和未完成审批，其他月份不受影响。" onClose={() => setDeleteTarget(null)} footer={<><Button onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" onClick={deleteLedger}>删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定账本不能通过此操作删除。</p></Modal>
+      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
     </AppShell>
   );
 }

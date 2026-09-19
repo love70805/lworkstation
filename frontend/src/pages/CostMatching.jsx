@@ -443,10 +443,10 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       setVoidDraft(null);
       setInboxQueueOpen(true);
       notify(result.reopened
-        ? `已作废 ERP 正式成本批次 ${result.batchId}，账本已重新打开核算。`
-        : `已作废 ERP 正式成本批次 ${result.batchId}；受影响 SKU 已恢复为缺少正式成本。`, "success");
+        ? `已撤回本次采用的 ERP 成本 ${result.batchId}，本月已重新打开核对。`
+        : `已撤回本次采用的 ERP 成本 ${result.batchId}；受影响 SKU 需要重新确认成本。`, "success");
     } catch (error) {
-      notify(`作废发布失败：${error.message}`, "error");
+      notify(`撤回采用失败：${error.message}`, "error");
     } finally {
       setVoidingBatch(false);
     }
@@ -566,7 +566,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       return;
     }
     if (!effectiveRequestId && !batchEnvelope?.requestId) {
-      notify("发布前需要已登记的成本查询关联，请重试登记或查看回传批次。", "error");
+      notify("采用前需要已登记的成本查询关联，请重试登记或查看回传批次。", "error");
       return;
     }
     setPublishing(true);
@@ -583,14 +583,14 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         inputHash,
         sourceEnvelope: batchEnvelope,
       });
-      notify(`ERP 成本批次 ${result.batchId} 已发布，匹配 ${result.matchedCount} 个平台 SKU。`);
+      notify(`ERP 成本批次 ${result.batchId} 已采用，匹配 ${result.matchedCount} 个平台 SKU。`);
       clearCostDraft(snapshot.ledger.id);
       if (ledgerIdentityRef.current === snapshot.ledger.id) {
         if (onPublished) onPublished(result);
         else navigate(profitHref);
       }
     } catch (error) {
-      notify(`成本批次发布失败：${error.message}`, "error");
+      notify(`采用 ERP 成本失败：${error.message}`, "error");
     } finally {
       setPublishing(false);
     }
@@ -639,7 +639,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     };
     setResolutions((current) => upsertCostResolution(current, resolution));
     setResolutionDraft(null);
-    notify(resolution.action === "confirm_true_price" ? "已确认真实采购价，正式成本已重新计算。" : "采购价已修正，正式成本已重新计算。", "success");
+    notify(resolution.action === "confirm_true_price" ? "已确认真实采购价，候选成本已重新计算。" : "采购价已修正，候选成本已重新计算。", "success");
   };
 
   const columns = useMemo(() => {
@@ -766,7 +766,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     return (
       <>
         <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>{desktop ? "ERP 扩展状态" : "安装 ERP 助手"}</Button></div>
-        <PageHeader title="ERP 成本核对" description="先导入月度销售台账，才能生成平台 SKC 查询并核对正式成本。" />
+        <PageHeader title="ERP 成本核对" description="先导入月度销售台账，再采集一次 ERP 成本供本月反复核对和复用。" />
         <Panel><EmptyState icon={Warehouse} title="没有可核对的月度销售明细" description="导入台账后，本页会按平台 SKU 列出所有需要 ERP 成本的明细。" action={<Button variant="primary" icon={Upload} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
         {erpAssistantDialog}
         {deleteBatchDialog}
@@ -783,20 +783,27 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       <PageHeader
         eyebrow={`月度利润 › ${snapshot.ledger.period}`}
         title="ERP 成本核对"
-        description={`当前筛选：${describeProfitFilter(profitFilter)}。先复制 ${platformSkcs.length} 个平台 SKC 到卓麟 ERP 查询；扩展回传采购证据后，由本页核对并发布正式成本。`}
+        description={`当前筛选：${describeProfitFilter(profitFilter)}。先复制 ${platformSkcs.length} 个平台 SKC 到卓麟 ERP 查询；扩展回传采购证据后，由本页核对并采用为本月可复用成本。`}
         actions={<><Button icon={platformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || platformSkcs.length === 0} onClick={copySkcs}>{platformSkcs.length ? `复制 ${platformSkcs.length} 个平台 SKC` : "待补平台 SKC"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前成本" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></>}
       />
 
-      {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 尚不能发布正式成本</strong><small>{reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；请先核对 ERP 与当前账本的 SKU/SKC，再重新采集。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；请使用 ERP Assistant v8.0.15 重新抓取。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的正式单价，不能发布；请保留真实采购价格。" : `Lworkstation 发现 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请在下方完成修正或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}
+      <div className="cost-flow-guide" aria-label="成本核对流程">
+        <div className="cost-flow-guide-heading"><strong>成本核对怎么走</strong><span>ERP 只是候选来源，人工判断可以随时介入。</span></div>
+        <div className="cost-flow-guide-steps">
+          {["采集或载入候选", "查看证据与异常", "人工确认或更正", "采用到本月核算"].map((step, index) => <span className={index === (reconciliation?.summary.anomalyPendingCount > 0 ? 2 : reconciliation ? 3 : 0) ? "active" : ""} key={step}><b>{index + 1}</b>{step}</span>)}
+        </div>
+      </div>
+
+      {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 需要人工判断</strong><small>{reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；可以检查 SKU/SKC 后重新采集，也可以在下方直接人工更正。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；可以重新采集，也可以在下方直接人工更正成本。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的价格，请保留真实采购价格或直接填写人工成本。" : `有 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请选择修正价格或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}
 
       {visibleAnomalyGroups.length > 0 ? <Panel className="cost-resolution-panel">
         {!locked ? <Button onClick={() => document.getElementById("manual-cost-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}>按店铺人工更正成本</Button> : null}
         <div className="panel-header"><div className="panel-title"><AlertCircle size={19} /><h2>采购成本异常处置</h2></div><Badge tone="warning">Lworkstation 核对</Badge></div>
         <div className="cost-resolution-list">{visibleAnomalyGroups.map((match) => <section className="cost-resolution-group" key={match.sourceWarehouseSku}>
           <header><span><small>仓库 SKU</small><strong className="mono">{match.sourceWarehouseSku}</strong></span><span><small>当前预览成本</small><strong className="mono">{match.unitCost == null ? "--" : formatErpUnitCost(match.unitCost)}</strong></span>{match.baseline?.enabled ? <span><small>历史参考区间</small><strong className="mono">{currency(match.baseline.lowerBound)} - {currency(match.baseline.upperBound)}</strong></span> : <span><small>历史基线</small><strong>样本不足</strong></span>}</header>
-          {match.costDecision?.unitCost === 0 ? <p role="alert">正式成本按四位小数向零截断后为 ¥0.0000，不能发布。真实正价低于 0.0001 元时超出当前支持精度，请保留真实采购价格；实际零价按采购证据核对。</p> : null}
+          {match.costDecision?.unitCost === 0 ? <p role="alert">当前价格按四位小数处理后为 ¥0.0000。真实正价低于 0.0001 元时请保留原始价格；如果 ERP 结果不适用，也可以直接填写人工成本。</p> : null}
           <p>关联平台 SKU：{match.variants.map((variant) => [variant.platformSku, variant.platformSkc, variant.attribute].filter(Boolean).join(" / ")).join("；")}</p>
-          {!match.evidenceComplete ? <div className="cost-resolution-empty"><AlertCircle size={17} /><div><strong>当前批次没有完整采购历史</strong><small>旧版批次和手工汇总只能预览，不能通过人工确认变成 ERP 正式成本。</small><EvidenceDetails match={match} /></div></div> : <div className="cost-resolution-records">{(match.costDecision?.anomalies ?? []).map((anomaly) => {
+          {!match.evidenceComplete ? <div className="cost-resolution-empty"><AlertCircle size={17} /><div><strong>当前批次没有完整采购历史</strong><small>这批 ERP 数据暂不能直接采用；可以重新采集，也可以跳到下方人工更正成本。</small><EvidenceDetails match={match} /></div></div> : <div className="cost-resolution-records">{(match.costDecision?.anomalies ?? []).map((anomaly) => {
             const record = match.costDecision?.selectedRecords?.find((item) => item.recordId === anomaly.recordId);
             return <article className={`cost-resolution-record ${anomaly.status === "resolved" ? "resolved" : "pending"}`} key={anomaly.recordId}>
               <div><strong>{record?.purchaseDate || "日期未知"} · <span className="mono">{purchaseCurrency(anomaly.originalUnitPrice)}</span></strong><small>{anomaly.reasons.map((reason) => ERP_COST_ANOMALY_LABELS[reason] ?? reason).join("；")}</small>{anomaly.resolution ? <small>已由 {anomaly.resolution.resolvedBy} 于 {new Date(anomaly.resolution.resolvedAt).toLocaleString("zh-CN")} {anomaly.resolution.action === "confirm_true_price" ? "确认真实价格" : `修正为 ${purchaseCurrency(anomaly.resolution.resolvedUnitPrice)}`}</small> : null}</div>
@@ -821,14 +828,15 @@ function CostMatchingBody({ validatedContext, onPublished }) {
           <div className="panel-header cost-preview-header"><div className="panel-title"><ListChecks size={19} /><h2>平台 SKU 核对结果</h2></div><div className="cost-preview-tools"><SearchInput value={resultQuery} onChange={(event) => setResultQuery(event.target.value)} placeholder="搜索 SKC、SKU、仓库 SKU、供应商或采购单..." /><span className="cost-preview-count">{reconciliation ? `显示 ${visibleGroupedMatches.length} / ${groupedMatches.length} 个 SKC` : "等待成本数据"}</span>{reconciliation ? <Badge tone={reconciliation.summary.missingCount === 0 ? "success" : "warning"}>{reconciliation.summary.missingCount === 0 ? "成本完整" : "仍需补齐"}</Badge> : null}</div></div>
           {!reconciliation ? <EmptyState icon={Warehouse} title="等待成本数据" description="ERP Assistant 收件后会自动解析；也可以粘贴或导入 ERP 输出。本区按平台 SKC 折叠展示，多个平台 SKU 会并列显示。" /> : visibleGroupedMatches.length ? <DataTable columns={columns} data={visibleGroupedMatches} getRowId={(row) => row.id} pageSize={12} /> : <EmptyState icon={ListChecks} title="没有匹配的核对结果" description="可按平台 SKC、平台 SKU、仓库 SKU、供应商或采购单搜索。" />}
           {reconciliation?.overrides.length ? <div className="cost-audit-note"><AlertCircle size={17} />检测到 {reconciliation.overrides.length} 次有效覆盖，旧值与新值已写入批次审计。</div> : null}
-          {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成 Lworkstation 成本处置；原始采购证据、修正或真实价确认、原因和时间会随正式成本保存。</div> : null}
+          {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
           {reconciliation?.unmatchedCostRows.length ? <div className="cost-audit-note"><AlertCircle size={17} />有 {reconciliation.unmatchedCostRows.length} 行成本不属于当前账本平台 SKU，将保留在预览但不写入利润成本。</div> : null}
           {auxiliaryGroups.length ? <details className="cost-auxiliary-audit"><summary><Info size={17} />同查询 SKC 下、本账本未使用的额外变体 <strong>{reconciliation.summary.auxiliaryCount}</strong> 行</summary><div className="cost-auxiliary-list">{auxiliaryGroups.map((group) => <section key={group.id}><header><strong className="mono">{group.platformSkc}</strong><span>仓库 SKU <code>{group.warehouseSku}</code></span></header><p>{group.variants.map((variant) => variant.platformSku).join("、")}</p><small>采购记录 {group.purchaseRecordCount} 条 · 排除记录 {group.excludedRecordCount} 条 · 仅供预览与审计，不影响本账本成本，也不会写入正式利润。</small></section>)}</div></details> : null}
-          <div className="cost-publish-bar"><span>{reconciliation ? reconciliation.summary.anomalyPendingCount > 0 ? `成本待处置 ${reconciliation.summary.anomalyPendingCount} 项，完成后才能发布` : `可发布 ${reconciliation.summary.matchedCount} 项，缺失 ${reconciliation.summary.missingCount} 项` : "解析后才能发布成本批次"}</span><Button variant="primary" loading={publishing} disabled={locked || publishing || !reconciliation?.summary.matchedCount || reconciliation?.summary.anomalyPendingCount > 0} onClick={publish}>{locked ? "账本已定稿" : reconciliation?.summary.anomalyPendingCount > 0 ? "完成成本处置后可发布" : "发布已匹配 ERP 成本"}</Button></div>
+          <div className="cost-publish-bar"><span>{reconciliation ? reconciliation.summary.anomalyPendingCount > 0 ? `成本待处置 ${reconciliation.summary.anomalyPendingCount} 项，完成后才能采用` : `可采用 ${reconciliation.summary.matchedCount} 项，缺失 ${reconciliation.summary.missingCount} 项` : "解析后才能采用成本批次"}</span><Button variant="primary" loading={publishing} disabled={locked || publishing || !reconciliation?.summary.matchedCount || reconciliation?.summary.anomalyPendingCount > 0} onClick={publish}>{locked ? "账本已定稿" : reconciliation?.summary.anomalyPendingCount > 0 ? "完成成本处置后可采用" : "采用已匹配 ERP 成本"}</Button></div>
+          <p className="cost-audit-note">ERP 回传和当前核对结果都是可复用候选，可重复采集和替换；采用后会保存为本月核算成本，但仍可人工更正，或删除本月账本后重新开始。人工更正始终优先于 ERP 成本。</p>
         </Panel>
       </div>
       {inboxQueueDialog}
-      {!locked ? <details open id="manual-cost-actions"><summary>逐店 SKU 状态与人工更正</summary>{filteredSalesLines.map((row) => {
+      {!locked ? <details open id="manual-cost-actions"><summary>人工成本优先（逐店 SKU 可随时更正）</summary>{filteredSalesLines.map((row) => {
         const match = reconciliation?.matches.find((item) => item.canonicalPlatformSku === row.canonicalPlatformSku);
         const manualOverride = selectManualOverride(snapshot?.approvals, { workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store: row.store, platformSku: row.platformSku });
         const reason = manualOverride ? "人工更正有效" : match?.status === "matched" ? "ERP 成本已匹配" : match?.costDecision?.selectedRecords?.some((record) => record.unitPrice === 0) ? "采购记录存在零价" : match?.evidenceComplete === false ? "证据不完整" : match?.purchaseRecords?.length === 0 ? "尚无可用采购记录，需核对 ERP" : "尚未收到可用成本，原因待查";

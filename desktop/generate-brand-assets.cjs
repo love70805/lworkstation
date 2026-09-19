@@ -66,9 +66,29 @@ async function generate() {
   });
   const document = `<!doctype html><style>html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}svg{display:block;width:100%;height:100%}</style>${source}`;
   await renderer.loadURL(`data:text/html;base64,${Buffer.from(document).toString("base64")}`);
-  const captured = await renderer.webContents.capturePage({ x: 0, y: 0, width: 1024, height: 1024 });
-  renderer.destroy();
-  const image = nativeImage.createFromBuffer(captured.toPNG());
+  // Rasterize the verified SVG directly; hidden-window Viz captures can be blank.
+  let captured;
+  try {
+    captured = await renderer.webContents.executeJavaScript(`(async () => {
+      const image = new Image();
+      image.src = ${JSON.stringify(`data:image/svg+xml;base64,${sourceBuffer.toString("base64")}`)};
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = 1024;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0, 1024, 1024);
+      const pixels = context.getImageData(0, 0, 1024, 1024).data;
+      let colored = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] > 0 && Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) - Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) > 20) colored++;
+      }
+      if (colored < 1000) throw new Error("L7 icon raster is blank or lacks its brand colors");
+      return canvas.toDataURL("image/png");
+    })()`);
+  } finally {
+    renderer.destroy();
+  }
+  const image = nativeImage.createFromDataURL(captured);
   if (image.isEmpty() || image.getSize().width !== 1024 || image.getSize().height !== 1024) {
     throw new Error(`Electron rendered an invalid L7 master size: ${JSON.stringify(image.getSize())}`);
   }
