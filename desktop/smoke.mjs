@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import updatePolicy from "./update-policy.cjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const executable = process.env.SHOPEERS_DESKTOP_SMOKE_EXECUTABLE
@@ -16,10 +17,12 @@ const userDataPath = path.join(os.tmpdir(), `shopeers-desktop-smoke-user-data-${
 const cachePath = path.join(userDataPath, "cache");
 const inboxPort = 20790 + Math.floor(Math.random() * 800);
 const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+const channel = updatePolicy.versionChannel(version);
+if (!channel) throw new Error(`Unsupported smoke update channel for ${version}`);
 
 const updateServer = http.createServer((request, response) => {
   const requestPath = new URL(request.url, "http://127.0.0.1").pathname;
-  if (requestPath !== "/latest.yml") {
+  if (requestPath !== `/${channel}.yml`) {
     response.writeHead(404).end();
     return;
   }
@@ -49,6 +52,7 @@ const child = spawn(executable, [], {
     SHOPEERS_DESKTOP_SMOKE_ERP_V2: "1",
     SHOPEERS_DESKTOP_UPDATE_SMOKE: "1",
     SHOPEERS_DESKTOP_UPDATE_URL: updateUrl,
+    SHOPEERS_DESKTOP_UPDATE_CHANNEL: channel,
     SHOPEERS_ERP_INBOX_PORT: String(inboxPort),
     SHOPEERS_ERP_INBOX_FILE: inboxSpoolPath,
     SHOPEERS_DESKTOP_SMOKE_USER_DATA: userDataPath,
