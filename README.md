@@ -1,24 +1,26 @@
 # Lworkstation 经营管理工作台
 
-选品工作台与利润核算面板的一体化内部工具。Lworkstation Windows 桌面安装版是正式交付入口，内置工作站、ERP 和 1688 受控标签；浏览器构建继续保留用于前端开发与调试。当前交付为纯本机版本，无需云端数据库。
+选品工作台与利润核算面板的一体化内部工具。仅继续开发与交付 Lworkstation Windows 桌面安装版，内置工作站、ERP 和 1688 受控标签；`frontend/` 作为 Electron 内置界面维护，不开发或发布独立浏览器版本。当前交付为纯本机版本，无需云端数据库。
 
 ## 下载与项目入口
 
 - [最新稳定版与安装包](https://github.com/love70805/lworkstation/releases/latest)
+- [v0.3.0 Beta 预发布](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta)
 - [当前发布状态](docs/RELEASE_STATUS.md) · [历史版本与本机候选登记](releases/README.md)
 - [下一版待改动](docs/NEXT_UPDATE.md)：需求与静态预览已整理，尚未实施，不代表当前版本功能。
 - [开发任务看板](docs/CODEX_TASK_BOARD.md) · [跨电脑续接指南](docs/CODEX_RESTART_GUIDE.md)
 
-## 浏览器开发调试
+## 桌面界面开发
 
-仅在开发或调试前端页面时，在工作区根目录执行：
+在工作区根目录执行，通过 Electron 验证桌面界面：
 
 ```powershell
 pnpm --dir frontend install
-pnpm --dir frontend dev
+pnpm --dir desktop install
+pnpm --dir desktop dev
 ```
 
-开发服务器地址为 `http://127.0.0.1:5173/`，不作为正式产品交付入口。常用调试页面：
+开发命令会启动 Vite 和 Electron，Vite 只为桌面开发提供热更新资源，不作为独立浏览器产品。桌面内置界面路由：
 
 - `/workspace`：经营概览
 - `/products`：选品工作台
@@ -30,7 +32,7 @@ pnpm --dir frontend dev
 
 ## Lworkstation Windows 桌面版
 
-当前稳定版为 [`0.2.15`](https://github.com/love70805/lworkstation/releases/tag/v0.2.15)，已发布为 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.15/Lworkstation-Setup-0.2.15.exe)。本版修复弹窗输入跳焦，压缩利润页布局并优化明细读取；每日明细使用 SKC，活动名称简写并去重；保留经营概览并融入月度账本和每日趋势，利润页融合成本核对，支持代发/独立扣款导入、两阶段 Excel 报告及历史文件留存；增加主题过渡、启动反馈和默认关闭进入托盘。首次安装可选择位置，稳定更新检查默认开启，下载和安装仍需用户操作。历史版本保留。发布记录与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前稳定版为 [`0.2.19`](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，保持 GitHub Latest。[下载稳定版 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.19/Lworkstation-Setup-0.2.19.exe)。稳定版提供每日/月度销售图、期间店铺与 SKC 明细，利润页专注核算。`0.3.0-beta` 已公开为预发布，人工确认删除、备份一级入口及 ERP 核算交互改进见 [Beta 记录](docs/RELEASE_0.3.0_BETA.md)。首次安装可选择位置，更新下载和安装仍需用户操作。发布状态与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
@@ -39,11 +41,11 @@ pnpm --dir desktop install
 pnpm --dir desktop dev
 ```
 
-`dev` 会启动 Vite 和 Electron。稳定版使用 `pnpm --dir desktop build`。历史 beta 候选使用 `release:build`，先构建 `frontend/dist`，再打入受控 beta 更新配置：
+`dev` 会启动 Vite 和 Electron。稳定版使用 `pnpm --dir desktop build`。当前 Beta 候选使用 `release:build`，先构建 `frontend/dist`，再打入受控 beta 更新配置：
 
 ```powershell
 pnpm --dir desktop verify
-pnpm --dir desktop build
+pnpm --dir desktop release:build
 pnpm --dir desktop smoke:packaged
 pnpm --dir desktop release:organize
 pnpm --dir desktop release:check
@@ -55,7 +57,7 @@ Beta 安装包命名为 `Lworkstation-Setup-<版本>.exe`，由 `desktop/release
 
 安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
 
-0.2.7 起稳定检查默认开启；新 Beta 构建默认开启 beta 检查，两个通道禁止互跳和降级。下载和安装需用户操作，客户端不保存 GitHub Token。旧 0.2.6 关闭检查，需手工安装新版；旧 beta.7 仍带旧更新策略，需要继续 Beta 时应等待并手工安装包含本修复的新 Beta，本轮未发布新 Beta。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
+0.2.7 起稳定检查默认开启；新 Beta 构建默认开启 beta 检查，两个通道禁止互跳和降级。下载和安装需用户操作，客户端不保存 GitHub Token。旧 0.2.6 关闭检查，需手工安装新版；旧 beta.7 仍带旧更新策略，继续 Beta 建议手工下载 `0.3.0-beta`，不假定旧包能自动升级。稳定版不会自动切到 Beta。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
 
 生产版工作站通过 Electron 内部 `shopeers://` 安全协议读取前端资源；ERP / 1688 采集回传只监听 `127.0.0.1` 本机回环地址，默认端口为 `8790`，测试或受控启动可使用运行时端口。桌面会把实际 inbox origin 注入内置扩展，不接受局域网连接，通常不需要放行 Windows 防火墙。开发模式仍由 Vite 提供热更新页面。
 
