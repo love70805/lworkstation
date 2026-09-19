@@ -2,9 +2,9 @@
 
 更新时间：2026-09-20
 
-## v0.3.0 Beta 候选验收通过
+## v0.3.0 Beta 已公开发布
 
-代码版本 `0.3.0-beta`，仅 Windows 桌面版。719 测试、生产构建、12 组桌面验证、Windows 候选交互与 packaged smoke、发布资产合同检查通过。候选源 `03c2fbe`，等待 GitHub CI / 集成及公开回读；尚未公开发布或安装，不替代稳定通道。见 [Beta 记录](RELEASE_0.3.0_BETA.md)。
+代码版本 `0.3.0-beta`，仅 Windows 桌面版。719 测试、生产构建、12 组桌面验证、Windows 候选交互与 packaged smoke、发布资产合同检查通过。候选源 `03c2fbe`，PR #90 / main CI 通过，标签基线 `d99049e`。2026-09-20 已公开为 GitHub 预发布，四资产匿名回读与更新通道隔离通过；本机未安装，稳定 Latest 保持 `v0.2.19`。见 [Beta 记录](RELEASE_0.3.0_BETA.md)。
 
 ## 当前公开稳定版 0.2.19
 

@@ -1,6 +1,6 @@
 # v0.3.0 Beta
 
-状态：2026-09-20 本机候选验收通过，等待 GitHub CI / 集成与公开资产回读；尚未公开发布或安装。
+状态：2026-09-20 02:00:49（UTC+8）已公开为 GitHub 预发布，四资产匿名下载与哈希回读通过；本机未安装。
 
 包版本使用 `0.3.0-beta`，标签应使用 `v0.3.0-beta`，与现有更新器的 SemVer 校验一致。仅交付 Windows 桌面版，不发布独立浏览器版本，不将 Beta 推入稳定更新通道。
 
@@ -25,14 +25,19 @@
 - 实际打包 Electron 在隔离数据目录中通过人工成本 `0.009` 保存、备份跳转、返回后删除账本、浅深色及 1280/1024 窗口验收；无页面横向溢出或 renderer 错误。
 - 实测发现备份返回仍显示旧删除弹窗，已修复并增加两项组件回归测试。
 
-## 候选与证据
+## 发布与证据
+
+- [GitHub v0.3.0-beta](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta) / [Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.3.0-beta/Lworkstation-Setup-0.3.0-beta.exe)。
+- PR #90 已合入主线 `d99049e8e87975164fa3cff4f00bc60c4f1743d9`，PR / main 两项 CI 均通过；发布标签指向该提交，与候选的应用生产文件一致。
+- 四资产匿名完整下载回读通过，证据 `archive/release-0.3.0-beta/public-readback.json`。GitHub Latest 仍为稳定版 `v0.2.19`。
+- 当前更新器的公开源版本模拟检查通过：稳定 `0.2.18` 只发现 `0.2.19`，稳定 `0.2.19` 不收到 Beta，旧 Beta 版本号可发现 `0.3.0-beta`，当前 Beta 不重复提示；证据 `public-channel-check.json`。未启动旧 Beta 安装程序或执行实际升级。
 
 - 构建源提交：`03c2fbe`。为避开 Windows NSIS 长路径限制，使用同一提交的短路径工作树构建；后续文档与 smoke 夹具不进入安装包。
 - 本机候选：`releases/candidates/0.3.0-beta-human-first/`；Beta 上传源：`releases/prerelease/0.3.0-beta/`。
 - 验收截图、结果与脚本：`archive/release-0.3.0-beta/desktop-qa/`。
 - 安装包：`Lworkstation-Setup-0.3.0-beta.exe`，116,571,697 字节。
 - SHA-256：`67434B31A1BB0EE85CEF5628303CF02371B6A70B43EBCFF901A239C8DFB0E126`。
-- 仅发布安装包、blockmap、`beta.yml`、`SHA256.txt` 四资产；不上传 `latest.yml`，不设置 GitHub Latest。
+- 已发布安装包、blockmap、`beta.yml`、`SHA256.txt` 四资产；未上传 `latest.yml`，未设置 GitHub Latest。
 
 ## 边界
 
@@ -40,4 +45,4 @@
 - `0010_manual_ledger_deletion.sql` 仅为已有云端兼容代码准备；桌面版使用本地数据库。
 - 冻结报告只在人工确认删除整月账本时一起删除，撤回成本不会删除旧报告。
 - 已锁定账本仍不可直接修改成本，但可以人工确认后删除。真实 ERP 账号采集、多机云端和签名安装升级不在本次合成数据验收范围。
-- 公开发布前须完成候选验收、GitHub CI/集成和 Beta 资产校验；不使用 `v0.3.0beta` 作为更新器标签。
+- 候选验收、GitHub CI/集成和 Beta 资产校验均已完成；标签为 `v0.3.0-beta`，不使用不符合 SemVer 的 `v0.3.0beta`。

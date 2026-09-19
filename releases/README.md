@@ -6,15 +6,15 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，四资产回读及稳定更新检查通过，旧 Beta 列表限制见 [发布状态](../docs/RELEASE_STATUS.md)。本机未安装。
+当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta)。四资产回读与通道隔离检查通过；Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-20。0.3.0 Beta 本机候选验收通过，尚未公开；稳定版记录仍为 0.2.19。本机按用户要求暂不安装。
+核对日期：2026-09-20。0.3.0 Beta 已公开预发布并验证下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.3.0-beta` human first | 本机候选通过；719 测试、12 组桌面验证、实际 Electron 交互及 packaged smoke 通过；等待 CI/集成/公开回读 | `candidates/0.3.0-beta-human-first/`；`prerelease/0.3.0-beta/`；[验收](../docs/RELEASE_0.3.0_BETA.md) |
+| `0.3.0-beta` human first | 已公开 GitHub 预发布；719 测试、CI、12 组桌面验证、实际 Electron 交互、packaged smoke、四资产回读及通道隔离通过；本机未安装 | `candidates/0.3.0-beta-human-first/`；`prerelease/0.3.0-beta/`；[验收](../docs/RELEASE_0.3.0_BETA.md) |
 | `0.2.19` sales detail | 已公开 GitHub Latest；709 测试、CI、Windows packaged smoke、四资产回读/稳定通道通过；本机未安装 | `candidates/0.2.19-sales-detail/`；[验收](../docs/RELEASE_0.2.19.md) |
 | `0.2.18` stacked sales | 历史稳定版 | [验收](../docs/RELEASE_0.2.18.md) |
 | `0.2.17` grouped sales | 历史稳定版 | [验收](../docs/RELEASE_0.2.17.md) |
@@ -31,12 +31,12 @@
 | `0.2.8` stable acceptance | 已完成本机候选验收、代码集成和公开发布，候选与公开包相同 | 本机 `candidates/0.2.8-stable-acceptance/` |
 | `0.2.7` | 历史稳定版；可通过稳定更新源发现 0.2.8 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.7) |
 | `0.2.6` | 历史稳定版；原资产保留 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6)；该旧包更新关闭 |
-| `0.2.6-beta.7` | 已公开预发布，当前公开 Beta | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，本机 `prerelease/0.2.6-beta.7/` |
+| `0.2.6-beta.7` | 历史公开 Beta | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.2.6-beta.7)，本机 `prerelease/0.2.6-beta.7/` |
 | `0.2.6-beta.8` Security QA | 本机隔离安装、覆盖升级与重启验收通过；未公开发布 | 本机 `candidates/0.2.6-beta.8-security-qa/`，详见 [安全验收记录](../docs/SECURITY_HARDENING_2026-09.md) |
 
 QA 包使用独立应用身份，不能作为正式应用的更新包上传。GitHub Releases 只列出实际创建的发布条目；合并代码和更新本清单不会自动创建 Release。安装包、运行日志及数据库不提交 Git，本机目录仅在归档机器上存在。
 
-本机 beta.8 QA 已补“Lworkstation QA beta.8（仅测试）”桌面快捷方式，使用隔离启动器且公开更新关闭。0.2.7 临时安装验收应用已卸载，只保留证据。旧公开 beta.7 没有本轮通道修复，本轮未发布新 Beta。
+本机 beta.8 QA 已补“Lworkstation QA beta.8（仅测试）”桌面快捷方式，使用隔离启动器且公开更新关闭。0.2.7 临时安装验收应用已卸载，只保留证据。旧公开 beta.7 没有严格通道修复，继续 Beta 建议手工下载当前 `0.3.0-beta`；不假定旧安装包可自动升级。
 
 ## 公开 Beta 构建与归档
 
