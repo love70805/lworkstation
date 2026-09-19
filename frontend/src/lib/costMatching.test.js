@@ -11,9 +11,9 @@ describe("成本核对按平台 SKC 分组", () => {
       { id: "OTHER", ledgerId: "L-2", status: "applied", appliedAt: "2026-08-23T08:00:00.000Z" },
     ], "L-1");
     expect(history.map((item) => [item.id, item.statusLabel])).toEqual([
-      ["VOIDED", "已作废"],
+      ["VOIDED", "已撤回"],
       ["REJECTED", "已删除"],
-      ["APPLIED", "已发布"],
+      ["APPLIED", "已采用"],
     ]);
     expect(history[1].envelope.batch.sourceMeta.sourceWarnings).toEqual(["unknown_platform_sku:legacy"]);
   });

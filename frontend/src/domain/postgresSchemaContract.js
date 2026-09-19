@@ -40,7 +40,7 @@ export const REQUIRED_CLOUD_FRAGMENTS = [
   "create trigger erp_cost_batches_controlled_transition",
   "create trigger erp_cost_inbox_controlled_transition",
   "unique (workspace_id, applied_batch_id)",
-  "存在已发布或已作废 ERP 正式成本的账本不能物理删除",
+  "Human-confirmed ledger deletion is allowed for any ledger",
   "create policy erp_inbox_insert",
   "drop policy if exists erp_batches_update",
   "alter table public.audit_events force row level security",

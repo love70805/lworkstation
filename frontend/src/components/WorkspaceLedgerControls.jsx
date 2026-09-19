@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Panel } from './UI';
 import { profitWorkspaceHref } from '../lib/workspaceNavigation';
-const labels = { draft: '草稿', cost_pending: '待补正式成本', approval_pending: '待人工确认', ready: '可定稿', finalized: '已定稿', locked: '已锁定' };
+const labels = { draft: '草稿', cost_pending: '待核对成本', approval_pending: '待确认成本', ready: '待确认利润', finalized: '已定稿', locked: '已锁定' };
 
 export default function WorkspaceLedgerControls({ scope, onError }) {
   const context = scope.context;
@@ -14,7 +14,7 @@ export default function WorkspaceLedgerControls({ scope, onError }) {
       <div className="workspace-ledger-filters">
         <label>核算月份<select className="select-input" aria-label="首页核算月份" value={ledger.id} onChange={event => change('ledger', event.target.value)}>{context.ledgers.map(item => <option key={item.id} value={item.id}>{item.period}</option>)}</select></label>
         <label>店铺<select className="select-input" aria-label="首页店铺" value={context.store} onChange={event => change('store', event.target.value)}><option value="all">全部店铺</option>{context.stores.map(store => <option key={store} value={store}>{store}</option>)}</select></label>
-        <div className="workspace-ledger-status"><strong>账本状态（整月）：{labels[ledger.status] || '待核对'}</strong><span>{ledger.costSummary?.missingCount == null ? '正式成本状态待核对' : `整月 ${ledger.costSummary.missingCount} 条 SKU 待补正式成本`}</span></div>
+        <div className="workspace-ledger-status"><strong>账本状态（整月）：{labels[ledger.status] || '待核对'}</strong><span>{ledger.costSummary?.missingCount == null ? '成本状态待读取' : ledger.costSummary.missingCount > 0 ? `还有 ${ledger.costSummary.missingCount} 条 SKU 待确认成本` : '成本已齐，等待人工确认利润'}</span></div>
       </div>
     </>}
     <div className="workspace-ledger-actions">

@@ -564,7 +564,7 @@ function businessOperations(projection, workspaceId) {
     eventId: event.eventId,
     table: "ledgers",
     kind: "delete_guard",
-    text: "select l.status, (exists (select 1 from public.erp_cost_batches b where b.workspace_id = l.workspace_id and b.ledger_id = l.id and b.status in ('published', 'voided')) or exists (select 1 from public.erp_cost_inbox i where i.workspace_id = l.workspace_id and i.ledger_id = l.id and i.status in ('applied', 'voided'))) as has_formal_lifecycle from public.ledgers l where l.workspace_id = $1 and l.id = $2 for update",
+    text: "select l.status from public.ledgers l where l.workspace_id = $1 and l.id = $2 for update",
     values: [workspaceId, entityId],
   }, {
     eventId: event.eventId,
@@ -718,13 +718,8 @@ export async function applySyncEnvelopeWithPostgresClient(payload, {
         if (["delete_guard", "finalize_guard"].includes(operation.kind)) {
           const ledger = rowsFrom(result)[0];
           if (!ledger) throw new SyncContractError("找不到同步事件对应的月度账本。", { code: "LEDGER_NOT_FOUND", status: 409, eventIds: [eventPlan.event.eventId] });
-          if (operation.kind === "delete_guard" && [true, "true", 1, "1"].includes(ledger.has_formal_lifecycle)) {
-            throw new SyncContractError("该账本已有正式 ERP 成本生命周期记录，不能物理删除。", {
-              code: "LEDGER_HAS_FORMAL_COST_HISTORY", status: 409, eventIds: [eventPlan.event.eventId],
-            });
-          }
-          if (["finalized", "locked"].includes(String(ledger.status))) {
-            throw new SyncContractError("已定稿或已锁定账本不能再次定稿或删除。", { code: "LEDGER_IMMUTABLE", status: 409, eventIds: [eventPlan.event.eventId] });
+          if (operation.kind === "finalize_guard" && ["finalized", "locked"].includes(String(ledger.status))) {
+            throw new SyncContractError("已定稿或已锁定账本不能再次定稿。", { code: "LEDGER_IMMUTABLE", status: 409, eventIds: [eventPlan.event.eventId] });
           }
         }
         if (operation.kind === "void_guard") {

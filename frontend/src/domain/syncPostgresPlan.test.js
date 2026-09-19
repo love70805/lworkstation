@@ -554,35 +554,26 @@ describe("sync postgres transaction plan", () => {
     expect(plan.eventPlans[0].contentHash).not.toBe(await syncEventContentHash({ ...plan.eventPlans[0].event, actorIdProvided: true }));
   });
 
-  it("guards finalized ledgers from deletion and repeated finalization", async () => {
+  it("allows human-confirmed deletion of finalized ledgers while guarding repeated finalization", async () => {
     const deleteEvent = { ...event({ eventId: "E-D", objectType: "monthly_ledger", objectId: "L-1", action: "deleted" }), after: null };
     const client = fakeClient({ ledgerStatus: "finalized" });
-    await expect(applySyncEnvelopeWithPostgresClient(envelope([deleteEvent]), { client })).rejects.toMatchObject({ code: "LEDGER_IMMUTABLE" });
-    expect(client.calls.at(-1).text).toBe("rollback");
-    expect(client.calls.some((call) => call.text.startsWith("delete from public.ledgers"))).toBe(false);
+    await expect(applySyncEnvelopeWithPostgresClient(envelope([deleteEvent]), { client })).resolves.toMatchObject({ transaction: "committed" });
+    expect(client.calls.some((call) => call.text.startsWith("delete from public.ledgers"))).toBe(true);
   });
 
-  it("rejects a stale draft deletion when PostgreSQL still has formal ERP lifecycle history", async () => {
+  it("allows a stale draft deletion when PostgreSQL still has formal ERP lifecycle history", async () => {
     const deleteEvent = { ...event({ eventId: "E-D-FORMAL", objectType: "monthly_ledger", objectId: "L-1", action: "deleted" }), after: null };
     const client = fakeClient({ ledgerStatus: "draft", hasFormalLifecycle: true });
-    await expect(applySyncEnvelopeWithPostgresClient(envelope([deleteEvent]), { client })).rejects.toMatchObject({
-      code: "LEDGER_HAS_FORMAL_COST_HISTORY",
-      status: 409,
-    });
-    expect(client.calls.at(-1).text).toBe("rollback");
-    expect(client.calls.some((call) => call.text.startsWith("delete from public.ledgers"))).toBe(false);
+    await expect(applySyncEnvelopeWithPostgresClient(envelope([deleteEvent]), { client })).resolves.toMatchObject({ transaction: "committed" });
+    expect(client.calls.some((call) => call.text.startsWith("delete from public.ledgers"))).toBe(true);
   });
 
-  it("guards stale ledger deletion when only an applied or voided inbox remains", async () => {
+  it("does not add ERP lifecycle evidence as a deletion guard", async () => {
     const deleteEvent = { ...event({ eventId: "E-D-INBOX", objectType: "monthly_ledger", objectId: "L-1", action: "deleted" }), after: null };
     const plan = await buildSyncPostgresPlan(envelope([deleteEvent]));
-    expect(plan.eventPlans[0].operations[0].text).toContain("from public.erp_cost_inbox i");
-    expect(plan.eventPlans[0].operations[0].text).toContain("i.status in ('applied', 'voided')");
+    expect(plan.eventPlans[0].operations[0].text).toBe("select l.status from public.ledgers l where l.workspace_id = $1 and l.id = $2 for update");
     const client = fakeClient({ ledgerStatus: "draft", hasFormalLifecycle: true });
-    await expect(applySyncEnvelopeWithPostgresClient(envelope([deleteEvent]), { client })).rejects.toMatchObject({
-      code: "LEDGER_HAS_FORMAL_COST_HISTORY",
-      status: 409,
-    });
-    expect(client.calls.some((call) => call.text.startsWith("delete from public.ledgers"))).toBe(false);
+    await expect(applySyncEnvelopeWithPostgresClient(envelope([deleteEvent]), { client })).resolves.toMatchObject({ transaction: "committed" });
+    expect(client.calls.some((call) => call.text.startsWith("delete from public.ledgers"))).toBe(true);
   });
 });

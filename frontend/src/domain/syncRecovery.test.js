@@ -216,7 +216,7 @@ describe("sync recovery contract", () => {
     expect(tables.salesRows).toEqual([]);
   });
 
-  it("rejects a stale delete recovery event once formal ERP lifecycle evidence exists", () => {
+  it("replays a delete recovery event after formal ERP lifecycle evidence exists", () => {
     const published = event("1", "published", "C-1", {
       costBatch: { id: "C-1", workspaceId: "workspace-default", ledgerId: "L-1", status: "published", currency: "CNY" },
       rows: [],
@@ -225,7 +225,9 @@ describe("sync recovery contract", () => {
     });
     published.objectType = "erp_cost_batch";
     const payload = buildSyncRecoveryPayload({ workspaceId: "workspace-default", events: [published, event("2", "deleted", "L-1")] });
-    expect(() => replaySyncRecoveryPayload(payload)).toThrow("不能通过恢复事件物理删除");
+    expect(replaySyncRecoveryPayload(payload).tables.ledgers).toEqual([]);
+    expect(replaySyncRecoveryPayload(payload).tables.erpCostBatches).toEqual([]);
+    expect(replaySyncRecoveryPayload(payload).tables.erpCostInbox).toEqual([]);
   });
 
   it("replays a duplicate-SKC merge without leaving source SKU or cost records behind", () => {

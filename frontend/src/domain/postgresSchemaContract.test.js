@@ -6,6 +6,7 @@ const migrationsDir = new URL("../../supabase/migrations/", import.meta.url);
 const migration = readdirSync(migrationsDir).filter((file) => file.endsWith(".sql")).toSorted().map((file) => readFileSync(new URL(file, migrationsDir), "utf8")).join("\n");
 const lifecycleMigration = readFileSync(new URL("0008_erp_cost_lifecycle.sql", migrationsDir), "utf8");
 const voidTransitionMigration = readFileSync(new URL("0009_erp_cost_void_transition.sql", migrationsDir), "utf8");
+const manualDeletionMigration = readFileSync(new URL("0010_manual_ledger_deletion.sql", migrationsDir), "utf8");
 
 describe("PostgreSQL migration contract", () => {
   it("contains all tenant tables, workspace columns, RLS and immutable fact guards", () => {
@@ -71,11 +72,13 @@ describe("PostgreSQL migration contract", () => {
     expect(voidTransitionMigration).toContain(`new.${field} is distinct from old.${field}`);
   });
 
-  it("requires complete void metadata and guards ledger deletion against inbox-only lifecycle evidence", () => {
+  it("requires complete void metadata while allowing human-confirmed ledger deletion", () => {
     expect(voidTransitionMigration).toContain("voided_at is not null");
     expect(voidTransitionMigration).toContain("nullif(trim(voided_by), '') is not null");
     expect(voidTransitionMigration).toContain("nullif(trim(void_reason), '') is not null");
     expect(voidTransitionMigration).toContain("i.status in ('applied', 'voided')");
-    expect(voidTransitionMigration).toContain("存在已发布或已作废 ERP 正式成本生命周期的账本不能物理删除");
+    expect(manualDeletionMigration).toContain("create or replace function public.assert_ledger_deletable");
+    expect(manualDeletionMigration).not.toContain("erp_cost_batches");
+    expect(manualDeletionMigration).not.toContain("已定稿或已锁定账本不能删除");
   });
 });

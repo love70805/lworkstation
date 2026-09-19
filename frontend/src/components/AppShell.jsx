@@ -44,7 +44,7 @@ const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
   { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
-  { id: "diagnostics", label: "系统诊断与备份", path: "/diagnostics", icon: Activity, match: ["/diagnostics", "/data-security"] },
+  { id: "diagnostics", label: "备份中心", path: "/data-security", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
 ];
 
 function isActive(pathname, item) {
@@ -147,7 +147,7 @@ export default function AppShell({ children, pageClass = "" }) {
       items.push({
         id: `costs:${workspaceSummary.latestOpenLedger.id}:${workspaceSummary.latestOpenLedger.updatedAt ?? "none"}:${workspaceSummary.missingCostCount}`,
         tone: "danger",
-        title: `工作区合计 ${workspaceSummary.missingCostCount} 条 SKU 待补正式成本`,
+        title: `工作区合计 ${workspaceSummary.missingCostCount} 条 SKU 待确认成本`,
         detail: `查看 ${workspaceSummary.latestOpenLedger.period} 成本核对`,
         path: profitWorkspaceHref(`ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`, 'cost'),
       });
@@ -155,8 +155,8 @@ export default function AppShell({ children, pageClass = "" }) {
       items.push({
         id: `ledger-ready:${workspaceSummary.latestOpenLedger.id}:${workspaceSummary.latestOpenLedger.updatedAt ?? "none"}`,
         tone: "success",
-        title: `${workspaceSummary.latestOpenLedger.period} 账本可定稿`,
-        detail: "正式成本已完整，等待最终复核",
+        title: `${workspaceSummary.latestOpenLedger.period} 账本待确认利润`,
+        detail: "成本已齐，等待人工最后核对",
         path: `/profit?ledger=${encodeURIComponent(workspaceSummary.latestOpenLedger.id)}`,
       });
     }

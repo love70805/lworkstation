@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, CalendarDays, Check, CheckCircle2, ChevronDown, Download, LockKeyhole, Plus, RotateCcw, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
@@ -8,8 +8,6 @@ import { REPORT_FORMULA_VERSION, displayMoney } from "../domain/profitReports";
 import ProfitGroups from "./ProfitGroups";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
 import {
-  revokeApproved1688Fallback,
-  saveApproved1688Fallback,
   updateLedgerWarehouseRate,
   reopenLedgerForCostCorrection,
 } from "../data/database";
@@ -27,9 +25,9 @@ const currency = (value) => `¥${displayMoney(value)}`;
 
 const ledgerStatusLabels = {
   draft: "草稿",
-  cost_pending: "待补 ERP 成本",
-  approval_pending: "待人工审批",
-  ready: "可定稿",
+  cost_pending: "待核对成本",
+  approval_pending: "待确认成本",
+  ready: "待确认利润",
   finalized: "已定稿",
   locked: "已锁定",
 };
@@ -133,15 +131,6 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   const [rateDraft, setRateDraft] = useState("0.7");
   const [rateDialog, setRateDialog] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [approvalTarget, setApprovalTarget] = useState(null);
-  const [approvalAmount, setApprovalAmount] = useState("");
-  const [approvalSource, setApprovalSource] = useState("");
-  const [approvalActor, setApprovalActor] = useState("本地复核人");
-  const [approvalReason, setApprovalReason] = useState("");
-  const [approvalSaving, setApprovalSaving] = useState(false);
-  const [revokeTarget, setRevokeTarget] = useState(null);
-  const [revokeReason, setRevokeReason] = useState("");
-  const [revoking, setRevoking] = useState(false);
 
   useEffect(() => {
     const next = readProfitFilter(searchParams, requestedLedgerId);
@@ -202,58 +191,6 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
 
   const canFinalize = Boolean(calculated.length) && ledgerSummary.missing === 0 && !locked && !calculation.loading && !calculation.error;
   const costMatchingHref = useMemo(() => buildProfitHref({ ledgerId: snapshot?.ledger?.id, ...filterState, view: "cost" }), [filterState, snapshot?.ledger?.id]);
-
-  const openApproval = useCallback((row) => {
-    setApprovalTarget(row);
-    setApprovalAmount(row.reference1688Cost?.unitCost ? String(row.reference1688Cost.unitCost) : "");
-    setApprovalSource(row.reference1688Cost?.orderNumber ?? row.order1688 ?? "");
-    setApprovalReason("");
-  }, []);
-
-  const approveFallback = async () => {
-    if (!snapshot?.ledger || !approvalTarget) return;
-    setApprovalSaving(true);
-    try {
-      await saveApproved1688Fallback({
-        ledgerId: snapshot.ledger.id,
-        platformSku: approvalTarget.platformSku,
-        unitCost: approvalAmount,
-        reason: approvalReason,
-        approvedBy: approvalActor,
-        referenceSource: approvalSource ? "1688 来源单号/说明" : "人工录入的 1688 落地参考",
-        referenceOrderNumber: approvalSource,
-      });
-      notify(`${approvalTarget.platformSku} 已完成 1688 兜底成本审批，仅对 ${snapshot.ledger.period} 账本生效。`);
-      setApprovalTarget(null);
-      setApprovalAmount("");
-      setApprovalSource("");
-      setApprovalReason("");
-    } catch (error) {
-      notify(`审批失败：${error.message}`, "error");
-    } finally {
-      setApprovalSaving(false);
-    }
-  };
-
-  const revokeFallback = async () => {
-    if (!snapshot?.ledger || !revokeTarget?.approvalId) return;
-    setRevoking(true);
-    try {
-      await revokeApproved1688Fallback({
-        ledgerId: snapshot.ledger.id,
-        approvalId: revokeTarget.approvalId,
-        reason: revokeReason,
-        revokedBy: approvalActor,
-      });
-      notify(`${revokeTarget.platformSku} 的 1688 兜底审批已撤销。`);
-      setRevokeTarget(null);
-      setRevokeReason("");
-    } catch (error) {
-      notify(`撤销失败：${error.message}`, "error");
-    } finally {
-      setRevoking(false);
-    }
-  };
 
   const columns = useMemo(() => [
     {
@@ -358,11 +295,11 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
       meta: { headerStyle: { width: "156px" } },
       cell: ({ row }) => {
         const item = row.original;
-        if (!locked) return <div className="profit-status-actions"><Badge tone={item.finalizable ? "success" : "warning"}>{item.costSource === "manual_override" ? "人工更正" : item.costSource === "erp" ? "ERP 正式成本" : "待补正式成本"}</Badge><button className="inline-link" onClick={() => setManualTarget(item)}>{item.manualOverride ? "更正 / 撤销" : "人工更正"}</button>{!item.finalizable ? <button className="inline-link" onClick={() => navigate(costMatchingHref)}>查看回传</button> : null}</div>;
+        if (!locked) return <div className="profit-status-actions"><Badge tone={item.finalizable ? "success" : "warning"}>{item.costSource === "manual_override" ? "人工确认" : item.costSource === "erp" ? "ERP 结果已采用" : "待确认成本"}</Badge><button className="inline-link" onClick={() => setManualTarget(item)}>{item.manualOverride ? "更正 / 撤销" : "人工填写"}</button>{!item.finalizable ? <button className="inline-link" onClick={() => navigate(costMatchingHref)}>查看候选</button> : null}</div>;
         if (item.costSource === "manual_override") return <Badge tone="success">人工更正</Badge>;
-        if (item.costSource === "erp") return <Badge tone="success">ERP 正式成本</Badge>;
-        if (item.costSource === "approved_1688") return <div className="profit-status-actions"><Badge tone="warning">人工参考，待 ERP</Badge>{!locked ? <button className="inline-link muted" onClick={() => { setRevokeTarget(item); setRevokeReason(""); }}>撤销</button> : null}</div>;
-        return <div className="profit-status-actions"><Badge tone="danger">待补成本</Badge><button className="inline-link" onClick={() => navigate(costMatchingHref)}>去核对</button></div>;
+        if (item.costSource === "erp") return <Badge tone="success">ERP 结果已采用</Badge>;
+        if (item.costSource === "approved_1688") return <Badge tone="warning">1688 参考，未计入利润</Badge>;
+        return <div className="profit-status-actions"><Badge tone="danger">待确认成本</Badge><button className="inline-link" onClick={() => navigate(costMatchingHref)}>去查看</button></div>;
       },
     },
   ], [costMatchingHref, locked]);
@@ -395,6 +332,10 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   };
 
   const finalizeLedger = () => document.getElementById("monthly-reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const openCostDetails = () => {
+    setDetailsOpen(true);
+    requestAnimationFrame(() => document.querySelector(".profit-table-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
 
   const reopenLedger = async () => {
     setReopening(true); setReopenError("");
@@ -420,8 +361,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
   if (!snapshot?.ledger || (!locked && !snapshot.rows?.length)) {
     return (
       <>
-        <PageHeader title="利润核算" description="导入月度台账后，系统会按平台 SKC/SKU 建立精确利润核算。" />
-        <Panel><EmptyState icon={CalendarDays} title="还没有可核算的月度台账" description="先导入 CSV/XLSX 台账，再复制平台 SKC 到 ERP 获取正式成本。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
+        <PageHeader title="利润核算" description="导入月度台账后，系统会整理销售明细，并把 ERP、历史和人工成本放在一起供你确认。" />
+        <Panel><EmptyState icon={CalendarDays} title="还没有可核算的月度台账" description="先导入 CSV/XLSX 台账，再取得候选成本；人工确认后才会进入本月利润。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
       </>
     );
   }
@@ -431,12 +372,21 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
       <PageHeader
         eyebrow={`月度利润核算 · ${snapshot.ledger.period}`}
         title="利润核算"
-        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "商品金额精确累计，代发与扣款在本月报告归集"}`}
+        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "销售金额、成本和扣款会先整理，确认后再形成月度结果"}`}
         actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>报告与导出</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} disabled={!canFinalize} onClick={finalizeLedger}>预览并定稿</Button>}</>}
       />
 
       {calculation.error ? <div role="alert" className="profit-refresh-status">读取失败：{calculation.error} 以下为上次结果，暂不能定稿。<Button onClick={() => setRetryCalculation(value => value + 1)}>重新读取</Button></div> : null}
       {calculation.loading ? <p className="profit-refresh-status" role="status">正在更新计算，当前显示上次结果；更新完成后才能定稿。</p> : null}
+      <section className="profit-next-step" aria-label="本月下一步">
+        <div><strong>本月怎么继续</strong><span>ERP 结果只是候选，人工确认可以覆盖任何来源。</span></div>
+        <div className="profit-next-step-items">
+          <span className="done"><b>1</b>销售台账</span>
+          <span className={missing ? "active" : "done"}><b>2</b>取得成本</span>
+          <span className={!missing ? "active" : ""}><b>3</b>人工确认</span>
+          <span><b>4</b>确认利润</span>
+        </div>
+      </section>
       <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
         <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
         <span className="profit-purpose-arrow">→</span>
@@ -456,12 +406,12 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
         <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
         <button className="profit-summary-item profit-summary-action" disabled={locked} onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
         <div className="profit-summary-item"><span>{legacySnapshot ? "客退罚款" : "独立扣款"}</span><strong className={legacySnapshot && penalties > 0 ? "profit-negative" : ""}>{legacySnapshot ? currency(penalties) : "见本月报告"}</strong><small>{legacySnapshot ? "台账扣款汇总" : "按整月采用来源归集"}</small></div>
-        <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>{legacySnapshot ? "总利润" : "商品利润"}</span><strong>{missing ? "待补正式成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : legacySnapshot ? "金额 − 采购 − 仓储 − 客退" : "金额 − 采购 − 仓储"}</small></div>
+        <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>{legacySnapshot ? "总利润" : "商品利润"}</span><strong>{missing ? "待确认成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : legacySnapshot ? "金额 − 采购 − 仓储 − 客退" : "金额 − 采购 − 仓储"}</small></div>
       </div>
 
-      {missing ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>当前总利润暂不能定稿。可等待 ERP 回传，或在明细中填写人工更正；1688 参考不会自动转为正式成本。</small></span><Button variant="ghost" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>进入 ERP 成本核对</Button></div> : null}
+      {missing && !locked ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>可以等待 ERP 回传，也可以直接填写人工成本。</small></span><Button variant="ghost" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>查看成本候选</Button><Button variant="primary" onClick={openCostDetails}>填写人工成本</Button></div> : null}
 
-      <details onToggle={event => setDetailsOpen(event.currentTarget.open)}><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary>{detailsOpen ? <Panel className="profit-table-panel">
+      <details open={detailsOpen} onToggle={event => setDetailsOpen(event.currentTarget.open)}><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary>{detailsOpen ? <Panel className="profit-table-panel">
         <div className="profit-table-heading">
           <div><h2>月度利润明细</h2><p>每个 SKU 一行，SKC 用分组标识；金额和成本均为人民币 CNY。</p></div>
           <span className="profit-filter-count">当前 {groupedFiltered.length} 个 SKC · {filtered.length} 个 SKU</span>
@@ -479,42 +429,9 @@ export function ProfitWorkspaceContent({ suppliedSnapshot } = {}) {
       {snapshot.ledger.status === "finalized" ? <Button icon={RotateCcw} onClick={() => { setReopenReason(""); setReopenError(""); setReopenDialog(true); }}>重开本月全部店铺核算</Button> : null}
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本；定稿后不能直接修改。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
       {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={manualTarget} onClose={() => setManualTarget(null)} /> : null}
-      <Modal open={reopenDialog} title="确认重开本月全部店铺" description="重开后可更正成本并重新定稿。原定稿明细保留在审计记录中，已发布 ERP 成本继续有效。" onClose={() => { if (!reopening) setReopenDialog(false); }} footer={<><Button disabled={reopening} onClick={() => setReopenDialog(false)}>取消</Button><Button variant="primary" disabled={!reopenReason.trim() || reopening} loading={reopening} onClick={reopenLedger}>确认重开</Button></>}>
+      <Modal open={reopenDialog} title="确认重开本月全部店铺" description="重开后可更正成本并重新定稿。原报告和核对记录保留，已采用 ERP 成本继续有效。" onClose={() => { if (!reopening) setReopenDialog(false); }} footer={<><Button disabled={reopening} onClick={() => setReopenDialog(false)}>取消</Button><Button variant="primary" disabled={!reopenReason.trim() || reopening} loading={reopening} onClick={reopenLedger}>确认重开</Button></>}>
         <div className="form-field"><label htmlFor="profit-reopen-reason">重开原因</label><input id="profit-reopen-reason" className="text-input" value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} /></div>
         {reopenError ? <p role="alert">{reopenError}</p> : null}
-      </Modal>
-      <Modal
-        open={Boolean(approvalTarget)}
-        title="确认人工参考成本"
-        description="仅在 ERP 无有效成本时使用，只对当前账本与平台 SKU 生效，且不会替代 ERP 正式利润口径。"
-        onClose={() => !approvalSaving && setApprovalTarget(null)}
-        footer={<><Button disabled={approvalSaving} onClick={() => setApprovalTarget(null)}>取消</Button><Button variant="primary" icon={CheckCircle2} loading={approvalSaving} disabled={approvalSaving || !(Number(approvalAmount) > 0) || !approvalActor.trim() || !approvalReason.trim()} onClick={approveFallback}>确认审批</Button></>}
-      >
-        <div className="approval-context">
-          <span>账本 <strong className="mono">{snapshot.ledger.period}</strong></span>
-          <span>平台 SKU <strong className="mono">{approvalTarget?.platformSku}</strong></span>
-          <span>平台 SKC <strong className="mono">{approvalTarget?.groupSkc || "--"}</strong></span>
-        </div>
-        <div className="approval-form-grid">
-          <div className="form-field"><label className="required">1688 参考单件成本（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0.01" step="0.01" value={approvalAmount} onChange={(event) => setApprovalAmount(event.target.value)} /></div>
-          <div className="form-field"><label>1688 单号或来源说明</label><input className="text-input mono" value={approvalSource} onChange={(event) => setApprovalSource(event.target.value)} placeholder="例如：A-20260806-01" /></div>
-          <div className="form-field"><label className="required">复核人</label><input className="text-input" value={approvalActor} onChange={(event) => setApprovalActor(event.target.value)} /></div>
-          <div className="form-field approval-reason"><label className="required">审批原因</label><textarea className="text-input" rows="3" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="说明 ERP 缺失原因、参考成本核对依据及本月使用理由。" /></div>
-        </div>
-        <p className="modal-note">人工参考成本可用于核对和预估，但账本仍需 ERP 成本才能定稿；后续 ERP 成本始终具有更高优先级。</p>
-      </Modal>
-      <Modal
-        open={Boolean(revokeTarget)}
-        title="撤销 1688 兜底审批？"
-        description="撤销后将移除该 SKU 的人工参考记录；无论是否保留参考，当前账本均需 ERP 成本才能定稿。"
-        onClose={() => !revoking && setRevokeTarget(null)}
-        footer={<><Button disabled={revoking} onClick={() => setRevokeTarget(null)}>取消</Button><Button variant="danger" icon={RotateCcw} loading={revoking} disabled={revoking || !revokeReason.trim() || !approvalActor.trim()} onClick={revokeFallback}>确认撤销</Button></>}
-      >
-        <div className="approval-context"><span>平台 SKU <strong className="mono">{revokeTarget?.platformSku}</strong></span><span>已审批成本 <strong className="mono">{revokeTarget?.unitCost != null ? currency(revokeTarget.unitCost) : "--"}</strong></span></div>
-        <div className="approval-form-grid">
-          <div className="form-field"><label className="required">操作人</label><input className="text-input" value={approvalActor} onChange={(event) => setApprovalActor(event.target.value)} /></div>
-          <div className="form-field approval-reason"><label className="required">撤销原因</label><textarea className="text-input" rows="3" value={revokeReason} onChange={(event) => setRevokeReason(event.target.value)} placeholder="说明为什么撤销本次成本审批。" /></div>
-        </div>
       </Modal>
     </>
   );

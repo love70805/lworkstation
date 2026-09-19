@@ -37,9 +37,9 @@ const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", {
 
 const ledgerStatusLabels = {
   draft: "草稿",
-  cost_pending: "待补正式成本",
-  approval_pending: "待审批",
-  ready: "可定稿",
+  cost_pending: "待核对成本",
+  approval_pending: "待确认成本",
+  ready: "待确认利润",
   finalized: "已定稿",
   locked: "已锁定",
 };
@@ -95,6 +95,16 @@ export default function WorkspacePortal() {
   const referenceRows = useMemo(() => (portalData?.referenceRows ?? [])
     .toSorted((left, right) => Number(right.recentRevenue ?? 0) - Number(left.recentRevenue ?? 0))
     .slice(0, 5), [portalData?.referenceRows]);
+  const workflowLedger = latestOpenLedger ?? latestLedger;
+  const workflowStep = workflowLedger
+    ? ({ draft: 0, cost_pending: 1, approval_pending: 2, ready: 3, finalized: 4, locked: 4 }[workflowLedger.status] ?? 1)
+    : 0;
+  const workflowSteps = [
+    { title: "导入销售台账", detail: workflowLedger ? "本月销售数据已建立" : "先建立本月账本", path: "/import-preview" },
+    { title: "采集或复用成本", detail: workflowLedger ? "ERP 结果可以重复采集和替换" : "账本建立后进行", path: workflowLedger ? `/cost-matching?ledger=${encodeURIComponent(workflowLedger.id)}` : "/import-preview" },
+    { title: "人工确认成本", detail: "人工决定始终优先", path: workflowLedger ? `/cost-matching?ledger=${encodeURIComponent(workflowLedger.id)}` : "/import-preview" },
+    { title: "确认利润并定稿", detail: workflowLedger ? "确认后再生成本月结果" : "成本确认后进行", path: workflowLedger ? `/profit?ledger=${encodeURIComponent(workflowLedger.id)}` : "/import-preview" },
+  ];
   const taskItems = useMemo(() => {
     const items = [];
     if ((summary?.blockedCaptureCount ?? 0) > 0) {
@@ -103,10 +113,10 @@ export default function WorkspacePortal() {
       items.push({ icon: Hourglass, tone: "warning", title: "待确认采集", detail: `${summary.pendingCaptureCount} 条记录等待人工确认`, action: "打开队列", path: "/products?view=pending" });
     }
     if ((summary?.missingCostCount ?? 0) > 0 && latestOpenLedger) {
-      items.push({ icon: Warehouse, tone: "warning", title: "正式成本待补齐", detail: `工作区合计 ${summary.missingCostCount} 条 SKU 待补正式成本`, action: `查看 ${latestOpenLedger.period}`, path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
+      items.push({ icon: Warehouse, tone: "warning", title: "成本待确认", detail: `工作区合计 ${summary.missingCostCount} 条 SKU 待人工确认`, action: `查看 ${latestOpenLedger.period}`, path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
     }
     if (latestOpenLedger?.status === "ready") {
-      items.push({ icon: CircleDollarSign, tone: "success", title: "账本可以定稿", detail: `${latestOpenLedger.period} 正式成本已完整`, action: "打开账本", path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
+      items.push({ icon: CircleDollarSign, tone: "success", title: "账本待确认利润", detail: `${latestOpenLedger.period} 成本已齐，等待人工核对`, action: "打开账本", path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
     }
     return items.slice(0, 3);
   }, [latestOpenLedger, summary?.blockedCaptureCount, summary?.missingCostCount, summary?.pendingCaptureCount]);
@@ -142,14 +152,14 @@ export default function WorkspacePortal() {
   } else if ((summary?.missingCostCount ?? 0) > 0 && latestOpenLedger) {
     alert = {
       icon: TriangleAlert,
-      text: `工作区合计仍有 ${summary.missingCostCount} 条平台 SKU 待补正式成本。`,
+      text: `工作区合计仍有 ${summary.missingCostCount} 条平台 SKU 待确认成本。`,
       action: `查看 ${latestOpenLedger.period} 成本`,
       path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}`,
     };
   } else if (latestOpenLedger?.status === "ready") {
     alert = {
       icon: CircleDollarSign,
-      text: `${latestOpenLedger.period} 账本的正式成本已经完整，可以执行最终复核。`,
+      text: `${latestOpenLedger.period} 账本的成本已经齐全，可以执行人工核对。`,
       action: "打开利润核算",
       path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}`,
     };
@@ -181,6 +191,21 @@ export default function WorkspacePortal() {
 
       {alert ? <div className="workspace-status-strip"><span className="workspace-status-icon"><AlertIcon size={18} /></span><span><strong>需要处理</strong><small>{alert.text}</small></span><Button variant="ghost" onClick={() => navigate(alert.path)}>{alert.action}<ChevronRight size={16} /></Button></div> : null}
 
+      <section className="workspace-flow" aria-labelledby="workspace-flow-title">
+        <div className="workspace-flow-heading">
+          <div><h2 id="workspace-flow-title">本月核算流程</h2><p>系统负责整理和复用数据，是否采用由你决定。</p></div>
+          {workflowLedger ? <span className="workspace-flow-period mono">{workflowLedger.period}</span> : null}
+        </div>
+        <div className="workspace-flow-steps">
+          {workflowSteps.map((step, index) => (
+            <button className={`workspace-flow-step ${index === workflowStep ? "active" : ""} ${index < workflowStep ? "done" : ""}`} key={step.title} onClick={() => navigate(step.path)} aria-current={index === workflowStep ? "step" : undefined}>
+              <span className="workspace-flow-index">{index < workflowStep ? <Check size={14} /> : index + 1}</span>
+              <span><strong>{step.title}</strong><small>{step.detail}</small></span>
+              {index < workflowSteps.length - 1 ? <ChevronRight className="workspace-flow-arrow" size={16} /> : null}
+            </button>
+          ))}
+        </div>
+      </section>
       <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')} />
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
