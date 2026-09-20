@@ -17,9 +17,9 @@
     const RETRY_COUNT = 2;
     const CACHE_TTL = 10 * 60 * 1000;
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
-    const RESULT_CACHE_KEY = 'latest_cost_result_v4';
+    const RESULT_CACHE_KEY = 'latest_cost_result_v5';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.17';
+    const EXTENSION_VERSION = '8.0.18';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -709,11 +709,9 @@
         };
     }
 
-    function aggregateDetails(details, now) {
-        const currentYearMonth = now.getFullYear() * 100 + now.getMonth() + 1;
+    function aggregateDetails(details) {
         const buckets = new Map();
         const excludedDetails = [];
-        let skippedCurrentMonth = 0;
         let skippedInvalid = 0;
 
         details.forEach((detail, detailIndex) => {
@@ -749,12 +747,6 @@
                 excludedDetails.push(Object.assign({}, evidenceBase, { exclusionReasons: ['invalid_purchase_detail'] }));
                 return;
             }
-            if (date.yearMonth === currentYearMonth) {
-                skippedCurrentMonth += 1;
-                excludedDetails.push(Object.assign({}, evidenceBase, { exclusionReasons: ['current_month'] }));
-                return;
-            }
-
             if (!buckets.has(warehouseSku)) buckets.set(warehouseSku, []);
             buckets.get(warehouseSku).push({
                 recordId: evidenceBase.recordId,
@@ -777,8 +769,8 @@
 
         if (buckets.size === 0) {
             throw new CostError(
-                '没有可用的历史采购明细',
-                '当月记录会被排除；无日期、无 SKU 或数量不大于 0 的记录也不参与核算。'
+                '没有可用的采购明细',
+                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
             );
         }
 
@@ -860,7 +852,6 @@
         results.sort((a, b) => a.warehouseSku.localeCompare(b.warehouseSku, 'zh-CN', { numeric: true }));
         return {
             results,
-            skippedCurrentMonth,
             skippedInvalid,
             warehouseEvidence: {
                 formatVersion: 1,
@@ -919,13 +910,12 @@
 
     async function runCalculation(filters, run) {
         const startedAt = Date.now();
-        const now = new Date();
         const querySkcs = extractQuerySkcs(filters);
         const orderState = await fetchAllOrders(filters, run);
         const orders = orderState.orders;
         const detailState = await fetchAllDetails(orders, run);
-        setLoading('正在计算数量加权成本', '排除当月并选择最近采购记录', 65);
-        const aggregateState = aggregateDetails(detailState.details, now);
+        setLoading('正在计算数量加权成本预览', '选择最近采购记录，账本月末截止范围待工作台筛选', 65);
+        const aggregateState = aggregateDetails(detailState.details);
         const mappingState = await fetchMappings(aggregateState.results, run);
         const mappingPartition = resultPolicy.partitionResultsByMapping(aggregateState.results);
         const scopedState = resultPolicy.filterResultsByMappingScope(mappingPartition.mapped, querySkcs);
@@ -985,7 +975,6 @@
                 detailFailures: detailState.failedOrders,
                 mappingFailureCount: mappingState.failedMappings.length,
                 mappingFailures: mappingState.failedMappings,
-                skippedCurrentMonth: aggregateState.skippedCurrentMonth,
                 skippedInvalid: aggregateState.skippedInvalid,
                 warehouseSkuCount: previewResults.length,
                 platformSkuCount: resultMappings.length,
@@ -1007,7 +996,8 @@
                 sourceFormat: 'erp-assistant-v8-preview-evidence',
                 extensionVersion: EXTENSION_VERSION,
                 durationMs: Date.now() - startedAt,
-                excludedMonth: now.getFullYear() + '年' + (now.getMonth() + 1) + '月'
+                previewScope: 'unscoped',
+                ledgerMonthCutoffStatus: 'pending_workstation'
             }
         };
     }
@@ -1366,14 +1356,13 @@
             '<span class="erpa-status-item">有效采购单 <strong>' + lastMeta.validOrderCount + '</strong></span>' +
             '<span class="erpa-status-item">明细 <strong>' + lastMeta.detailCount + '</strong></span>' +
             (lastMeta.skippedOrderCount ? '<span class="erpa-status-item erpa-status-warn">已排除作废单 <strong>' + lastMeta.skippedOrderCount + '</strong></span>' : '') +
-            (lastMeta.skippedCurrentMonth ? '<span class="erpa-status-item erpa-status-warn">已排除当月明细 <strong>' + lastMeta.skippedCurrentMonth + '</strong></span>' : '') +
             (lastMeta.detailFailureCount ? '<span class="erpa-status-item erpa-status-warn">明细读取失败 <strong>' + lastMeta.detailFailureCount + '</strong></span>' : '') +
             (lastMeta.mappingFailureCount ? '<span class="erpa-status-item erpa-status-warn">平台映射失败 <strong>' + lastMeta.mappingFailureCount + '</strong></span>' : '') +
             (lastMeta.requestContextError ? '<span class="erpa-status-item erpa-status-warn">自动回传上下文异常，本地结果已保留</span>' : '') +
             (lastMeta.excludedMappingCount ? '<span class="erpa-status-item">已排除范围外映射 <strong>' + lastMeta.excludedMappingCount + '</strong></span>' : '') +
             (lastMeta.excludedWarehouseSkuCount ? '<span class="erpa-status-item">未命中仓库SKU <strong>' + lastMeta.excludedWarehouseSkuCount + '</strong></span>' : '') +
             (lastMeta.costWarningCount ? '<span class="erpa-status-item erpa-status-danger">疑似成本异常 <strong>' + lastMeta.costWarningCount + '</strong></span>' : '') +
-            '<span class="erpa-status-item">完整历史证据 <strong>' + (lastMeta.evidenceRecordCount || 0) + '</strong></span>' +
+            '<span class="erpa-status-item">有效采购证据 <strong>' + (lastMeta.evidenceRecordCount || 0) + '</strong></span>' +
             '<span class="erpa-status-item">请求分页 <strong>' + (lastMeta.pageSize || PREFERRED_PAGE_SIZE) + ' 条/页</strong>' + (lastMeta.pageSizeFallback ? '（已回退）' : '') + '</span>' +
             '<span class="erpa-status-item">后台实际返回峰值 <strong>' + (lastMeta.maxReturnedPerPage || 0) + ' 条/页</strong></span>' +
             ((lastMeta.pageSize === PREFERRED_PAGE_SIZE && lastMeta.maxReturnedPerPage > 0 && lastMeta.maxReturnedPerPage < PREFERRED_PAGE_SIZE && lastMeta.reportedOrderCount && lastMeta.reportedOrderCount > lastMeta.maxReturnedPerPage)
@@ -1381,7 +1370,7 @@
                 : '') +
             (lastMeta.orderCountMismatch ? '<span class="erpa-status-item erpa-status-warn">ERP 总数参考值与实际页数据不同，已按分页结果完成读取</span>' : '');
         footerLeft.innerHTML = '筛选：<strong>' + escapeHtml(summarizeFilters(lastMeta.filters)) + '</strong>';
-        footerRight.textContent = '排除' + lastMeta.excludedMonth + ' · 1688单号优先 · 最近' + MAX_RECORDS + '单加权 · ' + (lastMeta.durationMs / 1000).toFixed(1) + '秒' + (lastMeta.cacheRestored ? ' · 临时缓存恢复' : '');
+        footerRight.textContent = '未按账本月末截止范围筛选的预览 · 待工作台筛选 · 1688单号优先 · 最近' + MAX_RECORDS + '单加权 · ' + (lastMeta.durationMs / 1000).toFixed(1) + '秒' + (lastMeta.cacheRestored ? ' · 临时缓存恢复' : '');
     }
 
     function updateIdleStatus() {
@@ -1496,7 +1485,7 @@
             '<section class="erpa-panel" role="dialog" aria-modal="true" aria-label="SKU 采购成本预览">' +
                 '<header class="erpa-header"><div class="erpa-title-wrap">' +
                     '<div class="erpa-title-line"><h2 class="erpa-title">SKU 采购成本预览</h2><span class="erpa-badge">API v8.0</span></div>' +
-                    '<p class="erpa-subtitle">最近三次用于预览，全部有效历史和排除证据回传 Lworkstation</p></div>' +
+                    '<p class="erpa-subtitle">最近三次仅供预览，全部有效采购和排除证据回传 Lworkstation，按账本月末截止范围筛选</p></div>' +
                     '<button class="erpa-icon-button" id="erpa-close" type="button" title="关闭" aria-label="关闭">×</button></header>' +
                 '<div class="erpa-anomaly-banner" id="erpa-anomaly-banner" role="alert"></div>' +
                 '<div class="erpa-toolbar">' +

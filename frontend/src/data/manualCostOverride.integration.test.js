@@ -35,10 +35,19 @@ describe("manual exact cost overrides", () => {
   it("keeps manual priority over later ERP and revocation restores the latest ERP", async () => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
-    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString() });
+    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-08-01", unitPrice: 0.009, quantity: 1 }] });
     expect((await lines())[0].unitCost).toBe(0.003);
     await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
     expect((await lines())[0]).toMatchObject({ unitCost: 0.009, costSource: "erp" });
+  });
+  it.each(["2026-09-01", null])("does not restore future or undated ERP after manual revocation: %s", async purchaseDate => {
+    const manual = await save("甲", 0.003);
+    await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
+    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate, unitPrice: 0.009, quantity: 1 }] });
+    expect((await lines())[0]).toMatchObject({ unitCost: 0.003, costSource: "manual_override" });
+    await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
+    expect((await lines())[0]).toMatchObject({ unitCost: null, costSource: null });
+    expect((await db.ledgers.get(ledgerId)).status).toBe("cost_pending");
   });
   it("rejects stale UI after replacement/revocation and freezes successful full-ledger finalization", async () => {
     await save("甲", 0); const other = await save("乙", 0.0000001);

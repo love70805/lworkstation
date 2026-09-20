@@ -11,6 +11,7 @@ import { planSalesImports, prepareSalesImportItems } from "../../domain/batchSal
 import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
 import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../../domain/erpCostResolution";
+import { hasLegacyMonthExclusions } from "../../domain/erpCostPeriod";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
@@ -59,7 +60,7 @@ async function readLedgerCostCoverage(ledgerId) {
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
   ]);
   const ledger = await db.ledgers.get(ledgerId);
-  return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals, workspaceId: ledger?.workspaceId, ledgerId });
+  return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals, workspaceId: ledger?.workspaceId, ledgerId, period: ledger?.period });
 }
 
 export async function saveManualCostOverride({ ledgerId, store, platformSku, unitCost, reason }) {
@@ -90,7 +91,7 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
     const scope = { workspaceId: ledger.workspaceId, ledgerId, store: scopedStore, platformSku: sku };
     const previous = selectManualOverride(approvals, scope);
     const erpCost = (await getLatestLedgerCosts(ledgerId)).find((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(sku));
-    const oldDecision = resolveFormalCostDecision({ ...scope, manualOverride: previous, erpCost });
+    const oldDecision = resolveFormalCostDecision({ ...scope, period: ledger.period, manualOverride: previous, erpCost });
     const auditActor = await resolveProfitAuditActor();
     const revokedRecords = approvals.filter((item) => item.status === "approved" && manualSnapshot(item)?.kind === "manual_override" && storeIdentity(manualSnapshot(item).store) === scopedStore && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(sku));
     for (const item of revokedRecords) {
@@ -405,6 +406,9 @@ export async function savePublishedErpCostBatch({
   if (!sourceEnvelope) {
     throw new Error("发布 ERP 正式成本必须使用包含完整采购证据的 v2 批次；TSV、旧批次和页面汇总只能预览。");
   }
+  const targetLedger = await db.ledgers.get(ledgerId);
+  if (!targetLedger || targetLedger.workspaceId !== workspaceId) throw new Error("找不到当前工作区的月度账本。");
+  const costPeriod = normalizeLedgerPeriod(targetLedger.period);
   const recordedRequest = await db.erpCostRequests.get(effectiveRequestId);
   if (!recordedRequest
     || String(recordedRequest.ledgerId ?? "") !== String(ledgerId)
@@ -458,20 +462,22 @@ export async function savePublishedErpCostBatch({
       ? sourceEvidenceByWarehouseSku.get(canonicalWarehouseSku(row.sourceWarehouseSku))
       : null;
     const purchaseRecords = sourceEvidence?.purchaseRecords ?? row.purchaseRecords;
+    if (hasLegacyMonthExclusions({ ...sourceEvidence, sourceMeta: verifiedSourceEnvelope.sourceMeta }, costPeriod)) {
+      throw new Error(`截至 ${costPeriod} 的采购曾被旧版当月排除规则遗漏，请重新采集或填写人工成本。`);
+    }
     const evidenceComplete = sourceEvidence?.evidenceComplete ?? row.evidenceComplete;
     const decision = calculateWarehouseCostDecision({
       warehouseSku: row.sourceWarehouseSku,
       purchaseRecords,
       resolutions: row.resolutions,
       evidenceComplete,
-      currentYearMonth: Number(verifiedSourceEnvelope.generatedAt.slice(0, 4)) * 100
-        + Number(verifiedSourceEnvelope.generatedAt.slice(5, 7)),
+      period: costPeriod,
     });
     if (decision.unitCost === 0 && decision.selectedRecords.every((record) => record.effectiveUnitPrice > 0)) {
       throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
     }
     if (decision.resolutionStatus !== "resolved" || decision.unresolvedAnomalyCount > 0 || !(decision.formalUnitCost > 0)) {
-      throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 的采购证据或异常处置尚未满足正式成本要求。`);
+      throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 截至 ${costPeriod} 的采购证据或异常处置尚未满足正式成本要求。`);
     }
     if (!Number.isFinite(Number(row.unitCost)) || Math.abs(Number(row.unitCost) - decision.formalUnitCost) > 0.00005) {
       throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 的页面成本与仓储层独立复算结果不一致。`);
@@ -488,6 +494,10 @@ export async function savePublishedErpCostBatch({
       excludedRecords: sourceEvidence?.excludedRecords ?? row.excludedRecords ?? [],
       sourceWarnings: sourceEvidence?.sourceWarnings ?? row.sourceWarnings ?? [],
       costDecision: decision,
+      costPeriod,
+      orderNumber: decision.selectedRecords[0]?.order1688 || decision.selectedRecords[0]?.purchaseOrderNo || null,
+      orderType: decision.selectedRecords[0]?.order1688 ? "1688" : "purchase_order",
+      dateRange: `${decision.selectedRecords.at(-1).purchaseDate} ~ ${decision.selectedRecords[0].purchaseDate}`,
       resolutionStatus: decision.resolutionStatus,
       unresolvedAnomalyCount: decision.unresolvedAnomalyCount,
       resolvedAnomalyCount: decision.resolvedAnomalyCount,
@@ -508,6 +518,7 @@ export async function savePublishedErpCostBatch({
   await db.transaction("rw", db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger) throw new Error("找不到对应的月度账本。");
+    if (ledger.period !== costPeriod) throw new Error("账本月份已变化，请重新核对 ERP 成本。");
     if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能直接更新成本。");
     if (String(workspaceId) !== String(ledger.workspaceId)) throw new Error("ERP 成本发布工作区与账本不一致。");
     const request = await db.erpCostRequests.get(effectiveRequestId);
@@ -560,6 +571,7 @@ export async function savePublishedErpCostBatch({
       baseline: verifiedSourceEnvelope.baseline,
       algorithmVersion: verifiedSourceEnvelope.algorithmVersion,
       resolutionVersion: ERP_COST_RESOLUTION_VERSION,
+      costPeriod,
       query: verifiedSourceEnvelope.query,
       summary: verifiedSourceEnvelope.summary,
       sourceMeta: verifiedSourceEnvelope.sourceMeta,
@@ -594,6 +606,7 @@ export async function savePublishedErpCostBatch({
       canonicalPlatformSkc: row.canonicalPlatformSkc ?? null,
       warehouseSku: row.sourceWarehouseSku,
       unitCost: row.unitCost,
+      costPeriod,
       currency: row.currency,
       orderNumber: row.orderNumber,
       orderType: row.orderType,

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const toolsRoot = path.dirname(fileURLToPath(import.meta.url));
 const policyPath = path.join(toolsRoot, "..", "integrations", "erp-assistant-extension", "src", "result-policy.js");
@@ -176,4 +177,123 @@ assert.deepEqual(
   [[], []],
 );
 
-console.log("ERP result policy tests passed");
+async function verifyUnscopedEvidenceDelivery() {
+  const frontendRequire = createRequire(path.join(toolsRoot, "..", "frontend", "package.json"));
+  const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
+  const collectionTime = new Date("2026-06-15T12:00:00").getTime();
+  const detail = (recordId, creationTime, overrides = {}) => ({
+    detailId: recordId,
+    itemId: "WH-MONTH",
+    tradeName: "Synthetic month fixture",
+    creationTime,
+    purchaseQuantity: "2",
+    purchaseUnitPrice: "4",
+    ...overrides,
+  });
+  const current = detail("CURRENT", "2026-06-10 12:00:00");
+  const earlier = [
+    detail("MAY", "2026-05-31 23:59:59"),
+    detail("APRIL", "2026-04-15 12:00:00"),
+    detail("MARCH", "2026-03-15 12:00:00"),
+    detail("PRIOR-YEAR", "2025-12-31 23:59:59"),
+  ];
+  const later = detail("LATER", "2026-07-01 00:00:00");
+  const invalid = [
+    detail("INVALID-QTY", current.creationTime, { purchaseQuantity: "0" }),
+    detail("INVALID-DATE", "", {}),
+    detail("INVALID-PRICE", current.creationTime, { purchaseUnitPrice: "-1" }),
+  ];
+
+  for (const mixedMonths of [false, true]) {
+    const window = new Window({ url: "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html" });
+    const NativeDate = window.Date;
+    window.Date = class extends NativeDate {
+      constructor(...args) { super(...(args.length ? args : [collectionTime])); }
+      static now() { return collectionTime; }
+    };
+    const sent = [];
+    const fetchedOrders = [];
+    const validDetails = mixedMonths ? [current, ...earlier, later] : [current];
+    const orders = [
+      { purchaseOrderId: "PO-1688", purchaseOrderNo1688: "1688-FIXTURE" },
+      { purchaseOrderId: "PO-CANCELLED", purchaseStatus: "11" },
+      ...(mixedMonths ? [{ purchaseOrderId: "PO-REGULAR", purchaseOrderNo: "REGULAR-FIXTURE" }] : []),
+    ];
+    window.chrome = {
+      runtime: {
+        lastError: null,
+        sendMessage(message, callback) {
+          sent.push(JSON.parse(JSON.stringify(message)));
+          callback({ ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
+        },
+      },
+    };
+    window.fetch = async (rawUrl) => {
+      const url = new URL(rawUrl);
+      let data;
+      if (url.pathname === "/purchase/purchase/v1/purchase-order-page") {
+        data = orders;
+      } else if (url.pathname === "/purchase/purchase/v1/purchase-order-details") {
+        const orderId = url.searchParams.get("purchaseOrderId");
+        fetchedOrders.push(orderId);
+        assert.notEqual(orderId, "PO-CANCELLED", "cancelled orders must remain filtered before detail collection");
+        assert.ok(["PO-1688", "PO-REGULAR"].includes(orderId));
+        data = orderId === "PO-1688"
+          ? [...validDetails, ...invalid]
+          : [detail("REGULAR-NEWEST", "2026-08-01 00:00:00")];
+      } else {
+        assert.equal(url.pathname, "/purchase/product/v1/product-info-sku", "only fixture ERP endpoints are allowed");
+        data = [{ platformSku: "SKU-MONTH", platformSkc: "SKC-MONTH" }];
+      }
+      return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
+    };
+    try {
+      for (const file of ["result-policy.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
+        window.eval(await readFile(path.join(path.dirname(policyPath), file), "utf8"));
+      }
+      window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", {
+        detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-MONTH" },
+      }));
+      window.document.getElementById("erpa-cost-trigger").click();
+      for (let attempt = 0; attempt < 100 && !sent.some((message) => message.type === "shopeers.erp.submitCostResult"); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const deliveries = sent.filter((message) => message.type === "shopeers.erp.submitCostResult");
+      assert.equal(deliveries.length, 1, "even a collection-month-only purchase must reach the real bridge transport");
+      assert.equal(fetchedOrders.length, mixedMonths ? 2 : 1);
+      const { payload } = deliveries[0];
+      assert.equal(payload.warehouseEvidence.warehouses.length, 1);
+      const records = payload.warehouseEvidence.warehouses[0].purchaseRecords;
+      assert.deepEqual(
+        records.map((record) => record.recordId).sort(),
+        [...validDetails.map((record) => record.detailId), ...(mixedMonths ? ["REGULAR-NEWEST"] : [])].sort(),
+        "all valid raw evidence, including earlier, collection and later months, must survive transport for workstation cutoff filtering",
+      );
+      assert.ok(records.every((record) => record.eligible && record.exclusionReasons.length === 0));
+      assert.equal(records.find((record) => record.recordId === "CURRENT").purchaseDate, "2026-06-10");
+      assert.equal(payload.warehouseEvidence.excludedOrders.length, 1);
+      assert.equal(payload.meta.skippedCancelledOrderCount, 1);
+      assert.equal(payload.meta.skippedInvalid, invalid.length);
+      assert.ok(payload.warehouseEvidence.excludedDetails.every((record) => record.exclusionReasons.join() === "invalid_purchase_detail"));
+      assert.equal(payload.warehouseEvidence.excludedDetails.length, invalid.length);
+      const expectedPreview = mixedMonths ? ["LATER", "CURRENT", "MAY"] : ["CURRENT"];
+      assert.deepEqual(payload.results[0].selectedRecordIds, expectedPreview, "latest-three and 1688 preference remain preview-only rules");
+      assert.deepEqual(records.filter((record) => record.selectedForPreview).map((record) => record.recordId), expectedPreview);
+      assert.equal(payload.results[0].unitCost, "4.0000");
+      assert.equal(payload.results[0].mappings[0].platformSku, "SKU-MONTH");
+      assert.equal(payload.meta.evidenceRecordCount, records.length);
+      assert.equal(payload.meta.previewScope, "unscoped");
+      assert.equal(payload.meta.ledgerMonthCutoffStatus, "pending_workstation");
+      assert.equal(Object.hasOwn(payload.meta, "excludedMonth"), false);
+      assert.equal(Object.hasOwn(payload.meta, "skippedCurrentMonth"), false);
+      const footer = window.document.getElementById("erpa-footer-right").textContent;
+      assert.match(footer, /未按账本月末截止范围筛选的预览/);
+      assert.doesNotMatch(window.document.body.textContent, /排除当月|完整历史证据|排除undefined/);
+    } finally {
+      await window.happyDOM.close();
+    }
+  }
+}
+
+await verifyUnscopedEvidenceDelivery();
+console.log("ERP result policy and unscoped evidence delivery tests passed");

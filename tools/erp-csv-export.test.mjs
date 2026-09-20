@@ -8,7 +8,8 @@ const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
 const frontendRequire = createRequire(path.join(workspaceRoot, "frontend", "package.json"));
 const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
 const Papa = frontendRequire("papaparse");
-const cacheKey = "erpAssistantV8_latest_cost_result_v4";
+const cacheKey = "erpAssistantV8_latest_cost_result_v5";
+const legacyCacheKey = "erpAssistantV8_latest_cost_result_v4";
 const erpUrl = "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html";
 
 function cachedResult(text) {
@@ -30,7 +31,7 @@ function cachedResult(text) {
   };
 }
 
-async function loadExtension(extensionRoot, { cache, fetchImpl } = {}) {
+async function loadExtension(extensionRoot, { cache, legacyCache, fetchImpl } = {}) {
   const window = new Window({ url: erpUrl });
   const downloads = [];
   const deliveries = [];
@@ -50,6 +51,7 @@ async function loadExtension(extensionRoot, { cache, fetchImpl } = {}) {
     submit: async (payload) => { deliveries.push(payload); return { status: "success" }; },
   };
   if (cache) window.localStorage.setItem(cacheKey, JSON.stringify(cache));
+  if (legacyCache) window.localStorage.setItem(legacyCacheKey, JSON.stringify(legacyCache));
   try {
     for (const file of ["result-policy.js", "request-context.js", "content.js"]) {
       let source = await readFile(path.join(extensionRoot, "src", file), "utf8");
@@ -82,6 +84,54 @@ async function loadExtension(extensionRoot, { cache, fetchImpl } = {}) {
     },
     close: () => window.happyDOM.close(),
   };
+}
+
+async function verifyLegacyCacheIsolation(extensionRoot) {
+  const legacyCache = {
+    timestamp: Date.now(),
+    resultDeliveryId: "ERP-RESULT-LEGACY-V4",
+    results: [cachedResult("LEGACY-V4-SKU")],
+    meta: { filters: {}, skippedCurrentMonth: 1, excludedMonth: "2026年6月", evidenceRecordCount: 1 },
+    warehouseEvidence: {
+      formatVersion: 1,
+      warehouses: [{
+        warehouseSku: "LEGACY-V4-SKU",
+        evidenceComplete: true,
+        purchaseRecords: [{ recordId: "MAY", purchaseDate: "2026-05-01", quantity: 2, unitPrice: 4 }],
+      }],
+    },
+    importEnvelope: { batchId: "LEGACY-V4-BATCH" },
+  };
+  for (const withCurrentCache of [false, true]) {
+    const cache = withCurrentCache ? {
+      timestamp: Date.now(),
+      resultDeliveryId: "ERP-RESULT-CURRENT-V5",
+      results: [cachedResult("CURRENT-V5-SKU")],
+      meta: { filters: {}, previewScope: "unscoped", ledgerMonthCutoffStatus: "pending_workstation" },
+    } : undefined;
+    const extension = await loadExtension(extensionRoot, { cache, legacyCache });
+    try {
+      const { window } = extension;
+      assert.doesNotMatch(window.document.body.textContent, /LEGACY-V4-SKU|LEGACY-V4-BATCH/, "v4 results must never restore as unscoped v5 evidence");
+      assert.equal(window.localStorage.getItem(legacyCacheKey), JSON.stringify(legacyCache), "legacy cache is ignored, not migrated or rewritten");
+      assert.equal(window.localStorage.getItem(cacheKey), cache ? JSON.stringify(cache) : null, "v4 cache must not be promoted into v5");
+      window.__deliveryStatus({ resultDeliveryId: legacyCache.resultDeliveryId, status: "success", envelope: legacyCache.importEnvelope });
+      assert.equal(window.localStorage.getItem(cacheKey), cache ? JSON.stringify(cache) : null, "a late v4 delivery ACK must not revive the old cache");
+      if (withCurrentCache) {
+        const { rows } = await extension.exportCsv();
+        assert.equal(rows.length, 2);
+        assert.equal(rows[1][0], "CURRENT-V5-SKU", "v5 remains restorable when a v4 cache also exists");
+      } else {
+        assert.equal(window.document.getElementById("erpa-export").disabled, true);
+        assert.equal(window.document.getElementById("erpa-copy").disabled, true);
+        assert.doesNotMatch(window.document.getElementById("erpa-statusbar").textContent, /完整性校验通过/);
+        assert.doesNotMatch(window.document.getElementById("erpa-footer-right").textContent, /临时缓存恢复|未按账本月末截止范围筛选的预览/);
+      }
+      assert.equal(extension.deliveries.length, 0, "legacy cache restoration must not submit stale evidence");
+    } finally {
+      await extension.close();
+    }
+  }
 }
 
 async function verifyCachedCsv(extensionRoot) {
@@ -165,8 +215,12 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3);
     const delivery = extension.deliveries[0];
+    assert.equal(delivery.meta.extensionVersion, "8.0.18");
+    assert.equal(delivery.meta.previewScope, "unscoped");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
+    assert.ok(originalCache, "fresh calculation must write the v5 result cache");
+    assert.equal(window.localStorage.getItem(legacyCacheKey), null, "fresh calculation must not create a v4 cache");
     const evidence = delivery.warehouseEvidence.warehouses[0].purchaseRecords[0];
     assert.equal(evidence.productName, "=1+1");
     assert.equal(evidence.quantity, 3);
@@ -187,6 +241,7 @@ async function verifyCalculatedCsv(extensionRoot) {
 }
 
 export async function verifyCsvExport(extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension")) {
+  await verifyLegacyCacheIsolation(extensionRoot);
   await verifyCachedCsv(extensionRoot);
   await verifyCalculatedCsv(extensionRoot);
   const extension = await loadExtension(extensionRoot, { cache: { timestamp: Date.now(), results: [cachedResult("CURRENT-SKU")], meta: { filters: {} }, resultDeliveryId: "ERP-RESULT-CURRENT" } });

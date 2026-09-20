@@ -420,7 +420,7 @@ export function validateErpCostBatchEnvelope(payload, {
       sourceWarnings: uniqueText([...(evidence?.sourceWarnings ?? []), ...row.sourceWarnings]),
       evidenceComplete: Boolean(evidence?.evidenceComplete) && row.sourceWarnings.length === 0,
       warehouseEvidence: evidence ?? null,
-      currentYearMonth: Number(generatedAt.slice(0, 4)) * 100 + Number(generatedAt.slice(5, 7)),
+      sourceMeta: normalizeSourceMeta(payload.sourceMeta, { evidenceComplete, legacy }),
     };
   });
   return {
