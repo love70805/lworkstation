@@ -6,15 +6,16 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta)。四资产回读与通道隔离检查通过；Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.1](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.1)。四资产回读与通道隔离检查通过；Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-20。0.3.0 Beta 已公开预发布并验证下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
+核对日期：2026-09-20 UTC。0.3.0 Beta.1 已公开预发布并验证下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.3.0-beta` human first | 已公开 GitHub 预发布；719 测试、CI、12 组桌面验证、实际 Electron 交互、packaged smoke、四资产回读及通道隔离通过；本机未安装 | `candidates/0.3.0-beta-human-first/`；`prerelease/0.3.0-beta/`；[验收](../docs/RELEASE_0.3.0_BETA.md) |
+| `0.3.0-beta.1` ledger cutoff | 已公开 GitHub 预发布；743 测试、PR #92 / main CI、12 组桌面验证、跨月成本与人工更正 Electron 交互、smoke、四资产回读及通道隔离通过；本机未安装 | `candidates/0.3.0-beta.1-ledger-cutoff/`；[验收](../docs/RELEASE_0.3.0_BETA_1.md) |
+| `0.3.0-beta` human first | 历史 GitHub 预发布；719 测试、CI、12 组桌面验证、实际 Electron 交互、packaged smoke、四资产回读及通道隔离通过；本机未安装 | `candidates/0.3.0-beta-human-first/`；`prerelease/0.3.0-beta/`；[验收](../docs/RELEASE_0.3.0_BETA.md) |
 | `0.2.19` sales detail | 已公开 GitHub Latest；709 测试、CI、Windows packaged smoke、四资产回读/稳定通道通过；本机未安装 | `candidates/0.2.19-sales-detail/`；[验收](../docs/RELEASE_0.2.19.md) |
 | `0.2.18` stacked sales | 历史稳定版 | [验收](../docs/RELEASE_0.2.18.md) |
 | `0.2.17` grouped sales | 历史稳定版 | [验收](../docs/RELEASE_0.2.17.md) |

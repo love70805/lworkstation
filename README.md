@@ -5,7 +5,7 @@
 ## 下载与项目入口
 
 - [最新稳定版与安装包](https://github.com/love70805/lworkstation/releases/latest)
-- [v0.3.0 Beta 预发布](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta)
+- [v0.3.0 Beta.1 预发布](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.1)
 - [当前发布状态](docs/RELEASE_STATUS.md) · [历史版本与本机候选登记](releases/README.md)
 - [下一版待改动](docs/NEXT_UPDATE.md)：需求与静态预览已整理，尚未实施，不代表当前版本功能。
 - [开发任务看板](docs/CODEX_TASK_BOARD.md) · [跨电脑续接指南](docs/CODEX_RESTART_GUIDE.md)
@@ -32,7 +32,7 @@ pnpm --dir desktop dev
 
 ## Lworkstation Windows 桌面版
 
-当前稳定版为 [`0.2.19`](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，保持 GitHub Latest。[下载稳定版 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.19/Lworkstation-Setup-0.2.19.exe)。稳定版提供每日/月度销售图、期间店铺与 SKC 明细，利润页专注核算。`0.3.0-beta` 已公开为预发布，人工确认删除、备份一级入口及 ERP 核算交互改进见 [Beta 记录](docs/RELEASE_0.3.0_BETA.md)。首次安装可选择位置，更新下载和安装仍需用户操作。发布状态与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+当前稳定版为 [`0.2.19`](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，保持 GitHub Latest。[下载稳定版 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.2.19/Lworkstation-Setup-0.2.19.exe)。稳定版提供每日/月度销售图、期间店铺与 SKC 明细，利润页专注核算。`0.3.0-beta.1` 已公开为预发布，所有月份采购成本按账本月末截止，人工更正优先，见 [Beta.1 记录](docs/RELEASE_0.3.0_BETA_1.md)。人工确认删除、备份一级入口等首版改进见 [Beta 记录](docs/RELEASE_0.3.0_BETA.md)。首次安装可选择位置，更新下载和安装仍需用户操作。发布状态与验收边界见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
