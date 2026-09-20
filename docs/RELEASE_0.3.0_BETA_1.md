@@ -1,6 +1,6 @@
 # v0.3.0 Beta.1
 
-状态：候选验收中，尚未公开发布或安装。
+状态：2026-09-20 16:36:16 UTC 已公开为 GitHub 预发布，四资产匿名回读和更新通道验证通过；本机未安装。
 
 ## 变更
 
@@ -17,7 +17,20 @@
 - 完整本地发布检查通过；最终元数据/旧金额保留修订另补验 89 项测试。
 - 12 组桌面验证通过；扩展 bridge、CSV、真实采集函数模拟和目录/ZIP 一致性通过。
 - 既有 SheetJS 分包和大 chunk 警告保留。
-- Windows 候选与隔离 Electron 交互验收进行中，尚未完成 GitHub 集成/公开资产回读。
+- Windows 最终候选隔离 Electron 实测同一原始证据：六月采用 5 元（六月、五月），五月采用 3 元（五月）；仅未来记录不能采用。
+- 旧采用 7 元保留原值，缺失筛选可见，人工更正为 2 元成功；浅深色 1280/1024 窗口无横向溢出和 renderer 错误。
+- 最终 packaged smoke、Beta 更新检查和发布资产合同校验通过。
+- PR #92 与主线两项 CI 通过，合入 `d57b6aac7572d839feacf8dee6616d2d59333a79`；标签生产文件与候选构建 `507711e54166360530b67a8bb0f2f57eb57941ef` 一致。
+
+## 发布与证据
+
+- [GitHub v0.3.0-beta.1](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.1)；安装包、blockmap、`beta.yml`、`SHA256.txt` 四资产匿名完整回读一致，稳定 Latest 仍为 `v0.2.19`。
+- 使用当前更新器模拟公开源：`0.3.0-beta` 可发现 `0.3.0-beta.1`；当前 Beta 不重复提示，稳定 `0.2.19` 不跨通道。没有执行安装。
+- 安装包 `Lworkstation-Setup-0.3.0-beta.1.exe`，116,574,796 字节。
+- SHA-256：`E4202DF8BA5C84CF843D28D9EB519E1C5ED83465316083D1C5BCDFFB88ADFD1E`。
+- 主项目候选目录：`releases/candidates/0.3.0-beta.1-ledger-cutoff/`。
+- 构建工作树上传源：`releases/prerelease/0.3.0-beta.1/`。验收脚本、截图、公开回读和通道结果：`archive/release-0.3.0-beta.1/`。
+- 交互使用 Playwright Electron 控制真实打包程序，不启动独立浏览器产品；真实 ERP 账号采集与实际安装升级不在本次合成数据验收范围。
 
 ## 边界
 
