@@ -11,6 +11,7 @@ import {
   normalizeWorkspaceId,
 } from "./identifiers";
 import { calculateWarehouseCostDecision } from "./erpCostResolution";
+import { hasLegacyMonthExclusions, isErpCostWithinPeriod } from "./erpCostPeriod";
 
 // The extension wire version is stable; the local preview algorithm has its own version.
 export const ERP_COST_ALGORITHM_VERSION = "erp-v8.0-compatible@1";
@@ -122,7 +123,7 @@ function normalizeExpectedSku(item, workspaceId, index) {
   };
 }
 
-function normalizeCostRow(row, index, defaultBatchId, resolutions) {
+function normalizeCostRow(row, index, defaultBatchId, resolutions, period) {
   const platformSkuText = optionalText(row.platformSku);
   const warehouseSkuText = optionalText(row.warehouseSku);
   const previewCost = finiteDecimal(row.previewUnitCost ?? row.unitCost);
@@ -134,16 +135,20 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions) {
   const purchaseRecords = Array.isArray(row.purchaseRecords)
     ? row.purchaseRecords
     : (Array.isArray(row.warehouseEvidence?.purchaseRecords) ? row.warehouseEvidence.purchaseRecords : []);
-  const evidenceComplete = row.evidenceComplete === true
-    || row.warehouseEvidence?.evidenceComplete === true;
-  const trustedPublishedLegacy = Boolean(row.publishedAt) && Boolean(previewCost?.gt(0));
+  const legacyMonthExclusions = hasLegacyMonthExclusions(row, period);
+  const evidenceComplete = !legacyMonthExclusions && (row.evidenceComplete === true
+    || row.warehouseEvidence?.evidenceComplete === true);
+  const publishedScoped = period != null && Boolean(row.publishedAt);
+  const publishedWithinPeriod = publishedScoped && isErpCostWithinPeriod(row, period);
+  const adoptedCost = publishedScoped ? finiteDecimal(row.unitCost) : null;
+  const trustedPublishedLegacy = period == null && Boolean(row.publishedAt) && Boolean(previewCost?.gt(0));
   const decision = warehouseSkuText && purchaseRecords.length > 0
     ? calculateWarehouseCostDecision({
       warehouseSku: warehouseSkuText,
       purchaseRecords,
       resolutions,
       evidenceComplete,
-      currentYearMonth: optionalFiniteNumber(row.currentYearMonth, { minimum: 190001, integer: true }),
+      period,
     })
     : null;
 
@@ -169,18 +174,18 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions) {
     warehouseSku: warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null,
     canonicalWarehouseSku: warehouseSkuText ? canonicalWarehouseSku(warehouseSkuText) : null,
     previewUnitCost: previewCost?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null,
-    unitCost: decision?.unitCost ?? previewCost?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null,
+    unitCost: decision ? decision.unitCost : (period == null ? previewCost?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null : null),
     formalUnitCost: decision?.formalUnitCost ?? (trustedPublishedLegacy ? previewCost.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() : null),
     currency,
-    orderNumber: optionalText(row.orderNumber ?? row.orderNo ?? row.order1688),
-    orderType: optionalText(row.orderType ?? row.sourceType),
+    orderNumber: decision && period != null ? optionalText(decision.selectedRecords[0]?.order1688 ?? decision.selectedRecords[0]?.purchaseOrderNo) : optionalText(row.orderNumber ?? row.orderNo ?? row.order1688),
+    orderType: decision && period != null ? (decision.selectedRecords.length ? (decision.selectedRecords[0].order1688 ? "1688" : "purchase_order") : null) : optionalText(row.orderType ?? row.sourceType),
     platformSkc: optionalText(row.platformSkc),
     canonicalPlatformSkc: row.platformSkc ? canonicalPlatformSkc(row.platformSkc) : null,
     productName: optionalText(row.productName ?? row.name),
-    calculationCount: optionalFiniteNumber(row.calculationCount ?? row.calcTimes, { minimum: 1, integer: true }),
-    dateRange: optionalText(row.dateRange),
-    totalQuantity: optionalFiniteNumber(row.totalQuantity ?? row.totalQty, { minimum: 0 }),
-    totalPrice: optionalFiniteNumber(row.totalPrice, { minimum: 0 }),
+    calculationCount: decision?.calculationCount ?? optionalFiniteNumber(row.calculationCount ?? row.calcTimes, { minimum: 1, integer: true }),
+    dateRange: decision ? (decision.selectedRecords.length ? `${decision.selectedRecords.at(-1).purchaseDate} ~ ${decision.selectedRecords[0].purchaseDate}` : null) : optionalText(row.dateRange),
+    totalQuantity: decision?.totalQuantity ?? optionalFiniteNumber(row.totalQuantity ?? row.totalQty, { minimum: 0 }),
+    totalPrice: decision?.totalPrice ?? optionalFiniteNumber(row.totalPrice, { minimum: 0 }),
     supplierName: optionalText(row.supplierName),
     supplier1688Url: optionalText(row.supplier1688Url ?? row.supplierOfferUrl ?? row.sourceUrl),
     selectedRecordIds: Array.isArray(row.selectedRecordIds)
@@ -207,11 +212,26 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions) {
     calculatedAt: optionalText(row.calculatedAt),
     mappingFallback: Boolean(row.mappingFallback),
     ledgerScopeRole,
+    legacyMonthExclusions,
+    periodReviewRequired: publishedScoped && !publishedWithinPeriod,
     raw: row,
+    ...(publishedScoped ? {
+      adoptedUnitCost: adoptedCost?.toNumber() ?? null,
+      unitCost: publishedWithinPeriod ? adoptedCost?.toNumber() ?? null : null,
+      formalUnitCost: publishedWithinPeriod ? adoptedCost?.toNumber() ?? null : null,
+      resolutionStatus: publishedWithinPeriod ? row.resolutionStatus ?? "resolved" : "pending",
+      costDecision: row.costDecision ?? null,
+      orderNumber: optionalText(row.orderNumber),
+      orderType: optionalText(row.orderType),
+      dateRange: optionalText(row.dateRange),
+      calculationCount: row.calculationCount ?? row.selectedRecordIds?.length ?? null,
+      totalQuantity: row.totalQuantity ?? null,
+      totalPrice: row.totalPrice ?? null,
+    } : {}),
   };
 }
 
-function addIndexedCost(index, key, keyType, row, overrides) {
+function addIndexedCost(index, key, keyType, row, overrides, period) {
   if (!key) return;
   const previous = index.get(key);
   let next = row;
@@ -219,8 +239,8 @@ function addIndexedCost(index, key, keyType, row, overrides) {
   if (previous) {
     next = {
       ...row,
-      orderNumber: row.orderNumber || previous.orderNumber,
-      orderType: row.orderNumber ? row.orderType : previous.orderType,
+      orderNumber: period == null ? row.orderNumber || previous.orderNumber : row.orderNumber,
+      orderType: period == null && !row.orderNumber ? previous.orderType : row.orderType,
     };
     overrides.push({
       keyType,
@@ -230,7 +250,7 @@ function addIndexedCost(index, key, keyType, row, overrides) {
       previousUnitCost: previous.unitCost,
       nextUnitCost: row.unitCost,
       changedCost: previous.unitCost !== row.unitCost,
-      retainedPreviousOrderNumber: !row.orderNumber && Boolean(previous.orderNumber),
+      retainedPreviousOrderNumber: period == null && !row.orderNumber && Boolean(previous.orderNumber),
     });
   }
 
@@ -387,7 +407,7 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
   };
 }
 
-export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batchId = null, resolutions = [] }) {
+export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batchId = null, resolutions = [], period = null }) {
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
   const expected = (expectedSkus ?? []).map((item, index) => normalizeExpectedSku(item, normalizedWorkspaceId, index));
   assertUniquePlatformSkus(expected);
@@ -400,7 +420,7 @@ export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batc
   const overrides = [];
 
   (costRows ?? []).forEach((row, index) => {
-    const normalized = normalizeCostRow(row, index, batchId, resolutions);
+    const normalized = normalizeCostRow(row, index, batchId, resolutions, period);
     if (!normalized.valid) {
       invalidRows.push(normalized);
       return;
@@ -411,8 +431,8 @@ export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batc
       auxiliaryCostRows.push(normalized);
       return;
     }
-    addIndexedCost(platformIndex, normalized.canonicalPlatformSku, "platform_sku", normalized, overrides);
-    addIndexedCost(warehouseIndex, normalized.canonicalWarehouseSku, "warehouse_sku", normalized, overrides);
+    addIndexedCost(platformIndex, normalized.canonicalPlatformSku, "platform_sku", normalized, overrides, period);
+    addIndexedCost(warehouseIndex, normalized.canonicalWarehouseSku, "warehouse_sku", normalized, overrides, period);
   });
 
   const usedRows = new Set();
@@ -442,6 +462,9 @@ export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batc
       unitCost: cost.unitCost,
       formalUnitCost: cost.formalUnitCost,
       previewUnitCost: cost.previewUnitCost,
+      adoptedUnitCost: cost.adoptedUnitCost,
+      periodReviewRequired: cost.periodReviewRequired,
+      legacyMonthExclusions: cost.legacyMonthExclusions,
       currency: cost.currency,
       sourceRow: cost.sourceRow,
       sourceBatchId: cost.batchId,
@@ -501,6 +524,8 @@ export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batc
       anomalyConfirmedCount: matches.filter((item) => item.status === "matched" && item.resolvedAnomalyCount > 0).length,
       unresolvedAnomalyCount: matches.reduce((sum, item) => sum + Number(item.unresolvedAnomalyCount ?? 0), 0),
       evidenceIncompleteCount: matches.filter((item) => item.status === "anomaly_pending" && item.evidenceComplete === false).length,
+      periodMissingCount: matches.filter((item) => period != null && item.costDecision?.selectedRecords.length === 0).length,
+      periodReviewCount: matches.filter((item) => item.periodReviewRequired || item.legacyMonthExclusions).length,
       invalidRowCount: invalidRows.length,
       overrideCount: overrides.length,
       fallbackCount: matches.filter((item) => item.matchMethod === "warehouse_sku_fallback").length,

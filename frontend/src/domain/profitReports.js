@@ -52,7 +52,7 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
   return [...groups.values()].map(row => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const cost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveFormalCostDecision({ ...scope, erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
+    const decision = resolveFormalCostDecision({ ...scope, period: ledger.period, erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
     if (!decision.eligibleForExactProfit) {
       if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId };
       throw new Error(`${row.store} / ${row.platformSku} 尚缺正式成本，不能生成报告。`);

@@ -1,7 +1,8 @@
 import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
+import { purchaseRecordPeriod, validateCostPeriod } from "./erpCostPeriod";
 
-export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@2-unit-4dp";
+export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@3-unit-4dp-ledger-cutoff";
 export const ERP_HISTORY_MIN_SAMPLES = 6;
 export const ERP_PREVIEW_RECORD_LIMIT = 3;
 
@@ -89,7 +90,7 @@ function normalizedResolution(resolution, warehouseSku, record) {
   };
 }
 
-export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWarehouseSku = null, { currentYearMonth = null } = {}) {
+export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWarehouseSku = null, { period = null, currentYearMonth = null } = {}) {
   const warehouseSkuText = text(record?.warehouseSku ?? fallbackWarehouseSku);
   const warehouseSku = warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null;
   const quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
@@ -99,6 +100,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     .map((reason) => text(reason))
     .filter(Boolean))];
   const purchaseDate = text(record?.purchaseDate ?? record?.date);
+  const purchasePeriod = purchaseRecordPeriod(record);
   const recordId = text(record?.recordId ?? record?.id) ?? `record-${index + 1}`;
   const statusFields = record?.statusFields && typeof record.statusFields === "object" && !Array.isArray(record.statusFields)
     ? { ...record.statusFields }
@@ -106,6 +108,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const derivedExclusionReasons = [...exclusionReasons];
   if (!warehouseSku
     || !purchaseDate
+    || !purchasePeriod
     || purchaseTimestamp(record) <= 0
     || !Number.isFinite(quantity)
     || quantity <= 0
@@ -114,7 +117,10 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     derivedExclusionReasons.push("invalid_purchase_detail");
   }
   if (cancelledByStatus(statusFields)) derivedExclusionReasons.push("cancelled_or_closed");
-  if (currentYearMonth != null && purchaseYearMonth(purchaseDate) === Number(currentYearMonth)) {
+  if (period != null && purchasePeriod && purchasePeriod > validateCostPeriod(period)) {
+    derivedExclusionReasons.push("after_ledger_period");
+  }
+  if (period == null && currentYearMonth != null && purchaseYearMonth(purchaseDate) === Number(currentYearMonth)) {
     derivedExclusionReasons.push("current_month");
   }
   const normalizedExclusionReasons = [...new Set(derivedExclusionReasons)];
@@ -217,14 +223,16 @@ export function calculateWarehouseCostDecision({
   purchaseRecords = [],
   resolutions = [],
   evidenceComplete = true,
+  period = null,
   currentYearMonth = null,
 } = {}) {
+  if (period != null) validateCostPeriod(period);
   const normalizedWarehouseSku = normalizeWarehouseSku(warehouseSku);
   const records = purchaseRecords.map((record, index) => normalizePurchaseEvidenceRecord(
     record,
     index,
     normalizedWarehouseSku,
-    { currentYearMonth },
+    { period, currentYearMonth },
   ));
   const selectedRecords = selectFormalPurchaseRecords(records);
   const detection = detectPurchaseCostAnomalies(records, selectedRecords);
@@ -269,6 +277,7 @@ export function calculateWarehouseCostDecision({
     : "pending";
   return {
     resolutionVersion: ERP_COST_RESOLUTION_VERSION,
+    costPeriod: period,
     warehouseSku: normalizedWarehouseSku,
     evidenceComplete: Boolean(evidenceComplete),
     purchaseRecords: records,

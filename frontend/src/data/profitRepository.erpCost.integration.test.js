@@ -21,6 +21,7 @@ import {
   voidPublishedErpCostBatch,
 } from "./database";
 import { buildErpCostRequest, reconcileErpCostRows } from "../domain/erpCosts";
+import { ERP_COST_RESOLUTION_VERSION } from "../domain/erpCostResolution";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope, parseErpInboxMessage } from "../domain/erpInboxContract";
 import { calculateExactProfitLine, PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
@@ -62,7 +63,7 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   expect(backup.tables.erpCostRows[0].unitCost).toBe(0.0097);
   const audit = (await db.auditEvents.toArray()).find((event) => event.action === "report_saved");
   expect(audit).toMatchObject({ localOnly: true, objectType: "local_profit_report" });
-  expect(await db.erpCostBatches.get(saved.batchId)).toMatchObject({ status: "published", sourceContract: { algorithmVersion: source.algorithmVersion, resolutionVersion: "shopeers-cost-resolution@2-unit-4dp" } });
+  expect(await db.erpCostBatches.get(saved.batchId)).toMatchObject({ status: "published", sourceContract: { algorithmVersion: source.algorithmVersion, resolutionVersion: ERP_COST_RESOLUTION_VERSION } });
 });
 
 it("independently rejects subprecision prices even when the page claims matched", async () => {
@@ -108,6 +109,7 @@ async function context({
 
 function reconcile({ purchaseRecords, resolutions = [], previewUnitCost = null }) {
   return reconcileErpCostRows({
+    period,
     workspaceId: DEFAULT_WORKSPACE_ID,
     expectedSkus: [{ platformSku: "SKU-AUDIT", platformSkc: "SKC-AUDIT", warehouseSku: "WH-AUDIT" }],
     costRows: [{
@@ -245,6 +247,45 @@ afterEach(async () => {
 });
 
 describe("ERP cost repository independent recalculation", () => {
+  it("rejects hidden old collection-month exclusions even when the page says matched", async () => {
+    const { ledger, request } = await context();
+    const purchaseRecords = [record("PREVIOUS", 4)];
+    const source = sourceEnvelope({ ledger, request, purchaseRecords });
+    source.warehouseEvidence[0].excludedRecords = [{ ...record("OMITTED", 10, 1, "2026-08-01"), eligible: false, exclusionReasons: ["current_month"] }];
+    const reconciliation = reconcile({ purchaseRecords });
+    await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source })).rejects.toThrow("旧版当月排除");
+    expect(await db.erpCostRows.count()).toBe(0);
+  });
+
+  it("uses the database ledger cutoff regardless of collection time or payload period", async () => {
+    const { ledger, request } = await context();
+    const purchaseRecords = [
+      record("FUTURE", 999, 1, "2026-09-01"),
+      record("CURRENT", 6, 2, "2026-08-31"),
+      record("PREVIOUS", 3, 1, "2026-07-31"),
+    ];
+    const source = sourceEnvelope({ ledger, request, purchaseRecords });
+    source.generatedAt = "2026-10-01T00:00:00.000Z";
+    source.costPeriod = "2026-10";
+    const reconciliation = reconcile({ purchaseRecords, previewUnitCost: 999 });
+    expect(reconciliation.matches[0].unitCost).toBe(5);
+    await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source });
+    const saved = (await getLatestLedgerCosts(ledger.id))[0];
+    expect(saved).toMatchObject({ costPeriod: period, unitCost: 5, selectedRecordIds: ["CURRENT", "PREVIOUS"] });
+    expect(saved.purchaseRecords).toHaveLength(3);
+  });
+
+  it("rejects a forged future preview without writing formal costs", async () => {
+    const { ledger, request } = await context();
+    const purchaseRecords = [record("FUTURE", 999, 1, "2026-09-01")];
+    const reconciliation = reconcile({ purchaseRecords, previewUnitCost: 999 });
+    reconciliation.matches[0] = { ...reconciliation.matches[0], status: "matched", unitCost: 999, formalUnitCost: 999 };
+    const source = sourceEnvelope({ ledger, request, purchaseRecords });
+    await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source })).rejects.toThrow("2026-08");
+    expect(await db.erpCostRows.count()).toBe(0);
+    expect(await db.erpCostBatches.count()).toBe(0);
+  });
+
   it("uses the active member as the audit actor while retaining ERP Assistant as transport source", async () => {
     expect(selectProfitAuditActor({ requestedActor: "erp-assistant-v8" })).toBe("local-user");
     expect(selectProfitAuditActor({ activeMemberId: "finance-cloud-1", requestedActor: "erp-assistant-v8", cloudConfigured: true })).toBe("finance-cloud-1");

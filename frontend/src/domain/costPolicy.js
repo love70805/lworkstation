@@ -2,8 +2,9 @@ import Decimal from "decimal.js";
 import { canonicalPlatformSku, normalizePlatformSku } from "./identifiers";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 import { validManualOverride } from "./manualCostOverride";
+import { isErpCostWithinPeriod } from "./erpCostPeriod";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@7-store-manual-override";
+export const COST_POLICY_VERSION = "formal-cost-policy@8-ledger-cutoff";
 
 function text(value) {
   const normalized = String(value ?? "").trim();
@@ -109,6 +110,7 @@ export function resolveFormalCostDecision({
   store,
   manualOverride = null,
   ledgerId,
+  period = null,
   platformSku,
   erpCost = null,
   reference1688Cost = null,
@@ -124,6 +126,10 @@ export function resolveFormalCostDecision({
       sourceRecordId: manualOverride.id, approvalId: manualOverride.id, reasons: [], policyVersion: COST_POLICY_VERSION };
   }
   const normalizedErp = normalizeCandidate(erpCost, canonicalSku, "erp");
+  if (normalizedErp.candidate && !isErpCostWithinPeriod(erpCost, period)) {
+    normalizedErp.candidate = null;
+    normalizedErp.issues.push("erp_cost_period_unverified");
+  }
   reasons.push(...normalizedErp.issues);
 
   if (normalizedErp.candidate) {

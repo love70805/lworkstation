@@ -1,5 +1,6 @@
 import { canonicalPlatformSku } from "./identifiers";
 import { manualSnapshot, selectManualOverride, storeSkuKey } from "./manualCostOverride";
+import { isErpCostWithinPeriod } from "./erpCostPeriod";
 
 function validAmount(value) {
   const amount = Number(value);
@@ -19,10 +20,10 @@ function collectSkus(items, predicate = () => true) {
     .filter(Boolean));
 }
 
-export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId }) {
+export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId, period = null }) {
   const expectedRows = new Map(salesRows.map((row) => [storeSkuKey(row.store, row.platformSku ?? row.sku), row]));
   const expectedSkus = new Set(expectedRows.keys());
-  const erpSkus = collectSkus(erpCosts, formalErpCost);
+  const erpSkus = collectSkus(erpCosts, item => formalErpCost(item) && isErpCostWithinPeriod(item, period));
   const approvedSkus = collectSkus(approvals, (item) => (
     manualSnapshot(item)?.kind !== "manual_override" && item.status === "approved" && validAmount(item.approvedAmount ?? item.unitCost)
   ));
