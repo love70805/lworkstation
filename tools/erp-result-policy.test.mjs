@@ -276,8 +276,9 @@ async function verifyUnscopedEvidenceDelivery() {
       assert.equal(payload.meta.skippedInvalid, invalid.length);
       assert.ok(payload.warehouseEvidence.excludedDetails.every((record) => record.exclusionReasons.join() === "invalid_purchase_detail"));
       assert.equal(payload.warehouseEvidence.excludedDetails.length, invalid.length);
-      const expectedPreview = mixedMonths ? ["LATER", "CURRENT", "MAY"] : ["CURRENT"];
-      assert.deepEqual(payload.results[0].selectedRecordIds, expectedPreview, "latest-three and 1688 preference remain preview-only rules");
+      const expectedPreview = mixedMonths ? ["REGULAR-NEWEST", "LATER", "CURRENT"] : ["CURRENT"];
+      assert.deepEqual(payload.results[0].selectedRecordIds, expectedPreview, "latest-three preview must not prefer 1688 or apply an untrusted month cutoff");
+      assert.equal(payload.results[0].sourceType, mixedMonths ? "混合采购" : "1688");
       assert.deepEqual(records.filter((record) => record.selectedForPreview).map((record) => record.recordId), expectedPreview);
       assert.equal(payload.results[0].unitCost, "4.0000");
       assert.equal(payload.results[0].mappings[0].platformSku, "SKU-MONTH");
@@ -287,7 +288,9 @@ async function verifyUnscopedEvidenceDelivery() {
       assert.equal(Object.hasOwn(payload.meta, "excludedMonth"), false);
       assert.equal(Object.hasOwn(payload.meta, "skippedCurrentMonth"), false);
       const footer = window.document.getElementById("erpa-footer-right").textContent;
-      assert.match(footer, /未按账本月末截止范围筛选的预览/);
+      assert.match(footer, /未按账本前月范围筛选的预览/);
+      assert.match(footer, /待工作台排除账本当月及以后采购/);
+      assert.doesNotMatch(footer, /1688单号优先|月末截止/);
       assert.doesNotMatch(window.document.body.textContent, /排除当月|完整历史证据|排除undefined/);
     } finally {
       await window.happyDOM.close();

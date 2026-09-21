@@ -5,7 +5,7 @@ import { resolveFormalCostDecision } from "./costPolicy";
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
-export const REPORT_TEMPLATE_VERSION = "profit-zebra@1";
+export const REPORT_TEMPLATE_VERSION = "profit-zebra@2-purchase-evidence";
 export const REPORT_TABLES = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
 export const Exact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 export function exact(value, { nonnegative = false } = {}) {
@@ -60,7 +60,9 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
     const unitCostExact = exact(decision.unitCost, { nonnegative: true });
     const purchaseCostExact = new Exact(row.quantityExact).times(unitCostExact).toFixed();
     const warehouseCostExact = new Exact(row.quantityExact).times(rate).toFixed();
-    return { ...row, unitCostExact, purchaseCostExact, warehouseCostExact, profitExact: new Exact(row.revenueExact).minus(purchaseCostExact).minus(warehouseCostExact).toFixed(), costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, orderNumber: cost?.orderNumber ?? "" };
+    return { ...row, unitCostExact, purchaseCostExact, warehouseCostExact, profitExact: new Exact(row.revenueExact).minus(purchaseCostExact).minus(warehouseCostExact).toFixed(), costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, orderNumber: cost?.orderNumber ?? "",
+      costPurchaseRecords: decision.source === "erp" ? adoptedCostEvidence(cost).selected : [],
+      costResolutionVersion: decision.source === "erp" ? adoptedCostEvidence(cost).decision?.resolutionVersion ?? null : null };
   }).sort((a,b) => a.store.localeCompare(b.store,"zh-CN") || a.groupSkc.localeCompare(b.groupSkc) || a.platformSku.localeCompare(b.platformSku));
 }
 
@@ -83,3 +85,4 @@ export function legacyReportLine(line) {
   const amount = value => value == null ? null : Number(value);
   return { ...line, quantity: Number(line.quantityExact), qty: Number(line.quantityExact), revenue: Number(line.revenueExact), unitCost: amount(line.unitCostExact), purchaseCost: amount(line.purchaseCostExact), warehouseCost: amount(line.warehouseCostExact), profit: amount(line.profitExact), penalty: 0, finalizable: line.unitCostExact != null };
 }
+import { adoptedCostEvidence } from "./erpPurchaseEvidence";

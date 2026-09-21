@@ -46,7 +46,7 @@ it("explicitly reopens a pure manual ledger, preserves snapshots and permits cor
 
 it("keeps ERP published and restores it when a manual override is revoked after reopening", async () => {
   await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
-  await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.5, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-08-01", unitPrice: 0.5, quantity: 1 }] });
+  await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 0.5, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-07-01", unitPrice: 0.5, quantity: 1 }] });
   await reopenLedgerForCostCorrection({ ledgerId, reason: "复核混合成本" });
   for (const approval of await db.costApprovals.toArray()) await revokeManualCostOverride({ ledgerId, approvalId: approval.id });
   expect(await db.erpCostBatches.get("ERP")).toMatchObject({ status: "published" });

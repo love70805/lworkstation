@@ -190,6 +190,9 @@
 .cost-evidence-inline-body span, .cost-evidence-inline-body small { overflow-wrap: anywhere; }
 .cost-evidence-details { margin-top: 8px; padding-top: 7px; border-top: 1px dashed var(--warning-border); }
 .cost-evidence-details-body { display: grid; gap: 8px; margin-top: 7px; color: var(--text-muted); font-size: 11px; line-height: 16px; }
+.cost-selected-purchase { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.cost-selected-purchase:last-child { border-bottom: 0; }
+.cost-variant-line > .cost-evidence-details { min-width: 0; max-width: 260px; margin: 0; padding: 5px 0; border: 0; }
 .cost-evidence-issue-list { display: grid; gap: 4px; margin: 0; padding-left: 17px; }
 .cost-evidence-issue-list li { padding-left: 2px; }
 .cost-evidence-issue-list strong { margin-right: 4px; color: var(--warning); }

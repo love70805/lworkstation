@@ -19,5 +19,5 @@ export async function readCachedReportProducts({ snapshot, warehouseRate = snaps
   // Supplied/testing snapshots without a verified source revision cannot be persisted.
   if (!snapshot.dataVersion) return compute();
   assertSourceRevision(snapshot.dataVersion);
-  return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@3-ledger-cutoff`, revision: snapshot.dataVersion, compute, onStatus });
+  return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@4-beta-prior-month-latest-three`, revision: snapshot.dataVersion, compute, onStatus });
 }

@@ -1,8 +1,10 @@
 import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
-import { purchaseRecordPeriod, validateCostPeriod } from "./erpCostPeriod";
+import { normalizePurchaseEvidenceRecord, validateCostPeriod } from "./erpPurchaseEvidence";
+import { selectLatestPurchaseRecords } from "./erpPurchaseSelection";
+export { normalizePurchaseEvidenceRecord } from "./erpPurchaseEvidence";
 
-export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@3-unit-4dp-ledger-cutoff";
+export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@4-unit-4dp-beta-prior-month-latest-three";
 export const ERP_HISTORY_MIN_SAMPLES = 6;
 export const ERP_PREVIEW_RECORD_LIMIT = 3;
 
@@ -38,27 +40,6 @@ function median(values) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function purchaseTimestamp(record) {
-  const explicit = finiteNumber(record?.timestamp);
-  if (explicit != null) return explicit;
-  const parsed = Date.parse(String(record?.purchaseDate ?? record?.date ?? ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-const CANCELLED_PURCHASE_STATUS = /(?:^|[\s:：])(?:11|cancel(?:led)?|void(?:ed)?|已取消|取消|已作废|作废|已关闭|关闭)(?:$|[\s:：])/i;
-
-function purchaseYearMonth(value) {
-  const match = String(value ?? "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-  return match ? Number(match[1]) * 100 + Number(match[2]) : null;
-}
-
-function cancelledByStatus(statusFields) {
-  return Object.values(statusFields ?? {}).some((value) => {
-    const normalized = String(value ?? "").normalize("NFKC").trim();
-    return normalized === "11" || CANCELLED_PURCHASE_STATUS.test(normalized);
-  });
-}
-
 function normalizedResolution(resolution, warehouseSku, record) {
   if (!resolution || typeof resolution !== "object") return null;
   if (canonicalWarehouseSku(resolution.warehouseSku ?? warehouseSku) !== canonicalWarehouseSku(warehouseSku)) return null;
@@ -90,77 +71,8 @@ function normalizedResolution(resolution, warehouseSku, record) {
   };
 }
 
-export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWarehouseSku = null, { period = null, currentYearMonth = null } = {}) {
-  const warehouseSkuText = text(record?.warehouseSku ?? fallbackWarehouseSku);
-  const warehouseSku = warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null;
-  const quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
-  const unitPrice = finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
-  const totalPriceValue = finiteNumber(record?.totalPrice ?? record?.price);
-  const exclusionReasons = [...new Set((Array.isArray(record?.exclusionReasons) ? record.exclusionReasons : [])
-    .map((reason) => text(reason))
-    .filter(Boolean))];
-  const purchaseDate = text(record?.purchaseDate ?? record?.date);
-  const purchasePeriod = purchaseRecordPeriod(record);
-  const recordId = text(record?.recordId ?? record?.id) ?? `record-${index + 1}`;
-  const statusFields = record?.statusFields && typeof record.statusFields === "object" && !Array.isArray(record.statusFields)
-    ? { ...record.statusFields }
-    : {};
-  const derivedExclusionReasons = [...exclusionReasons];
-  if (!warehouseSku
-    || !purchaseDate
-    || !purchasePeriod
-    || purchaseTimestamp(record) <= 0
-    || !Number.isFinite(quantity)
-    || quantity <= 0
-    || !Number.isFinite(unitPrice)
-    || unitPrice < 0) {
-    derivedExclusionReasons.push("invalid_purchase_detail");
-  }
-  if (cancelledByStatus(statusFields)) derivedExclusionReasons.push("cancelled_or_closed");
-  if (period != null && purchasePeriod && purchasePeriod > validateCostPeriod(period)) {
-    derivedExclusionReasons.push("after_ledger_period");
-  }
-  if (period == null && currentYearMonth != null && purchaseYearMonth(purchaseDate) === Number(currentYearMonth)) {
-    derivedExclusionReasons.push("current_month");
-  }
-  const normalizedExclusionReasons = [...new Set(derivedExclusionReasons)];
-  return {
-    recordId,
-    warehouseSku,
-    canonicalWarehouseSku: warehouseSku ? canonicalWarehouseSku(warehouseSku) : null,
-    purchaseDate,
-    timestamp: purchaseTimestamp(record),
-    quantity,
-    unitPrice,
-    totalPrice: totalPriceValue ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
-    order1688: text(record?.order1688),
-    purchaseOrderNo: text(record?.purchaseOrderNo),
-    purchaseOrderId: text(record?.purchaseOrderId),
-    supplierName: text(record?.supplierName),
-    supplier1688Url: text(record?.supplier1688Url),
-    statusFields,
-    eligible: record?.eligible !== false && normalizedExclusionReasons.length === 0,
-    selectedForPreview: Boolean(record?.selectedForPreview),
-    exclusionReasons: normalizedExclusionReasons,
-  };
-}
-
 export function selectFormalPurchaseRecords(records, maxRecords = ERP_PREVIEW_RECORD_LIMIT) {
-  const eligible = (records ?? [])
-    .filter((record) => record.eligible !== false
-      && record.exclusionReasons.length === 0
-      && record.warehouseSku
-      && record.purchaseDate
-      && Number.isFinite(record.quantity)
-      && record.quantity > 0
-      && Number.isFinite(record.unitPrice)
-      && record.unitPrice >= 0)
-    .toSorted((left, right) => (
-      right.timestamp - left.timestamp
-      || String(right.purchaseOrderId ?? "").localeCompare(String(left.purchaseOrderId ?? ""), "zh-CN", { numeric: true })
-    ));
-  const records1688 = eligible.filter((record) => record.order1688);
-  return (records1688.length > 0 ? records1688 : eligible).slice(0, maxRecords);
+  return selectLatestPurchaseRecords(records, maxRecords);
 }
 
 export function detectPurchaseCostAnomalies(records, selectedRecords) {

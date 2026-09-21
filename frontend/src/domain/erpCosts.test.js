@@ -48,7 +48,7 @@ describe("ERP cost requests", () => {
 });
 
 describe("ERP v8.0-compatible cost selection", () => {
-  it("uses only recent 1688 records and calculates a weighted unit cost", () => {
+  it("uses the latest three mixed records and calculates a weighted unit cost", () => {
     const result = calculateLegacyWarehouseCosts([
       { id: "R1", warehouseSku: "WH-1", purchaseDate: "2026-05-01", quantity: 10, unitPrice: 10, purchaseOrderNo: "P1" },
       { id: "R2", warehouseSku: "WH-1", purchaseDate: "2026-06-01", quantity: 10, unitPrice: 20, purchaseOrderNo: "P2" },
@@ -58,13 +58,13 @@ describe("ERP v8.0-compatible cost selection", () => {
 
     expect(result.costs[0]).toMatchObject({
       warehouseSku: "WH-1",
-      sourceType: "1688",
-      orderNumber: "A4",
-      calculationCount: 2,
-      totalQuantity: 5,
-      totalPrice: 31,
-      unitCost: 6.2,
-      selectedRecordIds: ["R4", "R3"],
+      sourceType: "mixed",
+      orderNumber: "A4 / A3 / P2",
+      calculationCount: 3,
+      totalQuantity: 15,
+      totalPrice: 231,
+      unitCost: 15.4,
+      selectedRecordIds: ["R4", "R3", "R2"],
     });
   });
 
@@ -96,7 +96,7 @@ describe("ERP v8.0-compatible cost selection", () => {
       { id: "R1", warehouseSku: "WH-1", purchaseDate: "2026-07-01", quantity: 3, unitPrice: 1.239, purchaseOrderNo: "P1" },
     ], { currentYearMonth: 202608 });
 
-    expect(result.costs[0]).toMatchObject({ totalPrice: 3.71, unitCost: 1.239, algorithmVersion: "erp-v8.0-compatible@2-unit-4dp" });
+    expect(result.costs[0]).toMatchObject({ totalPrice: 3.71, unitCost: 1.239, algorithmVersion: "erp-v8.0-compatible@3-beta-latest-three" });
   });
 
   it("recognizes cancelled payment and 1688 order states even when the ERP field name varies", () => {

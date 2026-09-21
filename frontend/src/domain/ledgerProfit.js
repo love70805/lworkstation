@@ -11,10 +11,14 @@ export function calculateFormalLedgerRows({ ledger, salesRows, erpCosts, approva
     const erpCost = costs.get(row.canonicalPlatformSku);
     const decision = resolveFormalCostDecision({ ...scope, period: ledger.period, erpCost, manualOverride: selectManualOverride(approvals, scope) });
     return { ...row, ...calculateExactProfitLine({ revenue: row.revenue, quantity: row.qty, penalty: row.penalty, warehouseRate: ledger.warehouseRate, costDecision: decision }),
-      unitCost: decision.unitCost, costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, costPolicyVersion: decision.policyVersion, orderNumber: erpCost?.orderNumber ?? null };
+      unitCost: decision.unitCost, costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, costPolicyVersion: decision.policyVersion,
+      orderNumber: erpCost?.orderNumber ?? null,
+      costPurchaseRecords: decision.source === "erp" ? adoptedCostEvidence(erpCost).selected : [],
+      costResolutionVersion: decision.source === "erp" ? adoptedCostEvidence(erpCost).decision?.resolutionVersion ?? null : null };
   });
 }
 
 export function comparableProfitLines(lines) {
   return lines.map((row) => JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), row.quantity, row.revenue, row.penalty, row.unitCost, row.purchaseCost, row.warehouseCost, row.profit, row.costSource, row.costSourceRecordId, row.costApprovalId ?? null])).sort();
 }
+import { adoptedCostEvidence } from "./erpPurchaseEvidence";

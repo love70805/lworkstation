@@ -7,13 +7,13 @@ import { normalizeHeader, parseNumericValue } from "./salesImport";
 const fields = {
   platformSku: ["平台sku", "平台 SKU", "platformsku", "platform_sku", "sku"],
   warehouseSku: ["仓库sku", "仓库 SKU", "warehousesku", "warehouse_sku", "产品sku"],
-  orderNumber: ["1688单号", "1688订单号", "采购单号", "订单号", "ordernumber", "order_number"],
-  orderType: ["单号类型", "来源类型", "ordertype", "order_type", "sourcetype"],
+  orderNumber: ["所选采购单号", "关联单号", "1688单号", "1688订单号", "采购单号", "订单号", "ordernumber", "order_number"],
+  orderType: ["所选单号类型", "单号类型", "来源类型", "ordertype", "order_type", "sourcetype"],
   unitCost: ["单件平均成本", "单件成本", "预览单件成本", "unitcost", "unit_cost", "cost"],
   platformSkc: ["平台skc", "skc", "商品skc", "platformskc", "platform_skc"],
   productName: ["产品名称", "商品名称", "productname", "product_name", "name"],
   calculationCount: ["核算次数", "计算次数", "预览次数", "calctimes", "calculationcount", "calculation_count"],
-  dateRange: ["核算日期范围", "日期范围", "预览日期范围", "daterange", "date_range"],
+  dateRange: ["所选采购日期", "核算日期范围", "日期范围", "预览日期范围", "daterange", "date_range"],
   totalQuantity: ["总采购量", "采购总量", "totalqty", "totalquantity", "total_quantity"],
   totalPrice: ["总采购价(￥)", "总采购价", "采购总价", "totalprice", "total_price"],
   supplierName: ["供应商", "供应商名称", "supplier", "suppliername", "supplier_name"],
@@ -134,5 +134,5 @@ export function parseErpCostInput(text, options = {}) {
 }
 
 export function buildErpCostTemplate() {
-  return "平台SKU\t平台SKC\t仓库SKU\t1688单号\t单件平均成本\t供应商1688链接\n";
+  return "平台SKU\t平台SKC\t仓库SKU\t关联单号\t单件平均成本\t供应商1688链接\n";
 }

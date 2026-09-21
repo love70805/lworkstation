@@ -35,12 +35,12 @@ describe("manual exact cost overrides", () => {
   it("keeps manual priority over later ERP and revocation restores the latest ERP", async () => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
-    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-08-01", unitPrice: 0.009, quantity: 1 }] });
+    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-07-01", unitPrice: 0.009, quantity: 1 }] });
     expect((await lines())[0].unitCost).toBe(0.003);
     await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
     expect((await lines())[0]).toMatchObject({ unitCost: 0.009, costSource: "erp" });
   });
-  it.each(["2026-09-01", null])("does not restore future or undated ERP after manual revocation: %s", async purchaseDate => {
+  it.each(["2026-08-01", "2026-09-01", null])("does not restore current, future or undated ERP after manual revocation: %s", async purchaseDate => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
     await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate, unitPrice: 0.009, quantity: 1 }] });

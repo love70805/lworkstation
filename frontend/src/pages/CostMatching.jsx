@@ -15,6 +15,7 @@ import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useTo
 import { getErpCostInbox, getLatestErpCostRequest, listErpCostInbox, listErpCostRequests, markErpCostInboxStatus, rejectErpCostInboxBatches, saveErpCostRequest, savePublishedErpCostBatch, switchLoadedErpCostInbox, voidPublishedErpCostBatch } from "../data/database";
 import { reconcileErpCostRows } from "../domain/erpCosts";
 import { ERP_COST_ANOMALY_LABELS, upsertCostResolution } from "../domain/erpCostResolution";
+import { adoptedCostEvidence } from "../domain/erpPurchaseEvidence";
 import { collectErpPlatformSkcs } from "../domain/erpQueryScope";
 import { buildErpInboxQueue, ERP_INBOX_MATCH_REASONS } from "../domain/erpInboxMatching";
 import { canonicalPlatformSku } from "../domain/identifiers";
@@ -132,6 +133,22 @@ function EvidencePreview({ variants }) {
       })}
     </div>
   );
+}
+
+function SelectedPurchaseEvidence({ match }) {
+  const records = match.costDecision?.selectedRecords ?? adoptedCostEvidence(match.raw ?? match).selected.filter(Boolean);
+  if (!records.length) return <span className="pending-text">{match.periodReviewRequired ? "选样待复核" : match.costDecision ? "无合格采购" : "兼容输入"}</span>;
+  return <details className="cost-evidence-details">
+    <summary>{match.periodReviewRequired ? "原采用" : "参与核算"} {records.length} 笔采购</summary>
+    <div className="cost-evidence-details-body">
+      {records.map(record => <div key={record.recordId} className="cost-selected-purchase">
+        <strong>{record.purchaseDate}</strong>
+        <span>{record.order1688 ? "1688" : "采购单"} · {record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || "未提供单号"}</span>
+        {record.order1688 && record.purchaseOrderNo ? <small>采购单 · {record.purchaseOrderNo}</small> : null}
+        <small>{record.quantity} 件 × {formatErpUnitCost(record.effectiveUnitPrice ?? record.unitPrice)}</small>
+      </div>)}
+    </div>
+  </details>;
 }
 
 function CostMatchingBody({ validatedContext, onPublished }) {
@@ -547,7 +564,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         平台SKU: "",
         平台SKC: "",
         仓库SKU: "",
-        "1688单号": "",
+        "关联单号": "",
         单件平均成本: "",
         "供应商1688链接": "",
       }], "erp-cost-template.xlsx", "ERP成本导入模板");
@@ -660,8 +677,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       { id: "platformSku", header: "平台 SKU / 属性", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><strong className="mono" title={item.platformSku}>{item.platformSku}</strong><small>{item.attribute || "未提供属性"}</small></div>) },
       { id: "unitCost", header: "成本预览", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><span className="cost-status-stack">{item.unitCost != null ? <span className="mono table-number">{formatErpUnitCost(item.unitCost)}</span> : <span className="pending-text">--</span>}{item.periodReviewRequired && item.adoptedUnitCost != null ? <small className="row-subtitle">原采用 {formatErpUnitCost(item.adoptedUnitCost)} · 待复核</small> : null}</span></div>), meta: { cellStyle: { textAlign: "right" } } },
       { id: "warehouseSku", header: "仓库 SKU", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><span className="mono">{item.sourceWarehouseSku || "--"}</span></div>) },
-      { id: "evidence", header: "核算证据", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}>{item.calculationCount ? <span><strong className="mono">{item.calculationCount} 条记录</strong><small className="row-subtitle">{item.dateRange || `${item.totalQuantity ?? "--"} 件 · ${item.totalPrice == null ? "--" : currency(item.totalPrice)}`}</small></span> : <span className="pending-text">{item.periodReviewRequired ? "日期待复核" : item.costDecision ? "无合格采购" : "兼容输入"}</span>}</div>) },
-      { id: "status", header: "核对状态", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><div className="cost-status-stack">{item.status === "matched" ? <Badge tone={item.requiresReview ? "warning" : "success"}>{item.resolvedAnomalyCount > 0 ? "异常已在 Lworkstation 处置" : item.requiresReview ? "仓库 SKU 兜底" : "平台 SKU 匹配"}</Badge> : item.status === "anomaly_pending" ? <Badge tone="danger"><AlertCircle size={12} />{item.periodReviewRequired || item.legacyMonthExclusions ? "旧成本月份待复核" : item.costDecision?.selectedRecords.length === 0 ? "截止月末无可用采购" : item.evidenceComplete ? "成本异常待处置" : "采购证据不完整"}</Badge> : <Badge tone="danger"><AlertCircle size={12} />缺少 ERP 成本</Badge>}{item.periodReviewRequired || item.evidenceComplete === false || item.costDecision?.selectedRecords.length === 0 ? <EvidenceDetails match={item} /> : null}</div></div>) },
+      { id: "evidence", header: "核算采购", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><SelectedPurchaseEvidence match={item} /></div>) },
+      { id: "status", header: "核对状态", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><div className="cost-status-stack">{item.status === "matched" ? <Badge tone={item.requiresReview ? "warning" : "success"}>{item.resolvedAnomalyCount > 0 ? "异常已在 Lworkstation 处置" : item.requiresReview ? "仓库 SKU 兜底" : "平台 SKU 匹配"}</Badge> : item.status === "anomaly_pending" ? <Badge tone="danger"><AlertCircle size={12} />{item.periodReviewRequired || item.legacyMonthExclusions ? "旧成本选样待复核" : item.costDecision?.selectedRecords.length === 0 ? "核算月之前无可用采购" : item.evidenceComplete ? "成本异常待处置" : "采购证据不完整"}</Badge> : <Badge tone="danger"><AlertCircle size={12} />缺少 ERP 成本</Badge>}{item.periodReviewRequired || item.evidenceComplete === false || item.costDecision?.selectedRecords.length === 0 ? <EvidenceDetails match={item} /> : null}</div></div>) },
     ];
   }, [expandedUnmappedGroups]);
 
@@ -783,7 +800,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       <PageHeader
         eyebrow={`月度利润 › ${snapshot.ledger.period}`}
         title="ERP 成本核对"
-        description={`当前筛选：${describeProfitFilter(profitFilter)} · 采购截止：${snapshot.ledger.period} 月末（含历史采购）`}
+        description={`当前筛选：${describeProfitFilter(profitFilter)} · Beta 临时口径：${snapshot.ledger.period} 之前最近三笔（不含当月，不区分单号类型）`}
         actions={<><Button icon={platformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || platformSkcs.length === 0} onClick={copySkcs}>{platformSkcs.length ? `复制 ${platformSkcs.length} 个平台 SKC` : "待补平台 SKC"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前成本" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></>}
       />
 
@@ -794,7 +811,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         </div>
       </div>
 
-      {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 需要人工判断</strong><small>{reconciliation.summary.periodReviewCount > 0 ? `${reconciliation.summary.periodReviewCount} 项旧成本的采购月份需要重新核对，原金额保留；可重新采集或直接人工更正。` : reconciliation.summary.periodMissingCount > 0 ? `${reconciliation.summary.periodMissingCount} 项截至 ${snapshot.ledger.period} 月末无可用采购记录。` : reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；可以检查 SKU/SKC 后重新采集，也可以在下方直接人工更正。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；可以重新采集，也可以在下方直接人工更正成本。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的价格，请保留真实采购价格或直接填写人工成本。" : `有 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请选择修正价格或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 || reconciliation.summary.periodReviewCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}
+      {reconciliation?.summary.anomalyPendingCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>有 {reconciliation.summary.anomalyPendingCount} 个平台 SKU 需要人工判断</strong><small>{reconciliation.summary.periodReviewCount > 0 ? `${reconciliation.summary.periodReviewCount} 项旧成本的采购选样需要重新核对，原金额保留；可重新采集或直接人工更正。` : reconciliation.summary.periodMissingCount > 0 ? `${reconciliation.summary.periodMissingCount} 项在 ${snapshot.ledger.period} 之前无可用采购记录（不含当月）。` : reconciliation.summary.evidenceIncompleteCount > 0 ? mappingIdentityIssue ? `${reconciliation.summary.evidenceIncompleteCount} 项平台身份映射待修正；可以检查 SKU/SKC 后重新采集，也可以在下方直接人工更正。` : `${reconciliation.summary.evidenceIncompleteCount} 项缺少完整历史采购证据；可以重新采集，也可以在下方直接人工更正成本。` : reconciliation.summary.unresolvedAnomalyCount === 0 ? "存在低于 0.0001 元精度边界的价格，请保留真实采购价格或直接填写人工成本。" : `有 ${reconciliation.summary.unresolvedAnomalyCount} 条采购价需要核对，请选择修正价格或确认真实价格。`}</small></span>{resultQuery.trim() ? <Button variant="ghost" onClick={() => setResultQuery("")}>清除搜索，查看全部待处置项</Button> : null}{reconciliation.summary.evidenceIncompleteCount > 0 || reconciliation.summary.periodReviewCount > 0 ? <Button onClick={() => setErpAssistantOpen(true)}>重新采集 ERP 证据</Button> : null}</div> : null}
 
       {visibleAnomalyGroups.length > 0 ? <Panel className="cost-resolution-panel">
         {!locked ? <Button onClick={() => document.getElementById("manual-cost-actions")?.scrollIntoView({ behavior: "smooth", block: "start" })}>按店铺人工更正成本</Button> : null}
@@ -840,7 +857,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       {!locked ? <details open id="manual-cost-actions"><summary>人工成本优先（逐店 SKU 可随时更正）</summary>{filteredSalesLines.map((row) => {
         const match = reconciliation?.matches.find((item) => item.canonicalPlatformSku === row.canonicalPlatformSku);
         const manualOverride = selectManualOverride(snapshot?.approvals, { workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store: row.store, platformSku: row.platformSku });
-        const reason = manualOverride ? "人工更正有效" : match?.periodReviewRequired || match?.legacyMonthExclusions ? "旧成本月份待复核" : match?.status === "matched" ? "ERP 成本已匹配" : match?.costDecision?.costPeriod && match.costDecision.selectedRecords.length === 0 ? `截至 ${snapshot.ledger.period} 无可用采购` : match?.costDecision?.selectedRecords?.some((record) => record.unitPrice === 0) ? "采购记录存在零价" : match?.evidenceComplete === false ? "证据不完整" : match?.purchaseRecords?.length === 0 ? "尚无可用采购记录，需核对 ERP" : "尚未收到可用成本，原因待查";
+        const reason = manualOverride ? "人工更正有效" : match?.periodReviewRequired || match?.legacyMonthExclusions ? "旧成本选样待复核" : match?.status === "matched" ? "ERP 成本已匹配" : match?.costDecision?.costPeriod && match.costDecision.selectedRecords.length === 0 ? `${snapshot.ledger.period} 之前无可用采购` : match?.costDecision?.selectedRecords?.some((record) => record.unitPrice === 0) ? "采购记录存在零价" : match?.evidenceComplete === false ? "证据不完整" : match?.purchaseRecords?.length === 0 ? "尚无可用采购记录，需核对 ERP" : "尚未收到可用成本，原因待查";
         return <div className="cost-resolution-record" key={row.id}><span>{row.store} · {row.platformSku} · {reason}</span><Button onClick={() => setManualTarget({ ...row, unitCost: manualOverride?.approvedAmount ?? match?.unitCost, manualOverride })}>{manualOverride ? "更正 / 撤销" : "人工更正"}</Button></div>;
       })}</details> : null}
       {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={manualTarget} onClose={() => setManualTarget(null)} /> : null}

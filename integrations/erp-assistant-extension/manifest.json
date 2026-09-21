@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ERP Assistant",
-  "version": "8.0.18",
+  "version": "8.0.19",
   "description": "卓麟 ERP SKU 采购成本核算工具",
   "host_permissions": [
     "https://*.zhuolinkeji.cn/*",

@@ -76,7 +76,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.18" }),
+      getManifest: () => ({ version: "8.0.19" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -181,9 +181,9 @@ function resultInput(overrides = {}) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.18");
+  assert.equal(manifest.version, "8.0.19");
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.18";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.19";/, "the download action must recommend the patched package");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
@@ -231,13 +231,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.18-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.19-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.18");
+    assert.equal(manifest.version, "8.0.19");
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -248,8 +248,15 @@ async function verifyPublishedPackage() {
     const content = await readFile(path.join(root, "src", "content.js"), "utf8");
     const canonicalContent = await readFile(sourcePath("content.js"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
-    assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v5';/);
-    assert.match(content, /const EXTENSION_VERSION = '8\.0\.18';/);
+    assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v6';/);
+    assert.match(content, /const EXTENSION_VERSION = '8\.0\.19';/);
+    for (const file of ["background.js", "content.css", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
+      assert.equal(
+        (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
+        (await readFile(sourcePath(file), "utf8")).replace(/\r\n/g, "\n"),
+        `packaged ${file} must match its canonical source`,
+      );
+    }
     const readme = await readFile(path.join(root, "README.md"), "utf8");
     const canonicalReadme = await readFile(path.join(extensionRoot, "README.md"), "utf8");
     assert.equal(readme.replace(/\r\n/g, "\n"), canonicalReadme.replace(/\r\n/g, "\n"), "packaged installation and collection guidance must match the canonical README");
