@@ -1,6 +1,6 @@
 # v0.3.0 Beta.3
 
-状态：本机候选验收通过，GitHub 集成与发布处理中，尚未公开发布。仅 Windows 桌面 Beta；稳定版保持 0.2.19，本机不安装。
+状态：2026-09-21T11:50:46Z 已公开 GitHub Beta 预发布，四资产匿名回读与更新通道验证完成。仅 Windows 桌面 Beta；稳定版保持 0.2.19，本机不安装。
 
 成本改为采用核算当月及以前的采购，排除后续月份；保持按时间最近三笔、数量加权与四位截断。旧采用金额保留，选样改变需重新核对，人工更正优先，已定稿报告不自动改写。内置 ERP 助手 8.0.20 同步说明与下载包。详见 [成本契约](integration/ERP_CURRENT_MONTH_BETA_3.md)。
 
@@ -15,3 +15,11 @@
 最终 Windows 候选实际交互通过：八月采用八月与七月采购，选样 current-late/current/previous，数量加权单价 8.6666；九月证据被排除，只有未来采购的 SKU 不可采用。合成有效批次经 UI 采用后读取本机数据库确认实际保存。浅深色 × 1280/1024 布局及真实安装包内 ERP／1688 + 最小化返回保留未保存 React 弹窗草稿通过。现有托盘、二次启动、后台收件、网络失败重试、30 秒启动超时及退出路径回归通过。
 
 候选安装包：`Lworkstation-Setup-0.3.0-beta.3.exe`，116,656,267 字节，SHA-256 `9B0B1C90E6A35F12E0B654ECAD1B2F07CCBB159D94151E510C2D8917AFD56B46`。
+
+## 发布记录
+
+- 构建源：`b5de54122ffb6b3f8c952e58114ffa7008f2ce8d`；安装包内全部桌面文件和前端资源与源构建逐字节一致。
+- PR #98 与主线 CI 均通过；合并和标签 `v0.3.0-beta.3`：`62e054b99f65d9724f8c915ecb960fcc4755c22e`，合并树与候选源树一致。
+- [GitHub Beta.3](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.3)。安装包、blockmap、beta.yml、SHA256.txt 已匿名完整下载，大小和 SHA-256 均与验收候选一致。
+- 真实更新 Provider：Beta.2 检测到 Beta.3，Beta.3 不重复提示；稳定 0.2.19 保持 Latest，不跨通道。
+- 本机归档：`releases/candidates/0.3.0-beta.3-cost-recovery/`、`releases/prerelease/0.3.0-beta.3/`；证据 `archive/release-0.3.0-beta.3/`。
