@@ -28,7 +28,12 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const recordId = text(record?.recordId ?? record?.id) ?? `record-${index + 1}`;
   const statusFields = record?.statusFields && typeof record.statusFields === "object" && !Array.isArray(record.statusFields)
     ? { ...record.statusFields } : {};
-  const derivedExclusionReasons = [...exclusionReasons];
+  // Ledger cutoffs are derived from the current accounting period. Old Beta.2
+  // decisions persist these flags alongside complete evidence; re-evaluate them
+  // without changing the stored record or clearing independent exclusions.
+  const ledgerExclusions = new Set(["on_or_after_ledger_period", "after_ledger_period"]);
+  const hasOnlyLedgerExclusions = exclusionReasons.length > 0 && exclusionReasons.every(reason => ledgerExclusions.has(reason));
+  const derivedExclusionReasons = period == null ? [...exclusionReasons] : exclusionReasons.filter(reason => !ledgerExclusions.has(reason));
   if (!warehouseSku || !purchaseDate || !purchasePeriod || purchaseTimestamp(record) <= 0
     || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) {
     derivedExclusionReasons.push("invalid_purchase_detail");
@@ -37,8 +42,8 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     const normalized = String(value ?? "").normalize("NFKC").trim();
     return normalized === "11" || CANCELLED_PURCHASE_STATUS.test(normalized);
   })) derivedExclusionReasons.push("cancelled_or_closed");
-  if (period != null && purchasePeriod && purchasePeriod >= validateCostPeriod(period)) {
-    derivedExclusionReasons.push("on_or_after_ledger_period");
+  if (period != null && purchasePeriod && purchasePeriod > validateCostPeriod(period)) {
+    derivedExclusionReasons.push("after_ledger_period");
   }
   if (period == null && currentYearMonth != null && Number(purchasePeriod?.replace("-", "")) === Number(currentYearMonth)) {
     derivedExclusionReasons.push("current_month");
@@ -50,7 +55,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     totalPrice: totalPriceValue ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
     order1688: text(record?.order1688), purchaseOrderNo: text(record?.purchaseOrderNo), purchaseOrderId: text(record?.purchaseOrderId),
     supplierName: text(record?.supplierName), supplier1688Url: text(record?.supplier1688Url), statusFields,
-    eligible: record?.eligible !== false && normalizedExclusionReasons.length === 0,
+    eligible: (record?.eligible !== false || (period != null && hasOnlyLedgerExclusions)) && normalizedExclusionReasons.length === 0,
     selectedForPreview: Boolean(record?.selectedForPreview), exclusionReasons: normalizedExclusionReasons,
   };
 }

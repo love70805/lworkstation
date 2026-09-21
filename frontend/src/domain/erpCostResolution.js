@@ -4,7 +4,7 @@ import { normalizePurchaseEvidenceRecord, validateCostPeriod } from "./erpPurcha
 import { selectLatestPurchaseRecords } from "./erpPurchaseSelection";
 export { normalizePurchaseEvidenceRecord } from "./erpPurchaseEvidence";
 
-export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@4-unit-4dp-beta-prior-month-latest-three";
+export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@5-unit-4dp-beta-current-month-latest-three";
 export const ERP_HISTORY_MIN_SAMPLES = 6;
 export const ERP_PREVIEW_RECORD_LIMIT = 3;
 

@@ -12,7 +12,7 @@ const record = (id, purchaseDate, unitPrice = 5, quantity = 1, extra = {}) => ({
 const cost = (records, period = "2026-06") => calculateWarehouseCostDecision({ warehouseSku: "WH", purchaseRecords: records, period });
 const published = decision => ({ platformSku: "SKU", unitCost: decision.unitCost, resolutionStatus: "resolved", costDecision: decision });
 
-describe("Beta purchases strictly before ledger month", () => {
+describe("Beta purchases through the ledger month end", () => {
   it("selects b,a,b from b,a,b,b,a,a without preferring 1688 and preserves weighted precision", () => {
     const records = ["b", "a", "b", "b", "a", "a"].map((kind, i) => record(
       `R${i}`, `2026-05-${30 - i}`, 4 + i, i + 1,
@@ -67,19 +67,20 @@ describe("Beta purchases strictly before ledger month", () => {
     ]).selectedRecordIds).toEqual(["LATEST", "ZONE", "OLDER"]);
   });
 
-  it.each(Array.from({ length: 12 }, (_, i) => i + 1))("excludes month %s itself and later months", month => {
+  it.each(Array.from({ length: 12 }, (_, i) => i + 1))("includes all of month %s and excludes later months", month => {
     const period = `2026-${String(month).padStart(2, "0")}`;
     const nextPeriod = month === 12 ? "2027-01" : `2026-${String(month + 1).padStart(2, "0")}`;
     const previousDate = new Date(Date.UTC(2026, month - 1, 0)).toISOString().slice(0, 10);
+    const lastDate = new Date(Date.UTC(2026, month, 0)).toISOString().slice(0, 10);
     const decision = cost([
       record("BEFORE", `${previousDate} 23:59:59`),
       record("FIRST", `${period}-01 00:00:00`),
-      record("LAST", `${period}-28 23:59:59`, 7),
+      record("LAST", `${lastDate} 23:59:59`, 7),
       record("AFTER", `${nextPeriod}-01 00:00:00`, 999),
     ], period);
-    expect(decision.selectedRecordIds).toEqual(["BEFORE"]);
-    expect(decision).toMatchObject({ costPeriod: period, resolutionStatus: "resolved", unitCost: 5 });
-    expect(decision.purchaseRecords.at(-1)).toMatchObject({ eligible: false, exclusionReasons: ["on_or_after_ledger_period"] });
+    expect(decision.selectedRecordIds).toEqual(["LAST", "FIRST", "BEFORE"]);
+    expect(decision).toMatchObject({ costPeriod: period, resolutionStatus: "resolved", unitCost: 5.6666 });
+    expect(decision.purchaseRecords.at(-1)).toMatchObject({ eligible: false, exclusionReasons: ["after_ledger_period"] });
   });
 
   it("filters before latest-three and the anomaly baseline", () => {
@@ -92,16 +93,29 @@ describe("Beta purchases strictly before ledger month", () => {
     ];
     const before = structuredClone(records);
     const result = cost(records);
-    expect(result.selectedRecordIds).toEqual(["MAY", "APRIL", "OLDER"]);
-    expect(result).toMatchObject({ unitCost: 4.6666, totalQuantity: 3, baseline: { sampleCount: 3 }, anomalies: [] });
+    expect(result.selectedRecordIds).toEqual(["JUNE", "MAY", "APRIL"]);
+    expect(result).toMatchObject({ unitCost: 4.25, totalQuantity: 4, baseline: { sampleCount: 4 }, anomalies: [] });
     expect(records).toEqual(before);
   });
 
-  it("excludes same-month purchases regardless of collection month", () => {
+  it("includes same-month purchases regardless of collection month", () => {
     expect(calculateWarehouseCostDecision({
       warehouseSku: "WH", period: "2026-06", currentYearMonth: 202606,
       purchaseRecords: [record("CURRENT", "2026-06-15")],
-    })).toMatchObject({ formalUnitCost: null, selectedRecordIds: [] });
+    })).toMatchObject({ formalUnitCost: 5, selectedRecordIds: ["CURRENT"] });
+  });
+
+  it("uses the China business month at the precise UTC cutoff including leap day", () => {
+    const decision = cost([
+      record("NEXT", "2024-02-29T16:00:00Z", 999),
+      record("LAST", "2024-02-29T15:59:59.999Z", 8, 2),
+      record("OFFSET", "2024-03-01T00:59:59+09:00", 4),
+      record("FIRST", "2024-02-01 00:00:00", 4),
+      record("BEFORE", "2024-01-31 23:59:59", 4),
+    ], "2024-02");
+    expect(decision.selectedRecordIds).toEqual(["LAST", "OFFSET", "FIRST"]);
+    expect(decision).toMatchObject({ formalUnitCost: 6, totalQuantity: 4, baseline: { sampleCount: 4 } });
+    expect(decision.purchaseRecords[0].exclusionReasons).toEqual(["after_ledger_period"]);
   });
 
   it("never falls back to future preview values when the cutoff leaves no records", () => {
@@ -138,7 +152,30 @@ describe("Beta purchases strictly before ledger month", () => {
     expect(isErpCostWithinPeriod(row, "2026-06")).toBe(false);
     const result = reconcileErpCostRows({ workspaceId: "W", expectedSkus: ["SKU"], costRows: [row], period: "2026-06" });
     expect(result.matches[0]).toMatchObject({ status: "anomaly_pending", formalUnitCost: null, legacyMonthExclusions: true });
-    expect(isErpCostWithinPeriod({ ...row, excludedRecords: [record("CURRENT", "2026-06-01", 10, 1, { eligible: false, exclusionReasons: ["current_month"] })] }, "2026-06")).toBe(true);
+    expect(isErpCostWithinPeriod({ ...row, excludedRecords: [record("CURRENT", "2026-06-01", 10, 1, { eligible: false, exclusionReasons: ["current_month"] })] }, "2026-06")).toBe(false);
+    expect(isErpCostWithinPeriod({ ...row, excludedRecords: [record("FUTURE", "2026-07-01", 10, 1, { eligible: false, exclusionReasons: ["current_month"] })] }, "2026-06")).toBe(true);
+    for (const reason of ["on_or_after_ledger_period", "after_ledger_period"]) {
+      expect(isErpCostWithinPeriod({ ...row, excludedRecords: [record("CURRENT", "2026-06-01", 10, 1, { eligible: false, exclusionReasons: [reason] })] }, "2026-06")).toBe(false);
+      expect(isErpCostWithinPeriod({ ...row, excludedRecords: [record("FUTURE", "2026-07-01", 10, 1, { eligible: false, exclusionReasons: [reason] })] }, "2026-06")).toBe(true);
+    }
+  });
+
+  it("reviews Beta.2 adoption when persisted month exclusions change the selected evidence without rewriting it", () => {
+    const oldDecision = cost([record("MAY", "2026-05-01", 4)]);
+    oldDecision.resolutionVersion = "shopeers-cost-resolution@4-unit-4dp-beta-prior-month-latest-three";
+    oldDecision.purchaseRecords.push(record("JUNE", "2026-06-30", 8, 2, { eligible: false, exclusionReasons: ["on_or_after_ledger_period"] }));
+    const row = { ...published(oldDecision), warehouseSku: "WH", publishedAt: "2026-07-01", purchaseRecords: oldDecision.purchaseRecords, evidenceComplete: true };
+    const before = structuredClone(row);
+    expect(cost(row.purchaseRecords)).toMatchObject({ selectedRecordIds: ["JUNE", "MAY"], unitCost: 6.6666 });
+    expect(isErpCostWithinPeriod(row, "2026-06")).toBe(false);
+    const result = reconcileErpCostRows({ workspaceId: "W", period: "2026-06", expectedSkus: ["SKU"], costRows: [row] });
+    expect(result.matches[0]).toMatchObject({ status: "anomaly_pending", periodReviewRequired: true, adoptedUnitCost: 4, formalUnitCost: null });
+    expect(resolveFormalCostDecision({ platformSku: "SKU", period: "2026-06", erpCost: row }).status).toBe("missing");
+    expect(row).toEqual(before);
+    // Independent invalid/cancelled exclusions are never cleared by a policy change.
+    expect(cost([record("CANCELLED", "2026-06-30", 8, 1, { eligible: false, exclusionReasons: ["on_or_after_ledger_period", "cancelled_or_closed"] })]).selectedRecordIds).toEqual([]);
+    const unchanged = { ...row, purchaseRecords: [row.purchaseRecords[0], record("FUTURE", "2026-07-01", 8, 1, { eligible: false, exclusionReasons: ["on_or_after_ledger_period"] })] };
+    expect(isErpCostWithinPeriod(unchanged, "2026-06")).toBe(true);
   });
 
   it("keeps old approved costs immutable but excludes future or unverifiable evidence from live profits and coverage", () => {

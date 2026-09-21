@@ -20,7 +20,7 @@
     const RESULT_CACHE_KEY = 'latest_cost_result_v6';
     const PREFIX = '[ERP Assistant]';
     const EXTENSION_VERSION = '8.0.19';
-    const PREVIEW_SCOPE_LABEL = '未按账本前月范围筛选的预览；待工作台排除账本当月及以后采购';
+    const PREVIEW_SCOPE_LABEL = '未按账本月末范围筛选的预览；待工作台保留账本当月及以前采购，排除后续月份';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -770,7 +770,7 @@
         if (buckets.size === 0) {
             throw new CostError(
                 '没有可用的采购明细',
-                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本前月范围待工作台筛选。'
+                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
             );
         }
 
@@ -915,7 +915,7 @@
         const orderState = await fetchAllOrders(filters, run);
         const orders = orderState.orders;
         const detailState = await fetchAllDetails(orders, run);
-        setLoading('正在计算数量加权成本预览', '按时间选择最近采购记录，账本前月范围待工作台筛选', 65);
+        setLoading('正在计算数量加权成本预览', '按时间选择最近采购记录，账本月末截止范围待工作台筛选', 65);
         const aggregateState = aggregateDetails(detailState.details);
         const mappingState = await fetchMappings(aggregateState.results, run);
         const mappingPartition = resultPolicy.partitionResultsByMapping(aggregateState.results);

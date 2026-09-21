@@ -32,21 +32,38 @@ describe("manual exact cost overrides", () => {
     expect(result[1]).toMatchObject({ unitCost: 0.0000001, purchaseCost: 0.01, profit: 0.99 });
     expect((await db.ledgers.get(ledgerId)).status).toBe("ready");
   });
-  it("keeps manual priority over later ERP and revocation restores the latest ERP", async () => {
+  it.each(["2026-07-01", "2026-08-31"])("keeps manual priority and revocation restores latest eligible ERP: %s", async purchaseDate => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
-    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-07-01", unitPrice: 0.009, quantity: 1 }] });
+    await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate, unitPrice: 0.009, quantity: 1 }] });
     expect((await lines())[0].unitCost).toBe(0.003);
     await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
     expect((await lines())[0]).toMatchObject({ unitCost: 0.009, costSource: "erp" });
   });
-  it.each(["2026-08-01", "2026-09-01", null])("does not restore current, future or undated ERP after manual revocation: %s", async purchaseDate => {
+  it.each(["2026-09-01", null])("does not restore future or undated ERP after manual revocation: %s", async purchaseDate => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
     await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate, unitPrice: 0.009, quantity: 1 }] });
     expect((await lines())[0]).toMatchObject({ unitCost: 0.003, costSource: "manual_override" });
     await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
     expect((await lines())[0]).toMatchObject({ unitCost: null, costSource: null });
+    expect((await db.ledgers.get(ledgerId)).status).toBe("cost_pending");
+  });
+  it("retains manual priority over Beta.2 adoption pending review and revokes to missing without changing its evidence", async () => {
+    const manual = await save("甲", 0);
+    await db.erpCostBatches.put({ id: "BETA2", ledgerId, workspaceId, status: "published" });
+    const id = await db.erpCostRows.add({ batchId: "BETA2", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 4, resolutionStatus: "resolved", publishedAt: "2026-08-31T10:00:00Z",
+      selectedRecordIds: ["JULY"], costDecision: { resolutionVersion: "shopeers-cost-resolution@4-unit-4dp-beta-prior-month-latest-three" },
+      purchaseRecords: [
+        { recordId: "JULY", purchaseDate: "2026-07-31", quantity: 1, unitPrice: 4 },
+        { recordId: "AUGUST", purchaseDate: "2026-08-31", quantity: 1, unitPrice: 8, eligible: false, exclusionReasons: ["on_or_after_ledger_period"] },
+      ] });
+    const stored = await db.erpCostRows.get(id);
+    expect((await lines())[0]).toMatchObject({ unitCost: 0, costSource: "manual_override" });
+    expect((await lines())[1]).toMatchObject({ unitCost: null, finalizable: false });
+    await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
+    expect((await lines())[0]).toMatchObject({ unitCost: null, finalizable: false });
+    expect(await db.erpCostRows.get(id)).toEqual(stored);
     expect((await db.ledgers.get(ledgerId)).status).toBe("cost_pending");
   });
   it("rejects stale UI after replacement/revocation and freezes successful full-ledger finalization", async () => {

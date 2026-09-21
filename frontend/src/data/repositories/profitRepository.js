@@ -464,7 +464,7 @@ export async function savePublishedErpCostBatch({
       : null;
     const purchaseRecords = sourceEvidence?.purchaseRecords ?? row.purchaseRecords;
     if (hasLegacyMonthExclusions({ ...sourceEvidence, sourceMeta: verifiedSourceEnvelope.sourceMeta }, costPeriod)) {
-      throw new Error(`${costPeriod} 之前的采购曾被旧版当月排除规则遗漏，请重新采集或填写人工成本。`);
+      throw new Error(`${costPeriod} 及以前的采购曾被旧版当月排除规则遗漏，请重新采集或填写人工成本。`);
     }
     const evidenceComplete = sourceEvidence?.evidenceComplete ?? row.evidenceComplete;
     const decision = calculateWarehouseCostDecision({
@@ -478,7 +478,7 @@ export async function savePublishedErpCostBatch({
       throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
     }
     if (decision.resolutionStatus !== "resolved" || decision.unresolvedAnomalyCount > 0 || !(decision.formalUnitCost > 0)) {
-      throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 在 ${costPeriod} 之前的采购证据或异常处置尚未满足正式成本要求。`);
+      throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 在 ${costPeriod} 及以前的采购证据或异常处置尚未满足正式成本要求。`);
     }
     if (!Number.isFinite(Number(row.unitCost)) || Math.abs(Number(row.unitCost) - decision.formalUnitCost) > 0.00005) {
       throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 的页面成本与仓储层独立复算结果不一致。`);
