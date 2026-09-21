@@ -6,15 +6,15 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.3](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.3)。四资产回读与通道隔离检查通过；Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.4](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.4)。四资产回读与通道隔离检查通过；Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-21 UTC。0.3.0 Beta.3 已公开预发布并验证下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
+核对日期：2026-09-21 UTC。0.3.0 Beta.4 已公开预发布并验证下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.3.0-beta.4` ledger preview | 候选通过，PR #101 集成中，未公开；772 测试及实际扩展月份传递/自动回传/桌面 smoke 通过 | `candidates/0.3.0-beta.4-ledger-preview/`；[验收](../docs/RELEASE_0.3.0_BETA_4.md) |
+| `0.3.0-beta.4` ledger preview | 已公开 GitHub 预发布；772 测试、实际扩展月份传递/自动回传、PR #101 / main CI、四资产回读和更新通道检查通过；本机未安装 | `candidates/0.3.0-beta.4-ledger-preview/`；[验收](../docs/RELEASE_0.3.0_BETA_4.md) |
 | `0.3.0-beta.3` cost/recovery | 已公开 GitHub 预发布；755 测试、13 组桌面验证、原生恢复和最终候选交互、PR #98 / main CI、四资产回读与更新检测通过，本机未安装 | `candidates/0.3.0-beta.3-cost-recovery/`；[验收](../docs/RELEASE_0.3.0_BETA_3.md) |
 | `0.3.0-beta.2` prior-month latest-three | 已公开 GitHub 预发布；751 测试、PR #94 / main CI、12 组桌面验证、b,a,b 跨月选样/人工更正交互、smoke、四资产回读和更新检测通过；临时试验规则，本机未安装 | `candidates/0.3.0-beta.2-prior-month/`；`prerelease/0.3.0-beta.2/`；[验收](../docs/RELEASE_0.3.0_BETA_2.md) |
 | `0.3.0-beta.1` ledger cutoff | 已公开 GitHub 预发布；743 测试、PR #92 / main CI、12 组桌面验证、跨月成本与人工更正 Electron 交互、smoke、四资产回读及通道隔离通过；本机未安装 | `candidates/0.3.0-beta.1-ledger-cutoff/`；[验收](../docs/RELEASE_0.3.0_BETA_1.md) |

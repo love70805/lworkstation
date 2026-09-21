@@ -1,6 +1,6 @@
 # 0.3.0-beta.4 · ERP 预览按台账月份
 
-当前状态：Windows 候选验收通过，PR #101 集成中，尚未公开。仅 Beta 通道；稳定版保持 0.2.19。本机不安装，不修改真实业务数据。
+当前状态：已公开 GitHub 预发布，候选验收、PR #101 / main CI、四资产匿名回读及真实更新通道检查通过。仅 Beta 通道；稳定版保持 0.2.19。本机不安装，不修改真实业务数据。
 
 ## 改动
 
@@ -24,4 +24,8 @@ ERP 助手 8.0.21 读取工作台已登记的台账月份，先保留当月及�
 - 候选：`releases/candidates/0.3.0-beta.4-ledger-preview/`；预发布资产：`releases/prerelease/0.3.0-beta.4/`。
 - 原始验收：`archive/release-0.3.0-beta.4/`。源码工作区为应用管理的 `beta4-ledger-cost-preview/Lworkstation`。
 
-公开发布、标签和资产回读完成后追加记录，不将候选视为已发布。
+## 公开发布确认
+
+2026-09-21 17:35:57 UTC（本地 2026-09-22）公开 [v0.3.0-beta.4](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.4)。标签及 PR #101 合并基线 `fbadee855634ffdfafbc3e36d39a0df06ff246a4`，与构建源 `56a537f` 的运行代码一致。PR CI `35632658729`、main CI `35632868116` 通过。
+
+安装包、blockmap、beta.yml、SHA256.txt 均匿名下载，逐文件哈希与本机验收产物一致。Beta.3 检测到 Beta.4，Beta.4 显示当前版本，稳定版 0.2.19 不跨通道升级，GitHub Latest 仍为 0.2.19。原始证据：`archive/release-0.3.0-beta.4/public-readback.json`、`live-provider.json`。本机未安装。
