@@ -4,7 +4,7 @@
 
 用户修正此前限制：采购可采用核算当月及以前，仍排除后续月份；最新要求覆盖下方 Beta.2 的“核算月之前”。时间最近三笔、数量加权、人工优先及定稿保护不变。另修复顶部切 ERP／1688、最小化后返回工作站的显示／响应恢复路径。仅 Beta 更新，本机不安装。
 
-755 项前端测试、完整发布检查、13 组桌面验证和原生恢复故障注入通过；候选实际交互与打包 smoke 通过，GitHub 集成与发布处理中，尚未公开。见 [Beta.3](RELEASE_0.3.0_BETA_3.md)、[成本契约](integration/ERP_CURRENT_MONTH_BETA_3.md) 和 [桌面恢复契约](integration/WORKSPACE_RECOVERY_BETA_3.md)。
+755 项前端测试、完整发布检查、13 组桌面验证和原生恢复故障注入通过；候选实际交互与打包 smoke、PR #98 / main CI、四资产匿名回读和更新通道检查均通过，Beta.3 已公开发布，稳定 Latest 仍为 0.2.19。见 [Beta.3](RELEASE_0.3.0_BETA_3.md)、[成本契约](integration/ERP_CURRENT_MONTH_BETA_3.md) 和 [桌面恢复契约](integration/WORKSPACE_RECOVERY_BETA_3.md)。
 
 ## 2026-09-21 · Beta.2 临时历史三笔规则已公开
 
