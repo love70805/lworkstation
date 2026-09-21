@@ -217,7 +217,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3);
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.19");
+    assert.equal(delivery.meta.extensionVersion, "8.0.20");
     assert.equal(delivery.meta.previewScope, "unscoped");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);

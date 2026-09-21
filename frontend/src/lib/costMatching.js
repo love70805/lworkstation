@@ -154,11 +154,11 @@ export function evidenceRepairGuidance(issueKeys = []) {
   if (keys.has("warehouseSku") || keys.has("mapping")) guidance.push("回到 ERP 采购页重新抓取平台 SKU/SKC 与仓库 SKU 映射。");
   if (keys.has("purchaseRecords")) guidance.push("确认采购页已加载历史订单明细，并重新执行成本核算。");
   if (keys.has("excludedRecords")) guidance.push("排除记录会继续保留审计；请核对取消、关闭、无效或核算月之后的排除原因。");
-  if (keys.has("costPeriod")) guidance.push("重新核对账本月份之前的最近三笔采购，或直接填写人工成本。");
+  if (keys.has("costPeriod")) guidance.push("重新核对账本当月及以前的最近三笔采购，或直接填写人工成本。");
   if (keys.has("mappingSourceWarnings") || keys.has("mappingFailures")) guidance.push("核对当前账本平台 SKU/SKC 与 ERP 仓库映射；修正商品身份或仓库 SKU 映射后重新采集。");
   if (keys.has("detailSourceWarnings") || keys.has("detailFailures")) guidance.push("检查 ERP 采购页分页和历史订单明细是否完整加载后重新采集。");
   if (keys.has("sourceWarnings")) guidance.push("按采集警告完成对应修正后重新回传。");
-  if (keys.has("evidenceRef") || keys.has("batchEvidence")) guidance.push("使用 ERP Assistant v8.0.19 重新生成完整 v2 批次，再回到本页载入。");
+  if (keys.has("evidenceRef") || keys.has("batchEvidence")) guidance.push("使用 ERP Assistant v8.0.20 重新生成完整 v2 批次，再回到本页载入。");
   return [...new Set(guidance)];
 }
 
