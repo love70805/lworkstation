@@ -845,12 +845,13 @@ function chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs })
   return null;
 }
 
-function requestInputHash({ requestId, workspaceId, ledgerId, platformSkcs, expectedSkus }) {
+function requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, platformSkcs, expectedSkus }) {
   const normalizedExpectedScope = normalizedExpectedSkus(expectedSkus);
   const input = {
     requestId: String(requestId ?? "").trim(),
     workspaceId: String(workspaceId ?? "").trim(),
     ledgerId: String(ledgerId ?? "").trim(),
+    ...(ledgerPeriod == null ? {} : { ledgerPeriod }),
     querySkcs: [...querySkcSet(platformSkcs)].sort(),
     expectedSkus: [...normalizedExpectedScope.values()]
       .map((item) => ({
@@ -1037,6 +1038,8 @@ const server = http.createServer(async (req, res) => {
       const requestId = String(payload?.request?.id ?? payload?.requestId ?? "").trim();
       const workspaceId = String(payload?.request?.workspaceId ?? payload?.workspaceId ?? "").trim();
       const ledgerId = payload?.request?.ledgerId ?? payload?.ledgerId ?? null;
+      const ledgerPeriod = payload?.request?.ledgerPeriod ?? null;
+      if (ledgerPeriod != null && (typeof ledgerPeriod !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod))) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "ERP 请求核算月份必须为 YYYY-MM。" });
       const platformSkcs = Array.isArray(payload?.request?.platformSkcs) ? payload.request.platformSkcs : [];
       const expectedSkus = Array.isArray(payload?.expectedSkus) ? payload.expectedSkus : [];
       const replaceLedgerScope = payload?.request?.replaceLedgerScope === true;
@@ -1067,7 +1070,7 @@ const server = http.createServer(async (req, res) => {
       if ([...normalizedExpectedScope.values()].some((item) => !queryScope.has(item.canonicalPlatformSkc))) {
         return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "expectedSkus 包含不在完整平台 SKC 查询范围内的项目。" });
       }
-      const inputHash = requestInputHash({ requestId, workspaceId, ledgerId, platformSkcs, expectedSkus: [...normalizedExpectedScope.values()] });
+      const inputHash = requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, platformSkcs, expectedSkus: [...normalizedExpectedScope.values()] });
       const existingRequest = records.find((item) => item.kind === "request" && item.requestId === requestId);
       if (existingRequest) {
         const existingInputHash = existingRequest.requestInputHash || requestInputHash(existingRequest);
@@ -1090,6 +1093,7 @@ const server = http.createServer(async (req, res) => {
         workspaceId,
         ledgerId,
         platformSkcs,
+        ledgerPeriod,
         expectedSkus: [...normalizedExpectedScope.values()].map(({ platformSku, platformSkc }) => ({ platformSku, platformSkc })),
         requestInputHash: inputHash,
         requestedAt: payload?.request?.requestedAt ?? new Date().toISOString(),

@@ -32,6 +32,14 @@ import { buildSyncPostgresPlan } from "../domain/syncPostgresPlan";
 
 const period = "2026-08";
 
+it("persists the real ledger month and rejects request attempts to override it", async () => {
+  const { ledger, request } = await context();
+  expect(await db.erpCostRequests.get(request.id)).toMatchObject({ ledgerId: ledger.id, ledgerPeriod: "2026-08" });
+  await expect(saveErpCostRequest({ ...request, id: "FORGED-PERIOD", ledgerPeriod: "2026-09" })).rejects.toThrow("月份与月度账本不匹配");
+  await saveErpCostRequest({ ...request, ledgerPeriod: "2026-08" });
+  expect(await db.erpCostRequests.count()).toBe(1);
+});
+
 it("publishes true low cost without correction, finalizes exact values and reloads immutable snapshots", async () => {
   const { ledger, request } = await context();
   await db.ledgers.update(ledger.id, { warehouseRate: 0 });

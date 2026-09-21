@@ -355,6 +355,24 @@ try {
   assert.equal(response.status, 202);
   response = await post("/erp/v1/requests", request("A", "SKU-A"));
   assert.deepEqual(await response.json(), { accepted: true, idempotent: true, requestId: "A", status: "registered" });
+  const periodRequest = request("PERIOD", "SKU-PERIOD");
+  periodRequest.request.ledgerPeriod = "2026-08";
+  response = await post("/erp/v1/requests", periodRequest);
+  assert.equal(response.status, 202);
+  response = await post("/erp/v1/requests", periodRequest);
+  assert.equal((await response.json()).idempotent, true);
+  response = await fetch(`${base}/erp/v1/requests?workspaceId=workspace-test`);
+  assert.equal((await response.json()).records.find((row) => row.requestId === "PERIOD").ledgerPeriod, "2026-08");
+  response = await post("/erp/v1/requests", { ...periodRequest, request: { ...periodRequest.request, ledgerPeriod: "2026-09" } });
+  assert.equal(response.status, 409, "same ID cannot change its trusted month");
+  response = await post("/erp/v1/requests", { ...periodRequest, request: { ...periodRequest.request, ledgerPeriod: null } });
+  assert.equal(response.status, 409, "same ID cannot drop its trusted month");
+  for (const ledgerPeriod of ["2026-13", "2026-00", "2026-8", "", 202608]) {
+    response = await post("/erp/v1/requests", { ...periodRequest, request: { ...periodRequest.request, id: "INVALID-PERIOD", ledgerPeriod } });
+    assert.equal(response.status, 400);
+  }
+  response = await post("/erp/v1/requests", { ...request("A", "SKU-A"), request: { ...request("A", "SKU-A").request, ledgerPeriod: "2026-08" } });
+  assert.equal(response.status, 409, "legacy IDs cannot be silently rebound to a month");
   response = await fetch(`${base}/erp/v1/requests?includeHistory=true`);
   assert.equal(response.status, 400);
   assert.equal((await response.json()).error, "INVALID_ERP_REQUEST_QUERY");

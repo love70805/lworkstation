@@ -266,8 +266,10 @@ export function buildErpCostRequest({
   requestedBy,
   requestedAt,
   ledgerId = null,
+  ledgerPeriod = null,
 }) {
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+  assertDomain(ledgerPeriod == null || (typeof ledgerPeriod === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod)), "erp_request_invalid_period", "ERP 请求核算月份必须为 YYYY-MM");
   const seen = new Set();
   const skcs = [];
 
@@ -309,6 +311,7 @@ export function buildErpCostRequest({
     id: requiredText(id, "成本请求 ID"),
     workspaceId: normalizedWorkspaceId,
     ledgerId: optionalText(ledgerId),
+    ledgerPeriod,
     requestedBy: requiredText(requestedBy, "请求人"),
     requestedAt: validIsoTimestamp(requestedAt, "请求时间"),
     queryUnit: "platform_skc",
