@@ -62,6 +62,10 @@ export function formatProfitAmount(value) {
 export const formatErpUnitCost = (value) => `¥${new Decimal(value).toDecimalPlaces(4, Decimal.ROUND_DOWN).toFixed(4)}`;
 export const formatManualUnitCost = (value) => `¥${new Decimal(value).toFixed()}`;
 
+export function formatCostPurchaseEvidence(row) {
+  return (row.costPurchaseRecords ?? []).map(record => `${record.purchaseDate} | ${record.order1688 ? "1688" : "采购单"} ${record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || "未提供单号"} | ${record.quantity}件 × ${record.effectiveUnitPrice ?? record.unitPrice}`).join("\n");
+}
+
 export function buildProfitExportRows(rows, ledger, summary) {
   const version = isProfitSnapshot(ledger) ? ledger.formulaVersion : PROFIT_FORMULA_VERSION;
   const rule = version === PROFIT_FORMULA_VERSION
@@ -69,7 +73,9 @@ export function buildProfitExportRows(rows, ledger, summary) {
     : "历史定稿快照：保留已存金额和公式版本，不重新计算";
   return [...rows.map((row) => ({
     SKC: row.groupSkc, SKU: row.platformSku, 属性: row.attribute,
-    数量: row.qty, 金额: row.revenue, "1688单号": row.orderNumber ?? "",
+    数量: row.qty, 金额: row.revenue, "关联单号": row.orderNumber ?? "",
+    核算采购明细: formatCostPurchaseEvidence(row),
+    成本算法: row.costResolutionVersion ?? "",
     店铺: row.store,
     成本口径: row.costSource === "manual_override" ? "人工更正" : row.costSource === "erp" ? "ERP 正式成本" : row.costSource === "approved_1688" ? "人工参考，未计正式利润" : "待 ERP 成本",
     单件平均成本: row.unitCost ?? row.reference1688Cost?.unitCost ?? "缺失",

@@ -17,9 +17,10 @@
     const RETRY_COUNT = 2;
     const CACHE_TTL = 10 * 60 * 1000;
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
-    const RESULT_CACHE_KEY = 'latest_cost_result_v5';
+    const RESULT_CACHE_KEY = 'latest_cost_result_v6';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.18';
+    const EXTENSION_VERSION = '8.0.19';
+    const PREVIEW_SCOPE_LABEL = '未按账本前月范围筛选的预览；待工作台排除账本当月及以后采购';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -460,8 +461,7 @@
     }
 
     function selectCostRecords(records) {
-        const records1688 = records.filter((record) => record.order1688);
-        return (records1688.length > 0 ? records1688 : records).slice(0, MAX_RECORDS);
+        return records.slice(0, MAX_RECORDS);
     }
 
     function warningReasons(detail) {
@@ -770,7 +770,7 @@
         if (buckets.size === 0) {
             throw new CostError(
                 '没有可用的采购明细',
-                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
+                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本前月范围待工作台筛选。'
             );
         }
 
@@ -789,7 +789,8 @@
             const totalPrice = selected.reduce((sum, record) => sum + record.totalPrice, 0);
             const newest = selected[0];
             const oldest = selected[selected.length - 1];
-            const sourceType = newest.order1688 ? '1688' : '采购单';
+            const sourceTypes = new Set(selected.map((record) => record.order1688 ? '1688' : '采购单'));
+            const sourceType = sourceTypes.size > 1 ? '混合采购' : [...sourceTypes][0];
             const costWarnings = resultPolicy.summarizeCostWarnings(selected);
 
             warehouses.push({
@@ -914,7 +915,7 @@
         const orderState = await fetchAllOrders(filters, run);
         const orders = orderState.orders;
         const detailState = await fetchAllDetails(orders, run);
-        setLoading('正在计算数量加权成本预览', '选择最近采购记录，账本月末截止范围待工作台筛选', 65);
+        setLoading('正在计算数量加权成本预览', '按时间选择最近采购记录，账本前月范围待工作台筛选', 65);
         const aggregateState = aggregateDetails(detailState.details);
         const mappingState = await fetchMappings(aggregateState.results, run);
         const mappingPartition = resultPolicy.partitionResultsByMapping(aggregateState.results);
@@ -1087,11 +1088,11 @@
                     warehouseSku: result.warehouseSku,
                     platformSku: mapping.platformSku,
                     platformSkc: mapping.platformSkc || '',
-                    orderNumber: result.orderNumber,
-                    sourceType: result.sourceType,
+                    orderNumber: selectedPreviewValues(result, 'orderNumber', result.orderNumber).join('\n'),
+                    sourceType: selectedPreviewValues(result, 'sourceType', result.sourceType).join('\n'),
                     name: result.name,
                     calcTimes: result.calcTimes,
-                    dateRange: result.dateRange,
+                    purchaseDates: selectedPreviewValues(result, 'date', result.dateRange).join('\n'),
                     totalQty: result.totalQty,
                     totalPrice: result.totalPrice,
                     unitCost: result.unitCost,
@@ -1153,9 +1154,9 @@
 
     async function copyCosts() {
         if (lastResults.length === 0) return;
-        const lines = ['平台SKU\t平台SKC\t仓库SKU\t1688单号\t预览单件成本\t供应商1688链接\t疑似异常\t提示原因\t原始提示JSON'];
+        const lines = ['平台SKU\t平台SKC\t仓库SKU\t所选采购单号\t预览单件成本\t供应商1688链接\t疑似异常\t提示原因\t原始提示JSON\t所选采购日期\t所选单号类型\t预览范围'];
         buildExportRows(lastResults).forEach((row) => {
-            lines.push([row.platformSku, row.platformSkc, row.warehouseSku, row.orderNumber, row.unitCost, row.supplier1688Url, row.costWarningCount, row.costWarningReasons, JSON.stringify(row.costWarningRecords)].join('\t'));
+            lines.push([row.platformSku, row.platformSkc, row.warehouseSku, row.orderNumber.replace(/\n/g, '；'), row.unitCost, row.supplier1688Url, row.costWarningCount, row.costWarningReasons, JSON.stringify(row.costWarningRecords), row.purchaseDates.replace(/\n/g, '；'), row.sourceType.replace(/\n/g, '；'), PREVIEW_SCOPE_LABEL].join('\t'));
         });
         try {
             await copyTextWithFallback(lastImportEnvelope ? JSON.stringify(lastImportEnvelope, null, 2) : lines.join('\n'));
@@ -1168,14 +1169,14 @@
     function exportCsv() {
         if (lastResults.length === 0) return;
         const headers = [
-            '仓库SKU', '平台SKU', '平台SKC', '单号类型', '1688单号', '产品名称', '供应商', '供应商1688链接', '疑似异常', '提示原因', '原始提示JSON',
-            '预览次数', '预览日期范围', '总采购量', '总采购价(￥)', '预览单件成本'
+            '仓库SKU', '平台SKU', '平台SKC', '所选单号类型', '所选采购单号', '产品名称', '供应商', '供应商1688链接', '疑似异常', '提示原因', '原始提示JSON',
+            '预览次数', '所选采购日期', '总采购量', '总采购价(￥)', '预览单件成本', '预览范围'
         ];
         const lines = [headers.map(csvCell).join(',')];
         buildExportRows(lastResults).forEach((row) => {
             lines.push([
                 row.warehouseSku, row.platformSku, row.platformSkc, row.sourceType, row.orderNumber, row.name, row.supplierName, row.supplier1688Url, row.costWarningCount, row.costWarningReasons, JSON.stringify(row.costWarningRecords),
-                row.calcTimes, row.dateRange, row.totalQty, row.totalPrice, row.unitCost
+                row.calcTimes, row.purchaseDates, row.totalQty, row.totalPrice, row.unitCost, PREVIEW_SCOPE_LABEL
             ].map(csvCell).join(','));
         });
         const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -1195,7 +1196,8 @@
         return lastResults.filter((result) => {
             const mappings = result.mappings.map((mapping) => [mapping.platformSku, mapping.platformSkc].filter(Boolean).join(' ')).join(' ');
             const haystack = [
-                result.warehouseSku, result.name, result.orderNumber, result.sourceType, result.supplierName, result.supplier1688Url, mappings
+                result.warehouseSku, result.name, result.orderNumber, result.sourceType, result.supplierName, result.supplier1688Url, mappings,
+                ...(result.details || []).map((detail) => [detail.date, detail.sourceType, detail.orderNumber].join(' '))
             ].join(' ').toLowerCase();
             return words.every((word) => haystack.includes(word));
         });
@@ -1256,6 +1258,19 @@
             '</tbody></table></div></td></tr>';
     }
 
+    function selectedPreviewValues(result, field, fallback) {
+        return result.details && result.details.length > 0
+            ? result.details.map((detail) => detail[field] || '-')
+            : [fallback || ''];
+    }
+
+    function renderSelectedOrders(result) {
+        const details = result.details && result.details.length > 0
+            ? result.details
+            : [{ sourceType: result.sourceType, orderNumber: result.orderNumber }];
+        return details.map((detail) => '<div>' + escapeHtml(detail.sourceType) + ' · ' + escapeHtml(detail.orderNumber || '-') + '</div>').join('');
+    }
+
     function renderResults() {
         const body = document.getElementById('erpa-table-body');
         const empty = document.getElementById('erpa-empty');
@@ -1284,10 +1299,10 @@
             const row = '<tr class="erpa-result-row' + (expanded ? ' erpa-expanded' : '') + warningClass + '" data-sku="' + escapeHtml(key) + '">' +
                 '<td class="erpa-cell-sku" title="' + escapeHtml(key) + '">' + escapeHtml(key) + '</td>' +
                 '<td class="erpa-cell-platform" title="' + escapeHtml(result.mappings.map((item) => item.platformSku + ' · ' + item.platformSkc).join(', ')) + '">' + renderPlatformCell(result) + '</td>' +
-                '<td class="erpa-cell-order" title="' + escapeHtml(result.orderNumber) + '">' + escapeHtml(result.orderNumber || '-') + '</td>' +
+                '<td class="erpa-cell-order erpa-selected-records">' + renderSelectedOrders(result) + '</td>' +
                 '<td title="' + escapeHtml(result.name) + '">' + escapeHtml(result.name || '-') + '</td>' +
                 '<td class="erpa-cell-number">' + result.calcTimes + '</td>' +
-                '<td>' + escapeHtml(result.dateRange) + '</td>' +
+                '<td class="erpa-selected-records">' + selectedPreviewValues(result, 'date', result.dateRange).map((date) => '<div>' + escapeHtml(date) + '</div>').join('') + '</td>' +
                 '<td class="erpa-cell-number">' + escapeHtml(result.totalQty) + '</td>' +
                 '<td class="erpa-cell-number">' + escapeHtml(result.totalPrice) + '</td>' +
                 '<td class="erpa-cell-number erpa-cell-cost"><span>' + escapeHtml(result.unitCost) + '</span>' + costState + '</td></tr>';
@@ -1370,7 +1385,7 @@
                 : '') +
             (lastMeta.orderCountMismatch ? '<span class="erpa-status-item erpa-status-warn">ERP 总数参考值与实际页数据不同，已按分页结果完成读取</span>' : '');
         footerLeft.innerHTML = '筛选：<strong>' + escapeHtml(summarizeFilters(lastMeta.filters)) + '</strong>';
-        footerRight.textContent = '未按账本月末截止范围筛选的预览 · 待工作台筛选 · 1688单号优先 · 最近' + MAX_RECORDS + '单加权 · ' + (lastMeta.durationMs / 1000).toFixed(1) + '秒' + (lastMeta.cacheRestored ? ' · 临时缓存恢复' : '');
+        footerRight.textContent = PREVIEW_SCOPE_LABEL + ' · 不分单号类型 · 按时间最近' + MAX_RECORDS + '条加权 · ' + (lastMeta.durationMs / 1000).toFixed(1) + '秒' + (lastMeta.cacheRestored ? ' · 临时缓存恢复' : '');
     }
 
     function updateIdleStatus() {
@@ -1485,7 +1500,7 @@
             '<section class="erpa-panel" role="dialog" aria-modal="true" aria-label="SKU 采购成本预览">' +
                 '<header class="erpa-header"><div class="erpa-title-wrap">' +
                     '<div class="erpa-title-line"><h2 class="erpa-title">SKU 采购成本预览</h2><span class="erpa-badge">API v8.0</span></div>' +
-                    '<p class="erpa-subtitle">最近三次仅供预览，全部有效采购和排除证据回传 Lworkstation，按账本月末截止范围筛选</p></div>' +
+                    '<p class="erpa-subtitle">Beta 临时口径：不分类型按时间最近三条；未按账本前月筛选，全部证据回传工作台</p></div>' +
                     '<button class="erpa-icon-button" id="erpa-close" type="button" title="关闭" aria-label="关闭">×</button></header>' +
                 '<div class="erpa-anomaly-banner" id="erpa-anomaly-banner" role="alert"></div>' +
                 '<div class="erpa-toolbar">' +
@@ -1498,8 +1513,8 @@
                 '<div class="erpa-table-wrap" id="erpa-table-wrap"><table class="erpa-table">' +
                     '<colgroup><col style="width:180px"><col style="width:175px"><col style="width:180px"><col style="width:220px">' +
                     '<col style="width:70px"><col style="width:150px"><col style="width:90px"><col style="width:105px"><col style="width:115px"></colgroup>' +
-                    '<thead><tr><th>仓库 SKU</th><th>平台 SKU / SKC</th><th>1688 / 采购单号</th><th>产品名称</th>' +
-                    '<th>次数</th><th>核算日期</th><th>采购量</th><th>采购价(￥)</th><th>平均成本(￥)</th></tr></thead>' +
+                    '<thead><tr><th>仓库 SKU</th><th>平台 SKU / SKC</th><th>所选类型 / 采购单号</th><th>产品名称</th>' +
+                    '<th>次数</th><th>所选采购日期</th><th>采购量</th><th>采购价(￥)</th><th>预览成本(￥)</th></tr></thead>' +
                     '<tbody id="erpa-table-body"></tbody></table></div>' +
                 '<div class="erpa-empty" id="erpa-empty">暂无核算结果</div>' +
                 '<footer class="erpa-footer"><span id="erpa-footer-left"></span><span id="erpa-footer-right"></span></footer>' +

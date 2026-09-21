@@ -4,7 +4,7 @@ import { DEFAULT_CURRENCY } from "./erpCosts";
 import { validManualOverride } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@8-ledger-cutoff";
+export const COST_POLICY_VERSION = "formal-cost-policy@9-beta-prior-month-latest-three";
 
 function text(value) {
   const normalized = String(value ?? "").trim();

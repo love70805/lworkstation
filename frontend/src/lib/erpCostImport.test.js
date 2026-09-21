@@ -21,7 +21,13 @@ describe("ERP cost import", () => {
 
   it("requires the cost column and emits the canonical template", () => {
     expect(() => parseErpCostText("平台SKU\t仓库SKU\nSKU-1\tWH-1")).toThrow("单件平均成本");
-    expect(buildErpCostTemplate()).toBe("平台SKU\t平台SKC\t仓库SKU\t1688单号\t单件平均成本\t供应商1688链接\n");
+    expect(buildErpCostTemplate()).toBe("平台SKU\t平台SKC\t仓库SKU\t关联单号\t单件平均成本\t供应商1688链接\n");
+  });
+
+  it("reads the mixed-order Beta extension columns without promoting CSV to formal evidence", () => {
+    const result = parseErpCostText("平台SKU\t仓库SKU\t所选采购单号\t所选单号类型\t所选采购日期\t预览单件成本\nSKU-1\tWH-1\tP1；A2；P3\t采购单；1688；采购单\t2026-05-31；2026-05-30；2026-05-29\t5.3333");
+    expect(result.rows[0]).toMatchObject({ orderNumber: "P1；A2；P3", orderType: "采购单；1688；采购单", unitCost: 5.3333 });
+    expect(result.rows[0].evidenceComplete).not.toBe(true);
   });
 
   it("ignores extension confirmation and manual correction columns", () => {

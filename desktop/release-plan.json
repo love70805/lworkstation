@@ -1,7 +1,7 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.1",
-  "integrationBranch": "codex/month-scoped-erp-costs",
+  "version": "0.3.0-beta.2",
+  "integrationBranch": "codex/beta-prior-month-latest-three",
   "requiredCommits": [
     {
       "module": "monthly-sales-and-period-skc-details",

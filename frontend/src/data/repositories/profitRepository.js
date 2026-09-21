@@ -12,6 +12,7 @@ import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../doma
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
 import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../../domain/erpCostResolution";
 import { hasLegacyMonthExclusions } from "../../domain/erpCostPeriod";
+import { purchaseOrderSummary } from "../../domain/erpPurchaseSelection";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
@@ -463,7 +464,7 @@ export async function savePublishedErpCostBatch({
       : null;
     const purchaseRecords = sourceEvidence?.purchaseRecords ?? row.purchaseRecords;
     if (hasLegacyMonthExclusions({ ...sourceEvidence, sourceMeta: verifiedSourceEnvelope.sourceMeta }, costPeriod)) {
-      throw new Error(`截至 ${costPeriod} 的采购曾被旧版当月排除规则遗漏，请重新采集或填写人工成本。`);
+      throw new Error(`${costPeriod} 之前的采购曾被旧版当月排除规则遗漏，请重新采集或填写人工成本。`);
     }
     const evidenceComplete = sourceEvidence?.evidenceComplete ?? row.evidenceComplete;
     const decision = calculateWarehouseCostDecision({
@@ -477,7 +478,7 @@ export async function savePublishedErpCostBatch({
       throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
     }
     if (decision.resolutionStatus !== "resolved" || decision.unresolvedAnomalyCount > 0 || !(decision.formalUnitCost > 0)) {
-      throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 截至 ${costPeriod} 的采购证据或异常处置尚未满足正式成本要求。`);
+      throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 在 ${costPeriod} 之前的采购证据或异常处置尚未满足正式成本要求。`);
     }
     if (!Number.isFinite(Number(row.unitCost)) || Math.abs(Number(row.unitCost) - decision.formalUnitCost) > 0.00005) {
       throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 的页面成本与仓储层独立复算结果不一致。`);
@@ -495,8 +496,7 @@ export async function savePublishedErpCostBatch({
       sourceWarnings: sourceEvidence?.sourceWarnings ?? row.sourceWarnings ?? [],
       costDecision: decision,
       costPeriod,
-      orderNumber: decision.selectedRecords[0]?.order1688 || decision.selectedRecords[0]?.purchaseOrderNo || null,
-      orderType: decision.selectedRecords[0]?.order1688 ? "1688" : "purchase_order",
+      ...purchaseOrderSummary(decision.selectedRecords),
       dateRange: `${decision.selectedRecords.at(-1).purchaseDate} ~ ${decision.selectedRecords[0].purchaseDate}`,
       resolutionStatus: decision.resolutionStatus,
       unresolvedAnomalyCount: decision.unresolvedAnomalyCount,

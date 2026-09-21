@@ -16,6 +16,7 @@ export function matchesCostQuery(match, query) {
     match.supplierName,
     match.supplier1688Url,
     match.orderNumber,
+    ...(match.costDecision?.selectedRecords ?? []).flatMap(record => [record.order1688, record.purchaseOrderNo, record.purchaseOrderId, record.purchaseDate]),
     match.productName,
   ].map(normalizedSearch).join(" ");
   return searchText.includes(normalizedQuery);
@@ -129,10 +130,10 @@ export function describeEvidenceIssues(match = {}) {
   }
   if (purchaseRecords.length === 0) issues.push({ key: "purchaseRecords", label: "采购记录", detail: "没有可用于核算的采购记录。" });
   if (match.periodReviewRequired || match.legacyMonthExclusions) {
-    issues.push({ key: "costPeriod", label: "旧成本月份待复核", detail: match.legacyMonthExclusions ? "旧采集规则曾遗漏截止月份内的采购，请重新采集或人工更正。" : "原采用成本含后续月份采购或日期证据不完整，暂不计入本月利润，请重新采集或人工更正。" });
+    issues.push({ key: "costPeriod", label: "旧成本选样待复核", detail: match.legacyMonthExclusions ? "旧采集规则曾遗漏核算月之前的采购，请重新采集或人工更正。" : "原采用成本不符合本次 Beta 的历史三笔规则或证据不完整，原金额保留，暂不计入本月利润。" });
   }
   if (!match.periodReviewRequired && !match.legacyMonthExclusions && match.costDecision?.costPeriod && match.costDecision.selectedRecords.length === 0) {
-    issues.push({ key: "costPeriod", label: "采购日期范围", detail: `截至 ${match.costDecision.costPeriod} 月末没有可用采购记录，后续月份未计入。` });
+    issues.push({ key: "costPeriod", label: "采购日期范围", detail: `${match.costDecision.costPeriod} 之前没有可用采购记录，核算当月及以后均未计入。` });
   }
   if (excludedRecords.length > 0) issues.push({ key: "excludedRecords", label: "排除记录", detail: `发现 ${excludedRecords.length} 条已排除记录，原因仅保留在审计证据中。` });
   if (mappingFailures.length > 0) issues.push({ key: "mappingFailures", label: "映射失败", detail: `发现 ${mappingFailures.length} 条平台 SKU/SKC 映射失败记录。` });
@@ -152,12 +153,12 @@ export function evidenceRepairGuidance(issueKeys = []) {
   const guidance = [];
   if (keys.has("warehouseSku") || keys.has("mapping")) guidance.push("回到 ERP 采购页重新抓取平台 SKU/SKC 与仓库 SKU 映射。");
   if (keys.has("purchaseRecords")) guidance.push("确认采购页已加载历史订单明细，并重新执行成本核算。");
-  if (keys.has("excludedRecords")) guidance.push("排除记录会继续保留审计；请核对取消、关闭、无效或晚于账本月份的排除原因。");
-  if (keys.has("costPeriod")) guidance.push("补充截至账本月末的采购记录，或直接填写人工成本。");
+  if (keys.has("excludedRecords")) guidance.push("排除记录会继续保留审计；请核对取消、关闭、无效或核算当月及以后的排除原因。");
+  if (keys.has("costPeriod")) guidance.push("重新核对账本月份之前的最近三笔采购，或直接填写人工成本。");
   if (keys.has("mappingSourceWarnings") || keys.has("mappingFailures")) guidance.push("核对当前账本平台 SKU/SKC 与 ERP 仓库映射；修正商品身份或仓库 SKU 映射后重新采集。");
   if (keys.has("detailSourceWarnings") || keys.has("detailFailures")) guidance.push("检查 ERP 采购页分页和历史订单明细是否完整加载后重新采集。");
   if (keys.has("sourceWarnings")) guidance.push("按采集警告完成对应修正后重新回传。");
-  if (keys.has("evidenceRef") || keys.has("batchEvidence")) guidance.push("使用 ERP Assistant v8.0.15 重新生成完整 v2 批次，再回到本页载入。");
+  if (keys.has("evidenceRef") || keys.has("batchEvidence")) guidance.push("使用 ERP Assistant v8.0.19 重新生成完整 v2 批次，再回到本页载入。");
   return [...new Set(guidance)];
 }
 

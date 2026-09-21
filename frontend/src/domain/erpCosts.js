@@ -12,10 +12,11 @@ import {
 } from "./identifiers";
 import { calculateWarehouseCostDecision } from "./erpCostResolution";
 import { hasLegacyMonthExclusions, isErpCostWithinPeriod } from "./erpCostPeriod";
+import { purchaseOrderSummary } from "./erpPurchaseSelection";
 
 // The extension wire version is stable; the local preview algorithm has its own version.
 export const ERP_COST_ALGORITHM_VERSION = "erp-v8.0-compatible@1";
-export const ERP_COST_CALCULATION_VERSION = "erp-v8.0-compatible@2-unit-4dp";
+export const ERP_COST_CALCULATION_VERSION = "erp-v8.0-compatible@3-beta-latest-three";
 export const DEFAULT_CURRENCY = "CNY";
 export const ERP_LEDGER_SCOPE_EXPECTED = "expected";
 export const ERP_LEDGER_SCOPE_AUXILIARY = "auxiliary";
@@ -177,8 +178,8 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions, period) {
     unitCost: decision ? decision.unitCost : (period == null ? previewCost?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null : null),
     formalUnitCost: decision?.formalUnitCost ?? (trustedPublishedLegacy ? previewCost.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() : null),
     currency,
-    orderNumber: decision && period != null ? optionalText(decision.selectedRecords[0]?.order1688 ?? decision.selectedRecords[0]?.purchaseOrderNo) : optionalText(row.orderNumber ?? row.orderNo ?? row.order1688),
-    orderType: decision && period != null ? (decision.selectedRecords.length ? (decision.selectedRecords[0].order1688 ? "1688" : "purchase_order") : null) : optionalText(row.orderType ?? row.sourceType),
+    orderNumber: decision && period != null ? purchaseOrderSummary(decision.selectedRecords).orderNumber : optionalText(row.orderNumber ?? row.orderNo ?? row.order1688),
+    orderType: decision && period != null ? purchaseOrderSummary(decision.selectedRecords).orderType : optionalText(row.orderType ?? row.sourceType),
     platformSkc: optionalText(row.platformSkc),
     canonicalPlatformSkc: row.platformSkc ? canonicalPlatformSkc(row.platformSkc) : null,
     productName: optionalText(row.productName ?? row.name),
@@ -321,8 +322,7 @@ export function buildErpCostRequest({
 
 export function selectLegacyCostRecords(records, maxRecords = 3) {
   assertDomain(Number.isInteger(maxRecords) && maxRecords > 0, "invalid_record_limit", "采购记录上限必须是正整数");
-  const records1688 = records.filter((record) => optionalText(record.order1688));
-  return (records1688.length > 0 ? records1688 : records).slice(0, maxRecords);
+  return records.slice(0, maxRecords);
 }
 
 export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null, maxRecords = 3 } = {}) {
@@ -386,8 +386,8 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
     return {
       warehouseSku,
       name: newest.name || sorted[0].name || "",
-      sourceType: newest.order1688 ? "1688" : "purchase_order",
-      orderNumber: newest.order1688 || newest.purchaseOrderNo || "",
+      sourceType: purchaseOrderSummary(selected).orderType,
+      orderNumber: purchaseOrderSummary(selected).orderNumber || "",
       calculationCount: selected.length,
       dateRange: newest.date === oldest.date ? newest.date : `${oldest.date} ~ ${newest.date}`,
       totalQuantity: totalQuantity.toNumber(),

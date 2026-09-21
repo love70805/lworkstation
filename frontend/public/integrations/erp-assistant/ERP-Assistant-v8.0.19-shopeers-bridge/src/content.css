@@ -241,6 +241,8 @@
 .erpa-cell-platform { color: #0e776b; font-weight: 700; }
 .erpa-platform-skc { color: #607083; font-family: Consolas, "Microsoft YaHei", monospace; font-size: 10px; font-weight: 600; }
 .erpa-cell-order { color: #9a5207; font-family: Consolas, monospace; font-size: 11px; }
+.erpa-table td.erpa-selected-records { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.erpa-selected-records > div + div { margin-top: 4px; }
 .erpa-cell-number { text-align: right; font-variant-numeric: tabular-nums; }
 .erpa-cell-cost { color: #d94b34 !important; font-size: 14px; font-weight: 800; }
 .erpa-cell-cost > span { display: block; }

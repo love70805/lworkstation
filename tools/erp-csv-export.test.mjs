@@ -8,8 +8,8 @@ const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
 const frontendRequire = createRequire(path.join(workspaceRoot, "frontend", "package.json"));
 const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
 const Papa = frontendRequire("papaparse");
-const cacheKey = "erpAssistantV8_latest_cost_result_v5";
-const legacyCacheKey = "erpAssistantV8_latest_cost_result_v4";
+const cacheKey = "erpAssistantV8_latest_cost_result_v6";
+const legacyCacheKey = "erpAssistantV8_latest_cost_result_v5";
 const erpUrl = "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html";
 
 function cachedResult(text) {
@@ -31,7 +31,7 @@ function cachedResult(text) {
   };
 }
 
-async function loadExtension(extensionRoot, { cache, legacyCache, fetchImpl } = {}) {
+async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion = 5, fetchImpl } = {}) {
   const window = new Window({ url: erpUrl });
   const downloads = [];
   const deliveries = [];
@@ -51,7 +51,7 @@ async function loadExtension(extensionRoot, { cache, legacyCache, fetchImpl } = 
     submit: async (payload) => { deliveries.push(payload); return { status: "success" }; },
   };
   if (cache) window.localStorage.setItem(cacheKey, JSON.stringify(cache));
-  if (legacyCache) window.localStorage.setItem(legacyCacheKey, JSON.stringify(legacyCache));
+  if (legacyCache) window.localStorage.setItem(`erpAssistantV8_latest_cost_result_v${legacyVersion}`, JSON.stringify(legacyCache));
   try {
     for (const file of ["result-policy.js", "request-context.js", "content.js"]) {
       let source = await readFile(path.join(extensionRoot, "src", file), "utf8");
@@ -79,53 +79,54 @@ async function loadExtension(extensionRoot, { cache, legacyCache, fetchImpl } = 
       const csv = new TextDecoder().decode(bytes);
       const parsed = Papa.parse(csv);
       assert.deepEqual(parsed.errors, [], "quotes and embedded delimiters must remain valid CSV");
-      assert.ok(parsed.data.every((row) => row.length === 16), "untrusted text cannot create cells or rows");
+      assert.ok(parsed.data.every((row) => row.length === 17), "untrusted text cannot create cells or rows");
       return { csv, rows: parsed.data };
     },
     close: () => window.happyDOM.close(),
   };
 }
 
-async function verifyLegacyCacheIsolation(extensionRoot) {
+async function verifyLegacyCacheIsolation(extensionRoot, legacyVersion) {
+  const legacyCacheKey = `erpAssistantV8_latest_cost_result_v${legacyVersion}`;
   const legacyCache = {
     timestamp: Date.now(),
-    resultDeliveryId: "ERP-RESULT-LEGACY-V4",
-    results: [cachedResult("LEGACY-V4-SKU")],
+    resultDeliveryId: `ERP-RESULT-LEGACY-V${legacyVersion}`,
+    results: [cachedResult(`LEGACY-V${legacyVersion}-SKU`)],
     meta: { filters: {}, skippedCurrentMonth: 1, excludedMonth: "2026年6月", evidenceRecordCount: 1 },
     warehouseEvidence: {
       formatVersion: 1,
       warehouses: [{
-        warehouseSku: "LEGACY-V4-SKU",
+        warehouseSku: `LEGACY-V${legacyVersion}-SKU`,
         evidenceComplete: true,
         purchaseRecords: [{ recordId: "MAY", purchaseDate: "2026-05-01", quantity: 2, unitPrice: 4 }],
       }],
     },
-    importEnvelope: { batchId: "LEGACY-V4-BATCH" },
+    importEnvelope: { batchId: `LEGACY-V${legacyVersion}-BATCH` },
   };
   for (const withCurrentCache of [false, true]) {
     const cache = withCurrentCache ? {
       timestamp: Date.now(),
-      resultDeliveryId: "ERP-RESULT-CURRENT-V5",
-      results: [cachedResult("CURRENT-V5-SKU")],
+      resultDeliveryId: "ERP-RESULT-CURRENT-V6",
+      results: [cachedResult("CURRENT-V6-SKU")],
       meta: { filters: {}, previewScope: "unscoped", ledgerMonthCutoffStatus: "pending_workstation" },
     } : undefined;
-    const extension = await loadExtension(extensionRoot, { cache, legacyCache });
+    const extension = await loadExtension(extensionRoot, { cache, legacyCache, legacyVersion });
     try {
       const { window } = extension;
-      assert.doesNotMatch(window.document.body.textContent, /LEGACY-V4-SKU|LEGACY-V4-BATCH/, "v4 results must never restore as unscoped v5 evidence");
+      assert.doesNotMatch(window.document.body.textContent, /LEGACY-V[45]-SKU|LEGACY-V[45]-BATCH/, `v${legacyVersion} results must never restore as v6 evidence`);
       assert.equal(window.localStorage.getItem(legacyCacheKey), JSON.stringify(legacyCache), "legacy cache is ignored, not migrated or rewritten");
-      assert.equal(window.localStorage.getItem(cacheKey), cache ? JSON.stringify(cache) : null, "v4 cache must not be promoted into v5");
+      assert.equal(window.localStorage.getItem(cacheKey), cache ? JSON.stringify(cache) : null, `v${legacyVersion} cache must not be promoted into v6`);
       window.__deliveryStatus({ resultDeliveryId: legacyCache.resultDeliveryId, status: "success", envelope: legacyCache.importEnvelope });
-      assert.equal(window.localStorage.getItem(cacheKey), cache ? JSON.stringify(cache) : null, "a late v4 delivery ACK must not revive the old cache");
+      assert.equal(window.localStorage.getItem(cacheKey), cache ? JSON.stringify(cache) : null, `a late v${legacyVersion} delivery ACK must not revive the old cache`);
       if (withCurrentCache) {
         const { rows } = await extension.exportCsv();
         assert.equal(rows.length, 2);
-        assert.equal(rows[1][0], "CURRENT-V5-SKU", "v5 remains restorable when a v4 cache also exists");
+        assert.equal(rows[1][0], "CURRENT-V6-SKU", `v6 remains restorable when a v${legacyVersion} cache also exists`);
       } else {
         assert.equal(window.document.getElementById("erpa-export").disabled, true);
         assert.equal(window.document.getElementById("erpa-copy").disabled, true);
         assert.doesNotMatch(window.document.getElementById("erpa-statusbar").textContent, /完整性校验通过/);
-        assert.doesNotMatch(window.document.getElementById("erpa-footer-right").textContent, /临时缓存恢复|未按账本月末截止范围筛选的预览/);
+        assert.doesNotMatch(window.document.getElementById("erpa-footer-right").textContent, /临时缓存恢复|未按账本前月范围筛选的预览/);
       }
       assert.equal(extension.deliveries.length, 0, "legacy cache restoration must not submit stale evidence");
     } finally {
@@ -166,12 +167,13 @@ async function verifyCachedCsv(extensionRoot) {
       for (const column of [0, 1, 2, 3, 4, 5, 6, 7, 12]) {
         assert.equal(row[column], expected, `text column ${column} must safely preserve ${JSON.stringify(value)}`);
       }
-      assert.deepEqual([row[8], row[11], ...row.slice(13)], ["1", "3", "10", "12.34", "1.2340"]);
+      assert.deepEqual([row[8], row[11], ...row.slice(13, 16)], ["1", "3", "10", "12.34", "1.2340"]);
+      assert.match(row[16], /未按账本前月范围筛选的预览/);
       assert.equal(row[9], "采购单价为 1");
       assert.deepEqual(JSON.parse(row[10]), results[index].costWarnings.records);
     });
-    assert.deepEqual(rows.at(-3).slice(13), ["-5", "-12.5", "-2.5"], "actual numeric cells do not receive text prefixes");
-    assert.deepEqual(rows.at(-2).slice(13), ["", "", ""], "missing costs do not become zero");
+    assert.deepEqual(rows.at(-3).slice(13, 16), ["-5", "-12.5", "-2.5"], "actual numeric cells do not receive text prefixes");
+    assert.deepEqual(rows.at(-2).slice(13, 16), ["", "", ""], "missing costs do not become zero");
     assert.equal(rows.at(-1)[9], "'=1+1", "external warning labels use the same safe text serialization");
     const typed = Papa.parse(csv, { header: true, dynamicTyping: (field) => ["总采购量", "总采购价(￥)", "预览单件成本"].includes(field) });
     assert.deepEqual([typed.data[0]["总采购量"], typed.data[0]["总采购价(￥)"], typed.data[0]["预览单件成本"]], [10, 12.34, 1.234]);
@@ -215,12 +217,12 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3);
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.18");
+    assert.equal(delivery.meta.extensionVersion, "8.0.19");
     assert.equal(delivery.meta.previewScope, "unscoped");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
-    assert.ok(originalCache, "fresh calculation must write the v5 result cache");
-    assert.equal(window.localStorage.getItem(legacyCacheKey), null, "fresh calculation must not create a v4 cache");
+    assert.ok(originalCache, "fresh calculation must write the v6 result cache");
+    assert.equal(window.localStorage.getItem(legacyCacheKey), null, "fresh calculation must not create a v5 cache");
     const evidence = delivery.warehouseEvidence.warehouses[0].purchaseRecords[0];
     assert.equal(evidence.productName, "=1+1");
     assert.equal(evidence.quantity, 3);
@@ -231,7 +233,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(rows[1][4], "'=1+1");
     assert.equal(rows[1][5], "'=1+1");
     assert.equal(rows[1][6], "'+供应商");
-    assert.deepEqual(rows[1].slice(13), ["3", "3.70", "1.2345"], "CSV protection leaves existing ERP preview precision unchanged");
+    assert.deepEqual(rows[1].slice(13, 16), ["3", "3.70", "1.2345"], "CSV protection leaves existing ERP preview precision unchanged");
     assert.equal(JSON.stringify(originalDetail), originalDetailJson, "the ERP response remains unchanged");
     assert.equal(JSON.stringify(delivery), originalDelivery, "complete evidence submitted to the bridge remains unchanged");
     assert.equal(window.localStorage.getItem(cacheKey), originalCache, "calculation cache remains unchanged after export");
@@ -240,10 +242,116 @@ async function verifyCalculatedCsv(extensionRoot) {
   }
 }
 
+async function verifyChronologicalPreview(extensionRoot) {
+  for (const types of [
+    ["b", "a", "b", "b", "a", "a"],
+    ["a", "b", "a", "a", "b", "b"],
+    ["a", "b"],
+    ["a", "a", "a", "a"],
+    ["b", "b"],
+  ]) {
+    const fixtures = types.map((type, index) => ({
+      order: {
+        purchaseOrderId: `PO-${index}`,
+        purchaseOrderNo: `REGULAR-${index}`,
+        ...(type === "a" ? { purchaseOrderNo1688: `1688-${index}` } : {}),
+      },
+      detail: {
+        detailId: `DETAIL-${index}`,
+        itemId: "WH-CHRONO",
+        tradeName: "Synthetic chronological fixture",
+        // Cover distinct dates and same-day timestamps, independent of API order.
+        creationTime: `2026-05-${types[0] === "b" ? 26 - index : 20} ${19 - index}:00:00`,
+        purchaseQuantity: String(index + 1),
+        purchaseUnitPrice: String(index + 2),
+      },
+    }));
+    const originalFixtures = JSON.stringify(fixtures);
+    const extension = await loadExtension(extensionRoot, {
+      fetchImpl: async (rawUrl) => {
+        const url = new URL(rawUrl);
+        let data;
+        if (url.pathname === "/purchase/purchase/v1/purchase-order-page") {
+          data = fixtures.map(({ order }) => order).reverse();
+        } else if (url.pathname === "/purchase/purchase/v1/purchase-order-details") {
+          const fixture = fixtures.find(({ order }) => order.purchaseOrderId === url.searchParams.get("purchaseOrderId"));
+          assert.ok(fixture, "only synthetic purchase orders may be fetched");
+          data = [fixture.detail];
+        } else {
+          assert.equal(url.pathname, "/purchase/product/v1/product-info-sku");
+          data = [{ platformSku: "SKU-CHRONO", platformSkc: "SKC-CHRONO" }];
+        }
+        return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
+      },
+    });
+    try {
+      const { window } = extension;
+      window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", {
+        detail: { url: `${new URL(erpUrl).origin}/purchase/purchase/v1/purchase-order-page?sku=SKC-CHRONO` },
+      }));
+      window.document.getElementById("erpa-cost-trigger").click();
+      for (let attempt = 0; attempt < 100 && !extension.deliveries.length; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(extension.deliveries.length, 1);
+      const delivery = JSON.parse(JSON.stringify(extension.deliveries[0]));
+      const result = delivery.results[0];
+      const selected = fixtures.slice(0, 3);
+      const selectedTypes = types.slice(0, 3).map((type) => type === "a" ? "1688" : "采购单");
+      const selectedNumbers = selected.map(({ order }) => order.purchaseOrderNo1688 || order.purchaseOrderNo);
+      const selectedDates = selected.map(({ detail }) => detail.creationTime.slice(0, 10));
+      assert.deepEqual(result.selectedRecordIds, selected.map(({ detail }) => detail.detailId), `${types.join(",")} must select its chronological first three`);
+      assert.deepEqual(result.details.map(({ sourceType }) => sourceType), selectedTypes);
+      assert.equal(result.sourceType, new Set(selectedTypes).size > 1 ? "混合采购" : selectedTypes[0]);
+      const quantity = selected.reduce((sum, { detail }) => sum + Number(detail.purchaseQuantity), 0);
+      const total = selected.reduce((sum, { detail }) => sum + Number(detail.purchaseQuantity) * Number(detail.purchaseUnitPrice), 0);
+      assert.equal(result.totalQty, quantity);
+      assert.equal(result.unitCost, (total / quantity).toFixed(4));
+      assert.equal(delivery.meta.previewScope, "unscoped");
+      assert.equal(delivery.meta.ledgerMonthCutoffStatus, "pending_workstation");
+      const evidence = delivery.warehouseEvidence.warehouses[0].purchaseRecords;
+      assert.equal(evidence.length, fixtures.length, "nonselected evidence must survive unchanged");
+      assert.deepEqual(evidence.filter(({ selectedForPreview }) => selectedForPreview).map(({ recordId }) => recordId), result.selectedRecordIds);
+      for (const { order, detail } of fixtures) {
+        const record = evidence.find(({ recordId }) => recordId === detail.detailId);
+        assert.equal(record.purchaseOrderNo, order.purchaseOrderNo);
+        assert.equal(record.order1688, order.purchaseOrderNo1688 || "");
+        assert.equal(record.quantity, Number(detail.purchaseQuantity));
+        assert.equal(record.unitPrice, Number(detail.purchaseUnitPrice));
+        assert.equal(record.eligible, true);
+      }
+      const cells = window.document.querySelector(".erpa-result-row").querySelectorAll("td");
+      assert.deepEqual(Array.from(cells[2].querySelectorAll("div"), (node) => node.textContent), selectedTypes.map((type, index) => `${type} · ${selectedNumbers[index]}`));
+      assert.deepEqual(Array.from(cells[5].querySelectorAll("div"), (node) => node.textContent), selectedDates, "duplicate dates still represent each selected record");
+      window.document.querySelector(".erpa-result-row").click();
+      const detailRows = [...window.document.querySelectorAll(".erpa-detail-table tbody tr:not(.erpa-detail-summary)")];
+      assert.deepEqual(detailRows.map((row) => [...row.querySelectorAll("td")].slice(0, 3).map((cell) => cell.textContent)), selectedDates.map((date, index) => [date, selectedTypes[index], selectedNumbers[index]]));
+      const originalCache = window.localStorage.getItem(cacheKey);
+      const { rows } = await extension.exportCsv();
+      assert.equal(rows.length, 2);
+      assert.equal(rows[0][3], "所选单号类型");
+      assert.equal(rows[0][4], "所选采购单号");
+      assert.equal(rows[0][12], "所选采购日期");
+      assert.equal(rows[1][3], selectedTypes.join("\n"));
+      assert.equal(rows[1][4], selectedNumbers.join("\n"));
+      assert.equal(rows[1][12], selectedDates.join("\n"));
+      assert.equal(rows[1][11], String(selected.length));
+      assert.match(rows[1][16], /待工作台排除账本当月及以后采购/);
+      assert.equal(window.localStorage.getItem(cacheKey), originalCache);
+      assert.equal(JSON.stringify(extension.deliveries[0]), JSON.stringify(delivery));
+      assert.equal(JSON.stringify(fixtures), originalFixtures);
+    } finally {
+      await extension.close();
+    }
+  }
+}
+
 export async function verifyCsvExport(extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension")) {
-  await verifyLegacyCacheIsolation(extensionRoot);
+  await verifyLegacyCacheIsolation(extensionRoot, 4);
+  await verifyLegacyCacheIsolation(extensionRoot, 5);
   await verifyCachedCsv(extensionRoot);
   await verifyCalculatedCsv(extensionRoot);
+  await verifyChronologicalPreview(extensionRoot);
   const extension = await loadExtension(extensionRoot, { cache: { timestamp: Date.now(), results: [cachedResult("CURRENT-SKU")], meta: { filters: {} }, resultDeliveryId: "ERP-RESULT-CURRENT" } });
   try {
     const { window } = extension;

@@ -31,3 +31,19 @@ it('handles colliding, reserved and long store names without losing any store',(
  const workbook=buildProfitReportWorkbook({report:{kind:'pre_deduction',period:'2026-08',revision:1,totalsExact:reportTotals(rows,'0','0')},products:rows});
  const book=XLSX.read(workbook.bytes,{type:'array'});expect(new Set(book.SheetNames.map(name=>name.toLowerCase())).size).toBe(7);expect(book.SheetNames.every(name=>name.length<=31&&!/[\[\]:*?/\\]/.test(name))).toBe(true);
 });
+it("exports each selected mixed purchase with textual order identifiers in a dedicated sheet", () => {
+ const rows=[{...products[0],costResolutionVersion:"beta-prior-month",costPurchaseRecords:[
+  {recordId:"B1",purchaseDate:"2026-07-31",purchaseOrderNo:"00001",quantity:2,unitPrice:4},
+  {recordId:"A2",purchaseDate:"2026-07-30",order1688:"12345678901234567890",purchaseOrderNo:"00002",quantity:3,unitPrice:5},
+  {recordId:"B3",purchaseDate:"2026-07-29",purchaseOrderNo:"00003",quantity:4,unitPrice:6},
+ ]}];
+ const before=structuredClone(rows);
+ const result=buildProfitReportWorkbook({report:{kind:"pre_deduction",period:"2026-08",revision:1,totalsExact:reportTotals(rows,"0","0")},products:rows});
+ const book=XLSX.read(result.bytes,{type:"array"});
+ expect(book.Sheets["合成甲店"].F1.v).toBe("关联单号");
+ const detail=XLSX.utils.sheet_to_json(book.Sheets["核算采购"]);
+ expect(detail.map(row=>row["单号类型"])).toEqual(["采购单","1688","采购单"]);
+ expect(detail.map(row=>row["关联单号"])).toEqual(["00001","12345678901234567890","00003"]);
+ expect(detail.map(row=>row["采购数量"])).toEqual([2,3,4]);
+ expect(rows).toEqual(before);
+});
