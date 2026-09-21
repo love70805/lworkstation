@@ -933,7 +933,7 @@
         const mappingPartition = resultPolicy.partitionResultsByMapping(aggregateState.results);
         const scopedState = resultPolicy.filterResultsByMappingScope(mappingPartition.mapped, querySkcs);
         const resultMappings = scopedState.results.flatMap((item) => item.mappings || []);
-        
+
         const scopedWarehouseSkus = new Set(scopedState.results.map((result) => resultPolicy.canonical(result.warehouseSku)).filter(Boolean));
         const evidenceOnlySourceRecords = [
             ...detailState.excludedOrders,

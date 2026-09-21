@@ -4,6 +4,10 @@
   "integrationBranch": "codex/beta4-ledger-cost-preview",
   "requiredCommits": [
     {
+      "module": "erp-preview-ledger-month",
+      "commit": "125756b"
+    },
+    {
       "module": "workspace-foreground-recovery",
       "commit": "8df5e39"
     },
