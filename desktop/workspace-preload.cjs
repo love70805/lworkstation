@@ -9,6 +9,12 @@ function reportAppearance(value) {
 }
 
 if (typeof document !== "undefined") {
+  ipcRenderer.on('workspace:probe', (_event, token) => {
+    if (typeof token !== 'string' || token.length > 64) return;
+    // This reply stays in the isolated preload; the remote tabs cannot forge it.
+    const root = document.querySelector('#root');
+    ipcRenderer.send('workspace:probe-result', { token, ready: Boolean(root?.childElementCount) });
+  });
   const attachAppearanceObserver = () => {
     const ready = () => {
       const root = document.querySelector('#root');

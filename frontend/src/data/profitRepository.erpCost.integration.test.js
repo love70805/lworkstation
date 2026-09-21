@@ -247,6 +247,36 @@ afterEach(async () => {
 });
 
 describe("ERP cost repository independent recalculation", () => {
+  it("keeps a stored Beta.2 finalized report immutable when its live adoption now needs review", async () => {
+    const { ledger, request } = await context();
+    const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "BETA2-FROZEN" });
+    await db.salesRows.where("ledgerId").equals(ledger.id).modify({ store: "测试店铺" });
+    await adoptZeroDispatch(ledger.id);
+    await finalizeMonthlyLedger({ ledgerId: ledger.id });
+    // Model the full evidence saved by Beta.2 while retaining its old selected
+    // records, amount, report and audit trail. No production migration runs.
+    await db.erpCostRows.where("batchId").equals(applied.batchId).modify(row => {
+      const omitted = { ...record("CURRENT", 8, 2, "2026-08-31"), eligible: false, exclusionReasons: ["on_or_after_ledger_period"] };
+      row.purchaseRecords.push(omitted);
+      row.costDecision.resolutionVersion = "shopeers-cost-resolution@4-unit-4dp-beta-prior-month-latest-three";
+      row.costDecision.purchaseRecords = row.purchaseRecords;
+      row.evidence.purchaseRecords = row.purchaseRecords;
+      row.evidence.costDecision = row.costDecision;
+    });
+    const before = (await createWorkspaceBackupPayload()).tables;
+    const storedCost = (await getLatestLedgerCosts(ledger.id))[0];
+    expect(resolveFormalCostDecision({ platformSku: "SKU-AUDIT", period, erpCost: storedCost }).status).toBe("missing");
+    const live = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period, expectedSkus: ["SKU-AUDIT"], costRows: [storedCost] });
+    expect(live.matches[0]).toMatchObject({ periodReviewRequired: true, adoptedUnitCost: 4, formalUnitCost: null });
+    const snapshot = await getLedgerSnapshot(ledger.id);
+    expect(snapshot.ledger.status).toBe("finalized");
+    expect(snapshot.profitLines[0].purchaseCost).toBe(4);
+    const purchaseRecords = [record("CURRENT", 8, 2, "2026-08-31")];
+    await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }),
+      sourceEnvelope: sourceEnvelope({ ledger, request, purchaseRecords }) })).rejects.toThrow("已定稿");
+    expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
+  });
+
   it("persists authoritative b,a,b order evidence and rejects forged page order labels", async () => {
     const { ledger, request } = await context();
     const purchaseRecords = ["b", "a", "b", "b", "a", "a"].map((kind, index) => ({
@@ -269,7 +299,7 @@ describe("ERP cost repository independent recalculation", () => {
     const { ledger, request } = await context();
     const purchaseRecords = [record("PREVIOUS", 4)];
     const source = sourceEnvelope({ ledger, request, purchaseRecords });
-    source.warehouseEvidence[0].excludedRecords = [{ ...record("OMITTED", 10, 1, "2026-07-02"), eligible: false, exclusionReasons: ["current_month"] }];
+    source.warehouseEvidence[0].excludedRecords = [{ ...record("OMITTED", 10, 1, "2026-08-02"), eligible: false, exclusionReasons: ["current_month"] }];
     const reconciliation = reconcile({ purchaseRecords });
     await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source })).rejects.toThrow("旧版当月排除");
     expect(await db.erpCostRows.count()).toBe(0);
@@ -286,14 +316,14 @@ describe("ERP cost repository independent recalculation", () => {
     source.generatedAt = "2026-10-01T00:00:00.000Z";
     source.costPeriod = "2026-10";
     const reconciliation = reconcile({ purchaseRecords, previewUnitCost: 999 });
-    expect(reconciliation.matches[0].unitCost).toBe(3);
+    expect(reconciliation.matches[0].unitCost).toBe(5);
     await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source });
     const saved = (await getLatestLedgerCosts(ledger.id))[0];
-    expect(saved).toMatchObject({ costPeriod: period, unitCost: 3, selectedRecordIds: ["PREVIOUS"] });
+    expect(saved).toMatchObject({ costPeriod: period, unitCost: 5, selectedRecordIds: ["CURRENT", "PREVIOUS"] });
     expect(saved.purchaseRecords).toHaveLength(3);
   });
 
-  it.each(["2026-08-01", "2026-09-01"])("rejects a forged current or future preview without writing formal costs: %s", async purchaseDate => {
+  it.each(["2026-09-01", "2026-10-01"])("rejects a forged future preview without writing formal costs: %s", async purchaseDate => {
     const { ledger, request } = await context();
     const purchaseRecords = [record("FUTURE", 999, 1, purchaseDate)];
     const reconciliation = reconcile({ purchaseRecords, previewUnitCost: 999 });

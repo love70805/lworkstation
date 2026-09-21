@@ -31,12 +31,33 @@ candidate.require = name => name === 'electron' ? { ...electron, Tray: CapturedT
     return menu;
   },
 } } : module.require(name);
-candidate._compile(fs.readFileSync(filename, 'utf8') + `
+const source = fs.readFileSync(filename, 'utf8');
+// Shorten only this isolated fault-injection test; production keeps 8 seconds.
+const testSource = process.env.DESKTOP_EXPERIENCE_SMOKE === 'recovery'
+  ? source.replace('createWorkspaceRecovery({', 'createWorkspaceRecovery({ timeoutMs: 500,') : source;
+candidate._compile(testSource + `
+globalThis.__recoveryTrace = [];
+for (const method of ['ready', 'fail', 'start']) {
+  const original = startup[method];
+  startup[method] = (...args) => { globalThis.__recoveryTrace.push({time:Date.now(),method,args}); return original(...args); };
+}
 globalThis.__experience = {
  state: publicState,
  lifecycle: () => desktopLifecycle.getState(),
  window: () => mainWindow,
  workspace: () => views.get('workspace').webContents,
+ switchTab: setActiveTab,
+ restore: restoreWorkspaceSurface,
+ recovery: workspaceRecovery,
+ retry: retryWorkspace,
+ view: () => views.get('workspace'),
+ holdProbe: () => {
+   const contents = views.get('workspace').webContents;
+   const original = contents.send.bind(contents), held = [];
+   contents.send = (channel, ...args) => { globalThis.__recoveryTrace.push({time:Date.now(),held:channel}); return channel === 'workspace:probe' ? held.push([channel, ...args]) : original(channel, ...args); };
+   globalThis.__releaseProbe = () => { contents.send = original; held.forEach(args => original(...args)); };
+ },
+ releaseProbe: () => globalThis.__releaseProbe(),
  inbox: () => inboxService?.getOwnedPid(),
  backgroundRoundTrip: runErpV2SmokeFixture,
  fail: () => views.get('workspace').webContents.loadURL(DEV_URL + '/retry-test').catch(() => {}),

@@ -288,8 +288,8 @@ async function verifyUnscopedEvidenceDelivery() {
       assert.equal(Object.hasOwn(payload.meta, "excludedMonth"), false);
       assert.equal(Object.hasOwn(payload.meta, "skippedCurrentMonth"), false);
       const footer = window.document.getElementById("erpa-footer-right").textContent;
-      assert.match(footer, /未按账本前月范围筛选的预览/);
-      assert.match(footer, /待工作台排除账本当月及以后采购/);
+      assert.match(footer, /未按账本月末范围筛选的预览/);
+      assert.match(footer, /待工作台保留账本当月及以前采购，排除后续月份/);
       assert.doesNotMatch(footer, /1688单号优先|月末截止/);
       assert.doesNotMatch(window.document.body.textContent, /排除当月|完整历史证据|排除undefined/);
     } finally {

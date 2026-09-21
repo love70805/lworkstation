@@ -28,6 +28,7 @@ const { normalizeAllowedRemoteUrl, resolveRemotePopup } = require("./remote-navi
 const { isAllowedWorkspaceUrl } = require("./workspace-navigation.cjs");
 const { createInboxServiceController } = require("./inbox-service.cjs");
 const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecycle.cjs');
+const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
 const { createInboxPopoverLifecycle } = require("./inbox-popover-lifecycle.cjs");
@@ -82,6 +83,13 @@ const startup = createStartupState({ changed: () => { resizeViews(); publishStat
 let inboxPopoverWindow;
 let updatePopoverWindow;
 let activeTab = "workspace";
+const workspaceRecovery = createWorkspaceRecovery({
+  getContents: () => views.get('workspace')?.webContents,
+  isForeground: () => activeTab === 'workspace' && Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) && !desktopLifecycle?.getState().quitting,
+  onFailure: message => { setStatus('workspace', { status: 'error', error: message }); startup.fail(message); },
+  onRecovered: () => { setStatus('workspace', { status: 'ready', error: null }); startup.ready(); },
+});
+let lastWorkspaceUrl = DEV_URL || 'shopeers://workstation/';
 let inboxService;
 const inboxCapability = crypto.randomBytes(32).toString("base64url");
 const workspaceContextCoordinator = createWorkspaceContextCoordinator();
@@ -152,10 +160,12 @@ function publicState() {
   const tabs = {};
   for (const [id, state] of Object.entries(tabState)) {
     const view = views.get(id);
-    const history = navigationState(view?.webContents);
+    const contents = view?.webContents;
+    const alive = contents && !contents.isDestroyed();
+    const history = navigationState(alive ? contents : null);
     tabs[id] = {
       ...state,
-      url: view?.webContents.getURL() || state.url,
+      url: (alive ? contents.getURL() : '') || state.url,
       ...history,
     };
   }
@@ -192,15 +202,17 @@ function reportPreferenceWriteFailure(preference, error) {
 }
 
 function resizeViews() {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   const [width, height] = mainWindow.getContentSize();
   for (const [id, view] of views) {
+    if (!view.webContents || view.webContents.isDestroyed()) continue;
     const shouldAttach = id === activeTab && (id !== 'workspace' || startup.getState().status === 'ready');
     const isAttached = attachedViews.has(id);
     if (shouldAttach && !isAttached) {
       mainWindow.contentView.addChildView(view);
       attachedViews.add(id);
     } else if (!shouldAttach && isAttached) {
+      view.setVisible(false);
       mainWindow.contentView.removeChildView(view);
       attachedViews.delete(id);
     }
@@ -212,6 +224,7 @@ function resizeViews() {
         width,
         height: Math.max(0, height - contentTop),
       });
+      view.setVisible(true);
     }
   }
 }
@@ -386,6 +399,7 @@ function closeInboxPopover({ returnFocus = true } = {}) {
 
 async function shutdownDesktop() {
   desktopLifecycle?.dispose();
+  workspaceRecovery.dispose();
   startup.dispose();
   updateRuntime?.stop();
 
@@ -616,8 +630,35 @@ async function runUpdatePopoverDomClickSmoke() {
 function setActiveTab(tabId) {
   if (!views.has(tabId)) return { ok: false, error: "未知标签" };
   activeTab = tabId;
+  workspaceRecovery.pause();
   resizeViews();
   publishState();
+  restoreWorkspaceSurface();
+  return { ok: true };
+}
+
+function restoreWorkspaceSurface() {
+  if (activeTab !== 'workspace' || (startup.getState().status !== 'ready' && !workspaceRecovery.needsRecovery())) return;
+  resizeViews();
+  workspaceRecovery.check();
+}
+
+function retryWorkspace() {
+  workspaceRecovery.reset();
+  const contents = views.get('workspace')?.webContents;
+  startup.start();
+  if (!contents || contents.isDestroyed()) {
+    const previous = views.get('workspace');
+    if (previous && attachedViews.has('workspace')) {
+      mainWindow.contentView.removeChildView(previous);
+      attachedViews.delete('workspace');
+    }
+    createWorkspaceView(lastWorkspaceUrl);
+  } else {
+    const current = contents.getURL();
+    const target = isAllowedWorkspaceUrl(current, DEV_URL || '') ? current : lastWorkspaceUrl;
+    contents.loadURL(target).catch(error => startup.fail(`工作站加载失败：${error.message}。请重试。`));
+  }
   return { ok: true };
 }
 
@@ -809,7 +850,10 @@ function createWorkspaceView(url) {
   });
   views.set("workspace", view);
   view.webContents.on("did-start-navigation", (_event, url, _isInPlace, isMainFrame) => {
-    if (isMainFrame) setStatus("workspace", { status: "loading", url, error: null, notice: null });
+    if (isMainFrame && isAllowedWorkspaceUrl(url, DEV_URL || '')) {
+      if (!_isInPlace) { workspaceRecovery.reset(); startup.start(); }
+      setStatus("workspace", { status: "loading", url, error: null, notice: null });
+    }
   });
   const blockDisallowedNavigation = (event, targetUrl) => {
     if (isAllowedWorkspaceUrl(targetUrl, DEV_URL || "")) return;
@@ -818,11 +862,16 @@ function createWorkspaceView(url) {
   };
   view.webContents.on("will-navigate", (event, targetUrl) => blockDisallowedNavigation(event, targetUrl));
   view.webContents.on("will-redirect", (event, targetUrl) => blockDisallowedNavigation(event, targetUrl));
-  view.webContents.on("did-navigate", (_event, url, _httpResponseCode, _httpStatusText, isMainFrame) => {
-    if (isMainFrame) setStatus("workspace", { status: "ready", url, error: null, notice: null });
+  view.webContents.on("did-navigate", (_event, url) => {
+    // did-navigate is already a main-frame-only event (no isMainFrame argument).
+    if (isAllowedWorkspaceUrl(url, DEV_URL || '')) lastWorkspaceUrl = url;
+    setStatus("workspace", { status: "ready", url, error: null, notice: null });
   });
   view.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
-    if (isMainFrame) setStatus("workspace", { status: "ready", url, error: null, notice: null });
+    if (isMainFrame) {
+      if (isAllowedWorkspaceUrl(url, DEV_URL || '')) lastWorkspaceUrl = url;
+      setStatus("workspace", { status: "ready", url, error: null, notice: null });
+    }
   });
   view.webContents.on("did-stop-loading", () => publishNavigationState(view.webContents));
   view.webContents.setWindowOpenHandler(({ url }) => {
@@ -835,7 +884,20 @@ function createWorkspaceView(url) {
       startup.fail(`工作站加载失败：${errorDescription}。请重试或退出。`);
     }
   });
-  view.webContents.on('render-process-gone', () => startup.fail('工作站进程已退出，请重试或退出。'));
+  view.webContents.on('render-process-gone', () => {
+    workspaceRecovery.pause();
+    setStatus('workspace', { status: 'error', error: '工作站进程已退出' });
+    startup.fail('工作站进程已退出，请重试恢复页面。');
+  });
+  view.webContents.on('destroyed', () => {
+    if (views.get('workspace') !== view || desktopLifecycle?.getState().quitting) return;
+    workspaceRecovery.pause();
+    setStatus('workspace', { status: 'error', error: '工作站页面已关闭' });
+    startup.fail('工作站页面已关闭，请重试恢复页面。');
+  });
+  view.webContents.on('unresponsive', () => {
+    if (activeTab === 'workspace' && startup.getState().status === 'ready') workspaceRecovery.check();
+  });
   view.webContents.loadURL(url).then(() => setStatus("workspace", { status: "ready", url })).catch((error) => {
     setStatus("workspace", { status: "error", error: error.message });
   });
@@ -1454,6 +1516,8 @@ async function createWindow() {
     onError: message => { lifecycleNotice = message; publishState(); },
   });
   mainWindow.on('resize', () => { resizeViews(); positionInboxPopover(); positionUpdatePopover(); });
+  for (const event of ['restore', 'show', 'focus']) mainWindow.on(event, restoreWorkspaceSurface);
+  for (const event of ['minimize', 'hide']) mainWindow.on(event, () => workspaceRecovery.pause());
   mainWindow.on('move', () => { positionInboxPopover(); positionUpdatePopover(); });
   mainWindow.on('closed', () => {
     closeInboxPopover({ returnFocus: false });
@@ -1500,11 +1564,17 @@ ipcMain.handle("desktop:get-state", () => publicState());
 ipcMain.handle('desktop:startup-action', (event, action) => {
   if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
   if (action === 'quit') { desktopLifecycle?.quit(); return { ok: true }; }
-  if (action === 'retry') { startup.start(); views.get('workspace')?.webContents.reload(); return { ok: true }; }
+  if (action === 'retry') return retryWorkspace();
   return { ok: false };
 });
 ipcMain.on('workspace:ready', event => {
-  if (event.sender === views.get('workspace')?.webContents && event.senderFrame === event.sender.mainFrame) startup.ready();
+  if (event.sender === views.get('workspace')?.webContents && event.senderFrame === event.sender.mainFrame) {
+    startup.ready();
+    restoreWorkspaceSurface();
+  }
+});
+ipcMain.on('workspace:probe-result', (event, payload) => {
+  if (event.sender === views.get('workspace')?.webContents && event.senderFrame === event.sender.mainFrame) workspaceRecovery.acknowledge(event.sender, payload);
 });
 ipcMain.handle("desktop:request-inbox", async (event, input) => {
   if (event.sender !== views.get("workspace")?.webContents) {
@@ -1607,7 +1677,7 @@ ipcMain.handle("desktop:forward", () => {
   setTimeout(publishState, result.ok ? 50 : 0);
   return result;
 });
-ipcMain.handle("desktop:refresh", () => views.get(activeTab)?.webContents.reload());
+ipcMain.handle("desktop:refresh", () => activeTab === 'workspace' ? retryWorkspace() : views.get(activeTab)?.webContents.reload());
 ipcMain.handle("desktop:open-external", () => {
   if (activeTab === "workspace") return { ok: false, error: "工作站页面不能外部打开" };
   const url = views.get(activeTab)?.webContents.getURL();

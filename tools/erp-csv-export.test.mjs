@@ -126,7 +126,7 @@ async function verifyLegacyCacheIsolation(extensionRoot, legacyVersion) {
         assert.equal(window.document.getElementById("erpa-export").disabled, true);
         assert.equal(window.document.getElementById("erpa-copy").disabled, true);
         assert.doesNotMatch(window.document.getElementById("erpa-statusbar").textContent, /完整性校验通过/);
-        assert.doesNotMatch(window.document.getElementById("erpa-footer-right").textContent, /临时缓存恢复|未按账本前月范围筛选的预览/);
+        assert.doesNotMatch(window.document.getElementById("erpa-footer-right").textContent, /临时缓存恢复|未按账本月末范围筛选的预览/);
       }
       assert.equal(extension.deliveries.length, 0, "legacy cache restoration must not submit stale evidence");
     } finally {
@@ -168,7 +168,7 @@ async function verifyCachedCsv(extensionRoot) {
         assert.equal(row[column], expected, `text column ${column} must safely preserve ${JSON.stringify(value)}`);
       }
       assert.deepEqual([row[8], row[11], ...row.slice(13, 16)], ["1", "3", "10", "12.34", "1.2340"]);
-      assert.match(row[16], /未按账本前月范围筛选的预览/);
+      assert.match(row[16], /未按账本月末范围筛选的预览/);
       assert.equal(row[9], "采购单价为 1");
       assert.deepEqual(JSON.parse(row[10]), results[index].costWarnings.records);
     });
@@ -217,7 +217,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3);
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.19");
+    assert.equal(delivery.meta.extensionVersion, "8.0.20");
     assert.equal(delivery.meta.previewScope, "unscoped");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
@@ -336,7 +336,7 @@ async function verifyChronologicalPreview(extensionRoot) {
       assert.equal(rows[1][4], selectedNumbers.join("\n"));
       assert.equal(rows[1][12], selectedDates.join("\n"));
       assert.equal(rows[1][11], String(selected.length));
-      assert.match(rows[1][16], /待工作台排除账本当月及以后采购/);
+      assert.match(rows[1][16], /待工作台保留账本当月及以前采购，排除后续月份/);
       assert.equal(window.localStorage.getItem(cacheKey), originalCache);
       assert.equal(JSON.stringify(extension.deliveries[0]), JSON.stringify(delivery));
       assert.equal(JSON.stringify(fixtures), originalFixtures);
