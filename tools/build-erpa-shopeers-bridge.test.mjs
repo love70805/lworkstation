@@ -76,7 +76,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.20" }),
+      getManifest: () => ({ version: "8.0.21" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -181,9 +181,9 @@ function resultInput(overrides = {}) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.20");
+  assert.equal(manifest.version, "8.0.21");
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.20";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.21";/, "the download action must recommend the patched package");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
@@ -231,13 +231,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.20-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.21-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.20");
+    assert.equal(manifest.version, "8.0.21");
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -249,7 +249,7 @@ async function verifyPublishedPackage() {
     const canonicalContent = await readFile(sourcePath("content.js"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
     assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v6';/);
-    assert.match(content, /const EXTENSION_VERSION = '8\.0\.20';/);
+    assert.match(content, /const EXTENSION_VERSION = '8\.0\.21';/);
     for (const file of ["background.js", "content.css", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
       assert.equal(
         (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
@@ -348,6 +348,57 @@ async function verifyWorldBoundary() {
   await isolatedWindow.ShopeersErpDeliveryBridge.submit(resultInput());
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "shopeers.erp.submitCostResult");
+  await isolatedWindow.ShopeersErpDeliveryBridge.previewContext({ ...resultInput(), ledgerPeriod: "2099-12" });
+  assert.deepEqual(sent[1], {
+    type: "shopeers.erp.previewContext",
+    payload: { querySkcs: resultInput().querySkcs, queryCapturedAt: resultInput().queryCapturedAt },
+  });
+}
+
+async function verifyTrustedPreviewPeriod() {
+  let records = [{ ...requestRecord(), ledgerPeriod: "2026-08" }];
+  let switchWorkspace = false;
+  let fetchCount = 0;
+  const background = await loadBackground({
+    storageSeed: {
+      shopeersErpInboxBaseUrl: "http://127.0.0.1:8790",
+      shopeersErpInboxCapability: capability,
+      shopeersErpWorkspaceId: "workspace-secure",
+    },
+    fetchImpl: async (url, init) => {
+      fetchCount += 1;
+      assert.equal(new URL(url).pathname, "/erp/v1/requests");
+      assert.equal(new URL(url).searchParams.get("workspaceId"), "workspace-secure");
+      assert.equal(new URL(url).searchParams.get("registeredBefore"), "2026-09-22T00:00:00.000Z");
+      assert.equal(init.headers.authorization, `Bearer ${capability}`);
+      if (switchWorkspace) background.storage.shopeersErpWorkspaceId = "workspace-other";
+      return response(200, { records });
+    },
+  });
+  const input = { ...resultInput(), queryCapturedAt: "2026-09-22T00:00:00.000Z", ledgerPeriod: "2026-09" };
+  const result = await background.api.previewContext(input, embeddedSender);
+  assert.deepEqual(jsonClone(result), { ok: true, ledgerPeriod: "2026-08" }, "September queries must use the actual August ledger month, with no private context exposed");
+  await assert.rejects(() => background.api.previewContext(input, { url: "https://attacker.invalid" }), { code: "ERP_UNTRUSTED_SENDER" });
+  await assert.rejects(() => background.api.previewContext({ ...input, queryCapturedAt: "" }, sender), { code: "ERP_REQUEST_CONTEXT_MISSING" });
+  assert.equal(fetchCount, 1, "untrusted senders and invalid snapshots must not access loopback");
+  for (const [scenario, expectedCode] of [
+    [[requestRecord()], "ERP_LEDGER_PERIOD_UNKNOWN"],
+    [[{ ...requestRecord(), ledgerPeriod: "2026-13" }], "ERP_LEDGER_PERIOD_INVALID"],
+    [[{ ...requestRecord(), ledgerPeriod: "2026-08", workspaceId: "workspace-forged" }], "ERP_REQUEST_NOT_FOUND"],
+    [[{ ...requestRecord(), ledgerPeriod: "2026-08", registeredAt: "2026-10-01T00:00:00.000Z" }], "ERP_REQUEST_NOT_FOUND"],
+    [[{ ...requestRecord(), ledgerPeriod: "2026-08", status: "superseded" }], "ERP_REQUEST_NOT_FOUND"],
+    [[{ ...requestRecord(), ledgerPeriod: "2026-08" }, { ...requestRecord(), requestId: "ANOTHER", ledgerPeriod: "2026-09" }], "ERP_REQUEST_AMBIGUOUS"],
+  ]) {
+    records = scenario;
+    const errorResponse = await new Promise((resolve) => background.runtimeListeners[0]({ type: "shopeers.erp.previewContext", payload: input }, sender, resolve));
+    assert.deepEqual(Object.keys(errorResponse).sort(), ["code", "message", "ok", "status"]);
+    assert.equal(errorResponse.ok, false);
+    assert.equal(errorResponse.code, expectedCode);
+  }
+  records = [{ ...requestRecord(), ledgerPeriod: "2026-08" }];
+  switchWorkspace = true;
+  await assert.rejects(() => background.api.previewContext(input, sender), { code: "ERP_WORKSPACE_CONTEXT_CHANGED" });
+  assert.equal(background.storage.shopeersErpPendingCostResultsV2, undefined, "preview lookup never writes delivery evidence");
 }
 
 async function verifyBackgroundSecurityAndDelivery() {
@@ -713,6 +764,7 @@ await verifyManifestAndGenerator();
 await verifyCsvExport(extensionRoot);
 await verifyPublishedPackage();
 await verifyWorldBoundary();
+await verifyTrustedPreviewPeriod();
 await verifyBackgroundSecurityAndDelivery();
 await verifyAtomicRuntimeConfigurationAndWorkspaceBinding();
 await verifyPendingWorkspaceSnapshotCannotRebind();

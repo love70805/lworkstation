@@ -1,12 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 import { ensureAutoErpRequest, cancelAutoErpRequest } from "./autoErpRequest";
 
-const input = () => ({ ledger: { id: crypto.randomUUID(), workspaceId: "W" }, platformSkcs: ["A", "B"], expectedSkus: [{ platformSku: "SKU", platformSkc: "A" }] });
+const input = () => ({ ledger: { id: crypto.randomUUID(), workspaceId: "W", period: "2026-08" }, platformSkcs: ["A", "B"], expectedSkus: [{ platformSku: "SKU", platformSkc: "A" }] });
 function dependencies() {
   let saved;
   return { latest: vi.fn(async () => saved), save: vi.fn(async (request) => { saved = request; }), register: vi.fn(async () => ({ accepted: true, status: "registered" })) };
 }
 describe("automatic ERP request lifecycle", () => {
+  it("replaces a recent legacy request without a trusted ledger month", async () => {
+    const scope = input(); const deps = dependencies();
+    const old = await ensureAutoErpRequest(scope, deps);
+    await deps.save({ ...old, ledgerPeriod: undefined });
+    const fresh = await ensureAutoErpRequest(scope, deps);
+    expect(fresh.id).not.toBe(old.id);
+    expect(fresh).toMatchObject({ ledgerPeriod: "2026-08", supersedesRequestId: old.id, replaceLedgerScope: true });
+    expect(deps.register.mock.calls.at(-1)[0].request.ledgerPeriod).toBe("2026-08");
+  });
   it("serializes duplicate mounts and reuses one request", async () => {
     const scope = input(); const deps = dependencies();
     const [a, b] = await Promise.all([ensureAutoErpRequest(scope, deps), ensureAutoErpRequest(scope, deps)]);

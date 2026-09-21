@@ -937,9 +937,13 @@ export async function saveErpCostRequest(request) {
     const ledger = request.ledgerId ? await db.ledgers.get(request.ledgerId) : null;
     if (request.ledgerId && !ledger) throw new Error("找不到对应的月度账本。");
     if (ledger && (ledger.workspaceId !== request.workspaceId || ["finalized", "locked"].includes(ledger.status))) throw new Error("账本工作区不匹配或已定稿，不能登记核算请求。");
+    const ledgerPeriod = ledger?.period ?? request.ledgerPeriod ?? null;
+    if (ledgerPeriod != null && (typeof ledgerPeriod !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod))) throw new Error("ERP 请求核算月份必须为 YYYY-MM。");
+    if (request.ledgerPeriod != null && request.ledgerPeriod !== ledgerPeriod) throw new Error("ERP 请求核算月份与月度账本不匹配。");
+    savedRequest.ledgerPeriod = ledgerPeriod;
     const existing = await db.erpCostRequests.get(request.id);
     if (existing) {
-      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
+      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || (existing.ledgerPeriod ?? null) !== ledgerPeriod || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
       return;
     }
 

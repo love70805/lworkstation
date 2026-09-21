@@ -13,6 +13,7 @@ export function buildLedgerErpCostRequest({
     id,
     workspaceId: ledger.workspaceId,
     ledgerId: ledger.id,
+    ledgerPeriod: ledger.period ?? null,
     platformSkcs,
     expectedSkus,
     requestedBy,

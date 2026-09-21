@@ -31,7 +31,7 @@ function cachedResult(text) {
   };
 }
 
-async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion = 5, fetchImpl } = {}) {
+async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion = 5, fetchImpl, ledgerPeriod = "2026-08" } = {}) {
   const window = new Window({ url: erpUrl });
   const downloads = [];
   const deliveries = [];
@@ -48,6 +48,7 @@ async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion 
   };
   window.ShopeersErpDeliveryBridge = {
     reportStatus: async () => {},
+    previewContext: async () => ({ ok: !!ledgerPeriod, ledgerPeriod }),
     submit: async (payload) => { deliveries.push(payload); return { status: "success" }; },
   };
   if (cache) window.localStorage.setItem(cacheKey, JSON.stringify(cache));
@@ -55,7 +56,7 @@ async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion 
   try {
     for (const file of ["result-policy.js", "request-context.js", "content.js"]) {
       let source = await readFile(path.join(extensionRoot, "src", file), "utf8");
-      if (file === "content.js") source = source.replace("function handleDeliveryStatus(detail = {}) {", "window.__deliveryStatus = handleDeliveryStatus; function handleDeliveryStatus(detail = {}) {");
+      if (file === "content.js") source = source.replace("function handleDeliveryStatus(detail = {}) {", "window.__csvCell = csvCell; window.__deliveryStatus = handleDeliveryStatus; function handleDeliveryStatus(detail = {}) {");
       window.eval(source);
     }
   } catch (error) {
@@ -72,7 +73,7 @@ async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion 
       button.click();
       assert.equal(downloads.length, previousCount + 1);
       const { name, blob } = downloads.at(-1);
-      assert.match(name, /^SKU成本核算_\d{4}-\d{2}\.csv$/);
+      assert.match(name, /^SKU成本核算_(?:\d{4}-\d{2}|月份待关联)\.csv$/);
       assert.equal(blob.type, "text/csv;charset=utf-8");
       const bytes = new Uint8Array(await blob.arrayBuffer());
       assert.deepEqual(Array.from(bytes.slice(0, 3)), [0xef, 0xbb, 0xbf], "Chinese CSV keeps the UTF-8 BOM");
@@ -155,28 +156,34 @@ async function verifyCachedCsv(extensionRoot) {
     timestamp: Date.now(), results, meta: { filters: {} }, resultDeliveryId: "ERP-CSV-CACHE",
     warehouseEvidence: { formatVersion: 1, warehouses: [{ purchaseRecords: [{ productName: "=1+1", unitPrice: 1.234 }] }] },
   };
-  const extension = await loadExtension(extensionRoot, { cache });
+  const extension = await loadExtension(extensionRoot, { cache, ledgerPeriod: null });
   try {
     const originalCache = extension.window.localStorage.getItem(cacheKey);
+    for (const value of values) {
+      const encoded = extension.window.__csvCell(value);
+      const cell = Papa.parse(encoded).data[0][0];
+      assert.equal(cell, dangerous.includes(value) ? "'" + value : value, 'CSV text encoding still protects every field');
+    }
+    assert.equal(Papa.parse(extension.window.__csvCell(-2.5)).data[0][0], '-2.5');
     const { csv, rows } = await extension.exportCsv();
     assert.equal(rows.length, results.length + 1);
     assert.equal(rows[0][5], "产品名称");
     values.forEach((value, index) => {
       const row = rows[index + 1];
       const expected = index < dangerous.length ? `'${value}` : value;
-      for (const column of [0, 1, 2, 3, 4, 5, 6, 7, 12]) {
+      for (const column of [0, 1, 2, 5]) {
         assert.equal(row[column], expected, `text column ${column} must safely preserve ${JSON.stringify(value)}`);
       }
-      assert.deepEqual([row[8], row[11], ...row.slice(13, 16)], ["1", "3", "10", "12.34", "1.2340"]);
-      assert.match(row[16], /未按账本月末范围筛选的预览/);
-      assert.equal(row[9], "采购单价为 1");
-      assert.deepEqual(JSON.parse(row[10]), results[index].costWarnings.records);
+      assert.deepEqual([row[8], row[11], ...row.slice(13, 16)], ["0", "0", "", "", ""]);
+      assert.match(row[16], /台账月份待关联/);
+      assert.equal(row[9], "");
+      assert.deepEqual(JSON.parse(row[10]), []);
     });
-    assert.deepEqual(rows.at(-3).slice(13, 16), ["-5", "-12.5", "-2.5"], "actual numeric cells do not receive text prefixes");
+    assert.deepEqual(rows.at(-3).slice(13, 16), ["", "", ""], "cached monetary values cannot bypass missing ledger scope");
     assert.deepEqual(rows.at(-2).slice(13, 16), ["", "", ""], "missing costs do not become zero");
-    assert.equal(rows.at(-1)[9], "'=1+1", "external warning labels use the same safe text serialization");
+    assert.equal(rows.at(-1)[9], "", "cached cost warnings are recomputed from selected evidence");
     const typed = Papa.parse(csv, { header: true, dynamicTyping: (field) => ["总采购量", "总采购价(￥)", "预览单件成本"].includes(field) });
-    assert.deepEqual([typed.data[0]["总采购量"], typed.data[0]["总采购价(￥)"], typed.data[0]["预览单件成本"]], [10, 12.34, 1.234]);
+    assert.deepEqual([typed.data[0]["总采购量"], typed.data[0]["总采购价(￥)"], typed.data[0]["预览单件成本"]], [null, null, null]);
     assert.equal((await extension.exportCsv()).csv, csv, "repeated exports must not accumulate prefixes in live results");
     assert.equal(extension.window.localStorage.getItem(cacheKey), originalCache, "CSV encoding must not rewrite cached evidence");
     assert.equal(extension.deliveries.length, 0, "exporting a cached preview must not submit altered evidence");
@@ -217,8 +224,8 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3);
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.20");
-    assert.equal(delivery.meta.previewScope, "unscoped");
+    assert.equal(delivery.meta.extensionVersion, "8.0.21");
+    assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
     assert.ok(originalCache, "fresh calculation must write the v6 result cache");
@@ -233,7 +240,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(rows[1][4], "'=1+1");
     assert.equal(rows[1][5], "'=1+1");
     assert.equal(rows[1][6], "'+供应商");
-    assert.deepEqual(rows[1].slice(13, 16), ["3", "3.70", "1.2345"], "CSV protection leaves existing ERP preview precision unchanged");
+    assert.deepEqual(rows[1].slice(13, 16), ["3", "3.7035", "1.2345"], "CSV protection leaves existing ERP preview precision unchanged");
     assert.equal(JSON.stringify(originalDetail), originalDetailJson, "the ERP response remains unchanged");
     assert.equal(JSON.stringify(delivery), originalDelivery, "complete evidence submitted to the bridge remains unchanged");
     assert.equal(window.localStorage.getItem(cacheKey), originalCache, "calculation cache remains unchanged after export");
@@ -299,16 +306,16 @@ async function verifyChronologicalPreview(extensionRoot) {
       const selected = fixtures.slice(0, 3);
       const selectedTypes = types.slice(0, 3).map((type) => type === "a" ? "1688" : "采购单");
       const selectedNumbers = selected.map(({ order }) => order.purchaseOrderNo1688 || order.purchaseOrderNo);
-      const selectedDates = selected.map(({ detail }) => detail.creationTime.slice(0, 10));
+      const selectedDates = selected.map(({ detail }) => detail.creationTime);
       assert.deepEqual(result.selectedRecordIds, selected.map(({ detail }) => detail.detailId), `${types.join(",")} must select its chronological first three`);
       assert.deepEqual(result.details.map(({ sourceType }) => sourceType), selectedTypes);
-      assert.equal(result.sourceType, new Set(selectedTypes).size > 1 ? "混合采购" : selectedTypes[0]);
+      assert.equal(result.sourceType, [...new Set(selectedTypes)].join(" / "));
       const quantity = selected.reduce((sum, { detail }) => sum + Number(detail.purchaseQuantity), 0);
       const total = selected.reduce((sum, { detail }) => sum + Number(detail.purchaseQuantity) * Number(detail.purchaseUnitPrice), 0);
-      assert.equal(result.totalQty, quantity);
-      assert.equal(result.unitCost, (total / quantity).toFixed(4));
-      assert.equal(delivery.meta.previewScope, "unscoped");
-      assert.equal(delivery.meta.ledgerMonthCutoffStatus, "pending_workstation");
+      assert.equal(Number(result.totalQty), quantity);
+      assert.equal(result.unitCost, (Math.floor((total / quantity) * 10000) / 10000).toFixed(4));
+      assert.equal(delivery.meta.previewScope, "ledger_month");
+      assert.equal(delivery.meta.ledgerMonthCutoffStatus, "applied");
       const evidence = delivery.warehouseEvidence.warehouses[0].purchaseRecords;
       assert.equal(evidence.length, fixtures.length, "nonselected evidence must survive unchanged");
       assert.deepEqual(evidence.filter(({ selectedForPreview }) => selectedForPreview).map(({ recordId }) => recordId), result.selectedRecordIds);
@@ -336,7 +343,7 @@ async function verifyChronologicalPreview(extensionRoot) {
       assert.equal(rows[1][4], selectedNumbers.join("\n"));
       assert.equal(rows[1][12], selectedDates.join("\n"));
       assert.equal(rows[1][11], String(selected.length));
-      assert.match(rows[1][16], /待工作台保留账本当月及以前采购，排除后续月份/);
+      assert.match(rows[1][16], /台账月份：2026-08 · 采用当月及以前采购/);
       assert.equal(window.localStorage.getItem(cacheKey), originalCache);
       assert.equal(JSON.stringify(extension.deliveries[0]), JSON.stringify(delivery));
       assert.equal(JSON.stringify(fixtures), originalFixtures);
@@ -346,12 +353,70 @@ async function verifyChronologicalPreview(extensionRoot) {
   }
 }
 
+async function verifyLedgerPreview(extensionRoot) {
+  const records = [
+    { detailId: 'SEP15', creationTime: '2026-09-15 10:00:00', purchaseQuantity: '150', purchaseUnitPrice: '.12' },
+    { detailId: 'SEP11', creationTime: '2026-09-11 10:00:00', purchaseQuantity: '150', purchaseUnitPrice: '.12' },
+    { detailId: 'JUNE', creationTime: '2026-06-21 10:00:00', purchaseQuantity: '500', purchaseUnitPrice: '.106' },
+  ].map(record => ({ ...record, itemId: 'WH-MONTH', tradeName: '月份测试' }));
+  let savedCache;
+  for (const ledgerPeriod of ['2026-08', '2026-05', null]) {
+    const extension = await loadExtension(extensionRoot, { ledgerPeriod, fetchImpl: async rawUrl => {
+      const url = new URL(rawUrl);
+      const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-MONTH', purchaseOrderNo: 'PO-MONTH' }]
+        : url.pathname.endsWith('purchase-order-details') ? records : [{ platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }];
+      return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
+    } });
+    try {
+      const { window } = extension;
+      window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: `${new URL(erpUrl).origin}/purchase/purchase/v1/purchase-order-page?sku=SKC-MONTH` } }));
+      window.document.getElementById('erpa-cost-trigger').click();
+      for (let i = 0; i < 100 && !extension.deliveries.length; i++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(extension.deliveries.length, 1, 'missing month must not stop complete evidence delivery');
+      const delivery = extension.deliveries[0];
+      assert.equal(delivery.warehouseEvidence.warehouses[0].purchaseRecords.length, 3, 'future evidence remains available to other ledgers');
+      const result = delivery.results[0];
+      const { rows } = await extension.exportCsv();
+      const scopeText = window.document.getElementById('erpa-preview-scope').textContent;
+      if (ledgerPeriod === '2026-08') {
+        assert.equal(result.unitCost, '0.1060');
+        assert.deepEqual(Array.from(result.selectedRecordIds), ['JUNE']);
+        assert.equal(rows[1][15], '0.1060');
+        assert.equal(rows[1][12], '2026-06-21 10:00:00');
+        assert.match(scopeText, /台账月份：2026-08/);
+        window.document.querySelector('.erpa-result-row').click();
+        assert.doesNotMatch(window.document.querySelector('.erpa-detail-table').textContent, /2026-09/);
+        savedCache = JSON.parse(window.localStorage.getItem(cacheKey));
+      } else {
+        assert.equal(result.unitCost, null);
+        assert.equal(rows[1][15], '');
+        assert.match(window.document.body.textContent, ledgerPeriod ? /台账当月及以前无可用采购/ : /台账月份待关联/);
+      }
+    } finally { await extension.close(); }
+  }
+  // Page cache may hold another month's results or tampered scope. Re-resolve and
+  // recalculate from complete evidence before showing any numerical preview.
+  savedCache.meta.ledgerPeriod = '2099-12';
+  for (const ledgerPeriod of ['2026-09', null]) {
+    const extension = await loadExtension(extensionRoot, { cache: savedCache, ledgerPeriod });
+    try {
+      assert.doesNotMatch(extension.window.document.getElementById('erpa-preview-scope').textContent, /2099/);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const { rows } = await extension.exportCsv();
+      assert.equal(rows[1][15], ledgerPeriod ? '0.1112' : '');
+      assert.equal(extension.deliveries.length, 0, 'cache preview must not submit different formal evidence');
+      assert.equal(extension.window.localStorage.getItem(cacheKey), JSON.stringify(savedCache), 'preview does not overwrite cached evidence');
+    } finally { await extension.close(); }
+  }
+}
+
 export async function verifyCsvExport(extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension")) {
   await verifyLegacyCacheIsolation(extensionRoot, 4);
   await verifyLegacyCacheIsolation(extensionRoot, 5);
   await verifyCachedCsv(extensionRoot);
   await verifyCalculatedCsv(extensionRoot);
   await verifyChronologicalPreview(extensionRoot);
+  await verifyLedgerPreview(extensionRoot);
   const extension = await loadExtension(extensionRoot, { cache: { timestamp: Date.now(), results: [cachedResult("CURRENT-SKU")], meta: { filters: {} }, resultDeliveryId: "ERP-RESULT-CURRENT" } });
   try {
     const { window } = extension;
