@@ -26,7 +26,7 @@ function render(state) {
   if (!state) return;
   latestState = state;
   const boot = state.startup || { status: 'ready' };
-  document.querySelector('#startup').hidden = boot.status === 'ready';
+  document.querySelector('#startup').hidden = boot.status === 'ready' || state.activeTab !== 'workspace';
   document.querySelector('#startup').dataset.status = boot.status;
   document.querySelector('#startup-message').textContent = boot.message || '';
   document.querySelector('#startup-actions').hidden = boot.status !== 'error';
