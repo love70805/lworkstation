@@ -1,8 +1,24 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.4",
-  "integrationBranch": "codex/beta4-ledger-cost-preview",
+  "version": "0.3.0-beta.5",
+  "integrationBranch": "codex/beta5-workflow-consistency",
   "requiredCommits": [
+    {
+      "module": "ledger-cost-report-workflow-consistency",
+      "commit": "9a3a2f4"
+    },
+    {
+      "module": "selection-save-and-local-read-recovery",
+      "commit": "9e66ce3"
+    },
+    {
+      "module": "durable-backup-and-system-controls",
+      "commit": "07fe496"
+    },
+    {
+      "module": "live-query-durable-derived-cache",
+      "commit": "3b4e457"
+    },
     {
       "module": "erp-preview-ledger-month",
       "commit": "125756b"
