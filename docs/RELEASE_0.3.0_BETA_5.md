@@ -1,6 +1,6 @@
 # 0.3.0-beta.5 · 流程一致与本机缓存
 
-当前状态：实现完成，正在最终回归与候选验收，尚未公开发布。仅 Windows Beta 通道；稳定版保持 0.2.19。本机不安装，不修改真实业务数据，不新增数据库迁移。
+当前状态：已公开 [0.3.0-beta.5](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.5)，候选、CI、公开资产回读及更新通道检查通过。仅 Windows Beta 通道；稳定版保持 0.2.19。本机未安装，未修改真实业务数据，无新增数据库迁移。
 
 ## 使用变化
 
@@ -33,6 +33,16 @@
 - 126 个文件 / 837 项前端测试、生产构建与完整 release:check 通过；15 组桌面 verify 通过。
 - 隔离 Edge 完成月份/返回、无效账本、图表键盘/分页、利润成本往返、连续输入、财务报告换版、90 组布局，以及 ERP、选品与系统用户路径；页面错误为零。读取失败注入后保留筛选并可重试。
 - 桌面恢复脚本覆盖 12 次 ERP/1688 与最小化恢复、空根节点、渲染崩溃、WebContents 销毁、探测超时与延迟恢复、外部导航拦截；正常返回没有重载或丢失草稿。
-- 业务提交：`9a3a2f4`、`9e66ce3`、`07fe496`、`3b4e457`。安装包哈希、PR、CI 和公开资产核验在完成后补充。证据：`archive/beta5-main/`、`archive/beta5-selection/`、`archive/beta5-system/`。
+- Windows 最终候选通过通用 packaged smoke 与 7 项系统操作验收：真实 IPC 备份落盘、取消/写入失败阻断恢复、成功保存回滚文件后恢复、关闭偏好持久化、4 轮 ERP/1688 与最小化返回草稿、托盘隐藏保留内容。为隔离测试，替代了保存对话框的选择/取消返回值；未自动操作 Windows 原生文件选择器或点击系统托盘图标，外部 ERP/1688 网络阻断。
+- 业务提交：`9a3a2f4`、`9e66ce3`、`07fe496`、`3b4e457`。证据：`archive/beta5-main/`、`archive/beta5-selection/`、`archive/beta5-system/`。
 
 UI 验证使用 Edge 窗口 1024/1280/1440、浅深色和 CSS 125%/150% 缩放；不将其等同于 Windows 系统 DPI 实机验收。后台恢复另用打包应用隔离用户目录验证；偶发白屏未自然复现时，不能据此声称已彻底消除。未连接真实 ERP 账号。
+
+## 构建与公开发布
+
+- 构建源：`1ee55d5cbda4a49eb30c9f815d8457ebecaa6190`；[PR #103](https://github.com/love70805/lworkstation/pull/103) 合并与发布标签：`9e9d149136a91f5c99d79a4b70ba0e8561f70498`。构建源与标签运行代码一致，asar 文件和前端资源逐项核对通过。
+- PR CI `35697383695`、main CI `35697659767` 通过。
+- 安装包：`Lworkstation-Setup-0.3.0-beta.5.exe`，116767879 字节；SHA-256：`B875F1295636EBA70B68EB4F0363547CD6C8ACFBB5AB083379A8E1BF0D0CFCDB`。
+- 候选：`releases/candidates/0.3.0-beta.5-workflow-consistency/`；Beta 资产：`releases/prerelease/0.3.0-beta.5/`。四资产已校验并同步至桌面项目相同目录。
+- 2026-09-22 07:05:32 UTC（北京时间 15:05:32）公开预发布。安装包、blockmap、beta.yml、SHA256.txt 均完成匿名下载，与验收文件逐项哈希一致。
+- 真实 GitHub 更新提供方检查：Beta.4 可发现 Beta.5，Beta.5 为当前版本，稳定版 0.2.19 不跨通道；GitHub Latest 仍为 0.2.19。证据 `archive/beta5-main/public-readback.json`、`live-provider.json`。未进行本机安装或真实更新替换。
