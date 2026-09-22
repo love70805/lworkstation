@@ -95,3 +95,4 @@ button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .notes-section summary { color: var(--primary); font-size: 11px; cursor: pointer; }
 .notes-section[open] p { margin-top: 8px; }
 .update-actions { flex-wrap: wrap; position: sticky; bottom: -10px; padding: 6px 0; background: var(--surface); }
+ .update-help { margin: 10px 0 0; color: var(--text-muted, #687583); font-size: 11px; line-height: 1.5; }

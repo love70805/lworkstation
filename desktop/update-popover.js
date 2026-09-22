@@ -16,7 +16,8 @@ const releaseNotes = document.querySelector("#release-notes");
 const releaseNotesAction = document.querySelector("#release-notes-action");
 const actions = [...document.querySelectorAll("[data-update-action]")];
 let latestState = null;
-let actionPending = false;
+const pendingActions = new Set();
+let actionError = '';
 
 const statusLabels = {
   disabled: "未启用",
@@ -57,7 +58,7 @@ function render(state) {
   const release = update.release || {};
   currentVersion.textContent = update.currentVersion ? `v${String(update.currentVersion).replace(/^v/i, "")}` : "--";
   document.querySelector("#update-channel").textContent = /-beta(?:[.+]|$)/.test(update.currentVersion || "") ? "Beta" : "稳定版";
-  message.textContent = update.message || "更新状态不可用";
+  message.textContent = actionError || update.message || "更新状态不可用";
   stateBadge.textContent = statusLabels[update.status] || "未知";
   stateBadge.dataset.tone = update.status === "error" ? "danger" : ["available", "downloading", "downloaded"].includes(update.status) ? "primary" : "muted";
 
@@ -78,10 +79,11 @@ function render(state) {
   releaseNotes.textContent = release.notes || "";
   releaseNotesAction.hidden = !release.releaseUrl;
 
-  actions.forEach((button) => { button.hidden = true; button.disabled = actionPending; });
+  const disabled = name => name === 'cancel' ? pendingActions.has('cancel') : pendingActions.size > 0;
+  actions.forEach((button) => { button.hidden = true; button.disabled = disabled(button.dataset.updateAction); });
   const show = (...names) => names.forEach((name) => {
     const button = actions.find((entry) => entry.dataset.updateAction === name);
-    if (button) { button.hidden = false; button.disabled = actionPending; }
+    if (button) { button.hidden = false; button.disabled = disabled(name); }
   });
   if (["idle", "current"].includes(update.status)) show("check");
   if (update.status === "available") show("download");
@@ -93,21 +95,26 @@ function render(state) {
 }
 
 async function runAction(name) {
-  if (actionPending) return;
-  actionPending = true;
+  if (name === 'cancel' ? pendingActions.has('cancel') || latestState?.update?.status !== 'downloading' : pendingActions.size > 0) return;
+  pendingActions.add(name);
+  actionError = '';
   render(latestState);
   try {
-    if (name === "check") await window.updatePopover.check();
-    if (name === "download") await window.updatePopover.download();
-    if (name === "cancel") await window.updatePopover.cancel();
+    let result;
+    if (name === "check") result = await window.updatePopover.check();
+    if (name === "download") result = await window.updatePopover.download();
+    if (name === "cancel") result = await window.updatePopover.cancel();
     if (name === "retry") {
-      if (latestState?.update?.retryAction === "download") await window.updatePopover.download();
-      else await window.updatePopover.retry();
+      if (latestState?.update?.retryAction === "download") result = await window.updatePopover.download();
+      else result = await window.updatePopover.retry();
     }
-    if (name === "install") await window.updatePopover.install();
-    if (name === "postpone") await window.updatePopover.postpone();
+    if (name === "install") result = await window.updatePopover.install();
+    if (name === "postpone") result = await window.updatePopover.postpone();
+    if (result?.ok === false && !result.canceled) actionError = result.error || '操作未完成，请重试。';
+  } catch (error) {
+    actionError = error?.message || '操作未完成，请重试。';
   } finally {
-    actionPending = false;
+    pendingActions.delete(name);
     if (latestState) render(latestState);
   }
 }

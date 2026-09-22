@@ -1,6 +1,6 @@
 const { loadCloseBehavior, saveCloseBehavior } = require('./desktop-preferences.cjs');
 
-function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, onHide = () => {}, onError = () => {} }) {
+function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, onHide = () => {}, onError = () => {}, onChanged = () => {} }) {
   let tray;
   let quitting = false;
   let notified = false;
@@ -12,6 +12,16 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, o
   };
   const beginQuit = () => { quitting = true; };
   const quit = () => { beginQuit(); app.quit(); };
+  function updateTray() {
+    tray?.setToolTip(closeBehavior === 'tray' ? 'Lworkstation · 关闭窗口后继续后台收件' : 'Lworkstation · 关闭窗口时退出应用');
+    tray?.setContextMenu(menu());
+  }
+  function setCloseBehavior(value) {
+    if (!['tray', 'quit'].includes(value)) throw Error('关闭行为无效。');
+    closeBehavior = saveCloseBehavior({ userDataPath, behavior: value });
+    updateTray();
+    onChanged({ closeBehavior, trayAvailable: Boolean(tray && !tray.isDestroyed()) });
+  }
   function menu() {
     return Menu.buildFromTemplate([
       { label: '打开 Lworkstation', click: restore },
@@ -19,7 +29,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, o
       { label: '关闭窗口时', submenu: ['tray', 'quit'].map(value => ({
         label: value === 'tray' ? '隐藏到托盘（继续后台收件）' : '退出应用', type: 'radio', checked: closeBehavior === value,
         click: () => {
-          try { closeBehavior = saveCloseBehavior({ userDataPath, behavior: value }); tray?.setContextMenu(menu()); }
+          try { setCloseBehavior(value); }
           catch (error) { onError(`关闭偏好未保存：${error.message}`); }
         },
       })) },
@@ -29,8 +39,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, o
   }
   try {
     tray = new Tray(icon);
-    tray.setToolTip('Lworkstation · 关闭窗口后继续后台收件');
-    tray.setContextMenu(menu());
+    updateTray();
     tray.on('click', restore);
     tray.on('double-click', restore);
   } catch (error) {
@@ -50,7 +59,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, o
   window.on('session-end', quit);
   app.on('before-quit', beginQuit);
   return {
-    restore, beginQuit, quit,
+    restore, beginQuit, quit, setCloseBehavior,
     getState: () => ({ quitting, closeBehavior, trayAvailable: Boolean(tray && !tray.isDestroyed()) }),
     dispose: () => { beginQuit(); if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; },
   };

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useLiveQuery } from "dexie-react-hooks";
 import { Activity, CloudOff, CloudUpload, Copy, Database, Download, HardDrive, RefreshCw, ShieldCheck } from "lucide-react";
 import AppShell from "../components/AppShell";
+import SystemNavigation from "../components/SystemNavigation";
+import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
 import ErpAssistantSetup from "../components/ErpAssistantSetup";
 import SelectionCaptureSetup from "../components/SelectionCaptureSetup";
 import { Badge, Button, Panel, PageHeader, useToast } from "../components/UI";
@@ -18,6 +19,14 @@ import { getRuntimeEnvironmentCopy, isDesktopRuntime } from "../lib/desktopRunti
 const DESKTOP_RUNTIME = isDesktopRuntime();
 const RUNTIME_COPY = getRuntimeEnvironmentCopy();
 const APP_VERSION = RUNTIME_COPY.application;
+
+async function readDiagnosticsState() {
+  const [security, storage, events, sync] = await Promise.all([
+    getDataSecuritySnapshot(), navigator.storage?.estimate?.() ?? null,
+    db.auditEvents.orderBy('createdAt').reverse().limit(20).toArray(), getSyncStatusSnapshot(),
+  ]);
+  return { security, storage, events, sync };
+}
 
 function formatBytes(value) {
   const bytes = Number(value ?? 0);
@@ -67,30 +76,16 @@ export default function Diagnostics() {
   const navigate = useNavigate();
   const location = useLocation();
   const { notify } = useToast();
-  const diagnostics = useLiveQuery(getDataSecuritySnapshot, [], null);
-  const recentEvents = useLiveQuery(() => db.auditEvents.orderBy("createdAt").reverse().limit(20).toArray(), [], []);
-  const syncStatus = useLiveQuery(getSyncStatusSnapshot, [], null);
-  const [storageEstimate, setStorageEstimate] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
+  const check = useSystemSnapshot(readDiagnosticsState);
+  const diagnostics = check.data?.security;
+  const recentEvents = check.data?.events ?? [];
+  const syncStatus = check.data?.sync;
+  const storageEstimate = check.data?.storage;
+  const refreshing = check.refreshing;
   const [syncing, setSyncing] = useState(false);
   const [syncHealth, setSyncHealth] = useState(null);
   const [checkingSyncHealth, setCheckingSyncHealth] = useState(false);
-  const [lastCheckedAt, setLastCheckedAt] = useState(null);
-
-  const refreshStorageEstimate = async () => {
-    const estimate = await (navigator.storage?.estimate?.() ?? Promise.resolve(null));
-    setStorageEstimate(estimate);
-    return estimate;
-  };
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const estimate = await (navigator.storage?.estimate?.() ?? Promise.resolve(null));
-      if (active) setStorageEstimate(estimate);
-    })();
-    return () => { active = false; };
-  }, []);
+  const lastCheckedAt = check.checkedAt;
 
   useEffect(() => {
     if (location.hash !== "#extensions") return;
@@ -125,16 +120,10 @@ export default function Diagnostics() {
   };
 
   const refresh = async () => {
-    setRefreshing(true);
-    try {
-      const [freshDiagnostics, freshStorage] = await Promise.all([getDataSecuritySnapshot(), refreshStorageEstimate()]);
-      setLastCheckedAt(new Date().toISOString());
-      notify(`本机检查完成：已读取 ${freshDiagnostics.summary.recordCount.toLocaleString("zh-CN")} 条记录${freshStorage?.usage ? `，占用 ${formatBytes(freshStorage.usage)}` : ""}。`, "success");
-    } catch (error) {
-      notify(`本机检查失败：${error.message}`, "error");
-    } finally {
-      setRefreshing(false);
-    }
+    const result = await check.refresh();
+    if (!result) return;
+    if (result.status === 'error') notify(`本机检查失败：${result.error}`, 'error');
+    else notify(`本机记录可读取：${result.data.security.summary.recordCount.toLocaleString('zh-CN')} 条。扩展连接请查看下方独立状态。`, 'success');
   };
 
   const syncNow = async () => {
@@ -163,6 +152,7 @@ export default function Diagnostics() {
     const text = [
       `Lworkstation ${APP_VERSION}`,
       `环境：${RUNTIME_COPY.environment}`,
+      `本机检查：${check.status === 'ready' ? '记录可读取' : check.status === 'error' ? `失败（${check.error}）` : '读取中'}`,
       `记录：${summary?.recordCount ?? "读取中"}`,
       `本机存储：${quotaBytes > 0 ? `${formatBytes(usageBytes)} / ${formatBytes(quotaBytes)}` : "当前环境未提供配额"}`,
       `最近备份：${lastBackup ? formatDateTime(lastBackup.generatedAt) : "尚未导出"}`,
@@ -181,6 +171,7 @@ export default function Diagnostics() {
     const generatedAt = new Date().toISOString();
     const report = {
       format: "shopeers-local-diagnostics",
+      localCheck: { status: check.status, checkedAt: check.checkedAt, error: check.error || null },
       formatVersion: 1,
       applicationVersion: APP_VERSION,
       generatedAt,
@@ -211,24 +202,26 @@ export default function Diagnostics() {
     };
     const fileName = `shopeers-diagnostics-${localDateStamp(generatedAt)}.json`;
     triggerDownload(fileName, JSON.stringify(report, null, 2));
-    notify(`诊断摘要已导出：${fileName}。`, "success");
+    notify(`已请求下载诊断摘要：${fileName}，请确认文件保存完成。`, "info");
   };
 
   return (
     <AppShell pageClass="diagnostics-page">
+      <SystemNavigation />
       <PageHeader
-        title="系统诊断"
+        title="系统检查"
         description={RUNTIME_COPY.diagnosticsDescription}
         actions={<Button icon={RefreshCw} loading={refreshing} disabled={refreshing} onClick={refresh}>刷新状态</Button>}
       />
+      {check.status === 'error' ? <div className="system-check-error" role="alert">本机检查失败：{check.error}<Button onClick={refresh} loading={refreshing} disabled={refreshing}>重试检查</Button></div> : null}
+      <p className="system-check-note">本机检查读取数据库记录与存储占用；可读取不代表业务数据均正确，也不代表 ERP / 1688 服务正常。各连接状态在下方独立检查。</p>
 
       <div className="diagnostic-meta"><span>应用 <strong className="mono">{APP_VERSION}</strong></span><span>环境 <strong className="mono">{RUNTIME_COPY.environment}</strong></span><span>云端协作 <strong className="mono">{runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "未配置"}</strong></span><span>上次检查 <strong className="mono">{lastCheckedAt ? formatDateTime(lastCheckedAt) : "未运行"}</strong></span></div>
 
-      <div className="diagnostic-card-grid">
-        <Panel className="diagnostic-card"><Database size={22} /><div><h2>本机数据库</h2><Badge tone={summary ? "success" : "neutral"}>{summary ? "可读取" : "读取中"}</Badge></div><strong className="mono">{summary ? `${summary.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{DESKTOP_RUNTIME ? "桌面工作站中的全部业务记录" : "当前浏览器中的全部业务记录"}</p><footer><span>模式：IndexedDB</span><span>{summary ? "已读取" : "等待数据"}</span></footer></Panel>
-        <Panel className="diagnostic-card"><HardDrive size={22} /><div><h2>{DESKTOP_RUNTIME ? "桌面存储" : "浏览器存储"}</h2><Badge tone={quotaBytes > 0 ? "success" : "neutral"}>{quotaBytes > 0 ? "已估算" : "未提供配额"}</Badge></div><strong className="mono">{storagePercent == null ? formatBytes(usageBytes) : `${storagePercent}%`}</strong><p>{quotaBytes > 0 ? `${formatBytes(usageBytes)} / ${formatBytes(quotaBytes)}` : `已用 ${formatBytes(usageBytes)}`}</p><footer><span>来源：Storage API</span><span>本机</span></footer></Panel>
-        <Panel className="diagnostic-card"><ShieldCheck size={22} /><div><h2>备份状态</h2><Badge tone={lastBackup ? "success" : "warning"}>{lastBackup ? "已导出" : "尚未导出"}</Badge></div><strong className="mono">{lastBackup ? `${lastBackup.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{lastBackup ? `最近导出：${formatDateTime(lastBackup.generatedAt)}` : "请先导出本机完整备份"}</p><footer><span>{lastBackup ? formatBytes(lastBackup.sizeBytes) : "无导出记录"}</span><button onClick={() => navigate("/data-security")}>打开备份中心</button></footer></Panel>
-        <Panel className="diagnostic-card"><CloudOff size={22} /><div><h2>云端协作</h2><Badge tone={syncHealth?.status === "ok" ? "success" : runtimeSummary.cloudConfigured ? "info" : "neutral"}>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</Badge></div><strong className="mono">{syncHealth?.backend ?? (runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "仅本机")}</strong><p>{syncHealth?.status === "error" ? syncHealth.message : runtimeSummary.cloudConfigured ? "同步端点已配置，可上传本地审计 outbox" : "当前数据不会自动上传或与其他成员同步"}</p><footer><span>待上传审计：{syncStatus?.retryableCount ?? "读取中"}</span><span className="diagnostic-card-actions"><button className="diagnostic-sync-button" disabled={checkingSyncHealth} onClick={checkSyncHealth}><RefreshCw size={13} />{checkingSyncHealth ? "检查中" : "检查服务"}</button><button className="diagnostic-sync-button" disabled={syncing || !runtimeSummary.cloudConfigured || !(syncStatus?.retryableCount > 0)} onClick={syncNow}><CloudUpload size={13} />{syncing ? "同步中" : "立即同步"}</button></span></footer></Panel>
+      <div className="diagnostic-card-grid system-local-cards">
+        <Panel className="diagnostic-card"><Database size={22} /><div><h2>本机数据库</h2><Badge tone={check.status === 'error' ? 'danger' : summary ? "success" : "neutral"}>{check.status === 'error' ? '检查失败' : summary ? "可读取" : "读取中"}</Badge></div><strong className="mono">{summary ? `${summary.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{DESKTOP_RUNTIME ? "桌面工作站中的全部业务记录" : "当前浏览器中的全部业务记录"}</p><footer><span>模式：IndexedDB</span><span>{check.status === 'error' ? '请重试检查' : summary ? "已读取" : "等待数据"}</span></footer></Panel>
+        <Panel className="diagnostic-card"><HardDrive size={22} /><div><h2>{DESKTOP_RUNTIME ? "桌面存储" : "浏览器存储"}</h2><Badge tone={quotaBytes > 0 ? "success" : "neutral"}>{check.status !== 'ready' ? check.status === 'error' ? '未读取' : '读取中' : quotaBytes > 0 ? "已估算" : "未提供配额"}</Badge></div><strong className="mono">{check.status !== 'ready' || !storageEstimate ? '--' : storagePercent == null ? formatBytes(usageBytes) : `${storagePercent}%`}</strong><p>{check.status !== 'ready' ? '等待本机检查完成' : quotaBytes > 0 ? `${formatBytes(usageBytes)} / ${formatBytes(quotaBytes)}` : '当前环境未提供存储估算'}</p><footer><span>来源：Storage API</span><span>本机</span></footer></Panel>
+        <Panel className="diagnostic-card"><ShieldCheck size={22} /><div><h2>备份状态</h2><Badge tone={check.status !== 'ready' ? 'neutral' : lastBackup ? "success" : "warning"}>{check.status !== 'ready' ? check.status === 'error' ? '未读取' : '读取中' : lastBackup ? "有导出记录" : "尚未导出"}</Badge></div><strong className="mono">{lastBackup ? `${lastBackup.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{lastBackup ? `最近导出：${formatDateTime(lastBackup.generatedAt)}，文件是否仍在磁盘需另行确认` : check.status === 'ready' ? "请先保存本机完整备份" : '等待本机检查完成'}</p><footer><span>{lastBackup ? formatBytes(lastBackup.sizeBytes) : '--'}</span><button onClick={() => navigate("/data-security")}>打开数据备份</button></footer></Panel>
       </div>
 
       <section className="diagnostic-extension-section" id="extensions" aria-labelledby="diagnostic-extension-title">
@@ -241,6 +234,10 @@ export default function Diagnostics() {
           <div className="diagnostic-extension-group"><div className="diagnostic-extension-group-heading"><strong>1688 采集扩展与收件服务</strong><small>状态检查不会改变待确认队列或选品数据。</small></div><SelectionCaptureSetup diagnostics /></div>
         </div>
       </section>
+
+      <details className="system-advanced"><summary>高级：云端协作</summary>
+        <Panel className="diagnostic-card"><CloudOff size={22} /><div><h2>云端协作</h2><Badge tone={syncHealth?.status === "ok" ? "success" : runtimeSummary.cloudConfigured ? "info" : "neutral"}>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</Badge></div><strong className="mono">{syncHealth?.backend ?? (runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "仅本机")}</strong><p>{syncHealth?.status === "error" ? syncHealth.message : runtimeSummary.cloudConfigured ? "同步端点已配置，可上传本地审计 outbox" : "当前数据不会自动上传或与其他成员同步"}</p><footer><span>待上传审计：{syncStatus?.retryableCount ?? "读取中"}</span><span className="diagnostic-card-actions"><button className="diagnostic-sync-button" disabled={checkingSyncHealth || !runtimeSummary.cloudConfigured} onClick={checkSyncHealth}><RefreshCw size={13} />{checkingSyncHealth ? "检查中" : "检查服务"}</button><button className="diagnostic-sync-button" disabled={syncing || !runtimeSummary.cloudConfigured || !(syncStatus?.retryableCount > 0)} onClick={syncNow}><CloudUpload size={13} />{syncing ? "同步中" : "立即同步"}</button></span></footer></Panel>
+      </details>
 
       <Panel className="trace-panel">
         <div className="panel-header">
@@ -255,12 +252,12 @@ export default function Diagnostics() {
             const logTone = item.tone === "success" ? "info" : item.tone;
             return <div className="log-line" key={event.id}><span className="log-time">[{formatDateTime(event.createdAt)}]</span><strong className={`log-${logTone}`}>{item.title}</strong><span className="log-source">[{event.objectType ?? "workspace"}]</span><span>{item.detail}</span></div>;
           })}
-          {recentEvents.length === 0 ? <p className="log-awaiting">暂无本机操作记录。导入销售台账、保存商品或导出备份后会显示在这里。</p> : null}
+          {recentEvents.length === 0 ? <p className="log-awaiting">{check.status === 'ready' ? '暂无本机操作记录。导入销售台账、保存商品或导出备份后会显示在这里。' : check.status === 'error' ? '操作记录读取失败，请重试本机检查。' : '正在读取操作记录…'}</p> : null}
         </div>
         </details>
       </Panel>
 
-      <div className="diagnostic-links"><span>诊断与备份已整合到本模块</span><span>数据模式：<code>本机 IndexedDB</code></span><span>云端协作：<code>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</code></span></div>
+      <div className="diagnostic-links"><span>系统与备份</span><span>数据模式：<code>本机 IndexedDB</code></span><span>云端协作：<code>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</code></span></div>
     </AppShell>
   );
 }

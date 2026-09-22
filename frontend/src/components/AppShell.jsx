@@ -26,7 +26,8 @@ import {
 import { createWorkspaceBackupPayload, db, getActiveMemberContext, getWorkspaceOperationalSummary, recordWorkspaceBackupExport } from "../data/database";
 import { runtimeConfig } from "../config/runtimeConfig";
 import { useCloudAuth } from "../hooks/useCloudAuth";
-import { downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
+import { backupSaveMessage, downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
+import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
 import { toggleAppearance } from "../lib/uiState";
 import { applyAppearance, readAppearance } from '../lib/appearance';
 import { profitWorkspaceHref, validatedLedgerSearch } from "../lib/workspaceNavigation";
@@ -44,7 +45,7 @@ const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
   { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
-  { id: "diagnostics", label: "备份中心", path: "/data-security", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
+  { id: "diagnostics", label: "系统与备份", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
 ];
 
 function isActive(pathname, item) {
@@ -88,12 +89,17 @@ export default function AppShell({ children, pageClass = "" }) {
   const [openMenu, setOpenMenu] = useState("");
   const [openDialog, setOpenDialog] = useState("");
   const [readNotificationIds, setReadNotificationIds] = useState(readStoredNotificationIds);
-  const [checkingConnection, setCheckingConnection] = useState(false);
-  const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const [backingUp, setBackingUp] = useState(false);
   const [supportCopied, setSupportCopied] = useState(false);
   const [appearance, setAppearance] = useState(readAppearance);
-  const workspaceSummary = useLiveQuery(getWorkspaceOperationalSummary, [], null);
+  const connectionCheck = useSystemSnapshot(getWorkspaceOperationalSummary);
+  const workspaceSummary = connectionCheck.data;
+  const checkingConnection = connectionCheck.refreshing;
+  const lastCheckedAt = connectionCheck.checkedAt;
+  const connectionLabel = checkingConnection ? '检查中' : connectionCheck.status === 'error' ? '检查失败' : workspaceSummary ? '可读取' : '读取中';
+  const [closePreference, setClosePreference] = useState({ status: 'loading' });
+  const [savingClosePreference, setSavingClosePreference] = useState(false);
+  const desktopRuntime = typeof window !== 'undefined' ? window.shopeersDesktopRuntime : null;
   const requestedLedgerId = new URLSearchParams(location.search).get("ledger");
   const navigationContext = useLiveQuery(async () => {
     const context = await getActiveMemberContext();
@@ -109,7 +115,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const effectiveSidebarCollapsed = compactSidebar ? !compactSidebarExpanded : sidebarCollapsed;
 
   const backTarget = useMemo(() => {
-    if (baseNavigation.some((item) => item.path === pathname)) return null;
+    if (baseNavigation.some((item) => item.path === pathname) || pathname === '/data-security') return null;
     if (pathname.startsWith("/products") || pathname.startsWith("/capture")) return "/products";
     if (pathname.startsWith("/import-preview") || pathname.startsWith('/ledger')) return `/workspace${navigationSearch}`;
     if (pathname.startsWith("/erp-assistant")) return profitWorkspaceHref(navigationSearch, 'cost');
@@ -188,6 +194,20 @@ export default function AppShell({ children, pageClass = "" }) {
   }, [appearance]);
 
   useEffect(() => {
+    if (openDialog !== 'settings' || !desktopRuntime?.desktop) return undefined;
+    let active = true;
+    const accept = result => {
+      if (!active) return;
+      setClosePreference(result?.ok === false ? { status: 'error', error: result.error } : { ...result, status: 'ready' });
+    };
+    setClosePreference({ status: 'loading' });
+    Promise.resolve(desktopRuntime.getCloseBehavior?.() ?? { ok: false, error: '当前桌面尚不支持此设置，请更新并重启。' })
+      .then(accept).catch(error => accept({ ok: false, error: error.message }));
+    const unsubscribe = desktopRuntime.onCloseBehavior?.(accept);
+    return () => { active = false; unsubscribe?.(); };
+  }, [openDialog, desktopRuntime]);
+
+  useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
@@ -249,30 +269,35 @@ export default function AppShell({ children, pageClass = "" }) {
   };
 
   const checkLocalWorkspace = async () => {
-    setCheckingConnection(true);
+    const result = await connectionCheck.refresh();
+    if (result?.status === 'error') notify(`本机数据库检查失败：${result.error}`, 'error');
+  };
+
+  const changeClosePreference = async (behavior) => {
+    setSavingClosePreference(true);
     try {
-      await getWorkspaceOperationalSummary();
-      const checkedAt = new Date().toISOString();
-      setLastCheckedAt(checkedAt);
+      const result = await desktopRuntime.setCloseBehavior(behavior);
+      if (!result?.ok) throw new Error(result?.error || '关闭偏好未保存。');
+      setClosePreference({ ...result, status: 'ready' });
+      notify('关闭窗口偏好已保存。', 'success');
     } catch (error) {
-      notify(`本机数据库检查失败：${error.message}`, "error");
-    } finally {
-      setCheckingConnection(false);
-      setOpenMenu("");
-    }
+      setClosePreference(current => ({ ...current, error: error.message }));
+    } finally { setSavingClosePreference(false); }
   };
 
   const exportLocalBackup = async () => {
     setBackingUp(true);
     try {
       const payload = await createWorkspaceBackupPayload();
-      const download = downloadWorkspaceBackup(payload);
+      const download = await downloadWorkspaceBackup(payload);
+      const notice = backupSaveMessage(download);
+      if (notice) { notify(notice, 'info'); return; }
       await recordWorkspaceBackupExport({
         ...download,
         recordCount: payload.recordCount,
         generatedAt: payload.generatedAt,
       });
-      notify(`本机备份已导出：${download.fileName}。`, "success");
+      notify(`本机备份已保存：${download.fileName}。`, "success");
     } catch (error) {
       notify(`备份导出失败：${error.message}`, "error");
     } finally {
@@ -324,7 +349,7 @@ export default function AppShell({ children, pageClass = "" }) {
         <div className="topbar-actions" ref={menuRef}>
           <div className="topbar-control environment-control">
             <button className="environment-chip" aria-haspopup="menu" aria-expanded={openMenu === "environment"} onClick={() => toggleMenu("environment")}><i /> {cloudEnvironment}</button>
-            {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon success"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在当前浏览器的 IndexedDB</small></span></div><div className="popover-detail"><span>本地数据库 <b>已连接</b></span><span>数据模式 <b>正式本地数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : "读取中"}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div><button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button></div> : null}
+            {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统检查<ChevronRight size={16} /></button></div> : null}
           </div>
           <Button variant="primary" icon={Inbox} onClick={() => navigate("/products?view=pending")}>待确认采集{workspaceSummary?.pendingCaptureCount ? `（${workspaceSummary.pendingCaptureCount}）` : ""}</Button>
           <span className="topbar-separator" />
@@ -342,7 +367,7 @@ export default function AppShell({ children, pageClass = "" }) {
           </div>
           <div className="topbar-control account-control">
             <button className={`avatar-button ${openMenu === "account" ? "active" : ""}`} aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded={openMenu === "account"} onClick={() => toggleMenu("account")}><span className="avatar" aria-hidden="true">L</span></button>
-            {openMenu === "account" ? <div className="topbar-popover account-popover" role="menu"><div className="account-summary"><span className="avatar avatar-large" aria-hidden="true">L</span><span><strong>{cloudAuth.user?.email ?? "Lworkstation 用户"}</strong><small>{cloudAuth.user ? "云端工作区成员" : runtimeConfig.syncProvider === "supabase" ? "尚未登录云端" : "本机工作区管理员"}</small></span></div><button onClick={() => showDialog("cloud-auth")}><ShieldCheck size={17} />{cloudAuth.user ? "云端账户" : "登录云端工作区"}<ChevronRight size={15} /></button><button onClick={() => showDialog("settings")}><Settings size={17} />工作区偏好<ChevronRight size={15} /></button><button onClick={() => showDialog("support")}><ShieldCheck size={17} />产品支持摘要<ChevronRight size={15} /></button></div> : null}
+            {openMenu === "account" ? <div className="topbar-popover account-popover" role="menu"><div className="account-summary"><span className="avatar avatar-large" aria-hidden="true">L</span><span><strong>{cloudAuth.user?.email ?? "Lworkstation 用户"}</strong><small>{cloudAuth.user ? "云端工作区成员" : runtimeConfig.syncProvider === "supabase" ? "尚未登录云端" : "本机工作区管理员"}</small></span></div>{runtimeConfig.cloudConfigured ? <button onClick={() => showDialog("cloud-auth")}><ShieldCheck size={17} />{cloudAuth.user ? "云端账户" : "登录云端工作区"}<ChevronRight size={15} /></button> : null}<button onClick={() => showDialog("settings")}><Settings size={17} />工作区偏好<ChevronRight size={15} /></button><button onClick={() => showDialog("support")}><ShieldCheck size={17} />产品支持摘要<ChevronRight size={15} /></button></div> : null}
           </div>
         </div>
       </header>
@@ -354,7 +379,7 @@ export default function AppShell({ children, pageClass = "" }) {
       <Modal
         open={openDialog === "settings"}
         title="工作区设置"
-        description="这些偏好和本地数据仅属于当前浏览器工作区。"
+        description="管理当前本机工作区与桌面偏好。"
         onClose={() => setOpenDialog("")}
         footer={<Button variant="primary" onClick={() => setOpenDialog("")}>完成</Button>}
       >
@@ -362,8 +387,10 @@ export default function AppShell({ children, pageClass = "" }) {
           <div><span><strong>界面语言</strong><small>导航、状态和提示均使用中文</small></span><b>简体中文</b></div>
           <div><span><strong>数据保存位置</strong><small>IndexedDB 本地数据不会自动上传云端</small></span><b>仅本机</b></div>
           <div><span><strong>当前数据量</strong><small>商品、账本、成本与审计等全部本地记录</small></span><b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : "读取中"}</b></div>
+          {desktopRuntime?.desktop ? <div className="desktop-close-preference"><span><label htmlFor="desktop-close-behavior"><strong>关闭窗口时</strong></label><small>{closePreference.status === 'loading' ? '正在读取桌面偏好…' : closePreference.trayAvailable === false ? '系统托盘当前不可用，关闭窗口会退出应用。' : closePreference.closeBehavior === 'quit' ? '退出应用并停止后台收件。' : '隐藏到系统托盘，继续后台收件。'}</small>{closePreference.error ? <small className="system-inline-error" role="alert">{closePreference.error}</small> : null}</span><select id="desktop-close-behavior" className="select-input" value={closePreference.closeBehavior ?? ''} disabled={savingClosePreference || closePreference.status !== 'ready'} onChange={event => changeClosePreference(event.target.value)}>{closePreference.status !== 'ready' ? <option value="">未读取</option> : null}<option value="tray">隐藏到托盘</option><option value="quit">退出应用</option></select></div> : null}
           <button type="button" disabled={backingUp} onClick={exportLocalBackup}><Download size={18} /><span><strong>{backingUp ? "正在导出备份" : "导出本机备份"}</strong><small>生成包含当前工作区全部表的 JSON 文件</small></span><ChevronRight size={16} /></button>
         </div>
+        <details className="system-advanced"><summary>高级：云端账户</summary><p>本机工作不需要登录云端。</p><Button onClick={() => showDialog('cloud-auth')}>管理云端账户</Button></details>
       </Modal>
 
       <Modal
@@ -375,9 +402,9 @@ export default function AppShell({ children, pageClass = "" }) {
       >
         <div className="shell-dialog-list support-summary">
           <div><span><strong>应用版本</strong><small>{PRODUCT_NAME} 经营管理中心</small></span><b>{APP_VERSION_LABEL}</b></div>
-          <div><span><strong>运行环境</strong><small>本机 IndexedDB 工作区</small></span><b>已连接</b></div>
+          <div><span><strong>运行环境</strong><small>本机 IndexedDB 工作区，仅检查可读取性</small></span><b>{connectionLabel}</b></div>
           <div><span><strong>业务数据</strong><small>正式商品 / 平台 SKU / 待确认采集</small></span><b>{workspaceSummary ? `${workspaceSummary.productCount} / ${workspaceSummary.platformSkuCount} / ${workspaceSummary.pendingCaptureCount}` : "读取中"}</b></div>
-          <div><span><strong>建议操作</strong><small>故障排查和日志导出请使用左侧“系统诊断”</small></span><b>诊断中心</b></div>
+          <button type="button" onClick={() => { setOpenDialog(''); navigate('/diagnostics'); }}><ShieldCheck size={18} /><span><strong>打开系统检查</strong><small>左侧“系统与备份”可检查连接、导出摘要及管理备份</small></span><ChevronRight size={16} /></button>
         </div>
       </Modal>
 

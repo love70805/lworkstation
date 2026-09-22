@@ -29,6 +29,7 @@ const { isAllowedWorkspaceUrl } = require("./workspace-navigation.cjs");
 const { createInboxServiceController } = require("./inbox-service.cjs");
 const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecycle.cjs');
 const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
+const { registerWorkspaceSystemIpc } = require('./workspace-system-ipc.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
 const { createInboxPopoverLifecycle } = require("./inbox-popover-lifecycle.cjs");
@@ -1514,6 +1515,10 @@ async function createWindow() {
     userDataPath: app.getPath('userData'),
     onHide: () => { closeInboxPopover({ returnFocus: false }); closeUpdatePopover({ returnFocus: false }); },
     onError: message => { lifecycleNotice = message; publishState(); },
+    onChanged: state => {
+      const contents = views.get('workspace')?.webContents;
+      if (contents && !contents.isDestroyed()) contents.send('workspace:close-behavior', state);
+    },
   });
   mainWindow.on('resize', () => { resizeViews(); positionInboxPopover(); positionUpdatePopover(); });
   for (const event of ['restore', 'show', 'focus']) mainWindow.on(event, restoreWorkspaceSurface);
@@ -1560,6 +1565,8 @@ async function createWindow() {
   await writeSmokeReport();
 }
 
+registerWorkspaceSystemIpc({ ipcMain, getContents: () => views.get('workspace')?.webContents,
+  getWindow: () => mainWindow, getLifecycle: () => desktopLifecycle, dialog, devUrl: DEV_URL });
 ipcMain.handle("desktop:get-state", () => publicState());
 ipcMain.handle('desktop:startup-action', (event, action) => {
   if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };

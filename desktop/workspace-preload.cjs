@@ -39,6 +39,14 @@ contextBridge.exposeInMainWorld("shopeersDesktopRuntime", Object.freeze({
   desktop: true,
   version,
   appearance: savedAppearance,
+  saveBackup: ({ fileName, json } = {}) => ipcRenderer.invoke('workspace:save-backup', { fileName, json }),
+  getCloseBehavior: () => ipcRenderer.invoke('workspace:get-close-behavior'),
+  setCloseBehavior: behavior => ipcRenderer.invoke('workspace:set-close-behavior', behavior),
+  onCloseBehavior: callback => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('workspace:close-behavior', listener);
+    return () => ipcRenderer.removeListener('workspace:close-behavior', listener);
+  },
   requestInbox: ({ route, method = "GET", query = null, body = null } = {}) => ipcRenderer.invoke("desktop:request-inbox", {
     route,
     method,
