@@ -9,6 +9,7 @@ import { createWorkspaceBackupPayload,restoreWorkspaceBackupPayload,createWorksp
 import { validateReportBackup } from "../domain/profitReportBackup";
 import { claimPendingSyncEnvelope } from "./syncOutbox";
 import { REPORT_TABLES } from "../domain/profitReports";
+import { withCurrentLedgerResults } from './repositories/ledgerOverviewRepository';
 const scope={workspaceId:"W",ledgerId:"L",period:"2026-08"};
 async function adopt(kind,patch={}){const input={...scope,kind,mode:"manual",...(kind==='dispatch'?{adoptedQuantityExact:'100',rows:[]}:{rows:[{kind,manual:true,store:'甲',signedAmountExact:'0.0009',sourceRow:1},{kind,manual:true,store:'乙',signedAmountExact:'-0.0001',sourceRow:1}]}),...patch};const preview=await previewMonthlySupplement(input);return adoptMonthlySupplement(input,preview);}
 async function report(kind='pre_deduction',baseReportId){const input={ledgerId:'L',kind,baseReportId};const preview=await previewProfitReport(input);return saveProfitReport(input,{expectedFingerprint:preview.fingerprint});}
@@ -20,6 +21,23 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('overview follows the current base and deduction batch while historical files remain immutable', async () => {
+ await adopt('dispatch');
+ const base = await report();
+ const current = async () => (await withCurrentLedgerResults([await db.ledgers.get('L')]))[0].currentResult;
+ expect((await current()).state).toBe('base');
+ await adopt('deduction');
+ const financial = await report('financial', base.id);
+ expect(await current()).toMatchObject({ state: 'financial', profit: Number(financial.displayTotals.profit), report: { id: financial.id } });
+ await adopt('deduction', { rows: [{ kind: 'deduction', manual: true, store: '甲', signedAmountExact: '20', sourceRow: 1 }, { kind: 'deduction', manual: true, store: '乙', signedAmountExact: '0', sourceRow: 1 }] });
+ expect(await current()).toMatchObject({ state: 'deduction_pending', profit: Number(base.displayTotals.profit), report: { id: base.id } });
+ const updated = await report('financial', base.id);
+ expect((await current()).report.id).toBe(updated.id);
+ await reopenLedgerForCostCorrection({ ledgerId: 'L', reason: '复核基础' });
+ expect(await current()).toMatchObject({ state: 'reopened', profit: null });
+ expect((await readSavedProfitReport(base.id)).fileBase64).toBe(base.fileBase64);
+ expect((await readSavedProfitReport(financial.id)).fileBase64).toBe(financial.fileBase64);
+});
 it('upgrades an actual v14 database without changing any old table row',async()=>{
  const before=await createWorkspaceBackupPayload();
  await db.delete();

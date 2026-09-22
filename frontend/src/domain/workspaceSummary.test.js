@@ -44,9 +44,18 @@ describe("buildWorkspaceOperationalSummary", () => {
       recordCount: 0,
       latestLedger: null,
       latestOpenLedger: null,
+      latestMissingCostLedger: null,
       latestFinalizedLedger: null,
       latestCaptureAt: null,
       latestActivityAt: null,
     });
   });
+});
+it('links cost tasks to a ledger that actually has missing costs', () => {
+ const summary = buildWorkspaceOperationalSummary({ ledgers: [
+  { id: 'june', status: 'cost_pending', updatedAt: '2026-09-01', costSummary: { missingCount: 2 } },
+  { id: 'may', status: 'ready', updatedAt: '2026-09-02', costSummary: { missingCount: 0 } },
+ ] });
+ expect(summary.latestOpenLedger.id).toBe('may');
+ expect(summary.latestMissingCostLedger.id).toBe('june');
 });

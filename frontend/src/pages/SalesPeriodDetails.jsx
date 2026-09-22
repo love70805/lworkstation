@@ -43,7 +43,9 @@ function StoreComposition({ data, metric, chosenStore, onChooseStore }) {
 export default function SalesPeriodDetails({ data, metric, chosenStore, onChooseStore, state, onStateChange, close, previous, next }) {
   const { query, sort, page, scroll } = { ...EMPTY_STATE, ...state };
   const searchId = useId(), sortId = useId(), tableRef = useRef(null);
+  const headingRef = useRef(null);
   const label = data.date || data.period;
+  useLayoutEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, [label]);
   const storeRows = useMemo(() => chosenStore ? data.rows.filter(row => salesStoreKey(row.store) === chosenStore) : data.rows, [data.rows, chosenStore]);
   const ranked = useMemo(() => chosenStore ? storeRows.filter(row => row.platformSkc?.trim()).toSorted((a, b) => new Exact(b.quantityExact).cmp(a.quantityExact) || tieKey(a, b)).slice(0, 5) : storeRows, [storeRows, chosenStore]);
   const selectedTotals = chosenStore && data.status !== 'unknown' ? data.stores?.find(item => salesStoreKey(item.store) === chosenStore) : null;
@@ -60,7 +62,7 @@ export default function SalesPeriodDetails({ data, metric, chosenStore, onChoose
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)), current = Math.min(page, pages - 1);
   useLayoutEffect(() => { if (tableRef.current) tableRef.current.scrollTop = scroll; }, [scroll]);
   return <section className="sales-day-details sales-period-details" aria-label={`${label} 商品明细`} onKeyDown={event => { if (event.key === 'Escape') close(); }}>
-    <div className="sales-details-heading"><div><h3>{label} 商品明细</h3><p>{pair(data.status === 'unknown' ? null : data.totalsExact)}</p></div><div className="sales-period-navigation">
+    <div className="sales-details-heading"><div><h3 ref={headingRef} tabIndex={-1}>{label} 商品明细</h3><p>{pair(data.status === 'unknown' ? null : data.totalsExact)}</p></div><div className="sales-period-navigation">
       <Button title={data.date ? '上一日' : '上一月'} aria-label={data.date ? '上一日' : '上一月'} disabled={!previous} onClick={previous}><ChevronLeft size={16} /></Button>
       <Button title={data.date ? '下一日' : '下一月'} aria-label={data.date ? '下一日' : '下一月'} disabled={!next} onClick={next}><ChevronRight size={16} /></Button>
       <Button onClick={close}><ArrowLeft size={16} />返回总览</Button>

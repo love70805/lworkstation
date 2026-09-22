@@ -35,6 +35,7 @@ export function buildWorkspaceOperationalSummary({
   const finalizedLedgers = ledgers.filter((ledger) => CLOSED_LEDGER_STATUSES.has(ledger.status));
   const latestLedger = [...ledgers].sort((a, b) => compareLatest(a, b, ["updatedAt", "period"]))[0] ?? null;
   const latestOpenLedger = [...openLedgers].sort((a, b) => compareLatest(a, b, ["updatedAt", "period"]))[0] ?? null;
+  const latestMissingCostLedger = [...openLedgers].filter(ledger => Number(ledger.costSummary?.missingCount ?? 0) > 0).sort((a, b) => compareLatest(a, b, ["updatedAt", "period"]))[0] ?? null;
   const latestFinalizedLedger = [...finalizedLedgers].sort((a, b) => compareLatest(a, b, ["finalizedAt", "updatedAt", "period"]))[0] ?? null;
   const latestCapture = [...pendingCaptures].sort((a, b) => compareLatest(a, b, ["capturedAt", "updatedAt", "createdAt"]))[0] ?? null;
   const latestActivity = [...auditEvents].sort((a, b) => compareLatest(a, b, ["createdAt"]))[0] ?? null;
@@ -51,6 +52,7 @@ export function buildWorkspaceOperationalSummary({
     recordCount: Object.values(tableCounts).reduce((sum, count) => sum + Number(count ?? 0), 0),
     latestLedger,
     latestOpenLedger,
+    latestMissingCostLedger,
     latestFinalizedLedger,
     latestCaptureAt: timestampOf(latestCapture, ["capturedAt", "updatedAt", "createdAt"]) || null,
     latestActivityAt: timestampOf(latestActivity, ["createdAt"]) || null,

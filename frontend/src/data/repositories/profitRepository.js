@@ -30,6 +30,8 @@ import { ensureDefaultWorkspace, getActiveMemberContext } from "./selectionRepos
 import { manualSnapshot, selectManualOverride, storeIdentity } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
 import { summarizeProfitRows } from "../../lib/profitPrecision";
+import { reconcileErpCostRows } from "../../domain/erpCosts";
+import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
 
@@ -434,12 +436,13 @@ export async function savePublishedErpCostBatch({
     throw new Error("发布 ERP 正式成本必须使用包含完整采购证据的 v2 批次；TSV、旧批次和页面汇总只能预览。");
   }
   const matchedRows = reconciliation.matches.filter((row) => row.status === "matched");
-  if (reconciliation.matches.some((row) => row.status === "anomaly_pending")) {
-    if (reconciliation.matches.some((row) => row.costDecision?.unitCost === 0 && row.costDecision?.selectedRecords?.every((record) => record.effectiveUnitPrice > 0))) {
-      throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
-    }
-    throw new Error("仍有采购成本异常或不完整证据未在 Lworkstation 完成处置，不能发布为 ERP 正式成本。");
-  }
+  // Rebuild the full incoming request scope: hiding an unresolved row in the
+  // page filter (or omitting it from submitted matches) must not approve it.
+  const authoritativeReconciliation = reconcileErpCostRows({
+    workspaceId, period: costPeriod, expectedSkus: verifiedExpectedSkus,
+    costRows: validatedSource.rows,
+    resolutions: reconciliation.matches.flatMap(row => row.resolutions ?? []),
+  });
   const sourceEvidenceByWarehouseSku = new Map(verifiedSourceEnvelope.warehouseEvidence.map((entry) => [
     canonicalWarehouseSku(entry.warehouseSku),
     entry,
@@ -515,12 +518,26 @@ export async function savePublishedErpCostBatch({
     transport: "manual-v2-import",
   });
   let appliedInboxId = null;
+  let adoptionSummary = null;
   await db.transaction("rw", db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger) throw new Error("找不到对应的月度账本。");
     if (ledger.period !== costPeriod) throw new Error("账本月份已变化，请重新核对 ERP 成本。");
     if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能直接更新成本。");
     if (String(workspaceId) !== String(ledger.workspaceId)) throw new Error("ERP 成本发布工作区与账本不一致。");
+    const [salesRows, approvals] = await Promise.all([
+      db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
+      db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
+    ]);
+    const readiness = erpAdoptionReadiness({ ledger, salesRows, approvals, reconciliation: authoritativeReconciliation });
+    if (readiness.blockedRows.length) {
+      if (readiness.blockedRows.some(row => row.costDecision?.unitCost === 0 && row.costDecision?.selectedRecords?.length && row.costDecision.selectedRecords.every(record => record.effectiveUnitPrice > 0))) {
+        throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
+      }
+      throw new Error("仍有采购成本异常或不完整证据未在 Lworkstation 完成处置；人工更正须覆盖该 SKU 在本月的全部店铺，不能发布为 ERP 正式成本。");
+    }
+    if (!verifiedRows.length) throw new Error("当前批次没有可采用的正式 ERP 成本。");
+    adoptionSummary = { ...authoritativeReconciliation.summary, ...readiness.summary, matchedCount: verifiedRows.length, manuallyCovered: readiness.manuallyCovered };
     const request = await db.erpCostRequests.get(effectiveRequestId);
     if (!request || String(request.ledgerId ?? "") !== String(ledgerId) || String(request.workspaceId ?? "") !== String(ledger.workspaceId)) {
       throw new Error("找不到与当前账本和工作区匹配的 ERP 成本请求，不能发布正式成本。");
@@ -589,9 +606,9 @@ export async function savePublishedErpCostBatch({
       currency: "CNY",
       publishedBy: auditActor,
       publishedAt,
-      summary: reconciliation.summary,
-      invalidRows: reconciliation.invalidRows,
-      overrides: reconciliation.overrides,
+      summary: adoptionSummary,
+      invalidRows: authoritativeReconciliation.invalidRows,
+      overrides: authoritativeReconciliation.overrides,
       sourceContract,
     };
     await db.erpCostBatches.add(savedBatch);
@@ -655,7 +672,7 @@ export async function savePublishedErpCostBatch({
       ledger,
       coverage,
       publishedAt,
-      reconciliation.summary,
+      adoptionSummary,
       ),
     };
     await db.ledgers.put(savedLedger);
@@ -686,7 +703,7 @@ export async function savePublishedErpCostBatch({
       after: {
         ledgerId,
         sourceName,
-        ...reconciliation.summary,
+        ...adoptionSummary,
         snapshot: {
           ...savedBatch,
           costBatch: savedBatch,
@@ -715,7 +732,7 @@ export async function savePublishedErpCostBatch({
     }
   });
 
-  return { batchId, inboxId: appliedInboxId, matchedCount: verifiedRows.length, ...reconciliation.summary };
+  return { batchId, inboxId: appliedInboxId, ...adoptionSummary, matchedCount: verifiedRows.length };
 }
 
 export async function saveApproved1688Fallback({

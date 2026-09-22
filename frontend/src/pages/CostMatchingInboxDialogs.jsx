@@ -6,6 +6,8 @@ export function CostMatchingInboxQueueDialog({
   open,
   inboxQueue,
   processedInboxRecords,
+  ledger,
+  requests = [],
   selectedPendingInboxIds,
   loadedInboxId,
   accountingReadOnly,
@@ -22,7 +24,7 @@ export function CostMatchingInboxQueueDialog({
     <Modal
       open={open}
       title={`ERP 回传待处理（${inboxQueue.pendingCount}）`}
-      description="批次按回传时间排列；只有账本、请求和完整平台 SKC 集合完全匹配时才能载入。"
+      description="已收到不等于已采用。批次须匹配账本和请求，允许在已登记 SKC 范围内分批回传。"
       className="cost-inbox-queue-modal"
       onClose={onClose}
       footer={<><Button variant="ghost" onClick={onManualImport}>手动导入</Button>{selectedPendingInboxIds.size > 0 ? <Button icon={Trash2} variant="danger" disabled={ledgerLocked} onClick={() => onDeleteSelected([...selectedPendingInboxIds])}>删除所选 {selectedPendingInboxIds.size} 个</Button> : null}<Button variant="primary" onClick={onClose}>关闭</Button></>}
@@ -34,10 +36,11 @@ export function CostMatchingInboxQueueDialog({
           const sentAt = item.inbox.envelope?.sentAt ?? item.inbox.receivedAt;
           const isLoaded = item.inbox.status === "loaded";
           const isActive = item.inbox.id === loadedInboxId;
+          const period = item.request?.ledgerPeriod ?? (item.inbox.ledgerId === ledger?.id ? ledger?.period : null) ?? "月份待核对";
           return <article className={"cost-inbox-item" + (isLoaded ? " loaded" : "")} key={item.inbox.id}>
             <div className="cost-inbox-item-select">{item.inbox.status === "pending" ? <input type="checkbox" aria-label={"选择批次 " + item.inbox.batchId} checked={selectedPendingInboxIds.has(item.inbox.id)} onChange={(event) => onTogglePending(item.inbox.id, event.target.checked)} /> : null}</div>
-            <div className="cost-inbox-item-main"><strong className="mono">{item.inbox.batchId}</strong><small>{sentAt ? new Date(sentAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知"} · {skcCount} 个平台 SKC</small><small>请求 <code>{item.inbox.requestId || "缺失"}</code></small></div>
-            <div className="cost-inbox-item-status"><Badge tone={isLoaded ? "success" : item.scopeMatched ? "default" : "warning"}>{isActive ? "当前已载入" : isLoaded ? "待恢复" : ERP_INBOX_MATCH_REASONS[item.reason] ?? item.reason}</Badge><Button disabled={accountingReadOnly || isActive || !item.scopeMatched} onClick={() => onLoadInbox(item)}>{accountingReadOnly ? "账本已定稿" : isActive ? "已载入" : isLoaded ? "恢复载入" : "载入核对"}</Button><Button icon={Trash2} variant="ghost" disabled={ledgerLocked} title="删除批次" onClick={() => onDeleteOne(item.inbox.id)}>删除批次</Button></div>
+            <div className="cost-inbox-item-main"><strong>{period} · {skcCount} 个平台 SKC</strong><small>接收：{item.inbox.receivedAt || sentAt ? new Date(item.inbox.receivedAt ?? sentAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知"}</small><small>批次 <code>{item.inbox.batchId}</code></small>{!item.scopeMatched ? <small>{ERP_INBOX_MATCH_REASONS[item.reason] ?? item.reason}</small> : null}</div>
+            <div className="cost-inbox-item-status"><Badge tone={isLoaded ? "info" : item.scopeMatched ? "default" : "warning"}>{isActive ? "已载入，待采用" : isLoaded ? "待恢复核对" : "已收到，待载入"}</Badge><Button disabled={accountingReadOnly || isActive || !item.scopeMatched} onClick={() => onLoadInbox(item)}>{accountingReadOnly ? "账本已定稿" : isActive ? "已载入" : isLoaded ? "恢复载入" : "载入核对"}</Button><Button icon={Trash2} variant="ghost" disabled={ledgerLocked} title="删除批次" onClick={() => onDeleteOne(item.inbox.id)}>删除批次</Button></div>
           </article>;
         })}
       </div>
@@ -45,7 +48,7 @@ export function CostMatchingInboxQueueDialog({
         <summary><History size={16} />已采用与历史批次 <strong>{processedInboxRecords.length}</strong></summary>
         <div className="cost-inbox-history-list">
           {processedInboxRecords.length === 0 ? <p className="pending-text">暂无历史批次。</p> : processedInboxRecords.map((record) => <article className="cost-inbox-history-item" key={record.id}>
-            <div><strong className="mono">{record.batchId}</strong><small>{record.historyAt ? new Date(record.historyAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知"} · {record.sourceLabel}</small>{record.appliedBatchId ? <small>已采用记录 <code>{record.appliedBatchId}</code></small> : null}{record.voidReason ? <small>撤回说明：{record.voidReason}</small> : null}</div>
+            <div><strong>{requests.find(request => request.id === record.requestId)?.ledgerPeriod ?? (record.ledgerId === ledger?.id ? ledger?.period : "月份待核对")} · {record.batchId}</strong><small>{record.historyAt ? new Date(record.historyAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知"} · {record.sourceLabel}</small>{record.appliedBatchId ? <small>已采用记录 <code>{record.appliedBatchId}</code></small> : null}{record.voidReason ? <small>撤回说明：{record.voidReason}</small> : null}</div>
             <div className="cost-inbox-item-status"><Badge tone={record.status === "applied" ? "success" : record.status === "voided" ? "warning" : "default"}>{record.statusLabel}</Badge>{record.status === "applied" ? <Button icon={RotateCcw} variant="ghost" disabled={ledgerLocked} onClick={() => onVoid(record)}>{ledgerLocked ? "账本已锁定" : "撤回本次采用"}</Button> : null}</div>
           </article>)}
         </div>
