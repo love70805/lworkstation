@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
 import { Button, ProgressBar, useToast } from "../components/UI";
-import { previewSalesImports, saveSalesImports } from "../data/database";
+import { getActiveMemberContext, listLedgerSummaries, previewSalesImports, saveSalesImports } from "../data/database";
+import { importReturnHref } from "../lib/importNavigation";
 import { createImportWorkerClient } from "../lib/importWorkerClient";
 import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, validateSalesMapping } from "../lib/salesImport";
 
@@ -28,13 +29,17 @@ function Totals({ summary }) {
 
 export default function ImportPreview() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestedLedgerId = new URLSearchParams(location.search).get('ledger');
+  const [ledgerContext, setLedgerContext] = useState(null);
+  const [contextRetry, setContextRetry] = useState(0);
   const { notify } = useToast();
   const inputRef = useRef(null);
   const previewRef = useRef(null);
   const clientRef = useRef(null);
   const operationRef = useRef(false);
   const [files, setFiles] = useState([]);
-  const [period, setPeriod] = useState(previousMonth);
+  const [period, setPeriod] = useState(() => requestedLedgerId ? '' : previousMonth());
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ value: 0, label: "" });
   const [error, setError] = useState("");
@@ -42,6 +47,30 @@ export default function ImportPreview() {
   const [payload, setPayload] = useState(null);
   const [overwriteSignature, setOverwriteSignature] = useState(null);
   const [result, setResult] = useState(null);
+  const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
+  const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
+  const returnHref = importReturnHref(location.search, location.state?.importReturnTo, result?.ledgerId);
+  const returnLabel = returnHref.startsWith('/workspace') ? '返回经营概览' : returnHref.startsWith('/ledger') ? '返回月度账本' : '返回利润面板';
+  useEffect(() => {
+    if (!requestedLedgerId) { setLedgerContext(null); return; }
+    let active = true;
+    setLedgerContext(null);
+    (async () => {
+      try {
+        const member = await getActiveMemberContext();
+        const ledger = (await listLedgerSummaries()).find(item => item.id === requestedLedgerId && item.workspaceId === member.workspaceId);
+        if (!ledger) throw new Error('指定账本不存在或不属于当前工作区，请重新选择账本。');
+        if (['finalized', 'locked'].includes(ledger.status)) throw new Error('本月基础已定稿，请返回账本显式重开后再导入。');
+        if ((await getActiveMemberContext()).workspaceId !== member.workspaceId) throw new Error('工作区已切换，请重新选择账本。');
+        if (active) { setPeriod(ledger.period); setLedgerContext({ id: ledger.id, workspaceId: member.workspaceId }); }
+      } catch (failure) { if (active) setLedgerContext({ id: requestedLedgerId, error: failure.message }); }
+    })();
+    return () => { active = false; };
+  }, [requestedLedgerId, contextRetry]);
+  const assertImportContext = async () => {
+    if (contextBlocked) throw new Error('请先确认目标账本。');
+    if (requestedLedgerId && (await getActiveMemberContext()).workspaceId !== ledgerContext.workspaceId) throw new Error('工作区已切换，请返回重新选择账本，当前文件尚未写入。');
+  };
 
   useEffect(() => {
     if (!preview) return;
@@ -61,7 +90,7 @@ export default function ImportPreview() {
     setFiles((current) => current.map((item) => item.itemId === itemId ? { ...item, ...patch, validation: null } : item));
   };
   const loadFiles = async (selection) => {
-    if (operationRef.current || !selection.length || result) return;
+    if (operationRef.current || !selection.length || result || contextBlocked) return;
     operationRef.current = true; setBusy(true); invalidate();
     const additions = Array.from(selection).map((file) => ({ file, fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
     setFiles((current) => [...current, ...additions]);
@@ -108,6 +137,7 @@ export default function ImportPreview() {
     if (operationRef.current || !ready || result) return;
     operationRef.current = true; setBusy(true); invalidate();
     try {
+      await assertImportContext();
       const items = [];
       let hasErrors = false;
       for (let index = 0; index < files.length; index += 1) {
@@ -129,18 +159,19 @@ export default function ImportPreview() {
     if (operationRef.current || result || !preview || !payload || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)) return;
     operationRef.current = true; setBusy(true);
     try {
+      await assertImportContext();
       setResult(await saveSalesImports({ ...payload, preview, overwriteSignature }));
       notify("整批处理完成，来源批次已保留。");
       for (const item of files) clientRef.current.release(item.itemId).catch(() => {});
     } catch (writeError) { invalidate(); setError(`整批未写入：${writeError.message}`); }
     finally { setBusy(false); operationRef.current = false; }
   };
-  const ready = files.length > 0 && /^\d{4}-\d{2}$/.test(period) && files.every((item) => {
+  const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && files.every((item) => {
     const columns = Object.values(item.mapping ?? {}).filter(Boolean);
     return item.status === "parsed" && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
   });
   return <main className="wizard-shell batch-import">
-    <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate("/profit")}><X size={20} />{result ? "返回利润面板" : "取消导入"}</button><strong>月度台账批量导入</strong></header>
+    <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate(returnHref)}><X size={20} />{result ? returnLabel : "取消导入"}</button><strong>月度台账批量导入</strong></header>
     <section className="wizard-content">
       <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，核对归属后统一预览、一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
       <section className="import-flow-guide" aria-label="月度核算流程">
@@ -148,14 +179,15 @@ export default function ImportPreview() {
         <div className="import-flow-guide-steps">
           <span className="active"><b>1</b><strong>导入销售台账</strong><small>当前步骤</small></span>
           <span><b>2</b><strong>取得候选成本</strong><small>ERP、历史或人工</small></span>
-          <span><b>3</b><strong>人工确认成本</strong><small>人工结果优先</small></span>
+          <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
           <span><b>4</b><strong>确认利润</strong><small>核对后再定稿</small></span>
         </div>
       </section>
+      {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
         <section className="wizard-card">
-          <fieldset disabled={busy} className="batch-fieldset">
-            <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">本批所有文件导入同一月份</p></div><input id="ledger-period" aria-describedby="batch-period-note" className="text-input" type="month" value={period} onChange={(event) => { setPeriod(event.target.value); invalidate(); }} /></div>
+          <fieldset disabled={busy || contextBlocked} className="batch-fieldset">
+            <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">{requestedLedgerId ? '沿用当前账本月份' : '本批所有文件导入同一月份'}</p></div><input id="ledger-period" disabled={Boolean(requestedLedgerId)} aria-describedby="batch-period-note" className="text-input" type="month" value={period} onChange={(event) => { setPeriod(event.target.value); invalidate(); }} /></div>
             <div className="import-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); loadFiles(event.dataTransfer.files); }}>
               <input ref={inputRef} type="file" multiple aria-label="选择月度销售台账文件" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => { loadFiles(event.target.files); event.target.value = ""; }} />
               <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；工作簿仅读取第一工作表。</p></div>
@@ -196,7 +228,7 @@ export default function ImportPreview() {
           {preview.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={(event) => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />我确认仅替换以上列出的重叠分组；其他店铺与分组保留。</label>}
           <div className="batch-submit"><p>核对以上文件、店铺及 {period} 月份后确认。修改配置需重新校验。</p><Button variant="primary" disabled={busy || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>确认导入</Button></div>
         </section>}
-      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(result.ledgerId)}`)}>查看月度利润</Button></section>}
+      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}
     </section>
   </main>;
 }

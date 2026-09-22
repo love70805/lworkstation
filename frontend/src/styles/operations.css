@@ -1,4 +1,19 @@
 /* Data security */
+.system-navigation { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.system-navigation a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 16px; border-bottom: 3px solid transparent; color: var(--text-muted); text-decoration: none; }
+.system-navigation a.active { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.system-navigation a:focus-visible, .system-advanced > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.system-check-note { margin: 0 0 16px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.system-check-error { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; padding: 12px; border: 1px solid var(--danger); border-radius: 6px; color: var(--danger); background: var(--surface); overflow-wrap: anywhere; }
+.system-inline-error { color: var(--danger) !important; overflow-wrap: anywhere; }
+.environment-popover .system-inline-error { margin: 8px 16px; font-size: 12px; }
+.system-advanced { min-width: 0; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.system-advanced > summary { min-height: 44px; padding: 13px 16px; color: var(--text-muted); cursor: pointer; font-size: 13px; }
+.system-advanced > .panel { border: 0; box-shadow: none; }
+.system-advanced > p, .system-advanced > .button { margin: 0 16px 14px; }
+.diagnostic-card-grid.system-local-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.desktop-close-preference .select-input { min-height: 44px; min-width: 136px; }
+.system-check-note + .diagnostic-meta { margin-top: 0; }
 .security-layout { display: grid; grid-template-columns: minmax(520px, 2fr) minmax(280px, 1fr); gap: 24px; }
 .security-main, .security-side { display: flex; flex-direction: column; gap: 24px; }
 .safeguard-panel { padding: 20px; }
@@ -120,6 +135,7 @@
 .diagnostic-links code { padding: 2px 5px; background: var(--surface-muted); color: var(--text); }
 
 @media (max-width: 1120px) {
+  .diagnostic-card-grid.system-local-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ledger-stat-grid, .ledger-card-grid, .diagnostic-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .diagnostic-extension-grid { grid-template-columns: 1fr; }
   .security-layout { grid-template-columns: 1fr; }
@@ -127,6 +143,9 @@
 }
 
 @media (max-width: 650px) {
+  .diagnostic-card-grid.system-local-cards { grid-template-columns: 1fr; }
+  .desktop-close-preference { flex-wrap: wrap; }
+  .desktop-close-preference .select-input { width: 100%; }
   .ledger-stat-grid, .ledger-card-grid, .diagnostic-card-grid, .security-side { grid-template-columns: 1fr; }
   .danger-action { align-items: flex-start; flex-direction: column; }
   .danger-action .button { width: 100%; }

@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,6 +15,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import AppShell from "../components/AppShell";
+import SystemNavigation from "../components/SystemNavigation";
+import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
 import { Badge, Button, Modal, PageHeader, Panel, ProgressBar, useToast } from "../components/UI";
 import {
   clearLocalWorkspaceData,
@@ -35,9 +36,14 @@ import { runtimeConfig } from "../config/runtimeConfig";
 import { validateCloudSeedPayload } from "../domain/cloudSeed";
 import { validateWorkspaceBackupPayload } from "../domain/workspaceBackup";
 import { replaySyncRecoveryPayload, validateSyncRecoveryPayload } from "../domain/syncRecovery";
-import { downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
+import { backupSaveMessage, downloadWorkspaceBackup, requireSavedWorkspaceBackup } from "../lib/workspaceBackupDownload";
 
 const ROLLBACK_BEFORE_RESTORE_KEY = "shopeers-rollback-before-restore";
+
+async function readSecurityState() {
+  const [security, storage] = await Promise.all([getDataSecuritySnapshot(), navigator.storage?.estimate?.() ?? null]);
+  return { security, storage };
+}
 
 function formatBytes(value) {
   const bytes = Number(value ?? 0);
@@ -123,12 +129,15 @@ export default function DataSecurity() {
   const { notify } = useToast();
   const restoreInputRef = useRef(null);
   const cloudSeedInputRef = useRef(null);
-  const security = useLiveQuery(getDataSecuritySnapshot, [], null);
-  const [storageEstimate, setStorageEstimate] = useState(null);
+  const check = useSystemSnapshot(readSecurityState);
+  const security = check.data?.security;
+  const storageEstimate = check.data?.storage;
   const [rollbackBeforeRestore, setRollbackBeforeRestore] = useState(() => localStorage.getItem(ROLLBACK_BEFORE_RESTORE_KEY) !== "false");
   const [restoreCandidate, setRestoreCandidate] = useState(null);
   const [loadingRestoreFile, setLoadingRestoreFile] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
+  const [cloudRecoveryError, setCloudRecoveryError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [seedExporting, setSeedExporting] = useState(false);
   const [cloudSeedCandidate, setCloudSeedCandidate] = useState(null);
@@ -153,20 +162,12 @@ export default function DataSecurity() {
   const lastCloudSeed = security?.lastCloudSeed ?? null;
   const lastCloudImport = security?.lastCloudImport ?? null;
 
-  const refreshStorageEstimate = async () => {
-    const estimate = await (navigator.storage?.estimate?.() ?? Promise.resolve(null));
-    setStorageEstimate(estimate);
-    return estimate;
+  const refreshStorageEstimate = check.refresh;
+  const refreshRecords = async () => {
+    const result = await check.refresh();
+    if (!result) return;
+    notify(result.status === 'ready' ? '已重新读取备份记录与存储占用。' : `刷新失败：${result.error}`, result.status === 'ready' ? 'success' : 'error');
   };
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const estimate = await (navigator.storage?.estimate?.() ?? Promise.resolve(null));
-      if (active) setStorageEstimate(estimate);
-    })();
-    return () => { active = false; };
-  }, []);
 
   const setRollbackPreference = (nextValue) => {
     setRollbackBeforeRestore(nextValue);
@@ -177,14 +178,16 @@ export default function DataSecurity() {
     setExporting(true);
     try {
       const payload = await createWorkspaceBackupPayload();
-      const download = downloadWorkspaceBackup(payload, { prefix });
+      const download = await downloadWorkspaceBackup(payload, { prefix });
+      const notice = backupSaveMessage(download);
+      if (notice) { notify(notice, 'info'); return null; }
       await recordWorkspaceBackupExport({
         ...download,
         recordCount: payload.recordCount,
         generatedAt: payload.generatedAt,
       });
       await refreshStorageEstimate();
-      notify(successMessage ?? `本机备份已导出：${download.fileName}。`, "success");
+      notify(successMessage ?? `本机备份已保存：${download.fileName}。`, "success");
       return { payload, download };
     } catch (error) {
       notify(`备份导出失败：${error.message}`, "error");
@@ -198,14 +201,16 @@ export default function DataSecurity() {
     setSeedExporting(true);
     try {
       const payload = await createWorkspaceCloudSeedPayload();
-      const download = downloadWorkspaceBackup(payload, { prefix: "shopeers-cloud-seed" });
+      const download = await downloadWorkspaceBackup(payload, { prefix: "shopeers-cloud-seed" });
+      const notice = backupSaveMessage(download);
+      if (notice) { notify(notice, 'info'); return null; }
       await recordWorkspaceBackupExport({
         ...download,
         recordCount: payload.recordCount,
         generatedAt: payload.generatedAt,
         exportKind: "cloud_seed",
       });
-      notify(`云端种子包已生成：${download.fileName}。该文件尚未上传。`, "success");
+      notify(`云端种子包已保存：${download.fileName}。该文件尚未上传。`, "success");
       return { payload, download };
     } catch (error) {
       notify(`云端种子包导出失败：${error.message}`, "error");
@@ -287,6 +292,7 @@ export default function DataSecurity() {
       const inspection = validateSyncRecoveryPayload(payload);
       const replay = replaySyncRecoveryPayload(payload);
       setCloudRecoveryCandidate({ payload, inspection, replay });
+      setCloudRecoveryError('');
       setCloudRecoveryText("");
       setCloudRecoveryOpen(true);
       notify(`云端恢复包校验通过，共 ${replay.recordCount.toLocaleString("zh-CN")} 条记录。`, "success");
@@ -301,9 +307,10 @@ export default function DataSecurity() {
   const restoreCloudRecovery = async () => {
     if (!cloudRecoveryCandidate || cloudRecoveryText !== "从云端恢复") return;
     setCloudRecovering(true);
+    setCloudRecoveryError('');
     try {
       const currentPayload = await createWorkspaceBackupPayload();
-      const rollbackDownload = downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-cloud-recovery" });
+      const rollbackDownload = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-cloud-recovery" }));
       const receipt = await restoreWorkspaceSyncRecoveryPayload(cloudRecoveryCandidate.payload);
       await recordWorkspaceBackupExport({
         ...rollbackDownload,
@@ -316,6 +323,7 @@ export default function DataSecurity() {
       setCloudRecoveryText("");
       notify(`云端数据已恢复，共写入 ${receipt.recordCount.toLocaleString("zh-CN")} 条记录。`, "success");
     } catch (error) {
+      setCloudRecoveryError(error.message);
       notify(`云端恢复失败：${error.message}`, "error");
     } finally {
       setCloudRecovering(false);
@@ -339,6 +347,7 @@ export default function DataSecurity() {
         payload,
         inspection,
       });
+      setRestoreError('');
     } catch (error) {
       notify(`无法使用该备份文件：${error.message}`, "error");
     } finally {
@@ -349,11 +358,12 @@ export default function DataSecurity() {
   const restoreBackup = async () => {
     if (!restoreCandidate) return;
     setRestoring(true);
+    setRestoreError('');
     try {
       let rollback = null;
       if (rollbackBeforeRestore) {
         const currentPayload = await createWorkspaceBackupPayload();
-        const download = downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-restore" });
+        const download = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-restore" }));
         rollback = {
           ...download,
           recordCount: currentPayload.recordCount,
@@ -367,6 +377,7 @@ export default function DataSecurity() {
       setRestoreCandidate(null);
       notify(`备份已恢复，共写入 ${inspection.recordCount.toLocaleString("zh-CN")} 条记录。`, "success");
     } catch (error) {
+      setRestoreError(error.message);
       notify(`备份恢复失败：${error.message}`, "error");
     } finally {
       setRestoring(false);
@@ -391,11 +402,14 @@ export default function DataSecurity() {
 
   return (
     <AppShell pageClass="security-page">
+      <SystemNavigation />
       <PageHeader
-        title="数据安全与备份"
+        title="数据备份"
         description="导出完整本机数据、校验恢复文件，并保留可追溯的操作记录。"
         actions={<Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出本机备份</Button>}
       />
+      {check.status === 'error' ? <div className="system-check-error" role="alert">读取失败：{check.error}<Button onClick={refreshRecords} loading={check.refreshing} disabled={check.refreshing}>重试读取</Button></div> : null}
+      <p className="system-check-note" role="status">{check.status === 'loading' ? '正在读取本机备份记录与存储占用…' : `最近检查：${formatDateTime(check.checkedAt)} · ${check.status === 'error' ? '未通过' : '仅检查本机记录可读取，不验证磁盘中的历史备份文件'}`}</p>
 
       <div className="security-layout">
         <div className="security-main">
@@ -403,8 +417,8 @@ export default function DataSecurity() {
             <div className="section-heading"><h2><ShieldCheck size={20} />恢复保护</h2></div>
             <div className="setting-row">
               <div>
-                <strong>恢复前下载当前回滚备份</strong>
-                <p>恢复文件前先下载当前完整状态，便于需要时手动恢复。</p>
+                <strong>恢复前保存当前回滚备份</strong>
+                <p>确认当前完整备份保存成功后才恢复；取消或保存失败将停止恢复。</p>
               </div>
               <button className={`toggle ${rollbackBeforeRestore ? "on" : ""}`} aria-label="恢复前下载回滚备份" aria-pressed={rollbackBeforeRestore} onClick={() => setRollbackPreference(!rollbackBeforeRestore)} />
             </div>
@@ -421,12 +435,12 @@ export default function DataSecurity() {
             <div className="panel-header">
               <div className="panel-title"><History size={20} /><h2>备份与恢复记录</h2></div>
               <div className="action-row">
-                <Button variant="ghost" icon={RefreshCw} onClick={() => notify("备份与恢复记录已从本机数据库刷新。", "success")}>刷新</Button>
+                <Button variant="ghost" icon={RefreshCw} loading={check.refreshing} disabled={check.refreshing} onClick={refreshRecords}>刷新</Button>
                 <Button icon={FileUp} loading={loadingRestoreFile} disabled={loadingRestoreFile || restoring} onClick={chooseRestoreFile}>导入备份</Button>
               </div>
             </div>
             <input ref={restoreInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择 Lworkstation JSON 备份文件" onChange={readRestoreFile} />
-            <div className="security-note">导出的文件保存在你选择的位置；浏览器不会在本机数据库中保存可直接恢复的文件副本。</div>
+            <div className="security-note">备份文件保存在你选择的位置；工作站不会在业务数据库中保存文件副本。旧版导出记录不能证明文件仍在磁盘中。</div>
             <div className="table-wrap">
               <table className="data-table snapshot-table">
                 <thead><tr><th>操作</th><th>本地时间</th><th>记录数</th><th>文件或来源</th></tr></thead>
@@ -437,10 +451,12 @@ export default function DataSecurity() {
                   })}
                 </tbody>
               </table>
-              {security && events.length === 0 ? <div className="security-empty">还没有备份或恢复记录。先导出一次本机备份，再保存在公司云盘或受控共享目录中。</div> : null}
+              {security && events.length === 0 ? <div className="security-empty">还没有备份或恢复记录。先保存一次本机备份，再放到公司云盘或受控共享目录中。</div> : null}
+              {!security ? <div className="security-empty">{check.status === 'error' ? '记录读取失败，请重试。' : '正在读取备份与恢复记录…'}</div> : null}
             </div>
           </Panel>
 
+          <details className="system-advanced"><summary>高级：云端迁移与恢复</summary>
           <Panel className="cloud-migration-panel">
             <div className="panel-header">
               <div className="panel-title"><CloudUpload size={20} /><h2>云端迁移与恢复</h2></div>
@@ -449,6 +465,7 @@ export default function DataSecurity() {
             <p className="cloud-migration-copy">先在本机校验种子包，再发送云端预检。只有工作区、引用关系和唯一约束全部通过后，才允许确认事务导入。</p>
             <input ref={cloudSeedInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择 Lworkstation 云端种子包" onChange={readCloudSeedFile} />
             <div className="action-row cloud-migration-actions">
+              <Button icon={CloudUpload} loading={seedExporting} disabled={exporting || seedExporting} onClick={exportCloudSeed}>导出云端种子包</Button>
               <Button icon={FileCheck2} onClick={chooseCloudSeedFile}>选择并校验种子包</Button>
               <Button variant="primary" icon={CloudUpload} loading={cloudPreflighting} disabled={!cloudSeedCandidate || cloudPreflighting || !runtimeConfig.cloudConfigured} onClick={preflightCloudSeed}>发送云端预检</Button>
               {cloudPreflight?.canImport ? <Button variant="primary" disabled={cloudImporting} onClick={() => setCloudImportOpen(true)}>确认导入</Button> : null}
@@ -470,7 +487,10 @@ export default function DataSecurity() {
               </div>
             ) : null}
             {lastCloudImport ? <small className="mono cloud-last-import">最近云端导入：{formatDateTime(lastCloudImport.importedAt)} · {lastCloudImport.importVersion}</small> : null}
+            <small>种子包仅含业务数据，不含本机设置与同步队列；生成后需由管理员导入云端。</small>
+            <small className="mono cloud-last-import">{lastCloudSeed ? `最近种子包：${formatDateTime(lastCloudSeed.generatedAt)} · ${formatBytes(lastCloudSeed.sizeBytes)}` : '尚未保存云端种子包'}</small>
           </Panel>
+          </details>
         </div>
 
         <aside className="security-side">
@@ -479,17 +499,14 @@ export default function DataSecurity() {
             <h2>手动导出</h2>
             <p>生成包含商品、采集、供应商、ERP 成本、账本、利润与审计记录的 JSON 备份。</p>
             <Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出完整备份</Button>
-            <Button icon={CloudUpload} loading={seedExporting} disabled={exporting || seedExporting} onClick={exportCloudSeed}>导出云端种子包</Button>
-            <small>种子包仅含业务数据，不含本机设置与同步队列；生成后需由管理员导入云端。</small>
-            <small className="mono">{lastBackup ? `最近备份：${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : "尚未导出本机备份"}</small>
-            <small className="mono">{lastCloudSeed ? `最近种子包：${formatDateTime(lastCloudSeed.generatedAt)} · ${formatBytes(lastCloudSeed.sizeBytes)}` : "尚未导出云端种子包"}</small>
+            <small className="mono">{lastBackup ? `最近备份：${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : check.status === 'ready' ? "尚未导出本机备份" : '备份状态未读取'}</small>
           </Panel>
           <Panel className="storage-panel">
-            <div className="panel-title"><HardDrive size={19} /><h2>浏览器存储</h2></div>
-            <div className="storage-total"><span>已用 {formatBytes(usageBytes)}</span><span>{quotaBytes > 0 ? `配额 ${formatBytes(quotaBytes)}` : "配额未提供"}</span></div>
+            <div className="panel-title"><HardDrive size={19} /><h2>本机存储</h2></div>
+            <div className="storage-total"><span>已用 {storageEstimate ? formatBytes(usageBytes) : '--'}</span><span>{quotaBytes > 0 ? `配额 ${formatBytes(quotaBytes)}` : "配额未提供"}</span></div>
             <ProgressBar value={storagePercent} />
             <div className="storage-legend">
-              <span><i className="active" />本机 IndexedDB <b className="mono">{security ? `${security.summary.recordCount.toLocaleString("zh-CN")} 条记录` : "读取中"}</b></span>
+              <span><i className="active" />本机 IndexedDB <b className="mono">{security ? `${security.summary.recordCount.toLocaleString("zh-CN")} 条记录` : check.status === 'error' ? '读取失败' : "读取中"}</b></span>
               <span><i />最近备份文件 <b className="mono">{lastBackup ? formatBytes(lastBackup.sizeBytes) : "--"}</b></span>
             </div>
           </Panel>
@@ -498,7 +515,7 @@ export default function DataSecurity() {
 
       <Panel className="danger-zone">
         <div className="danger-title"><AlertTriangle size={23} /><h2>危险操作</h2></div>
-        <p>清空会删除当前浏览器中的正式商品、采集、供应商、账本、成本、利润和审计记录。已下载到文件系统的备份不会被删除。</p>
+        <p>清空会删除当前本机工作区中的正式商品、采集、供应商、账本、成本、利润和审计记录。已保存到文件系统的备份不会被删除。</p>
         <div className="danger-action">
           <div><strong>清空当前本机工作区</strong><span>操作后仅保留空白默认工作区，需从备份文件恢复才能找回数据。</span></div>
           <Button variant="danger" onClick={() => setDangerOpen(true)}>清空数据</Button>
@@ -508,11 +525,12 @@ export default function DataSecurity() {
       <Modal
         open={cloudRecoveryOpen}
         title="从云端恢复当前工作区"
-        description="恢复会覆盖当前浏览器中的业务数据，并强制下载一份覆盖前回滚备份。"
+        description="恢复会覆盖当前本机工作区的业务数据，必须先成功保存回滚备份。"
         tone="danger"
         onClose={() => { if (!cloudRecovering) { setCloudRecoveryOpen(false); setCloudRecoveryText(""); } }}
         footer={<><Button disabled={cloudRecovering} onClick={() => { setCloudRecoveryOpen(false); setCloudRecoveryText(""); }}>取消</Button><Button variant="danger" loading={cloudRecovering} disabled={cloudRecovering || cloudRecoveryText !== "从云端恢复"} onClick={restoreCloudRecovery}>确认恢复</Button></>}
       >
+        {cloudRecoveryError ? <p className="system-check-error" role="alert">{cloudRecoveryError}</p> : null}
         <div className="restore-summary">
           <span>工作区 <strong className="mono">{cloudRecoveryCandidate?.inspection.workspaceId}</strong></span>
           <span>同步版本 <strong className="mono">{cloudRecoveryCandidate?.inspection.cursor ?? "--"}</strong></span>
@@ -541,7 +559,7 @@ export default function DataSecurity() {
       <Modal
         open={Boolean(restoreCandidate)}
         title="恢复本机备份"
-        description="恢复将覆盖当前浏览器中的全部工作区数据。"
+        description="恢复将覆盖当前本机中的全部工作区数据。"
         onClose={() => !restoring && setRestoreCandidate(null)}
         footer={<><Button disabled={restoring} onClick={() => setRestoreCandidate(null)}>取消</Button><Button variant="primary" loading={restoring} disabled={restoring} onClick={restoreBackup}>恢复备份</Button></>}
       >
@@ -551,7 +569,8 @@ export default function DataSecurity() {
           <span>备份生成时间 <strong>{formatDateTime(restoreCandidate?.inspection.generatedAt)}</strong></span>
           <span>待写入记录 <strong className="mono">{restoreCandidate?.inspection?.recordCount?.toLocaleString("zh-CN") ?? "--"}</strong></span>
         </div>
-        <p className="modal-note">{rollbackBeforeRestore ? "恢复前会自动下载当前状态作为回滚备份。" : "恢复前回滚备份已关闭，当前状态不会自动下载。"}</p>
+        {restoreError ? <p className="system-check-error" role="alert">{restoreError}</p> : null}
+        <p className="modal-note">{rollbackBeforeRestore ? "请先在保存窗口中保存当前状态作为回滚备份，保存成功后才执行恢复。" : "恢复前回滚备份已关闭，当前状态不会自动保存。"}</p>
       </Modal>
 
       <Modal

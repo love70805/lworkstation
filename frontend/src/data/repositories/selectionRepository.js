@@ -8,6 +8,8 @@ import {
   normalizeWarehouseSku,
 } from "../../domain/identifiers";
 import { calculateSupplierLandedUnitCost, validateProductDraft } from "../../domain/productCatalog";
+import { normalizeProductTags, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../../domain/productSelectionDraft";
+import { buildSelectionReferenceRows } from "../../lib/selectionReferences";
 import { buildProductDataReadiness, normalizeProductPublicationStatus } from "../../domain/productPublication";
 import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../../domain/profitCalculations";
 import {
@@ -58,8 +60,15 @@ export async function setActiveMemberContext({ memberId = DEFAULT_MEMBER_ID, rol
     workspaceId: catalogText(workspaceId) || DEFAULT_WORKSPACE_ID,
     updatedAt: new Date().toISOString(),
   };
-  await db.settings.put(context);
-  return getActiveMemberContext();
+  return db.transaction('rw', db.settings, async () => {
+    const saved = await db.settings.get(ACTIVE_MEMBER_CONTEXT_KEY);
+    // Startup may initialize the same identity more than once. A no-op write
+    // invalidates persisted derived results and makes every restart recompute.
+    if (!saved || saved.memberId !== context.memberId || saved.role !== context.role || saved.workspaceId !== context.workspaceId) {
+      await db.settings.put(context);
+    }
+    return getActiveMemberContext();
+  });
 }
 
 export function selectionRecordVisible(record, context) {
@@ -164,26 +173,6 @@ export async function saveSelectionStatusDefinitions({ definitions, updatedBy = 
     });
   });
   return normalized;
-}
-
-function productValidationMessage(issue) {
-  const messages = {
-    product_name_required: "商品名称不能为空。",
-    platform_skc_required: "平台 SKC 不能为空。",
-    platform_sku_required: "至少需要一个平台 SKU。",
-    package_weight_required: "存在运费时必须填写大于 0 的包装重量。",
-  };
-  if (messages[issue]) return messages[issue];
-  const variantMatch = /^variant_(\d+)_(.+)$/.exec(issue);
-  if (!variantMatch) return "商品资料仍有阻断项。";
-  const index = Number(variantMatch[1]) + 1;
-  const variantMessages = {
-    platform_sku_required: `第 ${index} 个规格缺少平台 SKU。`,
-    platform_sku_duplicate: `第 ${index} 个规格的平台 SKU 与其他规格重复。`,
-    purchase_pack_count_invalid: `第 ${index} 个规格的采购份数必须大于 0。`,
-    units_per_pack_invalid: `第 ${index} 个规格的每份单品数必须大于 0。`,
-  };
-  return variantMessages[variantMatch[2]] ?? `第 ${index} 个规格仍有阻断项。`;
 }
 
 function captureTimestamp(value, fallback) {
@@ -459,9 +448,18 @@ export async function ignoreCaptureRecord(captureId, ignoredBy = "local-user") {
 
 export async function listPendingCaptureRecords() {
   const [captures, context] = await Promise.all([db.captures.toArray(), getActiveMemberContext()]);
-  return captures
+  const pending = captures
     .filter((capture) => ["pending", "blocked", "needs_review", "draft"].includes(capture.status) && selectionRecordVisible(capture, context))
     .toSorted((a, b) => String(b.capturedAt ?? b.updatedAt ?? "").localeCompare(String(a.capturedAt ?? a.updatedAt ?? "")));
+  if (!pending.length) return pending;
+  const definitions = await getSelectionStatusDefinitions();
+  const needsReadiness = pending.some(capture => selectionStatusById(definitions, capture.draft?.salesStatus ?? 'pending_review')?.requiresReadiness);
+  const historicalRows = needsReadiness ? buildSelectionReferenceRows(await getSelectionReferenceSnapshot()) : [];
+  return pending.map(capture => {
+    const draft = defaultProductDraft(capture.draft);
+    const result = productSaveReadiness({ draft, statusDefinition: selectionStatusById(definitions, draft.salesStatus), historicalRows });
+    return { ...capture, validation: { ...result.validation, valid: result.valid, blockingCount: result.issues.length, blockingIssues: result.issues }, readinessMessages: result.issues.map(productReadinessIssueLabel) };
+  });
 }
 
 export async function getProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "" } = {}) {
@@ -685,7 +683,7 @@ export async function listProductCatalogRecords() {
       const skuReferences = skus.map((sku) => {
         const key = sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku);
         const erpCost = latestErpCostBySku.get(key);
-        const salePrice = Number(sku.salePrice ?? sku.price);
+        const salePrice = productSalePrice(sku.salePrice ?? sku.price);
         const supplierOffers = offers.filter((offer) => (offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku)) === key);
         const manualCost = latestManualCostBySku.get(key);
         const finalizedCost = latestFinalizedCostBySku.get(key);
@@ -704,7 +702,7 @@ export async function listProductCatalogRecords() {
             : finalizedCost
               ? "finalized_profit_history"
               : supplierCost == null ? null : "supplier_landed";
-        const referenceProfit = source && Number.isFinite(salePrice) && salePrice >= 0
+        const referenceProfit = source && salePrice != null
           ? calculateReferenceProfitLine({
             revenue: salePrice,
             quantity: 1,
@@ -719,7 +717,7 @@ export async function listProductCatalogRecords() {
           warehouseSku: sku.warehouseSku ?? "",
           canonicalWarehouseSku: sku.canonicalWarehouseSku ?? (sku.warehouseSku ? canonicalWarehouseSku(sku.warehouseSku) : ""),
           attribute: sku.attribute ?? "",
-          salePrice: Number.isFinite(salePrice) && salePrice >= 0 ? salePrice : null,
+          salePrice,
           unitCost: source ? unitCost : null,
           source,
           manualCostId: manualCost?.id ?? null,
@@ -976,11 +974,19 @@ export async function bulkUpdateProductCatalogSalesStatus({ productIds, salesSta
   const updatedAt = new Date().toISOString();
   const updatedProducts = [];
 
-  await db.transaction("rw", db.products, db.auditEvents, async () => {
+  await db.transaction("rw", db.products, db.auditEvents, db.platformSkus, db.supplierOffers, db.catalogManualCosts, db.erpCostRows, db.profitLines, db.settings, db.workspaces, async () => {
     const products = await db.products.bulkGet(ids);
     for (const product of products) {
       if (!product) throw new Error("部分商品记录不存在，页面已刷新。");
       if (!selectionRecordVisible(product, context)) throw new Error("当前账号无权修改选中的商品。");
+    }
+
+    if (statusDefinition.requiresReadiness) {
+      const historicalRows = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+      for (const product of products) {
+        const snapshot = await getProductEditorSnapshot({ productId: product.id });
+        assertProductSaveReadiness({ ...snapshot.draft, salesStatus }, statusDefinition, historicalRows);
+      }
     }
 
     for (const product of products) {
@@ -1003,23 +1009,27 @@ export async function bulkUpdateProductCatalogSalesStatus({ productIds, salesSta
   return updatedProducts;
 }
 
+function assertProductSaveReadiness(draft, statusDefinition, historicalRows) {
+  const result = productSaveReadiness({ draft, statusDefinition, historicalRows });
+  if (!result.valid) throw new Error(`${draft.name || "未命名商品"}：${result.issues.map(productReadinessIssueLabel).join("；")}。`);
+}
+
 export async function saveProductCatalogRecord({
   productId = null,
   captureId = null,
   draft,
   status = "active",
   savedBy = "local-user",
-  workspaceId = DEFAULT_WORKSPACE_ID,
+  workspaceId = null,
 }) {
   await ensureDefaultWorkspace();
   const memberContext = await getActiveMemberContext();
+  workspaceId = workspaceId || memberContext.workspaceId;
+  if (workspaceId !== memberContext.workspaceId) throw new Error("只能在当前工作区保存商品，请先切换工作区。");
   const statusDefinitions = await getSelectionStatusDefinitions();
   const normalizedDraft = defaultProductDraft(draft);
   const validation = validateProductDraft(normalizedDraft);
   if (!catalogText(normalizedDraft.name)) throw new Error("商品名称不能为空。");
-  if (status === "active" && !validation.valid) {
-    throw new Error(productValidationMessage(validation.blockingIssues[0]));
-  }
 
   const normalizedVariants = normalizedDraft.variants
     .filter((variant) => catalogText(variant.platformSku))
@@ -1074,6 +1084,11 @@ export async function saveProductCatalogRecord({
     db.supplierOffers,
     db.captures,
     db.auditEvents,
+    db.catalogManualCosts,
+    db.erpCostRows,
+    db.profitLines,
+    db.settings,
+    db.workspaces,
     async () => {
       const existingProduct = await db.products.get(resolvedProductId);
       if (productId && !existingProduct) throw new Error("找不到对应的商品档案。");
@@ -1082,6 +1097,13 @@ export async function saveProductCatalogRecord({
       if (existingProduct && !selectionRecordVisible(existingProduct, memberContext)) throw new Error("当前账号无权访问该商品。");
       if (capture && !selectionRecordVisible(capture, memberContext)) throw new Error("当前账号无权访问该采集记录。");
       if (capture && ["confirmed", "ignored"].includes(capture.status)) throw new Error("该采集记录已经结束处理。");
+      // A draft-save call must not silently downgrade an existing formal record.
+      if (existingProduct?.status === "active") status = "active";
+      if (status === "active") {
+        const statusDefinition = selectionStatusById(statusDefinitions, normalizedDraft.salesStatus);
+        const historicalRows = statusDefinition?.requiresReadiness ? buildSelectionReferenceRows(await getSelectionReferenceSnapshot()) : [];
+        assertProductSaveReadiness(normalizedDraft, statusDefinition, historicalRows);
+      }
 
       for (const variant of normalizedVariants) {
         const duplicate = await db.platformSkus
@@ -1112,7 +1134,7 @@ export async function saveProductCatalogRecord({
         swatch: catalogText(variant.swatch) || "#9ca3af",
         imageUrl: catalogText(variant.imageUrl),
         status: status === "active" ? "active" : "draft",
-        salePrice: Number(variant.salePrice) || null,
+        salePrice: productSalePrice(variant.salePrice),
         createdAt: skuByCanonical.get(variant.canonicalPlatformSku)?.createdAt ?? now,
         updatedAt: now,
       }));
@@ -1224,7 +1246,7 @@ export async function saveProductCatalogRecord({
         ownerId: existingProduct?.ownerId ?? capture?.ownerId ?? (catalogText(normalizedDraft.ownerId) || memberContext.memberId),
         visibility: catalogText(normalizedDraft.visibility) || existingProduct?.visibility || (memberContext.canSeeAllSelection ? "workspace" : "private"),
         salesStatus: resolveSelectionStatusId(catalogText(normalizedDraft.salesStatus) || (status === "active" ? "on_sale" : "pending_review"), statusDefinitions),
-        tags: Array.isArray(normalizedDraft.tags) ? normalizedDraft.tags.map(catalogText).filter(Boolean) : [],
+        tags: normalizeProductTags(normalizedDraft.tags),
         notes: catalogText(normalizedDraft.notes),
         sourceCaptureId: captureId,
         status,

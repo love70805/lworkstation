@@ -15,13 +15,13 @@ vi.mock('../data/database', async importOriginal => ({ ...await importOriginal()
 
 let container, root, writeText;
 const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
-async function render(skcs, status = 'ready') {
+async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', ledgerId = 'L' } = {}) {
   mocks.snapshot = {
-    ledger: { id: 'L', workspaceId: 'W', period: '2026-08', status },
-    rows: skcs.map((platformSkc, index) => ({ store: '甲', platformSkc, platformSku: `SKU-${index}`, quantity: 1, amount: 10 })),
-    costs: [], approvals: [],
+    ledger: { id: ledgerId, workspaceId: 'W', period: '2026-08', status },
+    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: '甲', platformSkc, platformSku: `SKU-${index}`, quantity: 1, amount: 10 })),
+    costs, approvals: [],
   };
-  await act(async () => root.render(<MemoryRouter><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId: 'L', store: 'all' }} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: 'all' }} /></MemoryRouter>));
 }
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,4 +71,39 @@ it('reports failure and restores the copy button if both clipboard paths reject'
   expect(mocks.notify).not.toHaveBeenCalledWith('已复制 1 个平台 SKC。');
   expect(button('复制 1 个平台 SKC').disabled).toBe(false);
   delete document.execCommand;
+});
+const formalCost = {
+  id: 'COST-1', platformSku: 'SKU-0', platformSkc: 'SKC-1', warehouseSku: 'WH-1', unitCost: 10,
+  publishedAt: '2026-09-01T00:00:00Z', resolutionStatus: 'resolved', evidenceComplete: true,
+  selectedRecordIds: ['P-1'], purchaseRecords: [{ recordId: 'P-1', warehouseSku: 'WH-1', purchaseDate: '2026-08-10', quantity: 1, unitPrice: 10, eligible: true }],
+};
+it('shows adopted ERP and never offers adoption without a new evidence batch', async () => {
+  await render(['SKC-1'], 'ready', { costs: [formalCost], ledgerId: 'ADOPTED' });
+  expect(container.textContent).toContain('ERP 已采用');
+  expect(container.textContent).toContain('2026/9/1');
+  expect(button('采用已匹配 ERP 成本')).toBeUndefined();
+  expect(button('完成成本处置后可采用')).toBeUndefined();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+it.each([
+  { initialEntry: '/?missing=1', costs: [formalCost], title: '本月成本已齐' },
+  { initialEntry: '/?q=does-not-exist', costs: [], title: '当前筛选没有匹配明细' },
+])('does not mistake an empty filter for missing SKC: $title', async ({ initialEntry, costs, title }) => {
+  await render(['SKC-1'], 'ready', { initialEntry, costs, ledgerId: initialEntry });
+  expect(container.textContent).toContain(title);
+  expect(container.querySelector('.cost-skc-warning')).toBeNull();
+  expect(button('检查导入映射')).toBeUndefined();
+  expect(button('待补平台 SKC')).toBeUndefined();
+});
+it('keeps page two after an effective-cost update and leaving and returning', async () => {
+  const skcs = Array.from({ length: 20 }, (_, index) => `SKC-${index + 1}`);
+  const options = { ledgerId: 'PAGINATION' };
+  await render(skcs, 'cost_pending', options);
+  await act(async () => container.querySelector('[aria-label="第 2 页"]').click());
+  expect(container.textContent).toContain('显示第 13 至 20 条');
+  await render(skcs, 'cost_pending', { ...options, costs: [formalCost] });
+  expect(container.textContent).toContain('显示第 13 至 20 条');
+  await act(async () => root.render(null));
+  await render(skcs, 'cost_pending', options);
+  expect(container.textContent).toContain('显示第 13 至 20 条');
 });

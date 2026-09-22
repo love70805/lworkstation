@@ -176,7 +176,9 @@ kbd {
   padding: 4px 10px 14px;
   border-right: 1px solid var(--border-strong);
   background: var(--surface);
-  transition: width 180ms ease, padding 180ms ease;
+  /* Match the main canvas and topbar geometry immediately when collapsing.
+     Animating only this fixed panel leaves it covering the newly exposed page. */
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 .app-shell.sidebar-collapsed {

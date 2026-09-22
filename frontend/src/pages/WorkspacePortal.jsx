@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
@@ -28,6 +28,9 @@ import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
 import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
 import SalesAnalytics from './SalesAnalytics';
+import { withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
+import { currentLedgerResult, ledgerNextStep } from "../domain/ledgerWorkflow";
+import { profitWorkspaceHref } from "../lib/workspaceNavigation";
 
 const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", {
   style: "currency",
@@ -65,25 +68,35 @@ export default function WorkspacePortal() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const ledgerScope = useWorkspaceLedgerScope();
-  const [checkingHealth, setCheckingHealth] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const [healthChecked, setHealthChecked] = useState(false);
   const portalData = useLiveQuery(async () => {
+    try {
     const { workspaceId } = await getActiveMemberContext();
     const [summary, auditEvents, referenceSnapshot] = await Promise.all([
       getWorkspaceOperationalSummary(),
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
       getSelectionReferenceSnapshot(),
     ]);
+    const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestOpenLedger, summary.latestFinalizedLedger].filter(Boolean));
+    if ((await getActiveMemberContext()).workspaceId !== workspaceId) throw new Error('工作区已切换，请重新读取。');
     return {
-      summary,
+      refresh,
+      summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestOpenLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
       auditEvents,
       referenceRows: buildSelectionReferenceRows(referenceSnapshot),
     };
-  }, [], null);
+    } catch (error) { return { refresh, error: error.message }; }
+  }, [refresh], null);
+  const checkingHealth = Boolean(refresh && portalData?.refresh !== refresh);
+  useEffect(() => {
+    if (refresh && portalData?.refresh === refresh) setHealthChecked(!portalData.error);
+  }, [portalData, refresh]);
 
   const summary = portalData?.summary;
   const latestLedger = summary?.latestLedger ?? null;
   const latestOpenLedger = summary?.latestOpenLedger ?? null;
+  const missingLedger = summary?.latestMissingCostLedger ?? null;
   const latestFinalizedLedger = summary?.latestFinalizedLedger ?? null;
   const latestSales = latestLedger?.summary ?? {};
   const recentActivities = (portalData?.auditEvents ?? []).map((event) => ({
@@ -95,15 +108,15 @@ export default function WorkspacePortal() {
   const referenceRows = useMemo(() => (portalData?.referenceRows ?? [])
     .toSorted((left, right) => Number(right.recentRevenue ?? 0) - Number(left.recentRevenue ?? 0))
     .slice(0, 5), [portalData?.referenceRows]);
-  const workflowLedger = latestOpenLedger ?? latestLedger;
-  const workflowStep = workflowLedger
-    ? ({ draft: 0, cost_pending: 1, approval_pending: 2, ready: 3, finalized: 4, locked: 4 }[workflowLedger.status] ?? 1)
-    : 0;
+  const workflowLedger = ledgerScope.context?.selected;
+  const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
+  const workflowFrozen = ['finalized', 'locked'].includes(workflowLedger?.status);
+  const workflowQuery = ledgerScope.context?.query ?? '';
+  const workflowStep = !workflowLedger ? 0 : workflowFrozen ? 3 : nextStep.key === 'cost' ? 1 : 2;
   const workflowSteps = [
-    { title: "导入销售台账", detail: workflowLedger ? "本月销售数据已建立" : "先建立本月账本", path: "/import-preview" },
-    { title: "采集或复用成本", detail: workflowLedger ? "ERP 结果可以重复采集和替换" : "账本建立后进行", path: workflowLedger ? `/cost-matching?ledger=${encodeURIComponent(workflowLedger.id)}` : "/import-preview" },
-    { title: "人工确认成本", detail: "人工决定始终优先", path: workflowLedger ? `/cost-matching?ledger=${encodeURIComponent(workflowLedger.id)}` : "/import-preview" },
-    { title: "确认利润并定稿", detail: workflowLedger ? "确认后再生成本月结果" : "成本确认后进行", path: workflowLedger ? `/profit?ledger=${encodeURIComponent(workflowLedger.id)}` : "/import-preview" },
+    { title: workflowFrozen ? "查看销售台账" : "导入销售台账", detail: workflowLedger ? "沿用当前账本月份" : "先建立月度账本", path: workflowFrozen ? `/ledger?${workflowQuery}` : `/import-preview?${workflowQuery}` },
+    { title: workflowFrozen ? "查看成本" : "核对成本", detail: "ERP 默认，人工更正优先", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'cost') : "/import-preview" },
+    { title: workflowFrozen ? "查看本月报告" : "保存本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "登记代发，预览后保存", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
   ];
   const taskItems = useMemo(() => {
     const items = [];
@@ -112,26 +125,19 @@ export default function WorkspacePortal() {
     } else if ((summary?.pendingCaptureCount ?? 0) > 0) {
       items.push({ icon: Hourglass, tone: "warning", title: "待确认采集", detail: `${summary.pendingCaptureCount} 条记录等待人工确认`, action: "打开队列", path: "/products?view=pending" });
     }
-    if ((summary?.missingCostCount ?? 0) > 0 && latestOpenLedger) {
-      items.push({ icon: Warehouse, tone: "warning", title: "成本待确认", detail: `工作区合计 ${summary.missingCostCount} 条 SKU 待人工确认`, action: `查看 ${latestOpenLedger.period}`, path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
+    if (missingLedger) {
+      items.push({ icon: Warehouse, tone: "warning", title: `${missingLedger.period} 成本待补`, detail: `本月 ${missingLedger.costSummary.missingCount} 条 SKU 待补成本`, action: "核对成本", path: `/cost-matching?ledger=${encodeURIComponent(missingLedger.id)}` });
     }
     if (latestOpenLedger?.status === "ready") {
       items.push({ icon: CircleDollarSign, tone: "success", title: "账本待确认利润", detail: `${latestOpenLedger.period} 成本已齐，等待人工核对`, action: "打开账本", path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
     }
     return items.slice(0, 3);
-  }, [latestOpenLedger, summary?.blockedCaptureCount, summary?.missingCostCount, summary?.pendingCaptureCount]);
+  }, [latestOpenLedger, missingLedger, summary?.blockedCaptureCount, summary?.pendingCaptureCount]);
 
-  const runHealthCheck = async () => {
-    setCheckingHealth(true);
+  const runHealthCheck = () => {
     setHealthChecked(false);
-    try {
-      await getWorkspaceOperationalSummary();
-      setHealthChecked(true);
-    } catch (error) {
-      notify(`自检失败：${error.message}`, "error");
-    } finally {
-      setCheckingHealth(false);
-    }
+    setRefresh(value => value + 1);
+    ledgerScope.retry();
   };
 
   let alert = null;
@@ -149,12 +155,12 @@ export default function WorkspacePortal() {
       action: "打开待确认采集",
       path: "/products?view=pending",
     };
-  } else if ((summary?.missingCostCount ?? 0) > 0 && latestOpenLedger) {
+  } else if (missingLedger) {
     alert = {
       icon: TriangleAlert,
-      text: `工作区合计仍有 ${summary.missingCostCount} 条平台 SKU 待确认成本。`,
-      action: `查看 ${latestOpenLedger.period} 成本`,
-      path: `/cost-matching?ledger=${encodeURIComponent(latestOpenLedger.id)}`,
+      text: `${missingLedger.period} 仍有 ${missingLedger.costSummary.missingCount} 条平台 SKU 待补成本。`,
+      action: `查看 ${missingLedger.period} 成本`,
+      path: `/cost-matching?ledger=${encodeURIComponent(missingLedger.id)}`,
     };
   } else if (latestOpenLedger?.status === "ready") {
     alert = {
@@ -165,10 +171,8 @@ export default function WorkspacePortal() {
     };
   }
 
-  // The contextual alert owns the blocking next step. The first quick action
-  // deliberately points to the adjacent workflow so the home page never
-  // presents two prominent controls that land on the same route.
-  const primaryAction = resolveWorkspacePrimaryAction({ alertPath: alert?.path, latestOpenLedger });
+  // Cross-month tasks identify their own month; normal actions follow selection.
+  const primaryAction = resolveWorkspacePrimaryAction({ selectedLedger: workflowLedger, query: workflowQuery });
   const PrimaryActionIcon = primaryAction.kind === "cost" ? Warehouse : primaryAction.kind === "profit" ? CircleDollarSign : FileUp;
   const AlertIcon = alert?.icon;
 
@@ -180,25 +184,26 @@ export default function WorkspacePortal() {
         actions={<Button icon={healthChecked ? Check : RefreshCw} loading={checkingHealth} disabled={checkingHealth} onClick={runHealthCheck}>{healthChecked ? "总览已刷新" : "刷新总览"}</Button>}
       />
 
-      {!portalData ? <div className="workspace-load-state" role="status" aria-live="polite"><RefreshCw className="spin" size={16} />正在读取工作区总览...</div> : null}
+      {!portalData || checkingHealth ? <div className="workspace-load-state" role="status" aria-live="polite"><RefreshCw className="spin" size={16} />正在读取工作区总览...</div> : null}
+      {portalData?.error ? <div className="workspace-load-state" role="alert">总览读取失败：{portalData.error}<Button onClick={runHealthCheck}>重试</Button></div> : null}
 
-      <div className="dashboard-metric-grid">
+      {summary ? <div className="dashboard-metric-grid">
         <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>正式商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待确认采集</small><strong>{summary?.pendingCaptureCount ?? 0}</strong><em>{summary?.blockedCaptureCount ?? 0} 条存在阻断项</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon info"><ShoppingCart size={19} /></span><span><small>{latestLedger ? `${latestLedger.period} 销售额` : "最近月度销售额"}</small><strong>{money(latestSales.revenue ?? 0)}</strong><em>总销量 {Number(latestSales.quantity ?? 0).toLocaleString("zh-CN")} 件</em></span></Panel>
-        <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近定稿利润</small><strong>{latestFinalizedLedger?.profitSummary ? money(latestFinalizedLedger.profitSummary.profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${ledgerStatusLabels[latestFinalizedLedger.status]}` : "尚无已定稿账本"}</em></span></Panel>
-      </div>
+        <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近已保存利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已定稿账本"}</em></span></Panel>
+      </div> : null}
 
       {alert ? <div className="workspace-status-strip"><span className="workspace-status-icon"><AlertIcon size={18} /></span><span><strong>需要处理</strong><small>{alert.text}</small></span><Button variant="ghost" onClick={() => navigate(alert.path)}>{alert.action}<ChevronRight size={16} /></Button></div> : null}
 
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
-          <div><h2 id="workspace-flow-title">本月核算流程</h2><p>系统负责整理和复用数据，是否采用由你决定。</p></div>
+          <div><h2 id="workspace-flow-title">本月核算流程</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
           {workflowLedger ? <span className="workspace-flow-period mono">{workflowLedger.period}</span> : null}
         </div>
         <div className="workspace-flow-steps">
           {workflowSteps.map((step, index) => (
-            <button className={`workspace-flow-step ${index === workflowStep ? "active" : ""} ${index < workflowStep ? "done" : ""}`} key={step.title} onClick={() => navigate(step.path)} aria-current={index === workflowStep ? "step" : undefined}>
+            <button disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} className={`workspace-flow-step ${index === workflowStep ? "active" : ""} ${index < workflowStep ? "done" : ""}`} key={step.title} onClick={() => navigate(step.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })} aria-current={index === workflowStep ? "step" : undefined}>
               <span className="workspace-flow-index">{index < workflowStep ? <Check size={14} /> : index + 1}</span>
               <span><strong>{step.title}</strong><small>{step.detail}</small></span>
               {index < workflowSteps.length - 1 ? <ChevronRight className="workspace-flow-arrow" size={16} /> : null}
@@ -232,7 +237,7 @@ export default function WorkspacePortal() {
         <aside className="workspace-secondary">
           <Panel className="dashboard-widget tasks-panel">
             <div className="panel-header"><div className="panel-title"><Inbox size={19} /><h2>当前待办</h2></div><span className="widget-count">{taskItems.length} 项</span></div>
-            {taskItems.length > 0 ? <div className="task-list">{taskItems.map((item) => { const TaskIcon = item.icon; return <div className="task-item" key={item.path}><span className={`task-icon ${item.tone}`}><TaskIcon size={17} /></span><span><strong>{item.title}</strong><small>{item.detail}</small></span><button onClick={() => navigate(item.path)}>{item.action}<ChevronRight size={15} /></button></div>; })}</div> : <div className="task-empty"><CircleDollarSign size={20} /><span>当前没有阻塞事项，工作区运行正常。</span></div>}
+            {!summary ? <div className="task-empty" role="status">{portalData?.error ? '待办读取失败，请重试总览。' : '正在读取工作区待办…'}</div> : taskItems.length > 0 ? <div className="task-list">{taskItems.map((item) => { const TaskIcon = item.icon; return <div className="task-item" key={item.path}><span className={`task-icon ${item.tone}`}><TaskIcon size={17} /></span><span><strong>{item.title}</strong><small>{item.detail}</small></span><button onClick={() => navigate(item.path)}>{item.action}<ChevronRight size={15} /></button></div>; })}</div> : <div className="task-empty"><CircleDollarSign size={20} /><span>当前没有待办事项。</span></div>}
           </Panel>
 
           {referenceRows.length > 0 ? <details className="dashboard-widget reference-widget workspace-disclosure">
@@ -245,7 +250,7 @@ export default function WorkspacePortal() {
               <div className="panel-title"><BarChart3 size={19} /><h2>快捷操作</h2></div>
             </div>
             <div className="quick-actions">
-              <button onClick={() => navigate(primaryAction.path)}><PrimaryActionIcon size={21} /><span><strong>{primaryAction.title}</strong><small>{primaryAction.detail}</small></span><ArrowUpRight size={17} /></button>
+              <button disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(primaryAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}><PrimaryActionIcon size={21} /><span><strong>{primaryAction.title}</strong><small>{primaryAction.detail}</small></span><ArrowUpRight size={17} /></button>
               <button onClick={() => navigate("/products?view=reference")}><BarChart3 size={21} /><span><strong>查看选品参考</strong><small>{summary?.platformSkuCount ?? 0} 个平台 SKU 可分析</small></span><ArrowUpRight size={17} /></button>
               <button onClick={() => navigate("/ledger")}><CalendarDays size={21} /><span><strong>管理月度账本</strong><small>{summary?.openLedgerCount ?? 0} 个未完成 · {summary?.finalizedLedgerCount ?? 0} 个已定稿</small></span><ArrowUpRight size={17} /></button>
             </div>

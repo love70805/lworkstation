@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { useLiveQuery } from "dexie-react-hooks";
+import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import { AlertCircle, CheckCheck, Download, ExternalLink, Filter, Image, Pencil, Plus, Search, ShieldCheck, Trash2, TriangleAlert, X } from "lucide-react";
 import { Badge, Button, EmptyState, Modal, Panel, useToast } from "../components/UI";
 import SelectionCaptureSetup from "../components/SelectionCaptureSetup";
@@ -59,11 +59,23 @@ function groupCaptures(captures) {
   return [...groups.values()];
 }
 
-export function CaptureQueueContent({ query = "", onQueryChange = () => {} }) {
+export function CaptureQueueContent(props) {
+  const captureRead = useSelectionRead(listPendingCaptureRecords);
+  const [filter, setFilter] = useState("all");
+  return <CaptureQueueView filter={filter} onFilterChange={setFilter} {...props} captureRead={captureRead} />;
+}
+
+export function CaptureQueueView({ captureRead, query = "", onQueryChange = () => {}, filter = "all", onFilterChange = () => {}, onOpenEditor, initialScrollY }) {
   const navigate = useNavigate();
   const { notify } = useToast();
-  const captures = useLiveQuery(listPendingCaptureRecords, [], []);
-  const [filter, setFilter] = useState("all");
+  const captureSnapshot = captureRead.data;
+  const captures = captureSnapshot ?? [];
+  const restoredScrollRef = useRef(false);
+  useLayoutEffect(() => {
+    if (captureSnapshot === undefined || restoredScrollRef.current) return;
+    restoredScrollRef.current = true;
+    if (initialScrollY != null) window.scrollTo({ top: initialScrollY, behavior: "auto" });
+  }, [captureSnapshot, initialScrollY]);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState(emptyCaptureForm);
@@ -152,14 +164,14 @@ export function CaptureQueueContent({ query = "", onQueryChange = () => {} }) {
   return (
     <>
       <div className="queue-view-toolbar">
-        <div><strong>{pendingCount} 条采集记录等待确认</strong><span>{blockingCount} 条存在阻断项，确认后才会写入正式商品库。</span></div>
+        <div><strong>{captureRead.status === "ready" ? `${pendingCount} 条采集记录等待确认` : "尚未取得待确认采集"}</strong><span>{captureRead.status === "ready" ? `${blockingCount} 条存在阻断项，确认后才会写入正式商品库。` : "请等待读取完成后确认入库。"}</span></div>
         <div>
           <div className="selection-domain-search queue-domain-search">
             <Search size={17} aria-hidden="true" />
             <input aria-label="搜索待确认采集" type="search" value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索商品名、平台 SKC/SKU、仓库 SKU 或供应商" />
             {query ? <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onQueryChange("")}><X size={16} /></button> : null}
           </div>
-          <label className="queue-filter button button-secondary"><Filter size={17} /><span>筛选</span><select aria-label="队列筛选" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">全部</option><option value="needs-action">需要处理</option><option value="ready">可确认</option></select></label>
+          <label className="queue-filter button button-secondary"><Filter size={17} /><span>筛选</span><select aria-label="队列筛选" value={filter} onChange={(event) => onFilterChange(event.target.value)}><option value="all">全部</option><option value="needs-action">需要处理</option><option value="ready">可确认</option></select></label>
           <Button icon={Plus} onClick={() => setCreateOpen(true)}>新增采集</Button>
           <Button icon={desktop ? ShieldCheck : Download} onClick={() => setSetupOpen(true)}>{desktop ? "1688 扩展状态" : "安装 1688 扩展"}</Button>
           <Button variant="primary" icon={CheckCheck} loading={confirmingAll} disabled={readyCaptures.length === 0 || confirmingAll} onClick={confirmAllValid}>确认全部有效项</Button>
@@ -191,9 +203,10 @@ export function CaptureQueueContent({ query = "", onQueryChange = () => {} }) {
                     <div className="warning-stack">
                       {blockingIssues > 0 ? <Badge tone="danger"><AlertCircle size={12} />{blockingIssues} 个阻断项</Badge> : <Badge tone="success"><CheckCheck size={12} />可确认入库</Badge>}
                       {warningIssues > 0 ? <Badge tone="warning"><AlertCircle size={12} />{warningIssues} 个提醒</Badge> : null}
+                      {capture.readinessMessages?.length ? <small title={capture.readinessMessages.join('；')}>{capture.readinessMessages[0]}{capture.readinessMessages.length > 1 ? '等，编辑后可确认' : ''}</small> : null}
                     </div>
                     <div className="queue-actions">
-                      <button aria-label={`编辑 ${draft.name || capture.id}`} title="编辑采集记录" onClick={() => navigate(`/products/edit?capture=${encodeURIComponent(capture.id)}`)}><Pencil size={17} /></button>
+                      <button aria-label={`编辑 ${draft.name || capture.id}`} title="编辑采集记录" onClick={() => onOpenEditor ? onOpenEditor(`/products/edit?capture=${encodeURIComponent(capture.id)}`) : navigate(`/products/edit?capture=${encodeURIComponent(capture.id)}`, { state: { productLibraryReturnTo: "/products?view=pending" } })}><Pencil size={17} /></button>
                       <button aria-label={`忽略 ${draft.name || capture.id}`} title="忽略采集记录" onClick={() => setPendingDelete(capture)}><Trash2 size={17} /></button>
                       <Button variant="secondary" loading={confirmingId === capture.id} disabled={!capture.validation?.valid || confirmingId === capture.id} onClick={() => confirmCapture(capture)}>确认</Button>
                     </div>
@@ -204,8 +217,8 @@ export function CaptureQueueContent({ query = "", onQueryChange = () => {} }) {
           );
         })}
 
-        {visibleBatches.length === 0 ? (
-          <Panel className="queue-empty"><EmptyState icon={CheckCheck} title={captures.length === 0 ? "待确认队列为空" : "没有符合当前条件的采集记录"} description={captures.length === 0 ? "可先手工登记 1688 来源，后续浏览器扩展也会写入同一队列。" : "请调整筛选条件或搜索内容。"} action={captures.length === 0 ? <Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>新增采集记录</Button> : <Button onClick={() => setFilter("all")}>清除筛选</Button>} /></Panel>
+        {captureRead.status !== "ready" ? <SelectionReadState read={captureRead} label="待确认采集" /> : visibleBatches.length === 0 ? (
+          <Panel className="queue-empty"><EmptyState icon={CheckCheck} title={captures.length === 0 ? "待确认队列为空" : "没有符合当前条件的采集记录"} description={captures.length === 0 ? "可先手工登记 1688 来源，后续浏览器扩展也会写入同一队列。" : "请调整筛选条件或搜索内容。"} action={captures.length === 0 ? <Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>新增采集记录</Button> : <Button onClick={() => { onFilterChange("all"); onQueryChange(""); }}>清除筛选</Button>} /></Panel>
         ) : null}
       </div>
 

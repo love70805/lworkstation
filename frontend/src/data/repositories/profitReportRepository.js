@@ -1,6 +1,6 @@
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
-import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
+import { sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import { makeId } from "../db/utils";
 import { getActiveMemberContext } from "./selectionRepository";
 import { getLatestLedgerCosts } from "./profitRepository";
@@ -9,6 +9,7 @@ import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/l
 import { PROFIT_FORMULA_VERSION } from "../../domain/profitCalculations";
 import { REPORT_FORMULA_VERSION, REPORT_TEMPLATE_VERSION, buildReportProducts, canonicalJson, displayMoney, exact, legacyReportLine, reportTotals, sha256 } from "../../domain/profitReports";
 import { buildProfitReportWorkbook, bytesToBase64 } from "../../lib/profitReportWorkbook";
+import { readLedgerReportHeaders } from './ledgerOverviewRepository';
 
 const tables = () => [db.settings,db.ledgers,db.salesRows,db.erpCostBatches,db.erpCostRows,db.costApprovals,db.profitLines,db.auditEvents,db.monthlySupplementBatches,db.monthlySupplementRows,db.profitReports,db.profitReportLines];
 async function scope(ledgerId,write=false) {
@@ -33,7 +34,7 @@ async function readMonthlyReportStateOnce(ledgerId){
     const {ledger}=await scope(ledgerId);
     // The source editor needs stores and adopted batches, not ERP cost rows or
     // a complete calculation context. Keep those reads for actual previews.
-    const [salesRows,dispatch,deduction,reports]=await Promise.all([readLedgerSalesRows(ledger.workspaceId,ledgerId,{strict:true}),adopted(ledgerId,'dispatch'),adopted(ledgerId,'deduction'),cachedDerived({scope:[ledger.workspaceId,ledgerId],formula:'report-headers@1',revision,compute:async()=>(await db.profitReports.where('ledgerId').equals(ledgerId).toArray()).map(({fileBase64,...report})=>report)})]);
+    const [salesRows,dispatch,deduction,reports]=await Promise.all([readLedgerSalesRows(ledger.workspaceId,ledgerId,{strict:true}),adopted(ledgerId,'dispatch'),adopted(ledgerId,'deduction'),readLedgerReportHeaders(ledger,revision)]);
     if(salesRows.some(row=>row.workspaceId!==ledger.workspaceId))throw new Error("台账存在跨工作区来源记录，请恢复完整备份后再核算。");
     const context={ledger,salesRows,dispatch,deduction,reports};
     const batches=await db.monthlySupplementBatches.where('ledgerId').equals(ledgerId).toArray();

@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useLiveQuery } from "dexie-react-hooks";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
+import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
 import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
 import { matchesSelectionSearch } from "../lib/selectionSearch";
-import { CaptureQueueContent } from "./CaptureQueue";
+import { CaptureQueueView } from "./CaptureQueue";
 import { activeSelectionStatusDefinitions, createCustomSelectionStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSkc } from "../domain/identifiers";
 import { PRODUCT_PUBLICATION_STATUSES, productPublicationStatusById } from "../domain/productPublication";
@@ -43,6 +43,8 @@ const dataStatusLabels = {
 };
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
+const EMPTY_ROWS = [];
+const readReferenceRows = async () => buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
 
 const productFiltersKey = (workspaceId, view) => `${PRODUCT_FILTERS_KEY}:${JSON.stringify([workspaceId, view])}`;
 
@@ -92,11 +94,12 @@ function SelectionDomainSearch({ value, onChange, label }) {
 }
 
 export default function ProductLibrary() {
-  const context = useLiveQuery(getActiveMemberContext, [], null);
+  const contextRead = useSelectionRead(getActiveMemberContext);
+  const context = contextRead.data;
   const [params] = useSearchParams();
   const requestedView = params.get("view");
   const view = requestedView === "reference" ? "reference" : requestedView === "pending" ? "pending" : "official";
-  if (!context) return <AppShell pageClass="product-library-page"><p role="status">正在读取选品工作区…</p></AppShell>;
+  if (!context) return <AppShell pageClass="product-library-page"><SelectionReadState read={contextRead} label="选品工作区" /></AppShell>;
   return <ProductLibraryView key={`${context.workspaceId}:${view}`} workspaceId={context.workspaceId} view={view} />;
 }
 
@@ -106,13 +109,14 @@ function ProductLibraryView({ workspaceId, view }) {
   const savedView = useMemo(() => readProductLibraryViewState(workspaceId, view), [workspaceId, view]);
   const navigationSnapshotRef = useRef(null);
   const navigate = useCallback((target) => {
-    saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState() });
+    saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState(), windowScrollY: window.scrollY });
     routeNavigate(target, { state: { productLibraryReturnTo: `/products?view=${view}` } });
   }, [routeNavigate, workspaceId, view]);
   const [, setSearchParams] = useSearchParams();
   const { notify } = useToast();
   const initialFilters = useMemo(() => savedView?.filters ?? readProductFilters(workspaceId, view), [savedView, workspaceId, view]);
   const [query, setQuery] = useState(savedView?.query ?? "");
+  const [queueFilter, setQueueFilter] = useState(savedView?.queueFilter ?? "all");
   const [store, setStore] = useState(initialFilters.store);
   const [status, setStatus] = useState(initialFilters.status);
   const [publicationStatus, setPublicationStatus] = useState(initialFilters.publicationStatus);
@@ -138,10 +142,14 @@ function ProductLibraryView({ workspaceId, view }) {
   const [mergePreview, setMergePreview] = useState(null);
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
   const [mergingSkcRecords, setMergingSkcRecords] = useState(false);
-  const catalogSnapshot = useLiveQuery(listProductCatalogRecords, [], undefined);
-  const catalogProducts = catalogSnapshot ?? [];
-  const pendingCaptures = useLiveQuery(listPendingCaptureRecords, [], []);
-  const salesStatusDefinitions = useLiveQuery(getSelectionStatusDefinitions, [], []);
+  const catalogRead = useSelectionRead(listProductCatalogRecords);
+  const statusRead = useSelectionRead(getSelectionStatusDefinitions);
+  const catalogState = catalogRead.status !== "ready" ? catalogRead : statusRead;
+  const catalogSnapshot = catalogState.status === "ready" ? catalogRead.data : undefined;
+  const catalogProducts = catalogSnapshot ?? EMPTY_ROWS;
+  const captureRead = useSelectionRead(listPendingCaptureRecords);
+  const pendingCaptures = captureRead.data ?? EMPTY_ROWS;
+  const salesStatusDefinitions = statusRead.data ?? EMPTY_ROWS;
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
   const pendingCount = pendingCaptures.length;
   const missingProductCount = catalogProducts.filter((product) => product.dataReadiness?.hasGaps || product.skuCount === 0).length;
@@ -162,11 +170,10 @@ function ProductLibraryView({ workspaceId, view }) {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  const referenceSnapshot = useLiveQuery(async () => (
-    buildSelectionReferenceRows(await getSelectionReferenceSnapshot())
-  ), [], undefined);
-  const referenceRows = referenceSnapshot ?? [];
-  navigationSnapshotRef.current = { query, filters: { store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly } };
+  const referenceRead = useSelectionRead(readReferenceRows);
+  const referenceSnapshot = referenceRead.data;
+  const referenceRows = referenceSnapshot ?? EMPTY_ROWS;
+  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly } };
 
   useEffect(() => {
     localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
@@ -183,10 +190,11 @@ function ProductLibraryView({ workspaceId, view }) {
   }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, productSort, publicationStatus, referenceSource, status, store, workspaceId, view]);
 
   useEffect(() => {
-    if (statusManagerOpen) setStatusDraft(salesStatusDefinitions);
-  }, [salesStatusDefinitions, statusManagerOpen]);
+    if (statusManagerOpen && statusRead.status === "ready") setStatusDraft(salesStatusDefinitions);
+  }, [salesStatusDefinitions, statusManagerOpen, statusRead.status]);
 
   const changeView = (nextView) => {
+    saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState(), windowScrollY: window.scrollY });
     // The reference view is query-driven; clearing the query falls back to the official catalog.
     const params = nextView === "official" ? {} : { view: nextView };
     setSearchParams(params, { replace: true });
@@ -240,7 +248,10 @@ function ProductLibraryView({ workspaceId, view }) {
   const resolveSalesStatus = (value) => selectionStatusById(salesStatusDefinitions, value);
   const salesStatusLabel = (value) => resolveSalesStatus(value)?.label ?? "未设置";
   useEffect(() => {
-    setSelectedProductIds((current) => current.filter((id) => filteredProductIds.includes(id)));
+    setSelectedProductIds((current) => {
+      const next = current.filter((id) => filteredProductIds.includes(id));
+      return next.length === current.length ? current : next;
+    });
   }, [filteredProductIds]);
 
   const toggleProductSelection = (productId) => {
@@ -562,18 +573,18 @@ function ProductLibraryView({ workspaceId, view }) {
       />
 
       <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
-        <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogProducts.length}</small></button>
-        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>成本与利润参考</span><small>{referenceRows.length}</small></button>
-        <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>待确认采集</span><small>{pendingCount}</small></button>
+        <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
+        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>成本与利润参考</span><small>{referenceRead.status === "ready" ? referenceRows.length : "—"}</small></button>
+        <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>待确认采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button>
       </div>
 
       {view === "reference" ? (
         <>
           <div className="reference-summary" aria-label="选品参考摘要">
-            <span><small>平台 SKU</small><strong>{referenceRows.length}</strong></span>
-            <span><small>已有定稿历史</small><strong>{referenceWithHistory}</strong></span>
-            <span><small>采用 ERP 历史参考</small><strong>{referenceWithErp}</strong></span>
-            <span className={negativeCount ? "danger" : ""}><small>负利润预警</small><strong>{negativeCount}</strong></span>
+            <span><small>平台 SKU</small><strong>{referenceRead.status === "ready" ? referenceRows.length : "—"}</strong></span>
+            <span><small>已有定稿历史</small><strong>{referenceRead.status === "ready" ? referenceWithHistory : "—"}</strong></span>
+            <span><small>采用 ERP 历史参考</small><strong>{referenceRead.status === "ready" ? referenceWithErp : "—"}</strong></span>
+            <span className={negativeCount ? "danger" : ""}><small>负利润预警</small><strong>{referenceRead.status === "ready" ? negativeCount : "—"}</strong></span>
           </div>
           <Panel className="library-filter-panel">
             <div className="library-filters">
@@ -583,10 +594,10 @@ function ProductLibraryView({ workspaceId, view }) {
               </select>
               <button className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly((value) => !value)}><AlertCircle size={17} />只看负利润</button>
             </div>
-            <span className="reference-filter-count">当前 {filteredReferences.length} 条</span>
+            <span className="reference-filter-count">{referenceRead.status === "ready" ? `当前 ${filteredReferences.length} 条` : "尚未取得参考记录"}</span>
           </Panel>
           <Panel className="product-table-panel">
-            {referenceRows.length ? (
+            {referenceRead.status !== "ready" ? <SelectionReadState read={referenceRead} label="成本与利润参考" /> : referenceRows.length ? (
               <DataTable
                 className="selection-reference-table"
                 ref={tableRef}
@@ -608,10 +619,10 @@ function ProductLibraryView({ workspaceId, view }) {
             <div className="library-filters">
               <SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />
               <select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
-                <option value="all">全部店铺</option>{[...new Set(catalogProducts.map((product) => product.store).filter(Boolean))].map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
+                <option value="all">全部店铺</option>{store !== "all" && !catalogProducts.some(product => product.store === store) ? <option value={store}>{store}</option> : null}{[...new Set(catalogProducts.map((product) => product.store).filter(Boolean))].map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
               </select>
               <select className="select-input" aria-label="按选品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
-                <option value="all">全部状态</option>{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}<option value="draft">草稿资料</option><option value="inactive">停用资料</option>
+                <option value="all">全部状态</option>{!["all", "draft", "inactive"].includes(status) && !salesStatusDefinitions.some(item => item.id === status) ? <option value={status}>当前选中状态（等待读取）</option> : null}{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}<option value="draft">草稿资料</option><option value="inactive">停用资料</option>
               </select>
               <select className="select-input" aria-label="按发布状态筛选" value={publicationStatus} onChange={(event) => setPublicationStatus(event.target.value)}>
                 <option value="all">全部发布状态</option>{PRODUCT_PUBLICATION_STATUSES.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}</option>)}
@@ -619,10 +630,10 @@ function ProductLibraryView({ workspaceId, view }) {
               <select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
                 <option value="all">全部经营数据</option><option value="missing_purchase">缺少采购数据</option><option value="missing_profit">缺少利润数据</option><option value="missing_mapping">缺少仓库 SKU 映射</option><option value="erp_complete">采购数据已覆盖</option><option value="profit_complete">已有利润数据</option><option value="mapping_complete">仓库 SKU 已映射</option>
               </select>
-              <button className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly((value) => !value)}><AlertCircle size={17} />缺失数据（{missingProductCount}）</button>
+              <button className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly((value) => !value)}><AlertCircle size={17} />缺失数据（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
               {duplicateSkcGroups.length ? <button className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly((value) => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
               {duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}
-              <Button variant="ghost" icon={Settings2} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>
+              <Button variant="ghost" icon={Settings2} disabled={statusRead.status !== "ready"} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>
             </div>
             <label className="sort-control">排序：
               <select value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="updated">最后更新</option><option value="coverage">成本覆盖情况</option><option value="lowestCost">最低 SKU 参考成本</option><option value="name">商品名称</option></select>
@@ -645,7 +656,7 @@ function ProductLibraryView({ workspaceId, view }) {
                 </div>
               </div>
             ) : null}
-            <DataTable
+            {catalogState.status !== "ready" ? <SelectionReadState read={catalogState} label="商品档案" /> : <DataTable
               className="product-table"
               ref={tableRef}
               initialViewState={savedView?.table}
@@ -656,10 +667,10 @@ function ProductLibraryView({ workspaceId, view }) {
               getRowId={(row) => row.id}
               getRowProps={(row) => ({ onClick: () => navigate(`/products/edit?product=${encodeURIComponent(row.id)}`), tabIndex: 0, onKeyDown: (event) => event.key === "Enter" && navigate(`/products/edit?product=${encodeURIComponent(row.id)}`) })}
               emptyState="没有符合当前筛选条件的商品，请清除部分筛选条件。"
-            />
+            />}
           </Panel>
         </>
-      ) : <CaptureQueueContent query={query} onQueryChange={setQuery} />}
+      ) : <CaptureQueueView captureRead={captureRead} query={query} onQueryChange={setQuery} filter={queueFilter} onFilterChange={setQueueFilter} onOpenEditor={navigate} initialScrollY={savedView?.windowScrollY} />}
       <Modal
         open={bulkConfirmOpen}
         size="small"

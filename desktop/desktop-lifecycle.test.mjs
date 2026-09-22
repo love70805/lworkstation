@@ -14,13 +14,21 @@ try {
     const window = Object.assign(new EventEmitter(), { isDestroyed: () => false, isMinimized: () => false, show: () => { visible = true; }, focus() {}, hide: () => { visible = false; } });
     class Tray extends EventEmitter {
       constructor() { super(); if (unavailable) throw new Error('unavailable'); tray = this; }
-      setToolTip() {} setContextMenu(value) { this.menu = value; } isDestroyed() { return this.dead; } destroy() { this.dead = true; } displayBalloon() {}
+      setToolTip(value) { this.tooltip = value; } setContextMenu(value) { this.menu = value; } isDestroyed() { return this.dead; } destroy() { this.dead = true; } displayBalloon() {}
     }
     const lifecycle = createDesktopLifecycle({ app, window, Tray, Menu: { buildFromTemplate: value => value }, userDataPath: path.join(root, String(unavailable)) });
     let prevented = false;
     window.emit('close', { preventDefault: () => { prevented = true; } });
     assert.equal(prevented, !unavailable); assert.equal(visible, unavailable);
-    if (tray) { tray.emit('click'); assert(visible); tray.menu[2].submenu[1].click(); assert.equal(lifecycle.getState().closeBehavior, 'quit'); }
+    if (tray) {
+      tray.emit('click'); assert(visible);
+      tray.menu[2].submenu[1].click(); assert.equal(lifecycle.getState().closeBehavior, 'quit');
+      assert.match(tray.tooltip, /退出应用/);
+      lifecycle.setCloseBehavior('tray'); assert.match(tray.tooltip, /继续后台收件/);
+      assert.equal(tray.menu[2].submenu[0].checked, true);
+      assert.throws(() => lifecycle.setCloseBehavior('invalid'));
+      assert.equal(lifecycle.getState().closeBehavior, 'tray');
+    }
     lifecycle.quit(); assert.equal(quits, 1);
     prevented = false; window.emit('close', { preventDefault: () => { prevented = true; } }); assert(!prevented);
     lifecycle.dispose();

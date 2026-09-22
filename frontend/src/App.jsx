@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate, Route, Routes } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
 import LegacyCostRedirect from './components/LegacyCostRedirect';
+import AppRouteError from './components/AppRouteError';
 import { ToastProvider } from "./components/UI";
 import { RuntimeConfigurationGate } from "./components/RuntimeConfigurationGate";
 import { CloudAuthenticationGate, hasAuthenticatedCloudIdentity, useCloudAuthenticationState } from "./components/CloudAuthenticationGate";
@@ -143,10 +144,9 @@ function CloudSyncListener() {
   return null;
 }
 
-export default function App() {
+function AppContent() {
   const erpAssistantRouteTarget = getErpAssistantRouteTarget();
   return (
-    <BrowserRouter>
       <ToastProvider>
         <RuntimeConfigurationGate>
           <CloudAuthenticationGate>
@@ -175,6 +175,12 @@ export default function App() {
           </CloudAuthenticationGate>
         </RuntimeConfigurationGate>
       </ToastProvider>
-    </BrowserRouter>
   );
+}
+
+let appRouter;
+export default function App() {
+  // Construct once, including React StrictMode's repeated initial render.
+  appRouter ??= createBrowserRouter([{ path: "*", element: <AppContent />, errorElement: <AppRouteError /> }]);
+  return <RouterProvider router={appRouter} />;
 }

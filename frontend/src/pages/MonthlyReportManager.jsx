@@ -6,6 +6,7 @@ import { inspectSupplementSource, suggestSupplementMapping, supplementFields, su
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
 import { downloadReportFile } from "../lib/profitReportWorkbook";
 import { displayMoney } from "../domain/profitReports";
+import { currentLedgerResult, reportReadiness } from "../domain/ledgerWorkflow";
 
 const fieldLabels={owner:'姓名',store:'实际店铺',platformSkc:'SKC',supplierNumber:'供方货号',businessId:'业务单号',order1688:'1688单号',quantity:'件数',amount:'扣款金额'};
 export function SupplementEditor({ state, kind, onClose }) {
@@ -56,18 +57,29 @@ export function SupplementEditor({ state, kind, onClose }) {
   </Modal>;
 }
 
-export default function MonthlyReportManager({ ledgerId }) {
+export default function MonthlyReportManager({ ledgerId, missingCostCount, onOpenCosts }) {
   const {notify}=useToast();
-  const state=useLiveQuery(async()=>{try{return {ledgerId,data:await readMonthlyReportState(ledgerId)};}catch(error){return {ledgerId,error:error.message};}},[ledgerId]);
+  const [retry, setRetry] = useState(0);
+  const state=useLiveQuery(async()=>{try{return {ledgerId,data:await readMonthlyReportState(ledgerId)};}catch(error){return {ledgerId,error:error.message};}},[ledgerId,retry]);
   const [editor,setEditor]=useState(null),[preview,setPreview]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   if(!state||state.ledgerId!==ledgerId)return <Panel>正在读取本月报告...</Panel>;
-  if(state.error)return <Panel><p role="alert">{state.error}</p></Panel>;
+  if(state.error)return <Panel><p role="alert">{state.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取报告</Button></Panel>;
   const data=state.data,locked=['finalized','locked'].includes(data.ledger.status);
+  const missing = locked ? 0 : missingCostCount === undefined ? data.ledger.costSummary?.missingCount : missingCostCount;
+  const readiness = reportReadiness({ ...data, missingCount: missing });
+  const current = currentLedgerResult(data.ledger, data.reports, data.deduction);
+  async function download(reportId) { try { downloadReportFile(await readSavedProfitReport(reportId)); } catch (failure) { setError(failure.message); } }
   async function prepare(kind){setBusy(true);setError('');try{const input={ledgerId,kind,baseReportId:kind==='financial'?data.ledger.currentBaseReportId:null};setPreview({input,...await previewProfitReport(input)});}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function save(){setBusy(true);setError('');try{const report=await saveProfitReport(preview.input,{expectedFingerprint:preview.fingerprint});downloadReportFile(report);setPreview(null);notify('报告已保存并开始下载，可从历史报告重下载。');}catch(e){setError(e.message);setPreview(null);}finally{setBusy(false);}}
   return <Panel className="monthly-report-manager" id="monthly-reports"><h2>本月报告 · {data.ledger.period}</h2><p>未扣款报告先留存商品与代发基础，后收到的扣款仍归入这个账本月份。原报告可重下载。</p>
     <div className="report-sources-summary"><div><strong>代发</strong><p>{data.dispatch?`已采用 ${data.dispatch.adoptedQuantityExact} 件 · r${data.dispatch.revision}`:'尚未采用（真实零需明确填写）'}</p><Button disabled={locked} onClick={()=>setEditor('dispatch')}>登记代发</Button></div><div><strong>独立扣款</strong><p>{data.deduction?`已采用 ${data.deduction.signedAmountExact} 元 · r${data.deduction.revision}${data.deduction.missingStores.length?' · 部分店铺待取得':''}`:'尚未取得'}</p><Button disabled={data.ledger.status==='locked'} onClick={()=>setEditor('deduction')}>登记扣款</Button></div></div>
-    <div className="profit-toolbar"><Button disabled={busy||locked} onClick={()=>prepare('pre_deduction')}>预览未扣款报告并定稿</Button><Button disabled={busy||!data.ledger.currentBaseReportId||data.ledger.status==='locked'} onClick={()=>prepare('financial')}>预览财务对账报告</Button></div>
+    <div className="report-readiness" aria-label="整月报告准备情况">
+      <div><strong>商品成本</strong><span>{locked ? '已随基础保存' : missing == null ? '正在核对整月成本' : missing ? `整月 ${missing} 条待补` : '整月已齐'}</span>{!locked && missing > 0 && onOpenCosts ? <Button onClick={onOpenCosts}>补齐成本</Button> : null}</div>
+      <div><strong>代发</strong><span>{data.dispatch || readiness.baseSaved ? '已登记' : '待登记，真实零填 0'}</span></div>
+      <div><strong>扣款</strong><span>{!data.deduction ? '等待来源，可先保存未扣款报告' : readiness.missingStores.length ? `待取得：${readiness.missingStores.join('、')}` : '各店已齐'}</span></div>
+    </div>
+    <div className="profit-toolbar"><Button disabled={busy||!readiness.baseReady} onClick={()=>prepare('pre_deduction')}>预览未扣款报告并定稿</Button><Button disabled={busy||!readiness.financialReady||current.state === 'unavailable'} onClick={()=>prepare('financial')}>预览财务对账报告</Button></div>
+    {current.report ? <div className="report-current"><div><strong>{current.label}</strong><span>{current.state === 'deduction_pending' ? '当前金额为未扣款基础 · ' : ''}¥{displayMoney(current.profit)}</span></div><Button onClick={() => download(current.report.id)}>下载{current.report.kind === 'financial' ? '当前财务报告' : '未扣款报告'}</Button></div> : locked ? <p role="status">{current.label}{current.state === 'legacy' ? '，生成新格式报告需先重开本月基础。' : ''}</p> : null}
     {data.ledger.reportReopenReason&&!locked?<p>基础已显式重开：{data.ledger.reportReopenReason}。本次将生成新修订，旧文件保持不变。</p>:null}
     {data.reports.length?<details><summary>历史报告（{data.reports.length}）</summary>{data.reports.map(report=><div className="report-history-row" key={report.id}><span>{report.kind==='financial'?'财务对账':'未扣款'} · r{report.revision} · {report.createdAt.slice(0,10)} · ¥{report.displayTotals.profit}</span><Button onClick={async()=>{try{downloadReportFile(await readSavedProfitReport(report.id));}catch(e){setError(e.message);}}}>重下载原文件</Button></div>)}</details>:null}
     {editor?<SupplementEditor key={`${ledgerId}/${editor}`} state={data} kind={editor} onClose={()=>setEditor(null)} />:null}

@@ -353,3 +353,26 @@
 .cost-page .cost-page-toolbar {
   margin-top: 0;
 }
+
+.cost-store-results { display: grid; gap: 10px; align-content: start; }
+.cost-store-results > div { display: grid; gap: 3px; }
+.cost-store-results strong, .cost-store-results small { overflow-wrap: anywhere; }
+.cost-store-results small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.cost-store-results .button { min-height: 44px; white-space: normal; }
+.cost-detail-modal { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin-left: auto; }
+.cost-detail-modal .modal-body { display: grid; gap: 18px; }
+.cost-detail-current { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-bg); }
+.cost-detail-current small { color: var(--text-secondary); line-height: 1.6; }
+.cost-detail-evidence { min-width: 0; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.cost-detail-evidence h3 { margin: 0 0 8px; font-size: 14px; }
+.cost-detail-evidence p { color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.cost-detail-evidence .cost-resolution-record { flex-wrap: wrap; padding-right: 0; padding-left: 0; }
+.cost-detail-evidence .cost-resolution-actions { flex-wrap: wrap; }
+.cost-detail-modal .modal-footer { flex-wrap: wrap; }
+.cost-detail-modal .modal-footer .button { min-height: 44px; }
+.cost-detail-modal:focus-within { scroll-padding-block: 18px; }
+@media (max-width: 760px) {
+  .cost-detail-modal { margin: auto; }
+  .cost-inbox-item, .cost-inbox-history-item { align-items: stretch; flex-wrap: wrap; }
+  .cost-inbox-item-status { flex-wrap: wrap; justify-content: flex-start; }
+}
