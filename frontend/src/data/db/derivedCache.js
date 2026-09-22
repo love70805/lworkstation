@@ -78,6 +78,30 @@ export function installDerivedInvalidation(database) {
 }
 
 export function clearDerivedMemory() { memory.clear(); pending.clear(); }
+
+function persistEntry(entry, revision) {
+  // A native timer starts a separate task outside Dexie's liveQuery scope.
+  // ignoreTransaction only detaches transactions, not the read-only querier.
+  // Keep this boundary specific to the disposable sidecar; source reads and
+  // computation remain in the original observable, read-only context.
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      try {
+        await derivedCacheDb.transaction('rw', derivedCacheDb.entries, async () => {
+          assertSourceRevision(revision);
+          await derivedCacheDb.entries.put(entry);
+          const entries = await derivedCacheDb.entries.orderBy('createdAt').reverse().toArray();
+          let size = 0;
+          const expired = entries.filter((item, index) => { size += item.bytes; return index >= MAX_DISK || size > MAX_DISK_BYTES; });
+          await derivedCacheDb.entries.bulkDelete(expired.map(item => item.key));
+          assertSourceRevision(revision);
+        });
+        resolve();
+      } catch (error) { reject(error); }
+    }, 0);
+  });
+}
+
 export async function cachedDerived({ scope, formula, revision = sourceRevision(), compute, persist = true, onStatus = () => {} }) {
   assertSourceRevision(revision);
   const key = JSON.stringify([formula, scope, revision]);
@@ -97,13 +121,7 @@ export async function cachedDerived({ scope, formula, revision = sourceRevision(
       if (persist && durable) {
         try {
           const bytes = JSON.stringify(value).length * 2;
-          if (bytes <= MAX_ENTRY_BYTES) await Dexie.ignoreTransaction(() => derivedCacheDb.transaction('rw', derivedCacheDb.entries, async () => {
-            await derivedCacheDb.entries.put({ key, value, bytes, createdAt: Date.now() });
-            const entries = await derivedCacheDb.entries.orderBy('createdAt').reverse().toArray();
-            let size = 0;
-            const expired = entries.filter((entry, index) => { size += entry.bytes; return index >= MAX_DISK || size > MAX_DISK_BYTES; });
-            await derivedCacheDb.entries.bulkDelete(expired.map(entry => entry.key));
-          }));
+          if (bytes <= MAX_ENTRY_BYTES) await persistEntry({ key, value, bytes, createdAt: Date.now() }, revision);
         } catch { /* quota/private mode must not block a correct calculation */ }
       }
     }

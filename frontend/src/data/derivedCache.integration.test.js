@@ -10,6 +10,17 @@ import { getLedgerSnapshot } from './repositories/profitRepository';
 import { readCachedReportProducts } from './repositories/derivedComputationService';
 import { buildReportProducts } from '../domain/profitReports';
 import { readMonthlyReportState } from './repositories/profitReportRepository';
+import * as computation from './repositories/derivedComputationService';
+
+function firstLiveResult(querier) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => { subscription.unsubscribe(); reject(new Error('live query timed out')); }, 3000);
+    const subscription = liveQuery(querier).subscribe({
+      next(value) { clearTimeout(timeout); subscription.unsubscribe(); resolve(value); },
+      error(error) { clearTimeout(timeout); subscription.unsubscribe(); reject(error); },
+    });
+  });
+}
 
 beforeEach(async () => {
   const values = new Map();
@@ -22,6 +33,21 @@ beforeEach(async () => {
   await db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', store: '甲', platformSku: 'A', quantity: 1, amount: 0.009, amountExact: '0.009', sourceAddedDate: '2026-08-01' });
 });
 afterEach(async () => { await db.delete(); await derivedCacheDb.delete(); vi.unstubAllGlobals(); });
+it('keeps durable cache across identical startup identity initialization but invalidates on a real identity change', async () => {
+  const compute = vi.fn(async () => 'unchanged-business-result');
+  const options = { scope: ['W', 'L'], formula: 'startup-idempotence@1', compute };
+  await cachedDerived(options);
+  const revision = sourceRevision();
+  await Promise.all([setActiveMemberContext({ workspaceId: 'W', memberId: 'M' }), setActiveMemberContext({ workspaceId: 'W', memberId: 'M' })]);
+  expect(sourceRevision()).toBe(revision);
+  clearDerivedMemory();
+  expect(await cachedDerived(options)).toBe('unchanged-business-result');
+  expect(compute).toHaveBeenCalledTimes(1);
+  await setActiveMemberContext({ workspaceId: 'W', memberId: 'M', role: 'viewer' });
+  expect(sourceRevision()).not.toBe(revision);
+  await cachedDerived(options);
+  expect(compute).toHaveBeenCalledTimes(2);
+});
 
 it('reuses persisted exact results after closing databases and discarding process memory', async () => {
   const compute = vi.fn(async () => ({ exact: '0.00000001' }));
@@ -46,6 +72,46 @@ it('shares one raw snapshot and persists consumed sales summaries', async () => 
   expect(await derivedCacheDb.entries.count()).toBe(1);
   clearDerivedMemory();
   expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('0.009');
+});
+
+it('persists real live-query sales results and reuses them without computation after memory clear and restart', async () => {
+  const compute = vi.spyOn(computation, 'runDerivedComputation');
+  const query = async () => readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' });
+  try {
+    const first = await firstLiveResult(query);
+    expect(first.monthTotalsExact.revenueExact).toBe('0.009');
+    expect(await derivedCacheDb.entries.count()).toBe(1);
+    expect(compute).toHaveBeenCalledTimes(1);
+    compute.mockClear(); clearDerivedMemory();
+    expect((await firstLiveResult(query)).monthTotalsExact).toEqual(first.monthTotalsExact);
+    expect(compute).not.toHaveBeenCalled();
+    db.close(); derivedCacheDb.close(); clearDerivedMemory();
+    await db.open(); await derivedCacheDb.open();
+    expect((await firstLiveResult(query)).chartMonth).toEqual(first.chartMonth);
+    expect(compute).not.toHaveBeenCalled();
+    // Deferring optional cache persistence must not relax business writes.
+    await expect(firstLiveResult(async () => db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'FORBIDDEN' }))).rejects.toMatchObject({ name: 'ReadOnlyError' });
+    expect(await db.salesRows.count()).toBe(1);
+  } finally { compute.mockRestore(); }
+});
+
+it('observes same-count and same-value writes after a live-query persistent-cache hit', async () => {
+  await firstLiveResult(async () => readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' }));
+  clearDerivedMemory();
+  const emissions = [], errors = [];
+  const subscription = liveQuery(async () => readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).subscribe({ next: value => emissions.push(value.monthTotalsExact.revenueExact), error: error => errors.push(error) });
+  try {
+    await vi.waitFor(() => expect(emissions.at(-1)).toBe('0.009'));
+    await db.salesRows.where('ledgerId').equals('L').modify({ amountExact: '2', amount: 2 });
+    await vi.waitFor(() => expect(emissions.at(-1)).toBe('2'));
+    const priorCount = emissions.length, priorRevision = sourceRevision();
+    await db.salesRows.where('ledgerId').equals('L').modify({ amountExact: '2', amount: 2 });
+    await vi.waitFor(() => expect(emissions.length).toBeGreaterThan(priorCount));
+    expect(emissions.at(-1)).toBe('2');
+    expect(sourceRevision()).not.toBe(priorRevision);
+    expect(errors).toEqual([]);
+    expect(await db.salesRows.count()).toBe(1);
+  } finally { subscription.unsubscribe(); }
 });
 
 it('invalidates same-count row replacement, formal costs, approvals, rate and restore clear', async () => {
@@ -79,6 +145,16 @@ it('rejects an old worker result and a stale profit snapshot after mutation', as
   await expect(result).rejects.toBeInstanceOf(StaleDerivedResultError);
   await expect(readCachedReportProducts({ snapshot })).rejects.toBeInstanceOf(StaleDerivedResultError);
   expect(await derivedCacheDb.entries.count()).toBe(0);
+});
+
+it('rejects a revision change while sidecar persistence is queued', async () => {
+  const result = cachedDerived({ scope: ['W', 'L'], formula: 'queued-race', compute: () => {
+    setTimeout(() => invalidateDerivedCache(false), 0);
+    return { exact: 'old-result' };
+  } });
+  await expect(result).rejects.toBeInstanceOf(StaleDerivedResultError);
+  expect(await derivedCacheDb.entries.count()).toBe(0);
+  expect(await db.salesRows.count()).toBe(1);
 });
 
 it('bounds disposable disk entries and preserves source data', async () => {
@@ -127,6 +203,17 @@ it('falls back to correct calculation and source reads when optional cache stora
     expect(await cachedDerived({ scope: ['W'], formula: 'fallback', compute: () => ({ exact: '0.0001' }) })).toEqual({ exact: '0.0001' });
     expect((await readLedgerSalesRows('W', 'L'))[0].amountExact).toBe('0.009');
   } finally { get.mockRestore(); revisionGet.mockRestore(); }
+});
+
+it('returns the correct live-query result if detached sidecar persistence fails', async () => {
+  const put = vi.spyOn(derivedCacheDb.entries, 'put').mockRejectedValue(new Error('cache quota exceeded'));
+  try {
+    const result = await firstLiveResult(async () => readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' }));
+    expect(result.monthTotalsExact.revenueExact).toBe('0.009');
+    expect(put).toHaveBeenCalled();
+    expect(await derivedCacheDb.entries.count()).toBe(0);
+    expect(await db.salesRows.count()).toBe(1);
+  } finally { put.mockRestore(); }
 });
 
 it('caches worker chart output and distinguishes a missing comparison store from known zero', async () => {
