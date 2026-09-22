@@ -109,8 +109,10 @@ export function validateProductSalesReadiness({ draft = {}, referenceCosts = [] 
   if (!text(draft.platformSkc)) issues.push("platform_skc_required");
   if (!text(draft.store)) issues.push("store_required");
   if (!suppliers.some((supplier) => text(supplier.sourceUrl))) issues.push("supplier_source_required");
+  if (variants.length === 0) issues.push("platform_sku_required");
 
   variants.forEach((variant, index) => {
+    if (!text(variant.platformSku)) issues.push(`variant_${index}_platform_sku_required`);
     if (!text(variant.attribute)) issues.push(`variant_${index}_attribute_required`);
     if (!positive(variant.salePrice)) issues.push(`variant_${index}_sale_price_required`);
     const referenceCost = Number(referenceCosts[index]);
