@@ -380,12 +380,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
 
   return (
     <>
-      <PageHeader
-        eyebrow={`月度利润核算 · ${snapshot.ledger.period}`}
-        title="利润核算"
-        description={`${ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status} · ${calculated.length} 条 SKU 明细 · ${locked ? "历史定稿口径，使用已存快照" : "销售金额、成本和扣款会先整理，确认后再形成月度结果"}`}
-        actions={<><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button><Button variant="primary" icon={Warehouse} onClick={() => navigate(costMatchingHref)}>ERP 成本核对</Button><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>报告与导出</Button>{locked ? <Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge> : <Button icon={CheckCircle2} disabled={!canFinalize} onClick={finalizeLedger}>预览并定稿</Button>}</>}
-      />
+      <div className="profit-section-toolbar"><p>{calculated.length} 条 SKU 明细 · {locked ? "历史定稿口径" : "核对成本后形成月度结果"}</p><div className="page-actions"><Button icon={CalendarDays} onClick={() => navigate("/ledger")}>月度账本</Button>{locked ? <><Button icon={Download} loading={exporting} disabled={exporting} onClick={exportProfit}>导出旧账本</Button><Badge tone="success"><LockKeyhole size={13} />{snapshot.ledger.status === "locked" ? "已锁定" : "已定稿"}</Badge></> : null}</div></div>
 
       {calculation.error ? <div role="alert" className="profit-refresh-status">读取失败：{calculation.error} 以下为上次结果，暂不能定稿。<Button onClick={() => setRetryCalculation(value => value + 1)}>重新读取</Button></div> : null}
       {calculation.loading ? <p className="profit-refresh-status" role="status">正在更新计算，当前显示上次结果；更新完成后才能定稿。</p> : null}
@@ -443,7 +438,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
   );
 }
 
-export function ProfitViewsContent() {
+export function ProfitViewsContent({ monthControl = null }) {
   const [readiness, setReadiness] = useState(null);
   const [retry, setRetry] = useState(0);
   const [params, setParams] = useSearchParams();
@@ -463,7 +458,8 @@ export function ProfitViewsContent() {
   const openAllMissingCosts = () => setParams(buildProfitQuery({ ledgerId: snapshot.ledger.id, view: 'cost', storeFilter: 'all', missingOnly: true }));
   return <>
     {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set('view', 'detail'); setParams(next); }}>查看利润明细</Button></Panel> : snapshot === undefined ? <Panel role="status">正在读取月度账本...</Panel> : snapshot?.error ? <Panel><p role="alert">账本读取失败：{snapshot.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取</Button></Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p>{snapshot?.ledger ? <Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button> : <Button onClick={() => navigate('/ledger')}>选择账本</Button>}</Panel> : <>
-      <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button><label>店铺 <select className="select-input" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></nav>
+      <header className="profit-workspace-header"><div><h1>利润核算</h1><p>{snapshot.ledger.period} · {ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status}</p></div><div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></div></header>
+      <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button></nav>
       {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></>}
     </>}
   </>;

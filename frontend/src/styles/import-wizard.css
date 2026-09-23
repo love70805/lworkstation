@@ -240,6 +240,9 @@
 .batch-import .batch-store label { font-size: 12px; font-weight: 600; }
 .batch-import .text-input { min-width: 0; min-height: 44px; width: 100%; background: var(--surface-bg); color: var(--text); }
 .batch-import .batch-period .text-input { width: 210px; }
+.batch-import .batch-period-evidence, .batch-import .batch-period-warning { margin: 0 24px 14px; padding: 10px 12px; border-radius: 6px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.batch-import .batch-period-evidence { background: var(--surface-bg); color: var(--text-muted); }
+.batch-import .batch-period-warning { border: 1px solid var(--warning-border); background: var(--warning-bg); color: var(--text); }
 .batch-import [aria-invalid="true"] { border-color: var(--danger); }
 .batch-import details { margin-top: 10px; }
 .batch-import summary { min-height: 44px; padding: 12px 0; cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }

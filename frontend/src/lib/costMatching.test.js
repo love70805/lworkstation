@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, filterCostMatches, groupAuxiliaryCostRows, groupCostMatchesBySkc, hasMappingIdentityIssue, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft } from "./costMatching";
+import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, filterCostMatches, groupAuxiliaryCostRows, groupCostMatchesBySkc, hasMappingIdentityIssue, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "./costMatching";
 
 describe("成本核对按平台 SKC 分组", () => {
+  it("projects existing ledger attributes with traceable conflicting descriptions without changing SKU matching", () => {
+    const matches = withLedgerAttributes([{ platformSku: "SKU-1", platformSkc: "SKC-1", status: "matched" }], [
+      { platformSku: "SKU-1", attribute: "红色 / L", store: "甲店", sourceSheet: "销售", sourceRow: 12 },
+      { platformSku: "SKU-1", attribute: "蓝色 / L", store: "乙店", sourceSheet: "销售", sourceRow: 18 },
+    ]);
+    expect(matches[0]).toMatchObject({ platformSku: "SKU-1", status: "matched", attribute: "红色 / L、蓝色 / L", attributeEvidence: [
+      { attribute: "红色 / L", sources: [{ store: "甲店", sourceSheet: "销售", sourceRow: 12 }] },
+      { attribute: "蓝色 / L", sources: [{ store: "乙店", sourceSheet: "销售", sourceRow: 18 }] },
+    ] });
+    expect(filterCostMatchGroups(groupCostMatchesBySkc(matches), "蓝色")).toHaveLength(1);
+  });
   it("builds a newest-first processed and voided inbox history without rewriting evidence warnings", () => {
     const history = buildErpInboxHistory([
       { id: "PENDING", ledgerId: "L-1", status: "pending" },

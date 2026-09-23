@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ImportPreview from "./ImportPreview";
 import { ToastProvider } from "../components/UI";
-const mocks = vi.hoisted(() => ({ parse:vi.fn(), validate:vi.fn(), release:vi.fn(), terminate:vi.fn(), preview:vi.fn(), save:vi.fn() }));
+const mocks = vi.hoisted(() => ({ parse:vi.fn(), inspectPeriod:vi.fn(), validate:vi.fn(), release:vi.fn(), terminate:vi.fn(), preview:vi.fn(), save:vi.fn() }));
 vi.mock('../lib/importWorkerClient', () => ({createImportWorkerClient:()=>mocks}));
 vi.mock('../data/database', () => ({previewSalesImports:mocks.preview,saveSalesImports:mocks.save}));
 let container, root;
@@ -14,17 +14,19 @@ const mapping = {platformSku:'SKU',platformSkc:'SKC',quantity:'数量',amount:'�
 const summary = {quantity:2,revenue:10,penalty:0};
 function button(text) { return [...container.querySelectorAll('button')].find((node)=>node.textContent === text); }
 async function click(text) { await act(async()=>button(text).click()); }
-async function upload() {
+async function upload(selectPeriod = true) {
   const input = container.querySelector('input[type=file]');
   const files = [new File(['first'], '甲店.csv'),new File(['second'],'乙店.csv')];
   Object.defineProperty(input,'files',{configurable:true,value:files});
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
   await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(2)); });
+  if (selectPeriod) await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
 }
 beforeEach(async()=>{
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); mocks.release.mockResolvedValue({});
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'generic'});
+  mocks.inspectPeriod.mockResolvedValue({ evidence: { sourceField:'sourceAddedAt', sourceColumn:'', distribution:[], validCount:0, missingCount:1, invalidCount:0, errorCount:0, eligibleCount:1, suggestedPeriod:null } });
   mocks.validate.mockResolvedValue({rows:[{platformSku:'000123'}],summary:{validRowCount:1,errorCount:0,ignoredCount:0,errors:[]}});
   mocks.preview.mockImplementation(async(input)=>({ledgerId:'L',targetSignature:'snapshot',inputSignature:'input',requiresOverwrite:true,summary,finalSummary:summary,
     items:input.items.map(item=>({...item,status:'ready',validRowCount:1,ignoredRowCount:0,errorCount:0,summary,addedGroupCount:0,replacedGroupCount:1,overlaps:[{groupKey:item.itemId,store:item.storeName,platformSkc:'父商品',before:{...summary,rowCount:1},after:{...summary,rowCount:1}}]}))}));
@@ -134,4 +136,29 @@ it('requires a fresh preview and overwrite approval after an atomic submission f
   await click('统一校验与预览');
   expect(button('确认导入').disabled).toBe(true);
   expect(mocks.save).toHaveBeenCalledTimes(1);
+});
+it('auto-selects a complete single source month and requires an explicit choice after a new conflicting file',async()=>{
+  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-07',count:2}], suggestedPeriod:'2026-07', missingCount:0, invalidCount:0, errorCount:0 } });
+  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-07',count:1}], suggestedPeriod:'2026-07', missingCount:0, invalidCount:0, errorCount:0 } });
+  await upload(false);
+  expect(container.querySelector('#ledger-period').value).toBe('2026-07');
+  expect(button('统一校验与预览').disabled).toBe(false);
+  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-08',count:1}], suggestedPeriod:'2026-08', missingCount:0, invalidCount:0, errorCount:0 } });
+  const input=container.querySelector('input[type=file]');
+  Object.defineProperty(input,'files',{configurable:true,value:[new File(['third'],'丙店.csv')]});
+  await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+  expect(container.querySelector('#ledger-period').value).toBe('');
+  expect(container.textContent).toContain('2026-07');
+  expect(container.textContent).toContain('2026-08');
+  expect(button('统一校验与预览').disabled).toBe(true);
+  await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
+  expect(button('统一校验与预览').disabled).toBe(false);
+});
+it('keeps a user-selected month when later file inspection completes',async()=>{
+  await upload();
+  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-06',count:1}], suggestedPeriod:'2026-06', missingCount:0, invalidCount:0, errorCount:0 } });
+  const input=container.querySelector('input[type=file]');
+  Object.defineProperty(input,'files',{configurable:true,value:[new File(['third'],'丙店.csv')]});
+  await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+  expect(container.querySelector('#ledger-period').value).toBe('2026-08');
 });

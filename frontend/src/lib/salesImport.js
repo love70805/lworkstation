@@ -285,3 +285,33 @@ export function validateSalesRows(rawRows, mapping, {
     platformSkcMissingCount: rows.filter((row) => !row.platformSkc).length,
   };
 }
+
+// Month suggestions only use sales rows that would enter this import. An
+// incomplete source date never becomes an implicit month choice.
+export function collectSalesPeriodEvidence(rawRows, mapping, options = {}) {
+  const validation = validateSalesRows(rawRows, mapping, { ...options, period: undefined });
+  const months = new Map();
+  let missingCount = 0;
+  let invalidCount = 0;
+  for (const row of validation.rows) {
+    if (row.dateStatus === "valid" && row.sourceAddedDate) {
+      const month = row.sourceAddedDate.slice(0, 7);
+      months.set(month, (months.get(month) ?? 0) + 1);
+    } else if (row.dateStatus === "missing") missingCount += 1;
+    else invalidCount += 1;
+  }
+  const distribution = [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, count]) => ({ month, count }));
+  return {
+    sourceField: "sourceAddedAt",
+    sourceColumn: mapping?.sourceAddedAt ?? "",
+    distribution,
+    validCount: distribution.reduce((total, item) => total + item.count, 0),
+    missingCount,
+    invalidCount,
+    errorCount: validation.errors.length,
+    ignoredCount: validation.ignored.length,
+    eligibleCount: validation.rows.length,
+    suggestedPeriod: distribution.length === 1 && missingCount === 0 && invalidCount === 0 && validation.errors.length === 0
+      ? distribution[0].month : null,
+  };
+}

@@ -4,17 +4,12 @@ import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-reac
 import { Button, ProgressBar, useToast } from "../components/UI";
 import { getActiveMemberContext, listLedgerSummaries, previewSalesImports, saveSalesImports } from "../data/database";
 import { importReturnHref } from "../lib/importNavigation";
+import { summarizeImportPeriod } from "../lib/importPeriod";
 import { createImportWorkerClient } from "../lib/importWorkerClient";
 import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, validateSalesMapping } from "../lib/salesImport";
 
 const ACCEPTED_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"]);
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
-function previousMonth() {
-  const date = new Date();
-  date.setDate(1);
-  date.setMonth(date.getMonth() - 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
 async function sha256File(file) {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
@@ -38,8 +33,10 @@ export default function ImportPreview() {
   const previewRef = useRef(null);
   const clientRef = useRef(null);
   const operationRef = useRef(false);
+  const periodChoiceRef = useRef(false);
+  const inspectionSequenceRef = useRef(new Map());
   const [files, setFiles] = useState([]);
-  const [period, setPeriod] = useState(() => requestedLedgerId ? '' : previousMonth());
+  const [period, setPeriod] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState({ value: 0, label: "" });
   const [error, setError] = useState("");
@@ -49,6 +46,11 @@ export default function ImportPreview() {
   const [result, setResult] = useState(null);
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
+  const periodEvidence = summarizeImportPeriod(files, requestedLedgerId ? period : null);
+  const suggestedPeriod = periodEvidence.suggestedPeriod;
+  useEffect(() => {
+    if (!requestedLedgerId && !periodChoiceRef.current) setPeriod(suggestedPeriod ?? "");
+  }, [requestedLedgerId, suggestedPeriod]);
   const returnHref = importReturnHref(location.search, location.state?.importReturnTo, result?.ledgerId);
   const returnLabel = returnHref.startsWith('/workspace') ? '返回经营概览' : returnHref.startsWith('/ledger') ? '返回月度账本' : '返回利润面板';
   useEffect(() => {
@@ -85,9 +87,31 @@ export default function ImportPreview() {
     return () => clientRef.current?.terminate();
   }, []);
   const invalidate = () => { setPreview(null); setPayload(null); setOverwriteSignature(null); setError(""); };
+  const inspectPeriod = async (item) => {
+    const sequence = (inspectionSequenceRef.current.get(item.itemId) ?? 0) + 1;
+    inspectionSequenceRef.current.set(item.itemId, sequence);
+    try {
+      const { evidence } = await clientRef.current.inspectPeriod(item.itemId, item.mapping, {
+        ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
+      });
+      if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
+        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, periodEvidence: evidence } : entry));
+      }
+    } catch (inspectionError) {
+      if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
+        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? {
+          ...entry, periodEvidence: { distribution: [], suggestedPeriod: null, errorCount: 1 }, periodInspectionError: inspectionError.message,
+        } : entry));
+      }
+    }
+  };
   const update = (itemId, patch) => {
     invalidate();
-    setFiles((current) => current.map((item) => item.itemId === itemId ? { ...item, ...patch, validation: null } : item));
+    const current = files.find((item) => item.itemId === itemId);
+    if (!current) return;
+    const next = { ...current, ...patch, validation: null, periodEvidence: null, periodInspectionError: null };
+    setFiles((entries) => entries.map((item) => item.itemId === itemId ? next : item));
+    void inspectPeriod(next);
   };
   const loadFiles = async (selection) => {
     if (operationRef.current || !selection.length || result || contextBlocked) return;
@@ -103,12 +127,16 @@ export default function ImportPreview() {
           if (item.file.size > MAX_FILE_SIZE) throw new Error("单文件不能超过 50 MB。");
           const fileHash = await sha256File(item.file);
           const parsed = await clientRef.current.parse(item.file, item.itemId);
+          const filterOptions = parsed.preset === "ledger_report" ? {
+            movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
+            supplierNumbers: parsed.facets.supplierNumbers, deriveAmountFromUnitPrice: true,
+          } : null;
+          const inspected = await clientRef.current.inspectPeriod(item.itemId, parsed.suggestedMapping, {
+            ...filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
+          });
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions: parsed.preset === "ledger_report" ? {
-              movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
-              supplierNumbers: parsed.facets.supplierNumbers, deriveAmountFromUnitPrice: true,
-            } : null,
+            filterOptions, periodEvidence: inspected.evidence,
           }));
         } catch (parseError) {
           setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, status: "error", error: parseError.message } : entry));
@@ -119,6 +147,7 @@ export default function ImportPreview() {
   };
   const remove = async (item) => {
     if (operationRef.current) return;
+    inspectionSequenceRef.current.delete(item.itemId);
     invalidate(); setFiles((current) => current.filter((entry) => entry.itemId !== item.itemId));
     await clientRef.current.release(item.itemId).catch(() => {});
   };
@@ -126,11 +155,13 @@ export default function ImportPreview() {
     invalidate();
     const columns = Object.values(source.mapping).filter(Boolean);
     let count = 0;
-    setFiles(files.map((item) => {
+    const updated = files.map((item) => {
       if (item.itemId === source.itemId || item.status !== "parsed" || !columns.every((column) => item.headers.includes(column))) return item;
       count += 1;
-      return { ...item, mapping: { ...source.mapping }, validation: null };
-    }));
+      return { ...item, mapping: { ...source.mapping }, validation: null, periodEvidence: null };
+    });
+    setFiles(updated);
+    updated.filter((item) => item.periodEvidence === null).forEach((item) => { void inspectPeriod(item); });
     notify(`映射已套用到 ${count} 个兼容文件；各文件店铺与筛选保持原值。`);
   };
   const validate = async () => {
@@ -166,7 +197,7 @@ export default function ImportPreview() {
     } catch (writeError) { invalidate(); setError(`整批未写入：${writeError.message}`); }
     finally { setBusy(false); operationRef.current = false; }
   };
-  const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && files.every((item) => {
+  const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && !periodEvidence.awaitingEvidence && files.every((item) => {
     const columns = Object.values(item.mapping ?? {}).filter(Boolean);
     return item.status === "parsed" && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
   });
@@ -175,10 +206,10 @@ export default function ImportPreview() {
     <section className="wizard-content">
       <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，核对归属后统一预览、一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
       <section className="import-flow-guide" aria-label="月度核算流程">
-        <div className="import-flow-guide-heading"><strong>月度核算流程</strong><span>这里只是建立数据，最终是否采用由人工决定。</span></div>
+        <div className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></div>
         <div className="import-flow-guide-steps">
           <span className="active"><b>1</b><strong>导入销售台账</strong><small>当前步骤</small></span>
-          <span><b>2</b><strong>取得候选成本</strong><small>ERP、历史或人工</small></span>
+          <span><b>2</b><strong>取得正式成本</strong><small>ERP 自动采用</small></span>
           <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
           <span><b>4</b><strong>确认利润</strong><small>核对后再定稿</small></span>
         </div>
@@ -187,7 +218,10 @@ export default function ImportPreview() {
       {!result ? <>
         <section className="wizard-card">
           <fieldset disabled={busy || contextBlocked} className="batch-fieldset">
-            <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">{requestedLedgerId ? '沿用当前账本月份' : '本批所有文件导入同一月份'}</p></div><input id="ledger-period" disabled={Boolean(requestedLedgerId)} aria-describedby="batch-period-note" className="text-input" type="month" value={period} onChange={(event) => { setPeriod(event.target.value); invalidate(); }} /></div>
+            <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">{requestedLedgerId ? '沿用当前账本月份' : suggestedPeriod && !periodChoiceRef.current ? `按销售台账“添加时间”识别：${suggestedPeriod}` : '请依据销售台账日期明确选择月份'}</p></div><input id="ledger-period" disabled={Boolean(requestedLedgerId)} aria-describedby="batch-period-note batch-period-evidence" className="text-input" type="month" value={period} onChange={(event) => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} /></div>
+            {files.length ? <p id="batch-period-evidence" className={periodEvidence.conflictsExisting || periodEvidence.months.length > 1 || periodEvidence.missingCount || periodEvidence.invalidCount ? "batch-period-warning" : "batch-period-evidence"} role="status">
+              {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>来源月份：{periodEvidence.months.length ? periodEvidence.months.map(({ month, count }) => `${month}（${count} 行）`).join("、") : "未识别到有效日期"}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? ` 来源月份与已有账本 ${period} 不一致，仍沿用账本月份。` : !requestedLedgerId && !suggestedPeriod ? "请核对文件并手动选择账本月份。" : ""}</>}
+            </p> : null}
             <div className="import-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); loadFiles(event.dataTransfer.files); }}>
               <input ref={inputRef} type="file" multiple aria-label="选择月度销售台账文件" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => { loadFiles(event.target.files); event.target.value = ""; }} />
               <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；工作簿仅读取第一工作表。</p></div>

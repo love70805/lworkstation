@@ -26,6 +26,27 @@ export function filterCostMatches(matches = [], query = "") {
   return matches.filter((match) => matchesCostQuery(match, query));
 }
 
+// Display evidence comes from existing ledger rows; ERP matching still uses the
+// workspace-wide platform SKU identity only.
+export function withLedgerAttributes(matches = [], salesRows = []) {
+  const bySku = new Map();
+  for (const row of salesRows) {
+    const sku = canonicalPlatformSku(row.platformSku ?? row.sku);
+    const attribute = String(row.attribute ?? "").normalize("NFKC").trim();
+    if (!sku || !attribute) continue;
+    if (!bySku.has(sku)) bySku.set(sku, new Map());
+    const descriptions = bySku.get(sku);
+    if (!descriptions.has(attribute)) descriptions.set(attribute, []);
+    descriptions.get(attribute).push({ store: row.store ?? "", sourceSheet: row.sourceSheet ?? "", sourceRow: row.sourceRow ?? null });
+  }
+  return matches.map((match) => {
+    const descriptions = bySku.get(canonicalPlatformSku(match.platformSku));
+    if (!descriptions?.size) return match;
+    const attributeEvidence = [...descriptions].map(([attribute, sources]) => ({ attribute, sources }));
+    return { ...match, attribute: attributeEvidence.map((item) => item.attribute).join("、"), attributeEvidence };
+  });
+}
+
 // One purchase decision per warehouse, but every linked platform identity is searchable.
 export function groupCostAnomalies(matches = [], salesLines = []) {
   const groups = new Map();
