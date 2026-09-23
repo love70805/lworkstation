@@ -365,7 +365,7 @@ describe("ERP cost repository independent recalculation", () => {
     expect(await db.erpCostInbox.get(received.id)).toMatchObject({ receivedVia: "local-http", rejectedBy: "finance-cloud-1" });
   });
 
-  it("acknowledges an idempotent ERP delivery without resolving a new audit actor", async () => {
+  it("revalidates active workspace before acknowledging an idempotent ERP delivery", async () => {
     const { ledger, request } = await context();
     const purchaseRecords = [record("IDEMPOTENT-ACTOR-R1", 4)];
     const batch = sourceEnvelope({ ledger, request, purchaseRecords, previewUnitCost: 4 });
@@ -373,12 +373,10 @@ describe("ERP cost repository independent recalculation", () => {
     const first = await receiveErpCostInboxEnvelope({ envelope, receivedVia: "local-http" });
     const settingsRead = vi.spyOn(db.settings, "get").mockRejectedValue(new Error("member context unavailable"));
 
-    await expect(receiveErpCostInboxEnvelope({ envelope, receivedVia: "local-http" })).resolves.toMatchObject({
-      id: first.id,
-      idempotent: true,
-    });
-    expect(settingsRead).not.toHaveBeenCalled();
-    settingsRead.mockRestore();
+    try {
+      await expect(receiveErpCostInboxEnvelope({ envelope, receivedVia: "local-http" })).rejects.toThrow("member context unavailable");
+    } finally { settingsRead.mockRestore(); }
+    await expect(receiveErpCostInboxEnvelope({ envelope, receivedVia: "local-http" })).resolves.toMatchObject({ id: first.id, idempotent: true });
   });
 
   it("publishes only expected rows while retaining shared-warehouse auxiliary evidence in the source contract", async () => {

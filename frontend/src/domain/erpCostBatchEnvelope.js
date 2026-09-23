@@ -293,6 +293,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy }) {
   const result = {
     evidenceVersion: legacy ? 0 : (Number(meta.evidenceVersion) || ERP_COST_EVIDENCE_VERSION),
     evidenceComplete: legacy ? false : Boolean(evidenceComplete),
+    completenessScope: meta.completenessScope === "source" || (meta.evidenceComplete === false && meta.completenessScope !== "derived") ? "source" : "derived",
   };
   for (const field of numericFields) {
     const value = Number(meta[field]);
