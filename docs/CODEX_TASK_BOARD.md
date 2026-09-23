@@ -1,5 +1,9 @@
 # Codex 任务看板
 
+## 2026-09-24 · Beta.6 候选验收
+
+M0–M3 已在 `codex/beta6-implementation` 提交：可信 ERP 回传自动部分采用、异常重试与审计、导入月份识别、已有台账属性显示、利润与成本页精简。M1 原专职未提交草稿在任务归档时丢失，执行端依据任务记录重建并保留 [恢复说明](../archive/beta6-profit/RECOVERY.md)，无法声明逐字节一致。前端 130 文件/865 测、生产构建、桌面 verify、Windows packaged smoke、隔离 Edge 业务路径与版面、候选四资产和 `release:check` 通过。构建提交 `1a9c131`，候选哈希及限制见 [Beta.6 验收记录](RELEASE_0.3.0_BETA_6.md)。待完成 PR/CI、公开 Beta 与资产回读；稳定 0.2.19、本机未安装。
+
 ## 2026-09-24 · Beta.6 执行职责更新
 
 本版从 GitHub main `99549ab` 实施，决策端只处理范围和阶段结论；“Beta.6 实施与集成”作为唯一长期执行任务，直接完成开发、测试、审查、集成、候选和发布。原利润与 ERP、桌面化专职停止新增工作并保留各自提交/在制代码供执行端接入。交付范围与验收仍按 [Beta.6 开发规划](integration/BETA_6_IMPLEMENTATION_PLAN.md) 的 A–E；继续 Beta 线，本机暂不安装。此条记录协作方式，不代表软件已发布。

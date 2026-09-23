@@ -6,7 +6,7 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.5](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.5)。四资产回读与通道隔离检查通过；Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.5](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.5)。Beta.6 候选已通过本机验收，尚未公开。Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
@@ -14,6 +14,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.0-beta.6` automatic ERP adoption | Windows 候选验收通过；865 测试、桌面 verify、packaged smoke、隔离业务路径和四资产哈希一致；待 PR/CI 与公开回读，本机未安装 | `candidates/0.3.0-beta.6-auto-erp-profit/`；[验收](../docs/RELEASE_0.3.0_BETA_6.md) |
 | `0.3.0-beta.5` workflow consistency | 已公开 GitHub 预发布；837 测试、缓存实测、Windows 候选、PR #103 / main CI、四资产回读及通道隔离通过，本机未安装 | `candidates/0.3.0-beta.5-workflow-consistency/`；[验收](../docs/RELEASE_0.3.0_BETA_5.md) |
 | `0.3.0-beta.4` ledger preview | 已公开 GitHub 预发布；772 测试、实际扩展月份传递/自动回传、PR #101 / main CI、四资产回读和更新通道检查通过；本机未安装 | `candidates/0.3.0-beta.4-ledger-preview/`；[验收](../docs/RELEASE_0.3.0_BETA_4.md) |
 | `0.3.0-beta.3` cost/recovery | 已公开 GitHub 预发布；755 测试、13 组桌面验证、原生恢复和最终候选交互、PR #98 / main CI、四资产回读与更新检测通过，本机未安装 | `candidates/0.3.0-beta.3-cost-recovery/`；[验收](../docs/RELEASE_0.3.0_BETA_3.md) |
