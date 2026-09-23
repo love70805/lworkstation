@@ -282,7 +282,7 @@ function normalizeEvidenceRow(row, index, {
   };
 }
 
-function normalizeSourceMeta(meta, { evidenceComplete, legacy }) {
+function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete = false }) {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) meta = {};
   const numericFields = [
     "orderCount", "validOrderCount", "skippedOrderCount", "detailCount",
@@ -293,7 +293,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy }) {
   const result = {
     evidenceVersion: legacy ? 0 : (Number(meta.evidenceVersion) || ERP_COST_EVIDENCE_VERSION),
     evidenceComplete: legacy ? false : Boolean(evidenceComplete),
-    completenessScope: meta.completenessScope === "source" || (meta.evidenceComplete === false && meta.completenessScope !== "derived") ? "source" : "derived",
+    completenessScope: meta.completenessScope === "source" || (meta.evidenceComplete === false && meta.completenessScope !== "derived" && !scopedIncomplete) ? "source" : "derived",
   };
   for (const field of numericFields) {
     const value = Number(meta[field]);
@@ -400,6 +400,9 @@ export function validateErpCostBatchEnvelope(payload, {
   const expectedScopeComplete = expectedScopeBySku
     ? expectedScopeBySku.size > 0 && [...expectedScopeBySku.keys()].every((sku) => matchedExpectedSkus.has(sku))
     : rows.every((row) => row.ledgerScopeRole === ERP_LEDGER_SCOPE_EXPECTED);
+  const scopedIncomplete = !expectedScopeComplete
+    || expectedRows.some((row) => row.sourceWarnings.length > 0 || evidenceByRef.get(row.evidenceRef)?.evidenceComplete !== true)
+    || [payload.sourceMeta?.detailFailures, payload.sourceMeta?.mappingFailures].some((items) => Array.isArray(items) && items.some((item) => item?.warehouseSku || item?.platformSku));
   const sourceFailuresPresent = [payload.sourceMeta?.detailFailures, payload.sourceMeta?.mappingFailures]
     .some((items) => Array.isArray(items) && items.length > 0);
   const declaredIncomplete = payload.evidenceStatus === "legacy_partial"
@@ -421,7 +424,7 @@ export function validateErpCostBatchEnvelope(payload, {
       sourceWarnings: uniqueText([...(evidence?.sourceWarnings ?? []), ...row.sourceWarnings]),
       evidenceComplete: Boolean(evidence?.evidenceComplete) && row.sourceWarnings.length === 0,
       warehouseEvidence: evidence ?? null,
-      sourceMeta: normalizeSourceMeta(payload.sourceMeta, { evidenceComplete, legacy }),
+      sourceMeta: normalizeSourceMeta(payload.sourceMeta, { evidenceComplete, legacy, scopedIncomplete }),
     };
   });
   return {
@@ -444,7 +447,7 @@ export function validateErpCostBatchEnvelope(payload, {
       summary: { outputRowCount: rows.length, warehouseSkuCount: uniqueWarehouseSkus.size, mappingFallbackCount, querySkcCount: platformSkcs.length },
       sourceMeta: normalizeSourceMeta(topLevelWarnings.hasField
         ? { ...payload.sourceMeta, sourceWarnings: topLevelWarnings.warnings }
-        : payload.sourceMeta, { evidenceComplete, legacy }),
+        : payload.sourceMeta, { evidenceComplete, legacy, scopedIncomplete }),
       warehouseEvidence,
       rows,
     },

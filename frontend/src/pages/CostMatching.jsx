@@ -14,7 +14,7 @@ import DataTable from "../components/DataTable";
 import ErpAssistantSetup from "../components/ErpAssistantSetup";
 import { isDesktopRuntime } from "../lib/desktopRuntime";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
-import { getErpCostInbox, getLatestErpCostRequest, listErpCostInbox, listErpCostRequests, markErpCostInboxStatus, rejectErpCostInboxBatches, saveErpCostRequest, savePublishedErpCostBatch, switchLoadedErpCostInbox, voidPublishedErpCostBatch } from "../data/database";
+import { getErpCostInbox, getLatestErpCostRequest, listErpCostInbox, listErpCostRequests, markErpCostInboxStatus, processErpCostInboxAdoption, rejectErpCostInboxBatches, saveErpCostRequest, savePublishedErpCostBatch, switchLoadedErpCostInbox, voidPublishedErpCostBatch } from "../data/database";
 import { reconcileErpCostRows } from "../domain/erpCosts";
 import { ERP_COST_ANOMALY_LABELS, upsertCostResolution } from "../domain/erpCostResolution";
 import { adoptedCostEvidence } from "../domain/erpPurchaseEvidence";
@@ -30,6 +30,7 @@ import { buildProfitHref, filterProfitRows, readProfitFilter } from "../lib/prof
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, groupAuxiliaryCostRows, groupCostMatchesBySkc, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "../lib/costMatching";
 import { clearCostDraft, invalidateLegacyCostDrafts, readRestorableCostDraft, writeCostDraft } from "../lib/costMatchingDraft";
+import { ERP_ADOPTION_ITEM_LABELS, summarizeAdoptionForDisplay } from "../lib/erpAdoptionPresentation";
 import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchingVoidBatchDialog } from "./CostMatchingInboxDialogs";
 
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
@@ -232,6 +233,10 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const inboxRecords = useMemo(() => workspaceInboxRecords.filter((record) => ["pending", "loaded"].includes(record.status)), [workspaceInboxRecords]);
   const processedInboxRecords = useMemo(() => buildErpInboxHistory(workspaceInboxRecords, snapshot?.ledger?.id), [snapshot?.ledger?.id, workspaceInboxRecords]);
   const loadedInbox = useMemo(() => inboxRecords.find((record) => record.id === loadedInboxId) ?? null, [inboxRecords, loadedInboxId]);
+  const latestAdoptionInbox = useMemo(() => workspaceInboxRecords.filter(record => record.ledgerId === snapshot?.ledger?.id && record.adoption?.version).toSorted((a, b) => Date.parse(b.receivedAt ?? b.adoption.processedAt) - Date.parse(a.receivedAt ?? a.adoption.processedAt))[0] ?? null, [workspaceInboxRecords, snapshot?.ledger?.id]);
+  const reviewAdoption = loadedInbox?.adoption ?? latestAdoptionInbox?.adoption;
+  const adoptionNotice = summarizeAdoptionForDisplay(reviewAdoption, { status: loadedInbox?.status ?? latestAdoptionInbox?.status });
+  const adoptionItemsBySku = useMemo(() => new Map((reviewAdoption?.items ?? []).map(item => [item.canonicalPlatformSku, item])), [reviewAdoption]);
 
   const persistedCostRows = useMemo(() => snapshot?.costs ?? [], [snapshot?.costs]);
   const effectiveCostRows = useMemo(() => {
@@ -293,14 +298,17 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const filteredSalesLines = useMemo(() => filterProfitRows(formalSalesLines, profitFilter), [formalSalesLines, profitFilter]);
   const expectedSkus = useMemo(() => {
     const unique = new Map();
-    filteredSalesLines.forEach((row) => {
+    formalSalesLines.forEach((row) => {
       const key = canonicalPlatformSku(row.platformSku);
       if (!unique.has(key)) unique.set(key, { platformSku: row.platformSku, platformSkc: row.platformSkc });
     });
     return [...unique.values()];
-  }, [filteredSalesLines]);
-  const erpQueryScope = useMemo(() => collectErpPlatformSkcs(filteredSalesLines), [filteredSalesLines]);
-  const { platformSkcs, missingCount: missingPlatformSkcCount } = erpQueryScope;
+  }, [formalSalesLines]);
+  const erpQueryScope = useMemo(() => collectErpPlatformSkcs(formalSalesLines), [formalSalesLines]);
+  const { platformSkcs } = erpQueryScope;
+  const displayQueryScope = useMemo(() => collectErpPlatformSkcs(filteredSalesLines), [filteredSalesLines]);
+  const { platformSkcs: displayPlatformSkcs, missingCount: missingPlatformSkcCount } = displayQueryScope;
+  const displaySkuSet = useMemo(() => new Set(filteredSalesLines.map(row => row.canonicalPlatformSku)), [filteredSalesLines]);
   const registrationScope = erpRequestScopeKey({ ledger: snapshot?.ledger, platformSkcs, expectedSkus });
   useEffect(() => {
     if (locked || !snapshot?.ledger || !platformSkcs.length) return;
@@ -503,6 +511,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const publicationReconciliation = useMemo(() => parsedRows == null || !snapshot?.ledger ? null : reconcileErpCostRows({ workspaceId: snapshot.ledger.workspaceId, period: snapshot.ledger.period, expectedSkus: requestForImport?.expectedSkus ?? expectedSkus, costRows: parsedRows, batchId: "preview", resolutions }), [parsedRows, expectedSkus, requestForImport, resolutions, snapshot?.ledger]);
   const adoption = useMemo(() => erpAdoptionReadiness({ ledger: snapshot?.ledger, salesRows: snapshot?.rows, approvals: snapshot?.approvals, reconciliation: publicationReconciliation }), [snapshot, publicationReconciliation]);
   const hasNewBatch = Boolean(parsedRows && batchEnvelope?.formatVersion === ERP_COST_BATCH_VERSION && batchEnvelope.evidenceStatus === "complete");
+  const isAutomaticInbox = Boolean(loadedInbox?.adoption?.version);
+  const canRetryAutomatic = isAutomaticInbox && resolutions.length > 0 && !locked;
   const hasFilteredRows = filteredSalesLines.length > 0;
   const allCostsReady = formalSalesLines.length > 0 && formalSalesLines.every(row => row.finalizable);
   const clearFilters = () => {
@@ -576,11 +586,11 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   };
 
   const copySkcs = async () => {
-    if (!snapshot?.ledger || platformSkcs.length === 0) return;
+    if (!snapshot?.ledger || displayPlatformSkcs.length === 0) return;
     setCopyingSkcs(true);
     try {
-      await writeClipboardText(platformSkcs.join("\n"));
-      notify(`已复制 ${platformSkcs.length} 个平台 SKC。`);
+      await writeClipboardText(displayPlatformSkcs.join("\n"));
+      notify(`已复制 ${displayPlatformSkcs.length} 个平台 SKC。`);
     } catch (error) {
       notify(`复制 SKC 失败：${error.message}`, "error");
     } finally {
@@ -608,7 +618,19 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   };
 
   const publish = async () => {
-    if (!snapshot?.ledger || !hasNewBatch || !publicationReconciliation || publishing) return;
+    if (!snapshot?.ledger || publishing) return;
+    if (isAutomaticInbox) {
+      if (!canRetryAutomatic) return;
+      setPublishing(true);
+      try {
+        const result = await processErpCostInboxAdoption({ inboxId: loadedInbox.id, resolutions });
+        notify(`已重新处理 ERP 异常：自动采用 ${result.adoption?.summary?.adoptedCount - result.adoption?.summary?.manualEffectiveCount || 0} 项，剩余 ${result.adoption?.summary?.remainingCount ?? 0} 项。`, "success");
+        if (result.status === "applied") { clearCostDraft(snapshot.ledger.id); if (onPublished) onPublished(result); }
+      } catch (error) { notify(`重试 ERP 异常失败：${error.message}`, "error"); }
+      finally { setPublishing(false); }
+      return;
+    }
+    if (!hasNewBatch || !publicationReconciliation) return;
     if (!adoption.canAdopt) {
       notify("仍有未解决的采购异常；人工更正须覆盖该 SKU 在本月的全部店铺。", "error");
       return;
@@ -660,7 +682,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   }, [reviewRows]);
   const targetRow = manualTarget ? reviewRows.find(row => row.id === manualTarget.id) ?? manualTarget : null;
   const candidateSkuSet = useMemo(() => new Set((parsedRows ?? []).map(row => canonicalPlatformSku(row.platformSku))), [parsedRows]);
-  const reviewMatches = useMemo(() => withLedgerAttributes(reconciliation?.matches ?? expectedSkus.map(row => ({ ...row, canonicalPlatformSku: canonicalPlatformSku(row.platformSku), status: "missing", unitCost: null })), snapshot?.rows), [reconciliation, expectedSkus, snapshot?.rows]);
+  const reviewMatches = useMemo(() => withLedgerAttributes((reconciliation?.matches ?? expectedSkus.map(row => ({ ...row, canonicalPlatformSku: canonicalPlatformSku(row.platformSku), status: "missing", unitCost: null }))).filter(row => displaySkuSet.has(row.canonicalPlatformSku)), snapshot?.rows), [reconciliation, expectedSkus, displaySkuSet, snapshot?.rows]);
 
   const openResolution = (match, anomaly, action) => {
     const record = match.costDecision?.selectedRecords?.find((item) => item.recordId === anomaly.recordId);
@@ -722,11 +744,11 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         return <div className="cost-group-skc"><span className="cost-group-skc-label">{unmappedCount ? <button className="cost-group-toggle" type="button" aria-expanded={expanded} onClick={() => setExpandedUnmappedGroups((current) => { const next = new Set(current); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })} title={expanded ? "收起未映射证据" : "展开查看未映射原始证据"}>{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<strong className="mono">{group.platformSkc}</strong></button> : <strong className="mono">{group.platformSkc}</strong>}<small>{group.skuCount} 个 SKU{unmappedCount ? ` · ${unmappedCount} 条未映射` : ""}</small></span>{expanded ? <EvidencePreview variants={group.variants} /> : null}</div>;
       } },
       { id: "platformSku", header: "平台 SKU / 属性", enableSorting: false, cell: ({ row }) => renderStack(row.original, (item) => <div className="cost-variant-line" key={item.canonicalPlatformSku}><strong className="mono" title={item.platformSku}>{item.platformSku}</strong><small>{item.attribute || "未提供属性"}</small>{item.attributeEvidence?.length > 1 ? <details><summary>查看 {item.attributeEvidence.length} 种属性来源</summary>{item.attributeEvidence.map(({ attribute, sources }) => <p key={attribute}><strong>{attribute}</strong>：{sources.slice(0, 3).map((source) => `${source.store || "店铺未填"}${source.sourceSheet ? `/${source.sourceSheet}` : ""} 第${source.sourceRow ?? "?"}行`).join("、")}{sources.length > 3 ? `，另 ${sources.length - 3} 行` : ""}</p>)}</details> : null}</div>) },
-      { id: "unitCost", header: "ERP 证据 / 候选", enableSorting: false, cell: ({ row }) => renderStack(row.original, item => <div className="cost-variant-line" key={item.canonicalPlatformSku}><span className="cost-status-stack">{item.unitCost != null ? <span className="mono table-number">{formatErpUnitCost(item.unitCost)}</span> : <span className="pending-text">尚无可用值</span>}<small>{candidateSkuSet.has(item.canonicalPlatformSku) ? item.status === "matched" ? "本次候选待采用" : item.status === "anomaly_pending" ? item.costDecision?.selectedRecords?.length === 0 ? "本月及以前无合格采购" : item.evidenceComplete ? "采购异常待处理" : "采购证据不完整" : "未查到可用成本，原因待查" : item.status === "matched" ? "已采用 ERP" : item.periodReviewRequired ? "原采用选样待复核" : "尚未收到可用成本"}</small></span></div>) },
+      { id: "unitCost", header: "ERP 证据 / 候选", enableSorting: false, cell: ({ row }) => renderStack(row.original, item => <div className="cost-variant-line" key={item.canonicalPlatformSku}><span className="cost-status-stack">{item.unitCost != null ? <span className="mono table-number">{formatErpUnitCost(item.unitCost)}</span> : <span className="pending-text">尚无可用值</span>}<small>{adoptionItemsBySku.has(item.canonicalPlatformSku) ? ERP_ADOPTION_ITEM_LABELS[adoptionItemsBySku.get(item.canonicalPlatformSku).state] ?? "回传待核对" : candidateSkuSet.has(item.canonicalPlatformSku) ? item.status === "matched" ? "手动批次待采用" : item.status === "anomaly_pending" ? item.costDecision?.selectedRecords?.length === 0 ? "本月及以前无合格采购" : item.evidenceComplete ? "采购异常待处理" : "采购证据不完整" : "未查到可用成本，原因待查" : item.status === "matched" ? "已采用 ERP" : item.periodReviewRequired ? "原采用选样待复核" : "尚未收到可用成本"}</small></span></div>) },
       { id: "currentCost", header: "当前采用结果", enableSorting: false, cell: ({ row }) => renderStack(row.original, item => <div className="cost-variant-line cost-store-results" key={item.canonicalPlatformSku}>{(reviewRowsBySku.get(item.canonicalPlatformSku) ?? []).map(line => <div key={line.id}><strong>{line.store}</strong><span className="mono">{line.decision.eligibleForExactProfit ? line.manualOverride ? formatManualUnitCost(line.decision.unitCost) : formatErpUnitCost(line.decision.unitCost) : "待补成本"}</span><small>{line.manualOverride ? "人工更正有效" : line.decision.eligibleForExactProfit ? "ERP 已采用" : "未采用有效成本"}{line.manualOverride?.approvedAt || line.erpCost?.publishedAt ? ` · ${new Date(line.manualOverride?.approvedAt ?? line.erpCost.publishedAt).toLocaleDateString("zh-CN")}` : ""}</small></div>)}</div>) },
       { id: "actions", header: "详情与更正", enableSorting: false, cell: ({ row }) => renderStack(row.original, item => <div className="cost-variant-line cost-store-results" key={item.canonicalPlatformSku}>{(reviewRowsBySku.get(item.canonicalPlatformSku) ?? []).map(line => <Button key={line.id} onClick={() => setManualTarget(line)}>{line.store} · {locked ? "查看详情" : line.manualOverride ? "更正 / 撤销" : "处理成本"}</Button>)}</div>) },
     ];
-  }, [expandedUnmappedGroups, candidateSkuSet, reviewRowsBySku, locked]);
+  }, [expandedUnmappedGroups, candidateSkuSet, adoptionItemsBySku, reviewRowsBySku, locked]);
 
   const groupedMatches = useMemo(() => groupCostMatchesBySkc(reviewMatches), [reviewMatches]);
   const visibleGroupedMatches = useMemo(() => filterCostMatchGroups(groupedMatches, resultQuery), [groupedMatches, resultQuery]);
@@ -843,21 +865,21 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   return (
     <>
       {!locked && platformSkcs.length > 0 && registrationState.message ? <p className="cost-registration-status" role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
-      {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>本机已收到新批次，尚未采用。当前核对草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>保留草稿，查看返回批次</Button></Panel> : null}
+      {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>本机已收到新批次；正常项已自动处理，剩余项和当前草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></Panel> : null}
       <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>{desktop ? "ERP 扩展状态" : "安装 ERP 助手"}</Button></div>
-      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={platformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || platformSkcs.length === 0} onClick={copySkcs}>{platformSkcs.length ? `复制 ${platformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前成本" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
+      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
 
       <div className="cost-flow-guide" aria-label="成本核对状态" role="status">
-        <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : hasNewBatch ? adoption.canAdopt ? "本批次可以采用" : adoption.summary.blockedAnomalyCount ? "本批次仍需处理" : "本批次没有可采用的 ERP 成本" : allCostsReady ? "本月成本已齐" : "等待 ERP 回传或人工更正"}</strong><span>{hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 人工已覆盖 ${adoption.summary.manuallyCoveredCount} 个 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本；新回传采用前不会改变当前结果。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。"}</span></div>
+        <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : adoptionNotice?.title ?? (hasNewBatch ? "手动批次待核对" : allCostsReady ? "本月成本已齐" : "等待 ERP 回传或人工更正")}</strong><span>{adoptionNotice?.details ?? (hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。")}</span></div>
       </div>
 
-      {hasNewBatch && adoption.summary.blockedAnomalyCount > 0 ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>{adoption.summary.blockedAnomalyCount} 个 SKU 的 ERP 异常尚未解决</strong><small>从对应店铺的“处理成本”查看证据或人工更正。同一 SKU 的人工更正需覆盖本月全部相关店铺，原异常证据仍保留。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
+      {(adoptionNotice?.remainingCount > 0 || hasNewBatch && adoption.summary.blockedAnomalyCount > 0) ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>{adoptionNotice?.remainingCount ?? adoption.summary.blockedAnomalyCount} 个 SKU 仍需核对</strong><small>查看采购证据并处理异常、补齐缺失项或按店铺人工更正。原始回传记录保留。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
       {hasFilteredRows && missingPlatformSkcCount > 0 ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前范围有 {missingPlatformSkcCount} 条明细缺少平台 SKC</strong><small>这些明细无法生成对应 ERP 查询；请检查台账映射，或按店铺人工更正。已有 SKC 的其他明细可继续查询。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 
       <div className="match-stat-grid">
-        <Panel className="match-stat"><ListChecks size={22} /><span>待核对平台 SKU</span><strong>{expectedSkus.length}</strong></Panel>
+        <Panel className="match-stat"><ListChecks size={22} /><span>当前查看平台 SKU</span><strong>{displaySkuSet.size}</strong></Panel>
         <Panel className="match-stat match-success"><CheckCircle2 size={22} /><span>当前有效成本</span><strong>{filteredSalesLines.filter(row => row.finalizable).length}<small> 条店铺 SKU</small></strong></Panel>
-        <Panel className="match-stat match-warning"><AlertCircle size={22} /><span>本次 ERP 可采用</span><strong>{hasNewBatch ? adoption.summary.erpAdoptableCount : 0}<small> 个 SKU</small></strong></Panel>
+        <Panel className="match-stat match-warning"><AlertCircle size={22} /><span>ERP 自动采用</span><strong>{adoptionNotice?.automaticCount ?? 0}<small> 个 SKU</small></strong></Panel>
         <Panel className="match-stat match-danger"><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{filteredSalesLines.filter(row => !row.finalizable).length}<small> 条店铺 SKU</small></strong><p>按当前查看范围</p></Panel>
       </div>
 
@@ -870,8 +892,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
           {hasNewBatch && publicationReconciliation?.unmatchedCostRows.length ? <div className="cost-audit-note"><AlertCircle size={17} />本批次有 {publicationReconciliation.unmatchedCostRows.length} 行成本不属于已登记的平台 SKU 范围，保留证据但不写入正式成本。</div> : null}
           {auxiliaryGroups.length ? <details className="cost-auxiliary-audit"><summary><Info size={17} />同查询 SKC 下、本账本未使用的额外变体 <strong>{reconciliation.summary.auxiliaryCount}</strong> 行</summary><div className="cost-auxiliary-list">{auxiliaryGroups.map((group) => <section key={group.id}><header><strong className="mono">{group.platformSkc}</strong><span>仓库 SKU <code>{group.warehouseSku}</code></span></header><p>{group.variants.map((variant) => variant.platformSku).join("、")}</p><small>采购记录 {group.purchaseRecordCount} 条 · 排除记录 {group.excludedRecordCount} 条 · 仅供预览与审计，不影响本账本成本，也不会写入正式利润。</small></section>)}</div></details> : null}
-          <div className="cost-publish-bar"><span>{hasNewBatch ? `本批次 ERP 可采用 ${adoption.summary.erpAdoptableCount} 项 · 人工有效 ${adoption.summary.manuallyCoveredCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项 · 未收到合格候选 ${adoption.summary.remainingMissingCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : persistedCostRows.length ? "当前正式 ERP 成本已采用；收到新的完整批次后再核对采用。" : "尚无待采用的完整 ERP 批次，可从列表直接人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>{adoption.summary.blockedAnomalyCount ? "完成成本处置后可采用" : "采用已匹配 ERP 成本"}</Button> : null}</div>
-          {hasNewBatch ? <p className="cost-audit-note">采用范围为当前收到的完整批次，不随列表搜索缩小。只写入合格 ERP 行；人工有效值始终优先，未采用的异常证据保留。</p> : null}
+          <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "本次回传已经自动核对；可查看剩余项。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : persistedCostRows.length ? "当前正式 ERP 成本已采用。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>重试已处理异常</Button> : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div>
+          {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按完整账本范围核对，页面筛选不改变采用范围；人工有效值始终优先，异常证据保留。</p> : null}
         </Panel>
       </div>
       {inboxQueueDialog}

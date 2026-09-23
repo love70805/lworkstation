@@ -28,8 +28,19 @@ it('automatically adopts only normal items on receipt, preserves partial history
  await voidPublishedErpCostBatch({inboxId:receipt.id,reason:'合成撤回'});await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);expect((await db.erpCostInbox.get(receipt.id)).status).toBe('voided');
 });
 it('isolates local incomplete evidence without turning it into a global envelope failure',async()=>{
- const {envelope}=await seed({prices:[5,8],incomplete:true});const receipt=await receiveErpCostInboxEnvelope({envelope});
+ const {envelope}=await seed({prices:[5,8],incomplete:true});
+ // The real inbox adapter reports evidenceComplete=false for this scoped failure.
+ envelope.batch.sourceMeta.evidenceComplete=false;
+ delete envelope.batch.sourceMeta.completenessScope;
+ const receipt=await receiveErpCostInboxEnvelope({envelope});
  expect(receipt.adoptionError).toBeUndefined();expect(receipt.adoption.summary).toMatchObject({adoptedCount:1,evidenceIncompleteCount:1});
+});
+it('blocks an unexplained source-level incomplete flag without adopting healthy-looking rows',async()=>{
+ const {envelope}=await seed({prices:[5,8]});envelope.batch.sourceMeta.evidenceComplete=false;delete envelope.batch.sourceMeta.completenessScope;
+ const receipt=await receiveErpCostInboxEnvelope({envelope});
+ expect((await db.erpCostInbox.get(receipt.id)).envelope.batch.sourceMeta.completenessScope).toBe('source');
+ expect(receipt.adoption).toMatchObject({state:'blocked',summary:{adoptedCount:0,evidenceIncompleteCount:2}});
+ expect(await db.erpCostRows.count()).toBe(0);
 });
 it('stores healthy background ERP while manual zero remains effective, then restores ERP on revoke',async()=>{
  const {ledger,envelope}=await seed({prices:[5,8]});const manual=await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'A',unitCost:0,reason:'真实零'});

@@ -15,13 +15,13 @@ vi.mock('../data/database', async importOriginal => ({ ...await importOriginal()
 
 let container, root, writeText;
 const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
-async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', ledgerId = 'L' } = {}) {
+async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all' } = {}) {
   mocks.snapshot = {
     ledger: { id: ledgerId, workspaceId: 'W', period: '2026-08', status },
-    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: '甲', platformSkc, platformSku: `SKU-${index}`, quantity: 1, amount: 10 })),
+    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: `SKU-${index}`, quantity: 1, amount: 10 })),
     costs, approvals: [],
   };
-  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: 'all' }} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
 }
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -43,6 +43,16 @@ it.each([
   await act(async () => button(`复制 ${count} 个平台 SKC`).click());
   expect(writeText).toHaveBeenCalledExactlyOnceWith(expected);
   expect(mocks.notify).toHaveBeenCalledWith(`已复制 ${count} 个平台 SKC。`);
+});
+it('keeps ERP request scope at the full ledger while store filtering changes only the display and copied SKCs', async () => {
+  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'FULL-SCOPE', stores: ['甲', '乙'], contextStore: '甲' });
+  expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({
+    platformSkcs: ['SKC-A', 'SKC-B'],
+    expectedSkus: expect.arrayContaining([{ platformSku: 'SKU-0', platformSkc: 'SKC-A' }, { platformSku: 'SKU-1', platformSkc: 'SKC-B' }]),
+  }), expect.any(Object));
+  expect(container.textContent).toContain('当前查看平台 SKU1');
+  await act(async () => button('复制 1 个平台 SKC').click());
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-A');
 });
 it.each(['finalized', 'locked'])('allows read-only copy in %s while cost writes and registration remain blocked', async status => {
   await render(['SKC-1'], status);

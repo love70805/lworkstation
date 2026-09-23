@@ -440,7 +440,7 @@ export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } 
     for (const row of reconciliation.matches) {
       const sku = canonicalPlatformSku(row.platformSku);
       const item = { platformSku: row.platformSku, canonicalPlatformSku: sku };
-      const stores = [...new Set(ownedSales.filter(sale => canonicalPlatformSku(sale.platformSku ?? sale.sku) === sku && canonicalPlatformSkc(sale.platformSkc) === canonicalPlatformSkc(row.platformSkc)).map(sale => storeIdentity(sale.store)))];
+      const stores = [...new Set(ownedSales.filter(sale => sale.platformSkc && canonicalPlatformSku(sale.platformSku ?? sale.sku) === sku && canonicalPlatformSkc(sale.platformSkc) === canonicalPlatformSkc(row.platformSkc)).map(sale => storeIdentity(sale.store)))];
       const manualStores = stores.filter(store => selectManualOverride(approvals, { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store, platformSku: sku }));
       item.manualStores = manualStores;
       const previous = existingRows.find(cost => canonicalPlatformSku(cost.platformSku) === sku);
