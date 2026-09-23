@@ -1,7 +1,7 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.5",
-  "integrationBranch": "codex/beta5-workflow-consistency",
+  "version": "0.3.0-beta.6",
+  "integrationBranch": "codex/beta6-implementation",
   "requiredCommits": [
     {
       "module": "ledger-cost-report-workflow-consistency",
@@ -242,6 +242,30 @@
     {
       "commit": "6c74307",
       "module": "erp-inbox-atomic-windows-recovery"
+    },
+    {
+      "module": "beta6-month-attributes-profit-layout",
+      "commit": "e91215c"
+    },
+    {
+      "module": "beta6-automatic-adoption-contract",
+      "commit": "37090c3"
+    },
+    {
+      "module": "beta6-desktop-inbox-recovery",
+      "commit": "b852fda"
+    },
+    {
+      "module": "beta6-durable-partial-erp-adoption",
+      "commit": "869b544"
+    },
+    {
+      "module": "beta6-adoption-page-scope",
+      "commit": "df7491e"
+    },
+    {
+      "module": "beta6-exception-guidance",
+      "commit": "aa17953"
     }
   ]
 }
