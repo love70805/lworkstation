@@ -1,6 +1,6 @@
 # 0.3.0-beta.6 · ERP 自动采用与利润核对
 
-状态（2026-09-24）：Windows 候选已通过本机隔离验收；PR、CI、公开 Beta 发布和资产回读尚待完成。稳定版仍为 0.2.19，本机未安装，也未改写真实业务数据。
+状态（2026-09-24）：Windows 候选、PR / main CI、公开 Beta 发布、四资产匿名回读和真实更新源检查均已完成。稳定版仍为 0.2.19，本机未安装，也未改写真实业务数据。
 
 ## 使用变化
 
@@ -19,4 +19,10 @@
 
 - 构建提交：`1a9c131`，分支 `codex/beta6-implementation`。
 - 安装包 `Lworkstation-Setup-0.3.0-beta.6.exe`，116772980 字节，SHA-256 `3F9452C47E83B29DE424954FB1AE416AD9E07718F4FD41072407AC630E7163FA`。
-- 本机候选 `releases/candidates/0.3.0-beta.6-auto-erp-profit/` 与待公开四资产 `releases/prerelease/0.3.0-beta.6/` 逐项一致；`beta.yml` 指向 Beta.6，不触及稳定 `latest.yml`。
+- 本机候选 `releases/candidates/0.3.0-beta.6-auto-erp-profit/` 与公开发布所用的 `releases/prerelease/0.3.0-beta.6/` 四资产逐项一致；`beta.yml` 指向 Beta.6，不触及稳定 `latest.yml`。
+
+## 集成与公开发布
+
+- [PR #107](https://github.com/love70805/lworkstation/pull/107) 保留原提交合入 `main`，合并提交 `5e67ad25e7fcad4b427ecd0fd41f4763d13af086`。候选构建提交是合并提交祖先，`frontend/` 与 `desktop/` 相比构建基线无差异。PR CI `35903661114` 和 [main CI `35903952647`](https://github.com/love70805/lworkstation/actions/runs/35903952647) 的发布检查、桌面验证均通过。
+- [v0.3.0-beta.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.6) 于 2026-09-24 02:43:56（UTC+8）公开为 GitHub prerelease；标签指向上述合并提交。四资产匿名下载与本机候选逐项 SHA-256 一致：安装包 `3F9452C47E83B29DE424954FB1AE416AD9E07718F4FD41072407AC630E7163FA`，blockmap `0B42079C1660F97C545DB84141BAB4BFF336BE94C1EAE9EAD78F85A49F13C795`，`beta.yml` `6B304D141DCC3737A427D6FF1F35DC8B9E27D1A862BA6D8669AB593DAF484790`，`SHA256.txt` `0867B7273665F9DA687469BFBE7CB532A441BF4C71F11287C4FBEF77C8E294E5`。
+- 真实 GitHub 更新提供方检查：Beta.5 可发现 Beta.6，Beta.6 显示当前版本，稳定版 0.2.19 使用 `latest.yml` 且不跨入 Beta；GitHub Latest 仍为 v0.2.19。检查仅读取公开元数据，未下载更新或安装。匿名回读和更新源证据保存在本机 `archive/beta6-ui/`。

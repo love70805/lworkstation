@@ -1,8 +1,8 @@
 # Codex 任务看板
 
-## 2026-09-24 · Beta.6 候选验收
+## 2026-09-24 · Beta.6 已公开发布
 
-M0–M3 已在 `codex/beta6-implementation` 提交：可信 ERP 回传自动部分采用、异常重试与审计、导入月份识别、已有台账属性显示、利润与成本页精简。M1 原专职未提交草稿在任务归档时丢失，执行端依据任务记录重建并保留 [恢复说明](../archive/beta6-profit/RECOVERY.md)，无法声明逐字节一致。前端 130 文件/865 测、生产构建、桌面 verify、Windows packaged smoke、隔离 Edge 业务路径与版面、候选四资产和 `release:check` 通过。构建提交 `1a9c131`，候选哈希及限制见 [Beta.6 验收记录](RELEASE_0.3.0_BETA_6.md)。待完成 PR/CI、公开 Beta 与资产回读；稳定 0.2.19、本机未安装。
+M0–M3 已在 `codex/beta6-implementation` 提交：可信 ERP 回传自动部分采用、异常重试与审计、导入月份识别、已有台账属性显示、利润与成本页精简。M1 原专职未提交草稿在任务归档时丢失，执行端依据任务记录重建并保留 [恢复说明](../archive/beta6-profit/RECOVERY.md)，无法声明逐字节一致。前端 130 文件/865 测、生产构建、桌面 verify、Windows packaged smoke、隔离 Edge 业务路径与版面、候选四资产和 `release:check` 通过。构建提交 `1a9c131`；PR #107 / main CI 合入后，[v0.3.0-beta.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.6) 已公开，四资产匿名回读与真实更新通道检查通过。候选哈希及限制见 [Beta.6 验收记录](RELEASE_0.3.0_BETA_6.md)。稳定 0.2.19、本机未安装。
 
 ## 2026-09-24 · Beta.6 执行职责更新
 
