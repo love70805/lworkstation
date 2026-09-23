@@ -30,7 +30,7 @@ import { buildProfitHref, filterProfitRows, readProfitFilter } from "../lib/prof
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, groupAuxiliaryCostRows, groupCostMatchesBySkc, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "../lib/costMatching";
 import { clearCostDraft, invalidateLegacyCostDrafts, readRestorableCostDraft, writeCostDraft } from "../lib/costMatchingDraft";
-import { ERP_ADOPTION_ITEM_LABELS, summarizeAdoptionForDisplay } from "../lib/erpAdoptionPresentation";
+import { ERP_ADOPTION_ITEM_LABELS, groupAdoptionExceptions, summarizeAdoptionForDisplay } from "../lib/erpAdoptionPresentation";
 import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchingVoidBatchDialog } from "./CostMatchingInboxDialogs";
 
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
@@ -237,6 +237,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const reviewAdoption = loadedInbox?.adoption ?? latestAdoptionInbox?.adoption;
   const adoptionNotice = summarizeAdoptionForDisplay(reviewAdoption, { status: loadedInbox?.status ?? latestAdoptionInbox?.status });
   const adoptionItemsBySku = useMemo(() => new Map((reviewAdoption?.items ?? []).map(item => [item.canonicalPlatformSku, item])), [reviewAdoption]);
+  const exceptionGroups = useMemo(() => groupAdoptionExceptions(reviewAdoption), [reviewAdoption]);
 
   const persistedCostRows = useMemo(() => snapshot?.costs ?? [], [snapshot?.costs]);
   const effectiveCostRows = useMemo(() => {
@@ -874,6 +875,13 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       </div>
 
       {(adoptionNotice?.remainingCount > 0 || hasNewBatch && adoption.summary.blockedAnomalyCount > 0) ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>{adoptionNotice?.remainingCount ?? adoption.summary.blockedAnomalyCount} 个 SKU 仍需核对</strong><small>查看采购证据并处理异常、补齐缺失项或按店铺人工更正。原始回传记录保留。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
+      {exceptionGroups.length ? <details className="cost-exception-groups" open>
+        <summary>按原因查看剩余项与处理方式</summary>
+        <div className="cost-exception-grid">{exceptionGroups.map(group => <section key={group.state}>
+          <h3>{group.label} <span>{group.items.length}</span></h3><p>{group.action}</p>
+          <div>{group.items.map(item => <Button key={item.canonicalPlatformSku} variant="ghost" onClick={() => { clearFilters(); setResultQuery(item.platformSku); window.setTimeout(() => document.querySelector(".cost-preview-panel")?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }), 0); }}>{item.platformSku}</Button>)}</div>
+        </section>)}</div>
+      </details> : null}
       {hasFilteredRows && missingPlatformSkcCount > 0 ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前范围有 {missingPlatformSkcCount} 条明细缺少平台 SKC</strong><small>这些明细无法生成对应 ERP 查询；请检查台账映射，或按店铺人工更正。已有 SKC 的其他明细可继续查询。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 
       <div className="match-stat-grid">
@@ -892,7 +900,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
           {hasNewBatch && publicationReconciliation?.unmatchedCostRows.length ? <div className="cost-audit-note"><AlertCircle size={17} />本批次有 {publicationReconciliation.unmatchedCostRows.length} 行成本不属于已登记的平台 SKU 范围，保留证据但不写入正式成本。</div> : null}
           {auxiliaryGroups.length ? <details className="cost-auxiliary-audit"><summary><Info size={17} />同查询 SKC 下、本账本未使用的额外变体 <strong>{reconciliation.summary.auxiliaryCount}</strong> 行</summary><div className="cost-auxiliary-list">{auxiliaryGroups.map((group) => <section key={group.id}><header><strong className="mono">{group.platformSkc}</strong><span>仓库 SKU <code>{group.warehouseSku}</code></span></header><p>{group.variants.map((variant) => variant.platformSku).join("、")}</p><small>采购记录 {group.purchaseRecordCount} 条 · 排除记录 {group.excludedRecordCount} 条 · 仅供预览与审计，不影响本账本成本，也不会写入正式利润。</small></section>)}</div></details> : null}
-          <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "本次回传已经自动核对；可查看剩余项。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : persistedCostRows.length ? "当前正式 ERP 成本已采用。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>重试已处理异常</Button> : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div>
+          {(sourceText.trim() || locked || !persistedCostRows.length) ? <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "本次回传已经自动核对；可查看剩余项。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>重试已处理异常</Button> : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div> : null}
           {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按完整账本范围核对，页面筛选不改变采用范围；人工有效值始终优先，异常证据保留。</p> : null}
         </Panel>
       </div>

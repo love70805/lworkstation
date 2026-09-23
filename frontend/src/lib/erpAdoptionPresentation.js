@@ -31,3 +31,22 @@ export const ERP_ADOPTION_ITEM_LABELS = Object.freeze({
   ledger_protected: "账本定稿保护，成本未改",
   superseded: "旧回传已跳过",
 });
+
+export const ERP_ADOPTION_ACTIONS = Object.freeze({
+  anomaly_pending: "核对采购异常或人工更正",
+  evidence_incomplete: "重新采集完整采购证据",
+  missing: "重新查询 ERP 或人工更正",
+  ledger_protected: "查看定稿账本与保留证据",
+  superseded: "查看较新的回传记录",
+});
+
+export function groupAdoptionExceptions(adoption) {
+  const groups = new Map();
+  for (const item of adoption?.items ?? []) {
+    if (!ERP_ADOPTION_ACTIONS[item.state]) continue;
+    const entries = groups.get(item.state) ?? [];
+    entries.push(item);
+    groups.set(item.state, entries);
+  }
+  return [...groups].map(([state, items]) => ({ state, label: ERP_ADOPTION_ITEM_LABELS[state], action: ERP_ADOPTION_ACTIONS[state], items }));
+}

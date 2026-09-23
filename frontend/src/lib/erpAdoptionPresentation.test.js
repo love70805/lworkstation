@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { ERP_ADOPTION_ITEM_LABELS, summarizeAdoptionForDisplay } from "./erpAdoptionPresentation";
+import { ERP_ADOPTION_ITEM_LABELS, groupAdoptionExceptions, summarizeAdoptionForDisplay } from "./erpAdoptionPresentation";
 
 it("separates automatically adopted costs from effective manual corrections and remaining exceptions", () => {
   expect(summarizeAdoptionForDisplay({ state: "partial", summary: {
@@ -9,4 +9,10 @@ it("separates automatically adopted costs from effective manual corrections and 
   expect(ERP_ADOPTION_ITEM_LABELS.ledger_protected).toContain("成本未改");
   expect(summarizeAdoptionForDisplay({ state: "applied", summary: { adoptedCount: 3 } }, { status: "voided" }))
     .toMatchObject({ title: "本次 ERP 采用已撤回", automaticCount: 0 });
+  expect(groupAdoptionExceptions({ items: [
+    { state: 'adopted', platformSku: 'A' },
+    { state: 'anomaly_pending', platformSku: 'B' },
+    { state: 'missing', platformSku: 'C' },
+  ] }).map(group => [group.state, group.items.map(item => item.platformSku)]))
+    .toEqual([['anomaly_pending', ['B']], ['missing', ['C']]]);
 });

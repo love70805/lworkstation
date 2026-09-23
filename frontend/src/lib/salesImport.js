@@ -3,7 +3,7 @@ import Decimal from "decimal.js";
 import { decimalSource, parseSalesAddedDate } from "../domain/salesAnalytics";
 
 export const salesFields = [
-  { key: "sourceAddedAt", label: "添加时间", description: "仅用于每日销售趋势，不使用交易或导入日期代替。", required: false, aliases: ["添加时间", "添加日期", "sourceAddedAt", "source_added_at"] },
+  { key: "sourceAddedAt", label: "添加时间", description: "用于来源月份核对和每日销售趋势；不使用导入时间或采购日期代替。", required: false, aliases: ["添加时间", "添加日期", "sourceAddedAt", "source_added_at"] },
   { key: "activity", label: "活动", description: "保留台账实际活动信息；缺失不表示未参加。", required: false, aliases: ["活动", "活动信息", "活动名称", "活动类型", "是否活动", "activity"] },
   { key: "store", label: "店铺", description: "未映射时使用文件名或导入时填写的店铺。", required: false, aliases: ["store", "saleschannel", "sales_channel", "shop", "店铺"] },
   { key: "supplierNumber", label: "供方货号", description: "与平台 SKC 共同组成旧利润工具的一级分组。", required: false, aliases: ["供方货号", "货号", "商家编码", "suppliernumber", "supplier_number", "merchantcode"] },
