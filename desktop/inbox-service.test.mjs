@@ -44,6 +44,13 @@ try {
   assert.equal(flowFromStatus({
     latestBatch: { status: "pending", requestId: "REQ", batchId: "BATCH", evidenceStatus: "complete", sourceFormatVersion: 2 },
   }).status, "batch_received");
+  const acknowledgedV2 = flowFromStatus({
+    latestBatch: { status: "acknowledged", requestId: "REQ", batchId: "BATCH", evidenceStatus: "complete", sourceFormatVersion: 2 },
+  });
+  assert.equal(acknowledgedV2.status, "workspace_received");
+  assert.equal(acknowledgedV2.tone, "info");
+  assert.equal(acknowledgedV2.label, "已收妥，查看成本结果");
+  assert.match(acknowledgedV2.message, /实际结果以当前有效成本与处理状态为准/);
   assert.deepEqual(flowFromStatus({}), {
     status: "idle",
     tone: "success",
