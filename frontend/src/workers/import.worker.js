@@ -1,6 +1,6 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { collectSalesImportFacets, detectLedgerReport, suggestLedgerReportMapping, suggestMappings, validateSalesRows } from "../lib/salesImport";
+import { collectSalesImportFacets, collectSalesPeriodEvidence, detectLedgerReport, suggestLedgerReportMapping, suggestMappings, validateSalesRows } from "../lib/salesImport";
 
 const jobs = new Map();
 
@@ -91,6 +91,13 @@ self.onmessage = ({ data }) => {
           ignored: result.ignored.slice(0, 50),
         },
       });
+      return;
+    }
+
+    if (type === "inspect-period") {
+      const rows = jobs.get(data.jobId);
+      if (!rows) throw new Error("导入预览已失效，请重新选择文件。");
+      self.postMessage({ type: "period-inspected", requestId, evidence: collectSalesPeriodEvidence(rows, data.mapping, data.options) });
       return;
     }
 

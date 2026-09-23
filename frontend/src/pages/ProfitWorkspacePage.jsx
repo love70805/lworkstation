@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Archive, Inbox } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { Button, EmptyState, Panel, useToast } from "../components/UI";
 import { getActiveMemberContext, listLedgerSummaries } from "../data/database";
@@ -51,22 +50,9 @@ export default function ProfitWorkspacePage() {
   }
   return (
     <AppShell pageClass="workspace-page profit-page">
-      <section className="workspace-entry-bar" aria-label="经营入口">
-        <div><strong>利润核算</strong><span>按账本核对成本，完成月度利润核算</span></div>
-        {ready && context.ledgers.length > 0 ? <label className="workspace-month-picker"><span>核算月份</span>
-          <select className="select-input" aria-label="核算月份" value={selected?.id || ""} disabled={switching || !selected} onChange={event => { void selectLedger(event.target.value); }}>
-            {!selected ? <option value="">正在选择账本…</option> : null}
-            {context.ledgers.map(ledger => <option key={ledger.id} value={ledger.id}>{ledger.period}</option>)}
-          </select>
-        </label> : null}
-        <nav aria-label="选品入口">
-          <Link to="/products"><Archive size={16} />选品工作台</Link>
-          <Link to="/products?view=pending"><Inbox size={16} />待确认采集</Link>
-        </nav>
-      </section>
       {context?.error ? <Panel><p role="alert">账本读取失败：{context.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取账本</Button></Panel> : ready && ledgerId && !selected ? <Panel><p role="alert">账本不属于当前工作区或已不存在。</p><Link to="/ledger">重新选择账本</Link></Panel> : !ready || (context.ledgers.length > 0 && !selected) ? <div role="status">正在读取当前工作区账本…</div>
-        : selected ? <div className="workspace-profit-content"><ProfitViewsContent key={`${context.workspaceId}/${selected.id}`} /></div>
-          : <Panel><EmptyState title="还没有月度账本" description="先导入销售台账，再核对成本和利润。" action={<Link to="/import-preview" className="button primary">导入月度台账</Link>} /></Panel>}
+        : selected ? <div className="workspace-profit-content"><ProfitViewsContent key={`${context.workspaceId}/${selected.id}`} monthControl={<label className="workspace-month-picker"><span>核算月份</span><select className="select-input" aria-label="核算月份" value={selected.id} disabled={switching} onChange={event => { void selectLedger(event.target.value); }}>{context.ledgers.map(ledger => <option key={ledger.id} value={ledger.id}>{ledger.period}</option>)}</select></label>} /></div>
+          : <Panel><h1>利润核算</h1><EmptyState title="还没有月度账本" description="先导入销售台账，再核对成本和利润。" action={<Link to="/import-preview" className="button primary">导入月度台账</Link>} /></Panel>}
     </AppShell>
   );
 }

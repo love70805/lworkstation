@@ -39,7 +39,7 @@ const history = [{
   sourceLabel: "manual-v2-import",
 }];
 
-function Harness() {
+function Harness({ items = queueItems, pendingCount = 1 }) {
   const [queueOpen, setQueueOpen] = useState(true);
   const [selected, setSelected] = useState(() => new Set());
   const [deleteIds, setDeleteIds] = useState([]);
@@ -51,7 +51,7 @@ function Harness() {
   return <>
     <CostMatchingInboxQueueDialog
       open={queueOpen && deleteIds.length === 0 && !voidDraft}
-      inboxQueue={{ items: queueItems, pendingCount: 1 }}
+      inboxQueue={{ items, pendingCount }}
       processedInboxRecords={history}
       selectedPendingInboxIds={selected}
       loadedInboxId="INBOX-LOADED"
@@ -140,5 +140,22 @@ describe("CostMatching ERP inbox dialogs", () => {
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
     expect(container.textContent).toContain("ERP 回传待处理（1）");
+  });
+  it("shows partial automatic adoption with a remaining review path and no delete action", async () => {
+    const partial = {
+      ...queueItems[0],
+      inbox: { ...queueItems[0].inbox, appliedBatchId: 'COST-PARTIAL', adoption: {
+        version: 'erp-auto-adoption@1', state: 'partial', summary: {
+          adoptedCount: 1, manualEffectiveCount: 0, anomalyCount: 1, remainingCount: 1,
+        },
+      } },
+    };
+    await act(async () => { root.render(<Harness items={[partial]} />); });
+    const row = container.querySelector('.cost-inbox-item');
+    expect(row.textContent).toContain('已自动采用 1 项，剩余 1 项待处理');
+    expect(findButton(row, '查看剩余项')).toBeTruthy();
+    expect(findButton(row, '撤回本次采用')).toBeTruthy();
+    expect(findButton(row, '删除批次')).toBeUndefined();
+    expect(row.querySelector('input[type="checkbox"]')).toBeNull();
   });
 });

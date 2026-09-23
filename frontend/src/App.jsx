@@ -7,7 +7,7 @@ import { ToastProvider } from "./components/UI";
 import { RuntimeConfigurationGate } from "./components/RuntimeConfigurationGate";
 import { CloudAuthenticationGate, hasAuthenticatedCloudIdentity, useCloudAuthenticationState } from "./components/CloudAuthenticationGate";
 import { MemberContextGate } from "./components/MemberContextGate";
-import { DEFAULT_WORKSPACE_ID, getActiveMemberContext, receiveErpCostInboxEnvelope, receiveSelectionCaptureEnvelope } from "./data/database";
+import { DEFAULT_WORKSPACE_ID, getActiveMemberContext, receiveErpCostInboxEnvelope, recoverErpCostInboxAdoptions, receiveSelectionCaptureEnvelope } from "./data/database";
 import { runSyncOnce } from "./data/syncRunner";
 import { runtimeConfig } from "./config/runtimeConfig";
 import { parseErpInboxMessage } from "./domain/erpInboxContract";
@@ -32,28 +32,71 @@ function RouteLoader() {
   return <div className="route-loader" role="status"><LoaderCircle className="spin" size={24} /><span>正在加载工作区...</span></div>;
 }
 
+export async function runErpInboxCycle({
+  isDisposed = () => false,
+  getContext = getActiveMemberContext,
+  pollRecords = pollErpInbox,
+  parseRecord = parseErpInboxMessage,
+  receive = receiveErpCostInboxEnvelope,
+  acknowledge = acknowledgeErpInbox,
+  recover = recoverErpCostInboxAdoptions,
+  emit = (envelope) => window.dispatchEvent(new CustomEvent("shopeers:erp-inbox-received", { detail: envelope })),
+} = {}) {
+  const failures = [];
+  let context;
+  try { context = await getContext(); }
+  catch (error) { return { received: 0, failures: [error], recovered: false }; }
+  if (isDisposed()) return { received: 0, failures, recovered: false };
+
+  let received = 0;
+  try {
+    const records = await pollRecords({ workspaceId: context.workspaceId });
+    for (const record of records) {
+      if (isDisposed()) break;
+      try {
+        const parsed = parseRecord(record.envelope);
+        await receiveAndAcknowledgeInboxRecord({
+          record,
+          receive: () => receive({ envelope: parsed.envelope, receivedVia: "desktop-inbox" }),
+          acknowledge: () => acknowledge(record.deliveryId, { workspaceId: context.workspaceId }),
+        });
+        received++;
+        emit(parsed.envelope);
+      } catch (error) {
+        // One invalid or temporarily unavailable delivery must not block the rest.
+        failures.push(error);
+      }
+    }
+  } catch (error) {
+    // The transport can be offline while previously acknowledged inbox data remains recoverable.
+    failures.push(error);
+  }
+
+  if (isDisposed()) return { received, failures, recovered: false };
+  try {
+    await recover({ workspaceId: context.workspaceId });
+    return { received, failures, recovered: true };
+  } catch (error) {
+    failures.push(error);
+    return { received, failures, recovered: false };
+  }
+}
+
+export function createErpInboxPoller(options = {}) {
+  let running = false;
+  return async () => {
+    if (running || options.isDisposed?.()) return null;
+    running = true;
+    try { return await runErpInboxCycle(options); }
+    finally { running = false; }
+  };
+}
+
 function ErpInboxListener() {
   useEffect(() => {
     let disposed = false;
-    const poll = async () => {
-      try {
-        const context = await getActiveMemberContext();
-        const records = await pollErpInbox({ workspaceId: context.workspaceId });
-        for (const record of records) {
-          if (disposed) break;
-          const parsed = parseErpInboxMessage(record.envelope);
-          await receiveAndAcknowledgeInboxRecord({
-            record,
-            receive: () => receiveErpCostInboxEnvelope({ envelope: parsed.envelope, receivedVia: "desktop-inbox" }),
-            acknowledge: () => acknowledgeErpInbox(record.deliveryId, { workspaceId: context.workspaceId }),
-          });
-          window.dispatchEvent(new CustomEvent("shopeers:erp-inbox-received", { detail: parsed.envelope }));
-        }
-      } catch {
-        // The local inbox service is optional; manual import remains available when it is offline.
-      }
-    };
-    poll();
+    const poll = createErpInboxPoller({ isDisposed: () => disposed });
+    void poll();
     const timer = window.setInterval(poll, 5000);
     return () => {
       disposed = true;

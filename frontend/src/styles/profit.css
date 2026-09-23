@@ -35,7 +35,17 @@
 .profit-purpose-help { margin:0 0 10px; font-size:12px; color:var(--text-muted); }
 .profit-purpose-help > summary { cursor:pointer; padding:6px 0; }
 .profit-purpose-help .profit-purpose-strip { margin-bottom:0; }
-.profit-page .workspace-entry-bar { margin-bottom:10px; padding:8px 14px; }
+.profit-workspace-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px 20px; min-width:0; margin-bottom:12px; }
+.profit-workspace-header h1 { margin:0; font-size:24px; line-height:1.3; }
+.profit-workspace-header p { margin:3px 0 0; color:var(--text-muted); font-size:12px; }
+.profit-workspace-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px 16px; min-width:0; }
+.profit-workspace-controls label { display:flex; align-items:center; gap:8px; white-space:nowrap; font-size:13px; }
+.profit-workspace-controls select { min-height:40px; min-width:140px; max-width:100%; }
+.profit-section-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+.profit-section-toolbar p { margin:0; color:var(--text-muted); font-size:12px; }
+.profit-section-toolbar h1 { margin:0 0 4px; font-size:24px; }
+.profit-section-toolbar .page-actions { flex-wrap:wrap; }
+@media (max-width:600px) { .profit-workspace-controls { width:100%; } .profit-workspace-controls label { flex:1 1 150px; flex-wrap:wrap; } .profit-workspace-controls select { flex:1 1 130px; } }
 .sales-day-details { min-width:0; padding:16px; border:1px solid var(--border); border-radius:10px; background:var(--surface-bg); }
 .sales-details-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .sales-details-heading h3 { margin:0; font-size:16px; }
@@ -174,6 +184,10 @@
 .cost-variant-line:last-child { border-bottom: 0; }
 .cost-variant-line > strong, .cost-variant-line > span { min-width: 0; overflow-wrap: anywhere; }
 .cost-variant-line > small { min-width: 0; overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; }
+.cost-variant-line:has(> details) { flex-wrap:wrap; }
+.cost-variant-line > details:not(.cost-evidence-details) { flex-basis:100%; min-width:0; font-size:11px; color:var(--text-muted); }
+.cost-variant-line > details:not(.cost-evidence-details) summary { cursor:pointer; color:var(--primary); }
+.cost-variant-line > details:not(.cost-evidence-details) p { margin:4px 0; overflow-wrap:anywhere; }
 .cost-variant-line > span > strong { display: block; }
 .cost-variant-line > span > small { display: block; }
 .cost-variant-stack.align-right .cost-variant-line { justify-content: flex-end; }

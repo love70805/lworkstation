@@ -31,7 +31,7 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); delete window.shopeersDesktopRuntime; delete globalThis.IS_REACT_ACT_ENVIRONMENT; });
 
 it('opens diagnostics directly and retains the actual failed connection result on retry', async () => {
-  expect(container.querySelector('a[href="/diagnostics"]').textContent).toContain('系统与备份');
+  expect(container.querySelector('a[href="/diagnostics"]').textContent).toContain('系统检查');
   await act(async () => container.querySelector('.environment-chip').click());
   const menu = container.querySelector('.environment-popover');
   expect(menu.textContent).toContain('检查失败');

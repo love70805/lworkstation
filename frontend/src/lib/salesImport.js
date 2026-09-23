@@ -3,7 +3,7 @@ import Decimal from "decimal.js";
 import { decimalSource, parseSalesAddedDate } from "../domain/salesAnalytics";
 
 export const salesFields = [
-  { key: "sourceAddedAt", label: "添加时间", description: "仅用于每日销售趋势，不使用交易或导入日期代替。", required: false, aliases: ["添加时间", "添加日期", "sourceAddedAt", "source_added_at"] },
+  { key: "sourceAddedAt", label: "添加时间", description: "用于来源月份核对和每日销售趋势；不使用导入时间或采购日期代替。", required: false, aliases: ["添加时间", "添加日期", "sourceAddedAt", "source_added_at"] },
   { key: "activity", label: "活动", description: "保留台账实际活动信息；缺失不表示未参加。", required: false, aliases: ["活动", "活动信息", "活动名称", "活动类型", "是否活动", "activity"] },
   { key: "store", label: "店铺", description: "未映射时使用文件名或导入时填写的店铺。", required: false, aliases: ["store", "saleschannel", "sales_channel", "shop", "店铺"] },
   { key: "supplierNumber", label: "供方货号", description: "与平台 SKC 共同组成旧利润工具的一级分组。", required: false, aliases: ["供方货号", "货号", "商家编码", "suppliernumber", "supplier_number", "merchantcode"] },
@@ -283,5 +283,35 @@ export function validateSalesRows(rawRows, mapping, {
     ignored,
     sourceRowCount: rawRows.length,
     platformSkcMissingCount: rows.filter((row) => !row.platformSkc).length,
+  };
+}
+
+// Month suggestions only use sales rows that would enter this import. An
+// incomplete source date never becomes an implicit month choice.
+export function collectSalesPeriodEvidence(rawRows, mapping, options = {}) {
+  const validation = validateSalesRows(rawRows, mapping, { ...options, period: undefined });
+  const months = new Map();
+  let missingCount = 0;
+  let invalidCount = 0;
+  for (const row of validation.rows) {
+    if (row.dateStatus === "valid" && row.sourceAddedDate) {
+      const month = row.sourceAddedDate.slice(0, 7);
+      months.set(month, (months.get(month) ?? 0) + 1);
+    } else if (row.dateStatus === "missing") missingCount += 1;
+    else invalidCount += 1;
+  }
+  const distribution = [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, count]) => ({ month, count }));
+  return {
+    sourceField: "sourceAddedAt",
+    sourceColumn: mapping?.sourceAddedAt ?? "",
+    distribution,
+    validCount: distribution.reduce((total, item) => total + item.count, 0),
+    missingCount,
+    invalidCount,
+    errorCount: validation.errors.length,
+    ignoredCount: validation.ignored.length,
+    eligibleCount: validation.rows.length,
+    suggestedPeriod: distribution.length === 1 && missingCount === 0 && invalidCount === 0 && validation.errors.length === 0
+      ? distribution[0].month : null,
   };
 }

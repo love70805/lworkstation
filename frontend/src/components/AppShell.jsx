@@ -45,7 +45,7 @@ const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
   { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
-  { id: "diagnostics", label: "系统与备份", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
+  { id: "diagnostics", label: "系统检查", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
 ];
 
 function isActive(pathname, item) {
@@ -404,7 +404,7 @@ export default function AppShell({ children, pageClass = "" }) {
           <div><span><strong>应用版本</strong><small>{PRODUCT_NAME} 经营管理中心</small></span><b>{APP_VERSION_LABEL}</b></div>
           <div><span><strong>运行环境</strong><small>本机 IndexedDB 工作区，仅检查可读取性</small></span><b>{connectionLabel}</b></div>
           <div><span><strong>业务数据</strong><small>正式商品 / 平台 SKU / 待确认采集</small></span><b>{workspaceSummary ? `${workspaceSummary.productCount} / ${workspaceSummary.platformSkuCount} / ${workspaceSummary.pendingCaptureCount}` : "读取中"}</b></div>
-          <button type="button" onClick={() => { setOpenDialog(''); navigate('/diagnostics'); }}><ShieldCheck size={18} /><span><strong>打开系统检查</strong><small>左侧“系统与备份”可检查连接、导出摘要及管理备份</small></span><ChevronRight size={16} /></button>
+          <button type="button" onClick={() => { setOpenDialog(''); navigate('/diagnostics'); }}><ShieldCheck size={18} /><span><strong>打开系统检查</strong><small>左侧“系统检查”可检查连接、导出摘要及管理备份</small></span><ChevronRight size={16} /></button>
         </div>
       </Modal>
 

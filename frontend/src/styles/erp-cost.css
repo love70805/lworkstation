@@ -101,7 +101,7 @@
 .cost-flow-guide-steps span.active { color: var(--text); font-weight: 700; }
 .cost-flow-guide-steps span.active b { background: var(--primary); color: #fff; }
 .cost-source-panel, .cost-preview-panel { min-width: 0; overflow: hidden; }
-.cost-preview-panel { width: 100%; }
+.cost-preview-panel { width: 100%; scroll-margin-top: 80px; }
 .cost-preview-header { align-items: center; }
 .cost-preview-tools { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .cost-preview-tools .search-input { width: min(360px, 30vw); }
@@ -125,6 +125,16 @@
 .cost-anomaly-warning strong, .cost-anomaly-warning small { display: block; }
 .cost-anomaly-warning small { margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 18px; }
 .cost-anomaly-warning .button { flex: 0 0 auto; }
+.cost-exception-groups { margin: -6px 0 18px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.cost-exception-groups > summary { padding: 11px 14px; cursor: pointer; color: var(--text); font-size: 12px; font-weight: 700; }
+.cost-exception-groups > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
+.cost-exception-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 10px; padding: 0 12px 12px; }
+.cost-exception-grid section { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-bg); }
+.cost-exception-grid h3 { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 12px; }
+.cost-exception-grid h3 span { color: var(--warning); }
+.cost-exception-grid p { margin: 6px 0 9px; color: var(--text-muted); font-size: 11px; line-height: 17px; }
+.cost-exception-grid section > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.cost-exception-grid .button { min-width: 0; overflow-wrap: anywhere; }
 .cost-textarea { display: block; width: calc(100% - 40px); min-height: 300px; margin: 0 20px; padding: 14px; resize: vertical; border: 1px solid var(--border-strong); border-radius: 4px; outline: 0; background: var(--surface-bg); color: var(--text); font-size: 12px; line-height: 19px; }
 .cost-textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 24%, transparent); }
 .cost-textarea:disabled { cursor: not-allowed; opacity: 0.65; }

@@ -32,6 +32,7 @@ import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/l
 import { summarizeProfitRows } from "../../lib/profitPrecision";
 import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
+import { ERP_ADOPTION_VERSION, erpSourceOrder, compareErpSourceOrder, erpBatchAdoptionBoundary, summarizeErpAdoption } from "../../domain/erpAutomaticAdoption";
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
 
@@ -388,7 +389,100 @@ export async function saveSalesImport({
   return { batchId, ledgerId, replacedGroupCount, addedGroupCount };
 }
 
-export async function savePublishedErpCostBatch({
+export async function savePublishedErpCostBatch(args) {
+  const inbox = args.inboxId ? await db.erpCostInbox.get(args.inboxId) : null;
+  if (inbox?.adoption?.version === ERP_ADOPTION_VERSION) {
+    return processErpCostInboxAdoption({ inboxId: inbox.id, resolutions: args.reconciliation?.matches?.flatMap(row => row.resolutions ?? []) ?? [] });
+  }
+  return publishVerifiedErpCostBatch(args);
+}
+
+export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } = {}) {
+  const member = await getActiveMemberContext();
+  return db.transaction('rw', db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+    const inbox = await db.erpCostInbox.get(inboxId);
+    if (!inbox || inbox.workspaceId !== member.workspaceId) throw new Error('ERP 收件不属于当前工作区。');
+    const active = await db.settings.get(ACTIVE_MEMBER_CONTEXT_KEY);
+    if (active?.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(active.role)) throw new Error('当前成员无此账本的财务写权限。');
+    if (['applied', 'rejected', 'voided'].includes(inbox.status)) return { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status, adoption: inbox.adoption, idempotent: true };
+    const ledger = await db.ledgers.get(inbox.ledgerId), request = await db.erpCostRequests.get(inbox.requestId);
+    const now = new Date().toISOString();
+    const persistResult = async (items, state, reason = null, batchId = inbox.appliedBatchId) => {
+      const summary = summarizeErpAdoption(items);
+      const adoption = { version: ERP_ADOPTION_VERSION, state, items, summary, reason };
+      const changed = JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
+      if (changed) {
+        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: now }, updatedAt: now };
+        await db.erpCostInbox.put(saved);
+        await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_processed', actorId: member.memberId, createdAt: now, before: { adoption: inbox.adoption ?? null }, after: { adoption, requestId: inbox.requestId, batchId: inbox.batchId, adoptionMethod: resolutions.length ? 'exception_retry' : 'automatic', systemSource: 'erp-auto-adoption', snapshot: saved } });
+      }
+      return { id: inbox.id, inboxId: inbox.id, batchId, status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: changed ? now : inbox.adoption?.processedAt }, ...summary, matchedCount: summary.adoptedCount, idempotent: !changed };
+    };
+    if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id || !request.expectedSkus?.length) return persistResult([], 'blocked', 'request_or_ledger_missing');
+    if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
+    const validated = validateErpCostInboxEnvelope(inbox.envelope, { expectedWorkspaceId: ledger.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus });
+    const batch = validated.batch;
+    if (batch.batchId !== inbox.batchId || batch.requestId !== inbox.requestId) throw new Error('ERP 收件记录与原始封装不一致。');
+    const boundary = erpBatchAdoptionBoundary(batch);
+    const queried = new Set(batch.query.platformSkcs.map(row => canonicalPlatformSkc(row.platformSkc)));
+    const expected = request.expectedSkus.filter(row => queried.has(canonicalPlatformSkc(row.platformSkc)));
+    const [salesRows, approvals, allRows, batches] = await Promise.all([
+      db.salesRows.where('ledgerId').equals(ledger.id).toArray(), db.costApprovals.where('ledgerId').equals(ledger.id).toArray(),
+      db.erpCostRows.where('ledgerId').equals(ledger.id).toArray(), db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
+    ]);
+    const ownedSales = salesRows.filter(row => row.workspaceId === ledger.workspaceId);
+    const order = erpSourceOrder(request, batch);
+    const batchById = new Map(batches.map(row => [row.id, row]));
+    const existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');
+    if (inbox.appliedBatchId && batchById.get(inbox.appliedBatchId)?.status !== 'published') throw new Error('已采用成本批次关联失效，请核对历史记录。');
+    const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: expected, costRows: validated.rows, resolutions });
+    const candidates = [], items = [];
+    for (const row of reconciliation.matches) {
+      const sku = canonicalPlatformSku(row.platformSku);
+      const item = { platformSku: row.platformSku, canonicalPlatformSku: sku };
+      const stores = [...new Set(ownedSales.filter(sale => sale.platformSkc && canonicalPlatformSku(sale.platformSku ?? sale.sku) === sku && canonicalPlatformSkc(sale.platformSkc) === canonicalPlatformSkc(row.platformSkc)).map(sale => storeIdentity(sale.store)))];
+      const manualStores = stores.filter(store => selectManualOverride(approvals, { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store, platformSku: sku }));
+      item.manualStores = manualStores;
+      const previous = existingRows.find(cost => canonicalPlatformSku(cost.platformSku) === sku);
+      if (previous) { items.push({ ...item, state: manualStores.length ? 'manual_effective' : 'adopted', costRowId: previous.id }); continue; }
+      if (['finalized', 'locked'].includes(ledger.status)) { items.push({ ...item, state: 'ledger_protected', reason: ledger.status }); continue; }
+      if (!stores.length) { items.push({ ...item, state: 'evidence_incomplete', reason: 'sku_not_in_ledger' }); continue; }
+      if (boundary.globalReasons.length) { items.push({ ...item, state: 'evidence_incomplete', reason: boundary.globalReasons.join(',') }); continue; }
+      const newer = allRows.some(cost => cost.workspaceId === ledger.workspaceId && canonicalPlatformSku(cost.platformSku) === sku && cost.sourceEnvelopeBatchId !== batch.batchId && compareErpSourceOrder(cost.sourceOrder ?? batchById.get(cost.batchId)?.sourceOrder ?? [Date.parse(batchById.get(cost.batchId)?.publishedAt) || 0, 0, cost.batchId], order) > 0);
+      if (newer) { items.push({ ...item, state: 'superseded', reason: 'newer_source_exists' }); continue; }
+      if (boundary.blockedSkus.has(sku) || (row.sourceWarehouseSku && boundary.blockedWarehouses.has(canonicalWarehouseSku(row.sourceWarehouseSku))) || (row.status !== 'missing' && !row.evidenceComplete)) { items.push({ ...item, state: 'evidence_incomplete', reason: 'item_evidence_incomplete' }); continue; }
+      if (row.status !== 'matched') { items.push({ ...item, state: row.status === 'missing' ? 'missing' : 'anomaly_pending', reason: row.status }); continue; }
+      candidates.push(row); items.push({ ...item, state: manualStores.length ? 'manual_effective' : 'adopted' });
+    }
+    let appliedBatchId = inbox.appliedBatchId;
+    if (candidates.length) {
+      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts: (await getLatestLedgerCosts(ledger.id)).filter(cost => candidates.some(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(cost.platformSku))) } });
+      appliedBatchId = saved.batchId;
+      const persisted = await db.erpCostRows.where('batchId').equals(appliedBatchId).toArray();
+      for (const item of items) if (['adopted', 'manual_effective'].includes(item.state)) item.costRowId = persisted.find(row => canonicalPlatformSku(row.platformSku) === item.canonicalPlatformSku)?.id;
+    }
+    const summary = summarizeErpAdoption(items);
+    const state = summary.remainingCount === 0 && items.length ? 'applied' : summary.adoptedCount ? 'partial' : summary.protectedCount ? 'protected' : boundary.globalReasons.length ? 'blocked' : 'pending';
+    const result = await persistResult(items, state, boundary.globalReasons.join(',') || null, appliedBatchId);
+    if (appliedBatchId) await db.erpCostBatches.update(appliedBatchId, { adoption: result.adoption });
+    return result;
+  });
+}
+
+export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = null } = {}) {
+  const member = await getActiveMemberContext();
+  if (!workspaceId || workspaceId !== member.workspaceId) throw new Error('恢复 ERP 收件必须限定当前工作区。');
+  const inboxes = await db.erpCostInbox.where('workspaceId').equals(workspaceId).toArray();
+  const results = [];
+  for (const inbox of inboxes.filter(row => ['pending', 'loaded'].includes(row.status) && (!ledgerId || row.ledgerId === ledgerId))) {
+    try { results.push(await processErpCostInboxAdoption({ inboxId: inbox.id })); }
+    catch (error) { results.push({ id: inbox.id, status: inbox.status, error: error.message }); }
+  }
+  return results;
+}
+
+
+async function publishVerifiedErpCostBatch({
   ledgerId,
   reconciliation,
   inboxId = null,
@@ -398,8 +492,9 @@ export async function savePublishedErpCostBatch({
   sourceEnvelope = null,
   workspaceId = DEFAULT_WORKSPACE_ID,
   publishedBy = "local-user",
+  adoptionContext = null,
 }) {
-  const batchId = makeId("COST");
+  const batchId = adoptionContext?.batchId ?? makeId("COST");
   const publishedAt = new Date().toISOString();
   const auditActor = await resolveProfitAuditActor(publishedBy);
   const effectiveRequestId = String(sourceEnvelope?.requestId ?? requestId ?? "").trim() || null;
@@ -432,7 +527,7 @@ export async function savePublishedErpCostBatch({
     expectedSkus: verifiedExpectedSkus,
   });
   const verifiedSourceEnvelope = validatedSource.envelope;
-  if (verifiedSourceEnvelope.formatVersion !== ERP_COST_BATCH_VERSION || verifiedSourceEnvelope.evidenceStatus !== "complete") {
+  if (verifiedSourceEnvelope.formatVersion !== ERP_COST_BATCH_VERSION || (!adoptionContext && verifiedSourceEnvelope.evidenceStatus !== "complete")) {
     throw new Error("发布 ERP 正式成本必须使用包含完整采购证据的 v2 批次；TSV、旧批次和页面汇总只能预览。");
   }
   const matchedRows = reconciliation.matches.filter((row) => row.status === "matched");
@@ -530,7 +625,7 @@ export async function savePublishedErpCostBatch({
       db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     ]);
     const readiness = erpAdoptionReadiness({ ledger, salesRows, approvals, reconciliation: authoritativeReconciliation });
-    if (readiness.blockedRows.length) {
+    if (!adoptionContext && readiness.blockedRows.length) {
       if (readiness.blockedRows.some(row => row.costDecision?.unitCost === 0 && row.costDecision?.selectedRecords?.length && row.costDecision.selectedRecords.every(record => record.effectiveUnitPrice > 0))) {
         throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
       }
@@ -553,7 +648,7 @@ export async function savePublishedErpCostBatch({
     }
     let linkedInbox = normalizedInboxId ? await db.erpCostInbox.get(normalizedInboxId) : null;
     if (normalizedInboxId && (!linkedInbox
-      || linkedInbox.status !== "loaded"
+      || !(adoptionContext ? ["pending", "loaded"].includes(linkedInbox.status) : linkedInbox.status === "loaded")
       || linkedInbox.ledgerId !== ledgerId
       || linkedInbox.workspaceId !== workspaceId
       || linkedInbox.requestId !== effectiveRequestId
@@ -602,6 +697,7 @@ export async function savePublishedErpCostBatch({
       requestId: effectiveRequestId,
       sourceName,
       inputHash,
+      ...(adoptionContext ? { sourceOrder: adoptionContext.sourceOrder, adoptionVersion: ERP_ADOPTION_VERSION } : {}),
       status: "published",
       currency: "CNY",
       publishedBy: auditActor,
@@ -611,7 +707,8 @@ export async function savePublishedErpCostBatch({
       overrides: authoritativeReconciliation.overrides,
       sourceContract,
     };
-    await db.erpCostBatches.add(savedBatch);
+    if (adoptionContext?.batchId) await db.erpCostBatches.put(savedBatch);
+    else await db.erpCostBatches.add(savedBatch);
 
     const storedRows = verifiedRows.map((row) => ({
       batchId,
@@ -656,6 +753,7 @@ export async function savePublishedErpCostBatch({
       },
       matchMethod: row.matchMethod,
       mappingFallback: row.mappingFallback,
+      ...(adoptionContext ? { sourceOrder: adoptionContext.sourceOrder, adoptionVersion: ERP_ADOPTION_VERSION } : {}),
       sourceEnvelopeBatchId: verifiedSourceEnvelope.batchId,
       sourceAlgorithmVersion: verifiedSourceEnvelope.algorithmVersion,
       sourceBaselineSha256: verifiedSourceEnvelope.baseline?.releaseSha256 ?? null,
@@ -704,6 +802,7 @@ export async function savePublishedErpCostBatch({
         ledgerId,
         sourceName,
         ...adoptionSummary,
+        ...(adoptionContext ? { adoptionMethod: adoptionContext.method, systemSource: "erp-auto-adoption", previousCosts: adoptionContext.previousCosts } : {}),
         snapshot: {
           ...savedBatch,
           costBatch: savedBatch,
@@ -987,66 +1086,36 @@ export async function saveErpCostRequest(request) {
   return request.id;
 }
 
-export async function receiveErpCostInboxEnvelope({ envelope, receivedVia = "browser-message" } = {}) {
-  const rawBatch = envelope?.batch;
-  const requestId = String(rawBatch?.requestId ?? "").trim();
-  const recordedRequest = requestId ? await db.erpCostRequests.get(requestId) : null;
-  const verifiedExpectedSkus = Array.isArray(recordedRequest?.expectedSkus) && recordedRequest.expectedSkus.length > 0
-    ? recordedRequest.expectedSkus
-    : null;
-  const validated = validateErpCostInboxEnvelope(envelope, recordedRequest ? {
-    expectedWorkspaceId: recordedRequest.workspaceId,
-    expectedLedgerId: recordedRequest.ledgerId,
-    expectedRequestId: recordedRequest.id,
-    expectedPlatformSkcs: recordedRequest.platformSkcs,
-    expectedSkus: verifiedExpectedSkus,
-  } : {});
-  const batch = validated.batch;
-  const receivedAt = new Date().toISOString();
-  const inboxId = `INBOX-${validated.deliveryId}`;
-  const existing = await db.erpCostInbox.where("deliveryId").equals(validated.deliveryId).first();
-  if (existing) return { id: existing.id, deliveryId: existing.deliveryId, status: existing.status, idempotent: true };
-
-  const existingBatch = await db.erpCostInbox.where("batchId").equals(batch.batchId).first();
-  if (existingBatch) return { id: existingBatch.id, deliveryId: existingBatch.deliveryId, status: existingBatch.status, idempotent: true };
-  const auditActor = await resolveProfitAuditActor("erp-assistant-v8");
-
-  const saved = {
-    id: inboxId,
-    deliveryId: validated.deliveryId,
-    batchId: batch.batchId,
-    workspaceId: batch.workspaceId,
-    ledgerId: batch.ledgerId,
-    requestId: batch.requestId,
-    status: "pending",
-    receivedVia: String(receivedVia || validated.envelope.transport || "browser-message"),
-    sentAt: validated.envelope.sentAt,
-    receivedAt,
-    envelope: validated.envelope,
-  };
-
-  await db.transaction("rw", db.erpCostInbox, db.auditEvents, async () => {
-    const race = await db.erpCostInbox.get(inboxId);
-    if (race) return;
+export async function receiveErpCostInboxEnvelope({ envelope, receivedVia = 'browser-message' } = {}) {
+  const member = await getActiveMemberContext();
+  let result;
+  await db.transaction('rw', db.erpCostRequests, db.erpCostInbox, db.auditEvents, async () => {
+    const request = await db.erpCostRequests.get(String(envelope?.batch?.requestId ?? ''));
+    const validated = validateErpCostInboxEnvelope(envelope, request ? { expectedWorkspaceId: request.workspaceId, expectedLedgerId: request.ledgerId, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus?.length ? request.expectedSkus : null } : {});
+    const batch = validated.batch;
+    if (batch.workspaceId !== member.workspaceId) throw new Error('ERP 收件不属于当前工作区。');
+    const byDelivery = await db.erpCostInbox.where('deliveryId').equals(validated.deliveryId).first();
+    const byBatch = await db.erpCostInbox.where('batchId').equals(batch.batchId).first();
+    const existing = byDelivery ?? byBatch;
+    if (existing) {
+      if (byDelivery && byBatch && byDelivery.id !== byBatch.id) throw new Error('ERP 投递和源批次标识冲突。');
+      const previous = validateErpCostInboxEnvelope(existing.envelope, request ? { expectedWorkspaceId: request.workspaceId, expectedLedgerId: request.ledgerId, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus?.length ? request.expectedSkus : null } : {}).batch;
+      if (JSON.stringify(previous) !== JSON.stringify(batch)) throw new Error('ERP 投递或源批次 ID 已被不同证据使用。');
+      result = { id: existing.id, deliveryId: existing.deliveryId, batchId: existing.batchId, status: existing.status, idempotent: true };
+      return;
+    }
+    const receivedAt = new Date().toISOString(), id = `INBOX-${validated.deliveryId}`;
+    const saved = { id, deliveryId: validated.deliveryId, batchId: batch.batchId, workspaceId: batch.workspaceId, ledgerId: batch.ledgerId, requestId: batch.requestId, status: 'pending', receivedVia: String(receivedVia || validated.envelope.transport), sentAt: validated.envelope.sentAt, receivedAt, envelope: validated.envelope };
     await db.erpCostInbox.add(saved);
-    await db.auditEvents.add({
-      workspaceId: batch.workspaceId,
-      objectType: "erp_cost_inbox",
-      objectId: inboxId,
-      action: "received",
-      actorId: auditActor,
-      createdAt: receivedAt,
-      after: {
-        batchId: batch.batchId,
-        ledgerId: batch.ledgerId,
-        requestId: batch.requestId,
-        deliveryId: validated.deliveryId,
-        receivedVia: saved.receivedVia,
-        outputRowCount: batch.summary.outputRowCount,
-      },
-    });
+    await db.auditEvents.add({ workspaceId: batch.workspaceId, objectType: 'erp_cost_inbox', objectId: id, action: 'received', actorId: member.memberId, createdAt: receivedAt, after: { batchId: batch.batchId, ledgerId: batch.ledgerId, requestId: batch.requestId, deliveryId: validated.deliveryId, receivedVia: saved.receivedVia, outputRowCount: batch.summary.outputRowCount } });
+    result = { id, deliveryId: validated.deliveryId, batchId: batch.batchId, status: 'pending', idempotent: false };
   });
-  return { id: inboxId, deliveryId: validated.deliveryId, batchId: batch.batchId, status: "pending", idempotent: false };
+  // Receipt is durable before processing. A failed adoption transaction may be
+  // acknowledged by transport because startup recovery retains the full inbox.
+  try {
+    const adoption = await processErpCostInboxAdoption({ inboxId: result.id });
+    return { ...result, status: adoption.status, adoption: adoption.adoption };
+  } catch (error) { return { ...result, adoptionError: error.message }; }
 }
 
 export async function getLatestErpCostInbox(ledgerId = null) {
@@ -1097,7 +1166,7 @@ export async function rejectErpCostInboxBatches({ ids, rejectedBy = "local-user"
     const records = await db.erpCostInbox.bulkGet(inboxIds);
     if (records.some((record) => !record)) throw new Error("部分 ERP 收件批次已不存在，请刷新后重试。");
     for (const record of records) {
-      if (!["pending", "loaded"].includes(record.status)) {
+      if (!["pending", "loaded"].includes(record.status) || record.appliedBatchId) {
         throw new Error("只有待处理或已载入的 ERP 批次可以删除。");
       }
       const ledger = await db.ledgers.get(record.ledgerId);
@@ -1284,7 +1353,7 @@ export async function voidPublishedErpCostBatch({
     db.auditEvents,
     async () => {
       const inbox = await db.erpCostInbox.get(normalizedInboxId);
-      if (!inbox || inbox.status !== "applied" || !inbox.appliedBatchId) {
+      if (!inbox || !["applied", "pending", "loaded"].includes(inbox.status) || !inbox.appliedBatchId) {
         throw new Error("只有已采用且尚未撤回的 ERP 批次可以撤回。");
       }
       const batch = await db.erpCostBatches.get(inbox.appliedBatchId);

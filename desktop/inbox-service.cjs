@@ -39,10 +39,10 @@ function flowFromStatus(payload) {
   if (batch?.status === "acknowledged") {
     return {
       status: "workspace_received",
-      tone: batch.evidenceStatus === "complete" ? "success" : "warning",
-      label: batch.evidenceStatus === "complete" ? "已接收，待成本核对" : "旧版预览，待成本核对",
+      tone: batch.evidenceStatus === "complete" ? "info" : "warning",
+      label: batch.evidenceStatus === "complete" ? "已收妥，查看成本结果" : "旧版预览，待成本核对",
       message: batch.evidenceStatus === "complete"
-        ? "v2 原始采购证据已由工作站读取，等待 CostMatching 处理。"
+        ? "v2 原始采购证据已由工作站保存；实际结果以当前有效成本与处理状态为准。"
         : "该批次仅具备 legacy_partial 预览证据，不能由桌面标记为正式成本。",
       requestId: batch.requestId,
       batchId: batch.batchId,

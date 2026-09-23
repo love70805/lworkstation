@@ -39,6 +39,7 @@ export function createImportWorkerClient(onProgress) {
       return request({ type: "parse", jobId, extension, buffer }, [buffer]);
     },
     validate: (jobId, mapping, options) => request({ type: "validate", jobId, mapping, options }),
+    inspectPeriod: (jobId, mapping, options) => request({ type: "inspect-period", jobId, mapping, options }),
     release: (jobId) => request({ type: "release", jobId }),
     terminate: () => {
       failure = "导入任务已停止。";

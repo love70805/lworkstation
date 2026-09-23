@@ -24,6 +24,7 @@ export const ERP_INBOX_MATCH_REASONS = Object.freeze({
   current_filter_mismatch: "与当前页面筛选 SKC 范围不同，需手动载入",
   inbox_not_pending: "批次已载入或处理",
   manually_unloaded: "已保留待处理，需手动载入",
+  automatic_adoption_review: "正常成本已自动处理，剩余项可查看",
 });
 
 export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformSkcs = null } = {}) {
@@ -61,6 +62,11 @@ export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformS
   }
   if (inbox?.status !== "pending") {
     return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "inbox_not_pending" };
+  }
+  if (inbox.adoption?.version) {
+    // The data layer has already adopted healthy items. Opening this page must
+    // not replace an in-progress review draft just to display the remainder.
+    return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "automatic_adoption_review" };
   }
   if (inbox.autoLoadSuppressed) return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "manually_unloaded" };
   return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: true, reason: "matched" };
