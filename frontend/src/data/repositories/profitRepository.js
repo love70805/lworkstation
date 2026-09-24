@@ -567,6 +567,9 @@ async function publishVerifiedErpCostBatch({
     const sourceEvidence = row.sourceWarehouseSku
       ? sourceEvidenceByWarehouseSku.get(canonicalWarehouseSku(row.sourceWarehouseSku))
       : null;
+    if (sourceEvidence?.evidenceRef !== sourceRow.evidenceRef || sourceEvidence?.evidenceComplete !== true) {
+      throw new Error(`平台 SKU ${row.platformSku || "未知"} 的证据引用与仓库证据不一致。`);
+    }
     const purchaseRecords = sourceEvidence?.purchaseRecords ?? row.purchaseRecords;
     if (hasLegacyMonthExclusions({ ...sourceEvidence, sourceMeta: verifiedSourceEnvelope.sourceMeta }, costPeriod)) {
       throw new Error(`${costPeriod} 及以前的采购曾被旧版当月排除规则遗漏，请重新采集或填写人工成本。`);
@@ -590,6 +593,8 @@ async function publishVerifiedErpCostBatch({
     }
     return {
       ...row,
+      evidenceRef: sourceRow.evidenceRef,
+      evidenceComplete: sourceRow.evidenceComplete === true && sourceEvidence?.evidenceComplete === true,
       unitCost: decision.formalUnitCost,
       formalUnitCost: decision.formalUnitCost,
       totalQuantity: decision.totalQuantity,
@@ -726,6 +731,8 @@ async function publishVerifiedErpCostBatch({
       platformSkc: row.platformSkc ?? null,
       canonicalPlatformSkc: row.canonicalPlatformSkc ?? null,
       warehouseSku: row.sourceWarehouseSku,
+      evidenceRef: row.evidenceRef,
+      evidenceComplete: row.evidenceComplete,
       unitCost: row.unitCost,
       costPeriod,
       currency: row.currency,
@@ -1296,7 +1303,7 @@ export async function getLatestLedgerCosts(ledgerId) {
     db.erpCostRows.where("ledgerId").equals(ledgerId).toArray(),
     db.erpCostBatches.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  const batchStatus = new Map(batches.map((batch) => [batch.id, batch.status]));
+  const batchById = new Map(batches.map((batch) => [batch.id, batch]));
   const latest = new Map();
   rows.toSorted((a, b) => {
     const dateOrder = String(a.publishedAt ?? "").localeCompare(String(b.publishedAt ?? ""));
@@ -1304,7 +1311,52 @@ export async function getLatestLedgerCosts(ledgerId) {
   }).forEach((row) => {
     latest.set(row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku), row);
   });
-  return [...latest.values()].filter((row) => batchStatus.get(row.batchId) === "published");
+  return [...latest.values()]
+    .filter((row) => batchById.get(row.batchId)?.status === "published")
+    .map((row) => projectPublishedCostEvidence(row, batchById.get(row.batchId)));
+}
+
+function samePurchaseEvidence(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+  return left.every((record, index) => {
+    const source = right[index];
+    return String(record.recordId ?? "") === String(source?.recordId ?? "")
+      && String(record.purchaseDate ?? "") === String(source?.purchaseDate ?? "")
+      && Number(record.quantity) === Number(source?.quantity)
+      && Number(record.unitPrice) === Number(source?.unitPrice);
+  });
+}
+
+function projectPublishedCostEvidence(row, batch) {
+  if (row.evidenceRef && row.evidenceComplete === true) return row;
+  const contract = batch?.sourceContract;
+  if (batch?.status !== "published"
+    || contract?.formatVersion !== ERP_COST_BATCH_VERSION
+    || !contract.batchId
+    || String(row.sourceEnvelopeBatchId ?? "") !== String(contract.batchId)
+    || String(contract.requestId ?? "") !== String(batch.requestId ?? "")
+    || String(row.workspaceId ?? "") !== String(batch.workspaceId ?? "")
+    || String(row.ledgerId ?? "") !== String(batch.ledgerId ?? "")
+    || row.evidenceComplete === false
+    || row.costDecision?.evidenceComplete !== true
+    || row.resolutionStatus !== "resolved"
+    || (row.sourceWarnings ?? []).length > 0
+    || !row.warehouseSku
+    || !row.platformSkc) return row;
+  const queriedSkcs = contract.query?.platformSkcs;
+  if (!Array.isArray(queriedSkcs)
+    || !queriedSkcs.some((item) => (item?.platformSkc ?? item)
+      && canonicalPlatformSkc(item?.platformSkc ?? item) === canonicalPlatformSkc(row.platformSkc))) return row;
+  const warehouseSku = canonicalWarehouseSku(row.warehouseSku);
+  const evidence = Array.isArray(contract.warehouseEvidence)
+    ? contract.warehouseEvidence.filter((entry) => entry?.warehouseSku && canonicalWarehouseSku(entry.warehouseSku) === warehouseSku)
+    : [];
+  if (evidence.length !== 1 || evidence[0].evidenceComplete !== true || (evidence[0].sourceWarnings ?? []).length > 0) return row;
+  const evidenceRef = `warehouse:${warehouseSku}`;
+  if (evidence[0].evidenceRef !== evidenceRef || (row.evidenceRef && row.evidenceRef !== evidenceRef)) return row;
+  if (!samePurchaseEvidence(row.purchaseRecords, evidence[0].purchaseRecords)
+    || !samePurchaseEvidence(row.excludedRecords ?? [], evidence[0].excludedRecords ?? [])) return row;
+  return { ...row, evidenceRef, evidenceComplete: true };
 }
 
 export async function reopenLedgerForCostCorrection({ ledgerId, reason } = {}) {
