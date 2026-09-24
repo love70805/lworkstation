@@ -1,6 +1,30 @@
-import { canonicalPlatformSku, canonicalWarehouseSku } from './identifiers';
+import { canonicalPlatformSkc, canonicalPlatformSku, canonicalWarehouseSku } from './identifiers';
 
 export const ERP_ADOPTION_VERSION = 'erp-auto-adoption@1';
+export function legacyExpectedSkusForRequest({ request, salesRows, workspaceId }) {
+  const requestedAt = Date.parse(request?.requestedAt ?? '');
+  if (!Number.isFinite(requestedAt)) return { expectedSkus: [], reason: 'legacy_request_scope_missing' };
+  const queriedSkcs = new Set((request?.platformSkcs ?? []).map(row => canonicalPlatformSkc(row?.platformSkc ?? row)).filter(Boolean));
+  if (!queriedSkcs.size) return { expectedSkus: [], reason: 'legacy_request_scope_missing' };
+  const bySku = new Map();
+  for (const row of salesRows) {
+    if (row.workspaceId !== workspaceId || !row.platformSku || !row.platformSkc) continue;
+    const importedAt = Date.parse(row.importedAt ?? '');
+    // A later import can add SKUs under an already queried SKC. It cannot
+    // expand the scope of the old request, even if its cost batch names them.
+    if (!Number.isFinite(importedAt) || importedAt > requestedAt) continue;
+    const canonicalSku = canonicalPlatformSku(row.platformSku);
+    const canonicalSkc = canonicalPlatformSkc(row.platformSkc);
+    const previous = bySku.get(canonicalSku);
+    if (previous && previous.canonicalPlatformSkc !== canonicalSkc) {
+      return { expectedSkus: [], reason: 'legacy_request_ambiguous_scope' };
+    }
+    bySku.set(canonicalSku, { platformSku: row.platformSku, platformSkc: row.platformSkc, canonicalPlatformSkc: canonicalSkc });
+  }
+  const expectedSkus = [...bySku.values()].filter(row => queriedSkcs.has(row.canonicalPlatformSkc))
+    .map(({ platformSku, platformSkc }) => ({ platformSku, platformSkc }));
+  return expectedSkus.length ? { expectedSkus, reason: null } : { expectedSkus, reason: 'legacy_request_scope_missing' };
+}
 export function erpSourceOrder(request, batch) {
   return [Date.parse(request.requestedAt ?? request.createdAt) || 0, Date.parse(batch.generatedAt) || 0, batch.batchId];
 }

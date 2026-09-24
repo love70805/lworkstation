@@ -22,6 +22,7 @@ const defaults = overrides => ({
   }),
   acknowledge: vi.fn(async () => {}),
   recover: vi.fn(async () => ({ recovered: true })),
+  recoverDrafts: vi.fn(async () => ({ recovered: 0, failures: [] })),
   emit: vi.fn(),
   ...overrides,
 });
@@ -51,6 +52,14 @@ describe('ERP inbox background delivery and adoption', () => {
     expect(options.recover).toHaveBeenCalledWith({ workspaceId: 'W1' });
     expect(result).toMatchObject({ received: 0, recovered: true });
     expect(result.failures).toHaveLength(1);
+  });
+
+  it('keeps durable inbox recovery running when an old local draft cannot be inspected', async () => {
+    const options = defaults({ pollRecords: vi.fn(async () => []), recoverDrafts: vi.fn(async () => { throw Error('draft read failed'); }) });
+    const result = await runErpInboxCycle(options);
+    expect(options.recover).toHaveBeenCalledWith({ workspaceId: 'W1' });
+    expect(result).toMatchObject({ received: 0, recovered: true });
+    expect(result.failures.map(error => error.message)).toEqual(['draft read failed']);
   });
 
   it('keeps a saved but unacknowledged record retryable while recovering the local inbox', async () => {

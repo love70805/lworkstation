@@ -32,7 +32,7 @@ import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/l
 import { summarizeProfitRows } from "../../lib/profitPrecision";
 import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
-import { ERP_ADOPTION_VERSION, erpSourceOrder, compareErpSourceOrder, erpBatchAdoptionBoundary, summarizeErpAdoption } from "../../domain/erpAutomaticAdoption";
+import { ERP_ADOPTION_VERSION, erpSourceOrder, compareErpSourceOrder, erpBatchAdoptionBoundary, legacyExpectedSkusForRequest, summarizeErpAdoption } from "../../domain/erpAutomaticAdoption";
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
 
@@ -418,19 +418,22 @@ export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } 
       }
       return { id: inbox.id, inboxId: inbox.id, batchId, status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: changed ? now : inbox.adoption?.processedAt }, ...summary, matchedCount: summary.adoptedCount, idempotent: !changed };
     };
-    if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id || !request.expectedSkus?.length) return persistResult([], 'blocked', 'request_or_ledger_missing');
+    if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return persistResult([], 'blocked', 'request_or_ledger_missing');
     if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
-    const validated = validateErpCostInboxEnvelope(inbox.envelope, { expectedWorkspaceId: ledger.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus });
-    const batch = validated.batch;
-    if (batch.batchId !== inbox.batchId || batch.requestId !== inbox.requestId) throw new Error('ERP 收件记录与原始封装不一致。');
-    const boundary = erpBatchAdoptionBoundary(batch);
-    const queried = new Set(batch.query.platformSkcs.map(row => canonicalPlatformSkc(row.platformSkc)));
-    const expected = request.expectedSkus.filter(row => queried.has(canonicalPlatformSkc(row.platformSkc)));
     const [salesRows, approvals, allRows, batches] = await Promise.all([
       db.salesRows.where('ledgerId').equals(ledger.id).toArray(), db.costApprovals.where('ledgerId').equals(ledger.id).toArray(),
       db.erpCostRows.where('ledgerId').equals(ledger.id).toArray(), db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
     ]);
     const ownedSales = salesRows.filter(row => row.workspaceId === ledger.workspaceId);
+    const legacyScope = request.expectedSkus?.length ? null : legacyExpectedSkusForRequest({ request, salesRows: ownedSales, workspaceId: ledger.workspaceId });
+    if (legacyScope?.reason) return persistResult([], 'blocked', legacyScope.reason);
+    const expectedSkus = legacyScope?.expectedSkus ?? request.expectedSkus;
+    const validated = validateErpCostInboxEnvelope(inbox.envelope, { expectedWorkspaceId: ledger.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus });
+    const batch = validated.batch;
+    if (batch.batchId !== inbox.batchId || batch.requestId !== inbox.requestId) throw new Error('ERP 收件记录与原始封装不一致。');
+    const boundary = erpBatchAdoptionBoundary(batch);
+    const queried = new Set(batch.query.platformSkcs.map(row => canonicalPlatformSkc(row.platformSkc)));
+    const expected = expectedSkus.filter(row => queried.has(canonicalPlatformSkc(row.platformSkc)));
     const order = erpSourceOrder(request, batch);
     const batchById = new Map(batches.map(row => [row.id, row]));
     const existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');
@@ -513,9 +516,13 @@ async function publishVerifiedErpCostBatch({
     || String(recordedRequest.workspaceId ?? "") !== String(workspaceId)) {
     throw new Error("找不到与当前账本和工作区匹配的 ERP 成本请求，不能发布正式成本。");
   }
+  const legacyScope = adoptionContext && !recordedRequest.expectedSkus?.length
+    ? legacyExpectedSkusForRequest({ request: recordedRequest, salesRows: await db.salesRows.where('ledgerId').equals(ledgerId).toArray(), workspaceId })
+    : null;
+  if (legacyScope?.reason) throw new Error(`旧 ERP 请求范围无法安全恢复：${legacyScope.reason}`);
   const verifiedExpectedSkus = Array.isArray(recordedRequest.expectedSkus) && recordedRequest.expectedSkus.length > 0
     ? recordedRequest.expectedSkus
-    : null;
+    : legacyScope?.expectedSkus ?? null;
   if (!verifiedExpectedSkus) {
     throw new Error("已记录的 ERP 成本请求缺少精确 expected SKU 范围，只能预览，不能发布正式成本。");
   }

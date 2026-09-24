@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { ERP_ADOPTION_ITEM_LABELS, groupAdoptionExceptions, summarizeAdoptionForDisplay } from "./erpAdoptionPresentation";
+import { ERP_ADOPTION_ITEM_LABELS, describeErpAdoptionReason, groupAdoptionExceptions, summarizeAdoptionForDisplay } from "./erpAdoptionPresentation";
 
 it("separates automatically adopted costs from effective manual corrections and remaining exceptions", () => {
   expect(summarizeAdoptionForDisplay({ state: "partial", summary: {
@@ -15,4 +15,11 @@ it("separates automatically adopted costs from effective manual corrections and 
     { state: 'missing', platformSku: 'C' },
   ] }).map(group => [group.state, group.items.map(item => item.platformSku)]))
     .toEqual([['anomaly_pending', ['B']], ['missing', ['C']]]);
+});
+
+it('explains a blocked old request without presenting a preview amount as adopted cost', () => {
+  expect(describeErpAdoptionReason('legacy_request_ambiguous_scope')).toContain('同一平台 SKU 对应多个平台 SKC');
+  expect(summarizeAdoptionForDisplay({ state: 'blocked', reason: 'source_incomplete', summary: {
+    adoptedCount: 0, remainingCount: 0,
+  } }).details).toContain('ERP 来源声明整体证据不完整');
 });
