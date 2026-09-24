@@ -1,8 +1,8 @@
 # Codex 任务看板
 
-## 2026-09-24 · Beta.6 成本缺失补丁在制
+## 2026-09-24 · Beta.7 成本恢复补丁已公开发布
 
-用户反馈 Beta.6 在三笔有效采购可预览 4.59 元时仍提示缺少有效成本，要求修复、验收并发布 Beta 补丁，本机暂不安装。已复现旧请求范围、完整 v2 草稿与弹窗状态缺陷；撤回批次保持原有墓碑规则，现场具体阻断分支仍需收件状态才能判定。Beta.7 候选已通过 876 测试、桌面 verify、packaged smoke、隔离 4.59 元旧草稿自动采用路径及资产检查，等待 PR / CI 与公开发布。见 [恢复契约](integration/BETA_7_COST_RECOVERY.md) 和 [候选验收](RELEASE_0.3.0_BETA_7.md)。
+用户反馈 Beta.6 在三笔有效采购可预览 4.59 元时仍提示缺少有效成本。已修复旧请求范围、完整 v2 草稿与弹窗状态缺陷；撤回批次保持原有墓碑规则，现场具体阻断分支仍需收件状态才能判定。876 测试、桌面 verify、packaged smoke、隔离 4.59 元旧草稿自动采用路径、PR #109 / main CI、四资产匿名回读和实际更新通道检查通过。[v0.3.0-beta.7](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.7) 已公开为预发布，稳定 Latest 仍为 0.2.19，本机未安装。见 [恢复契约](integration/BETA_7_COST_RECOVERY.md) 和 [发布验收](RELEASE_0.3.0_BETA_7.md)。
 
 ## 2026-09-24 · Beta.6 已公开发布
 

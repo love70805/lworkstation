@@ -6,16 +6,15 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.6)。Beta 不替代稳定 Latest。本机未安装。
-
-Beta.7 成本恢复补丁已通过本机候选验收，尚待 PR / CI 与公开发布。候选见 `candidates/0.3.0-beta.7-cost-recovery/` 与 [验收记录](../docs/RELEASE_0.3.0_BETA_7.md)。
+当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.7](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.7)。Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-24（UTC+8）。0.3.0 Beta.6 已公开预发布并验证四资产匿名下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
+核对日期：2026-09-24（UTC+8）。0.3.0 Beta.7 已公开预发布并验证四资产匿名下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.0-beta.7` cost recovery | 已公开 GitHub 预发布；876 测试、桌面 verify、packaged smoke、隔离旧草稿 4.59 元业务路径、PR #109 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.7)；`candidates/0.3.0-beta.7-cost-recovery/`；[验收](../docs/RELEASE_0.3.0_BETA_7.md) |
 | `0.3.0-beta.6` automatic ERP adoption | 已公开 GitHub 预发布；865 测试、桌面 verify、packaged smoke、隔离业务路径、PR #107 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.6)；`candidates/0.3.0-beta.6-auto-erp-profit/`；[验收](../docs/RELEASE_0.3.0_BETA_6.md) |
 | `0.3.0-beta.5` workflow consistency | 已公开 GitHub 预发布；837 测试、缓存实测、Windows 候选、PR #103 / main CI、四资产回读及通道隔离通过，本机未安装 | `candidates/0.3.0-beta.5-workflow-consistency/`；[验收](../docs/RELEASE_0.3.0_BETA_5.md) |
 | `0.3.0-beta.4` ledger preview | 已公开 GitHub 预发布；772 测试、实际扩展月份传递/自动回传、PR #101 / main CI、四资产回读和更新通道检查通过；本机未安装 | `candidates/0.3.0-beta.4-ledger-preview/`；[验收](../docs/RELEASE_0.3.0_BETA_4.md) |
