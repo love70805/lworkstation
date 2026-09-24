@@ -1,8 +1,8 @@
 # Codex 任务看板
 
-## 2026-09-24 · Beta.7 已采用成本证据详情伪报修复中
+## 2026-09-24 · Beta.8 已采用成本证据详情修复已公开发布
 
-现场确认同一 SKU 顶部显示“当前采用：¥4.5900 · ERP”，正式成本已生效；展开证据详情却提示缺少 `evidenceRef` 并要求重采。定位为完整 v2 批次发布后的成本行漏存证据字段。当前修复和隔离回归见 [证据引用契约](integration/ERP_PUBLISHED_EVIDENCE_REFERENCE.md)；不改真实数据库、本机不安装，验收及后续 Beta 发布仍在进行。
+现场确认同一 SKU 顶部显示“当前采用：¥4.5900 · ERP”，正式成本已生效；展开证据详情却提示缺少 `evidenceRef` 并要求重采。定位为完整 v2 批次发布后的成本行漏存证据字段。已修复新行写入，并对 Beta.7 已发布旧行实施严格条件下的只读证据投影。878 测试、生产构建、桌面 verify、packaged smoke、隔离 11 条采购业务路径、PR #111 / main CI、四资产匿名回读及真实更新通道检查通过。[v0.3.0-beta.8](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.8) 已公开为预发布；稳定 Latest 保持 0.2.19，本机未安装且未改真实数据。见 [证据引用契约](integration/ERP_PUBLISHED_EVIDENCE_REFERENCE.md) 与 [发布验收](RELEASE_0.3.0_BETA_8.md)。
 
 ## 2026-09-24 · Beta.7 成本恢复补丁已公开发布
 
