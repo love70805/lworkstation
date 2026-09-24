@@ -29,8 +29,71 @@ import { resolveFormalCostDecision } from "../domain/costPolicy";
 import { savedProfitRows, savedProfitSummary, buildProfitExportRows } from "../lib/profitPrecision";
 import { buildSyncEnvelope } from "../domain/syncEnvelope";
 import { buildSyncPostgresPlan } from "../domain/syncPostgresPlan";
+import { describeEvidenceIssues } from "../lib/costMatching";
 
 const period = "2026-08";
+
+it("keeps published ERP evidence attached after reopening cost matching", async () => {
+  const { ledger, request } = await context();
+  const purchaseRecords = [
+    record("LATEST-1", 4.5, 20, "2026-08-15"),
+    record("LATEST-2", 4.5, 15, "2026-08-10"),
+    record("LATEST-3", 4.8, 15, "2026-08-03"),
+    ...Array.from({ length: 8 }, (_, index) => record(`OLDER-${index}`, 6, 1, `2026-07-${String(index + 1).padStart(2, "0")}`)),
+  ];
+  const source = sourceEnvelope({ ledger, request, purchaseRecords });
+  await savePublishedErpCostBatch({
+    ledgerId: ledger.id,
+    requestId: request.id,
+    reconciliation: reconcile({ purchaseRecords }),
+    sourceEnvelope: source,
+  });
+  const stored = (await db.erpCostRows.toArray())[0];
+  expect(stored).toMatchObject({ unitCost: 4.59, evidenceRef: "warehouse:WH-AUDIT", evidenceComplete: true });
+  const reopenedCosts = await getLatestLedgerCosts(ledger.id);
+  const match = reconcileErpCostRows({
+    workspaceId: ledger.workspaceId,
+    period: ledger.period,
+    expectedSkus: request.expectedSkus,
+    costRows: reopenedCosts,
+  }).matches[0];
+  expect(match).toMatchObject({ evidenceRef: "warehouse:WH-AUDIT", evidenceComplete: true });
+  expect(describeEvidenceIssues(match)).toEqual([]);
+  expect(resolveFormalCostDecision({ platformSku: "SKU-AUDIT", erpCost: reopenedCosts[0] })).toMatchObject({ unitCost: 4.59 });
+});
+
+it("projects a Beta.7 published row's missing reference only from matching retained evidence", async () => {
+  const { ledger, request } = await context();
+  const purchaseRecords = [record("R1", 4.59, 10)];
+  const source = sourceEnvelope({ ledger, request, purchaseRecords });
+  const published = await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }), sourceEnvelope: source });
+  const raw = (await db.erpCostRows.toArray())[0];
+  const originalBatch = await db.erpCostBatches.get(published.batchId);
+  await db.erpCostRows.update(raw.id, { evidenceRef: undefined, evidenceComplete: undefined });
+  const projected = (await getLatestLedgerCosts(ledger.id))[0];
+  expect(projected).toMatchObject({ unitCost: 4.59, evidenceRef: "warehouse:WH-AUDIT", evidenceComplete: true });
+  expect((await db.erpCostRows.get(raw.id)).evidenceRef).toBeUndefined();
+  expect(describeEvidenceIssues(reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: request.expectedSkus, costRows: [projected] }).matches[0])).toEqual([]);
+
+  const unsafeBatches = [
+    { ...originalBatch, workspaceId: "another-workspace" },
+    { ...originalBatch, requestId: "another-request" },
+    { ...originalBatch, sourceContract: { ...originalBatch.sourceContract, batchId: "another-source-batch" } },
+    { ...originalBatch, sourceContract: { ...originalBatch.sourceContract, warehouseEvidence: [...originalBatch.sourceContract.warehouseEvidence, ...originalBatch.sourceContract.warehouseEvidence] } },
+    { ...originalBatch, sourceContract: { ...originalBatch.sourceContract, warehouseEvidence: [{ ...originalBatch.sourceContract.warehouseEvidence[0], evidenceComplete: false }] } },
+    { ...originalBatch, sourceContract: { ...originalBatch.sourceContract, warehouseEvidence: [{ ...originalBatch.sourceContract.warehouseEvidence[0], purchaseRecords: [] }] } },
+  ];
+  for (const unsafeBatch of unsafeBatches) {
+    await db.erpCostBatches.put(unsafeBatch);
+    expect((await getLatestLedgerCosts(ledger.id))[0].evidenceRef).toBeUndefined();
+  }
+  await db.erpCostBatches.put(originalBatch);
+  await db.erpCostRows.update(raw.id, { evidenceComplete: false });
+  expect((await getLatestLedgerCosts(ledger.id))[0].evidenceRef).toBeUndefined();
+  await db.erpCostRows.update(raw.id, { evidenceComplete: undefined });
+  await db.erpCostBatches.put({ ...originalBatch, status: "voided" });
+  expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);
+});
 
 it("persists the real ledger month and rejects request attempts to override it", async () => {
   const { ledger, request } = await context();

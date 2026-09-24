@@ -1,7 +1,7 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.7",
-  "integrationBranch": "codex/beta6-cost-recovery-fix",
+  "version": "0.3.0-beta.8",
+  "integrationBranch": "codex/beta7-evidence-ref-fix",
   "requiredCommits": [
     {
       "module": "ledger-cost-report-workflow-consistency",
@@ -270,6 +270,10 @@
     {
       "module": "beta7-legacy-cost-recovery",
       "commit": "c6f67ab"
+    },
+    {
+      "module": "beta8-published-erp-evidence",
+      "commit": "8a38e63"
     }
   ]
 }
