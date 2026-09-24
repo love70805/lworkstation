@@ -5,10 +5,11 @@ import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CostMatchingContent } from './CostMatching';
+import { costDraftKey } from '../lib/costMatchingDraft';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, notify: vi.fn(), register: vi.fn(), publish: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], notify: vi.fn(), register: vi.fn(), publish: vi.fn() }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
-vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (_query, _deps, initial) => initial }));
+vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : initial }));
 vi.mock('../components/UI', async importOriginal => ({ ...await importOriginal(), useToast: () => ({ notify: mocks.notify }) }));
 vi.mock('../lib/autoErpRequest', async importOriginal => ({ ...await importOriginal(), ensureAutoErpRequest: mocks.register }));
 vi.mock('../data/database', async importOriginal => ({ ...await importOriginal(), savePublishedErpCostBatch: mocks.publish }));
@@ -26,6 +27,7 @@ async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', 
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
+  mocks.inboxRecords = [];
   mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.register.mockReset().mockResolvedValue(null);
   writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText } });
@@ -94,6 +96,29 @@ it('shows adopted ERP and never offers adoption without a new evidence batch', a
   expect(button('采用已匹配 ERP 成本')).toBeUndefined();
   expect(button('完成成本处置后可采用')).toBeUndefined();
   expect(mocks.publish).not.toHaveBeenCalled();
+});
+it('refreshes an open cost dialog when the formal ERP cost is adopted', async () => {
+  await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH' });
+  await act(async () => button('甲 · 处理成本').click());
+  expect(container.querySelector('.cost-detail-current')?.textContent).toContain('缺少有效成本');
+  await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH', costs: [formalCost] });
+  expect(container.querySelector('.cost-detail-current')?.textContent).toContain('10.0000 · ERP');
+  expect(container.querySelector('.cost-detail-current')?.textContent).toContain('正式成本已生效');
+});
+it('recognizes a restored draft already in the automatic inbox and explains its block', async () => {
+  const ledgerId = 'RESTORED-INBOX';
+  localStorage.setItem(costDraftKey(ledgerId), JSON.stringify({
+    sourceText: '{}', batchEnvelope: { batchId: 'B-RESTORED', summary: { outputRowCount: 0, warehouseSkuCount: 0 } }, resolutions: [], updatedAt: Date.now(),
+  }));
+  mocks.inboxRecords = [{
+    id: 'I-RESTORED', batchId: 'B-RESTORED', ledgerId, workspaceId: 'W',
+    status: 'pending', receivedVia: 'restored-cost-draft', receivedAt: '2026-09-24T00:00:00Z',
+    adoption: { version: 'erp-auto-adoption@1', state: 'blocked', reason: 'legacy_request_scope_missing', summary: { adoptedCount: 0, remainingCount: 1 } },
+  }];
+  await render(['SKC-1'], 'ready', { ledgerId });
+  expect(container.textContent).toContain('旧请求无法从当前账本重建平台 SKU 范围');
+  expect(button('采用手动批次成本')).toBeUndefined();
+  expect(button('重试已处理异常')).toBeDefined();
 });
 it.each([
   { initialEntry: '/?missing=1', costs: [formalCost], title: '本月成本已齐' },

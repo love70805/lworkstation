@@ -6,12 +6,14 @@ import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 import { selectManualOverride } from '../domain/manualCostOverride';
 import { resolveFormalCostDecision } from '../domain/costPolicy';
+import { costDraftKey } from '../lib/costMatchingDraft';
+import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1'}={}){
  const ledger=await createOrGetMonthlyLedger({period:'2026-08'});
  const expectedSkus=['A','B'].map(platformSku=>({platformSku,platformSkc:`SKC-${platformSku}`}));
- if(!await db.salesRows.count())await db.salesRows.bulkAdd(expectedSkus.map(row=>({...row,workspaceId:ledger.workspaceId,ledgerId:ledger.id,store:'甲',quantity:2,amount:100})));
+ if(!await db.salesRows.count())await db.salesRows.bulkAdd(expectedSkus.map(row=>({...row,workspaceId:ledger.workspaceId,ledgerId:ledger.id,store:'甲',quantity:2,amount:100,importedAt:'2026-08-31T00:00:00Z'})));
  const request=buildErpCostRequest({id:`REQ-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,ledgerPeriod:ledger.period,platformSkcs:expectedSkus.map(row=>row.platformSkc),expectedSkus,requestedAt:requestAt,requestedBy:'finance'});await saveErpCostRequest(request);
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
@@ -87,4 +89,89 @@ it('blocks unscoped global collection failures while preserving all original evi
 it('keeps missing expected SKU pending without blocking a normal returned SKU',async()=>{
  const {envelope}=await seed({prices:[5,8]});envelope.batch.rows.pop();envelope.batch.summary.outputRowCount=1;envelope.batch.summary.warehouseSkuCount=1;
  const received=await receiveErpCostInboxEnvelope({envelope});expect(received.adoptionError).toBeUndefined();expect(received.adoption.summary).toMatchObject({adoptedCount:1,missingCount:1,remainingCount:1});
+});
+it('recovers a Beta.5 pending inbox whose request recorded only SKCs, using the ledger SKU mapping',async()=>{
+ const {ledger,request,envelope}=await seed({prices:[4.59,0],id:'legacy-inbox'});
+ envelope.batch.warehouseEvidence[0].purchaseRecords=[
+  {recordId:'P-1',purchaseDate:'2026-08-15',quantity:20,unitPrice:4.5},
+  {recordId:'P-2',purchaseDate:'2026-08-10',quantity:15,unitPrice:4.5},
+  {recordId:'P-3',purchaseDate:'2026-08-03',quantity:15,unitPrice:4.8},
+ ];
+ await db.erpCostRequests.update(request.id,{expectedSkus:[]});
+ await db.erpCostInbox.add({id:'INBOX-D-legacy-inbox',deliveryId:envelope.deliveryId,batchId:envelope.batch.batchId,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,status:'loaded',receivedVia:'browser-message',receivedAt:envelope.sentAt,sentAt:envelope.sentAt,envelope});
+ const recovered=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect(recovered[0].error).toBeUndefined();
+ expect(recovered[0].adoption).toMatchObject({state:'partial',summary:{adoptedCount:1,anomalyCount:1}});
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>[row.platformSku,row.unitCost])).toEqual([['A',4.59]]);
+});
+it('refuses a legacy SKC-only request when the ledger maps one platform SKU to conflicting SKCs',async()=>{
+ const {ledger,request,envelope}=await seed({prices:[4.59,8],id:'ambiguous'});
+ await db.erpCostRequests.update(request.id,{expectedSkus:[]});
+ await db.salesRows.add({workspaceId:ledger.workspaceId,ledgerId:ledger.id,store:'乙',platformSku:'A',platformSkc:'SKC-B',quantity:1,amount:10,importedAt:'2026-08-31T00:00:00Z'});
+ await db.erpCostInbox.add({id:'INBOX-D-ambiguous',deliveryId:envelope.deliveryId,batchId:envelope.batch.batchId,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,status:'pending',receivedVia:'browser-message',receivedAt:envelope.sentAt,sentAt:envelope.sentAt,envelope});
+ const recovered=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect(recovered[0].adoption).toMatchObject({state:'blocked',reason:'legacy_request_ambiguous_scope'});
+ expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);
+});
+it('does not expand an old SKC-only request to a SKU imported after the request',async()=>{
+ const {ledger,request}=await seed({prices:[4.59,8],id:'scope-time'});
+ await db.erpCostRequests.update(request.id,{expectedSkus:[]});
+ await db.salesRows.add({workspaceId:ledger.workspaceId,ledgerId:ledger.id,store:'甲',platformSku:'C',platformSkc:'SKC-A',quantity:1,amount:10,importedAt:'2026-09-02T00:00:00Z'});
+ const expectedSkus=[{platformSku:'A',platformSkc:'SKC-A'},{platformSku:'B',platformSkc:'SKC-B'}];
+ const results=[['A',4.59],['B',8],['C',99]].map(([sku,price])=>({warehouseSku:`WH-${sku}`,mappings:[{platformSku:sku,platformSkc:sku==='C'?'SKC-A':`SKC-${sku}`}],previewUnitCost:price}));
+ const evidence=results.map((row,index)=>({warehouseSku:row.warehouseSku,evidenceComplete:true,purchaseRecords:[{recordId:`P-${index}`,purchaseDate:'2026-08-15',quantity:1,unitPrice:row.previewUnitCost}]}));
+ const batch=buildErpCostBatchEnvelope({batchId:'B-scope-time',workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:'2026-09-01T00:00:00Z',results,warehouseEvidence:evidence});
+ const receipt=await receiveErpCostInboxEnvelope({envelope:buildErpCostInboxEnvelope({batch,deliveryId:'D-scope-time',sentAt:'2026-09-01T00:00:00Z'})});
+ expect(receipt.adoptionError).toBeUndefined();
+ expect(receipt.adoption.summary).toMatchObject({expectedCount:2,adoptedCount:2});
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.platformSku)).toEqual(['A','B']);
+});
+it('promotes a Beta.5 local full-evidence draft to a durable inbox and automatically adopts valid rows',async()=>{
+ const {ledger,request,envelope}=await seed({prices:[4.59,0],id:'legacy-draft'});
+ await db.erpCostRequests.update(request.id,{expectedSkus:[]});
+ const draftText=JSON.stringify({sourceText:JSON.stringify(envelope.batch),updatedAt:0});
+ const values=new Map([[costDraftKey(ledger.id),draftText]]);
+ const storage={get length(){return values.size;},key:index=>[...values.keys()][index],getItem:key=>values.get(key)??null,removeItem:key=>values.delete(key)};
+ const manual=await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'A',unitCost:0,reason:'真实零价'});
+ const result=await recoverCompleteErpCostDrafts({workspaceId:ledger.workspaceId,storage});
+ expect(result).toEqual({recovered:1,failures:[]});
+ expect(storage.length).toBe(0);
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>[row.platformSku,row.unitCost])).toEqual([['A',4.59]]);
+ expect((await db.erpCostInbox.toArray())[0]).toMatchObject({receivedVia:'restored-cost-draft',adoption:{state:'partial'}});
+ const scope={workspaceId:ledger.workspaceId,ledgerId:ledger.id,period:ledger.period,store:'甲',platformSku:'A'};
+ let snapshot=await getLedgerSnapshot(ledger.id);
+ expect(resolveFormalCostDecision({...scope,erpCost:snapshot.costs[0],manualOverride:selectManualOverride(snapshot.approvals,scope)}).unitCost).toBe(0);
+ const before={rows:await db.erpCostRows.count(),audit:await db.auditEvents.count()};
+ values.set(costDraftKey(ledger.id),draftText);
+ await recoverCompleteErpCostDrafts({workspaceId:ledger.workspaceId,storage});
+ expect({rows:await db.erpCostRows.count(),audit:await db.auditEvents.count()}).toEqual(before);
+ await revokeManualCostOverride({ledgerId:ledger.id,approvalId:manual.id});
+ snapshot=await getLedgerSnapshot(ledger.id);
+ expect(resolveFormalCostDecision({...scope,erpCost:snapshot.costs[0],manualOverride:selectManualOverride(snapshot.approvals,scope)}).unitCost).toBe(4.59);
+});
+it('preserves finalized ledger state when promoting a complete old draft to the inbox',async()=>{
+ const {ledger,envelope}=await seed({prices:[4.59,8],id:'draft-locked'});
+ await db.ledgers.update(ledger.id,{status:'finalized',profitSummary:{sentinel:1}});
+ const values=new Map([[costDraftKey(ledger.id),JSON.stringify({sourceText:JSON.stringify(envelope.batch),updatedAt:0})]]);
+ const storage={get length(){return values.size;},key:index=>[...values.keys()][index],getItem:key=>values.get(key)??null,removeItem:key=>values.delete(key)};
+ expect(await recoverCompleteErpCostDrafts({workspaceId:ledger.workspaceId,storage})).toEqual({recovered:1,failures:[]});
+ expect((await db.erpCostInbox.toArray())[0].adoption.state).toBe('protected');
+ expect(await db.erpCostRows.count()).toBe(0);
+ expect((await db.ledgers.get(ledger.id)).status).toBe('finalized');
+});
+it('keeps an unrelated draft untouched and never adopts it in the active workspace',async()=>{
+ const {ledger,envelope}=await seed({prices:[4.59,8],id:'foreign-draft'});
+ const values=new Map([[costDraftKey(ledger.id),JSON.stringify({sourceText:JSON.stringify({...envelope.batch,workspaceId:'foreign'}),updatedAt:0})]]);
+ const storage={get length(){return values.size;},key:index=>[...values.keys()][index],getItem:key=>values.get(key)??null,removeItem:key=>values.delete(key)};
+ expect(await recoverCompleteErpCostDrafts({workspaceId:ledger.workspaceId,storage})).toEqual({recovered:0,failures:[]});
+ expect(storage.length).toBe(1);
+ expect(await db.erpCostRows.count()).toBe(0);
+});
+it('keeps a voided newer source as a tombstone so old ERP evidence cannot revive',async()=>{
+ const older=await seed({prices:[4.59,8],id:'late-old'}),newer=await seed({prices:[10,12],id:'late-new',requestAt:'2026-09-02T00:00:00Z'});
+ const newerReceipt=await receiveErpCostInboxEnvelope({envelope:newer.envelope});
+ await voidPublishedErpCostBatch({inboxId:newerReceipt.id,reason:'隔离撤回'});
+ const received=await receiveErpCostInboxEnvelope({envelope:older.envelope});
+ expect(received.adoption.summary).toMatchObject({adoptedCount:0,supersededCount:2});
+ expect(await getLatestLedgerCosts(older.ledger.id)).toEqual([]);
 });

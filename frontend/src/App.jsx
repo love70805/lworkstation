@@ -13,6 +13,7 @@ import { runtimeConfig } from "./config/runtimeConfig";
 import { parseErpInboxMessage } from "./domain/erpInboxContract";
 import { acknowledgeErpInbox, pollErpInbox } from "./lib/erpInboxTransport";
 import { receiveAndAcknowledgeInboxRecord } from "./lib/inboxDelivery";
+import { recoverCompleteErpCostDrafts } from "./lib/erpLegacyDraftRecovery";
 import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectionCaptureContext } from "./lib/selectionCaptureTransport";
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 
@@ -40,6 +41,7 @@ export async function runErpInboxCycle({
   receive = receiveErpCostInboxEnvelope,
   acknowledge = acknowledgeErpInbox,
   recover = recoverErpCostInboxAdoptions,
+  recoverDrafts = recoverCompleteErpCostDrafts,
   emit = (envelope) => window.dispatchEvent(new CustomEvent("shopeers:erp-inbox-received", { detail: envelope })),
 } = {}) {
   const failures = [];
@@ -73,6 +75,8 @@ export async function runErpInboxCycle({
   }
 
   if (isDisposed()) return { received, failures, recovered: false };
+  try { await recoverDrafts({ workspaceId: context.workspaceId }); }
+  catch (error) { failures.push(error); }
   try {
     await recover({ workspaceId: context.workspaceId });
     return { received, failures, recovered: true };
