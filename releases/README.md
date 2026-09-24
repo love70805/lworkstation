@@ -8,6 +8,8 @@
 
 当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.6)。Beta 不替代稳定 Latest。本机未安装。
 
+Beta.7 成本恢复补丁已通过本机候选验收，尚待 PR / CI 与公开发布。候选见 `candidates/0.3.0-beta.7-cost-recovery/` 与 [验收记录](../docs/RELEASE_0.3.0_BETA_7.md)。
+
 ## 版本清单
 
 核对日期：2026-09-24（UTC+8）。0.3.0 Beta.6 已公开预发布并验证四资产匿名下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。

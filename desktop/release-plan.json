@@ -266,6 +266,10 @@
     {
       "module": "beta6-exception-guidance",
       "commit": "aa17953"
+    },
+    {
+      "module": "beta7-legacy-cost-recovery",
+      "commit": "c6f67ab"
     }
   ]
 }
