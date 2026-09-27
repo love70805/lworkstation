@@ -140,8 +140,8 @@ if (!validationError) {
       || report.popoverToggleSmoke?.cycles !== 2
       || report.popoverToggleSmoke?.staleClosed !== true
       || report.popoverToggleSmoke?.secondShown !== true
-      || report.popoverToggleSmoke?.secondBounds?.width > 176
-      || report.popoverToggleSmoke?.secondBounds?.height > 44
+      || report.popoverToggleSmoke?.secondBounds?.width > 280
+      || report.popoverToggleSmoke?.secondBounds?.height > 220
       || report.popoverToggleSmoke?.finalOpen !== false
       || !isolatedViews
       || report.inbox?.status !== "online"

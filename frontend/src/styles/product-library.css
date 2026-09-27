@@ -147,15 +147,43 @@
 .reference-summary strong { margin-top: 5px; font-size: 22px; line-height: 28px; }
 .reference-summary .danger strong { color: var(--danger); }
 .reference-filter-count { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.selection-reference-table { min-width: 1120px; table-layout: fixed; }
-.selection-reference-table tbody tr[tabindex] { cursor: pointer; }
-.selection-reference-table th:first-child, .selection-reference-table td:first-child { width: 205px; padding-left: 20px; }
-.selection-reference-table th:nth-child(2), .selection-reference-table td:nth-child(2) { width: 145px; }
-.selection-reference-table th:last-child, .selection-reference-table td:last-child { width: 142px; padding-right: 18px; }
-.selection-reference-table th:first-child,
-.selection-reference-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
-.selection-reference-table th:first-child { z-index: 3; background: var(--surface-soft); }
-.selection-reference-table tbody tr:hover > td:first-child { background: var(--surface-hover); }
+.selection-reference-table { width: 100%; min-width: 1120px; table-layout: fixed; }
+.selection-reference-table > thead > tr > th, .selection-reference-table > tbody > tr > td { width: 100% !important; padding: 0; }
+.reference-column-headings { display: grid; grid-template-columns: 25% 14% 11% 13% 12% 12% 13%; }
+.reference-column-headings > span { min-width: 0; padding: 10px 12px; }
+.reference-group-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.reference-column-0 { width: 25%; }
+.reference-column-1 { width: 14%; }
+.reference-column-2 { width: 11%; }
+.reference-column-3, .reference-column-6 { width: 13%; }
+.reference-column-4, .reference-column-5 { width: 12%; }
+.reference-group-table caption { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface-soft); text-align: left; }
+.reference-group-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.reference-group-heading > strong, .reference-group-heading > span { min-width: 0; overflow-wrap: anywhere; }
+.reference-group-heading > span { color: var(--text-muted); font-size: 12px; }
+.reference-group-heading .button { min-height: 32px; padding: 4px 8px; font-size: 12px; }
+.reference-group-heading .button svg { width: 14px; height: 14px; }
+.selection-reference-table .reference-group-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+.selection-reference-table .reference-group-table tr:last-child > td { border-bottom: 0; }
+.selection-reference-table .reference-group-table tr { background: transparent; }
+.selection-reference-table .reference-group-table tr[tabindex] { cursor: pointer; }
+.selection-reference-table .reference-group-table tr:hover { background: var(--surface-hover); }
+.reference-group-table tr:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.reference-sku-identity { display: grid; min-width: 0; gap: 4px; }
+.reference-sku-identity > strong, .reference-sku-identity > span { min-width: 0; overflow-wrap: anywhere; }
+.reference-sku-identity > span { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.reference-value-stack { display: grid; gap: 4px; }
+.reference-value-stack small { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.reference-money { white-space: nowrap; overflow-wrap: normal; }
+.reference-cost-cell, .reference-revenue-cell, .reference-profit-cell, .reference-unit-profit-cell { text-align: right; }
+.reference-cost-cell .reference-value-stack { justify-items: end; }
+.reference-status-cell .badge { max-width: 100%; white-space: normal; line-height: 1.5; text-align: left; }
+.reference-period-link { justify-self: start; min-height: 28px; padding: 2px 0; border: 0; background: transparent; color: var(--primary); font-weight: 600; }
+.reference-period-link:disabled { color: var(--text); cursor: default; }
+.reference-period-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .reference-group-heading .button, .reference-period-link { min-height: 44px; }
+}
 .selection-sku { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .selection-sku strong { overflow-wrap: anywhere; }
 .selection-sku small { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; }
@@ -206,3 +234,10 @@
   .skc-merge-preview > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
 }
 
+.reference-identity-evidence { width: 100%; text-align: left; font-size: 12px; color: var(--text-muted); }
+.reference-identity-evidence summary { cursor: pointer; color: var(--primary); padding-block: 6px; }
+.reference-identity-evidence summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.reference-identity-evidence p { margin: 6px 0; overflow-wrap: anywhere; }
+.reference-identity-evidence p small { display: block; }
+.reference-sku-identity .reference-identity-evidence { display: block; min-width: 0; margin-top: 2px; }
+.reference-sku-identity .reference-identity-evidence summary { min-height: 28px; }

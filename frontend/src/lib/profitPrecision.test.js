@@ -117,4 +117,20 @@ describe("ERP precision from evidence to ledger exits", () => {
     expect(exported[1].利润).toBe(7.54);
     expect(exported[0].汇总规则).toContain("不重新计算");
   });
+
+  it("uses the same single-order presentation in legacy profit exports while preserving complete evidence and amounts", () => {
+    const rows = [{ ...line(0.003, 2), orderNumber: "OLDER / NEWER", costPurchaseRecords: [
+      { recordId: "NEW", purchaseDate: "2026-08-30", purchaseOrderNo: "00000000000000000123", quantity: 2, unitPrice: 0.003 },
+      { recordId: "OLD", purchaseDate: "2026-08-29", order1688: "123456789012345678901234", quantity: 3, unitPrice: 0.003 },
+    ] }, { ...line(0, 1, 2, "MANUAL"), costSource: "manual_override", costPurchaseRecords: [], orderNumber: "STALE-ERP" }];
+    const before = structuredClone(rows);
+    const exported = buildProfitExportRows(rows, { status: "finalized", formulaVersion: "saved-formula" }, summarizeProfitRows(rows));
+    expect(exported[0].关联单号).toBe("00000000000000000123");
+    expect(exported[1].关联单号).toBe("");
+    expect(exported[0].核算采购明细).toContain("123456789012345678901234");
+    expect(exported[0]["总件数*成本"]).toBe(0.006);
+    expect(exported[0].利润).toBe(-0.006);
+    expect(exported[0].公式版本).toBe("saved-formula");
+    expect(rows).toEqual(before);
+  });
 });

@@ -6,7 +6,7 @@ import { isDesktopRuntime } from "../lib/desktopRuntime";
 import { getErpExtensionStatus, getErpRequestHistory } from "../lib/erpInboxTransport";
 import { getActiveMemberContext } from "../data/database";
 
-export const ERP_ASSISTANT_VERSION = "8.0.21";
+export const ERP_ASSISTANT_VERSION = "8.0.22";
 export const extensionDownload = `/integrations/erp-assistant/ERP-Assistant-v${ERP_ASSISTANT_VERSION}-shopeers-bridge.zip`;
 export const extensionManagerUrl = "chrome://extensions/";
 
@@ -81,7 +81,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
             ? "waiting-refresh"
             : "not-detected";
       if (currentExtensionState === "connected" && previousExtensionState.current !== "connected") {
-        notify("ERP Assistant 已安装并连接，可以开始核算。", "success");
+        notify("ERP Assistant 已连接。打开 ERP 助手查看登录和采购查询条件。", "success");
       }
       previousExtensionState.current = currentExtensionState;
     } catch {
@@ -130,13 +130,13 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
   }[extensionStatus];
   const extensionTone = extensionStatus === "connected" ? "success" : extensionStatus === "service-offline" || extensionStatus === "not-detected" ? "danger" : "warning";
   const extensionHint = extensionStatus === "connected"
-    ? `${extension.version ? `v${extension.version} · ` : ""}当前页面已连接`
+    ? `${extension.version ? `v${extension.version} · ` : ""}助手已连接工作台；登录和采购查询条件请在 ERP 助手中查看`
     : extensionStatus === "outdated"
       ? desktop
         ? `当前 v${extension.version}，桌面版会随应用版本统一更新；无需手工下载扩展包。`
         : `当前 v${extension.version}，最新 v${ERP_ASSISTANT_VERSION}。下载更新包并在 Chrome 重新加载扩展后，再刷新卓麟 ERP。`
     : extensionStatus === "waiting-refresh"
-      ? `${extension.version ? `v${extension.version} · ` : ""}请回到卓麟 ERP 采购管理页刷新`
+      ? `${extension.version ? `v${extension.version} · ` : ""}请打开卓麟 ERP 任一页面，必要时刷新以恢复助手连接`
       : extensionStatus === "not-detected"
         ? desktop ? "请先打开桌面版的卓麟 ERP 标签页，再重新检查" : "请在 Chrome 扩展管理页加载并启用 ERP Assistant"
         : "先启动本机收件服务，再检查扩展连接";
@@ -174,7 +174,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
       <div className="erp-install-steps">
         <div className="erp-install-step"><span>1</span><div><strong>下载并解压</strong><small>下载扩展包，解压到一个固定文件夹，不要直接删除该文件夹。</small></div></div>
         <div className="erp-install-step"><span>2</span><div><strong>{extensionStatus === "outdated" ? "重新加载扩展" : "加载扩展"}</strong><small>打开 <code>chrome://extensions/</code>，开启“开发者模式”，点击“加载已解压的扩展程序”，选择能看到 <code>manifest.json</code> 的文件夹。</small></div></div>
-        <div className="erp-install-step"><span>3</span><div><strong>刷新卓麟 ERP</strong><small>回到卓麟 ERP 的“采购管理”页刷新。页面出现“核算 SKU 成本”按钮后，扩展才算安装成功。</small></div></div>
+        <div className="erp-install-step"><span>3</span><div><strong>刷新卓麟 ERP</strong><small>打开卓麟 ERP 首页或其他页面并刷新，页面出现“ERP 成本助手”入口。助手会提示登录和采购查询条件；连接状态可在本页复检。</small></div></div>
       </div>
     </Panel>
   );
@@ -216,7 +216,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
       <PageHeader
         eyebrow="系统连接"
         title="ERP 助手"
-        description="安装并检查卓麟 ERP 成本采集扩展。扩展只读取采购管理页，把候选成本结果回传到本机工作区，之后由人工确认是否采用。"
+        description="安装并检查卓麟 ERP 成本采集扩展。助手可在卓麟 ERP 内启动，采购上下文下只读采集并回传本机；通过校验的正常成本自动采用，异常单独处理。"
         actions={<Button icon={RefreshCw} onClick={checkService} loading={serviceStatus === "checking"}>检查连接</Button>}
       />
       {statusCards}
@@ -226,9 +226,9 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
         <div className="erp-flow-list">
           <div><span>01</span><p><strong>利润核算 → ERP 成本核对</strong><small>按销售人员或供方货号筛选后，复制平台 SKC。</small></p></div>
           <div><span>02</span><p><strong>卓麟 ERP → 采购管理</strong><small>将平台 SKC 粘贴到查询框，点击“查询”，再点击“核算 SKU 成本”。</small></p></div>
-          <div><span>03</span><p><strong>回到 Lworkstation</strong><small>等待自动收件，查看结果和证据，再决定采用、替换或直接人工填写。</small></p></div>
+          <div><span>03</span><p><strong>回到 Lworkstation</strong><small>正常回传通过范围和证据校验后自动采用；查看异常项，需要时明确人工更正。</small></p></div>
         </div>
-        <div className="erp-flow-note"><Check size={17} />ERP 结果只是候选来源；人工确认后的成本优先，新的采集结果不会自动覆盖人工判断。</div>
+        <div className="erp-flow-note"><Check size={17} />人工有效更正优先；后续 ERP 回传不会覆盖人工更正或静默改变已定稿利润。</div>
       </Panel>
     </>
   );

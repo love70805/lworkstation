@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("inboxPopover", {
   getState: () => ipcRenderer.invoke("desktop:get-inbox-popover-state"),
   close: () => ipcRenderer.invoke("desktop:close-inbox-popover"),
   resize: (height) => ipcRenderer.invoke("desktop:resize-inbox-popover", height),
+  restore: action => ipcRenderer.invoke('desktop:restore-erp-assistant', action),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("desktop:inbox-popover-state", listener);

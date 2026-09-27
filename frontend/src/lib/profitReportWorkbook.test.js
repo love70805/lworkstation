@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { writeFileSync,mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { buildProfitReportWorkbook } from "./profitReportWorkbook";
-import { reportTotals } from "../domain/profitReports";
+import { REPORT_FORMULA_VERSION, REPORT_TEMPLATE_VERSION, reportTotals } from "../domain/profitReports";
 
 const products=Array.from({length:6},(_,i)=>({lineKind:'product',store:i<3?'合成甲店':'合成乙店',platformSkc:`SKC-${i}`,groupSkc:`SKC-${i}`,platformSku:`000000000000000000${i}`,attribute:'合成属性',quantityExact:'2',revenueExact:'20.009',orderNumber:'12345678901234567890',unitCostExact:'0.009999',purchaseCostExact:'0.019998',warehouseCostExact:'1.4',profitExact:'18.589002'}));
 const dispatchRows=[{lineKind:'dispatch',platformSkc:'SKC-0',businessId:'00001234567890123456',quantityExact:'200',order1688:'12345678901234567890'}];
@@ -31,19 +31,40 @@ it('handles colliding, reserved and long store names without losing any store',(
  const workbook=buildProfitReportWorkbook({report:{kind:'pre_deduction',period:'2026-08',revision:1,totalsExact:reportTotals(rows,'0','0')},products:rows});
  const book=XLSX.read(workbook.bytes,{type:'array'});expect(new Set(book.SheetNames.map(name=>name.toLowerCase())).size).toBe(7);expect(book.SheetNames.every(name=>name.length<=31&&!/[\[\]:*?/\\]/.test(name))).toBe(true);
 });
-it("exports each selected mixed purchase with textual order identifiers in a dedicated sheet", () => {
- const rows=[{...products[0],costResolutionVersion:"beta-prior-month",costPurchaseRecords:[
-  {recordId:"B1",purchaseDate:"2026-07-31",purchaseOrderNo:"00001",quantity:2,unitPrice:4},
-  {recordId:"A2",purchaseDate:"2026-07-30",order1688:"12345678901234567890",purchaseOrderNo:"00002",quantity:3,unitPrice:5},
-  {recordId:"B3",purchaseDate:"2026-07-29",purchaseOrderNo:"00003",quantity:4,unitPrice:6},
- ]}];
- const before=structuredClone(rows);
- const result=buildProfitReportWorkbook({report:{kind:"pre_deduction",period:"2026-08",revision:1,totalsExact:reportTotals(rows,"0","0")},products:rows});
- const book=XLSX.read(result.bytes,{type:"array"});
- expect(book.Sheets["合成甲店"].F1.v).toBe("关联单号");
- const detail=XLSX.utils.sheet_to_json(book.Sheets["核算采购"]);
- expect(detail.map(row=>row["单号类型"])).toEqual(["采购单","1688","采购单"]);
- expect(detail.map(row=>row["关联单号"])).toEqual(["00001","12345678901234567890","00003"]);
- expect(detail.map(row=>row["采购数量"])).toEqual([2,3,4]);
- expect(rows).toEqual(before);
+it.each(['pre_deduction','financial'])("exports one text order per SKU without a purchase worksheet in %s", kind => {
+ const rows=products.map(row=>({...row,costResolutionVersion:"latest-three-mixed-evidence"}));
+ rows[0].costPurchaseRecords=[
+  {recordId:"B1",purchaseDate:"2026-08-31",purchaseOrderNo:"00000000000000000123",quantity:2,unitPrice:4},
+  {recordId:"A2",purchaseDate:"2026-08-30",order1688:"12345678901234567890",purchaseOrderNo:"00002",quantity:3,unitPrice:5},
+  {recordId:"B3",purchaseDate:"2026-08-29",purchaseOrderNo:"00003",quantity:4,unitPrice:6},
+ ];
+ rows[1].costPurchaseRecords=[{recordId:"NO-ID",order1688:" "},{recordId:"BOTH",order1688:"000123456789012345678901234",purchaseOrderNo:"00002"}];
+ rows[2].orderNumber="0000123 / 9999999999999999999999";
+ rows[3].orderNumber="PO/2026/000004";
+ rows[4].costSource="manual_override";rows[4].costPurchaseRecords=[];
+ rows[5].costPurchaseRecords=[{recordId:"BLANK",order1688:" ",purchaseOrderNo:"",purchaseOrderId:null}];
+ const expected=["00000000000000000123","000123456789012345678901234","0000123","PO/2026/000004","",""];
+ const report={kind,period:"2026-08",revision:1,formulaVersion:REPORT_FORMULA_VERSION,totalsExact:reportTotals(rows,"200","0.7",kind==='financial'?deductionRows:[])};
+ const before=structuredClone({rows,report,dispatchRows,deductionRows});
+ const result=buildProfitReportWorkbook({report,products:rows,dispatchRows,deductionRows});
+ const book=XLSX.read(result.bytes,{type:"array",cellStyles:true});
+ expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
+ expect(new TextDecoder().decode(result.bytes)).not.toContain('name="核算采购"');
+ expect(result.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
+ expect(result.templateVersion).toBe("profit-zebra@3-single-order");
+ const summaryRows=XLSX.utils.sheet_to_json(book.Sheets["汇总表"],{header:1});
+ rows.forEach((row,index)=>{
+  const summary=summaryRows.find(cells=>cells[1]===row.platformSku);
+  expect(summary[5]).toBe(expected[index]);
+  const storeSheet=book.Sheets[row.store];
+  const storeRows=XLSX.utils.sheet_to_json(storeSheet,{header:1});
+  const storeRowIndex=storeRows.findIndex(cells=>cells[1]===row.platformSku)+1;
+  expect(storeSheet[`F${storeRowIndex}`]).toMatchObject({t:'s',v:expected[index],z:'@'});
+  expect(storeSheet[`E${storeRowIndex}`].v).toBe(Number(row.revenueExact));
+  expect(storeSheet[`G${storeRowIndex}`].v).toBe(Number(row.unitCostExact));
+  expect(storeSheet[`H${storeRowIndex}`].v).toBe(Number(row.purchaseCostExact));
+  expect(storeSheet[`I${storeRowIndex}`].v).toBe(Number(row.profitExact));
+ });
+ expect({rows,report,dispatchRows,deductionRows}).toEqual(before);
+ if(process.env.REPORT_QA_DIR){mkdirSync(process.env.REPORT_QA_DIR,{recursive:true});writeFileSync(join(process.env.REPORT_QA_DIR,result.fileName),result.bytes);}
 });

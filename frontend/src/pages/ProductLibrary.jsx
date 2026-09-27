@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
+import ReferenceGroupRows, { ReferenceTableHeader } from "./ReferenceGroupRows";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
@@ -17,11 +18,6 @@ import { PRODUCT_PUBLICATION_STATUSES, productPublicationStatusById } from "../d
 
 const money = (value, fractionDigits = 2) => Number(value ?? 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
 const percent = (value) => value == null ? "--" : `${Number(value).toFixed(1)}%`;
-const shortDate = (value) => {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) : null;
-};
-
 const referenceSourceLabels = {
   erp_history: "ERP 历史",
   manual_confirmed: "人工确认",
@@ -315,65 +311,15 @@ function ProductLibraryView({ workspaceId, view }) {
     { accessorKey: "updatedAt", header: "最后更新", cell: ({ getValue }) => <span className="mono">{formatUpdatedAt(getValue())}</span> },
   ], [allFilteredSelected, duplicateSkcCountByProductId, notify, salesStatusDefinitions, selectedProductIdSet]);
 
-  const referenceColumns = useMemo(() => [
-    {
-      accessorKey: "platformSku",
-      header: "平台 SKC / SKU",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-sku"><strong className="mono">{row.original.platformSkc}</strong><small>{row.original.skuCount} 个 SKU · {row.original.productName}</small><span className="selection-variant-stack">{row.original.variants.map((variant) => <span className="selection-variant-line" key={variant.canonicalPlatformSku}><strong className="mono">{variant.platformSku}</strong><small>{variant.attribute || "未提供属性"}</small></span>)}</span></span>,
-    },
-    {
-      accessorKey: "referenceUnitCost",
-      header: "当前参考成本",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-variant-stack align-right">{row.original.variants.map((variant) => variant.referenceUnitCost == null ? <span className="selection-variant-line" key={variant.canonicalPlatformSku}><Badge tone="danger">缺失</Badge></span> : <span className="selection-variant-line" key={variant.canonicalPlatformSku}><strong className="mono" style={{ whiteSpace: "nowrap", flexShrink: 0 }}>{money(variant.referenceUnitCost, variant.authoritativeSource === "erp" ? 4 : 2)}</strong><span title={variant.referenceNote ?? undefined}><Badge tone={variant.authoritativeSource === "erp" ? "success" : "neutral"}>{referenceSourceLabels[variant.referenceKind] ?? "参考"}</Badge>{variant.referenceKind === "manual_confirmed" ? <small className="row-subtitle">{shortDate(variant.referenceUpdatedAt) ? `确认于 ${shortDate(variant.referenceUpdatedAt)}` : "已确认"}{variant.manualCostHistoryCount > 1 ? ` · ${variant.manualCostHistoryCount} 条记录` : ""}</small> : null}</span></span>)}</span>,
-      meta: { cellStyle: { textAlign: "right" } },
-    },
-    {
-      accessorKey: "latestPeriod",
-      header: "最近定稿月",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-variant-stack">{row.original.variants.map((variant) => variant.latestPeriod ? <span className="selection-variant-line" key={variant.canonicalPlatformSku}><strong className="mono">{variant.latestPeriod}</strong><small className="row-subtitle">销量 {variant.latestQuantity.toLocaleString("zh-CN")}</small></span> : <span className="selection-variant-line" key={variant.canonicalPlatformSku}><span className="pending-text">暂无定稿</span></span>)}</span>,
-    },
-    {
-      accessorKey: "recentRevenue",
-      header: "近三月经营",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-variant-stack align-right">{row.original.variants.map((variant) => <span className="selection-variant-line" key={variant.canonicalPlatformSku}><strong className="mono">{money(variant.recentRevenue)}</strong><small className="row-subtitle">{variant.recentMonthCount} 个月 · {variant.recentQuantity.toLocaleString("zh-CN")} 件</small></span>)}</span>,
-      meta: { cellStyle: { textAlign: "right" } },
-    },
-    {
-      accessorKey: "latestProfit",
-      header: "最近实际利润",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-variant-stack align-right">{row.original.variants.map((variant) => variant.latestProfit == null ? <span className="selection-variant-line" key={variant.canonicalPlatformSku}><span className="pending-text">--</span></span> : <span className={`selection-variant-line ${variant.latestProfit < 0 ? "danger-text" : "success-text"}`} key={variant.canonicalPlatformSku}><strong className="mono">{money(variant.latestProfit)}</strong><small className="row-subtitle">利润率 {percent(variant.latestProfitRate)}</small></span>)}</span>,
-      meta: { cellStyle: { textAlign: "right" } },
-    },
-    {
-      accessorKey: "referenceUnitProfit",
-      header: "单件参考利润",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-variant-stack align-right">{row.original.variants.map((variant) => variant.referenceUnitProfit == null ? <span className="selection-variant-line" key={variant.canonicalPlatformSku}><span className="pending-text">缺少售价历史</span></span> : <span className={`selection-variant-line ${variant.referenceUnitProfit < 0 ? "danger-text" : "success-text"}`} key={variant.canonicalPlatformSku}><strong className="mono">{money(variant.referenceUnitProfit)}</strong><small className="row-subtitle">参考利润率 {percent(variant.referenceProfitRate)}</small></span>)}</span>,
-      meta: { cellStyle: { textAlign: "right" } },
-    },
-    {
-      id: "referenceStatus",
-      header: "参考状态",
-      enableSorting: false,
-      cell: ({ row }) => <span className="selection-variant-stack">{row.original.variants.map((variant) => <span className="selection-variant-line" key={variant.canonicalPlatformSku}>{variant.referenceUnitCost == null ? <Badge tone="danger"><AlertCircle size={12} />缺参考成本</Badge> : variant.averageSalePrice == null ? <Badge>等待售价历史</Badge> : variant.hasNegativeProfit ? <Badge tone="danger"><AlertCircle size={12} />出现负利润</Badge> : <Badge tone="success">可用于选品参考</Badge>}</span>)}</span>,
-    },
-    {
-      id: "catalogAction",
-      header: "商品档案",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const target = row.original.productId
-          ? `/products/edit?product=${encodeURIComponent(row.original.productId)}`
-          : `/products/edit?skc=${encodeURIComponent(row.original.platformSkc ?? "")}&sku=${encodeURIComponent(row.original.platformSku ?? "")}&name=${encodeURIComponent(row.original.productName ?? "")}`;
-        return <Button variant="ghost" icon={Pencil} onClick={(event) => { event.stopPropagation(); navigate(target); }}>{row.original.productId ? "编辑档案" : "建立档案"}</Button>;
-      },
-    },
-  ], []);
+  const referenceColumns = useMemo(() => [{
+    id: "referenceGroup", header: () => <ReferenceTableHeader />, enableSorting: false,
+    cell: ({ row }) => <ReferenceGroupRows group={row.original}
+      onOpenLedger={ledgerId => navigate(`/profit?ledger=${encodeURIComponent(ledgerId)}`)}
+      onEdit={() => navigate(row.original.productId
+        ? `/products/edit?product=${encodeURIComponent(row.original.productId)}`
+        : `/products/edit?skc=${encodeURIComponent(row.original.variants[0]?.platformSkc ?? "")}&sku=${encodeURIComponent(row.original.variants[0]?.platformSku ?? "")}&name=${encodeURIComponent(row.original.productName ?? "")}`)}
+    />,
+  }], [navigate]);
 
   const exportProducts = async (products) => {
     const exportRows = Array.isArray(products) ? products : filteredProducts;
@@ -607,7 +553,6 @@ function ProductLibraryView({ workspaceId, view }) {
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
-                getRowProps={(row) => row.latestLedgerId ? ({ onClick: () => navigate(`/profit?ledger=${encodeURIComponent(row.latestLedgerId)}`), tabIndex: 0, onKeyDown: (event) => event.key === "Enter" && navigate(`/profit?ledger=${encodeURIComponent(row.latestLedgerId)}`) }) : {}}
                 emptyState="没有符合当前筛选条件的选品参考记录。"
               />
             ) : <EmptyState icon={BarChart3} title="还没有选品经营参考" description="完成一个月度账本定稿后，平台 SKU 的正式成本与利润历史会自动出现在这里。" action={<Button variant="primary" icon={WalletCards} onClick={() => navigate("/ledger")}>打开月度账本</Button>} />}

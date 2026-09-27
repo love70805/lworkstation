@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { verifyCsvExport } from "./erp-csv-export.test.mjs";
+import { verifyErpPageStartup } from "./erp-page-startup.test.mjs";
 
 const execFileAsync = promisify(execFile);
 const toolsRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -76,7 +77,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.21" }),
+      getManifest: () => ({ version: "8.0.22" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -181,15 +182,16 @@ function resultInput(overrides = {}) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.21");
+  assert.equal(manifest.version, "8.0.22");
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.21";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.22";/, "the download action must recommend the patched package");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
   const isolated = manifest.content_scripts.find((entry) => !entry.world);
   assert.deepEqual(main.js, ["src/query-hook.js"]);
   assert.equal(main.all_frames, true);
+  assert.deepEqual(main.matches, ["https://*.zhuolinkeji.cn/*"], "the query hook follows ERP home and SPA documents only");
   assert.deepEqual(isolated.js, [
     "src/result-policy.js",
     "src/request-context.js",
@@ -197,6 +199,7 @@ async function verifyManifestAndGenerator() {
     "src/content.js",
   ]);
   assert.equal(isolated.all_frames, true);
+  assert.deepEqual(isolated.matches, main.matches);
   assert.ok(!isolated.js.includes("src/inbox-config.js"));
 
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "shopeers-erpa-secure-"));
@@ -231,13 +234,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.21-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.22-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.21");
+    assert.equal(manifest.version, "8.0.22");
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -249,7 +252,7 @@ async function verifyPublishedPackage() {
     const canonicalContent = await readFile(sourcePath("content.js"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
     assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v6';/);
-    assert.match(content, /const EXTENSION_VERSION = '8\.0\.21';/);
+    assert.match(content, /const EXTENSION_VERSION = '8\.0\.22';/);
     for (const file of ["background.js", "content.css", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
       assert.equal(
         (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
@@ -451,6 +454,15 @@ async function verifyBackgroundSecurityAndDelivery() {
   const statusBody = JSON.parse(calls.find((call) => new URL(call.url).pathname === "/erp/v1/extension-status").init.body);
   assert.equal(statusBody.pageUrl, embeddedSender.url);
   assert.equal(statusBody.context, "extension-isolated");
+
+  const homeSender = { frameId: 0, url: "https://www.zhuolinkeji.cn/view/console/index.html", tab: embeddedSender.tab };
+  const connected = await new Promise(resolve => background.runtimeListeners[0]({ type: "shopeers.erp.reportStatus", payload: { ready: true } }, homeSender, resolve));
+  assert.equal(connected.ok, true, "ERP home can report the loaded assistant and confirm the inbox bridge");
+  assert.equal(background.api.senderAllowed(homeSender), false, "site-wide startup never grants home purchase submission rights");
+  await assert.rejects(() => background.api.previewContext({ querySkcs: ["SKC-1"], queryCapturedAt: new Date().toISOString() }, homeSender), { code: "ERP_UNTRUSTED_SENDER" });
+  await assert.rejects(() => background.api.retryPending({}, homeSender), { code: "ERP_UNTRUSTED_SENDER" });
+  const foreign = await new Promise(resolve => background.runtimeListeners[0]({ type: "shopeers.erp.reportStatus", payload: { ready: true } }, { url: "https://zhuolinkeji.cn.attacker.invalid/" }, resolve));
+  assert.equal(foreign.code, "ERP_UNTRUSTED_SENDER");
 }
 
 async function verifyAtomicRuntimeConfigurationAndWorkspaceBinding() {
@@ -764,6 +776,7 @@ await verifyManifestAndGenerator();
 await verifyCsvExport(extensionRoot);
 await verifyPublishedPackage();
 await verifyWorldBoundary();
+await verifyErpPageStartup();
 await verifyTrustedPreviewPeriod();
 await verifyBackgroundSecurityAndDelivery();
 await verifyAtomicRuntimeConfigurationAndWorkspaceBinding();

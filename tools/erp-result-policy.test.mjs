@@ -177,7 +177,7 @@ assert.deepEqual(
   [[], []],
 );
 
-async function verifyUnscopedEvidenceDelivery() {
+async function verifyLedgerScopedEvidenceDelivery() {
   const frontendRequire = createRequire(path.join(toolsRoot, "..", "frontend", "package.json"));
   const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
   const collectionTime = new Date("2026-06-15T12:00:00").getTime();
@@ -204,7 +204,7 @@ async function verifyUnscopedEvidenceDelivery() {
     detail("INVALID-PRICE", current.creationTime, { purchaseUnitPrice: "-1" }),
   ];
 
-  for (const mixedMonths of [false, true]) {
+  for (const [mixedMonths, ledgerPeriod] of [[false, null], [true, null], [false, "2026-06"], [true, "2026-06"]]) {
     const window = new Window({ url: "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html" });
     const NativeDate = window.Date;
     window.Date = class extends NativeDate {
@@ -224,7 +224,9 @@ async function verifyUnscopedEvidenceDelivery() {
         lastError: null,
         sendMessage(message, callback) {
           sent.push(JSON.parse(JSON.stringify(message)));
-          callback({ ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
+          callback(message.type === "shopeers.erp.previewContext"
+            ? { ok: Boolean(ledgerPeriod), ledgerPeriod }
+            : { ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
         },
       },
     };
@@ -270,26 +272,25 @@ async function verifyUnscopedEvidenceDelivery() {
         "all valid raw evidence, including earlier, collection and later months, must survive transport for workstation cutoff filtering",
       );
       assert.ok(records.every((record) => record.eligible && record.exclusionReasons.length === 0));
-      assert.equal(records.find((record) => record.recordId === "CURRENT").purchaseDate, "2026-06-10");
+      assert.equal(records.find((record) => record.recordId === "CURRENT").purchaseDate, current.creationTime, "raw purchase timestamps remain intact for nearest-record ordering");
       assert.equal(payload.warehouseEvidence.excludedOrders.length, 1);
       assert.equal(payload.meta.skippedCancelledOrderCount, 1);
       assert.equal(payload.meta.skippedInvalid, invalid.length);
       assert.ok(payload.warehouseEvidence.excludedDetails.every((record) => record.exclusionReasons.join() === "invalid_purchase_detail"));
       assert.equal(payload.warehouseEvidence.excludedDetails.length, invalid.length);
-      const expectedPreview = mixedMonths ? ["REGULAR-NEWEST", "LATER", "CURRENT"] : ["CURRENT"];
-      assert.deepEqual(payload.results[0].selectedRecordIds, expectedPreview, "latest-three preview must not prefer 1688 or apply an untrusted month cutoff");
-      assert.equal(payload.results[0].sourceType, mixedMonths ? "混合采购" : "1688");
+      const expectedPreview = !ledgerPeriod ? [] : mixedMonths ? ["CURRENT", "MAY", "APRIL"] : ["CURRENT"];
+      assert.deepEqual(payload.results[0].selectedRecordIds, expectedPreview, "without a trusted month no preview is computed; a trusted month selects nearest eligible records and preserves later raw evidence");
+      assert.equal(payload.results[0].sourceType, ledgerPeriod ? "1688" : "", "preview type describes only selected records, never excluded later-month purchases");
       assert.deepEqual(records.filter((record) => record.selectedForPreview).map((record) => record.recordId), expectedPreview);
-      assert.equal(payload.results[0].unitCost, "4.0000");
+      assert.equal(payload.results[0].unitCost, ledgerPeriod ? "4.0000" : null);
       assert.equal(payload.results[0].mappings[0].platformSku, "SKU-MONTH");
       assert.equal(payload.meta.evidenceRecordCount, records.length);
-      assert.equal(payload.meta.previewScope, "unscoped");
-      assert.equal(payload.meta.ledgerMonthCutoffStatus, "pending_workstation");
+      assert.equal(payload.meta.previewScope, ledgerPeriod ? "ledger_month" : "period_unknown");
+      assert.equal(payload.meta.ledgerMonthCutoffStatus, ledgerPeriod ? "applied" : "pending_ledger");
       assert.equal(Object.hasOwn(payload.meta, "excludedMonth"), false);
       assert.equal(Object.hasOwn(payload.meta, "skippedCurrentMonth"), false);
       const footer = window.document.getElementById("erpa-footer-right").textContent;
-      assert.match(footer, /未按账本月末范围筛选的预览/);
-      assert.match(footer, /待工作台保留账本当月及以前采购，排除后续月份/);
+      assert.match(footer, ledgerPeriod ? /台账月份：2026-06.*采用当月及以前采购/ : /台账月份待关联.*暂不计算预览成本/);
       assert.doesNotMatch(footer, /1688单号优先|月末截止/);
       assert.doesNotMatch(window.document.body.textContent, /排除当月|完整历史证据|排除undefined/);
     } finally {
@@ -298,5 +299,5 @@ async function verifyUnscopedEvidenceDelivery() {
   }
 }
 
-await verifyUnscopedEvidenceDelivery();
-console.log("ERP result policy and unscoped evidence delivery tests passed");
+await verifyLedgerScopedEvidenceDelivery();
+console.log("ERP result policy, trusted-month preview and full raw evidence delivery tests passed");

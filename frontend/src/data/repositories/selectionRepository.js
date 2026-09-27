@@ -974,7 +974,7 @@ export async function bulkUpdateProductCatalogSalesStatus({ productIds, salesSta
   const updatedAt = new Date().toISOString();
   const updatedProducts = [];
 
-  await db.transaction("rw", db.products, db.auditEvents, db.platformSkus, db.supplierOffers, db.catalogManualCosts, db.erpCostRows, db.profitLines, db.settings, db.workspaces, async () => {
+  await db.transaction("rw", db.products, db.auditEvents, db.platformSkus, db.supplierOffers, db.catalogManualCosts, db.erpCostRows, db.profitLines, db.salesRows, db.ledgers, db.importBatches, db.settings, db.workspaces, async () => {
     const products = await db.products.bulkGet(ids);
     for (const product of products) {
       if (!product) throw new Error("部分商品记录不存在，页面已刷新。");
@@ -1087,6 +1087,9 @@ export async function saveProductCatalogRecord({
     db.catalogManualCosts,
     db.erpCostRows,
     db.profitLines,
+    db.salesRows,
+    db.ledgers,
+    db.importBatches,
     db.settings,
     db.workspaces,
     async () => {
@@ -1387,18 +1390,31 @@ export async function saveCatalogManualCost({
 }
 
 export async function getSelectionReferenceSnapshot() {
-  const [platformSkus, products, supplierOffers, catalogManualCosts, erpCosts, profitLines, context] = await Promise.all([
+  const context = await getActiveMemberContext();
+  const [platformSkus, products, supplierOffers, catalogManualCosts, erpCosts, profitLines, salesRows, ledgers, importBatches] = await Promise.all([
     db.platformSkus.toArray(),
     db.products.toArray(),
     db.supplierOffers.toArray(),
     db.catalogManualCosts.toArray(),
     db.erpCostRows.toArray(),
     db.profitLines.toArray(),
-    getActiveMemberContext(),
+    db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(),
+    db.ledgers.toArray(),
+    db.importBatches.toArray(),
   ]);
   const visibleProducts = products.filter((product) => selectionRecordVisible(product, context));
   const visibleProductIds = new Set(visibleProducts.map((product) => product.id));
-  const workspaceMatch = (record) => !record.workspaceId || record.workspaceId === context.workspaceId;
+  const workspaceMatch = (record) => (record.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId;
+  const ledgerById = new Map(ledgers.filter(ledger => ledger.workspaceId === context.workspaceId).map(ledger => [ledger.id, ledger]));
+  const batchById = new Map(importBatches.filter(batch => batch.workspaceId === context.workspaceId && batch.status === "completed" && ledgerById.has(batch.ledgerId)).map(batch => [batch.id, batch]));
+  const ledgerIdentityRows = salesRows.filter(row => {
+    const batch = batchById.get(row.batchId);
+    return workspaceMatch(row) && ledgerById.has(row.ledgerId) && batch?.ledgerId === row.ledgerId;
+  }).map(row => ({
+    platformSku: row.platformSku, platformSkc: row.platformSkc, attribute: row.attribute,
+    ledgerId: row.ledgerId, period: ledgerById.get(row.ledgerId).period, batchId: row.batchId,
+    store: row.store, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow,
+  }));
   return {
     platformSkus: platformSkus.filter((sku) => workspaceMatch(sku) && (!sku.productId || visibleProductIds.has(sku.productId))),
     products: visibleProducts,
@@ -1406,6 +1422,7 @@ export async function getSelectionReferenceSnapshot() {
     catalogManualCosts: catalogManualCosts.filter((item) => workspaceMatch(item) && (!item.productId || visibleProductIds.has(item.productId))),
     erpCosts: erpCosts.filter(workspaceMatch),
     profitLines: profitLines.filter(workspaceMatch),
+    ledgerIdentityRows,
   };
 }
 
