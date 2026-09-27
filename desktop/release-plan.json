@@ -4,6 +4,10 @@
   "integrationBranch": "codex/beta9-implementation",
   "requiredCommits": [
     {
+      "module": "beta9-cost-identity-status-and-export",
+      "commit": "c1156c35bf1fdf546afb35eb9c5b33a758b99be1"
+    },
+    {
       "module": "ledger-cost-report-workflow-consistency",
       "commit": "9a3a2f4"
     },
