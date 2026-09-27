@@ -2,6 +2,7 @@ import { selectSelectionReferenceCost } from "../domain/costPolicy";
 import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifiers";
 import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../domain/profitCalculations";
 import { sumMoney } from "./money";
+import { buildReferenceIdentityIndex, projectReferenceIdentity } from "../domain/selectionReferenceIdentity";
 
 function timestamp(item) {
   const value = item?.finalizedAt ?? item?.publishedAt ?? item?.calculatedAt ?? item?.updatedAt ?? "";
@@ -51,7 +52,9 @@ export function buildSelectionReferenceRows({
   catalogManualCosts = [],
   erpCosts = [],
   profitLines = [],
+  ledgerIdentityRows = [],
 }) {
+  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines });
   const platformSkuByCanonical = new Map(platformSkus.map((item) => [
     item.canonicalPlatformSku ?? canonicalPlatformSku(item.platformSku),
     item,
@@ -123,7 +126,7 @@ export function buildSelectionReferenceRows({
       id: canonicalSku,
       canonicalPlatformSku: canonicalSku,
       platformSku,
-      platformSkc: skuRecord?.platformSkc ?? latestProfit?.platformSkc ?? latestProfit?.groupSkc ?? "",
+      ...projectReferenceIdentity(skuRecord, identityBySku.get(canonicalSku)),
       warehouseSku: skuRecord?.warehouseSku ?? "",
       productId: product?.id ?? null,
       productName: product?.name ?? product?.title ?? "未建立商品档案",
@@ -177,7 +180,7 @@ export function groupSelectionReferenceRows(rows = []) {
     }
     groups.set(key, {
       id: `selection-reference-${key}`,
-      platformSkc: platformSkc || "未填写平台 SKC",
+      platformSkc: platformSkc || (row.platformSkcConflict ? "平台 SKC 来源待核对" : "未填写平台 SKC"),
       variants: [row],
     });
   });

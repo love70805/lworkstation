@@ -9,31 +9,22 @@
 
   function classifyErpState(inbox = {}, flow = {}) {
     const failure = ["stopped", "conflict", "error"].includes(inbox.status)
-      || ["delivery_error", "service_error"].includes(flow.status)
-      || flow.tone === "danger";
+      || flow.status === "service_error";
     if (failure) {
       return { tone: "danger", label: "ERP 异常", aria: `ERP 通道异常：${errorMessage(inbox, flow)}` };
     }
 
-    const hasRequest = flow.status === "request_registered";
-    const active = ["starting", "restarting"].includes(inbox.status)
-      || ["request_registered", "batch_received", "workspace_received", "service_starting"].includes(flow.status)
-      || ["warning", "info"].includes(flow.tone)
-      || flow.evidenceStatus === "legacy_partial"
-      || inbox.latestBatch?.evidenceStatus === "legacy_partial"
-      || Number(inbox.activeRequestCount || 0) > 0
-      || Number(inbox.pendingBatchCount || 0) > 0;
-    if (active) {
-      const label = hasRequest ? "有请求" : "处理中";
-      return { tone: "warning", label, aria: `ERP 通道${label}` };
-    }
-
-    const healthy = inbox.status === "online"
-      && flow.status === "idle"
-      && flow.tone === "success";
-    if (healthy) return { tone: "success", label: "", aria: "ERP 通道正常" };
-
-    return { tone: "warning", label: "处理中", aria: "ERP 通道处理中" };
+    if (['error', 'failed'].includes(inbox.extensionLoadState) || inbox.pageStatus === 'error') return { tone: 'danger', label: '助手异常', aria: 'ERP 助手不可用，请重新加载助手' };
+    if (inbox.status !== 'online' || ['loading', 'starting', 'restarting'].includes(inbox.extensionLoadState) || inbox.pageStatus === 'loading') return { tone: 'warning', label: '等待连接', aria: 'ERP 助手等待初始化与通信' };
+    const extension = inbox.latestExtension;
+    if (!extension || extension.context !== 'extension-isolated' || extension.handshakeVersion !== 1
+      || (inbox.workspaceId && extension.workspaceId !== inbox.workspaceId)) return { tone: 'warning', label: '等待握手', aria: 'ERP 助手等待真实通信确认' };
+    const age = Date.now() - Date.parse(extension.lastSeenAt || '');
+    if (Number(inbox.navigationStartedAt) > Date.parse(extension.lastSeenAt || '')) return { tone: 'warning', label: '等待握手', aria: 'ERP 页面已切换，等待助手重新确认通信' };
+    if (!Number.isFinite(age) || age < -5000 || age > 45000 || extension.ready !== true) return { tone: 'danger', label: '连接失效', aria: 'ERP 助手通信已失效，正在等待恢复' };
+    if (extension.sessionState === 'login_required' || extension.pageState === 'login_required') return { tone: 'warning', label: '需要登录', aria: 'ERP 助手已连接，请先登录 ERP' };
+    if (extension.sessionState !== 'authenticated') return { tone: 'warning', label: '登录待确认', aria: 'ERP 助手已连接，登录状态待确认' };
+    return { tone: 'success', label: '助手就绪', aria: extension.queryAvailable ? 'ERP 助手通信就绪，采购查询可用' : 'ERP 助手通信就绪，采集前请在采购管理查询' };
   }
 
   function getAddressPresentation(activeTab, activeTabState = {}) {
@@ -45,10 +36,11 @@
 
   function getPopoverPresentation(inbox = {}, flow = {}) {
     const state = classifyErpState(inbox, flow);
-    const error = state.tone === "danger" ? errorMessage(inbox, flow) : "";
+    const error = state.tone === "danger" ? state.aria : "";
     return {
-      status: error ? "" : (state.label || "通道正常"),
+      status: error ? "" : state.label,
       error,
+      reason: state.aria,
       showStatus: !error,
       showError: Boolean(error),
     };

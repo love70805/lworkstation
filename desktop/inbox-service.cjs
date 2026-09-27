@@ -145,6 +145,7 @@ function createInboxServiceController({
       pendingBatchCount: Number(payload.pendingBatchCount) || 0,
       activeRequestCount: Number(payload.activeRequestCount) || 0,
       latestTransportError: payload.latestTransportError ?? null,
+      latestExtension: payload.latestExtension ?? null,
       flow: flowFromStatus(payload),
     });
   }
@@ -165,6 +166,7 @@ function createInboxServiceController({
       return result;
     }
     if (!child && !stopping && state.ownership === "managed") scheduleRestart("ERP 收件服务意外停止");
+    else if (!stopping) publish({ status: "error", message: "ERP 收件服务暂未响应，正在自动检测恢复", latestExtension: null });
     return result;
   }
 

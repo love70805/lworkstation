@@ -1,7 +1,7 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.8",
-  "integrationBranch": "codex/beta7-evidence-ref-fix",
+  "version": "0.3.0-beta.9",
+  "integrationBranch": "codex/beta9-implementation",
   "requiredCommits": [
     {
       "module": "ledger-cost-report-workflow-consistency",

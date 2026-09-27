@@ -11,6 +11,7 @@ const inboxCapability = String(process.env.SHOPEERS_ERP_INBOX_CAPABILITY || "").
 const maxBytes = 25 * 1024 * 1024;
 const requestTtlMs = Math.max(Number(process.env.SHOPEERS_ERP_REQUEST_TTL_MS || 2 * 60 * 60 * 1000), 60_000);
 const extensionTtlMs = Math.max(Number(process.env.SHOPEERS_ERP_EXTENSION_TTL_MS || 90_000), 30_000);
+const inboxInstanceId = crypto.randomUUID();
 const selectionCaptureMaxBytes = 5 * 1024 * 1024;
 const selectionWorkspaceId = String(process.env.SHOPEERS_SELECTION_WORKSPACE_ID || "workspace-default").trim() || "workspace-default";
 const BASELINE = Object.freeze({
@@ -563,6 +564,7 @@ function runtimeStatus(records) {
     latestRequest: publicRequest(requests[0]),
     latestBatch: publicBatch(batches[0]),
     latestTransportError,
+    latestExtension: records.find(item => item.kind === 'extension-status' && item.extensionId === 'erp-assistant' && item.inboxInstanceId === inboxInstanceId) ?? null,
   };
 }
 
@@ -1114,6 +1116,13 @@ const server = http.createServer(async (req, res) => {
         version,
         pageUrl,
         ready: payload?.ready !== false,
+        context: payload?.context === 'extension-isolated' ? 'extension-isolated' : 'extension-background',
+        handshakeVersion: Number(payload?.handshakeVersion) === 1 ? 1 : 0,
+        workspaceId: String(payload?.workspaceId ?? '').trim(),
+        sessionState: ['authenticated', 'login_required'].includes(payload?.sessionState) ? payload.sessionState : 'unknown',
+        pageState: ['purchase_ready', 'query_ready', 'login_required'].includes(payload?.pageState) ? payload.pageState : 'page_ready',
+        queryAvailable: payload?.queryAvailable === true,
+        inboxInstanceId,
         lastSeenAt: new Date().toISOString(),
         userAgent: String(payload?.userAgent ?? "").slice(0, 240),
       };

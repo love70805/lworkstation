@@ -31,6 +31,7 @@ const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecy
 const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
 const { registerWorkspaceSystemIpc } = require('./workspace-system-ipc.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
+const { classifyErpState } = require('./shell-state.cjs');
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
 const { createInboxPopoverLifecycle } = require("./inbox-popover-lifecycle.cjs");
 const { buildInboxUrl, enforceWorkspaceContext, normalizeInboxRequest, normalizeWorkspaceContext } = require("./inbox-ipc.cjs");
@@ -61,7 +62,7 @@ const SHELL_TOP_HEIGHT = 80;
 const DESKTOP_ICON_PATH = path.join(__dirname, "assets", "lworkstation.ico");
 const INBOX_POPOVER_MIN_HEIGHT = 43;
 const INBOX_POPOVER_MAX_HEIGHT = 220;
-const INBOX_POPOVER_WIDTH = 175;
+const INBOX_POPOVER_WIDTH = 280;
 const UPDATE_POPOVER_MIN_HEIGHT = 132;
 const UPDATE_POPOVER_MAX_HEIGHT = 340;
 const UPDATE_POPOVER_WIDTH = 296;
@@ -123,6 +124,19 @@ let inboxState = {
   message: "ERP 收件服务尚未启动",
   flow: { status: "idle", tone: "muted", label: "等待 ERP 请求", message: "收件服务尚未启动。" },
 };
+let erpReadyNotified = false;
+let erpReadyNoticeUntil = 0;
+let erpNavigationStartedAt = 0;
+
+function assistantInboxState() {
+  return {
+    ...inboxState,
+    workspaceId: activeWorkspaceContext?.workspaceId || null,
+    extensionLoadState: tabState.erp.extension?.status,
+    pageStatus: tabState.erp.status,
+    navigationStartedAt: erpNavigationStartedAt,
+  };
+}
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "shopeers",
@@ -174,7 +188,8 @@ function publicState() {
     activeTab,
     tabs,
     update: { ...updateState },
-    inbox: { ...inboxState },
+    inbox: assistantInboxState(),
+    erpReadyNoticeUntil,
     inboxPopoverOpen: Boolean(inboxPopoverWindow && !inboxPopoverWindow.isDestroyed()),
     updatePopoverOpen: Boolean(updatePopoverWindow && !updatePopoverWindow.isDestroyed()),
     appearance: shellAppearance,
@@ -187,6 +202,10 @@ function publicState() {
 
 function publishState() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!erpReadyNotified && classifyErpState(assistantInboxState(), inboxState.flow).tone === 'success') {
+    erpReadyNotified = true;
+    erpReadyNoticeUntil = Date.now() + 3200;
+  }
   const state = publicState();
   mainWindow.webContents.send("desktop:state", state);
   if (inboxPopoverWindow && !inboxPopoverWindow.isDestroyed() && !inboxPopoverWindow.webContents.isDestroyed()) {
@@ -681,6 +700,12 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
     },
   });
   views.set(tabId, view);
+  if (tabId === 'erp') view.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (!isMainFrame) return;
+    erpNavigationStartedAt = Date.now();
+    inboxState = { ...inboxState, latestExtension: null };
+    publishState();
+  });
   if (tabId === "erp") view.webContents.setZoomFactor(erpZoomPercent / 100);
 
   view.webContents.setWindowOpenHandler(({ url }) => {
@@ -714,8 +739,8 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
       setImmediate(() => navigateRemoteView(tabId, normalized, "登录跳转"));
     }
   });
-  view.webContents.on("did-navigate", (_event, url, _httpResponseCode, _httpStatusText, isMainFrame) => {
-    if (isMainFrame) setStatus(tabId, { status: "ready", url, error: null, notice: null });
+  view.webContents.on("did-navigate", (_event, url) => {
+    setStatus(tabId, { status: "ready", url, error: null, notice: null });
   });
   view.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
     if (isMainFrame) setStatus(tabId, { status: "ready", url, error: null, notice: null });
@@ -1647,6 +1672,25 @@ ipcMain.handle("desktop:resize-inbox-popover", (event, requestedHeight) => {
   inboxPopoverHeight = Math.min(INBOX_POPOVER_MAX_HEIGHT, Math.max(INBOX_POPOVER_MIN_HEIGHT, Math.ceil(Number(requestedHeight) || 0)));
   positionInboxPopover();
   return { ok: true, height: inboxPopoverHeight };
+});
+ipcMain.handle('desktop:restore-erp-assistant', async (event, action) => {
+  if (![mainWindow?.webContents, inboxPopoverWindow?.webContents].includes(event.sender)) return { ok: false, error: '无效的助手恢复请求' };
+  if (action === 'open') {
+    closeInboxPopover({ returnFocus: false });
+    return setActiveTab('erp');
+  }
+  if (action !== 'reload') return { ok: false, error: '未知助手操作' };
+  inboxState = { ...inboxState, latestExtension: null };
+  publishState();
+  if (inboxState.status !== 'online') await inboxService.retry();
+  const erpSession = session.fromPartition('persist:erp', { cache: true });
+  if (tabState.erp.extension?.id) erpSession.extensions.removeExtension(tabState.erp.extension.id);
+  await loadExtension('erp', erpSession, 'erp-assistant-extension');
+  const contents = views.get('erp')?.webContents;
+  if (!contents || contents.isDestroyed()) return { ok: false, error: 'ERP 页面不可用，请重新启动应用' };
+  setStatus('erp', { status: 'loading', error: null });
+  contents.reload();
+  return { ok: true };
 });
 ipcMain.on("desktop:update-popover-toggle-intent", (event) => {
   if (event.sender !== mainWindow?.webContents) return;

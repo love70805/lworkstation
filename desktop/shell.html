@@ -20,11 +20,11 @@
           id="inbox-status"
           class="brand-status"
           type="button"
-          data-status="danger"
+          data-status="warning"
           aria-haspopup="dialog"
           aria-expanded="false"
-          aria-label="ERP 通道异常"
-          title="ERP 通道异常"
+          aria-label="ERP 助手等待真实通信确认"
+          title="ERP 助手等待真实通信确认"
         >
           <span class="erp-status-dot" aria-hidden="true"></span>
           <strong>Lworkstation</strong>
@@ -90,6 +90,8 @@
       </div>
     </header>
     <span id="erp-live" class="visually-hidden" aria-live="polite" aria-atomic="true"></span>
+    <span id="erp-status-hint" class="erp-status-hint" role="tooltip" hidden></span>
+    <span id="erp-ready-notice" class="erp-ready-notice" role="status" aria-live="polite" hidden>ERP 助手已就绪</span>
 
     <script src="./node_modules/lucide/dist/umd/lucide.min.js"></script>
     <script src="./shell-state.cjs"></script>

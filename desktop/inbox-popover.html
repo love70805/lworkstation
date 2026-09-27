@@ -9,10 +9,12 @@
   </head>
   <body>
     <main class="popover-card" role="dialog" aria-label="ERP 通道状态" aria-modal="false" tabindex="-1">
-      <header class="popover-heading"><strong>ERP 通道</strong><span id="popover-status" aria-live="polite">通道正常</span></header>
+      <header class="popover-heading"><strong>ERP 助手</strong><span id="popover-status" aria-live="polite">等待连接</span></header>
       <dl class="popover-details">
+        <div><dt>当前状态</dt><dd id="popover-reason"></dd></div>
         <div id="popover-error-row" hidden><dt>错误原因</dt><dd id="popover-error"></dd></div>
       </dl>
+      <div class="popover-actions"><button id="popover-open" type="button">打开 ERP</button><button id="popover-reload" type="button">重新连接</button><button id="popover-close" type="button" aria-label="关闭 ERP 助手详情">关闭</button></div>
     </main>
     <script src="./node_modules/lucide/dist/umd/lucide.min.js"></script>
     <script src="./shell-state.cjs"></script>

@@ -3,6 +3,7 @@ import { canonicalPlatformSku } from "../domain/identifiers";
 import { createLedgerGroupKey } from "../domain/ledgerImport";
 import { PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
 import { storeSkuKey } from "../domain/manualCostOverride";
+import { profitOrderNumberForExport } from "./profitOrderDisplay";
 
 const ExactSummary = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 const exactKeys = { qty: "quantityExact", revenue: "revenueExact", profit: "profitExact", purchaseCost: "purchaseCostExact", warehouseCost: "warehouseCostExact", penalty: "penaltyExact" };
@@ -73,7 +74,7 @@ export function buildProfitExportRows(rows, ledger, summary) {
     : "历史定稿快照：保留已存金额和公式版本，不重新计算";
   return [...rows.map((row) => ({
     SKC: row.groupSkc, SKU: row.platformSku, 属性: row.attribute,
-    数量: row.qty, 金额: row.revenue, "关联单号": row.orderNumber ?? "",
+    数量: row.qty, 金额: row.revenue, "关联单号": profitOrderNumberForExport(row),
     核算采购明细: formatCostPurchaseEvidence(row),
     成本算法: row.costResolutionVersion ?? "",
     店铺: row.store,

@@ -5,6 +5,8 @@ const appVersion = document.querySelector("#app-version");
 const inboxAction = document.querySelector("#inbox-status");
 const updateAction = document.querySelector("#update-status");
 const erpLive = document.querySelector("#erp-live");
+const erpStatusHint = document.querySelector('#erp-status-hint');
+const erpReadyNotice = document.querySelector('#erp-ready-notice');
 const erpZoom = document.querySelector("#erp-zoom");
 const erpZoomLabel = document.querySelector("#erp-zoom-label");
 const externalAction = document.querySelector('[data-action="external"]');
@@ -75,6 +77,10 @@ function render(state) {
   inboxAction.setAttribute("aria-expanded", String(inboxPopoverOpen));
   inboxAction.title = presentation.aria;
   inboxAction.setAttribute("aria-label", presentation.aria);
+  inboxAction.setAttribute('aria-describedby', 'erp-status-hint');
+  erpStatusHint.textContent = presentation.aria;
+  erpStatusHint.title = presentation.aria;
+  erpReadyNotice.hidden = presentation.tone !== 'success' || !(Number(state.erpReadyNoticeUntil) > Date.now());
   if (lastErpAnnouncement && lastErpAnnouncement !== presentation.aria) erpLive.textContent = presentation.aria;
   lastErpAnnouncement = presentation.aria;
   const zoom = state.erpZoom || { percent: 80, min: 70, max: 120 };
@@ -133,6 +139,10 @@ erpZoom.querySelectorAll("[data-zoom]").forEach((button) => button.addEventListe
 
 inboxAction.addEventListener("pointerdown", () => { window.desktop.noteInboxPopoverToggleIntent(); });
 inboxAction.addEventListener("click", () => { void window.desktop.toggleInboxPopover(); });
+inboxAction.addEventListener('mouseenter', () => { erpStatusHint.hidden = false; });
+inboxAction.addEventListener('mouseleave', () => { if (document.activeElement !== inboxAction) erpStatusHint.hidden = true; });
+inboxAction.addEventListener('focus', () => { erpStatusHint.hidden = false; });
+inboxAction.addEventListener('blur', () => { erpStatusHint.hidden = true; });
 updateAction.addEventListener("pointerdown", () => { window.desktop.noteUpdatePopoverToggleIntent(); });
 updateAction.addEventListener("click", () => {
   const rect = updateAction.getBoundingClientRect();
@@ -141,3 +151,5 @@ updateAction.addEventListener("click", () => {
 
 window.desktop.onState(render);
 window.desktop.getState().then(render);
+// Withdraw stale green even when there is no new IPC event, and dismiss the one-time notice.
+window.setInterval(() => { if (latestState) render(latestState); }, 1000);

@@ -99,11 +99,29 @@ it('shows adopted ERP and never offers adoption without a new evidence batch', a
 });
 it('refreshes an open cost dialog when the formal ERP cost is adopted', async () => {
   await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH' });
-  await act(async () => button('甲 · 处理成本').click());
+  await act(async () => button('详情').click());
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('缺少有效成本');
   await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH', costs: [formalCost] });
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('10.0000 · ERP');
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('正式成本已生效');
+});
+it('opens adopted cost details without a correction form and offers correction as a separate action', async () => {
+  await render(['SKC-1'], 'ready', { ledgerId: 'DETAILS-ONLY', costs: [formalCost] });
+  await act(async () => button('详情').click());
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain('成本详情');
+  expect(container.querySelector('#manual-cost-value')).toBeNull();
+  await act(async () => container.querySelector('.modal-footer button:last-child').click());
+  expect(container.querySelector('#manual-cost-value')?.value).toBe('10');
+  expect(container.querySelector('#manual-cost-reason')).not.toBeNull();
+});
+it.each(['finalized', 'locked'])('shows only details and preserves read-only cost evidence for %s', async status => {
+  await render(['SKC-1'], status, { ledgerId: `DETAILS-${status}`, costs: [formalCost] });
+  expect(container.querySelectorAll('.cost-match-row-actions button')).toHaveLength(1);
+  await act(async () => button('详情').click());
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain('已定稿或锁定');
+  expect(container.querySelector('#manual-cost-value')).toBeNull();
+  expect(button('人工更正')).toBeUndefined();
+  expect(button('撤销当前更正')).toBeUndefined();
 });
 it('recognizes a restored draft already in the automatic inbox and explains its block', async () => {
   const ledgerId = 'RESTORED-INBOX';
@@ -141,4 +159,21 @@ it('keeps page two after an effective-cost update and leaving and returning', as
   await act(async () => root.render(null));
   await render(skcs, 'cost_pending', options);
   expect(container.textContent).toContain('显示第 13 至 20 条');
+});
+
+it.each([{ skcs: [] }, { skcs: ['SKC-1'] }])('removes repeated desktop extension controls in empty and normal states: $skcs', async ({ skcs }) => {
+  window.shopeersDesktopRuntime = { desktop: true };
+  try {
+    await render(skcs);
+    expect(container.textContent).not.toContain('ERP 扩展状态');
+    expect(container.textContent).not.toContain('安装 ERP 助手');
+    expect(container.querySelector('.erp-assistant-modal')).toBeNull();
+  } finally { delete window.shopeersDesktopRuntime; }
+});
+
+it.each([{ skcs: [] }, { skcs: ['SKC-1'] }])('preserves browser extension installation in empty and normal states: $skcs', async ({ skcs }) => {
+  await render(skcs);
+  expect(button('安装 ERP 助手')).toBeDefined();
+  await act(async () => button('安装 ERP 助手').click());
+  expect(container.querySelector('.erp-assistant-modal')).not.toBeNull();
 });

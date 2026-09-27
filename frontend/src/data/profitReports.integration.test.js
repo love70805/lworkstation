@@ -8,7 +8,7 @@ import { saveManualCostOverride,reopenLedgerForCostCorrection,deleteMonthlyLedge
 import { createWorkspaceBackupPayload,restoreWorkspaceBackupPayload,createWorkspaceCloudSeedPayload } from "./repositories/workspaceRepository";
 import { validateReportBackup } from "../domain/profitReportBackup";
 import { claimPendingSyncEnvelope } from "./syncOutbox";
-import { REPORT_TABLES } from "../domain/profitReports";
+import { REPORT_FORMULA_VERSION, REPORT_TABLES, REPORT_TEMPLATE_VERSION, canonicalJson, sha256 } from "../domain/profitReports";
 import { withCurrentLedgerResults } from './repositories/ledgerOverviewRepository';
 const scope={workspaceId:"W",ledgerId:"L",period:"2026-08"};
 async function adopt(kind,patch={}){const input={...scope,kind,mode:"manual",...(kind==='dispatch'?{adoptedQuantityExact:'100',rows:[]}:{rows:[{kind,manual:true,store:'甲',signedAmountExact:'0.0009',sourceRow:1},{kind,manual:true,store:'乙',signedAmountExact:'-0.0001',sourceRow:1}]}),...patch};const preview=await previewMonthlySupplement(input);return adoptMonthlySupplement(input,preview);}
@@ -37,6 +37,27 @@ it('overview follows the current base and deduction batch while historical files
  expect(await current()).toMatchObject({ state: 'reopened', profit: null });
  expect((await readSavedProfitReport(base.id)).fileBase64).toBe(base.fileBase64);
  expect((await readSavedProfitReport(financial.id)).fileBase64).toBe(financial.fileBase64);
+});
+it('keeps an archived template file and formula unchanged when generating a new financial report', async () => {
+ await adopt('dispatch');const created=await report();
+ // These manual rows contain no purchase evidence, so the old v2 export has
+ // the same workbook bytes. Seed its saved header as a prior-template report.
+ const {payloadHash:_hash,...header}=created;
+ const legacy={...header,templateVersion:'profit-zebra@2-purchase-evidence'};
+ const lines=await db.profitReportLines.where('reportId').equals(created.id).toArray();
+ legacy.payloadHash=await sha256(canonicalJson({report:legacy,lines}));
+ await db.profitReports.put(legacy);
+ const stored=await readSavedProfitReport(created.id);
+ expect(stored).toEqual(legacy);
+ expect(stored.formulaVersion).toBe(REPORT_FORMULA_VERSION);
+ expect((await withCurrentLedgerResults([await db.ledgers.get('L')]))[0].currentResult.state).toBe('base');
+ await adopt('deduction');const financial=await report('financial',legacy.id);
+ expect(financial.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
+ expect(financial.formulaVersion).toBe(legacy.formulaVersion);
+ expect(financial.totalsExact.preDeductionExact).toBe(legacy.totalsExact.preDeductionExact);
+ expect(await readSavedProfitReport(legacy.id)).toEqual(legacy);
+ expect((await readSavedProfitReport(legacy.id)).fileBase64).toBe(created.fileBase64);
+ await validateReportBackup((await createWorkspaceBackupPayload()).tables);
 });
 it('upgrades an actual v14 database without changing any old table row',async()=>{
  const before=await createWorkspaceBackupPayload();
