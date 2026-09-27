@@ -48,7 +48,7 @@
     const loginRequired = status === 401 || status === 403 || /\/(?:login|signin)(?:[/.]|$)/i.test(redirectedUrl || '') || [401, 403].includes(Number(payload?.code))
       || /\/(?:logout|signout)(?:[/.]|$)/i.test(url.pathname) && status >= 200 && status < 300 && [0, '0'].includes(payload?.code);
     const authenticated = !/\/(?:login|signin)(?:[/.]|$)/i.test(window.location.pathname)
-      && /^\/(?:api|purchase|system|permission|user|admin|basic)\//.test(url.pathname)
+      && /^\/(?:purchase|system|permission|user|admin|basic)\//.test(url.pathname)
       && !/(?:login|logout|captcha|register|public)/i.test(url.pathname)
       && status >= 200 && status < 300 && [0, '0'].includes(payload?.code);
     if (!loginRequired && !authenticated) return;
