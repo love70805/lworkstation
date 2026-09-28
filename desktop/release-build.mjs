@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { canonicalInstallerName } from "./release-artifacts.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -83,7 +84,7 @@ function stageReleaseCandidate() {
   const names = metadataAssetNames(metadataContents);
   if (!new RegExp(`^version:\\s*${version.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*$`, "m").test(metadataContents)
     || names.length < 2
-    || names.some((name) => name !== artifactName)) {
+    || names.some((name) => canonicalInstallerName(name) !== canonicalInstallerName(artifactName))) {
     throw new Error(`${metadataFile} must reference only ${artifactName}.`);
   }
 

@@ -5,7 +5,7 @@ import path from "node:path";
 const SETUP_PATTERN = /^(.+?) Setup (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\.exe$/;
 const ALLOWED_SUFFIXES = new Set(["latest.yml", "beta.yml", "rc.yml", "SHA256.txt"]);
 
-function canonicalInstallerName(name) {
+export function canonicalInstallerName(name) {
   return String(name || "").replace(/^Lworkstation-Setup-/, "Lworkstation Setup ");
 }
 

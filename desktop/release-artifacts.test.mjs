@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { organizeReleaseArtifacts, validateLatestArtifacts } from "./release-artifacts.mjs";
+import { canonicalInstallerName, organizeReleaseArtifacts, validateLatestArtifacts } from "./release-artifacts.mjs";
 
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "lworkstation-release-test-"));
 const buildRoot = path.join(fixture, "build");
@@ -13,6 +13,8 @@ const version = "0.2.6-beta.4";
 const metadataFile = "beta.yml";
 const oldArtifact = `Shopeers 工作站 Setup ${version}.exe`;
 const artifactName = `Lworkstation-Setup-${version}.exe`;
+assert.equal(canonicalInstallerName('Lworkstation-Setup-0.3.0.exe'),canonicalInstallerName('Lworkstation Setup 0.3.0.exe'));
+assert.notEqual(canonicalInstallerName('Lworkstation-Setup-0.3.1.exe'),canonicalInstallerName('Lworkstation Setup 0.3.0.exe'));
 
 try {
   fs.mkdirSync(buildRoot, { recursive: true });
