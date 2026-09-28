@@ -4,6 +4,10 @@
   "integrationBranch": "codex/beta10-export-status",
   "requiredCommits": [
     {
+      "module": "beta10-saved-report-download-and-passive-erp-lamp",
+      "commit": "594dcb26ca515417649d8b5ef347a32f1727ca02"
+    },
+    {
       "module": "beta9-cost-identity-status-and-export",
       "commit": "c1156c35bf1fdf546afb35eb9c5b33a758b99be1"
     },
