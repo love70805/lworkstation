@@ -131,7 +131,8 @@ if (localRc) {
 }
 assert.match(read("release-after-pack.cjs"), /Refusing to enable beta updates for non-prerelease/);
 assert.match(read("release-build.mjs"), /--config\.afterPack=\.\/release-after-pack\.cjs/);
-assert.match(read("release-build.mjs"), /--config\.publish\.channel=beta/);
+assert.match(read("release-build.mjs"), /localRc \? "rc" : prerelease \? "beta" : "latest"/);
+assert.match(read("release-build.mjs"), /plan\.candidateOnly !== true/);
 assert.match(read("release-build.mjs"), /--publish",\s*"never"/);
 const updateTestConfig = JSON.parse(read("update-test-config.json"));
 assert.deepEqual(updateTestConfig, {

@@ -15,8 +15,8 @@ const localRc = releaseAfterPack.isRcVersion(plan.version);
 const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
 const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
 const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
-const buildRoot = prerelease ? path.join(desktopRoot, "release-test", plan.version) : path.join(desktopRoot, "release");
-const releaseRoot = localRc ? path.join(releasesRoot, "candidates", plan.version) : prerelease ? path.join(releasesRoot, "prerelease", plan.version) : path.join(releasesRoot, "latest");
+const buildRoot = (prerelease || plan.candidateOnly) ? path.join(desktopRoot, "release-test", plan.version) : path.join(desktopRoot, "release");
+const releaseRoot = (localRc || plan.candidateOnly) ? path.join(releasesRoot, "candidates", plan.version) : prerelease ? path.join(releasesRoot, "prerelease", plan.version) : path.join(releasesRoot, "latest");
 
 function importLegacyArchive() {
   const legacyRoot = path.join(buildRoot, "archive");
@@ -34,7 +34,7 @@ function importLegacyArchive() {
   if (fs.readdirSync(legacyRoot).length === 0) fs.rmdirSync(legacyRoot);
 }
 
-if (!prerelease) importLegacyArchive();
+if (!prerelease && !plan.candidateOnly) importLegacyArchive();
 const result = organizeReleaseArtifacts({
   buildRoot,
   latestRoot: releaseRoot,

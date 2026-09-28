@@ -18,12 +18,14 @@ const readJson = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "ut
 const pkg = readJson("package.json");
 const plan = readJson("release-plan.json");
 const version = plan.version;
-const artifactName = `Lworkstation-Setup-${version}.exe`;
+const prerelease = isPrereleaseVersion(version);
+const artifactName = prerelease ? `Lworkstation-Setup-${version}.exe` : `Lworkstation Setup ${version}.exe`;
 const outputRoot = path.join(root, "release");
 const candidateRoot = path.join(root, "release-test", version);
 const localRc = isRcVersion(version);
-const metadataFile = localRc ? "rc.yml" : "beta.yml";
-const releaseConfig = localRc ? EXPECTED_RC_CONFIG : loadReleaseBetaConfig(root);
+const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
+const releaseConfig = localRc ? EXPECTED_RC_CONFIG : prerelease ? loadReleaseBetaConfig(root) : readJson("update-config.json");
+if (!prerelease && JSON.stringify(releaseConfig) !== JSON.stringify({...loadReleaseBetaConfig(root), channel:"latest"})) throw new Error("Stable candidate requires the public stable update configuration.");
 const pnpmCli = process.env.npm_execpath;
 const builderCli = path.join(root, "node_modules", "electron-builder", "out", "cli", "cli.js");
 
@@ -99,7 +101,7 @@ function stageReleaseCandidate() {
 }
 
 if (pkg.version !== version) throw new Error("package.json version must match release-plan.json.");
-if (!isPrereleaseVersion(version)) throw new Error("release:build only supports an explicit prerelease version.");
+if (!prerelease && (!/^\d+\.\d+\.\d+$/.test(version) || plan.candidateOnly !== true)) throw new Error("Stable release:build requires explicit candidateOnly preparation.");
 if (!fs.existsSync(builderCli)) throw new Error(`Unable to locate Electron Builder: ${builderCli}`);
 
 resetDirectory(outputRoot, path.join(root, "release"));
@@ -111,10 +113,9 @@ run(process.execPath, [builderCli,
   "--publish",
   "never",
   "--config.electronDist=./node_modules/electron/dist",
-  "--config.afterPack=./release-after-pack.cjs",
-  "--config.publish.releaseType=prerelease",
-  localRc ? "--config.publish.channel=rc" : "--config.publish.channel=beta",
-  "--config.win.artifactName=Lworkstation-Setup-${version}.${ext}",
+  ...(prerelease ? ["--config.afterPack=./release-after-pack.cjs", "--config.publish.releaseType=prerelease"] : ["--config.publish.releaseType=release"]),
+  `--config.publish.channel=${localRc ? "rc" : prerelease ? "beta" : "latest"}`,
+  `--config.win.artifactName=${prerelease ? "Lworkstation-Setup-${version}.${ext}" : "Lworkstation Setup ${version}.${ext}"}`,
 ]);
 
 verifyPackagedUpdateConfig();

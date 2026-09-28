@@ -1,12 +1,11 @@
 import * as XLSX from 'xlsx';
-import { sha256 } from '../domain/profitReports';
-import { base64ToBytes } from './profitReportWorkbook';
+import { sha256, Exact, exact, REPORT_TEMPLATE_VERSION } from '../domain/profitReports';
+import { base64ToBytes, buildProfitReportWorkbook } from './profitReportWorkbook';
 import { profitOrderNumberForExport } from './profitOrderDisplay';
 
-const templates = new Set(['profit-zebra@1', 'profit-zebra@2-purchase-evidence', 'profit-zebra@3-single-order']);
+const templates = new Set(['profit-zebra@1', 'profit-zebra@2-purchase-evidence', 'profit-zebra@3-single-order', REPORT_TEMPLATE_VERSION]);
 const fail = () => { throw new Error('原报告信息不足或文件损坏，无法生成简化下载。原始审计存档未改变，请恢复完整报告备份后重试。'); };
 const decode = value => value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
 const attrs = tag => Object.fromEntries([...tag.matchAll(/([\w:]+)="([^"]*)"/g)].map(match => [match[1], decode(match[2])]));
 const key = (store, sku) => JSON.stringify([store, sku]);
 const textCell = cell => {
@@ -15,9 +14,9 @@ const textCell = cell => {
   return cell.v;
 };
 
-// Read only the immutable saved OOXML. Never round-trip worksheet numbers or
-// styles through the spreadsheet writer, or consult current business records.
-export async function simplifySavedReport(report, zip) {
+// Project only the immutable saved OOXML and its frozen report metadata.
+// Read numeric XML literals directly, preserving precision until final export.
+export async function simplifySavedReport(report) {
   if (!templates.has(report?.templateVersion) || !report.fileBase64) return fail();
   let bytes, book;
   try {
@@ -25,9 +24,16 @@ export async function simplifySavedReport(report, zip) {
     if (report.fileSha256 && (await sha256(bytes)).toLowerCase() !== report.fileSha256.toLowerCase()) return fail();
     book = XLSX.read(bytes, { type: 'array', bookFiles: true });
   } catch { return fail(); }
+  if (report.templateVersion === REPORT_TEMPLATE_VERSION) {
+    if (book.Sheets['汇总表']?.J1?.v !== '利润' || book.Sheets['汇总表']?.I1?.v !== '仓储成本') return fail();
+    return bytes;
+  }
+  if (report.warehouseRateExact == null || !report.totalsExact?.stores?.length) return fail();
+  try { exact(report.warehouseRateExact, { nonnegative: true }); } catch { return fail(); }
   const files = new Map(Object.entries(book.files ?? {}).filter(([name, entry]) => name && entry.type === 2 && name !== '\u0001Sh33tJ5').map(([name, entry]) => [name, new Uint8Array(entry.content)]));
-  const read = name => files.has(name) ? new TextDecoder().decode(files.get(name)) : fail();
-  const workbookPath = 'xl/workbook.xml', relsPath = 'xl/_rels/workbook.xml.rels', typesPath = '[Content_Types].xml';
+  const decoded=new Map();
+  const read = name => {if(!files.has(name))return fail();if(!decoded.has(name))decoded.set(name,new TextDecoder().decode(files.get(name)));return decoded.get(name);};
+  const workbookPath = 'xl/workbook.xml', relsPath = 'xl/_rels/workbook.xml.rels';
   const workbook = read(workbookPath), rels = read(relsPath);
   const relationships = [...rels.matchAll(/<Relationship\b[^>]*\/>/g)].map(match => ({ tag: match[0], ...attrs(match[0]) }));
   const sheets = [...workbook.matchAll(/<sheet\b[^>]*\/>/g)].map(match => {
@@ -50,10 +56,16 @@ export async function simplifySavedReport(report, zip) {
       if (!orders.has(id) || !orders.get(id)) orders.set(id, order);
     }
   }
-  const groups = new Map();
-  function patchSheet(entry, fixedStore) {
+  const groups = new Map(), products = [], numericCells=new Map();
+  function numeric(entry, address) {
+    if(!numericCells.has(entry.path))numericCells.set(entry.path,new Map([...read(entry.path).matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)].map(match=>[attrs(match[1]).r,match[2].match(/<v>([^<]+)<\/v>/)?.[1]])));
+    if (entry.sheet[address]?.t !== 'n') return fail();
+    const literal = numericCells.get(entry.path).get(address);
+    try { return exact(literal); } catch { return fail(); }
+  }
+  function readProductSheet(entry, fixedStore) {
     if (!productSheet(entry.sheet)) return fail();
-    let source = read(entry.path), store = fixedStore;
+    let store = fixedStore;
     const seen = [];
     for (let r = 2; r <= XLSX.utils.decode_range(entry.sheet['!ref']).e.r + 1; r++) {
       const sheet = entry.sheet, sku = textCell(sheet[`B${r}`]);
@@ -68,27 +80,36 @@ export async function simplifySavedReport(report, zip) {
       if (!store || !groups.has(store)) return fail();
       const id = key(store, sku), original = textCell(sheet[`F${r}`]);
       const order = orders.has(id) ? orders.get(id) : report.templateVersion === 'profit-zebra@3-single-order' ? original : profitOrderNumberForExport({ orderNumber: original });
-      const record = [sku, order];
+      const product = {store, platformSku:sku, groupSkc:textCell(sheet[`A${r}`]), attribute:textCell(sheet[`C${r}`]), exportOrderNumber:order,
+        quantityExact:numeric(entry,`D${r}`), revenueExact:numeric(entry,`E${r}`), unitCostExact:numeric(entry,`G${r}`), purchaseCostExact:numeric(entry,`H${r}`), profitExact:numeric(entry,`I${r}`)};
+      product.warehouseCostExact = new Exact(product.quantityExact).times(report.warehouseRateExact).toFixed();
+      const record = product;
+      if (!fixedStore) products.push(product);
       if (!fixedStore) groups.get(store).push(record);
       seen.push(record);
-      const pattern = new RegExp(`<c\\b(?=[^>]*\\br="F${r}")[^>]*>([\\s\\S]*?)<\\/c>`);
-      const cell = source.match(pattern);
-      if (!cell) return fail();
-      const style = attrs(cell[0].slice(0, cell[0].indexOf('>') + 1)).s;
-      source = source.replace(pattern, () => `<c r="F${r}"${style === undefined ? '' : ` s="${style}"`} t="inlineStr"><is><t xml:space="preserve">${escape(order)}</t></is></c>`);
+
     }
     if (fixedStore && JSON.stringify(seen) !== JSON.stringify(groups.get(fixedStore))) return fail();
-    files.set(entry.path, source);
   }
-  patchSheet(sheets[0]);
+  readProductSheet(sheets[0]);
   const storeSheets = sheets.slice(1).filter(row => productSheet(row.sheet));
   if (!groups.size || storeSheets.length !== groups.size) return fail();
-  [...groups.keys()].forEach((store, i) => patchSheet(storeSheets[i], store));
-  if (purchases) {
-    files.delete(purchases.path);
-    files.set(workbookPath, workbook.replace(purchases.tag, ''));
-    files.set(relsPath, rels.replace(purchases.relation.tag, ''));
-    files.set(typesPath, read(typesPath).replace(/<Override\b[^>]*\/>/g, tag => attrs(tag).PartName === `/${purchases.path}` ? '' : tag));
+  [...groups.keys()].forEach((store, i) => readProductSheet(storeSheets[i], store));
+  const frozenStores = report.totalsExact.stores.map(row=>row.store);
+  if (JSON.stringify([...groups.keys()]) !== JSON.stringify(frozenStores)) return fail();
+  const dispatchEntry=sheets.find(row=>row.name==='代发表'), dispatchRows=[];
+  if (dispatchEntry.sheet.A1?.v!=='SKC'||dispatchEntry.sheet.B1?.v!=='订单号') return fail();
+  for(let r=2;r<=XLSX.utils.decode_range(dispatchEntry.sheet['!ref']).e.r+1;r++){
+    if (!dispatchEntry.sheet[`C${r}`]) continue;
+    dispatchRows.push({platformSkc:textCell(dispatchEntry.sheet[`A${r}`]),businessId:textCell(dispatchEntry.sheet[`B${r}`]),quantityExact:numeric(dispatchEntry,`C${r}`),order1688:textCell(dispatchEntry.sheet[`D${r}`])});
   }
-  return zip([...files]);
+  const deductionRows=[], deductionEntry=sheets.find(row=>row.name==='扣款');
+  if(report.kind==='financial'){
+    if(deductionEntry?.sheet.A1?.v!=='店铺'||deductionEntry.sheet.E1?.v!=='金额') return fail();
+    for(let r=2;r<=XLSX.utils.decode_range(deductionEntry.sheet['!ref']).e.r+1;r++){
+      if(!deductionEntry.sheet[`E${r}`])continue;
+      deductionRows.push({store:textCell(deductionEntry.sheet[`A${r}`]),businessId:textCell(deductionEntry.sheet[`B${r}`]),platformSkc:textCell(deductionEntry.sheet[`C${r}`]),supplierNumber:textCell(deductionEntry.sheet[`D${r}`]),signedAmountExact:numeric(deductionEntry,`E${r}`)});
+    }
+  }
+  return buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}).bytes;
 }

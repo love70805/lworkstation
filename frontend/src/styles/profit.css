@@ -89,6 +89,12 @@
 .report-adoption-preview { margin:16px 0; padding:12px; }
 .report-preview-rows { overflow:auto; max-height:240px; }
 .report-preview-rows td, .report-preview-rows th { padding:8px; white-space:nowrap; }
+.report-import .report-selection label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.report-import select, .report-import input:not([type="checkbox"]):not([type="file"]) { min-height:36px; max-width:100%; min-width:0; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); }
+.report-import input[type="file"] { max-width:100%; }
+.report-import .report-preview-rows table { width:100%; border-collapse:collapse; }
+.report-import .report-preview-rows td:first-child { min-width:130px; max-width:200px; white-space:normal; overflow-wrap:anywhere; }
+.report-import .report-preview-rows td:last-child { min-width:150px; max-width:260px; white-space:normal; overflow-wrap:anywhere; }
 .report-history-row { display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:12px 0; }
 .profit-page,
 .profit-page .page-container,

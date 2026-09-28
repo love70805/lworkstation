@@ -17,3 +17,14 @@ it('uses physical starting CSV line numbers despite embedded newlines and blank 
  const result=inspectSupplementSource(source,{kind:'dispatch',headerRow:1,includeAll:true});
  expect(result.rows.map(row=>row.sourceRow)).toEqual([2,5]);
 });
+it('skips empty and 无 sheets and preserves explicit vertical merge origins',async()=>{
+ const book=XLSX.utils.book_new();
+ const sheet=XLSX.utils.aoa_to_sheet([['日期','登记人','店铺','SKC','订单号','sku数量','1688订单号'],['8/1','人员','甲','S','O1',2,'P'],['','','','','O2',3,'']]);
+ sheet['!merges']=[{s:{r:1,c:1},e:{r:2,c:1}},{s:{r:1,c:3},e:{r:2,c:3}},{s:{r:1,c:6},e:{r:2,c:6}}];
+ XLSX.utils.book_append_sheet(book,sheet,'甲');XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['无']]),'空');
+ const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
+ const sources=await readSupplementWorkbook({name:'synthetic.xlsx',arrayBuffer:async()=>bytes},'dispatch');
+ expect(sources).toHaveLength(1);
+ const result=inspectSupplementSource(sources[0],{kind:'dispatch',ownerMarker:'人员'});
+ expect(result.rows[1]).toMatchObject({platformSkc:'S',order1688:'P',quantityExact:'3',mergedFrom:{owner:2,platformSkc:2,order1688:2}});
+});

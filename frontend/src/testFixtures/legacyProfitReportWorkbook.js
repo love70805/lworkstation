@@ -1,5 +1,7 @@
-import { displayMoney, exactSum, REPORT_TEMPLATE_VERSION } from "../domain/profitReports";
-import { profitOrderNumberForExport } from "./profitOrderDisplay";
+// Frozen v3 writer, used only to exercise historical archive downloads.
+import { displayMoney, exactSum } from "../domain/profitReports";
+import { profitOrderNumberForExport } from "../lib/profitOrderDisplay";
+const REPORT_TEMPLATE_VERSION = 'profit-zebra@3-single-order';
 
 // A small, deterministic OOXML writer for the approved fixed report template.
 // Numbers are computed by the report domain before export; identifier cells are text.
@@ -41,15 +43,14 @@ function createStyles() {
     },
     xml() {
       const fonts = [0,1,2,3,4].map(i=>`<font>${[1,2,4].includes(i)?'<b/>':''}${i===2?'<color rgb="FFFFFFFF"/>':i>=3?'<color rgb="FFC62828"/>':'<color rgb="FF20344A"/>'}<sz val="10"/><name val="Microsoft YaHei"/></font>`).join('');
-      return `${declaration}<styleSheet xmlns="${ns}"><numFmts count="4"><numFmt numFmtId="164" formatCode="#,##0.####################"/><numFmt numFmtId="168" formatCode="0.00"/><numFmt numFmtId="165" formatCode="0.000000"/><numFmt numFmtId="166" formatCode="0.0000"/></numFmts><fonts count="5">${fonts}</fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${['FF284B6B','FFF5F8FA','FFEEF3F7'].map(color=>`<fill><patternFill patternType="solid"><fgColor rgb="${color}"/><bgColor indexed="64"/></patternFill></fill>`).join('')}</fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${definitions.length}">${definitions.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+      return `${declaration}<styleSheet xmlns="${ns}"><numFmts count="4"><numFmt numFmtId="164" formatCode="#,##0.####################"/><numFmt numFmtId="168" formatCode="#,##0.00;[Red]\\-#,##0.00;0.00"/><numFmt numFmtId="165" formatCode="0.000000"/><numFmt numFmtId="166" formatCode="0.0000"/></numFmts><fonts count="5">${fonts}</fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${['FF284B6B','FFF5F8FA','FFEEF3F7'].map(color=>`<fill><patternFill patternType="solid"><fgColor rgb="${color}"/><bgColor indexed="64"/></patternFill></fill>`).join('')}</fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${definitions.length}">${definitions.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
     }
   };
 }
 function column(index){let text="";for(let n=index+1;n>0;n=Math.floor((n-1)/26))text=String.fromCharCode(65+(n-1)%26)+text;return text;}
 const text = (value,format=0) => ({value,format});
-// Truncate the exported numeric value itself; formatting alone would round it.
-const number = (value,format=3) => ({value:format===2?value:displayMoney(value),format,number:true});
-const headers = values => values.map(value=>({value,header:true,format:0,align:'center'}));
+const number = (value,format=5) => ({value,format,number:true});
+const headers = values => values.map(value=>({value,header:true,format:0}));
 function sheetXml(rows,widths,registry,alignment=[],rowHeight=36){
   if(rows.length>1048576)throw new Error("报告明细超过 Excel 单页上限，请按账本范围核对来源。");
   return `${declaration}<worksheet xmlns="${ns}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${column(widths.length-1)}${Math.max(rows.length,1)}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="24"/><cols>${widths.map((width,i)=>`<col min="${i+1}" max="${i+1}" width="${width}" customWidth="1"/>`).join("")}</cols><sheetData>${rows.map((cells,i)=>`<row r="${i+1}" ht="${i?rowHeight:30}" customHeight="1">${cells.map((cell,j)=>{
@@ -59,35 +60,33 @@ function sheetXml(rows,widths,registry,alignment=[],rowHeight=36){
 }
 const detailRow = cells => cells.map(cell=>cell?{...cell,detail:true}:null);
 const bandRow = cells => cells.map(cell=>({...cell,value:cell?.value??'',bold:true,band:true}));
-const productHeaders=["SKC","SKU","属性","件数","销售额","1688单号","单件平均成本","总件数成本","仓储成本","利润"];
-const productWidths=[25,20,24,9,14,24,15,15,14,15];
-function productRows(products) {return [headers(productHeaders),...products.map(row=>detailRow([text(row.groupSkc??row.platformSkc),text(row.platformSku),text(row.attribute),number(row.quantityExact,2),number(row.revenueExact),text(row.exportOrderNumber??profitOrderNumberForExport(row),1),number(row.unitCostExact),number(row.purchaseCostExact),number(row.warehouseCostExact),number(row.profitExact)])),bandRow([text("合计"),null,null,number(exactSum(products,"quantityExact"),2),number(exactSum(products,"revenueExact")),null,null,number(exactSum(products,"purchaseCostExact")),number(exactSum(products,"warehouseCostExact")),number(exactSum(products,"profitExact"))])];}
+const productHeaders=["SKC","SKU","属性","件数","销售额","关联单号","单件成本","采购成本","利润"];
+const productWidths=[25,16.8833333333333,23.75,7.5,11.8833333333333,21.25,11.25,12.5,13.1333333333333];
+function productRows(products) {return [headers(productHeaders),...products.map(row=>detailRow([text(row.groupSkc??row.platformSkc),text(row.platformSku),text(row.attribute),number(row.quantityExact,2),number(row.revenueExact,3),text(profitOrderNumberForExport(row),1),number(row.unitCostExact,4),number(row.purchaseCostExact),number(row.profitExact)])),bandRow([text("合计"),null,null,number(exactSum(products,"quantityExact"),2),number(displayMoney(exactSum(products,"revenueExact")),3),null,null,number(displayMoney(exactSum(products,"purchaseCostExact")),3),number(displayMoney(exactSum(products,"profitExact")),3)])];}
 function groupedProductRows(products, stores) {
   const rows=[headers(productHeaders)];
   for(const store of stores){
-    rows.push([{...text(store.store),bold:true,band:true,mergeAcross:10},...Array(9).fill(null)]);
-    const details=productRows(products.filter(row=>row.store===store.store)).slice(1);
-    details.at(-1)[0].value=`${store.store} 小计`;
-    rows.push(...details);
+    rows.push([{...text(store.store),bold:true,band:true,mergeAcross:9},...Array(8).fill(null)]);
+    rows.push(...productRows(products.filter(row=>row.store===store.store)).slice(1));
   }
-  const total=productRows(products).at(-1);total[0].value='商品总计';rows.push(total);return rows;
+  rows.push(productRows(products).at(-1));return rows;
 }
 function combine(left,right,start){return Array.from({length:Math.max(left.length,right.length)},(_,i)=>{const row=[...(left[i]??[])];if(right[i]){while(row.length<start)row.push(null);row.push(...right[i]);}return row;});}
 function safeSheet(name,used){const base=String(name).replace(/[\[\]:*?/\\\x00-\x1f]/g,"-").replace(/^'+|'+$/g,"").slice(0,31)||"店铺";let result=base,n=2;while(used.has(result.toLowerCase())){const suffix=`-${n++}`;result=base.slice(0,31-suffix.length)+suffix;}used.add(result.toLowerCase());return result;}
 
 export function buildProfitReportWorkbook({report,products,dispatchRows=[],deductionRows=[]}) {
   const financial=report.kind==="financial",totals=report.totalsExact;
-  const right=[headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),number(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,{...number(totals.deductionExact),red:true}]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,number(financial?totals.profitExact:totals.preDeductionExact)])];
-  const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right,11),widths:[...productWidths,3,18,15,18],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"right","right"]}];
+  const right=[headers(financial?["店铺","销量","利润","扣款","扣后利润"]:["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact),...(financial?[{...number(store.deductionExact),red:true},number(displayMoney(store.financialProfitExact),3)]:[])]),[text("代发金额"),number(totals.dispatchQuantityExact,2),number(displayMoney(totals.dispatchAmountExact),3)], [text("合计"),number(totals.quantityExact,2),number(displayMoney(totals.preDeductionExact),3),...(financial?[{...number(displayMoney(totals.deductionExact),3),red:true},number(displayMoney(totals.profitExact),3)]:[])]];
+  const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right.map((row,i)=>i>=right.length-2?bandRow(row):row),10),widths:[...productWidths,3,7.75,8,13.1333333333333,...(financial?[12.5,14.75]:[])],alignment:[null,null,null,"center","center",null,"center","center","center",null,null,"left","left","left","left"]}];
   // Reserve template names before sanitizing dynamic store tabs.
   const used=new Set(["汇总表","代发表","扣款","核算采购"]);
   for(const store of totals.stores){
     const rows=productRows(products.filter(row=>row.store===store.store));
-    if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,{...number(store.deductionExact),red:true}]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
+    if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,{...number(displayMoney(store.deductionExact),3),red:true}]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,number(displayMoney(store.financialProfitExact),3)]));
     sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','center','center','center','center','center']});
   }
-  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(row.order1688,1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:[27.5,26.25,11,26.25,3,3,16,16],rowHeight:34,alignment:[null,null,"right",null,null,null,"right","right"]});
-  if(financial)sheets.push({name:"扣款",rows:combine([headers(["补扣款单号","SKC","供方货号","扣款金额"]),...deductionRows.map(row=>detailRow([text(row.businessId??"",1),text(row.platformSkc??"",1),text(row.supplierNumber??""),{...number(row.signedAmountExact),red:true}]))],[headers(["店铺","明细合计"]),...totals.stores.map(store=>[text(store.store),{...number(store.deductionExact),red:true}]),bandRow([text("合计"),{...number(totals.deductionExact),red:true}])],5),widths:[26,28,28,15,3,16,18],rowHeight:34,alignment:[null,null,null,"right",null,null,"right"]});
+  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","件数","1688单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(row.order1688,1)]))],[headers(["项目","合计"]),[text("代发件数"),number(totals.dispatchQuantityExact,2)],[text("代发金额"),number(displayMoney(totals.dispatchAmountExact),3)]],5),widths:[27.5,26.25,10.6333333333333,26.25,3,16.25,13],rowHeight:34,alignment:[null,null,"left","center",null,"center","center"]});
+  if(financial)sheets.push({name:"扣款",rows:combine([headers(["店铺","扣款单号","SKC","供方货号","金额"]),...deductionRows.map(row=>[text(row.store),text(row.businessId??""),text(row.platformSkc??""),text(row.supplierNumber??""),{...number(row.signedAmountExact),red:true}].map(cell=>({...cell,detail:true})))],[headers(["店铺","明细合计"]),...totals.stores.map(store=>[text(store.store),{...number(store.deductionExact),red:true}]),bandRow([text("合计"),{...number(displayMoney(totals.deductionExact),3),red:true}])],6),widths:[8.75,23.75,26.25,27.5,15,3,9.38333333333333,17.5],rowHeight:34,alignment:[null,null,"left","left","center",null,"center","right"]});
   const registry=createStyles();
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
   const files=[['[Content_Types].xml',`${declaration}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],['_rels/.rels',`${declaration}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],['xl/workbook.xml',`${declaration}<workbook xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet,i)=>`<sheet name="${xml(sheet.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets></workbook>`],['xl/_rels/workbook.xml.rels',`${declaration}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],['xl/styles.xml',registry.xml()],...sheetFiles];
@@ -98,6 +97,6 @@ export function bytesToBase64(bytes){let text="";for(let i=0;i<bytes.length;i+=1
 export function base64ToBytes(value){return Uint8Array.from(atob(value),char=>char.charCodeAt(0));}
 export async function prepareReportDownload(report) {
   const { simplifySavedReport } = await import('./savedReportDownload');
-  return simplifySavedReport(report);
+  return simplifySavedReport(report, zip);
 }
 export async function downloadReportFile(report){const bytes=await prepareReportDownload(report);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName.replace(/\.xlsx$/i,'-简化.xlsx');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
