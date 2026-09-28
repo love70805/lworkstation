@@ -1,6 +1,37 @@
-# 0.3.0 正式候选验收
+# 0.3.0 正式发布与验收
 
-2026-09-28：实施、代码集成和本机正式候选完成，公开Release、发布标签和Latest切换尚未执行；未安装，未改真实业务库。用户本轮授权为“重新准备正式版，包含这些修改”。
+2026-09-28：用户在候选验收后明确“发布吧”，已将同一候选公开为 [GitHub 0.3.0 稳定版 Latest](https://github.com/love70805/lworkstation/releases/tag/v0.3.0)。发布时间为2026-09-28 18:02:47（UTC+8），draft=false、prerelease=false；未重新构建、未安装、未改真实业务库，保留聊天与工作树。
+
+标签 `v0.3.0` 指向 `9e332a4673e98a0ed14c20c62cef0479bc3376e3`，发布前主线 [CI 36405863304](https://github.com/love70805/lworkstation/actions/runs/36405863304)通过。该提交经PR #120补齐候选文档，软件目录与构建提交f2811dd完全一致。
+
+## 公开资产
+
+四个资产均已匿名完整下载，文件长度、SHA256与上传前副本及GitHub资产digest逐一一致。EXE、blockmap和latest.yml均保持候选原字节；公开文件名统一连字符，SHA256.txt仅同步实际下载文件名。
+
+| 公开文件 | 字节 | SHA256 |
+| --- | ---: | --- |
+| Lworkstation-Setup-0.3.0.exe | 116980840 | `60F71121A4F709915FF87930367F880A9BF69C990645D2B4F8D00A72B622668A` |
+| Lworkstation-Setup-0.3.0.exe.blockmap | 123027 | `CA48471A84C13C1AA2698614D92C98499CFF750C9F313D1183698FF2ECA6207D` |
+| latest.yml | 353 | `1AE848335DFF974D9A394A7DB222D4BC755E28CFF1B78655D3211AB806F6FB9F` |
+| SHA256.txt | 276 | `43CD0E3D6A26BF55DC9B3621C20BABCACC20B87AD8FCEAD3F447EC067BFA5836` |
+
+`latest.yml`的path/files.url均为公开EXE名，size为116980840，SHA512为 `ZpWF+d9l3SacI/SRIHLfEvK6qqmrGHTTP6FwR/ayWynN4CysbgS/5mEMQilzjXbdHiq0vxbiJSEogl2+b4TCfg==`，与匿名下载的EXE一致；同名blockmap已单独下载核对。
+
+公开上传副本持久目录：`C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.0-public/`。发布说明、GitHub公开响应、匿名下载原件及校验、实际生产更新provider联网结果保存在 `C:/Users/Administrator/Desktop/Lworkstation/archive/release-0.3.0-public/`；原候选目录与准备阶段证据继续保留。
+
+## 公开更新通道实测
+
+使用已安装的electron-updater及生产AppUpdater、ChannelGitHubProvider和update-runtime，HTTP执行器访问真实公开端点，不使用fixture或认证令牌。仅检查发现结果和下载URL，不调用安装器或应用更新下载。
+
+| 当前版本 | 真实检查结果 |
+| --- | --- |
+| 0.2.19稳定版 | available，目标0.3.0，解析到本次公开EXE URL |
+| 0.3.0稳定版 | current，无更高版本 |
+| 0.3.0-beta.9 | available，目标0.3.0-beta.10 |
+| 0.3.0-beta.10 | current，不转入稳定版 |
+| 0.3.0-rc.1 / rc.2 | disabled，无网络请求，不会自动发现正式版 |
+
+全部场景autoDownload=false、autoInstallOnAppQuit=false，应用下载及安装调用均为0。Beta转正式版、RC转正式版需用户手工下载并运行正式安装包；本次未代用户执行安装或覆盖升级。原RC安装包缺失，RC结果是生产更新运行时在对应版本配置下的检查，不能视为原RC二进制重测。证据为`public-update-channels.json`及`verify-public.mjs`。
 
 ## 源码与范围
 
@@ -41,4 +72,4 @@ EXE 116,980,840字节，未数字签名；另有SHA256.txt。latest.yml的版本
 
 首次正式构建在末尾命名校验遇到空格/连字符差异，已修复并重新构建，失败日志保留。上述隐藏EXE smoke与浏览器业务流程是不同验证层，通过包内生产资源哈希关联；未声称在实际EXE中逐一重跑全部业务页面，也未进行真实ERP账号重采。
 
-当前公开版本不因代码合并改变。公开发布须后续明确授权，本次保留聊天及工作树，不归档。
+公开发布结果以本文顶部记录为准；下方所引用RC及候选阶段的暂停/未发布说明保留为历史阶段记录。本次未进行真实ERP账号重采或真实业务库升级验收。

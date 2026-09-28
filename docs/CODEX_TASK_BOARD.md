@@ -1,5 +1,9 @@
 # Codex 任务看板
 
+## 2026-09-28 · 0.3.0 稳定版公开发布
+
+用户在正式候选验收后明确“发布吧”，覆盖准备阶段的暂停发布限制。已将原候选发布为 [v0.3.0 GitHub Latest](https://github.com/love70805/lworkstation/releases/tag/v0.3.0)，draft=false、prerelease=false，标签固定 `9e332a4673e98a0ed14c20c62cef0479bc3376e3`；该主线CI通过。EXE/同名blockmap/latest.yml/SHA256.txt四资产匿名全量回读一致，未重新构建或安装，未写真实库，不归档聊天与工作树。公开文件名与latest.yml一致，原候选保留，证据持久保存在主仓库 `archive/release-0.3.0-public/`；[正式发布验收](RELEASE_0.3.0.md)。下方为历史阶段状态。
+
 ## 2026-09-28 · 正式候选准备恢复：导入导出与源码保全
 
 最新授权为“重新准备正式版，包含这些修改”：实施、审查、提交、必要PR/CI集成及0.3.0本机候选；不公开Release、不发布标签、不切Latest、不安装、不写真实库。此前AGENTS.md指令已由用户撤销。代发不发/引流/退款仅作备注，按源数量归集，不额外确认特殊备注。
