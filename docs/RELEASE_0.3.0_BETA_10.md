@@ -1,6 +1,6 @@
 # 0.3.0-beta.10 · 已有报告下载与纯颜色 ERP 灯
 
-状态（2026-09-28）：实现、审查和本地门禁通过；Windows候选、PR/CI、公开预发布与资产回读待完成。本机不安装，真实业务数据不变，稳定 Latest 保持0.2.19。
+状态（2026-09-28）：Windows候选、PR #115及main CI、公开预发布和四资产匿名回读全部通过。本机不安装，真实业务数据不变，稳定 Latest 保持0.2.19。
 
 ## 改动
 
@@ -19,4 +19,20 @@ ERP小灯只显示颜色，不可点击、悬停或键盘展开，没有就绪to
 
 限制：ERP通信使用隔离HTML/API，真实账号未验证。主壳视觉为实际资源的headless Edge；隐藏Electron截帧不作为可见窗口视觉/焦点证据。未安装、不改真实数据库或源Excel。
 
-原始证据暂存 `archive/beta10/`，最终持久目录和候选/发布哈希待登记。
+## 候选、合并与公开发布
+
+实现提交 `594dcb26ca515417649d8b5ef347a32f1727ca02`，候选构建 `11722e5`；[PR #115](https://github.com/love70805/lworkstation/pull/115)合并及标签为 `e534a2fc2a9c94fd67a4071a6668129c5cea40bd`，文件树与候选完全一致。[main CI](https://github.com/love70805/lworkstation/actions/runs/36366387778)通过。真实Windows packaged smoke、release:organize、release:check通过，ERP灯交互后仅一个窗口，独立更新弹窗正常开闭。
+
+[Beta.10公开预发布](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)四资产已用Node匿名下载并逐项与候选核对。Windows旧curl的TLS失败不作为回读成功，最终Node记录为准。真实GitHub更新提供方验证Beta.9→Beta.10、Beta.10当前、稳定0.2.19仅latest.yml且无更新；无下载更新或安装。
+
+| 资产 | SHA-256 |
+| --- | --- |
+
+| `Lworkstation-Setup-0.3.0-beta.10.exe` | `D537918F9FB9A736706461FB7D3792F9B262B2741D5434B1FCF4A89C8564975B` |
+| `Lworkstation-Setup-0.3.0-beta.10.exe.blockmap` | `D36F82CECBAC4FDD301DEC53A3E21608C2377EA08CFB35CD443A567C95A0491C` |
+| `beta.yml` | `3E5427E779C1A43755C55FB13D14BFE658A80C9CEE48F11662743552371BFC59` |
+| `SHA256.txt` | `B779C4FE2349595643CF8AB12A159FB0EBA91F9672AE0E1B38DDB32DDF8A5E44` |
+
+候选：`releases/candidates/0.3.0-beta.10-export-status/`。原始证据：`archive/beta10/`。持久交接目录：`C:/Users/Administrator/Desktop/Lworkstation/archive/beta10-execution-closeout-20260928/`，候选四资产、脚本/截图/日志/合成XLSX与MANIFEST逐项哈希保留，不包含业务数据/profile。
+
+用户随后要求准备0.3.0正式版时Beta.10已经公开。按每版本独立执行聊天约定，本任务仅收尾交接，正式版由新任务承接；不得将本Beta候选当作正式版候选，也不得跳过稳定更新合同与最终打包验收。

@@ -1,8 +1,8 @@
 # Codex 任务看板
 
-## 2026-09-28 · Beta.10 已有报告下载与纯颜色灯验收中
+## 2026-09-28 · Beta.10 已公开，正式版另行承接
 
-独立分支 `codex/beta10-export-status` 从 `859d346` 实施。历史报告按原存档 OOXML 生成简化下载副本，原文件/金额/定稿记录不变；ERP 灯只保留颜色与读屏语义，删除状态弹窗与提示，真实后台握手和失效恢复保留。三代模板/两类型/重开当前历史12次页面下载、两种新报告保存下载、存储哈希、主壳30组浅深色窗口检查与隐藏Electron通信通过。候选/PR/公开发布尚待完成，真实ERP账号未验。本机不安装。见 [契约](integration/BETA_10_EXISTING_EXPORT_AND_STATUS_PLAN.md)。
+已有报告只读简化下载、ERP灯纯颜色已完成；925测试、全量门禁、12次重开当前/历史下载与两种新保存下载、30组主壳视觉/交互、隐藏Electron真实通信、Windows候选smoke、PR #115/main CI、四资产匿名回读和真实更新通道通过。[Beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)已公开，稳定Latest 0.2.19、本机未安装、真实库未改。见[契约](integration/BETA_10_EXISTING_EXPORT_AND_STATUS_PLAN.md)与[发布验收](RELEASE_0.3.0_BETA_10.md)。用户随后提出0.3.0正式版时Beta.10已公开，由新的版本任务承接；本执行仅交接收尾。
 
 ## 2026-09-27 · Beta.9 四项调整已公开发布
 

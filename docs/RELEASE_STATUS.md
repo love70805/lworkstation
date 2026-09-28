@@ -1,10 +1,16 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-27
+更新时间：2026-09-28
 
-## 当前公开 Beta：v0.3.0-beta.9
+## 当前公开 Beta：v0.3.0-beta.10
 
-成本共同 SKU / 店铺行、台账身份只读投影、现有桌面 ERP 小灯真实通信、新利润 Excel 单号与工作表简化已通过候选验收和 PR #113 / main CI。2026-09-27 [公开 Beta.9](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.9)，四资产匿名回读哈希与真实更新通道通过。稳定 Latest 保持 0.2.19；本机未安装、未改真实数据，真实 ERP 账号未验。完整哈希和证据边界见 [Beta.9 记录](RELEASE_0.3.0_BETA_9.md)。
+已有报告当前/历史简化下载与纯颜色ERP灯已通过925项测试、完整门禁、隔离实际下载与状态链路、Windows候选smoke、PR #115/main CI；[Beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)已公开且四资产匿名哈希与真实更新通道通过。稳定Latest仍0.2.19，本机未安装、真实库未改，真实ERP账号未验。见 [验收与哈希](RELEASE_0.3.0_BETA_10.md)。
+
+用户随后要求准备0.3.0正式版，将由新的版本执行任务承接；本条仅登记已发布Beta.10，不代表正式版已发布。
+
+## 历史 v0.3.0 Beta.9
+
+四项调整已公开，见 [Beta.9](RELEASE_0.3.0_BETA_9.md)。
 
 ## 历史 v0.3.0 Beta.8 / Beta.7
 
