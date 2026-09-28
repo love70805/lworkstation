@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
 if (!process.env.SHOPEERS_DESKTOP_SMOKE_USER_DATA || process.env.DESKTOP_ERP_STATUS_SMOKE !== '1') throw new Error('isolated status smoke required');
+globalThis.__qaWindows = [];
+globalThis.__nativeWindowCount = () => globalThis.__qaWindows.filter(w => !w.isDestroyed()).length;
 globalThis.__erpStatusFixture = { mode: 'authenticated', calls: [] };
 electron.dialog.showErrorBox = (title, message) => { console.error(title + ': ' + message); };
 electron.app.whenReady().then(async () => {
@@ -20,18 +22,19 @@ electron.app.whenReady().then(async () => {
     });
   }
 });
-class HiddenWindow extends electron.BrowserWindow { show() {} showInactive() {} focus() {} }
+class HiddenWindow extends electron.BrowserWindow { constructor(options) { super(options); globalThis.__qaWindows.push(this); } show() {} showInactive() {} focus() {} }
 const filename = path.join(__dirname, 'main.cjs');
 const candidate = new Module(filename, module);
 candidate.filename = filename;
-candidate.paths = module.paths;
-candidate.require = name => name === 'electron' ? { ...electron, BrowserWindow: HiddenWindow } : module.require(name);
+candidate.paths = Module._nodeModulePaths(path.dirname(filename));
+const desktopRequire = Module.createRequire(filename);
+candidate.require = name => name === 'electron' ? { ...electron, BrowserWindow: HiddenWindow } : desktopRequire(name);
 candidate._compile(fs.readFileSync(filename, 'utf8') + `
 globalThis.__erpStatusSmoke = {
   state: publicState,
   window: () => mainWindow,
   erp: () => views.get('erp')?.webContents,
-  popup: () => inboxPopoverWindow,
+  windows: () => globalThis.__nativeWindowCount(),
   configure: () => configureLoadedExtensions({ workspaceId: 'erp-status-fixture', memberId: 'fixture-member', visibility: 'workspace' }),
   poll: () => inboxService.refresh(),
   restartInbox: () => inboxService.retry(),

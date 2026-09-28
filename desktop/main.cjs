@@ -31,7 +31,6 @@ const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecy
 const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
 const { registerWorkspaceSystemIpc } = require('./workspace-system-ipc.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
-const { classifyErpState } = require('./shell-state.cjs');
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
 const { createInboxPopoverLifecycle } = require("./inbox-popover-lifecycle.cjs");
 const { buildInboxUrl, enforceWorkspaceContext, normalizeInboxRequest, normalizeWorkspaceContext } = require("./inbox-ipc.cjs");
@@ -60,9 +59,6 @@ const {
 
 const SHELL_TOP_HEIGHT = 80;
 const DESKTOP_ICON_PATH = path.join(__dirname, "assets", "lworkstation.ico");
-const INBOX_POPOVER_MIN_HEIGHT = 43;
-const INBOX_POPOVER_MAX_HEIGHT = 220;
-const INBOX_POPOVER_WIDTH = 280;
 const UPDATE_POPOVER_MIN_HEIGHT = 132;
 const UPDATE_POPOVER_MAX_HEIGHT = 340;
 const UPDATE_POPOVER_WIDTH = 296;
@@ -82,7 +78,6 @@ let mainWindow;
 let desktopLifecycle;
 let lifecycleNotice = '';
 const startup = createStartupState({ changed: () => { resizeViews(); publishState(); } });
-let inboxPopoverWindow;
 let updatePopoverWindow;
 let activeTab = "workspace";
 const workspaceRecovery = createWorkspaceRecovery({
@@ -102,9 +97,6 @@ let shellAppearance = loadAppearancePreference({
   userDataPath: app.getPath("userData"),
   fallback: nativeTheme.shouldUseDarkColors ? "dark" : "light",
 });
-let inboxPopoverHeight = INBOX_POPOVER_MIN_HEIGHT;
-const inboxPopoverLifecycle = createInboxPopoverLifecycle();
-let inboxPopoverToggleIntentAt = 0;
 const updatePopoverLifecycle = createInboxPopoverLifecycle();
 let updatePopoverToggleIntentAt = 0;
 let updatePopoverHeight = UPDATE_POPOVER_MIN_HEIGHT;
@@ -124,8 +116,6 @@ let inboxState = {
   message: "ERP 收件服务尚未启动",
   flow: { status: "idle", tone: "muted", label: "等待 ERP 请求", message: "收件服务尚未启动。" },
 };
-let erpReadyNotified = false;
-let erpReadyNoticeUntil = 0;
 let erpNavigationStartedAt = 0;
 
 function assistantInboxState() {
@@ -189,8 +179,6 @@ function publicState() {
     tabs,
     update: { ...updateState },
     inbox: assistantInboxState(),
-    erpReadyNoticeUntil,
-    inboxPopoverOpen: Boolean(inboxPopoverWindow && !inboxPopoverWindow.isDestroyed()),
     updatePopoverOpen: Boolean(updatePopoverWindow && !updatePopoverWindow.isDestroyed()),
     appearance: shellAppearance,
     startup: startup.getState(),
@@ -202,15 +190,8 @@ function publicState() {
 
 function publishState() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (!erpReadyNotified && classifyErpState(assistantInboxState(), inboxState.flow).tone === 'success') {
-    erpReadyNotified = true;
-    erpReadyNoticeUntil = Date.now() + 3200;
-  }
   const state = publicState();
   mainWindow.webContents.send("desktop:state", state);
-  if (inboxPopoverWindow && !inboxPopoverWindow.isDestroyed() && !inboxPopoverWindow.webContents.isDestroyed()) {
-    inboxPopoverWindow.webContents.send("desktop:inbox-popover-state", state);
-  }
   if (updatePopoverWindow && !updatePopoverWindow.isDestroyed() && !updatePopoverWindow.webContents.isDestroyed()) {
     updatePopoverWindow.webContents.send("desktop:update-popover-state", state);
   }
@@ -247,23 +228,6 @@ function resizeViews() {
       view.setVisible(true);
     }
   }
-}
-
-function focusInboxStatus() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.focus();
-  mainWindow.webContents.executeJavaScript("document.querySelector('#inbox-status')?.focus()", true).catch(() => {});
-}
-
-function inboxPopoverSnapshot() {
-  const popup = inboxPopoverWindow;
-  return {
-    open: Boolean(popup && !popup.isDestroyed()),
-    visible: Boolean(popup && !popup.isDestroyed() && popup.isVisible()),
-    focused: Boolean(popup && !popup.isDestroyed() && popup.isFocused()),
-    generation: popup?.__inboxPopoverGeneration || null,
-    windowCount: BrowserWindow.getAllWindows().length,
-  };
 }
 
 function updatePopoverSnapshot() {
@@ -389,34 +353,6 @@ function openUpdatePopover(anchor) {
   return { ok: true, open: true };
 }
 
-function positionInboxPopover() {
-  if (!mainWindow || mainWindow.isDestroyed() || !inboxPopoverWindow || inboxPopoverWindow.isDestroyed()) return;
-  const [windowWidth] = mainWindow.getContentSize();
-  const [screenX, screenY] = mainWindow.getPosition();
-  const width = Math.min(INBOX_POPOVER_WIDTH, Math.max(168, windowWidth - 24));
-  inboxPopoverWindow.setBounds({
-    x: screenX + 8,
-    y: screenY + 36,
-    width,
-    height: inboxPopoverHeight,
-  });
-}
-
-function closeInboxPopover({ returnFocus = true } = {}) {
-  const popup = inboxPopoverWindow;
-  const generation = popup?.__inboxPopoverGeneration;
-  inboxPopoverToggleIntentAt = 0;
-  inboxPopoverWindow = null;
-  inboxPopoverLifecycle.close(generation);
-  if (popup && !popup.isDestroyed()) {
-    popup.removeAllListeners("blur");
-    popup.close();
-  }
-  publishState();
-  if (returnFocus) focusInboxStatus();
-  return { ok: true, open: false };
-}
-
 async function shutdownDesktop() {
   desktopLifecycle?.dispose();
   workspaceRecovery.dispose();
@@ -426,10 +362,6 @@ async function shutdownDesktop() {
   const service = inboxService;
   inboxService = null;
   await service?.stop({ wait: true });
-
-  const popup = inboxPopoverWindow;
-  inboxPopoverWindow = null;
-  if (popup && !popup.isDestroyed()) popup.destroy();
 
   const updatePopup = updatePopoverWindow;
   updatePopoverWindow = null;
@@ -446,156 +378,19 @@ async function shutdownDesktop() {
   cleanupRuntimeExtensionStagingSync({ userDataPath: app.getPath("userData") });
 }
 
-function openInboxPopover() {
-  if (inboxPopoverWindow && !inboxPopoverWindow.isDestroyed()) {
-    closeInboxPopover();
-    return { ok: true, open: false };
-  }
-  inboxPopoverToggleIntentAt = 0;
-  inboxPopoverHeight = INBOX_POPOVER_MIN_HEIGHT;
-  inboxPopoverWindow = new BrowserWindow({
-    parent: mainWindow,
-    width: INBOX_POPOVER_WIDTH,
-    height: inboxPopoverHeight,
-    minWidth: 168,
-    maxWidth: INBOX_POPOVER_WIDTH,
-    minHeight: INBOX_POPOVER_MIN_HEIGHT,
-    maxHeight: INBOX_POPOVER_MAX_HEIGHT,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    closable: true,
-    skipTaskbar: true,
-    show: false,
-    title: "ERP 通道",
-    backgroundColor: shellAppearance === "dark" ? "#18212c" : "#ffffff",
-    titleBarStyle: "hidden",
-    webPreferences: {
-      preload: path.join(__dirname, "inbox-popover-preload.cjs"),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  });
-  const popup = inboxPopoverWindow;
-  const generation = inboxPopoverLifecycle.open();
-  popup.__inboxPopoverGeneration = generation;
-  popup.on("blur", () => {
-    setTimeout(() => {
-      if (inboxPopoverWindow !== popup || !inboxPopoverLifecycle.isCurrent(generation) || popup.isDestroyed() || popup.isFocused()) return;
-      if (Date.now() - inboxPopoverToggleIntentAt < 300) return;
-      closeInboxPopover();
-    }, 50);
-  });
-  popup.on("closed", () => {
-    if (inboxPopoverWindow === popup && inboxPopoverLifecycle.isCurrent(generation)) {
-      inboxPopoverLifecycle.close(generation);
-      inboxPopoverWindow = null;
-      publishState();
-      focusInboxStatus();
-    }
-  });
-  popup.webContents.on("did-finish-load", () => {
-    if (inboxPopoverWindow !== popup || !inboxPopoverLifecycle.isCurrent(generation) || popup.isDestroyed()) return;
-    positionInboxPopover();
-    popup.webContents.send("desktop:inbox-popover-state", publicState());
-    popup.show();
-    popup.focus();
-  });
-  popup.loadFile(path.join(__dirname, "inbox-popover.html"), { query: { appearance: shellAppearance } });
-  positionInboxPopover();
-  publishState();
-  return { ok: true, open: true };
-}
-
-async function runPopoverSmokeToggle() {
-  const trace = [];
-  const waitFor = async (predicate, timeout = 4000) => {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (predicate()) return true;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return Boolean(predicate());
-  };
-  const record = (action, result) => {
-    trace.push({ action, result, open: publicState().inboxPopoverOpen });
-  };
-
-  // Close before the first load completes to exercise the stale did-finish-load path.
-  const firstOpen = openInboxPopover();
-  record("first-open", firstOpen);
-  const firstClose = closeInboxPopover({ returnFocus: false });
-  record("first-close-before-load", { ...firstClose, closed: firstClose?.open === false });
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  const staleClosed = !publicState().inboxPopoverOpen;
-
-  const secondOpen = openInboxPopover();
-  record("second-open", secondOpen);
-  const secondShown = await waitFor(() => Boolean(inboxPopoverWindow && !inboxPopoverWindow.isDestroyed() && inboxPopoverWindow.isVisible()));
-  const secondBounds = secondShown ? inboxPopoverWindow.getBounds() : null;
-  trace.push({ action: "second-shown", open: publicState().inboxPopoverOpen, visible: secondShown, bounds: secondBounds });
-  const secondClose = closeInboxPopover({ returnFocus: false });
-  record("second-close", { ...secondClose, closed: secondClose?.open === false });
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  const finalOpen = publicState().inboxPopoverOpen;
-  return {
-    ok: staleClosed && secondShown && !finalOpen,
-    cycles: 2,
-    staleClosed,
-    secondShown,
-    secondBounds,
-    finalOpen,
-    trace,
-  };
-}
-
-async function runPopoverDomClickSmoke() {
-  const trace = [];
-  const waitFor = async (predicate, timeout = 4000) => {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (predicate()) return true;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return Boolean(predicate());
-  };
-  const record = (action, extra = {}) => trace.push({ action, ...extra, ...inboxPopoverSnapshot(), stateOpen: publicState().inboxPopoverOpen });
-  const clickStatus = (delayAfterPointerDown = 0) => mainWindow.webContents.executeJavaScript(`(async () => {
-    const button = document.querySelector("#inbox-status");
-    if (!button) return { ok: false, error: "#inbox-status not found" };
-    button.focus();
-    button.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    if (${delayAfterPointerDown} > 0) await new Promise((resolve) => setTimeout(resolve, ${delayAfterPointerDown}));
-    button.click();
-    return { ok: true };
-  })()`, true);
-
-  closeInboxPopover({ returnFocus: false });
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  record("dom-before-first-click");
-  const firstClick = await clickStatus();
-  record("dom-first-click", { ipc: firstClick });
-  const firstShown = await waitFor(() => inboxPopoverSnapshot().visible);
-  record("dom-first-shown", { firstShown });
-
-  // A physical click focuses the shell before its click handler invokes IPC.
-  // Waiting past the blur grace period makes the former ordering bug deterministic.
-  inboxPopoverWindow?.blur();
-  record("dom-before-second-click-after-blur");
-  const secondClick = await clickStatus(75);
-  record("dom-second-click", { ipc: secondClick });
-  await new Promise((resolve) => setTimeout(resolve, 650));
-  const final = inboxPopoverSnapshot();
-  record("dom-final", { final });
-  closeInboxPopover({ returnFocus: false });
-  return {
-    ok: firstShown && !final.open && !final.visible && final.windowCount <= 1,
-    firstShown,
-    final,
-    trace,
-  };
+async function runErpIndicatorSmoke() {
+  const before = BrowserWindow.getAllWindows().length;
+  const dom = await mainWindow.webContents.executeJavaScript(`(() => {
+    const indicator = document.querySelector('#inbox-status');
+    for (const type of ['pointerdown', 'click', 'mouseenter', 'focus', 'keydown', 'mouseleave'])
+      indicator.dispatchEvent(type === 'keydown' ? new KeyboardEvent(type, { key: 'Enter', bubbles: true }) : new Event(type, { bubbles: true }));
+    return { passive: indicator.tagName === 'DIV' && indicator.tabIndex === -1,
+      noTooltip: !indicator.title && !indicator.hasAttribute('aria-haspopup') && !indicator.hasAttribute('aria-expanded'),
+      noPanel: !document.querySelector('#erp-status-hint, #erp-ready-notice'), tone: indicator.dataset.status };
+  })()`);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const windowCount = BrowserWindow.getAllWindows().length;
+  return { ok: dom.passive && dom.noTooltip && dom.noPanel && windowCount === before, ...dom, windowCount };
 }
 
 async function runUpdatePopoverDomClickSmoke() {
@@ -1338,8 +1133,7 @@ async function writeSmokeReport() {
     erpV2Fixture = await runErpV2SmokeFixture();
     await inboxService?.refresh();
   }
-  const popoverToggleSmoke = await runPopoverSmokeToggle();
-  const popoverDomClickSmoke = await runPopoverDomClickSmoke();
+  const erpIndicatorSmoke = await runErpIndicatorSmoke();
   const updatePopoverDomClickSmoke = await runUpdatePopoverDomClickSmoke();
   const tabSwitches = [];
   for (const tabId of ["erp", "1688", "workspace"]) {
@@ -1361,7 +1155,7 @@ async function writeSmokeReport() {
   const selectionPopupText = extensionFileText(state.tabs["1688"].extension?.path, "popup.js");
   const isolatedViews = tabSwitches.every((entry) => entry.attachedViews.length === 1 && entry.attachedViews[0] === entry.activeTab);
   const report = {
-    ok: state.tabs.workspace.status === "ready" && Boolean(state.tabs.workspace.url) && isolatedViews && popoverToggleSmoke.ok && popoverDomClickSmoke.ok && updatePopoverDomClickSmoke.ok && (!smokeRequiresErpV2 || erpV2Fixture?.ok),
+    ok: state.tabs.workspace.status === "ready" && Boolean(state.tabs.workspace.url) && isolatedViews && erpIndicatorSmoke.ok && updatePopoverDomClickSmoke.ok && (!smokeRequiresErpV2 || erpV2Fixture?.ok),
     packaged: app.isPackaged,
     applicationName: app.getName(),
     executableName: path.basename(process.execPath),
@@ -1400,8 +1194,7 @@ async function writeSmokeReport() {
       }))).storageConfigured,
     },
     erpV2Fixture,
-    popoverToggleSmoke,
-    popoverDomClickSmoke,
+    erpIndicatorSmoke,
     updatePopoverDomClickSmoke,
     tabSwitches,
   };
@@ -1538,19 +1331,18 @@ async function createWindow() {
   await mainWindow.loadFile(path.join(__dirname, "shell.html"), { query: { appearance: shellAppearance } });
   desktopLifecycle = createDesktopLifecycle({ app, window: mainWindow, Tray, Menu, icon: DESKTOP_ICON_PATH,
     userDataPath: app.getPath('userData'),
-    onHide: () => { closeInboxPopover({ returnFocus: false }); closeUpdatePopover({ returnFocus: false }); },
+    onHide: () => { closeUpdatePopover({ returnFocus: false }); },
     onError: message => { lifecycleNotice = message; publishState(); },
     onChanged: state => {
       const contents = views.get('workspace')?.webContents;
       if (contents && !contents.isDestroyed()) contents.send('workspace:close-behavior', state);
     },
   });
-  mainWindow.on('resize', () => { resizeViews(); positionInboxPopover(); positionUpdatePopover(); });
+  mainWindow.on('resize', () => { resizeViews(); positionUpdatePopover(); });
   for (const event of ['restore', 'show', 'focus']) mainWindow.on(event, restoreWorkspaceSurface);
   for (const event of ['minimize', 'hide']) mainWindow.on(event, () => workspaceRecovery.pause());
-  mainWindow.on('move', () => { positionInboxPopover(); positionUpdatePopover(); });
+  mainWindow.on('move', () => { positionUpdatePopover(); });
   mainWindow.on('closed', () => {
-    closeInboxPopover({ returnFocus: false });
     closeUpdatePopover({ returnFocus: false });
     mainWindow = null;
   });
@@ -1650,48 +1442,6 @@ ipcMain.handle("desktop:request-inbox", async (event, input) => {
   return { status: 200, body: responseBody };
 });
 ipcMain.handle("desktop:switch-tab", (_event, tabId) => setActiveTab(tabId));
-ipcMain.on("desktop:inbox-popover-toggle-intent", (event) => {
-  if (event.sender !== mainWindow?.webContents) return;
-  inboxPopoverToggleIntentAt = Date.now();
-});
-ipcMain.handle("desktop:toggle-inbox-popover", (event) => {
-  if (event.sender !== mainWindow?.webContents) return { ok: false, error: "无效的壳层请求" };
-  return openInboxPopover();
-});
-ipcMain.handle("desktop:get-inbox-popover-state", (event) => {
-  if (event.sender !== inboxPopoverWindow?.webContents) return { ok: false, error: "无效的浮窗请求" };
-  return publicState();
-});
-ipcMain.handle("desktop:close-inbox-popover", (event) => {
-  if (event.sender !== inboxPopoverWindow?.webContents) return { ok: false, error: "无效的浮窗请求" };
-  closeInboxPopover();
-  return { ok: true, open: false };
-});
-ipcMain.handle("desktop:resize-inbox-popover", (event, requestedHeight) => {
-  if (event.sender !== inboxPopoverWindow?.webContents) return { ok: false, error: "无效的浮窗请求" };
-  inboxPopoverHeight = Math.min(INBOX_POPOVER_MAX_HEIGHT, Math.max(INBOX_POPOVER_MIN_HEIGHT, Math.ceil(Number(requestedHeight) || 0)));
-  positionInboxPopover();
-  return { ok: true, height: inboxPopoverHeight };
-});
-ipcMain.handle('desktop:restore-erp-assistant', async (event, action) => {
-  if (![mainWindow?.webContents, inboxPopoverWindow?.webContents].includes(event.sender)) return { ok: false, error: '无效的助手恢复请求' };
-  if (action === 'open') {
-    closeInboxPopover({ returnFocus: false });
-    return setActiveTab('erp');
-  }
-  if (action !== 'reload') return { ok: false, error: '未知助手操作' };
-  inboxState = { ...inboxState, latestExtension: null };
-  publishState();
-  if (inboxState.status !== 'online') await inboxService.retry();
-  const erpSession = session.fromPartition('persist:erp', { cache: true });
-  if (tabState.erp.extension?.id) erpSession.extensions.removeExtension(tabState.erp.extension.id);
-  await loadExtension('erp', erpSession, 'erp-assistant-extension');
-  const contents = views.get('erp')?.webContents;
-  if (!contents || contents.isDestroyed()) return { ok: false, error: 'ERP 页面不可用，请重新启动应用' };
-  setStatus('erp', { status: 'loading', error: null });
-  contents.reload();
-  return { ok: true };
-});
 ipcMain.on("desktop:update-popover-toggle-intent", (event) => {
   if (event.sender !== mainWindow?.webContents) return;
   updatePopoverToggleIntentAt = Date.now();
@@ -1784,9 +1534,6 @@ ipcMain.on("workspace:appearance", (event, appearance) => {
       symbolColor: shellAppearance === "dark" ? "#d7e0ea" : "#566273",
     });
     mainWindow.setBackgroundColor(shellAppearance === "dark" ? "#0e1319" : "#eef2f6");
-  }
-  if (inboxPopoverWindow && !inboxPopoverWindow.isDestroyed()) {
-    inboxPopoverWindow.setBackgroundColor(shellAppearance === "dark" ? "#18212c" : "#ffffff");
   }
   if (updatePopoverWindow && !updatePopoverWindow.isDestroyed()) {
     updatePopoverWindow.setBackgroundColor(shellAppearance === "dark" ? "#18212c" : "#ffffff");

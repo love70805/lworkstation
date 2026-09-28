@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { classifyErpState, getPopoverPresentation } = require('./shell-state.cjs');
+const { classifyErpState } = require('./shell-state.cjs');
 const extension = {
   ready: true, context: 'extension-isolated', handshakeVersion: 1, workspaceId: 'test-workspace',
   lastSeenAt: new Date().toISOString(), sessionState: 'authenticated', pageState: 'page_ready', queryAvailable: false,
@@ -21,7 +21,5 @@ assert.equal(classifyErpState({ ...inbox, pageStatus: 'loading' }).tone, 'warnin
 assert.equal(classifyErpState({ ...inbox, pageStatus: 'error' }).tone, 'danger');
 assert.equal(classifyErpState({ ...inbox, extensionLoadState: 'failed' }).tone, 'danger');
 assert.equal(classifyErpState({ ...inbox, navigationStartedAt: Date.now() + 1 }).tone, 'warning', 'old page handshakes cannot remain green across refresh/navigation');
-assert.match(getPopoverPresentation({ ...inbox, latestExtension: { ...extension, lastSeenAt: new Date(Date.now() - 46000).toISOString() } }).error, /通信已失效/);
 assert.equal(classifyErpState({ ...inbox, latestExtension: { ...extension, queryAvailable: true } }).aria, 'ERP 助手通信就绪，采购查询可用');
-assert.match(getPopoverPresentation(inbox).reason, /通信就绪/);
 console.log('ERP assistant actual-handshake, login, freshness, workspace and recovery state tests passed.');
