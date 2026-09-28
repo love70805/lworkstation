@@ -181,11 +181,24 @@ it('adopts a complete multi-sheet/file candidate idempotently, rejects duplicate
  const first=await adopt('dispatch',patch),repeat=await adopt('dispatch',patch);
  expect(repeat.id).toBe(first.id);expect(await db.monthlySupplementBatches.count()).toBe(1);
  await expect(adopt('dispatch',{...patch,rows:[...rows,rows[0]]})).rejects.toThrow('重复源行');
- await expect(adopt('dispatch',{...patch,rows:[...rows,{...rows[0],fileHash:'conflicting-file'}]})).rejects.toThrow('冲突记录');
+ await expect(adopt('dispatch',{...patch,rows:[...rows,{...rows[0],fileHash:'conflicting-file'}]})).rejects.toThrow('跨文件相似业务记录');
  const next=await adopt('dispatch',{...patch,rows:[...rows,{kind:'dispatch',fileHash:'file-b',sourceSheet:'页一',sourceRow:2,quantityExact:'5',businessId:'ORDER-C'}],sources:[...patch.sources,{fileHash:'file-b',sheetName:'页一'}]});
- expect(next.adoptedQuantityExact).toBe('100');expect(next.replacesBatchId).toBe(first.id);
+ expect(next.adoptedQuantityExact).toBe('35');expect(next.replacesBatchId).toBe(first.id);
  expect((await db.monthlySupplementBatches.get(first.id)).status).toBe('superseded');
  expect(await db.monthlySupplementRows.where('batchId').equals(first.id).count()).toBe(2);
  expect(await db.monthlySupplementRows.where('batchId').equals(next.id).count()).toBe(3);
  expect(await db.monthlySupplementBatches.where('[ledgerId+kind+status]').equals(['L','dispatch','adopted']).count()).toBe(1);
+});
+it('persists equal allocated rows and requires a signed preview after cross-file review',async()=>{
+ const row={kind:'deduction',fileHash:'ONE',sourceSheet:'甲',sourceRow:2,store:'甲',businessId:'ORDER',platformSkc:'SKC',supplierNumber:'CODE',signedAmountExact:'0.899'};
+ const input={...scope,kind:'deduction',mode:'files',rows:[row,{...row,sourceRow:3},{...row,fileHash:'TWO'}]};
+ const first=await previewMonthlySupplement(input);
+ expect(first.candidate.rows).toHaveLength(3);expect(first.candidate.conflicts).toHaveLength(1);
+ await expect(adoptMonthlySupplement(input,first)).rejects.toThrow('尚未核对');
+ const reviewed={...input,reviewedCrossFileConflicts:true};
+ await expect(adoptMonthlySupplement(reviewed,first)).rejects.toThrow();
+ const preview=await previewMonthlySupplement(reviewed),batch=await adoptMonthlySupplement(reviewed,preview);
+ expect(batch.signedAmountExact).toBe('2.697');
+ expect(await db.monthlySupplementRows.where('batchId').equals(batch.id).count()).toBe(3);
+ expect((await adoptMonthlySupplement(reviewed,preview)).id).toBe(batch.id);
 });

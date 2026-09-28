@@ -7,6 +7,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const {
   EXPECTED_BETA_CONFIG,
+  EXPECTED_RC_CONFIG,
+  isRcVersion,
   isPrereleaseVersion,
   writeReleaseBetaConfig,
 } = require("./release-after-pack.cjs");
@@ -29,6 +31,11 @@ assert.equal(result.target, target);
 assert.deepEqual(JSON.parse(fs.readFileSync(target, "utf8")), EXPECTED_BETA_CONFIG);
 assert.equal(isPrereleaseVersion("0.2.6-beta.6"), true);
 assert.equal(isPrereleaseVersion("0.2.6"), false);
+assert.equal(isRcVersion("0.3.0-rc.1"), true);
+assert.equal(isRcVersion("0.3.0-beta.10"), false);
+writeReleaseBetaConfig({ appOutDir, packager: { appInfo: { version: "0.3.0-rc.1" } } }, { root: configRoot });
+assert.deepEqual(JSON.parse(fs.readFileSync(target, "utf8")), EXPECTED_RC_CONFIG);
+assert.deepEqual(EXPECTED_RC_CONFIG, { enabled: false, channel: "rc" });
 
 fs.writeFileSync(target, "{\n  \"enabled\": false\n}\n", "utf8");
 assert.throws(() => writeReleaseBetaConfig({

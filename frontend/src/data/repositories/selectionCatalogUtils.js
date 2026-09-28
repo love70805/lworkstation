@@ -1,4 +1,5 @@
 import { makeId } from "../db/utils";
+import { erpSupplierLink } from "../../domain/erpProductCatalog";
 
 export function catalogText(value) {
   return String(value ?? "").trim();
@@ -43,6 +44,13 @@ export function catalogSupplierProfile(supplier = {}, fallback = "") {
     supplierName: catalogText(supplier.supplierName),
     sourceProductId: catalogText(supplier.sourceProductId),
     sourceUrl: catalogText(supplier.sourceUrl),
+    sourceUrlKind: erpSupplierLink(supplier.sourceUrl)?.type ?? null,
+    catalogSource: supplier.catalogSource === "erp" ? "erp" : null,
+    sourceRecords: Array.isArray(supplier.sourceRecords) ? supplier.sourceRecords.map(item => ({
+      kind: "erp", platformSku: catalogText(item.platformSku), platformSkc: catalogText(item.platformSkc), warehouseSku: catalogText(item.warehouseSku),
+      batchId: catalogText(item.batchId), evidenceRef: catalogText(item.evidenceRef), recordId: catalogText(item.recordId), purchaseOrderNo: catalogText(item.purchaseOrderNo), capturedAt: catalogText(item.capturedAt),
+      purchaseOrderId: catalogText(item.purchaseOrderId), lineNumber: catalogText(item.lineNumber),
+    })) : [],
     shippingAmount: Number(supplier.shippingAmount) || 0,
     handlingFee: Number(supplier.handlingFee) || 0,
     variants: (Array.isArray(supplier.variants) ? supplier.variants : []).map(catalogSupplierVariantProfile),

@@ -57,12 +57,13 @@ export async function runErpInboxCycle({
       if (isDisposed()) break;
       try {
         const parsed = parseRecord(record.envelope);
-        await receiveAndAcknowledgeInboxRecord({
+        const receipt = await receiveAndAcknowledgeInboxRecord({
           record,
           receive: () => receive({ envelope: parsed.envelope, receivedVia: "desktop-inbox" }),
           acknowledge: () => acknowledge(record.deliveryId, { workspaceId: context.workspaceId }),
         });
         received++;
+        if (receipt.adoptionError) failures.push(new Error(receipt.adoptionError));
         emit(parsed.envelope);
       } catch (error) {
         // One invalid or temporarily unavailable delivery must not block the rest.
@@ -78,8 +79,10 @@ export async function runErpInboxCycle({
   try { await recoverDrafts({ workspaceId: context.workspaceId }); }
   catch (error) { failures.push(error); }
   try {
-    await recover({ workspaceId: context.workspaceId });
-    return { received, failures, recovered: true };
+    const results = await recover({ workspaceId: context.workspaceId });
+    const recoveryFailures = Array.isArray(results) ? results.filter(result => result.error) : [];
+    failures.push(...recoveryFailures.map(result => new Error(result.error)));
+    return { received, failures, recovered: recoveryFailures.length === 0 };
   } catch (error) {
     failures.push(error);
     return { received, failures, recovered: false };

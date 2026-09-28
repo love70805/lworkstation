@@ -3,9 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SETUP_PATTERN = /^(.+?) Setup (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\.exe$/;
-const ALLOWED_SUFFIXES = new Set(["latest.yml", "beta.yml", "SHA256.txt"]);
+const ALLOWED_SUFFIXES = new Set(["latest.yml", "beta.yml", "rc.yml", "SHA256.txt"]);
 
-function canonicalInstallerName(name) {
+export function canonicalInstallerName(name) {
   return String(name || "").replace(/^Lworkstation-Setup-/, "Lworkstation Setup ");
 }
 
@@ -87,6 +87,15 @@ export function validateLatestArtifacts({ latestRoot, artifactName, version, met
   }
   if (!exeReferences.some((name) => canonicalInstallerName(name) === canonicalInstallerName(artifactName))) {
     throw new Error(`${metadataFile} must reference the current installer`);
+  }
+  if (metadataFile === "rc.yml") {
+    const installer = ops.readFileSync(path.join(latestRoot, artifactName));
+    const expectedSha512 = crypto.createHash("sha512").update(installer).digest("base64");
+    const hashes = [...metadata.matchAll(/^\s*sha512:\s*(\S+)\s*$/gm)].map(match => match[1]);
+    const sizes = [...metadata.matchAll(/^\s*size:\s*(\d+)\s*$/gm)].map(match => Number(match[1]));
+    if (hashes.length < 2 || hashes.some(hash => hash !== expectedSha512) || !sizes.length || sizes.some(size => size !== installer.length)) {
+      throw new Error("rc.yml SHA512/size does not match the candidate installer");
+    }
   }
   const recordedHashes = new Map(ops.readFileSync(path.join(latestRoot, "SHA256.txt"), "utf8")
     .trim()

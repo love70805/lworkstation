@@ -13,6 +13,7 @@ import {
   normalizeWarehouseSku,
   normalizeWorkspaceId,
 } from "./identifiers";
+import { normalizeErpCatalogFields } from "./erpCatalogFields";
 
 export const ERP_COST_BATCH_FORMAT = "shopeers-erp-cost-batch";
 export const ERP_COST_BATCH_VERSION = 2;
@@ -123,6 +124,7 @@ function normalizePurchaseRecord(record, index, warehouseSku, excluded = false) 
     purchaseOrderId: optionalText(record.purchaseOrderId),
     supplierName: optionalText(record.supplierName),
     supplier1688Url: optionalText(record.supplier1688Url ?? record.supplierOfferUrl ?? record.sourceUrl),
+    ...normalizeErpCatalogFields(record, { includeMappings: false }),
     eligible: excluded ? false : record.eligible !== false,
     selectedForPreview: excluded ? false : Boolean(record.selectedForPreview),
     exclusionReasons: uniqueText(record.exclusionReasons),
@@ -270,6 +272,7 @@ function normalizeEvidenceRow(row, index, {
     totalPrice: optionalFiniteNumber(row.totalPrice, `第 ${index + 1} 行总采购价`, { minimum: 0 }),
     supplierName: optionalText(row.supplierName),
     supplier1688Url: optionalText(row.supplier1688Url ?? row.supplierOfferUrl ?? row.sourceUrl),
+    ...normalizeErpCatalogFields(row),
     previewUnitCost,
     unitCost: previewUnitCost,
     currency,
@@ -535,6 +538,7 @@ export function buildErpCostBatchEnvelope({
         orderNumber: result.orderNumber ?? "",
         orderType: result.sourceType ?? "",
         productName: result.name ?? "",
+        ...normalizeErpCatalogFields(result),
         calculationCount: result.calcTimes ?? result.calculationCount ?? null,
         dateRange: result.dateRange ?? "",
         totalQuantity: result.totalQty ?? result.totalQuantity ?? null,

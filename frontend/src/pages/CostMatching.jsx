@@ -237,9 +237,12 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const loadedInbox = useMemo(() => inboxRecords.find((record) => record.id === loadedInboxId) ?? null, [inboxRecords, loadedInboxId]);
   const sourceInbox = useMemo(() => workspaceInboxRecords.find(record => record.batchId === batchEnvelope?.batchId && record.ledgerId === snapshot?.ledger?.id) ?? null, [workspaceInboxRecords, batchEnvelope?.batchId, snapshot?.ledger?.id]);
   const currentInbox = loadedInbox ?? sourceInbox;
-  const latestAdoptionInbox = useMemo(() => workspaceInboxRecords.filter(record => record.ledgerId === snapshot?.ledger?.id && record.adoption?.version).toSorted((a, b) => Date.parse(b.receivedAt ?? b.adoption.processedAt) - Date.parse(a.receivedAt ?? a.adoption.processedAt))[0] ?? null, [workspaceInboxRecords, snapshot?.ledger?.id]);
+  const latestAdoptionInbox = useMemo(() => workspaceInboxRecords.filter(record => record.ledgerId === snapshot?.ledger?.id && (record.adoption?.version || record.adoptionFailure)).toSorted((a, b) => Date.parse(b.receivedAt ?? b.adoption?.processedAt) - Date.parse(a.receivedAt ?? a.adoption?.processedAt))[0] ?? null, [workspaceInboxRecords, snapshot?.ledger?.id]);
   const reviewAdoption = currentInbox ? currentInbox.adoption : latestAdoptionInbox?.adoption;
-  const adoptionNotice = summarizeAdoptionForDisplay(reviewAdoption, { status: currentInbox ? currentInbox.status : latestAdoptionInbox?.status });
+  const reviewAdoptionInbox = currentInbox ?? latestAdoptionInbox;
+  const reviewAdoptionFailure = ['pending', 'loaded'].includes(reviewAdoptionInbox?.status) ? reviewAdoptionInbox?.adoptionFailure : null;
+  const adoptionNotice = summarizeAdoptionForDisplay(reviewAdoption, { status: (currentInbox ?? latestAdoptionInbox)?.status, failure: reviewAdoptionFailure });
+  const otherAdoptionFailure = currentInbox && latestAdoptionInbox?.id !== currentInbox.id && Date.parse(latestAdoptionInbox?.receivedAt) > Date.parse(currentInbox.receivedAt) && ['pending', 'loaded'].includes(latestAdoptionInbox?.status) ? latestAdoptionInbox?.adoptionFailure : null;
   const adoptionItemsBySku = useMemo(() => new Map((reviewAdoption?.items ?? []).map(item => [item.canonicalPlatformSku, item])), [reviewAdoption]);
   const exceptionGroups = useMemo(() => groupAdoptionExceptions(reviewAdoption), [reviewAdoption]);
 
@@ -521,7 +524,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const adoption = useMemo(() => erpAdoptionReadiness({ ledger: snapshot?.ledger, salesRows: snapshot?.rows, approvals: snapshot?.approvals, reconciliation: publicationReconciliation }), [snapshot, publicationReconciliation]);
   const hasNewBatch = Boolean(parsedRows && batchEnvelope?.formatVersion === ERP_COST_BATCH_VERSION && batchEnvelope.evidenceStatus === "complete");
   const isAutomaticInbox = Boolean(currentInbox && currentInbox.receivedVia !== 'manual-v2-import');
-  const canRetryAutomatic = Boolean(currentInbox?.adoption?.version) && resolutions.length > 0 && !locked;
+  const canRetryAutomatic = ['pending', 'loaded'].includes(currentInbox?.status) && (Boolean(currentInbox?.adoptionFailure) || Boolean(currentInbox?.adoption?.version) && resolutions.length > 0) && !locked;
   const hasFilteredRows = filteredSalesLines.length > 0;
   const allCostsReady = formalSalesLines.length > 0 && formalSalesLines.every(row => row.finalizable);
   const clearFilters = () => {
@@ -697,6 +700,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     ? `更正说明：${targetRow.manualOverride.reason}。原 ERP 证据保留，更正不会将异常记录变为合格采购。`
     : targetRow?.decision.eligibleForExactProfit
       ? 'ERP 正式成本已生效，可直接核算。'
+      : reviewAdoptionFailure
+        ? `ERP 自动采用未完成：${reviewAdoptionFailure.message}。回传证据已保存，系统将继续重试。`
       : targetAdoptionItem
         ? `${ERP_ADOPTION_ITEM_LABELS[targetAdoptionItem.state] ?? '回传待核对'}${targetAdoptionItem.reason ? `：${describeErpAdoptionReason(targetAdoptionItem.reason)}` : ''}；候选价尚未计入正式利润。`
         : reviewAdoption?.state === 'blocked'
@@ -892,6 +897,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : adoptionNotice?.title ?? (hasNewBatch ? "手动批次待核对" : allCostsReady ? "本月成本已齐" : "等待 ERP 回传或人工更正")}</strong><span>{adoptionNotice?.details ?? (hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。")}</span></div>
       </div>
 
+      {otherAdoptionFailure ? <p className="cost-registration-status" role="alert">较新的 ERP 回传自动采用未完成：{otherAdoptionFailure.message}。证据已保存，系统将继续重试。<Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></p> : null}
       {(adoptionNotice?.remainingCount > 0 || hasNewBatch && adoption.summary.blockedAnomalyCount > 0) ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>{adoptionNotice?.remainingCount ?? adoption.summary.blockedAnomalyCount} 个 SKU 仍需核对</strong><small>查看采购证据并处理异常、补齐缺失项或按店铺人工更正。原始回传记录保留。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
       {exceptionGroups.length ? <details className="cost-exception-groups" open>
         <summary>按原因查看剩余项与处理方式</summary>
@@ -918,7 +924,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
           {hasNewBatch && publicationReconciliation?.unmatchedCostRows.length ? <div className="cost-audit-note"><AlertCircle size={17} />本批次有 {publicationReconciliation.unmatchedCostRows.length} 行成本不属于已登记的平台 SKU 范围，保留证据但不写入正式成本。</div> : null}
           {auxiliaryGroups.length ? <details className="cost-auxiliary-audit"><summary><Info size={17} />同查询 SKC 下、本账本未使用的额外变体 <strong>{reconciliation.summary.auxiliaryCount}</strong> 行</summary><div className="cost-auxiliary-list">{auxiliaryGroups.map((group) => <section key={group.id}><header><strong className="mono">{group.platformSkc}</strong><span>仓库 SKU <code>{group.warehouseSku}</code></span></header><p>{group.variants.map((variant) => variant.platformSku).join("、")}</p><small>采购记录 {group.purchaseRecordCount} 条 · 排除记录 {group.excludedRecordCount} 条 · 仅供预览与审计，不影响本账本成本，也不会写入正式利润。</small></section>)}</div></details> : null}
-          {(sourceText.trim() || locked || !persistedCostRows.length) ? <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "正在自动核验本次回传，请稍后查看结果。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>重试已处理异常</Button> : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div> : null}
+          {(sourceText.trim() || locked || !persistedCostRows.length) ? <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "正在自动核验本次回传，请稍后查看结果。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? (['pending', 'loaded'].includes(currentInbox?.status) ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>{reviewAdoptionFailure ? "重试自动采用" : "重试已处理异常"}</Button> : null) : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div> : null}
           {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按完整账本范围核对，页面筛选不改变采用范围；人工有效值始终优先，异常证据保留。</p> : null}
         </Panel>
       </div>

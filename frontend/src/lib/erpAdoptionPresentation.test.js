@@ -1,6 +1,16 @@
 import { expect, it } from "vitest";
 import { ERP_ADOPTION_ITEM_LABELS, describeErpAdoptionReason, groupAdoptionExceptions, summarizeAdoptionForDisplay } from "./erpAdoptionPresentation";
 
+it('distinguishes a saved receipt with failed adoption from missing procurement evidence', () => {
+  const failure = { name: 'Error', message: '隔离测试失败' };
+  expect(summarizeAdoptionForDisplay(null, { status: 'loaded', failure })).toMatchObject({
+    title: 'ERP 自动采用未完成', automaticCount: 0,
+    details: '回传证据已保存，系统将继续重试。失败原因：隔离测试失败',
+  });
+  expect(summarizeAdoptionForDisplay(null, { status: 'voided', failure }).title).toBe('本次 ERP 采用已撤回');
+  expect(summarizeAdoptionForDisplay(null, { status: 'rejected', failure }).title).toBe('本次 ERP 回传已拒绝');
+});
+
 it("separates automatically adopted costs from effective manual corrections and remaining exceptions", () => {
   expect(summarizeAdoptionForDisplay({ state: "partial", summary: {
     adoptedCount: 3, manualEffectiveCount: 1, anomalyCount: 1, evidenceIncompleteCount: 1, missingCount: 0, protectedCount: 0, supersededCount: 0, remainingCount: 2,

@@ -1,6 +1,7 @@
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
 import { parseSalesAddedDate } from "./salesAnalytics";
 import { purchaseTimestamp } from "./erpPurchaseSelection";
+import { normalizeErpCatalogFields } from "./erpCatalogFields";
 
 const text = value => String(value ?? "").trim() || null;
 const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
@@ -55,6 +56,8 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     totalPrice: totalPriceValue ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
     order1688: text(record?.order1688), purchaseOrderNo: text(record?.purchaseOrderNo), purchaseOrderId: text(record?.purchaseOrderId),
     supplierName: text(record?.supplierName), supplier1688Url: text(record?.supplier1688Url), statusFields,
+    ...(typeof record?.productName === "string" && record.productName.trim() ? { productName: record.productName.trim() } : {}),
+    ...normalizeErpCatalogFields(record, { includeMappings: false }),
     eligible: (record?.eligible !== false || (period != null && hasOnlyLedgerExclusions)) && normalizedExclusionReasons.length === 0,
     selectedForPreview: Boolean(record?.selectedForPreview), exclusionReasons: normalizedExclusionReasons,
   };

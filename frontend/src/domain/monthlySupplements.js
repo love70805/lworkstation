@@ -1,24 +1,39 @@
 import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@1";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@2";
 export const supplementFields = {
-  owner: ["姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人", "登记人"],
+  owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
+  date: ["日期", "登记日期"],
   store: ["店铺", "店铺名称"],
   platformSkc: ["SKC", "skc", "平台SKC"],
   supplierNumber: ["供方货号", "货号"],
   businessId: ["订单号", "补扣款单号", "扣款单号", "单号"],
   order1688: ["1688订单号", "1688单号"],
-  quantity: ["件数", "数量", "采购数量", "sku数量", "发货数量"],
-  amount: ["扣款金额", "金额"],
+  quantity: ["sku数量", "件数", "数量", "采购数量", "发货数量"],
+  amount: ["分摊后运费", "分摊金额", "扣款金额", "运费金额", "金额"],
 };
 const normalized = value => String(value ?? "").normalize("NFKC").trim();
 const headerKey = value => normalized(value).replace(/\s/g, "").toLowerCase();
+export function suggestSupplementStore(sourceName, stores=[]) {
+  const name=normalized(sourceName).toUpperCase();
+  const exactMatches=stores.filter(store=>normalized(store).toUpperCase()===name);
+  if(exactMatches.length)return exactMatches.length===1?exactMatches[0]:'';
+  if(!/^\d+(?:店)?$/.test(name))return '';
+  const matches=stores.filter(store=>/^\d+(?:店)?$/.test(normalized(store))&&normalized(store).replace(/店$/,'')===name.replace(/店$/,''));
+  return matches.length===1?matches[0]:'';
+}
 export function suggestSupplementMapping(headers) {
-  return Object.fromEntries(Object.entries(supplementFields).map(([field, aliases]) => [field, String(headers.findIndex(header => aliases.some(alias => headerKey(header) === headerKey(alias))))]));
+  return Object.fromEntries(Object.entries(supplementFields).map(([field, aliases]) => [field, String(aliases.map(alias=>headers.findIndex(header=>headerKey(header)===headerKey(alias))).find(index=>index>=0)??-1)]));
+}
+export function supplementMarkers(source, kind) {
+  const mapping=source.mapping??suggestSupplementMapping(supplementHeaders(source,source.headerRow));
+  const column=Number(mapping[kind==='dispatch'?'owner':'supplierNumber']);
+  const start=source.sourceRows?source.sourceRows.indexOf(source.headerRow):source.headerRow-1;
+  return [...new Set(source.cells.slice(start+1).map(row=>normalized(row[column])).filter(value=>value&&!['登记人','姓名','供方货号','货号','无'].includes(value)))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
 }
 export function supplementHeaders(source,headerRow){const index=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;return source.cells[index]??[];}
-export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", ownerField = "owner", store = "", includeAll = false } = {}) {
+export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store = "", stores = [], includeAll = false } = {}) {
   const cells = source.cells ?? [];
   const headerIndex=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;
   if(headerIndex<0||headerIndex>=cells.length)throw new Error("表头行不在来源记录中。");
@@ -29,24 +44,58 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
   if (!includeAll && !(Number(fields[ownerField]) >= 0)) throw new Error("请映射本人姓名或供方货号列。");
   if (!(Number(fields[kind === "dispatch" ? "quantity" : "amount"]) >= 0)) throw new Error("请映射数量或扣款金额列。");
   const rows = [], errors = [], ignored = [];
+  let group=null;
   for (let index = headerIndex+1; index < cells.length; index++) {
     const values = cells[index];
-    if (!values.some(value => normalized(value))) continue;
+    if (!values.some(value => normalized(value))) {group=null;continue;}
     const sourceRow = source.sourceRows?.[index] ?? index + 1;
-    const get = field => values[Number(fields[field])] ?? "";
-    if (values.some(value => /^(合计|总计|小计|总合计|汇总)([:：\s]|$)/.test(normalized(value)))) { ignored.push({ sourceRow, reason:"total" }); continue; }
-    if (headerKey(get(kind === "dispatch" ? "quantity" : "amount")) === headerKey(headers[Number(fields[kind === "dispatch" ? "quantity" : "amount"])])) { ignored.push({ sourceRow, reason:"header" }); continue; }
-    if (!includeAll && !normalized(get(ownerField)).includes(marker)) { ignored.push({ sourceRow, reason:"owner_excluded" }); continue; }
+    const mergedFrom={};
+    const get = field => {
+      const column=Number(fields[field]), value=values[column]??'';
+      if(normalized(value)||!['owner','date','store','platformSkc','order1688'].includes(field))return value;
+      const merge=source.merges?.find(range=>range.s.c===column&&range.e.c===column&&range.s.r<index&&range.e.r>=index);
+      if(!merge)return value;
+      mergedFrom[field]=merge.s.r+1;
+      return cells[merge.s.r]?.[column]??'';
+    };
+    if (!normalized(get('businessId')) && values.some(value => /^(合计|总计|小计|总合计|汇总)([:：\s]|$)/.test(normalized(value)))) {group=null;ignored.push({ sourceRow, reason:"total" }); continue; }
+    if (headerKey(get(kind === "dispatch" ? "quantity" : "amount")) === headerKey(headers[Number(fields[kind === "dispatch" ? "quantity" : "amount"])])) {group=null;ignored.push({ sourceRow, reason:"header" }); continue; }
+    if(kind==='deduction'&&!['businessId','platformSkc','supplierNumber','amount'].some(field=>normalized(get(field)))){ignored.push({sourceRow,reason:'separator'});continue;}
+    let owner=normalized(get(kind==='dispatch'?'owner':'supplierNumber')), sourceStore=normalized(get('store')), inheritedFrom=null;
+    let platformSkc=normalized(get('platformSkc')), order1688=normalized(get('order1688'));
+    const inheritedIdentifiers={};
+    if(kind==='dispatch'){
+      // A damaged first header may still contain recognisable dates. Never infer a name from it.
+      const date=normalized(get('date')) || (/^(?:\d{4}[-/.年])?\d{1,2}[-/.月]\d{1,2}(?:日)?$/.test(normalized(values[0]))?normalized(values[0]):'');
+      if (date&&date!==group?.date) group=null;
+      // A registrant can span stores; changing stores resets product/order identity only.
+      if (group&&sourceStore&&sourceStore!==group.store) group={owner:group.owner,date:group.date,sourceRow:group.sourceRow,store:sourceStore};
+      const hasOrder=normalized(get('businessId'))||(owner&&normalized(get('quantity')));
+      if(!hasOrder){group=null;ignored.push({sourceRow,reason:'separator'});continue;}
+      if(owner){
+        if(group?.owner!==owner)group=null;
+        sourceStore=sourceStore||group?.store||'';
+        group={...group,owner,store:sourceStore,date:date||group?.date||'',sourceRow};
+      }else if(group){owner=group.owner;sourceStore=sourceStore||group.store;inheritedFrom=group.sourceRow;}
+      else {errors.push({sourceRow,message:'连续记录的登记人归属不确定，请核对日期/分组并补齐来源登记人。'});continue;}
+      if(platformSkc&&platformSkc!==group.platformSkc){group.order1688='';group.order1688Row=null;}
+      if(platformSkc){group.platformSkc=platformSkc;group.skcRow=sourceRow;}
+      else if(group.platformSkc){platformSkc=group.platformSkc;inheritedIdentifiers.platformSkc=group.skcRow;}
+      if(order1688){group.order1688=order1688;group.order1688Row=sourceRow;}
+      else if(platformSkc&&group.order1688){order1688=group.order1688;inheritedIdentifiers.order1688=group.order1688Row;}
+    }
+    if (!includeAll && !(kind==='deduction'&&matchMode==='contains'?owner.includes(marker):owner===marker)) { ignored.push({ sourceRow, reason:"owner_excluded" }); continue; }
     const amount = decimalSource(get(kind === "dispatch" ? "quantity" : "amount"), null);
-    if (amount === null || (kind === "dispatch" && Number(amount) < 0)) { errors.push({ sourceRow, message:"数量或金额无效，请核对源行/映射。" }); continue; }
+    if (amount === null || (kind === "dispatch" && !/^\d+$/.test(exact(amount)))) { errors.push({ sourceRow, message:"数量须为非负整数，金额须为有效数值，请核对源行/映射。" }); continue; }
     const identifiers = ["businessId", "order1688", "platformSkc", "supplierNumber"];
     if (identifiers.some(field => typeof get(field) === "number" && (!Number.isSafeInteger(get(field)) || Math.abs(get(field)) >= 1e15))) { errors.push({ sourceRow, message:"源表数字标识符可能已丢失精度，请使用原始文本单号。" }); continue; }
-    const sourceStore = normalized(get("store"));
-    const targetStore = sourceStore || normalized(store);
+    const targetStore = sourceStore ? suggestSupplementStore(sourceStore,stores)||sourceStore : normalized(store);
     if (kind === "deduction" && !targetStore) { errors.push({ sourceRow, message:"请按实际源列或工作表映射店铺。" }); continue; }
-    rows.push({ ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), kind, ownerMarker: normalized(get(ownerField)), originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceRow, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}) } : { signedAmountExact: exact(amount) }) });
+    const mapped=new Set(Object.values(fields).map(Number).filter(value=>value>=0));
+    const remarks=values.flatMap((value,col)=>!mapped.has(col)&&normalized(value)?[{column:col+1,header:normalized(headers[col]),value:normalized(value)}]:[]);
+    rows.push({ ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceRow, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}) } : { signedAmountExact: exact(amount) }) });
   }
-  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, headerRow, mapping:fields, selection:{ownerMarker:marker,ownerField,includeAll,store}, parserVersion:SUPPLEMENT_PARSER_VERSION } };
+  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, headerRow, mapping:fields, selection:{ownerMarker:marker,ownerField,matchMode,includeAll,store}, parserVersion:SUPPLEMENT_PARSER_VERSION } };
 }
 
 export function normalizeSupplementCandidate(input, { ledger, stores }) {
@@ -58,20 +107,22 @@ export function normalizeSupplementCandidate(input, { ledger, stores }) {
     if (!row.manual && (!row.fileHash || !row.sourceSheet || !(Number(row.sourceRow) >= 1))) throw new Error("源行缺少可追溯位置。");
     return { ...row, ...(input.kind === "dispatch" ? {quantityExact:exact(row.quantityExact,{nonnegative:true})} : {signedAmountExact:exact(row.signedAmountExact)}) };
   });
-  const identities = new Set(), businessIds = new Set();
+  const identities = new Set(), businessIds = new Map(), conflicts=[];
   for (const row of rows) {
     const key = canonicalJson([row.fileHash,row.sourceSheet,row.sourceRow,row.manual ? row.store : null]);
     if (identities.has(key)) throw new Error("候选包含重复源行，请移除重复来源后重新采用。");
     identities.add(key);
     if (row.businessId) {
       const business = canonicalJson([row.store,row.businessId,row.platformSkc,row.supplierNumber]);
-      if (businessIds.has(business)) throw new Error("候选包含相同业务单号的冲突记录，请核对并保留正确来源；不会按金额自动去重。");
-      businessIds.add(business);
+      const previous=businessIds.get(business);
+      if (previous && previous.fileHash!==row.fileHash) conflicts.push({businessId:row.businessId,platformSkc:row.platformSkc,sourceName:row.sourceName,sourceSheet:row.sourceSheet,sourceRow:row.sourceRow,previousSourceName:previous.sourceName,previousSourceRow:previous.sourceRow});
+      if (!previous) businessIds.set(business,row);
     }
   }
-  const quantityExact = input.kind === "dispatch" ? exact(input.mode === "manual" ? input.adoptedQuantityExact : input.adoptedQuantityExact ?? exactSum(rows,"quantityExact"),{nonnegative:true}) : null;
+  const quantityExact = input.kind === "dispatch" ? exact(input.mode === "manual" ? input.adoptedQuantityExact : exactSum(rows,"quantityExact"),{nonnegative:true}) : null;
+  if(input.kind==='dispatch'&&(!/^\d+$/.test(quantityExact)||rows.some(row=>!/^\d+$/.test(row.quantityExact))))throw new Error('代发数量必须为非负整数。');
   if (input.kind === "dispatch" && !rows.length && input.mode !== "manual") throw new Error("没有有效代发记录，请检查来源和本人筛选。");
   if (input.kind === "deduction" && !rows.length) throw new Error("扣款尚未取得；真实零扣款请明确录入零值。");
   const coveredStores = [...new Set(rows.map(row => row.store).filter(Boolean))];
-  return { kind:input.kind, period:ledger.period, mode:input.mode ?? "files", sources:input.sources ?? [], rows, adoptedQuantityExact:quantityExact, signedAmountExact:input.kind === "deduction" ? exactSum(rows,"signedAmountExact") : null, coveredStores, missingStores:input.kind === "deduction" ? stores.filter(store=>!coveredStores.includes(store)) : [], parserVersion:SUPPLEMENT_PARSER_VERSION };
+  return { kind:input.kind, period:ledger.period, mode:input.mode ?? "files", sources:input.sources ?? [], rows, conflicts, reviewedCrossFileConflicts:Boolean(input.reviewedCrossFileConflicts), adoptedQuantityExact:quantityExact, signedAmountExact:input.kind === "deduction" ? exactSum(rows,"signedAmountExact") : null, coveredStores, missingStores:input.kind === "deduction" ? stores.filter(store=>!coveredStores.includes(store)) : [], parserVersion:SUPPLEMENT_PARSER_VERSION };
 }

@@ -17,10 +17,16 @@ export function describeErpAdoptionReason(reason) {
     .map(value => ERP_ADOPTION_REASON_LABELS[value] ?? `原因代码 ${value}`).join('；');
 }
 
-export function summarizeAdoptionForDisplay(adoption, { status = null } = {}) {
-  if (!adoption?.summary) return null;
+export function summarizeAdoptionForDisplay(adoption, { status = null, failure = null } = {}) {
   if (status === "voided") return { title: "本次 ERP 采用已撤回", details: "原回传与撤回记录已保留，请核对当前有效成本。", automaticCount: 0, remainingCount: 0 };
   if (status === "rejected") return { title: "本次 ERP 回传已拒绝", details: "原回传记录已保留，请检查拒绝原因。", automaticCount: 0, remainingCount: 0 };
+  if (failure && ['pending', 'loaded'].includes(status)) return {
+    title: 'ERP 自动采用未完成',
+    details: `回传证据已保存，系统将继续重试。失败原因：${failure.message}`,
+    automaticCount: Math.max(0, (adoption?.summary?.adoptedCount ?? 0) - (adoption?.summary?.manualEffectiveCount ?? 0)),
+    remainingCount: adoption?.summary?.remainingCount ?? 0,
+  };
+  if (!adoption?.summary) return null;
   const summary = adoption.summary;
   const reasonText = describeErpAdoptionReason(adoption.reason);
   const automaticCount = Math.max(0, (summary.adoptedCount ?? 0) - (summary.manualEffectiveCount ?? 0));

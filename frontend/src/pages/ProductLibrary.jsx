@@ -317,7 +317,7 @@ function ProductLibraryView({ workspaceId, view }) {
       onOpenLedger={ledgerId => navigate(`/profit?ledger=${encodeURIComponent(ledgerId)}`)}
       onEdit={() => navigate(row.original.productId
         ? `/products/edit?product=${encodeURIComponent(row.original.productId)}`
-        : `/products/edit?skc=${encodeURIComponent(row.original.variants[0]?.platformSkc ?? "")}&sku=${encodeURIComponent(row.original.variants[0]?.platformSku ?? "")}&name=${encodeURIComponent(row.original.productName ?? "")}`)}
+        : `/products/edit?skc=${encodeURIComponent(row.original.variants[0]?.platformSkcConflict ? "" : row.original.variants[0]?.platformSkc ?? "")}&sku=${encodeURIComponent(row.original.variants[0]?.platformSku ?? "")}`)}
     />,
   }], [navigate]);
 

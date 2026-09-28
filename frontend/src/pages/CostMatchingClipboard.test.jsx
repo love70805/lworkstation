@@ -7,12 +7,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CostMatchingContent } from './CostMatching';
 import { costDraftKey } from '../lib/costMatchingDraft';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], notify: vi.fn(), register: vi.fn(), publish: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], notify: vi.fn(), register: vi.fn(), publish: vi.fn(), retry: vi.fn() }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
 vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : initial }));
 vi.mock('../components/UI', async importOriginal => ({ ...await importOriginal(), useToast: () => ({ notify: mocks.notify }) }));
 vi.mock('../lib/autoErpRequest', async importOriginal => ({ ...await importOriginal(), ensureAutoErpRequest: mocks.register }));
-vi.mock('../data/database', async importOriginal => ({ ...await importOriginal(), savePublishedErpCostBatch: mocks.publish }));
+vi.mock('../data/database', async importOriginal => ({ ...await importOriginal(), savePublishedErpCostBatch: mocks.publish, processErpCostInboxAdoption: mocks.retry }));
 
 let container, root, writeText;
 const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
@@ -28,7 +28,7 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   mocks.inboxRecords = [];
-  mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.register.mockReset().mockResolvedValue(null);
+  mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.register.mockReset().mockResolvedValue(null);
   writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText } });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -137,6 +137,48 @@ it('recognizes a restored draft already in the automatic inbox and explains its 
   expect(container.textContent).toContain('旧请求无法从当前账本重建平台 SKU 范围');
   expect(button('采用手动批次成本')).toBeUndefined();
   expect(button('重试已处理异常')).toBeDefined();
+});
+
+it('shows durable automatic-adoption failures and retries through the validated backend without manual resolutions', async () => {
+  const ledgerId = 'FAILED-AUTO';
+  localStorage.setItem(costDraftKey(ledgerId), JSON.stringify({ sourceText: '{}', batchEnvelope: { batchId: 'B-FAILED', summary: { outputRowCount: 0, warehouseSkuCount: 0 } }, resolutions: [], updatedAt: Date.now() }));
+  mocks.inboxRecords = [{ id: 'I-FAILED', batchId: 'B-FAILED', ledgerId, workspaceId: 'W', status: 'pending', receivedVia: 'desktop-inbox', receivedAt: '2026-09-28T00:00:00Z', adoptionFailure: { message: '隔离采用故障' } }];
+  mocks.retry.mockResolvedValue({ status: 'pending', adoption: { summary: { adoptedCount: 0, remainingCount: 1 } } });
+  await render(['SKC-1'], 'ready', { ledgerId });
+  expect(container.textContent).toContain('ERP 自动采用未完成');
+  expect(container.textContent).toContain('隔离采用故障');
+  expect(button('重试自动采用').disabled).toBe(false);
+  await act(async () => button('详情').click());
+  expect(container.querySelector('.cost-detail-current').textContent).toContain('回传证据已保存');
+  await act(async () => button('重试自动采用').click());
+  expect(mocks.retry).toHaveBeenCalledExactlyOnceWith({ inboxId: 'I-FAILED', resolutions: [] });
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+
+it.each(['rejected', 'voided'])('does not promise recovery or retry in details after a failed receipt becomes %s', async status => {
+  const ledgerId = `FAILED-${status}`;
+  localStorage.setItem(costDraftKey(ledgerId), JSON.stringify({ sourceText: '{}', batchEnvelope: { batchId: 'B-FAILED', summary: { outputRowCount: 0, warehouseSkuCount: 0 } }, resolutions: [], updatedAt: Date.now() }));
+  mocks.inboxRecords = [{ id: 'I-FAILED', batchId: 'B-FAILED', ledgerId, workspaceId: 'W', status, receivedAt: '2026-09-28T00:00:00Z', adoptionFailure: { message: '历史故障' } }];
+  await render(['SKC-1'], 'ready', { ledgerId });
+  expect(button('重试自动采用')).toBeUndefined();
+  await act(async () => button('详情').click());
+  const detail = container.querySelector('.cost-detail-current').textContent;
+  expect(detail).not.toContain('自动采用未完成');
+  expect(detail).not.toContain('继续重试');
+  expect(detail).not.toContain('历史故障');
+  expect(mocks.retry).not.toHaveBeenCalled();
+});
+
+it('keeps a newer failed receipt visible while reviewing an older draft', async () => {
+  const ledgerId = 'OLD-DRAFT-NEW-FAILURE';
+  localStorage.setItem(costDraftKey(ledgerId), JSON.stringify({ sourceText: '{}', batchEnvelope: { batchId: 'B-OLD', summary: { outputRowCount: 0, warehouseSkuCount: 0 } }, resolutions: [], updatedAt: Date.now() }));
+  mocks.inboxRecords = [
+    { id: 'I-OLD', batchId: 'B-OLD', ledgerId, workspaceId: 'W', status: 'pending', receivedVia: 'desktop-inbox', receivedAt: '2026-09-27T00:00:00Z' },
+    { id: 'I-NEW', batchId: 'B-NEW', ledgerId, workspaceId: 'W', status: 'pending', receivedVia: 'desktop-inbox', receivedAt: '2026-09-28T00:00:00Z', adoptionFailure: { message: '新批次隔离故障' } },
+  ];
+  await render(['SKC-1'], 'ready', { ledgerId });
+  expect(container.textContent).toContain('较新的 ERP 回传自动采用未完成：新批次隔离故障');
+  expect(mocks.publish).not.toHaveBeenCalled();
 });
 it.each([
   { initialEntry: '/?missing=1', costs: [formalCost], title: '本月成本已齐' },

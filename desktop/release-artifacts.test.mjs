@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { organizeReleaseArtifacts, validateLatestArtifacts } from "./release-artifacts.mjs";
+import { canonicalInstallerName, organizeReleaseArtifacts, validateLatestArtifacts } from "./release-artifacts.mjs";
 
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "lworkstation-release-test-"));
 const buildRoot = path.join(fixture, "build");
@@ -12,6 +13,8 @@ const version = "0.2.6-beta.4";
 const metadataFile = "beta.yml";
 const oldArtifact = `Shopeers 工作站 Setup ${version}.exe`;
 const artifactName = `Lworkstation-Setup-${version}.exe`;
+assert.equal(canonicalInstallerName('Lworkstation-Setup-0.3.0.exe'),canonicalInstallerName('Lworkstation Setup 0.3.0.exe'));
+assert.notEqual(canonicalInstallerName('Lworkstation-Setup-0.3.1.exe'),canonicalInstallerName('Lworkstation Setup 0.3.0.exe'));
 
 try {
   fs.mkdirSync(buildRoot, { recursive: true });
@@ -42,6 +45,21 @@ try {
   fs.rmSync(extraArtifact);
   fs.writeFileSync(path.join(latestRoot, metadataFile), `version: ${version}\npath: ${oldArtifact}\n`);
   assert.throws(() => validateLatestArtifacts({ latestRoot, artifactName, version, metadataFile }), /non-current installer/);
+  const rcVersion = "0.3.0-rc.1";
+  const rcArtifact = `Lworkstation-Setup-${rcVersion}.exe`;
+  const rcRoot = path.join(fixture, "releases", "candidates", rcVersion);
+  const rcBytes = Buffer.from("isolated-rc-installer");
+  const sha512 = crypto.createHash("sha512").update(rcBytes).digest("base64");
+  fs.writeFileSync(path.join(buildRoot, rcArtifact), rcBytes);
+  fs.writeFileSync(path.join(buildRoot, `${rcArtifact}.blockmap`), "isolated-rc-blockmap");
+  const rcMetadata = `version: ${rcVersion}\nfiles:\n  - url: ${rcArtifact}\n    size: ${rcBytes.length}\n    sha512: ${sha512}\npath: ${rcArtifact}\nsha512: ${sha512}\n`;
+  fs.writeFileSync(path.join(buildRoot, "rc.yml"), rcMetadata);
+  organizeReleaseArtifacts({ buildRoot, latestRoot: rcRoot, historyRoot, artifactName: rcArtifact, version: rcVersion, metadataFile: "rc.yml" });
+  validateLatestArtifacts({ latestRoot: rcRoot, artifactName: rcArtifact, version: rcVersion, metadataFile: "rc.yml" });
+  for (const invalid of [rcMetadata.replace(`size: ${rcBytes.length}`, "size: 1"), rcMetadata.replaceAll(sha512, "incorrect")]) {
+    fs.writeFileSync(path.join(rcRoot, "rc.yml"), invalid);
+    assert.throws(() => validateLatestArtifacts({ latestRoot: rcRoot, artifactName: rcArtifact, version: rcVersion, metadataFile: "rc.yml" }), /SHA512\/size/);
+  }
   console.log("release artifact fixtures passed");
 } finally {
   fs.rmSync(fixture, { recursive: true, force: true });

@@ -11,11 +11,9 @@ import {
   getSelectionReferenceSnapshot,
   getLatestErpCostInbox,
   listProductCatalogRecords,
-  markErpCostInboxStatus,
   receiveErpCostInboxEnvelope,
   saveErpCostRequest,
   saveProductCatalogRecord,
-  savePublishedErpCostBatch,
   saveSalesImport,
 } from "./database";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
@@ -135,9 +133,11 @@ describe("同一平台 SKC 下多个平台 SKU 的 ERP 收件到利润回流", (
       envelope: buildErpCostInboxEnvelope({ batch, deliveryId: "ERP-DELIVERY-MULTI-SKU", sentAt: "2026-08-08T10:05:01.000Z" }),
       receivedVia: "integration-test",
     });
-    expect(inbox).toMatchObject({ batchId: batch.batchId, status: "pending", idempotent: false });
+    expect(inbox).toMatchObject({ batchId: batch.batchId, status: "applied", idempotent: false });
 
-    const received = await getLatestErpCostInbox(ledger.id);
+    expect(inbox.adoptionError).toBeUndefined();
+    expect(inbox.adoption.summary).toMatchObject({ adoptedCount: 2, remainingCount: 0 });
+    const received = await db.erpCostInbox.get(inbox.id);
     const rows = parseErpCostBatchJson(JSON.stringify(received.envelope.batch)).rows;
     const reconciliation = reconcileErpCostRows({
       workspaceId: DEFAULT_WORKSPACE_ID,
@@ -148,20 +148,8 @@ describe("同一平台 SKC 下多个平台 SKU 的 ERP 收件到利润回流", (
     expect(reconciliation.summary).toMatchObject({ expectedCount: 2, matchedCount: 2, missingCount: 0 });
     expect(reconciliation.matches.map((row) => row.platformSkc)).toEqual(["SKC-MULTI-1", "SKC-MULTI-1"]);
 
-    await markErpCostInboxStatus(received.id, "loaded");
-    const published = await savePublishedErpCostBatch({
-      ledgerId: ledger.id,
-      inboxId: received.id,
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      requestId: request.id,
-      reconciliation,
-      sourceName: "自动收件 · ERP-BATCH-MULTI-SKU",
-      inputHash: "multi-sku-hash",
-      sourceEnvelope: received.envelope.batch,
-      publishedBy: "multi-sku-test",
-    });
-    expect(published.matchedCount).toBe(2);
-    expect(await db.erpCostInbox.get(received.id)).toMatchObject({ status: "applied", appliedBatchId: published.batchId });
+    expect(received.appliedBatchId).toBeTruthy();
+    expect(await db.erpCostRows.where('batchId').equals(received.appliedBatchId).count()).toBe(2);
 
     // ERP 成本发布后应立即回流选品工作台；不依赖本月利润表先定稿。
     const [catalogAfterErpPublish] = await listProductCatalogRecords();

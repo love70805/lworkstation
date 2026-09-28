@@ -111,6 +111,28 @@ describe("ERP cost reconciliation", () => {
     return { recordId, warehouseSku, purchaseDate, unitPrice, quantity, eligible: true, exclusionReasons: [] };
   }
 
+  it("carries catalog candidates while keeping auxiliary mappings out of formal matching", () => {
+    const purchaseCatalog = { picturesLinking: "https://cbu01.alicdn.com/img/purchase.jpg", purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-1", lineNumber: 0, raw: { token: "discard" } };
+    const mappings = [
+      { platformSku: "SKU-A", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "采购商品", imageUrl: "https://cbu01.alicdn.com/img/one.jpg", attribute: "红色", raw: { token: "discard" } },
+      { platformSku: "SKU-AUX", platformSkc: "SKC-1", warehouseSku: "WH-1", attribute: "蓝色" },
+      { platformSku: "SKU-AUX", platformSkc: "SKC-CONFLICT", warehouseSku: "WH-1", attribute: "冲突候选" },
+    ];
+    const row = { platformSku: "SKU-A", platformSkc: "SKC-1", warehouseSku: "WH-1", previewUnitCost: 4.59, purchaseRecords: [{ ...purchaseRecord("R-CATALOG", "WH-1", "2026-07-01", 4.59), purchaseCatalog }], evidenceComplete: true, imageUrl: mappings[0].imageUrl, attribute: "红色", purchaseCatalog, catalogMappings: mappings, catalogQuerySkcs: ["SKC-1"], supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商" }] };
+    const result = reconcileErpCostRows({ workspaceId: "workspace-a", period: "2026-08", expectedSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-1" }, { platformSku: "SKU-MISSING" }], costRows: [row, { ...row, platformSku: "SKU-AUX", ledgerScopeRole: "auxiliary" }] });
+    expect(result.matches[0]).toMatchObject({ status: "matched", unitCost: 4.59, imageUrl: row.imageUrl, attribute: "红色", catalogQuerySkcs: ["SKC-1"], supplier1688Links: [{ supplierName: "甲供应商" }] });
+    expect(result.matches[0].catalogMappings).toHaveLength(3);
+    expect(result.matches[0].catalogMappings[0]).not.toHaveProperty("raw");
+    expect(result.matches[0].purchaseCatalog).toMatchObject({ purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", lineNumber: "0" });
+    expect(result.matches[0].purchaseRecords[0].purchaseCatalog).toEqual(result.matches[0].purchaseCatalog);
+    expect(result.matches[0].costDecision.purchaseRecords[0]).toMatchObject({ quantity: 1, unitPrice: 4.59, purchaseCatalog: result.matches[0].purchaseCatalog });
+    expect(JSON.stringify(result.matches[0].purchaseCatalog)).not.toContain("discard");
+    expect(result.matches[1].status).toBe("missing");
+    expect(result.auxiliaryCostRows).toHaveLength(1);
+    expect(result.auxiliaryCostRows[0].catalogMappings).toEqual(result.matches[0].catalogMappings);
+    expect(result.auxiliaryCostRows[0].purchaseCatalog).toEqual(result.matches[0].purchaseCatalog);
+  });
+
   it("keeps same-warehouse auxiliary variants out of matching and warehouse fallback", () => {
     const result = reconcileErpCostRows({
       workspaceId: "workspace-a",

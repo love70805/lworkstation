@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import releaseAfterPack from "./release-after-pack.cjs";
 import { artifactNameFromPattern, validateLatestArtifacts } from "./release-artifacts.mjs";
 
 const desktopRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -43,10 +44,11 @@ for (const requirement of plan.requiredCommits) {
 }
 
 const prerelease = plan.version.includes("-");
-const metadataFile = prerelease ? "beta.yml" : "latest.yml";
+const localRc = releaseAfterPack.isRcVersion(plan.version);
+const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
 const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
 const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
-const releaseRoot = prerelease
+const releaseRoot = (localRc || plan.candidateOnly) ? path.join(repositoryRoot, "releases", "candidates", plan.version) : prerelease
   ? path.join(repositoryRoot, "releases", "prerelease", plan.version)
   : path.join(repositoryRoot, "releases", "latest");
 const artifactPath = path.join(releaseRoot, artifactName);
@@ -63,6 +65,7 @@ console.log(JSON.stringify({
   artifact: artifactName,
   metadata: metadataFile,
   prerelease,
+  localCandidateOnly: localRc || plan.candidateOnly === true,
   bytes: artifact.byteLength,
   sha256
 }, null, 2));

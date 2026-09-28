@@ -180,7 +180,7 @@ function ProductEditor() {
 
   useEffect(() => {
     if (!snapshot) return;
-    const key = `${snapshot.mode}:${snapshot.capture?.id ?? snapshot.product?.id ?? "new"}`;
+    const key = `${snapshot.mode}:${snapshot.capture?.id ?? snapshot.product?.id ?? `${referenceSkc}:${referenceSku}:${referenceName}`}`;
     if (loadedKeyRef.current === key) return;
     loadedKeyRef.current = key;
     const nextDraft = {
@@ -243,7 +243,7 @@ function ProductEditor() {
         next.suppliers = syncSupplierVariantRenamed(current.suppliers, previousVariant?.platformSku, value, index);
       } else if (current.suppliers?.length && current.suppliers[0]?.variants?.length) {
         next.suppliers = current.suppliers.map((supplier, supplierIndex) => supplierIndex === 0
-          ? { ...supplier, variants: supplier.variants.map((variant, variantIndex) => variantIndex === index ? { ...variant, [field]: value } : variant) }
+          ? { ...supplier, variants: supplier.variants.map(variant => String(variant.platformSku).trim().toUpperCase() === String(previousVariant.platformSku).trim().toUpperCase() ? { ...variant, [field]: value } : variant) }
           : supplier);
       }
       return next;
@@ -284,13 +284,18 @@ function ProductEditor() {
     }));
   };
 
-  const updateSupplierVariant = (supplierIndex, variantIndex, field, value) => {
+  const updateSupplierVariant = (supplierIndex, platformSku, field, value) => {
     setSaved(false);
     setDraft((current) => ({
       ...current,
-      suppliers: current.suppliers.map((supplier, index) => index === supplierIndex
-        ? { ...supplier, variants: supplier.variants.map((variant, index) => index === variantIndex ? { ...variant, [field]: value } : variant) }
-        : supplier),
+      suppliers: current.suppliers.map((supplier, index) => {
+        if (index !== supplierIndex) return supplier;
+        const key = String(platformSku).trim().toUpperCase();
+        const existing = supplier.variants.find(variant => String(variant.platformSku).trim().toUpperCase() === key);
+        return { ...supplier, variants: existing
+          ? supplier.variants.map(variant => variant === existing ? { ...variant, [field]: value } : variant)
+          : [...supplier.variants, { ...supplierVariantFor(platformSku), [field]: value }] };
+      }),
     }));
   };
 
@@ -400,6 +405,31 @@ function ProductEditor() {
         <div className="page-actions">{isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !validation.valid || !statusTransitionReady} onClick={saveDraft}>保存修改</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!validation.valid || !statusTransitionReady || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
       </div>
 
+      {snapshot.prefill?.source === "erp" || snapshot.prefill?.warnings?.length ? <Panel className="erp-catalog-prefill">
+        <div className="panel-header"><div className="panel-title"><h2>ERP 档案资料</h2><span className="panel-subtitle">已带入 {snapshot.prefill.skuCount} 个关联 SKU；保存后建立档案</span></div><Badge tone="info">ERP 来源</Badge></div>
+        <p className="erp-catalog-note">已有档案资料优先保留。采购规格与平台 SKU 属性分别展示；采购比例保持原义，供应商报价需有独立报价记录。</p>
+        {snapshot.prefill.warnings.map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
+        <details><summary>核对 ERP 资料与供应商来源</summary>
+          <ul className="erp-catalog-evidence">{snapshot.prefill.sources.map((item, index) => <li key={index}><strong className="mono">{item.platformSku}</strong><span>{item.platformSkc} · {item.attribute || "平台 SKU 属性未提供"} · {item.productName || "商品名称尚未取得"}</span>{item.imageUrl ? <a href={item.imageUrl} target="_blank" rel="noreferrer">查看图片<ExternalLink size={12} /></a> : <span>商品图片未提供</span>}{item.trusted === false ? <span>映射关系待核对，未自动采用</span> : null}{item.supplierSummary?.link ? <><span>旧供应商摘要：{item.supplierSummary.supplierName || "未提供名称"}</span><a href={item.supplierSummary.link.url} target="_blank" rel="noreferrer">旧链接未能确认采购对应<ExternalLink size={12} /></a></> : null}</li>)}</ul>
+          {snapshot.prefill.purchases?.length ? <>
+            <h3 className="erp-purchase-heading">采购详情参考</h3>
+            <ul className="erp-catalog-evidence erp-purchase-evidence">{snapshot.prefill.purchases.map((item, index) => {
+              const purchase = item.purchaseCatalog;
+              return <li key={index}>
+                <strong>{item.supplierName || "供应商未提供"} · <span className="mono">{item.source.purchaseOrderNo || item.source.recordId || "采购明细"}{item.source.lineNumber != null ? ` · 明细行号 ${item.source.lineNumber}` : ""}</span></strong>
+                <span className="mono">仓库 {item.warehouseSku} · {item.platformSkus.join("、")}</span>
+                <span>采购规格：{purchase.purchaseSpecificationAndModel1688 || "未提供"}{purchase.model1688 ? ` · 型号/颜色：${purchase.model1688}` : ""}</span>
+                {purchase.specificationAndModel || purchase.productColor ? <span>仓库规格：{[purchase.specificationAndModel, purchase.productColor].filter(Boolean).join(" · ")}</span> : null}
+                {purchase.purchaseProportion1688 ? <span>采购比例：{purchase.purchaseProportion1688.replace(/^(\d+)-(\d+)$/, "$1:$2")}</span> : null}
+                {purchase.picturesLinking ? <a href={purchase.picturesLinking} target="_blank" rel="noreferrer">仓库图片<ExternalLink size={12} /></a> : null}
+                {purchase.pictureLink1688 ? <a href={purchase.pictureLink1688} target="_blank" rel="noreferrer">1688 采购图片<ExternalLink size={12} /></a> : null}
+              </li>;
+            })}</ul>
+          </> : null}
+          <ul className="erp-catalog-evidence">{snapshot.prefill.suppliers.map(item => <li key={item.id}><strong>{item.supplierName || "供应商名称待核对"}</strong><span className="mono">{[...new Set(item.sourceRecords.map(source => source.platformSku))].join("、")}</span>{item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceUrlKind === "product" ? "1688 商品" : "1688 供应商店铺"}<ExternalLink size={12} /></a> : <span>该采购记录未提供链接</span>}</li>)}</ul>
+        </details>
+      </Panel> : null}
+
       <div className="editor-grid">
         <div className="editor-left">
           <Panel className="product-gallery">
@@ -408,7 +438,7 @@ function ProductEditor() {
           </Panel>
 
           <Panel className="source-panel">
-            <div className="section-heading"><h2>1688 来源与报价</h2>{draft.sourceUrl ? <a className="inline-link" href={draft.sourceUrl} target="_blank" rel="noreferrer">打开来源<ExternalLink size={14} /></a> : null}</div>
+            <div className="section-heading"><h2>1688 来源与报价</h2>{draft.sourceUrl ? <a className="inline-link" href={draft.sourceUrl} target="_blank" rel="noreferrer">{draft.sourceUrlKind === "store" ? "供应商店铺" : "打开来源"}<ExternalLink size={14} /></a> : null}</div>
             <div className="form-field"><label>1688 来源链接</label><input aria-label="1688 来源链接" className="text-input" value={draft.sourceUrl} onChange={(event) => updateDraft("sourceUrl", event.target.value)} placeholder="https://detail.1688.com/offer/..." /></div>
             <div className="source-two-col">
               <div className="form-field"><label>1688 商品 ID</label><input aria-label="1688 商品 ID" className="text-input mono" value={draft.sourceProductId} onChange={(event) => updateDraft("sourceProductId", event.target.value)} /></div>
@@ -430,9 +460,22 @@ function ProductEditor() {
               return <div className="supplier-card" key={supplier.id ?? supplierIndex}>
                 <div className="supplier-card-heading"><strong>供应商 {supplierIndex + 1}</strong><button className="icon-button danger" aria-label={`删除供应商 ${supplierIndex + 1}`} title="删除供应商" onClick={() => removeSupplier(supplierIndex)}><Trash2 size={16} /></button></div>
                 <div className="source-two-col"><div className="form-field"><label>供应商名称</label><input className="text-input" value={supplier.supplierName ?? ""} onChange={(event) => updateSupplier(supplierIndex, "supplierName", event.target.value)} /></div><div className="form-field"><label>供应商编号</label><input className="text-input mono" value={supplier.supplierCode ?? ""} onChange={(event) => updateSupplier(supplierIndex, "supplierCode", event.target.value)} /></div></div>
-                <div className="source-two-col"><div className="form-field"><label>1688 采购链接</label><input className="text-input" value={supplier.sourceUrl ?? ""} onChange={(event) => updateSupplier(supplierIndex, "sourceUrl", event.target.value)} placeholder="https://detail.1688.com/offer/..." /></div><div className="form-field"><label>1688 商品 ID</label><input className="text-input mono" value={supplier.sourceProductId ?? ""} onChange={(event) => updateSupplier(supplierIndex, "sourceProductId", event.target.value)} /></div></div>
+                <div className="source-two-col"><div className="form-field"><label>1688 来源链接</label><input className="text-input" value={supplier.sourceUrl ?? ""} onChange={(event) => updateSupplier(supplierIndex, "sourceUrl", event.target.value)} placeholder="https://detail.1688.com/offer/..." /></div><div className="form-field"><label>1688 商品 ID</label><input className="text-input mono" value={supplier.sourceProductId ?? ""} onChange={(event) => updateSupplier(supplierIndex, "sourceProductId", event.target.value)} /></div></div>
                 <div className="source-two-col"><div className="form-field"><label>整单运费（CNY）</label><input className="text-input mono" type="number" min="0" step="0.01" value={supplier.shippingAmount ?? 0} onChange={(event) => updateSupplier(supplierIndex, "shippingAmount", event.target.value)} /></div><div className="form-field"><label>单份操作费（CNY）</label><input className="text-input mono" type="number" min="0" step="0.01" value={supplier.handlingFee ?? 0} onChange={(event) => updateSupplier(supplierIndex, "handlingFee", event.target.value)} /></div></div>
-                <div className="supplier-sku-grid supplier-sku-grid-detailed">{draft.variants.map((variant, variantIndex) => { const offer = supplier.variants[variantIndex] ?? {}; return <div className="supplier-sku-row" key={variant.platformSku || variant.id}><span className="mono">{variant.platformSku || "未填写 SKU"}</span><input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} 采购价`} className="table-input mono" type="number" min="0" step="0.01" placeholder="采购价/份" value={offer.purchaseUnitPrice ?? ""} onChange={(event) => updateSupplierVariant(supplierIndex, variantIndex, "purchaseUnitPrice", event.target.value)} /><input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} 采购份数`} className="table-input mono" type="number" min="0" step="1" placeholder="采购份数" value={offer.purchasePackCount ?? ""} onChange={(event) => updateSupplierVariant(supplierIndex, variantIndex, "purchasePackCount", event.target.value)} /><input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} 每份单品数`} className="table-input mono" type="number" min="1" step="1" placeholder="每份单品数" value={offer.unitsPerPack ?? 1} onChange={(event) => updateSupplierVariant(supplierIndex, variantIndex, "unitsPerPack", event.target.value)} /></div>; })}</div>
+                <div className="supplier-sku-grid supplier-sku-grid-detailed">{draft.variants.map(variant => {
+                  const offer = supplier.variants.find(item => String(item.platformSku).trim().toUpperCase() === String(variant.platformSku).trim().toUpperCase()) ?? {};
+                  return <div className="supplier-sku-row" key={variant.platformSku || variant.id}>
+                    <span className="mono">{variant.platformSku || "未填写 SKU"}</span>
+                    {[
+                      ["purchaseUnitPrice", "采购价/份", "采购价", "0.01", "0"],
+                      ["purchasePackCount", "采购份数", "采购份数", "1", "0"],
+                      ["unitsPerPack", "每份单品数", "每份单品数", "1", "1"],
+                    ].map(([field, label, accessibleLabel, step, min]) => <label className="supplier-quote-field" key={field}>
+                      <span>{label}</span>
+                      <input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} ${accessibleLabel}`} className="table-input mono" type="number" min={min} step={step} value={offer[field] ?? (field === "unitsPerPack" ? 1 : "")} onChange={event => updateSupplierVariant(supplierIndex, variant.platformSku, field, event.target.value)} />
+                    </label>)}
+                  </div>;
+                })}</div>
               </div>;
             })}
           </Panel>

@@ -22,7 +22,7 @@ import {
 } from "./database";
 import { buildErpCostRequest, reconcileErpCostRows } from "../domain/erpCosts";
 import { ERP_COST_RESOLUTION_VERSION } from "../domain/erpCostResolution";
-import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
+import { buildErpCostBatchEnvelope, validateErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope, parseErpInboxMessage } from "../domain/erpInboxContract";
 import { calculateExactProfitLine, PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
 import { resolveFormalCostDecision } from "../domain/costPolicy";
@@ -32,6 +32,35 @@ import { buildSyncPostgresPlan } from "../domain/syncPostgresPlan";
 import { describeEvidenceIssues } from "../lib/costMatching";
 
 const period = "2026-08";
+
+it("persists catalog carriers from verified source evidence and rejects page metadata substitution", async () => {
+  const { ledger, request } = await context();
+  const imageUrl = "https://cbu01.alicdn.com/img/one.jpg";
+  const purchaseCatalog = { picturesLinking: imageUrl, pictureLink1688: "https://cbu01.alicdn.com/img/1688.jpg", purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-A", purchaseOrderId: "PUR-1", purchaseOrderNo: "PO-1", lineNumber: 0, supplierId: "SUP-A", barcodeSkuid: "SKU-AUDIT", barcodeSkcid: "SKC-AUDIT", raw: { token: "discard" } };
+  const purchaseRecords = [
+    { ...record("CATALOG-A", 4.59, 10), productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog, supplierName: "甲供应商", supplier1688Url: "https://detail.1688.com/offer/730242606884.html", supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商", token: "discard" }] },
+    { ...record("CATALOG-B", 4.59, 5), purchaseCatalog: { ...purchaseCatalog, purchaseOrderDetailId: "DETAIL-B", lineNumber: 1, supplierId: "SUP-B" }, supplierName: "乙供应商", supplier1688Links: [{ type: "store", url: "https://shop123456789.1688.com", supplierName: "乙供应商" }] },
+  ];
+  const source = sourceEnvelope({ ledger, request, purchaseRecords });
+  source.rows[0] = { ...source.rows[0], productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog, catalogMappings: [
+    { platformSku: "SKU-AUDIT", platformSkc: "SKC-AUDIT", warehouseSku: "WH-AUDIT", productName: "采购商品", imageUrl, attribute: "红色", raw: { token: "discard" } },
+    { platformSku: "SKU-SIBLING", platformSkc: "SKC-AUDIT", warehouseSku: "WH-AUDIT", productName: "采购商品", attribute: "蓝色" },
+  ], supplier1688Links: purchaseRecords[0].supplier1688Links };
+  const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: request.expectedSkus, costRows: validateErpCostBatchEnvelope(source, { expectedSkus: request.expectedSkus }).rows });
+  Object.assign(reconciliation.matches[0], { productName: "页面伪造", imageUrl: "https://example.test/forged.jpg", attribute: "页面伪造", purchaseCatalog: { purchaseOrderDetailId: "FORGED", purchaseSpecificationAndModel1688: "页面伪造" }, catalogMappings: [{ platformSku: "FORGED" }], supplierName: "页面伪造", supplier1688Url: "https://shopforged.1688.com", supplier1688Links: [] });
+  await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source });
+  db.close(); await db.open();
+  const reopened = (await getLatestLedgerCosts(ledger.id))[0];
+  expect(reopened).toMatchObject({ unitCost: 4.59, productName: "采购商品", imageUrl, attribute: "红色", catalogQuerySkcs: ["SKC-AUDIT"], supplierName: "审计供应商", supplier1688Url: "https://detail.1688.com/offer/730242606884.html" });
+  expect(reopened.catalogMappings.map((mapping) => mapping.platformSku)).toEqual(["SKU-AUDIT", "SKU-SIBLING"]);
+  expect(reopened.purchaseCatalog).toMatchObject({ picturesLinking: imageUrl, pictureLink1688: purchaseCatalog.pictureLink1688, purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-A", lineNumber: "0", barcodeSkuid: "SKU-AUDIT", barcodeSkcid: "SKC-AUDIT" });
+  expect(reopened.purchaseRecords).toEqual(expect.arrayContaining([
+    expect.objectContaining({ recordId: "CATALOG-A", quantity: 10, unitPrice: 4.59, productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog: reopened.purchaseCatalog, supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商" }] }),
+    expect.objectContaining({ recordId: "CATALOG-B", supplierName: "乙供应商", purchaseCatalog: expect.objectContaining({ purchaseOrderDetailId: "DETAIL-B", lineNumber: "1", supplierId: "SUP-B" }), supplier1688Links: [{ type: "store", url: "https://shop123456789.1688.com/", supplierName: "乙供应商" }] }),
+  ]));
+  expect(JSON.stringify(reopened)).not.toMatch(/页面伪造|FORGED|discard/);
+  expect(await db.erpCostRows.count()).toBe(1);
+});
 
 it("keeps published ERP evidence attached after reopening cost matching", async () => {
   const { ledger, request } = await context();
@@ -232,26 +261,22 @@ function sourceEnvelope({
   });
 }
 
-async function publishAppliedInbox({ ledger, request, unitPrice, deliveryId }) {
+async function publishAppliedInbox({ ledger, request, unitPrice, deliveryId, generatedAt }) {
   if (await db.salesRows.where("ledgerId").equals(ledger.id).count() === 0) {
     await db.salesRows.add({ ledgerId: ledger.id, workspaceId: DEFAULT_WORKSPACE_ID, batchId: `IMPORT-${deliveryId}`, groupKey: `G-${deliveryId}`, platformSku: "SKU-AUDIT", platformSkc: "SKC-AUDIT", quantity: 1, amount: 10 });
   }
   const purchaseRecords = [record(`${deliveryId}-R1`, unitPrice)];
   const batch = sourceEnvelope({ ledger, request, purchaseRecords, previewUnitCost: unitPrice });
+  if (generatedAt) batch.generatedAt = generatedAt;
   const received = await receiveErpCostInboxEnvelope({
     envelope: buildErpCostInboxEnvelope({ batch, deliveryId }),
     receivedVia: "test",
   });
-  await markErpCostInboxStatus(received.id, "loaded");
-  const published = await savePublishedErpCostBatch({
-    ledgerId: ledger.id,
-    inboxId: received.id,
-    requestId: request.id,
-    reconciliation: reconcile({ purchaseRecords, previewUnitCost: unitPrice }),
-    sourceEnvelope: batch,
-    sourceName: `ERP ${unitPrice}`,
-  });
-  return { inboxId: received.id, batchId: published.batchId };
+  expect(received.adoptionError).toBeUndefined();
+  expect(received.status).toBe("applied");
+  expect(received.adoption.summary.adoptedCount).toBe(1);
+  const stored = await db.erpCostInbox.get(received.id);
+  return { inboxId: received.id, batchId: stored.appliedBatchId };
 }
 
 beforeEach(async () => {
@@ -555,6 +580,7 @@ describe("ERP cost repository independent recalculation", () => {
       })),
     ];
     const { ledger, request } = await context({ platformSkcs: querySkcs, expectedSkus });
+    await db.salesRows.bulkAdd(expectedSkus.map(row => ({ ...row, ledgerId: ledger.id, workspaceId: DEFAULT_WORKSPACE_ID, store: '合成店铺', quantity: 1, amount: 10 })));
     const sharedWarehouseSku = "SH25092037232977233-Y";
     const results = expectedSkus.map((item, index) => ({
       warehouseSku: index === 0 ? sharedWarehouseSku : `WH-SHARED-EXPECTED-${index + 1}`,
@@ -604,7 +630,7 @@ describe("ERP cost repository independent recalculation", () => {
       receivedVia: "test",
     });
     const storedInbox = await db.erpCostInbox.where("deliveryId").equals(deliveryId).first();
-    await markErpCostInboxStatus(storedInbox.id, "loaded");
+    expect(storedInbox).toMatchObject({ status: "applied", adoption: { summary: { adoptedCount: 19 } } });
     const parsed = parseErpInboxMessage(storedInbox.envelope, {
       expectedWorkspaceId: DEFAULT_WORKSPACE_ID,
       expectedLedgerId: ledger.id,
@@ -881,11 +907,10 @@ describe("ERP cost repository independent recalculation", () => {
     const { ledger, request } = await context();
     const purchaseRecords = [record("ATOMIC-R1", 4)];
     const batch = sourceEnvelope({ ledger, request, purchaseRecords, previewUnitCost: 4 });
-    const received = await receiveErpCostInboxEnvelope({
-      envelope: buildErpCostInboxEnvelope({ batch, deliveryId: "DELIVERY-ATOMIC-ROLLBACK" }),
-      receivedVia: "test",
-    });
-    await markErpCostInboxStatus(received.id, "loaded");
+    // A persisted pre-automatic-adoption receipt exercises the legacy publisher.
+    const envelope = buildErpCostInboxEnvelope({ batch, deliveryId: "DELIVERY-ATOMIC-ROLLBACK" });
+    const received = { id: 'INBOX-DELIVERY-ATOMIC-ROLLBACK', workspaceId: DEFAULT_WORKSPACE_ID, ledgerId: ledger.id, requestId: request.id, batchId: batch.batchId, deliveryId: envelope.deliveryId, envelope, status: 'loaded', receivedAt: envelope.sentAt };
+    await db.erpCostInbox.add(received);
     const batchCountBefore = await db.erpCostBatches.count();
     const rowCountBefore = await db.erpCostRows.count();
     const auditCountBefore = await db.auditEvents.count();
@@ -990,16 +1015,16 @@ describe("ERP cost repository independent recalculation", () => {
 
   it("does not fall back to an older formal cost after voiding the latest batch and allows a new batch to replace the tombstone", async () => {
     const { ledger, request } = await context();
-    const older = await publishAppliedInbox({ ledger, request, unitPrice: 3, deliveryId: "DELIVERY-OLD" });
+    const older = await publishAppliedInbox({ ledger, request, unitPrice: 3, deliveryId: "DELIVERY-OLD", generatedAt: "2026-08-20T00:00:00.000Z" });
     await db.erpCostRows.where("batchId").equals(older.batchId).modify({ publishedAt: "2026-08-20T00:00:00.000Z" });
-    const latest = await publishAppliedInbox({ ledger, request, unitPrice: 5, deliveryId: "DELIVERY-LATEST" });
+    const latest = await publishAppliedInbox({ ledger, request, unitPrice: 5, deliveryId: "DELIVERY-LATEST", generatedAt: "2026-08-21T00:00:00.000Z" });
     await db.erpCostRows.where("batchId").equals(latest.batchId).modify({ publishedAt: "2026-08-21T00:00:00.000Z" });
     expect((await getLatestLedgerCosts(ledger.id))[0].unitCost).toBe(5);
 
     await voidPublishedErpCostBatch({ inboxId: latest.inboxId, reason: "最新批次错误", voidedBy: "finance-1" });
     expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);
 
-    const replacement = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "DELIVERY-REPLACEMENT" });
+    const replacement = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "DELIVERY-REPLACEMENT", generatedAt: "2026-08-22T00:00:00.000Z" });
     await db.erpCostRows.where("batchId").equals(replacement.batchId).modify({ publishedAt: "2026-08-22T00:00:00.000Z" });
     expect((await getLatestLedgerCosts(ledger.id))[0].unitCost).toBe(4);
   });

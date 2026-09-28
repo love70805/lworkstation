@@ -103,6 +103,7 @@ let updatePopoverHeight = UPDATE_POPOVER_MIN_HEIGHT;
 let updatePopoverAnchor = { x: 132, y: 4, width: 70, height: 28 };
 let erpZoomPercent = loadErpZoomPreference({ userDataPath: app.getPath("userData") });
 const smokeReportPath = process.env.SHOPEERS_DESKTOP_SMOKE_REPORT;
+const hiddenSmoke = Boolean(smokeUserDataPath) && process.env.SHOPEERS_DESKTOP_SMOKE_HIDDEN === "1";
 const smokeRequiresUpdateCheck = process.env.SHOPEERS_DESKTOP_SMOKE_REQUIRE_UPDATE_CHECK === "1";
 const smokeRequiresErpV2 = process.env.SHOPEERS_DESKTOP_SMOKE_ERP_V2 === "1";
 const updateSmokeReportPath = process.env.SHOPEERS_DESKTOP_UPDATE_SMOKE_REPORT;
@@ -242,7 +243,7 @@ function updatePopoverSnapshot() {
 }
 
 function focusUpdateStatus() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (hiddenSmoke || !mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.focus();
   mainWindow.webContents.executeJavaScript("document.querySelector('#update-status')?.focus()", true).catch(() => {});
 }
@@ -344,8 +345,10 @@ function openUpdatePopover(anchor) {
     if (updatePopoverWindow !== popup || !updatePopoverLifecycle.isCurrent(generation) || popup.isDestroyed()) return;
     positionUpdatePopover();
     popup.webContents.send("desktop:update-popover-state", publicState());
-    popup.show();
-    popup.focus();
+    if (!hiddenSmoke) {
+      popup.show();
+      popup.focus();
+    }
   });
   popup.loadFile(path.join(__dirname, "update-popover.html"), { query: { appearance: shellAppearance } });
   positionUpdatePopover();
@@ -394,6 +397,7 @@ async function runErpIndicatorSmoke() {
 }
 
 async function runUpdatePopoverDomClickSmoke() {
+  if (hiddenSmoke) return { ok: null, skipped: true, reason: "Hidden QA does not validate native popup visibility or focus." };
   const trace = [];
   const waitFor = async (predicate, timeout = 4000) => {
     const deadline = Date.now() + timeout;
@@ -1155,7 +1159,9 @@ async function writeSmokeReport() {
   const selectionPopupText = extensionFileText(state.tabs["1688"].extension?.path, "popup.js");
   const isolatedViews = tabSwitches.every((entry) => entry.attachedViews.length === 1 && entry.attachedViews[0] === entry.activeTab);
   const report = {
-    ok: state.tabs.workspace.status === "ready" && Boolean(state.tabs.workspace.url) && isolatedViews && erpIndicatorSmoke.ok && updatePopoverDomClickSmoke.ok && (!smokeRequiresErpV2 || erpV2Fixture?.ok),
+    ok: state.tabs.workspace.status === "ready" && Boolean(state.tabs.workspace.url) && isolatedViews && erpIndicatorSmoke.ok && (hiddenSmoke ? updatePopoverDomClickSmoke.skipped : updatePopoverDomClickSmoke.ok) && (!smokeRequiresErpV2 || erpV2Fixture?.ok),
+    hiddenMode: hiddenSmoke,
+    visibleWindowCount: BrowserWindow.getAllWindows().filter(window => window.isVisible()).length,
     packaged: app.isPackaged,
     applicationName: app.getName(),
     executableName: path.basename(process.execPath),
@@ -1170,6 +1176,8 @@ async function writeSmokeReport() {
     erp: state.tabs.erp,
     selection1688: state.tabs["1688"],
     update: state.update,
+    updateFeedConfig: updateRuntime?.feedConfig ?? null,
+    updateInstallInvocationCount,
     inbox: state.inbox,
     erpZoom: state.erpZoom,
     extensionRuntime: {
@@ -1331,6 +1339,7 @@ async function createWindow() {
   await mainWindow.loadFile(path.join(__dirname, "shell.html"), { query: { appearance: shellAppearance } });
   desktopLifecycle = createDesktopLifecycle({ app, window: mainWindow, Tray, Menu, icon: DESKTOP_ICON_PATH,
     userDataPath: app.getPath('userData'),
+    canRestore: () => !hiddenSmoke,
     onHide: () => { closeUpdatePopover({ returnFocus: false }); },
     onError: message => { lifecycleNotice = message; publishState(); },
     onChanged: state => {
@@ -1347,8 +1356,8 @@ async function createWindow() {
     mainWindow = null;
   });
   startup.start();
-  mainWindow.show();
-  desktopInstance.windowReady(mainWindow);
+  if (!hiddenSmoke) mainWindow.show();
+  desktopInstance.windowReady(hiddenSmoke ? null : mainWindow);
   const inboxScript = app.isPackaged
     ? path.join(process.resourcesPath, "runtime", "erp-inbox-server.mjs")
     : projectPath("tools", "erp-inbox-server.mjs");
@@ -1545,7 +1554,11 @@ app.setAppUserModelId("com.shopeers.workstation");
 app.whenReady().then(createWindow).catch((error) => {
   if (desktopLifecycle?.getState().quitting) { app.quit(); return; }
   console.error("桌面应用启动失败：", error);
-  dialog.showErrorBox("Lworkstation 无法启动", error?.message || String(error));
+  if (!hiddenSmoke) dialog.showErrorBox("Lworkstation 无法启动", error?.message || String(error));
+  else if (smokeReportPath) {
+    try { fs.writeFileSync(smokeReportPath, JSON.stringify({ ok: false, hiddenMode: true, startupError: error?.message || String(error) }), "utf8"); }
+    catch (reportError) { console.error("隐藏验收失败报告无法保存：", reportError); }
+  }
   app.quit();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

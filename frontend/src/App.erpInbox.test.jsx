@@ -28,6 +28,19 @@ const defaults = overrides => ({
 });
 
 describe('ERP inbox background delivery and adoption', () => {
+  it('acknowledges durable receipt but reports failed automatic adoption and recovery', async () => {
+    const options = defaults({
+      pollRecords: vi.fn(async () => [record('saved')]),
+      receive: vi.fn(async () => ({ id: 'saved', status: 'pending', adoptionError: 'adoption transaction failed' })),
+      recover: vi.fn(async () => [{ id: 'saved', error: 'adoption retry failed' }]),
+    });
+    const result = await runErpInboxCycle(options);
+    expect(options.acknowledge).toHaveBeenCalledWith('saved', { workspaceId: 'W1' });
+    expect(options.emit).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ received: 1, recovered: false });
+    expect(result.failures.map(error => error.message)).toEqual(['adoption transaction failed', 'adoption retry failed']);
+  });
+
   it('isolates a failed delivery, acknowledges only a saved record, then recovers', async () => {
     const calls = [];
     const options = defaults({

@@ -59,6 +59,7 @@ export async function adoptMonthlySupplement(input,{expectedBatchId,inputSignatu
     if(context.ledger.status==='locked'||(input.kind==='dispatch'&&context.ledger.status==='finalized'))throw new Error("已定稿基础不能改代发，请显式重开。");
     const candidate=normalizeSupplementCandidate(input,{ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))]});
     const signature=canonicalJson(candidate);
+    if(candidate.conflicts.length&&!candidate.reviewedCrossFileConflicts)throw new Error('跨文件相似业务记录尚未核对，请检查来源后重新预览。');
     if(signature!==inputSignature)throw new Error("采用预览已变化，请重新预览。");
     const previous=context[input.kind];
     if(previous?.inputSignature===signature)return previous;

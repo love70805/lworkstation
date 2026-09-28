@@ -49,8 +49,10 @@
 .supplier-sku-grid { display: flex; flex-direction: column; gap: 7px; padding-top: 10px; border-top: 1px solid var(--border); }
 .supplier-sku-row { display: grid; grid-template-columns: minmax(0, 1fr) 130px; align-items: center; gap: 10px; }
 .supplier-sku-row > span { overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; }
-.supplier-sku-grid-detailed .supplier-sku-row { grid-template-columns: minmax(110px, 1fr) repeat(3, minmax(86px, 110px)); }
+.supplier-sku-grid-detailed .supplier-sku-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.supplier-sku-grid-detailed .supplier-sku-row > span { grid-column: 1 / -1; }
 .supplier-sku-grid-detailed .table-input { width: 100%; min-width: 0; }
+.supplier-quote-field { display: flex; min-width: 0; flex-direction: column; gap: 4px; color: var(--text-muted); font-size: 10px; }
 .product-name-cell { display: grid; min-width: 190px; gap: 4px; }
 .product-row-actions { display: inline-flex; align-items: center; gap: 4px; }
 .product-row-actions button,
@@ -69,7 +71,7 @@
 .source-inline button, button.source-inline { border: 0; }
 .source-inline > button { padding: 2px; border: 0; background: transparent; color: var(--primary); }
 .source-panel .form-field + .form-field, .source-two-col { margin-top: 16px; }
-.source-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.source-two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
 .procurement-grid { padding-top: 16px; border-top: 1px solid var(--border); }
 .source-action { width: 100%; cursor: pointer; }
 .source-action.invalid { background: var(--danger-bg); color: var(--danger); }
@@ -143,3 +145,18 @@
   .supplier-sku-grid-detailed .supplier-sku-row > span { white-space: normal; }
 }
 
+.erp-catalog-prefill { margin-bottom: 18px; }
+.erp-catalog-prefill > :not(.panel-header) { margin-left: 18px; margin-right: 18px; }
+.erp-catalog-prefill > details { margin-bottom: 14px; }
+.supplier-list-panel .panel-header { flex-wrap: wrap; gap: 8px; }
+.supplier-list-panel .panel-title h2 { white-space: nowrap; }
+.erp-catalog-note { color: var(--text-muted); margin: 0 0 12px; line-height: 1.6; }
+.erp-catalog-warning { display: flex; gap: 8px; align-items: flex-start; color: var(--warning); }
+.erp-catalog-prefill summary { cursor: pointer; padding: 8px 0; }
+.erp-catalog-evidence { padding: 0; list-style: none; }
+.erp-catalog-evidence li { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0; overflow-wrap: anywhere; }
+.erp-catalog-evidence li span { color: var(--text-muted); }
+.erp-catalog-evidence li a { display: inline-flex; align-items: center; gap: 4px; }
+.erp-purchase-heading { margin-top: 16px; font-size: 13px; }
+.erp-purchase-evidence li { border-top: 1px solid var(--border); padding-top: 10px; }
+.erp-purchase-evidence li > strong { width: 100%; }

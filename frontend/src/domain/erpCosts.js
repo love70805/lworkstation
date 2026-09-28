@@ -13,6 +13,7 @@ import {
 import { calculateWarehouseCostDecision } from "./erpCostResolution";
 import { hasLegacyMonthExclusions, isErpCostWithinPeriod } from "./erpCostPeriod";
 import { purchaseOrderSummary } from "./erpPurchaseSelection";
+import { normalizeErpCatalogFields } from "./erpCatalogFields";
 
 // The extension wire version is stable; the local preview algorithm has its own version.
 export const ERP_COST_ALGORITHM_VERSION = "erp-v8.0-compatible@1";
@@ -133,9 +134,13 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions, period) {
   const ledgerScopeRole = row.ledgerScopeRole == null || row.ledgerScopeRole === ""
     ? ERP_LEDGER_SCOPE_EXPECTED
     : String(row.ledgerScopeRole).trim().toLowerCase();
-  const purchaseRecords = Array.isArray(row.purchaseRecords)
+  const sourcePurchaseRecords = Array.isArray(row.purchaseRecords)
     ? row.purchaseRecords
     : (Array.isArray(row.warehouseEvidence?.purchaseRecords) ? row.warehouseEvidence.purchaseRecords : []);
+  const purchaseRecords = sourcePurchaseRecords.map(record => ({
+    ...record,
+    ...normalizeErpCatalogFields(record, { includeMappings: false }),
+  }));
   const legacyMonthExclusions = hasLegacyMonthExclusions(row, period);
   const evidenceComplete = !legacyMonthExclusions && (row.evidenceComplete === true
     || row.warehouseEvidence?.evidenceComplete === true);
@@ -189,6 +194,10 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions, period) {
     totalPrice: decision?.totalPrice ?? optionalFiniteNumber(row.totalPrice, { minimum: 0 }),
     supplierName: optionalText(row.supplierName),
     supplier1688Url: optionalText(row.supplier1688Url ?? row.supplierOfferUrl ?? row.sourceUrl),
+    ...normalizeErpCatalogFields(row),
+    ...(Array.isArray(row.catalogQuerySkcs) ? {
+      catalogQuerySkcs: [...new Set(row.catalogQuerySkcs.filter((value) => typeof value === "string" && value.trim()).map(normalizePlatformSkc))],
+    } : {}),
     selectedRecordIds: Array.isArray(row.selectedRecordIds)
       ? row.selectedRecordIds.map((id) => String(id)).filter(Boolean)
       : [],
@@ -484,6 +493,8 @@ export function reconcileErpCostRows({ workspaceId, expectedSkus, costRows, batc
       totalPrice: cost.totalPrice,
       supplierName: cost.supplierName,
       supplier1688Url: cost.supplier1688Url,
+      ...normalizeErpCatalogFields(cost),
+      ...(cost.catalogQuerySkcs ? { catalogQuerySkcs: cost.catalogQuerySkcs } : {}),
       selectedRecordIds: cost.costDecision?.selectedRecordIds ?? cost.selectedRecordIds,
       purchaseRecords: cost.purchaseRecords,
       excludedRecords: cost.excludedRecords,
