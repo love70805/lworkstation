@@ -6,7 +6,7 @@
 
 原54cb工作树已被应用归档，应用附件列表为空，创建工具因Git路径ENOENT失败，故从自动归档快照 `5510697efe8beacca5b49874cd685fb1a61534b2` 恢复原路径/分支，81项改动与快照逐项一致，提交 `d758375` 保全RC.2源码。忽略目录中的原RC.1/RC.2安装包和原始验收证据未寻获；下方历史哈希仅为原交付记录，不能表示当前原件仍在。新候选须重新正式构建，并复制到主仓库持久目录、哈希回读后交付。
 
-新增导入导出契约及当前验证见 [正式候选准备](integration/STABLE_0_3_0_SUPPLEMENT_EXPORT.md)。982项前端测试、完整本地release:check和16组桌面verify通过；页面/Windows候选验收进行中，不将历史RC结果作为本批通过证据。
+新增导入导出契约及当前验证见 [正式候选准备](integration/STABLE_0_3_0_SUPPLEMENT_EXPORT.md)。[PR #119](https://github.com/love70805/lworkstation/pull/119)已合入8c49f76；main CI的984项前端测试、完整release:check和16组桌面verify通过。隔离headless业务/重开、实际隐藏EXE smoke、461文件安装包和413项生产源码资源比对通过。候选四资产及39项源码/证据复制回读到主仓库持久目录。EXE SHA256 `60F71121A4F709915FF87930367F880A9BF69C990645D2B4F8D00A72B622668A`。当前交付见[正式候选验收](RELEASE_0.3.0.md)，公开Release/标签/Latest仍未执行；不将历史RC结果作为本批通过证据。
 
 ## 2026-09-28 · RC.2 修复本机默认成员导致成本采用被拒
 
