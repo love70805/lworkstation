@@ -9,6 +9,8 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const {
   isPrereleaseVersion,
+  isRcVersion,
+  EXPECTED_RC_CONFIG,
   loadReleaseBetaConfig,
 } = require("./release-after-pack.cjs");
 
@@ -19,7 +21,9 @@ const version = plan.version;
 const artifactName = `Lworkstation-Setup-${version}.exe`;
 const outputRoot = path.join(root, "release");
 const candidateRoot = path.join(root, "release-test", version);
-const betaConfig = loadReleaseBetaConfig(root);
+const localRc = isRcVersion(version);
+const metadataFile = localRc ? "rc.yml" : "beta.yml";
+const releaseConfig = localRc ? EXPECTED_RC_CONFIG : loadReleaseBetaConfig(root);
 const pnpmCli = process.env.npm_execpath;
 const builderCli = path.join(root, "node_modules", "electron-builder", "out", "cli", "cli.js");
 
@@ -54,31 +58,31 @@ function metadataAssetNames(contents) {
     .map((match) => match[1].trim());
 }
 
-function verifyPackagedBetaConfig() {
+function verifyPackagedUpdateConfig() {
   const configPath = path.join(outputRoot, "win-unpacked", "resources", "update-config.json");
   if (!fs.existsSync(configPath)) throw new Error(`Packaged update configuration is missing: ${configPath}`);
   const packagedConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  if (JSON.stringify(packagedConfig) !== JSON.stringify(betaConfig)) {
-    throw new Error("Release package did not receive the controlled beta update configuration.");
+  if (JSON.stringify(packagedConfig) !== JSON.stringify(releaseConfig)) {
+    throw new Error("Release package did not receive its controlled update configuration.");
   }
 }
 
 function stageReleaseCandidate() {
   const installer = path.join(outputRoot, artifactName);
   const blockmap = `${installer}.blockmap`;
-  const metadata = path.join(outputRoot, "beta.yml");
+  const metadata = path.join(outputRoot, metadataFile);
   for (const file of [installer, blockmap, metadata]) {
     if (!fs.existsSync(file)) throw new Error(`Release build is missing artifact: ${file}`);
   }
-  if (fs.existsSync(path.join(outputRoot, "latest.yml"))) {
-    throw new Error("Prerelease build unexpectedly produced latest.yml instead of beta.yml.");
+  if (["latest.yml", "beta.yml", "rc.yml"].some(name => name !== metadataFile && fs.existsSync(path.join(outputRoot, name)))) {
+    throw new Error(`Prerelease build produced metadata outside ${metadataFile}.`);
   }
   const metadataContents = fs.readFileSync(metadata, "utf8");
   const names = metadataAssetNames(metadataContents);
   if (!new RegExp(`^version:\\s*${version.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*$`, "m").test(metadataContents)
     || names.length < 2
     || names.some((name) => name !== artifactName)) {
-    throw new Error(`beta.yml must reference only ${artifactName}.`);
+    throw new Error(`${metadataFile} must reference only ${artifactName}.`);
   }
 
   resetDirectory(candidateRoot, path.join(root, "release-test", version));
@@ -109,10 +113,10 @@ run(process.execPath, [builderCli,
   "--config.electronDist=./node_modules/electron/dist",
   "--config.afterPack=./release-after-pack.cjs",
   "--config.publish.releaseType=prerelease",
-  "--config.publish.channel=beta",
+  localRc ? "--config.publish.channel=rc" : "--config.publish.channel=beta",
   "--config.win.artifactName=Lworkstation-Setup-${version}.${ext}",
 ]);
 
-verifyPackagedBetaConfig();
+verifyPackagedUpdateConfig();
 const candidate = stageReleaseCandidate();
 console.log(JSON.stringify({ version, artifact: artifactName, candidate }, null, 2));

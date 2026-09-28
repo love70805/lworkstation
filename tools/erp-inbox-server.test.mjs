@@ -17,6 +17,7 @@ const capability = "erp-inbox-test-capability-0123456789abcdef";
 
 await fs.rm(spoolPath, { force: true });
 const missingCapabilityChild = spawn(process.execPath, [serverPath], {
+  windowsHide: true,
   env: {
     ...process.env,
     SHOPEERS_ERP_INBOX_PORT: String(port + 2000),
@@ -35,6 +36,7 @@ assert.equal(missingCapabilityExit, 1);
 assert.match(missingCapabilityError, /SHOPEERS_ERP_INBOX_CAPABILITY/);
 await fs.rm(`${spoolPath}.missing-capability`, { force: true });
 const child = spawn(process.execPath, [serverPath], {
+  windowsHide: true,
   env: {
     ...process.env,
     SHOPEERS_ERP_INBOX_PORT: String(port),
@@ -447,6 +449,19 @@ try {
       warehouseSku: "WH-A",
       supplierName: "义乌市鑫颉日用品有限公司",
       supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+      imageUrl: "https://images.example/product-a.jpg",
+      attribute: "红色/M",
+      purchaseCatalog: { picturesLinking: "https://images.example.invalid/warehouse.jpg", pictureLink1688: "https://images.example.invalid/1688.jpg", purchaseSpecificationAndModel1688: "采购规格", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-CATALOG", purchaseOrderId: "PO-CATALOG", purchaseOrderNo: "PO-CATALOG", lineNumber: 0, supplierId: "SUPPLIER-CATALOG", barcodeSkuid: "", barcodeSkcid: null },
+      catalogMappings: [
+        { platformSku: "SKU-A", platformSkc: "SKC-A", warehouseSku: "WH-A", productName: "ERP 商品甲", imageUrl: "https://images.example/product-a.jpg", attribute: "红色/M", storeName: "店铺甲", articleNumber: "GOODS-A", platform: "Shein" },
+        { platformSku: "SKU-B", platformSkc: "SKC-A", warehouseSku: "WH-B", productName: "ERP 商品乙", attribute: "蓝色/L" },
+        { platformSku: "SKU-A", platformSkc: "SKC-CONFLICT", warehouseSku: "WH-A", attribute: "有冲突" },
+      ],
+      supplier1688Links: [
+        { type: "product", url: "https://detail.1688.com/offer/730242606884.html?trace=erp", supplierName: "义乌市鑫颉日用品有限公司" },
+        { type: "store", url: "https://xinjie.1688.com/page/offerlist.htm", supplierName: "义乌市鑫颉日用品有限公司" },
+        { type: "product", url: "https://xinjie.1688.com/page/offerlist.htm" },
+      ],
       costNature: "formal",
       manualUnitPrice: 2.5,
       anomalyConfirmed: true,
@@ -474,7 +489,7 @@ try {
       warehouses: [{
         warehouseSku: "WH-A",
         purchaseRecords: [
-          { recordId: "R-1", unitPrice: 1, quantity: 2, eligible: true, selectedForPreview: true, confirmed: true },
+          { recordId: "R-1", unitPrice: 1, quantity: 2, eligible: true, selectedForPreview: true, confirmed: true, imageUrl: "https://images.example/detail-a.jpg", attribute: "采购属性甲", supplierName: "旧采购供应商", supplier1688Links: [{ type: "store", url: "https://old.1688.com/", supplierName: "旧采购供应商" }], purchaseCatalog: { picturesLinking: "https://images.example.invalid/detail.jpg", purchaseSpecificationAndModel1688: "同行采购规格", purchaseProportion1688: "2-1", lineNumber: 0, purchaseOrderDetailId: "DETAIL-1" } },
           { recordId: "R-2", unitPrice: 1.99, quantity: 5, eligible: true, selectedForPreview: false },
         ],
       }],
@@ -490,6 +505,19 @@ try {
   assert.equal(response.status, 200);
   const firstPending = await response.json();
   assert.equal(firstPending.records[0].envelope.batch.rows[0].supplier1688Url, "https://detail.1688.com/offer/730242606884.html");
+  const catalogRow = firstPending.records[0].envelope.batch.rows[0];
+  assert.equal(catalogRow.imageUrl, "https://images.example/product-a.jpg");
+  assert.equal(catalogRow.attribute, "红色/M");
+  assert.equal(catalogRow.purchaseCatalog.purchaseProportion1688, "1-1");
+  assert.equal(catalogRow.purchaseCatalog.lineNumber, "0");
+  assert.equal(catalogRow.purchaseCatalog.barcodeSkuid, null);
+  assert.equal(catalogRow.purchaseCatalog.barcodeSkcid, null);
+  assert.equal(Object.keys(catalogRow.purchaseCatalog).length, 14);
+  assert.equal(catalogRow.catalogMappings.length, 3);
+  assert.equal(catalogRow.catalogMappings[1].attribute, "蓝色/L");
+  assert.equal(catalogRow.catalogMappings[0].storeName, "店铺甲");
+  assert.equal(catalogRow.supplier1688Links.length, 2, "typed store/product links cannot replace each other");
+  assert.equal(catalogRow.supplier1688Links[0].url, "https://detail.1688.com/offer/730242606884.html");
   assert.equal(firstPending.records[0].envelope.formatVersion, 2);
   assert.equal(firstPending.records[0].envelope.batch.formatVersion, 2);
   assert.equal(firstPending.records[0].envelope.batch.rows[0].previewUnitCost, 0);
@@ -501,6 +529,13 @@ try {
   assert.equal(firstPending.records[0].envelope.batch.sourceMeta.manualDecision, undefined);
   assert.equal(firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords.length, 2);
   assert.equal(firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords[0].confirmed, undefined);
+  const catalogRecord = firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords[0];
+  assert.equal(catalogRecord.imageUrl, "https://images.example/detail-a.jpg");
+  assert.equal(catalogRecord.attribute, "采购属性甲");
+  assert.equal(catalogRecord.supplier1688Links[0].supplierName, "旧采购供应商");
+  assert.equal(catalogRecord.purchaseCatalog.purchaseSpecificationAndModel1688, "同行采购规格");
+  assert.equal(catalogRecord.purchaseCatalog.purchaseProportion1688, "2-1");
+  assert.equal(catalogRecord.purchaseCatalog.purchaseOrderDetailId, "DETAIL-1");
   assert.deepEqual(firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords[0].warningReasons, []);
   assert.equal(firstPending.records[0].envelope.batch.warehouseEvidence[0].excludedRecords[0].exclusionReasons[0], "cancelled_or_closed");
   response = await post("/erp/v1/cost-results", acceptedResultPayload);
@@ -1230,6 +1265,40 @@ try {
   assert.equal(response.status, 409);
   response = await post("/erp/v1/requests", { request: { ...subsetRequest, cancel: true } });
   assert.equal((await response.json()).status, "superseded");
+  const directCatalog = createValidDirectV2Envelope({ deliveryId: "DIRECT-CATALOG-DELIVERY", batchId: "DIRECT-CATALOG-BATCH" });
+  directCatalog.batch.requestId = "DIRECT-CATALOG-REQUEST";
+  directCatalog.batch.workspaceId = "workspace-direct-catalog";
+  directCatalog.batch.ledgerId = "ledger-direct-catalog";
+  Object.assign(directCatalog.batch.rows[0], {
+    imageUrl: "https://user:pass@images.example/unsafe.jpg",
+    attribute: { invalid: "must not stringify" },
+    catalogMappings: catalogRow.catalogMappings,
+    supplier1688Links: catalogRow.supplier1688Links,
+    purchaseCatalog: { picturesLinking: "https://images.example.invalid/unsafe.jpg?token=secret", pictureLink1688: "https://user:pass@images.example.invalid/unsafe.jpg", lineNumber: 0, purchaseProportion1688: "1-1", unknown: "do-not-keep" },
+  });
+  Object.assign(directCatalog.batch.warehouseEvidence[0].purchaseRecords[0], {
+    imageUrl: "https://images.example/detail.jpg?token=private",
+    attribute: "采购详情属性",
+    supplier1688Links: catalogRecord.supplier1688Links,
+    purchaseCatalog: catalogRecord.purchaseCatalog,
+  });
+  response = await post("/erp/v1/cost-batches", directCatalog);
+  assert.equal(response.status, 202);
+  response = await fetch(`${base}/erp/v1/cost-batches?workspaceId=workspace-direct-catalog&ledgerId=ledger-direct-catalog`);
+  const directCatalogBatch = (await response.json()).records[0].envelope.batch;
+  assert.equal(directCatalogBatch.rows[0].imageUrl, "");
+  assert.equal(directCatalogBatch.rows[0].attribute, "");
+  assert.equal(directCatalogBatch.rows[0].purchaseCatalog.picturesLinking, null);
+  assert.equal(directCatalogBatch.rows[0].purchaseCatalog.pictureLink1688, null);
+  assert.equal(directCatalogBatch.rows[0].purchaseCatalog.lineNumber, "0");
+  assert.equal(directCatalogBatch.rows[0].purchaseCatalog.purchaseProportion1688, "1-1");
+  assert.equal(directCatalogBatch.rows[0].purchaseCatalog.unknown, undefined);
+  assert.deepEqual(directCatalogBatch.rows[0].catalogMappings, catalogRow.catalogMappings);
+  assert.deepEqual(directCatalogBatch.rows[0].supplier1688Links, catalogRow.supplier1688Links);
+  assert.equal(directCatalogBatch.warehouseEvidence[0].purchaseRecords[0].imageUrl, "");
+  assert.equal(directCatalogBatch.warehouseEvidence[0].purchaseRecords[0].attribute, "采购详情属性");
+  assert.deepEqual(directCatalogBatch.warehouseEvidence[0].purchaseRecords[0].purchaseCatalog, catalogRecord.purchaseCatalog);
+
   await post("/erp/v1/requests", request("EXPIRED", "SKU-EXPIRED"));
   const spool = JSON.parse(await fs.readFile(spoolPath, "utf8"));
   const expired = spool.find((item) => item.kind === "request" && item.requestId === "EXPIRED");

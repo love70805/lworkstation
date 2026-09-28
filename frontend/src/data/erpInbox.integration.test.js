@@ -149,8 +149,10 @@ describe("ERP 本机收件箱", () => {
     expect(await db.erpCostInbox.get(previous.id)).toMatchObject({ status: "loaded" });
   });
 
-  it("loads a matching pending inbox through the CostMatching import path and leaves unmatched batches pending", async () => {
-    await receiveErpCostInboxEnvelope({ envelope: envelopeFixture() });
+  it("loads a matching legacy pending inbox through the CostMatching import path and leaves unmatched batches pending", async () => {
+    // Legacy persisted receipt has no adoption result; current receipts are processed automatically.
+    const envelope = envelopeFixture();
+    await db.erpCostInbox.add({ id: 'INBOX-DELIVERY-IT', deliveryId: envelope.deliveryId, batchId: envelope.batch.batchId, workspaceId: envelope.batch.workspaceId, ledgerId: envelope.batch.ledgerId, requestId: envelope.batch.requestId, status: 'pending', receivedAt: envelope.sentAt, envelope });
     const [candidate] = await listErpCostInbox({ ledgerId: "LEDGER-IT", statuses: ["pending"] });
     const request = { id: "ERP-REQ-IT", workspaceId: "workspace-default", ledgerId: "LEDGER-IT", platformSkcs: ["SKC-IT"] };
     const ledger = { id: "LEDGER-IT", workspaceId: "workspace-default", status: "cost_pending" };

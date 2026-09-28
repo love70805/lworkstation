@@ -14,6 +14,8 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.0-rc.2` ERP自动采用修复 | 本机候选已验收；968测试、59SKU恢复/新回传/重开、包体哈希通过；更新禁用，未公开或安装，RC.1保留 | [安装包](candidates/0.3.0-rc.2/Lworkstation-Setup-0.3.0-rc.2.exe)；[验收记录](../docs/RELEASE_0.3.0_RC_2.md) |
+| `0.3.0-rc.1` ERP商品档案 | 仅本机测试候选；更新禁用，构建/smoke/14场景/包体哈希通过；未公开、未安装，正式发布继续暂停 | [安装包](candidates/0.3.0-rc.1/Lworkstation-Setup-0.3.0-rc.1.exe)；[验收与限制](../docs/RELEASE_0.3.0_RC_1.md) |
 | `0.3.0-beta.10` saved report / color lamp | 已公开预发布；925测试、Windows候选smoke、PR #115/main CI、四资产匿名回读与通道检查通过，本机未安装 | `candidates/0.3.0-beta.10-export-status/`；[验收](../docs/RELEASE_0.3.0_BETA_10.md) |
 | `0.3.0-beta.9` cost rows / identity / ERP lamp / Excel | 已公开 GitHub 预发布；920 测试、桌面 verify、packaged smoke、隔离浏览器 / Electron 通信与两类 XLSX 读回、PR #113 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.9)；`candidates/0.3.0-beta.9-cost-identity-status-export/`；[验收](../docs/RELEASE_0.3.0_BETA_9.md) |
 | `0.3.0-beta.8` published ERP evidence | 已公开 GitHub 预发布；878 测试、桌面 verify、packaged smoke、隔离 11 条采购与旧行只读恢复、PR #111 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.8)；`candidates/0.3.0-beta.8-evidence-reference/`；[验收](../docs/RELEASE_0.3.0_BETA_8.md) |

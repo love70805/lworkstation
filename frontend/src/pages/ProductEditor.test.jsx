@@ -8,6 +8,7 @@ import ProductEditor from "./ProductEditor";
 import ProductLibrary from "./ProductLibrary";
 import { ToastProvider } from "../components/UI";
 import { db, saveProductCatalogRecord, createManualCaptureRecord, updateCaptureDraft } from "../data/database";
+import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 const delayedWrite = vi.hoisted(() => ({ wait: null }));
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main>{children}</main> }));
@@ -56,6 +57,55 @@ afterEach(async () => {
 });
 
 describe("product editing workflow", () => {
+  it("edits a sparse secondary supplier quote by SKU rather than array position", async () => {
+    const { product } = await saveProductCatalogRecord({ draft: {
+      name: "两仓库商品", platformSkc: "SKC-SPARSE", variants: [{ platformSku: "SKU-A", attribute: "A" }, { platformSku: "SKU-B", attribute: "B" }],
+      suppliers: [
+        { id: "SUP-A", supplierName: "甲", sourceUrl: "https://shop-a.1688.com/", catalogSource: "erp", variants: [{ platformSku: "SKU-A", purchaseUnitPrice: "", purchasePackCount: 0 }] },
+        { id: "SUP-B", supplierName: "乙", sourceUrl: "https://shop-b.1688.com/", catalogSource: "erp", variants: [{ platformSku: "SKU-B", purchaseUnitPrice: "", purchasePackCount: 0 }] },
+      ],
+    } });
+    await mount(`/products/edit?product=${product.id}`);
+    await change(input("乙 SKU-B 采购价"), "7");
+    await change(input("乙 SKU-B 采购份数"), "2");
+    expect(input("乙 SKU-A 采购价").value).toBe("");
+    await click("保存修改");
+    await waitFor(async () => await db.supplierOffers.count() === 1);
+    expect((await db.supplierOffers.toArray())[0]).toMatchObject({ platformSku: "SKU-B", supplierName: "乙", purchaseUnitPrice: 7, landedUnitCost: 7 });
+    await act(async () => { await router.navigate("/products"); });
+    await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
+    await waitFor(() => input("乙 SKU-B 采购价")?.value === "7");
+    expect(input("第 2 个采购价").value).toBe("");
+    const offersBefore = await db.supplierOffers.toArray();
+    const savedAt = (await db.products.get(product.id)).updatedAt;
+    await click("保存修改");
+    await waitFor(async () => (await db.products.get(product.id)).updatedAt !== savedAt);
+    expect(await db.supplierOffers.toArray()).toEqual(offersBefore);
+  });
+
+  it("clicks establish catalog from ERP references and saves the full multi-SKU draft", async () => {
+    await db.erpCostRows.add(erpProductCatalogFixture());
+    router = createMemoryRouter([{ path: "/products", element: <ProductLibrary /> }, { path: "/products/edit", element: <ProductEditor /> }], { initialEntries: ["/products?view=reference"] });
+    await act(async () => root.render(<ToastProvider><RouterProvider router={router} /></ToastProvider>));
+    await waitFor(() => button("建立档案"));
+    await click("建立档案");
+    await waitFor(() => input("商品名称"));
+    expect(input("商品名称").value).toBe("ERP 多规格收纳盒");
+    expect(input("商品图片链接").value).toBe("https://images.example.invalid/red.png");
+    expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
+    expect(container.textContent).toContain("ERP 档案资料");
+    expect(input("第 1 个采购价").value).toBe("");
+    await click("确认进入工作台");
+    await click("确认写入");
+    await waitFor(async () => await db.products.count() === 1);
+    expect(await db.platformSkus.count()).toBe(2);
+    expect(await db.supplierOffers.count()).toBe(0);
+    const product = (await db.products.toArray())[0];
+    await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
+    await waitFor(() => button("保存修改"));
+    expect(input("商品名称").value).toBe(product.name);
+  });
+
   it("shows current quote and missing sale price, then persists sequential raw tags", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     await mount(`/products/edit?product=${product.id}`);

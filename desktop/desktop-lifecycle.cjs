@@ -1,12 +1,12 @@
 const { loadCloseBehavior, saveCloseBehavior } = require('./desktop-preferences.cjs');
 
-function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, onHide = () => {}, onError = () => {}, onChanged = () => {} }) {
+function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, canRestore = () => true, onHide = () => {}, onError = () => {}, onChanged = () => {} }) {
   let tray;
   let quitting = false;
   let notified = false;
   let closeBehavior = loadCloseBehavior({ userDataPath });
   const restore = () => {
-    if (window.isDestroyed()) return;
+    if (!canRestore() || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
     window.show(); window.focus();
   };

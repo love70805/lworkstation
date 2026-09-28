@@ -246,6 +246,81 @@ function evidenceRefFor(warehouseSku) {
   return `warehouse:${canonicalSku(warehouseSku)}`;
 }
 
+function catalogText(value) {
+  if (!["string", "number"].includes(typeof value) || typeof value === "number" && !Number.isFinite(value)) return "";
+  return String(value).normalize("NFKC").trim();
+}
+
+function catalogImageUrl(value) {
+  try {
+    const url = new URL(catalogText(value));
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return "";
+    if ([...url.searchParams.keys()].some((key) => /(token|authorization|cookie|password|secret|capability|endpoint|base.?url)/i.test(key))) return "";
+    url.hash = "";
+    return url.href;
+  } catch { return ""; }
+}
+
+function sanitizeCatalogMappings(values) {
+  const mappings = new Map();
+  for (const item of (Array.isArray(values) ? values : [])) {
+    const platformSku = catalogText(item?.platformSku);
+    const platformSkc = catalogText(item?.platformSkc);
+    if (!platformSku || !platformSkc) continue;
+    const mapping = {
+      platformSku, platformSkc,
+      warehouseSku: catalogText(item?.warehouseSku),
+      productName: catalogText(item?.productName),
+      imageUrl: catalogImageUrl(item?.imageUrl),
+      attribute: catalogText(item?.attribute),
+      storeName: catalogText(item?.storeName),
+      articleNumber: catalogText(item?.articleNumber),
+      platform: catalogText(item?.platform),
+    };
+    mappings.set(JSON.stringify(mapping), mapping);
+  }
+  return [...mappings.values()];
+}
+
+function sanitizeSupplierLinks(values) {
+  const links = new Map();
+  for (const item of (Array.isArray(values) ? values : [])) {
+    const safeUrl = catalogImageUrl(item?.url);
+    if (!safeUrl) continue;
+    const parsed = new URL(safeUrl);
+    let url;
+    if (item?.type === "product" && parsed.hostname === "detail.1688.com" && /^\/offer\/\d{7,20}\.html$/i.test(parsed.pathname)) {
+      url = `https://detail.1688.com${parsed.pathname}`;
+    } else if (item?.type === "store" && parsed.hostname.endsWith(".1688.com") && !["detail.1688.com", "www.1688.com"].includes(parsed.hostname)) {
+      url = parsed.href;
+    }
+    if (!url) continue;
+    const name = catalogText(item?.supplierName);
+    const link = { type: item.type, url, ...(name ? { supplierName: name } : {}) };
+    links.set(JSON.stringify(link), link);
+  }
+  return [...links.values()];
+}
+
+function sanitizeCatalogFields(source, { includeMappings = false } = {}) {
+  return {
+    ...(source?.imageUrl !== undefined ? { imageUrl: catalogImageUrl(source.imageUrl) } : {}),
+    ...(source?.attribute !== undefined ? { attribute: catalogText(source.attribute) } : {}),
+    ...(includeMappings && Array.isArray(source?.catalogMappings) ? { catalogMappings: sanitizeCatalogMappings(source.catalogMappings) } : {}),
+    ...(Array.isArray(source?.supplier1688Links) ? { supplier1688Links: sanitizeSupplierLinks(source.supplier1688Links) } : {}),
+    ...(source && Object.hasOwn(source, "purchaseCatalog") ? { purchaseCatalog: sanitizePurchaseCatalog(source.purchaseCatalog) } : {}),
+  };
+}
+
+function sanitizePurchaseCatalog(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return Object.fromEntries([
+    "picturesLinking", "pictureLink1688", "purchaseSpecificationAndModel1688", "model1688",
+    "specificationAndModel", "productColor", "purchaseProportion1688", "purchaseOrderDetailId",
+    "purchaseOrderId", "purchaseOrderNo", "lineNumber", "supplierId", "barcodeSkuid", "barcodeSkcid",
+  ].map((key) => [key, (["picturesLinking", "pictureLink1688"].includes(key) ? catalogImageUrl(value[key]) : catalogText(value[key])) || null]));
+}
+
 function sanitizePurchaseRecord(record, warehouseSku, index, excluded = false) {
   const quantity = optionalNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
   const unitPrice = optionalNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
@@ -254,6 +329,7 @@ function sanitizePurchaseRecord(record, warehouseSku, index, excluded = false) {
     recordId: String(record?.recordId ?? record?.id ?? `${evidenceRefFor(warehouseSku)}:${excluded ? "excluded" : "record"}:${index + 1}`).trim(),
     warehouseSku,
     productName: String(record?.productName ?? record?.name ?? "").trim(),
+    ...sanitizeCatalogFields(record),
     quantity,
     unitPrice,
     totalPrice: totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
@@ -445,6 +521,7 @@ function sanitizeDirectBatch(batch, {
       orderNumber: String(row?.orderNumber ?? "").trim(),
       orderType: String(row?.orderType ?? row?.sourceType ?? "").trim(),
       productName: String(row?.productName ?? row?.name ?? "").trim(),
+      ...sanitizeCatalogFields(row, { includeMappings: true }),
       calculationCount: optionalNumber(row?.calculationCount ?? row?.calcTimes),
       dateRange: String(row?.dateRange ?? "").trim(),
       totalQuantity: optionalNumber(row?.totalQuantity ?? row?.totalQty),
@@ -1194,6 +1271,7 @@ const server = http.createServer(async (req, res) => {
           orderNumber: String(row?.orderNumber ?? "").trim(),
           orderType: String(row?.sourceType ?? row?.orderType ?? "").trim(),
           productName: String(row?.name ?? row?.productName ?? "").trim(),
+          ...sanitizeCatalogFields(row, { includeMappings: true }),
           calculationCount: Number(row?.calcTimes ?? row?.calculationCount) || null,
           dateRange: String(row?.dateRange ?? "").trim(),
           totalQuantity: Number(row?.totalQty ?? row?.totalQuantity) || null,

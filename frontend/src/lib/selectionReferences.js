@@ -3,6 +3,7 @@ import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifier
 import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../domain/profitCalculations";
 import { sumMoney } from "./money";
 import { buildReferenceIdentityIndex, projectReferenceIdentity } from "../domain/selectionReferenceIdentity";
+import { buildErpProductCatalogIndex, catalogProductName, erpCatalogField, erpCatalogIdentityRows } from "../domain/erpProductCatalog";
 
 function timestamp(item) {
   const value = item?.finalizedAt ?? item?.publishedAt ?? item?.calculatedAt ?? item?.updatedAt ?? "";
@@ -51,10 +52,12 @@ export function buildSelectionReferenceRows({
   supplierOffers = [],
   catalogManualCosts = [],
   erpCosts = [],
+  erpCatalogRows = [],
   profitLines = [],
   ledgerIdentityRows = [],
 }) {
-  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines });
+  const erpCatalogBySku = buildErpProductCatalogIndex([...erpCosts, ...erpCatalogRows]);
+  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku) });
   const platformSkuByCanonical = new Map(platformSkus.map((item) => [
     item.canonicalPlatformSku ?? canonicalPlatformSku(item.platformSku),
     item,
@@ -71,11 +74,15 @@ export function buildSelectionReferenceRows({
     ...manualCostHistoryBySku.keys(),
     ...profitBySku.keys(),
     ...offerBySku.keys(),
+    ...erpCatalogBySku.keys(),
   ]);
 
   return [...allSkus].map((canonicalSku) => {
     const skuRecord = platformSkuByCanonical.get(canonicalSku);
     const product = skuRecord?.productId ? productById.get(skuRecord.productId) : null;
+    const erpCatalog = erpCatalogBySku.get(canonicalSku);
+    const erpName = erpCatalogField(erpCatalog, "productName");
+    const erpImage = erpCatalogField(erpCatalog, "imageUrl");
     const erpHistory = erpBySku.get(canonicalSku) ?? [];
     const manualCostHistory = manualCostHistoryBySku.get(canonicalSku) ?? [];
     const manualCost = latest(manualCostBySku.get(canonicalSku));
@@ -127,12 +134,20 @@ export function buildSelectionReferenceRows({
       canonicalPlatformSku: canonicalSku,
       platformSku,
       ...projectReferenceIdentity(skuRecord, identityBySku.get(canonicalSku)),
-      warehouseSku: skuRecord?.warehouseSku ?? "",
+      warehouseSku: skuRecord?.warehouseSku || erpCatalogField(erpCatalog, "warehouseSku").value,
       productId: product?.id ?? null,
-      productName: product?.name ?? product?.title ?? "未建立商品档案",
+      productName: catalogProductName(product?.name || product?.title) || erpName.value || "未建立商品档案",
+      imageUrl: product?.imageUrl || product?.image || skuRecord?.imageUrl || erpImage.value,
+      erpProductName: erpName,
+      erpImage,
+      erpCatalogSuppliers: erpCatalog?.suppliers ?? [],
+      erpCatalogFields: Object.fromEntries(["productName", "imageUrl", "warehouseSku", "storeName"].map(field => [field, erpCatalogField(erpCatalog, field)])),
+      erpCatalogSources: erpCatalog?.entries ?? [],
+      erpCatalogPurchases: erpCatalog?.purchases ?? [],
+      erpCatalogRelationshipConflict: Boolean(erpCatalog?.relationshipConflict),
       productStatus: product?.status ?? "unlinked",
       supplierCode: supplierOffer?.supplierCode ?? "",
-      supplierName: supplierOffer?.supplierName ?? "",
+      supplierName: supplierOffer?.supplierName || [...new Set((erpCatalog?.suppliers ?? []).map(item => item.supplierName).filter(Boolean))].join("、"),
       referenceUnitCost: referenceCost?.unitCost ?? null,
       referenceKind: referenceCost?.referenceKind ?? null,
       authoritativeSource: referenceCost?.authoritativeSource ?? null,
@@ -187,7 +202,7 @@ export function groupSelectionReferenceRows(rows = []) {
 
   return [...groups.values()].map((group) => {
     const variants = group.variants;
-    const latest = variants.find((item) => item.latestPeriod) ?? variants[0];
+    const latest = variants.find((item) => item.productId) ?? variants.find((item) => item.latestPeriod) ?? variants[0];
     const negative = variants.some((item) => item.hasNegativeProfit || Number(item.referenceUnitProfit) < 0);
     return {
       ...group,

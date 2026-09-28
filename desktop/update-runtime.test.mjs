@@ -104,6 +104,23 @@ class FakeUpdater extends EventEmitter {
 }
 
 const productionUpdater = new FakeUpdater();
+for (const feedConfig of [{ enabled: false, channel: "rc" }, PRODUCTION_FEED_CONFIG, { ...PRODUCTION_FEED_CONFIG, channel: "beta" }]) {
+  const rcUpdater = new FakeUpdater();
+  let schedules = 0;
+  const rcRuntime = createUpdateRuntime({ updater: rcUpdater, CancellationToken, currentVersion: "0.3.0-rc.1", enabled: true, feedConfig,
+    setIntervalFn: () => { schedules += 1; }, clearIntervalFn: () => {} });
+  rcRuntime.start();
+  assert.equal((await rcRuntime.check()).ok, false);
+  assert.equal((await rcRuntime.download()).ok, false);
+  assert.equal(rcRuntime.snapshot().status, "disabled");
+  assert.equal(rcRuntime.feedConfig, null);
+  assert.equal(rcRuntime.canInstall(), false);
+  assert.equal(rcUpdater.feed, undefined);
+  assert.equal(rcUpdater.checkCalls, 0);
+  assert.equal(rcUpdater.downloadCalls, 0);
+  assert.equal(schedules, 0);
+  rcRuntime.stop();
+}
 const disabledProductionRuntime = createUpdateRuntime({
   updater: productionUpdater,
   CancellationToken,

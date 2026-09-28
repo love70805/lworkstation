@@ -18,6 +18,41 @@ async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:0
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
+it.each(['receipt','loaded-recovery'])('uses the existing local default member with no saved setting for %s and remains idempotent after reopening',async path=>{
+ await db.settings.delete('active-member-context');
+ const {ledger,request,envelope}=await seed({prices:[5,8],id:path});
+ let inboxId;
+ if(path==='receipt'){
+  const receipt=await receiveErpCostInboxEnvelope({envelope});
+  expect(receipt.adoptionError).toBeUndefined();inboxId=receipt.id;
+ }else{
+  inboxId=`INBOX-${envelope.deliveryId}`;
+  await db.erpCostInbox.add({id:inboxId,deliveryId:envelope.deliveryId,batchId:envelope.batch.batchId,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,status:'loaded',receivedVia:'browser-message',receivedAt:envelope.sentAt,sentAt:envelope.sentAt,envelope});
+  db.close();await db.open();
+  const recovered=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+  expect(recovered[0].error).toBeUndefined();
+ }
+ expect(await db.settings.get('active-member-context')).toBeUndefined();
+ expect(await db.erpCostInbox.get(inboxId)).toMatchObject({status:'applied',adoption:{summary:{adoptedCount:2,remainingCount:0}}});
+ const snapshot=await getLedgerSnapshot(ledger.id);
+ expect(snapshot.costs.map(row=>row.unitCost)).toEqual([5,8]);
+ for(const cost of snapshot.costs)expect(resolveFormalCostDecision({workspaceId:ledger.workspaceId,ledgerId:ledger.id,period:ledger.period,store:'甲',platformSku:cost.platformSku,erpCost:cost}).eligibleForExactProfit).toBe(true);
+ const counts={rows:await db.erpCostRows.count(),batches:await db.erpCostBatches.count(),audit:await db.auditEvents.count()};
+ db.close();await db.open();await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ await receiveErpCostInboxEnvelope({envelope});
+ expect({rows:await db.erpCostRows.count(),batches:await db.erpCostBatches.count(),audit:await db.auditEvents.count()}).toEqual(counts);
+ expect(await db.settings.get('active-member-context')).toBeUndefined();
+});
+it.each(['operations','viewer','unknown'])('still refuses %s financial writes with a saved member setting',async role=>{
+ const {ledger,request,envelope}=await seed({prices:[5,8],id:role});
+ const inboxId=`INBOX-${envelope.deliveryId}`;
+ await db.erpCostInbox.add({id:inboxId,deliveryId:envelope.deliveryId,batchId:envelope.batch.batchId,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,status:'loaded',receivedAt:envelope.sentAt,envelope});
+ await setActiveMemberContext({workspaceId:ledger.workspaceId,memberId:'restricted',role});
+ const before=await db.erpCostInbox.get(inboxId);
+ await expect(processErpCostInboxAdoption({inboxId})).rejects.toThrow('财务写权限');
+ expect(await db.erpCostRows.count()).toBe(0);expect(await db.erpCostBatches.count()).toBe(0);
+ expect(await db.erpCostInbox.get(inboxId)).toEqual(before);
+});
 it('automatically adopts only normal items on receipt, preserves partial history and is idempotent across retry/restart',async()=>{
  const {ledger,envelope}=await seed();const receipt=await receiveErpCostInboxEnvelope({envelope});
  expect(receipt.adoptionError).toBeUndefined();expect(receipt).toMatchObject({status:'pending',adoption:{state:'partial',summary:{adoptedCount:1,anomalyCount:1,remainingCount:1}}});
@@ -62,9 +97,14 @@ it('does not roll back new costs for late old requests and rejects mutated sourc
  await expect(receiveErpCostInboxEnvelope({envelope:changed})).rejects.toThrow('不同证据');
 });
 it('retains durable receipt after an adoption transaction fails and recovery retries it',async()=>{
- const {ledger,envelope}=await seed({prices:[5,8]});const add=vi.spyOn(db.erpCostRows,'bulkAdd').mockRejectedValueOnce(new Error('synthetic failure'));
- const receipt=await receiveErpCostInboxEnvelope({envelope});expect(receipt.adoptionError).toBe('synthetic failure');expect(await db.erpCostInbox.count()).toBe(1);expect(await db.erpCostBatches.count()).toBe(0);add.mockRestore();
+ const {ledger,envelope}=await seed({prices:[5,8]});const add=vi.spyOn(db.erpCostRows,'bulkAdd').mockRejectedValue(new Error('synthetic failure'));
+ const receipt=await receiveErpCostInboxEnvelope({envelope});expect(receipt.adoptionError).toBe('synthetic failure');expect(await db.erpCostInbox.count()).toBe(1);expect(await db.erpCostBatches.count()).toBe(0);
+ const failed=await db.erpCostInbox.get(receipt.id);expect(failed).toMatchObject({status:'pending',adoptionFailure:{name:'Error',message:'synthetic failure'}});
+ const auditCount=await db.auditEvents.count();
+ db.close();await db.open();await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect((await db.erpCostInbox.get(receipt.id)).adoptionFailure).toEqual(failed.adoptionFailure);expect(await db.auditEvents.count()).toBe(auditCount);expect(await db.erpCostRows.count()).toBe(0);add.mockRestore();
  await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});expect(await db.erpCostRows.count()).toBe(2);
+ expect((await db.erpCostInbox.get(receipt.id)).adoptionFailure).toBeNull();
  const backup=JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));expect(JSON.stringify(backup)).toContain('erp-auto-adoption@1');
 });
 it('rejects corrupt envelope counts and foreign workspace; wrong ledger period remains blocked',async()=>{

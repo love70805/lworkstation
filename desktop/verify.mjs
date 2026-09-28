@@ -122,8 +122,13 @@ assert.doesNotMatch(read("update-beta-config.json"), /token/i);
 const releaseAfterPack = createRequire(import.meta.url)("./release-after-pack.cjs");
 assert.deepEqual(releaseAfterPack.loadReleaseBetaConfig(root), betaUpdateConfig);
 const releaseChannel = createRequire(import.meta.url)("./update-policy.cjs").versionChannel(releasePlan.version);
-assert.ok(["latest", "beta"].includes(releaseChannel), "release version must use a supported update channel");
-assert.equal(releaseAfterPack.isPrereleaseVersion(releasePlan.version), releaseChannel === "beta");
+const localRc = releaseAfterPack.isRcVersion(releasePlan.version);
+assert.ok(localRc || ["latest", "beta"].includes(releaseChannel), "release version must use a supported channel or a local RC");
+assert.equal(releaseAfterPack.isPrereleaseVersion(releasePlan.version), localRc || releaseChannel === "beta");
+if (localRc) {
+  assert.equal(releaseChannel, null, "local RC must not introduce a public update channel");
+  assert.deepEqual(releaseAfterPack.EXPECTED_RC_CONFIG, { enabled: false, channel: "rc" });
+}
 assert.match(read("release-after-pack.cjs"), /Refusing to enable beta updates for non-prerelease/);
 assert.match(read("release-build.mjs"), /--config\.afterPack=\.\/release-after-pack\.cjs/);
 assert.match(read("release-build.mjs"), /--config\.publish\.channel=beta/);

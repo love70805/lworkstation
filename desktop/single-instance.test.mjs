@@ -44,7 +44,7 @@ assert.equal(requested, true);
 assert.equal(exited, 0);
 assert.ok(main.indexOf('app.setPath("userData"') < main.indexOf("acquireDesktopInstance(app)"));
 assert.ok(main.indexOf("acquireDesktopInstance(app)") < main.indexOf('require("electron-updater")'));
-assert.match(main, /desktopInstance\.windowReady\(mainWindow\)/);
+assert.match(main, /desktopInstance\.windowReady\(hiddenSmoke \? null : mainWindow\)/);
 const pkg = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 assert.ok(pkg.build.files.includes("single-instance.cjs"));
 console.log("desktop single instance tests passed");

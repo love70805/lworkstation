@@ -1,7 +1,7 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.10",
-  "integrationBranch": "codex/beta10-export-status",
+  "version": "0.3.0-rc.2",
+  "integrationBranch": "codex/release-0-3-0-stable",
   "requiredCommits": [
     {
       "module": "beta10-saved-report-download-and-passive-erp-lamp",

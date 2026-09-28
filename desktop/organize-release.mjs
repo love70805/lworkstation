@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import releaseAfterPack from "./release-after-pack.cjs";
 import { archiveReleaseFile, artifactNameFromPattern, organizeReleaseArtifacts } from "./release-artifacts.mjs";
 
 const desktopRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -10,11 +11,12 @@ const historyRoot = path.join(releasesRoot, "history");
 const pkg = JSON.parse(fs.readFileSync(path.join(desktopRoot, "package.json"), "utf8"));
 const plan = JSON.parse(fs.readFileSync(path.join(desktopRoot, "release-plan.json"), "utf8"));
 const prerelease = plan.version.includes("-");
-const metadataFile = prerelease ? "beta.yml" : "latest.yml";
+const localRc = releaseAfterPack.isRcVersion(plan.version);
+const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
 const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
 const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
 const buildRoot = prerelease ? path.join(desktopRoot, "release-test", plan.version) : path.join(desktopRoot, "release");
-const releaseRoot = prerelease ? path.join(releasesRoot, "prerelease", plan.version) : path.join(releasesRoot, "latest");
+const releaseRoot = localRc ? path.join(releasesRoot, "candidates", plan.version) : prerelease ? path.join(releasesRoot, "prerelease", plan.version) : path.join(releasesRoot, "latest");
 
 function importLegacyArchive() {
   const legacyRoot = path.join(buildRoot, "archive");

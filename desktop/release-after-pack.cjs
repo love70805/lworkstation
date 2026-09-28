@@ -10,6 +10,10 @@ const EXPECTED_BETA_CONFIG = Object.freeze({
   channel: "beta",
 });
 
+// RC builds are local candidates. This does not enable an updater channel.
+const EXPECTED_RC_CONFIG = Object.freeze({ enabled: false, channel: "rc" });
+const isRcVersion = value => /^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$/.test(String(value || ""));
+
 function isPrereleaseVersion(value) {
   return /^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z][0-9A-Za-z.-]*$/.test(String(value || ""));
 }
@@ -61,7 +65,7 @@ function writeReleaseBetaConfig(context, { root = __dirname, operations = fs } =
     throw new Error("Packaged update-config.json is missing from resources.");
   }
 
-  const config = loadReleaseBetaConfig(root, operations);
+  const config = isRcVersion(version) ? EXPECTED_RC_CONFIG : loadReleaseBetaConfig(root, operations);
   operations.writeFileSync(target, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return { version, target, config };
 }
@@ -72,6 +76,8 @@ async function installReleaseBetaConfig(context) {
 
 module.exports = installReleaseBetaConfig;
 module.exports.EXPECTED_BETA_CONFIG = EXPECTED_BETA_CONFIG;
+module.exports.EXPECTED_RC_CONFIG = EXPECTED_RC_CONFIG;
+module.exports.isRcVersion = isRcVersion;
 module.exports.assertBetaUpdateConfig = assertBetaUpdateConfig;
 module.exports.isPrereleaseVersion = isPrereleaseVersion;
 module.exports.loadReleaseBetaConfig = loadReleaseBetaConfig;

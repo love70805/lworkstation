@@ -6,6 +6,7 @@ import {
   parseErpCostBatchJson,
   validateErpCostBatchEnvelope,
 } from "./erpCostBatchEnvelope";
+import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "./erpInboxContract";
 
 function evidence(warehouseSku, unitPrice = 4) {
   return {
@@ -62,6 +63,34 @@ function buildFixture() {
 }
 
 describe("ERP cost batch envelope v2", () => {
+  it("round-trips optional catalog mappings and per-purchase fields without changing cost evidence", () => {
+    const imageUrl = "https://cbu01.alicdn.com/img/one.jpg";
+    const purchaseCatalog = { picturesLinking: imageUrl, pictureLink1688: "https://cbu01.alicdn.com/img/1688.jpg", purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-1", purchaseOrderId: "PUR-1", purchaseOrderNo: "PO-1", lineNumber: 0, supplierId: "SUP-1", barcodeSkuid: "SKU-1", barcodeSkcid: "SKC-1", raw: { token: "discard" } };
+    const supplier1688Links = [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "测试供应商", cookie: "discard" }];
+    const envelope = buildErpCostBatchEnvelope({
+      batchId: "ERP-CATALOG-1", workspaceId: "workspace-default", ledgerId: "LEDGER-CATALOG-1", requestId: "REQ-CATALOG-1", platformSkcs: ["SKC-1"],
+      expectedSkus: [{ platformSku: "SKU-1", platformSkc: "SKC-1" }],
+      results: [{ warehouseSku: "WH-1", mappings: [{ platformSku: "SKU-1", platformSkc: "SKC-1" }], name: "采购商品", unitCost: 4.59, imageUrl, attribute: "红色", purchaseCatalog, supplier1688Links,
+        catalogMappings: [
+          { platformSku: "SKU-1", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "采购商品", imageUrl, attribute: "红色", storeName: "680店", token: "discard" },
+          { platformSku: "SKU-2", platformSkc: "SKC-1", warehouseSku: "WH-1", attribute: "蓝色" },
+          { platformSku: "SKU-2", platformSkc: "SKC-OTHER", warehouseSku: "WH-OTHER", attribute: "冲突候选" },
+        ],
+      }],
+      warehouseEvidence: [{ ...evidence("WH-1", 4.59), purchaseRecords: [{ ...evidence("WH-1", 4.59).purchaseRecords[0], imageUrl, attribute: "红色", purchaseCatalog, supplier1688Links, raw: { token: "discard" } }], excludedRecords: [{ ...evidence("WH-1", 4.59).excludedRecords[0], purchaseCatalog: { ...purchaseCatalog, purchaseOrderDetailId: "DETAIL-EXCLUDED" } }] }],
+    });
+    const inbox = buildErpCostInboxEnvelope({ batch: envelope, deliveryId: "DELIVERY-CATALOG" });
+    const validated = validateErpCostInboxEnvelope(JSON.parse(JSON.stringify(inbox)), { expectedSkus: [{ platformSku: "SKU-1", platformSkc: "SKC-1" }] });
+    expect(validated.batch).toMatchObject({ formatVersion: 2, evidenceStatus: "complete", summary: { outputRowCount: 1, querySkcCount: 1 } });
+    expect(validated.rows[0]).toMatchObject({ previewUnitCost: 4.59, imageUrl, attribute: "红色", catalogMappings: [{ platformSku: "SKU-1", attribute: "红色" }, { platformSku: "SKU-2", attribute: "蓝色" }, { platformSkc: "SKC-OTHER", warehouseSku: "WH-OTHER" }] });
+    expect(validated.rows[0].purchaseCatalog).toMatchObject({ picturesLinking: imageUrl, pictureLink1688: purchaseCatalog.pictureLink1688, purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-1", lineNumber: "0", barcodeSkuid: "SKU-1", barcodeSkcid: "SKC-1" });
+    expect(validated.rows[0].purchaseRecords[0]).toMatchObject({ imageUrl, attribute: "红色", purchaseCatalog: validated.rows[0].purchaseCatalog, supplier1688Links: [{ type: "product", supplierName: "测试供应商" }] });
+    expect(validated.rows[0].excludedRecords[0].purchaseCatalog.purchaseOrderDetailId).toBe("DETAIL-EXCLUDED");
+    expect(JSON.stringify(validated.batch)).not.toContain("discard");
+    expect(validateErpCostBatchEnvelope(buildFixture()).envelope.rows[0]).not.toHaveProperty("catalogMappings");
+    expect(validateErpCostBatchEnvelope(buildFixture()).envelope.rows[0]).not.toHaveProperty("purchaseCatalog");
+  });
+
   it("keeps shared-warehouse out-of-ledger variants auxiliary without downgrading expected evidence", () => {
     const purchaseRecords = Array.from({ length: 12 }, (_, index) => ({
       recordId: `SHARED-${index + 1}`,

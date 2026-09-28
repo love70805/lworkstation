@@ -9,6 +9,8 @@ import {
 import { summarizeLedgerRows } from "../../domain/ledgerImport";
 import { planSalesImports, prepareSalesImportItems } from "../../domain/batchSalesImport";
 import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../domain/erpCostBatchEnvelope";
+import { normalizeErpCatalogFields } from "../../domain/erpCatalogFields";
+import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
 import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../../domain/erpCostResolution";
 import { hasLegacyMonthExclusions } from "../../domain/erpCostPeriod";
@@ -398,21 +400,47 @@ export async function savePublishedErpCostBatch(args) {
 }
 
 export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } = {}) {
+  try { return await processErpCostInboxAdoptionOnce({ inboxId, resolutions }); }
+  catch (error) {
+    // The cost transaction has rolled back, but the original receipt is durable.
+    // Record a separate, deduplicated failure so background retries and the page
+    // do not mistake a saved receipt for successful cost adoption.
+    try {
+      await db.transaction('rw', db.settings, db.erpCostInbox, db.auditEvents, async () => {
+        const member = await getActiveMemberContext();
+        const inbox = await db.erpCostInbox.get(inboxId);
+        if (!inbox || inbox.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)
+          || !['pending', 'loaded'].includes(inbox.status)) return;
+        const failure = { name: String(error.name || 'Error').slice(0, 80), message: String(error.message || 'ERP 自动采用失败').slice(0, 500) };
+        if (inbox.adoptionFailure?.name === failure.name && inbox.adoptionFailure?.message === failure.message) return;
+        const attemptedAt = new Date().toISOString();
+        await db.erpCostInbox.update(inboxId, { adoptionFailure: { ...failure, attemptedAt } });
+        await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_failed', actorId: member.memberId, createdAt: attemptedAt, localOnly: true, syncState: 'local_only',
+          after: { requestId: inbox.requestId, batchId: inbox.batchId, failure, systemSource: 'erp-auto-adoption' } });
+      });
+    } catch { /* A failure to save diagnostics must preserve the original error. */ }
+    throw error;
+  }
+}
+
+async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
   const member = await getActiveMemberContext();
   return db.transaction('rw', db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const inbox = await db.erpCostInbox.get(inboxId);
     if (!inbox || inbox.workspaceId !== member.workspaceId) throw new Error('ERP 收件不属于当前工作区。');
-    const active = await db.settings.get(ACTIVE_MEMBER_CONTEXT_KEY);
-    if (active?.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(active.role)) throw new Error('当前成员无此账本的财务写权限。');
+    // Recheck the current identity inside the transaction, including the same
+    // local default used elsewhere when no explicit member setting is stored.
+    const active = await getActiveMemberContext();
+    if (active.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(active.role)) throw new Error('当前成员无此账本的财务写权限。');
     if (['applied', 'rejected', 'voided'].includes(inbox.status)) return { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status, adoption: inbox.adoption, idempotent: true };
     const ledger = await db.ledgers.get(inbox.ledgerId), request = await db.erpCostRequests.get(inbox.requestId);
     const now = new Date().toISOString();
     const persistResult = async (items, state, reason = null, batchId = inbox.appliedBatchId) => {
       const summary = summarizeErpAdoption(items);
       const adoption = { version: ERP_ADOPTION_VERSION, state, items, summary, reason };
-      const changed = JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
+      const changed = Boolean(inbox.adoptionFailure) || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
       if (changed) {
-        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: now }, updatedAt: now };
+        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
         await db.erpCostInbox.put(saved);
         await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_processed', actorId: member.memberId, createdAt: now, before: { adoption: inbox.adoption ?? null }, after: { adoption, requestId: inbox.requestId, batchId: inbox.batchId, adoptionMethod: resolutions.length ? 'exception_retry' : 'automatic', systemSource: 'erp-auto-adoption', snapshot: saved } });
       }
@@ -701,6 +729,7 @@ async function publishVerifiedErpCostBatch({
       sourceMeta: verifiedSourceEnvelope.sourceMeta,
       evidenceStatus: verifiedSourceEnvelope.evidenceStatus,
       warehouseEvidence: verifiedSourceEnvelope.warehouseEvidence,
+      catalogRows: erpProductCatalogRowsFromEnvelope(verifiedSourceEnvelope, { batchId, publishedAt }),
     };
     const savedBatch = {
       id: batchId,
@@ -738,13 +767,15 @@ async function publishVerifiedErpCostBatch({
       currency: row.currency,
       orderNumber: row.orderNumber,
       orderType: row.orderType,
-      productName: row.productName,
+      productName: expectedSourceRowsBySku.get(canonicalPlatformSku(row.platformSku))?.productName,
+      ...normalizeErpCatalogFields(expectedSourceRowsBySku.get(canonicalPlatformSku(row.platformSku))),
+      catalogQuerySkcs: verifiedSourceEnvelope.query.platformSkcs.map((item) => item.platformSkc),
       calculationCount: row.calculationCount,
       dateRange: row.dateRange,
       totalQuantity: row.totalQuantity,
       totalPrice: row.totalPrice,
-      supplierName: row.supplierName,
-      supplier1688Url: row.supplier1688Url,
+      supplierName: expectedSourceRowsBySku.get(canonicalPlatformSku(row.platformSku))?.supplierName,
+      supplier1688Url: expectedSourceRowsBySku.get(canonicalPlatformSku(row.platformSku))?.supplier1688Url,
       selectedRecordIds: row.selectedRecordIds,
       purchaseRecords: row.purchaseRecords,
       excludedRecords: row.excludedRecords,

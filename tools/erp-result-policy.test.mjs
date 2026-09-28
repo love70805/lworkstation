@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const toolsRoot = path.dirname(fileURLToPath(import.meta.url));
 const policyPath = path.join(toolsRoot, "..", "integrations", "erp-assistant-extension", "src", "result-policy.js");
-const sandbox = { window: {} };
+const sandbox = { window: {}, URL };
 sandbox.globalThis = sandbox.window;
 vm.runInNewContext(await readFile(policyPath, "utf8"), sandbox, { filename: policyPath });
 const policy = sandbox.window.ShopeersErpResultPolicy;
@@ -139,6 +139,69 @@ assert.equal(
   "https://xinjie.1688.com/page/offerlist.htm?spm=erp",
 );
 assert.equal(policy.extractSupplier1688Url({ href: "https://xinjie.1688.com.evil.example/offer/730242606884.html" }), "");
+
+// Synthetic carrier fixtures validate transport; these do not claim real ERP
+// picture/specification aliases, which still require a purchase-detail response.
+const catalogFixture = [
+  { barcodeSkuid: "SKU-RED", barcodeSkcid: "SKC-CATALOG", productName: "ERP 红色商品", imageUrl: "https://images.example/red.jpg", attribute: "红色/M", storeName: "店铺甲", platform: "Shein" },
+  { barcodeSkuid: "SKU-BLUE", barcodeSkcid: "SKC-CATALOG", productName: "ERP 蓝色商品", imageUrl: "https://images.example/blue.jpg", attribute: "蓝色/L" },
+  { barcodeSkuid: "SKU-RED", barcodeSkcid: "SKC-CONFLICT", attribute: "不同归属" },
+];
+const catalogMappings = JSON.parse(JSON.stringify(policy.normalizeCatalogMappings([...catalogFixture, catalogFixture[0]], "WH-CATALOG")));
+assert.equal(catalogMappings.length, 3, "only fully identical candidates are deduplicated; conflicting SKU ownership remains inspectable");
+assert.equal(catalogMappings[1].attribute, "蓝色/L");
+assert.equal(catalogMappings[1].warehouseSku, "WH-CATALOG");
+assert.equal(catalogMappings[0].imageUrl, "https://images.example/red.jpg");
+assert.equal(catalogMappings[0].storeName, "店铺甲");
+assert.equal(policy.canonicalImageUrl("javascript:alert(1)"), "");
+assert.equal(policy.canonicalImageUrl("https://user:pass@images.example/red.jpg"), "");
+assert.equal(policy.canonicalImageUrl("https://images.example/red.jpg?token=secret"), "");
+assert.equal(policy.catalogText({ value: "不要变成对象名称" }), "");
+const purchaseCatalog = JSON.parse(JSON.stringify(policy.purchaseCatalogFromDetail({
+  picturesLinking: "https://images.example.invalid/warehouse.jpg",
+  pictureLink1688: "https://images.example.invalid/1688.jpg",
+  purchaseSpecificationAndModel1688: "采购规格",
+  model1688: "红色",
+  purchaseProportion1688: "1-1",
+  purchaseOrderDetailId: "DETAIL-1", purchaseOrderId: "PO-1", purchaseOrderNo: "PO-1", lineNumber: 0,
+  supplierId: "SUPPLIER-1", barcodeSkuid: "", barcodeSkcid: null,
+  unexpectedSecret: "do-not-keep",
+})));
+assert.equal(Object.keys(purchaseCatalog).length, 14);
+assert.equal(purchaseCatalog.lineNumber, "0");
+assert.equal(purchaseCatalog.barcodeSkuid, null);
+assert.equal(purchaseCatalog.barcodeSkcid, null);
+assert.equal(purchaseCatalog.purchaseProportion1688, "1-1");
+assert.equal(purchaseCatalog.specificationAndModel, null);
+assert.equal(purchaseCatalog.productColor, null);
+assert.equal(purchaseCatalog.unexpectedSecret, undefined);
+assert.equal(policy.purchaseImageUrl({ picturesLinking: purchaseCatalog.picturesLinking, pictureLink1688: purchaseCatalog.pictureLink1688, imageUrl: "https://images.example.invalid/generic.jpg" }), purchaseCatalog.picturesLinking);
+assert.equal(policy.purchaseImageUrl({ picturesLinking: "javascript:alert(1)", pictureLink1688: purchaseCatalog.pictureLink1688 }), purchaseCatalog.pictureLink1688);
+assert.equal(policy.purchaseImageUrl({ imageUrl: "https://images.example.invalid/generic.jpg" }), "https://images.example.invalid/generic.jpg");
+assert.equal(policy.purchaseImageUrl({ purchaseOrderId: "PO-1", purchaseCatalog, imageUrl: "https://images.example.invalid/generic.jpg" }), purchaseCatalog.picturesLinking, "canonical nested metadata stays authoritative after evidence normalization");
+assert.equal(policy.normalizePurchaseCatalog({ lineNumber: Number.NaN }).lineNumber, null);
+assert.equal(policy.purchaseCatalogFromDetail({ imageUrl: "https://images.example.invalid/generic.jpg" }), null);
+const typedLinks = JSON.parse(JSON.stringify(policy.extractSupplier1688Links({
+  productUrl: "https://detail.1688.com/offer/730242606884.html?trace=erp",
+  storeUrl: "https://xinjie.1688.com/page/offerlist.htm",
+}, "供应商甲")));
+assert.deepEqual(typedLinks, [
+  { type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "供应商甲" },
+  { type: "store", url: "https://xinjie.1688.com/page/offerlist.htm", supplierName: "供应商甲" },
+]);
+assert.equal(policy.normalizeSupplier1688Links([{ type: "product", url: typedLinks[1].url }]).length, 0);
+assert.equal(policy.normalizeSupplier1688Links([{ type: "product", url: `https://attacker.example/?redirect=${typedLinks[0].url}` }]).length, 0);
+assert.deepEqual(JSON.parse(JSON.stringify(policy.extractSupplier1688Links({
+  supplier1688Links: typedLinks,
+  _supplier1688Url: "https://detail.1688.com/offer/888888888888.html",
+}, "不同供应商"))), typedLinks, "cached context and explicit supplier names must not be relabeled or recaptured");
+const pairedPreview = policy.previewForLedger([{ warehouseSku: "WH-PAIR" }], { warehouses: [{ warehouseSku: "WH-PAIR", purchaseRecords: [
+  { recordId: "NEW", purchaseDate: "2026-09-02", quantity: 1, unitPrice: 2, supplierName: "供应商乙", supplier1688Url: "" },
+  { recordId: "OLD", purchaseDate: "2026-09-01", quantity: 1, unitPrice: 3, supplierName: "供应商甲", supplier1688Url: typedLinks[0].url, supplier1688Links: typedLinks },
+] }] }, "2026-09")[0];
+assert.equal(pairedPreview.supplierName, "供应商乙");
+assert.equal(pairedPreview.supplier1688Url, "", "a different supplier's URL cannot fill the newest supplier's missing link");
+assert.deepEqual(JSON.parse(JSON.stringify(pairedPreview.supplier1688Links)), typedLinks);
 
 const warningRecords = policy.annotateCostWarnings([
   { recordId: "R0", unitPrice: 0 },

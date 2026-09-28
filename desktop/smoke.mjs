@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import updatePolicy from "./update-policy.cjs";
+import releaseAfterPack from "./release-after-pack.cjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const executable = process.env.SHOPEERS_DESKTOP_SMOKE_EXECUTABLE
@@ -18,9 +19,16 @@ const cachePath = path.join(userDataPath, "cache");
 const inboxPort = 20790 + Math.floor(Math.random() * 800);
 const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 const channel = updatePolicy.versionChannel(version);
-if (!channel) throw new Error(`Unsupported smoke update channel for ${version}`);
+const localRc = releaseAfterPack.isRcVersion(version);
+const hiddenMode = process.env.SHOPEERS_DESKTOP_SMOKE_HIDDEN === "1";
+if (!channel && !localRc) throw new Error(`Unsupported smoke update channel for ${version}`);
+if (localRc) {
+  const configPath = path.join(path.dirname(executable), "resources", "update-config.json");
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  if (JSON.stringify(config) !== JSON.stringify(releaseAfterPack.EXPECTED_RC_CONFIG)) throw new Error("Local RC must have disabled packaged update configuration");
+}
 
-const updateServer = http.createServer((request, response) => {
+const updateServer = localRc ? null : http.createServer((request, response) => {
   const requestPath = new URL(request.url, "http://127.0.0.1").pathname;
   if (requestPath !== `/${channel}.yml`) {
     response.writeHead(404).end();
@@ -39,8 +47,8 @@ const updateServer = http.createServer((request, response) => {
     "",
   ].join("\n"));
 });
-await new Promise((resolve) => updateServer.listen(0, "127.0.0.1", resolve));
-const updateUrl = `http://127.0.0.1:${updateServer.address().port}/`;
+if (updateServer) await new Promise((resolve) => updateServer.listen(0, "127.0.0.1", resolve));
+const updateUrl = updateServer ? `http://127.0.0.1:${updateServer.address().port}/` : "";
 
 if (!fs.existsSync(executable)) throw new Error(`Packaged executable not found: ${executable}`);
 fs.mkdirSync(cachePath, { recursive: true });
@@ -48,11 +56,11 @@ const child = spawn(executable, [], {
   env: {
     ...process.env,
     SHOPEERS_DESKTOP_SMOKE_REPORT: reportPath,
-    SHOPEERS_DESKTOP_SMOKE_REQUIRE_UPDATE_CHECK: "1",
+    SHOPEERS_DESKTOP_SMOKE_REQUIRE_UPDATE_CHECK: localRc ? "0" : "1",
     SHOPEERS_DESKTOP_SMOKE_ERP_V2: "1",
-    SHOPEERS_DESKTOP_UPDATE_SMOKE: "1",
+    SHOPEERS_DESKTOP_UPDATE_SMOKE: localRc ? "0" : "1",
     SHOPEERS_DESKTOP_UPDATE_URL: updateUrl,
-    SHOPEERS_DESKTOP_UPDATE_CHANNEL: channel,
+    SHOPEERS_DESKTOP_UPDATE_CHANNEL: channel || "",
     SHOPEERS_ERP_INBOX_PORT: String(inboxPort),
     SHOPEERS_ERP_INBOX_FILE: inboxSpoolPath,
     SHOPEERS_DESKTOP_SMOKE_USER_DATA: userDataPath,
@@ -113,7 +121,7 @@ try {
 } finally {
   if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
   if (fs.existsSync(inboxSpoolPath)) fs.unlinkSync(inboxSpoolPath);
-  updateServer.close();
+  updateServer?.close();
 }
 
 let validationError = processError;
@@ -131,7 +139,11 @@ if (!validationError) {
       || !report.packagedResources?.shell
       || !report.packagedResources?.workspacePreload
       || report.version !== version
-      || report.update.status !== "current"
+      || report.update.status !== (localRc ? "disabled" : "current")
+      || (localRc && (report.updateFeedConfig !== null || report.updateInstallInvocationCount !== 0))
+      || report.hiddenMode !== hiddenMode
+      || (hiddenMode && (report.visibleWindowCount !== 0 || report.updatePopoverDomClickSmoke?.skipped !== true))
+      || (!hiddenMode && report.updatePopoverDomClickSmoke?.ok !== true)
       || !report.erpIndicatorSmoke?.ok
       || report.erpIndicatorSmoke?.windowCount !== 1
       || !isolatedViews

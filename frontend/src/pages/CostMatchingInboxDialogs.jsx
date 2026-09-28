@@ -38,7 +38,7 @@ export function CostMatchingInboxQueueDialog({
           const isLoaded = item.inbox.status === "loaded";
           const isActive = item.inbox.id === loadedInboxId;
           const period = item.request?.ledgerPeriod ?? (item.inbox.ledgerId === ledger?.id ? ledger?.period : null) ?? "月份待核对";
-          const adoptionNotice = summarizeAdoptionForDisplay(item.inbox.adoption, { status: item.inbox.status });
+          const adoptionNotice = summarizeAdoptionForDisplay(item.inbox.adoption, { status: item.inbox.status, failure: item.inbox.adoptionFailure });
           return <article className={"cost-inbox-item" + (isLoaded ? " loaded" : "")} key={item.inbox.id}>
             <div className="cost-inbox-item-select">{item.inbox.status === "pending" && !item.inbox.appliedBatchId ? <input type="checkbox" aria-label={"选择批次 " + item.inbox.batchId} checked={selectedPendingInboxIds.has(item.inbox.id)} onChange={(event) => onTogglePending(item.inbox.id, event.target.checked)} /> : null}</div>
             <div className="cost-inbox-item-main"><strong>{period} · {skcCount} 个平台 SKC</strong><small>接收：{item.inbox.receivedAt || sentAt ? new Date(item.inbox.receivedAt ?? sentAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知"}</small><small>批次 <code>{item.inbox.batchId}</code></small>{adoptionNotice ? <small>{adoptionNotice.details}</small> : null}{!item.scopeMatched ? <small>{ERP_INBOX_MATCH_REASONS[item.reason] ?? item.reason}</small> : null}</div>
