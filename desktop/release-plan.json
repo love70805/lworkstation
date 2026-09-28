@@ -1,7 +1,7 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0-beta.9",
-  "integrationBranch": "codex/beta9-implementation",
+  "version": "0.3.0-beta.10",
+  "integrationBranch": "codex/beta10-export-status",
   "requiredCommits": [
     {
       "module": "beta9-cost-identity-status-and-export",

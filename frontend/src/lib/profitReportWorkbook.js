@@ -10,7 +10,7 @@ function crc32(bytes) { let crc=0xffffffff;for(const byte of bytes)crc=(crc>>>8)
 function zip(files) {
   const chunks=[],central=[]; let offset=0,centralLength=0;
   for(const [name,text] of files){
-    const filename=encode(name),data=encode(text),crc=crc32(data);
+    const filename=encode(name),data=typeof text === 'string' ? encode(text) : text,crc=crc32(data);
     const local=new Uint8Array(30+filename.length),l=new DataView(local.buffer);
     l.setUint32(0,0x04034b50,true);l.setUint16(4,20,true);l.setUint16(6,0x800,true);l.setUint32(14,crc,true);l.setUint32(18,data.length,true);l.setUint32(22,data.length,true);l.setUint16(26,filename.length,true);local.set(filename,30);
     const entry=new Uint8Array(46+filename.length),e=new DataView(entry.buffer);
@@ -93,4 +93,8 @@ export function buildProfitReportWorkbook({report,products,dispatchRows=[],deduc
 
 export function bytesToBase64(bytes){let text="";for(let i=0;i<bytes.length;i+=16384)text+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(text);}
 export function base64ToBytes(value){return Uint8Array.from(atob(value),char=>char.charCodeAt(0));}
-export function downloadReportFile(report){const blob=new Blob([base64ToBytes(report.fileBase64)],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function prepareReportDownload(report) {
+  const { simplifySavedReport } = await import('./savedReportDownload');
+  return simplifySavedReport(report, zip);
+}
+export async function downloadReportFile(report){const bytes=await prepareReportDownload(report);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName.replace(/\.xlsx$/i,'-简化.xlsx');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}

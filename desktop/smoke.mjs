@@ -132,17 +132,8 @@ if (!validationError) {
       || !report.packagedResources?.workspacePreload
       || report.version !== version
       || report.update.status !== "current"
-      || !report.popoverToggleSmoke?.ok
-      || !report.popoverDomClickSmoke?.ok
-      || report.popoverDomClickSmoke?.final?.open !== false
-      || report.popoverDomClickSmoke?.final?.visible !== false
-      || report.popoverDomClickSmoke?.final?.windowCount > 1
-      || report.popoverToggleSmoke?.cycles !== 2
-      || report.popoverToggleSmoke?.staleClosed !== true
-      || report.popoverToggleSmoke?.secondShown !== true
-      || report.popoverToggleSmoke?.secondBounds?.width > 280
-      || report.popoverToggleSmoke?.secondBounds?.height > 220
-      || report.popoverToggleSmoke?.finalOpen !== false
+      || !report.erpIndicatorSmoke?.ok
+      || report.erpIndicatorSmoke?.windowCount !== 1
       || !isolatedViews
       || report.inbox?.status !== "online"
       || report.inbox?.flow?.status !== "workspace_received"

@@ -34,26 +34,8 @@
     };
   }
 
-  function getPopoverPresentation(inbox = {}, flow = {}) {
-    const state = classifyErpState(inbox, flow);
-    const error = state.tone === "danger" ? state.aria : "";
-    return {
-      status: error ? "" : state.label,
-      error,
-      reason: state.aria,
-      showStatus: !error,
-      showError: Boolean(error),
-    };
-  }
-
-  function shouldReturnFocusOnPopoverClose(reason) {
-    return ["button", "outside", "escape"].includes(reason);
-  }
-
   return {
     classifyErpState,
     getAddressPresentation,
-    getPopoverPresentation,
-    shouldReturnFocusOnPopoverClose,
   };
 });

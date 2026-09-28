@@ -1,6 +1,6 @@
 {
   "name": "shopeers-desktop",
-  "version": "0.3.0-beta.9",
+  "version": "0.3.0-beta.10",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
   "author": "Lworkstation Team",
@@ -55,10 +55,6 @@
       "shell.css",
       "shell-state.cjs",
       "shell.js",
-      "inbox-popover.html",
-      "inbox-popover.css",
-      "inbox-popover.js",
-      "inbox-popover-preload.cjs",
       "update-runtime.cjs",
       "update-policy.cjs",
       "update-provider.cjs",

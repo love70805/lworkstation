@@ -28,26 +28,15 @@ async function green() { return shellRun("document.querySelector('#inbox-status'
     assert.equal(ready.inbox.latestExtension.context, 'extension-isolated');
     assert.equal(ready.inbox.latestExtension.sessionState, 'authenticated');
     assert.equal(ready.inbox.latestExtension.queryAvailable, false);
-    assert.ok(ready.erpReadyNoticeUntil > 0, 'the first actual readiness schedules exactly one short notice');
-    assert.equal(await shellRun("document.querySelector('#erp-ready-notice').hidden"), ready.erpReadyNoticeUntil <= Date.now(), 'notice visibility follows its short lifetime');
     assert.equal(await application.evaluate(() => globalThis.__erpStatusFixture.calls.some(value => value.startsWith('/purchase/'))), false, 'cold detection never requests purchase APIs');
     checks.push('hidden actual desktop stays on workspace; real MV3 loadExtension, MAIN session replay, isolated bridge and managed inbox handshake turn the lamp green without purchase');
-    const noticeUntil = ready.erpReadyNoticeUntil;
-    await application.evaluate(async () => { await globalThis.__erpStatusSmoke.poll(); await globalThis.__erpStatusSmoke.poll(); });
-    assert.equal((await application.evaluate(() => globalThis.__erpStatusSmoke.state())).erpReadyNoticeUntil, noticeUntil);
-    await delay(3400);
-    assert.equal(await shellRun("document.querySelector('#erp-ready-notice').hidden"), true);
-    checks.push('first readiness notice appears once and dismisses; repeat status polls do not reset it');
-    await shellRun("document.querySelector('#inbox-status').focus()");
-    assert.equal(await shellRun("document.querySelector('#erp-status-hint').hidden"), false);
-    assert.match(await shellRun("document.querySelector('#erp-status-hint').textContent"), /通信就绪/);
-    await shellRun("document.querySelector('#inbox-status').click()");
-    await wait(() => application.evaluate(() => Boolean(globalThis.__erpStatusSmoke.popup())), 'compact lamp popup');
-    const popupState = await application.evaluate(() => globalThis.__erpStatusSmoke.popup().webContents.executeJavaScript("({text:document.body.innerText,open:!!document.querySelector('#popover-open'),close:!!document.querySelector('#popover-close')})"));
-    assert.match(popupState.text, /通信就绪/); assert.equal(popupState.open, true); assert.equal(popupState.close, true);
-    await application.evaluate(() => globalThis.__erpStatusSmoke.popup().webContents.executeJavaScript("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))"));
-    await wait(() => application.evaluate(() => !globalThis.__erpStatusSmoke.popup()), 'Escape closes popup');
-    checks.push('keyboard focus exposes one-line reason and compact keyboard-closeable details');
+    await application.evaluate(async () => { for(let i=0;i<5;i++) await globalThis.__erpStatusSmoke.poll(); });
+    assert.equal(await shellRun("!!document.querySelector('#erp-ready-notice, #erp-status-hint')"), false);
+    await shellRun("(()=>{const lamp=document.querySelector('#inbox-status');lamp.click();lamp.dispatchEvent(new MouseEvent('mouseenter'));lamp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));lamp.focus();})()");
+    assert.equal(await application.evaluate(() => globalThis.__erpStatusSmoke.windows()),1);
+    assert.equal(await shellRun("document.querySelector('#inbox-status').title"),'');
+    assert.equal(await shellRun("document.querySelector('#inbox-status').tabIndex"),-1);
+    checks.push('repeated genuine status events and mouse/keyboard dispatch produce no status panel, tooltip, toast or child window');
     await application.evaluate(() => globalThis.__erpStatusSmoke.expire());
     assert.equal(await green(), false, 'stale status immediately revokes green');
     await application.evaluate(() => globalThis.__erpStatusSmoke.erp().executeJavaScript("window.dispatchEvent(new Event('online'))"));
@@ -56,7 +45,6 @@ async function green() { return shellRun("document.querySelector('#inbox-status'
     await wait(async () => !(await green()), 'inbox restart rejects old persisted readiness');
     await application.evaluate(() => globalThis.__erpStatusSmoke.erp().executeJavaScript("window.dispatchEvent(new Event('online'))"));
     await wait(green, 'inbox restart automatic handshake recovery');
-    assert.equal((await application.evaluate(() => globalThis.__erpStatusSmoke.state())).erpReadyNoticeUntil, noticeUntil);
     checks.push('expiry and real managed inbox restart revoke old green; fresh communication recovers without repeating notice');
     await application.evaluate(async () => { globalThis.__erpStatusFixture.mode = 'login'; await globalThis.__erpStatusSmoke.erp().loadURL('https://www.zhuolinkeji.cn/login.html'); });
     await wait(async () => !(await green()) && (await shellRun("document.querySelector('#inbox-status').getAttribute('aria-label')")).includes('请先登录'), 'known login state');
@@ -73,7 +61,7 @@ async function green() { return shellRun("document.querySelector('#inbox-status'
       const png = await application.evaluate(async () => (await globalThis.__erpStatusSmoke.window().webContents.capturePage()).toPNG().toString('base64'));
       fs.writeFileSync(path.join(output, `erp-lamp-${appearance}.png`), Buffer.from(png, 'base64'));
     }
-    checks.push('ERP/workspace switch retains handshake; 1024px light/dark lamp and focus hint rendered');
+    checks.push('ERP/workspace switch retains handshake; 1024px light/dark passive lamp DOM checked');
     fs.writeFileSync(path.join(output, 'desktop-status-checks.json'), JSON.stringify({ ok: true, checks, limitation: 'Real Electron extension and managed inbox against isolated ERP HTML/API fixtures; no live account or business data. Windows remain hidden, so native visible-window focus was not claimed.' }, null, 2));
     console.log(JSON.stringify({ ok: true, output, checks }, null, 2));
   } finally { if (application) await application.close(); await new Promise(resolve => workspaceServer.close(resolve)); }

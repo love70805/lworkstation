@@ -28,7 +28,7 @@ assert.match(pkg.scripts.verify, /release-after-pack\.test\.mjs/);
 assert.match(pkg.scripts["release:build"], /release-build\.mjs/);
 assert.ok(pkg.dependencies["electron-updater"]);
 assert.ok(pkg.dependencies.lucide);
-for (const file of ["main.cjs", "desktop-preferences.cjs", "extension-runtime.cjs", "extension-runtime.test.mjs", "workspace-context.cjs", "workspace-context.test.mjs", "workspace-navigation.cjs", "workspace-navigation.test.mjs", "inbox-ipc.cjs", "inbox-ipc.test.mjs", "generate-brand-assets.cjs", "navigation-history.cjs", "inbox-service.cjs", "inbox-service.test.mjs", "remote-navigation.cjs", "preload.cjs", "workspace-preload.cjs", "shell.html", "shell.css", "shell-state.cjs", "shell.js", "inbox-popover.html", "inbox-popover.css", "inbox-popover.js", "inbox-popover-preload.cjs", "inbox-popover-lifecycle.cjs", "update-runtime.cjs", "update-runtime.test.mjs", "update-popover.html", "update-popover.css", "update-popover.js", "update-popover-preload.cjs", "build-update-fixtures.mjs", "update-smoke.mjs", "update-fixture-config.cjs", "update-fixture-after-pack.cjs", "release-after-pack.cjs", "release-after-pack.test.mjs", "release-build.mjs", "smoke.mjs", "update-config.json", "update-beta-config.json", "update-test-config.json", "UPDATE_RELEASE_CHECKLIST.md", "release-plan.json", "organize-release.mjs", "release-artifacts.mjs", "release-artifacts.test.mjs", "release-check.mjs", "assets/lworkstation.png", "assets/lworkstation.ico"]) assert.ok(fs.existsSync(path.join(root, file)), file);
+for (const file of ["main.cjs", "desktop-preferences.cjs", "extension-runtime.cjs", "extension-runtime.test.mjs", "workspace-context.cjs", "workspace-context.test.mjs", "workspace-navigation.cjs", "workspace-navigation.test.mjs", "inbox-ipc.cjs", "inbox-ipc.test.mjs", "generate-brand-assets.cjs", "navigation-history.cjs", "inbox-service.cjs", "inbox-service.test.mjs", "remote-navigation.cjs", "preload.cjs", "workspace-preload.cjs", "shell.html", "shell.css", "shell-state.cjs", "shell.js", "inbox-popover-lifecycle.cjs", "update-runtime.cjs", "update-runtime.test.mjs", "update-popover.html", "update-popover.css", "update-popover.js", "update-popover-preload.cjs", "build-update-fixtures.mjs", "update-smoke.mjs", "update-fixture-config.cjs", "update-fixture-after-pack.cjs", "release-after-pack.cjs", "release-after-pack.test.mjs", "release-build.mjs", "smoke.mjs", "update-config.json", "update-beta-config.json", "update-test-config.json", "UPDATE_RELEASE_CHECKLIST.md", "release-plan.json", "organize-release.mjs", "release-artifacts.mjs", "release-artifacts.test.mjs", "release-check.mjs", "assets/lworkstation.png", "assets/lworkstation.ico"]) assert.ok(fs.existsSync(path.join(root, file)), file);
 const masterSource = fs.readFileSync(path.join(root, "../frontend/public/assets/brand/l7-app-icon-master.svg"), "utf8").replace(/\r\n/g, "\n");
 assert.equal(crypto.createHash("sha256").update(masterSource).digest("hex").toUpperCase(), "07A556FA1A57EC9E147138CFA97443214FF63AB0E67CB4B3AD10EB4A5708DA53");
 const png = fs.readFileSync(path.join(root, "assets/lworkstation.png"));
@@ -71,9 +71,6 @@ assert.match(main, /DESKTOP_ICON_PATH = path\.join\(__dirname, "assets", "lworks
 assert.match(main, /icon: DESKTOP_ICON_PATH/);
 assert.match(main, /app\.setAppUserModelId\("com\.shopeers\.workstation"\)/);
 assert.doesNotMatch(main, /SHELL_STATUS_HEIGHT/);
-assert.match(main, /const INBOX_POPOVER_MIN_HEIGHT = 43/);
-assert.match(main, /const INBOX_POPOVER_MAX_HEIGHT = 220/);
-assert.match(main, /const INBOX_POPOVER_WIDTH = 280/);
 assert.match(main, /const contentTop = SHELL_TOP_HEIGHT/);
 assert.match(main, /height - contentTop/);
 assert.match(main, /reportPreferenceWriteFailure/);
@@ -81,22 +78,8 @@ assert.match(main, /缩放已应用，但暂时无法保存/);
 assert.match(main, /try \{\s*saveAppearancePreference/);
 assert.match(main, /parent: mainWindow/);
 assert.match(main, /skipTaskbar: true/);
-assert.match(main, /minHeight: INBOX_POPOVER_MIN_HEIGHT/);
-assert.match(main, /minWidth: 168/);
-assert.match(main, /maxHeight: INBOX_POPOVER_MAX_HEIGHT/);
-assert.match(main, /inbox-popover-preload\.cjs/);
 assert.match(main, /createInboxPopoverLifecycle/);
-assert.match(main, /inboxPopoverLifecycle\.isCurrent\(generation\)/);
-assert.match(main, /inboxPopoverLifecycle\.close\(generation\)/);
 assert.match(main, /popup\.isDestroyed\(\)\) return;/);
-assert.match(main, /runPopoverSmokeToggle/);
-assert.match(main, /first-close-before-load/);
-assert.match(main, /second-shown/);
-assert.match(main, /secondBounds/);
-assert.match(read("smoke.mjs"), /popoverToggleSmoke/);
-assert.match(read("smoke.mjs"), /secondBounds\?\.width > 280/);
-assert.match(read("smoke.mjs"), /secondBounds\?\.height > 220/);
-assert.match(main, /positionInboxPopover/);
 assert.match(main, /titleBarStyle:\s*"hidden"/);
 assert.match(main, /titleBarOverlay/);
 assert.match(main, /height:\s*36/);
@@ -212,18 +195,12 @@ assert.doesNotMatch(main, /webContents\.canGoBack\(/);
 assert.doesNotMatch(main, /webContents\.canGoForward\(/);
 assert.match(read("preload.cjs"), /desktop:back/);
 assert.match(read("preload.cjs"), /desktop:forward/);
-assert.match(read("preload.cjs"), /desktop:toggle-inbox-popover/);
-assert.match(read("preload.cjs"), /desktop:inbox-popover-toggle-intent/);
 assert.match(read("shell.js"), /pointerdown/);
 assert.match(read("preload.cjs"), /desktop:adjust-erp-zoom/);
 assert.match(read("shell.js"), /runDesktopAction/);
 assert.match(read("shell.js"), /dataset\.activeTab/);
 assert.match(read("shell.js"), /backAction\.hidden = workspaceActive/);
 assert.match(read("shell.js"), /getAddressPresentation/);
-assert.match(read("shell.js"), /toggleInboxPopover/);
-assert.match(main, /runPopoverDomClickSmoke/);
-assert.match(main, /desktop:inbox-popover-toggle-intent/);
-assert.match(read("smoke.mjs"), /popoverDomClickSmoke/);
 assert.match(main, /runUpdatePopoverDomClickSmoke/);
 assert.match(read("smoke.mjs"), /SHOPEERS_DESKTOP_UPDATE_SMOKE/);
 assert.match(read("shell.js"), /adjustErpZoom/);
@@ -256,7 +233,6 @@ assert.match(read("UPDATE_RELEASE_CHECKLIST.md"), /Lworkstation-Setup-0\.2\.6-be
 assert.match(read("UPDATE_RELEASE_CHECKLIST.md"), /Lworkstation-Setup-0\.2\.6-beta\.2\.exe/);
 assert.match(read("UPDATE_RELEASE_CHECKLIST.md"), /不支持软件内发现/);
 assert.doesNotMatch(read("UPDATE_RELEASE_CHECKLIST.md"), /Lworkstation Setup 0\.2\.6-beta\.1/);
-for (const file of ["inbox-popover.html", "inbox-popover.css", "inbox-popover.js", "inbox-popover-preload.cjs"]) assert.ok(pkg.build.files.includes(file), file);
 for (const file of ["update-runtime.cjs", "update-popover.html", "update-popover.css", "update-popover.js", "update-popover-preload.cjs"]) assert.ok(pkg.build.files.includes(file), file);
 assert.deepEqual(pkg.build.publish[0], { provider: "github", owner: "love70805", repo: "lworkstation", releaseType: "release" });
 const legacyPrivateRepo = ["shopeers", "workstation"].join("-");
@@ -290,18 +266,6 @@ assert.match(read("smoke.mjs"), /failClosed/);
 assert.match(read("smoke.mjs"), /storageConfigured/);
 const shellHtml = read("shell.html");
 assert.ok(shellHtml.indexOf("./shell-state.cjs") < shellHtml.indexOf("./shell.js"));
-const popoverHtml = read("inbox-popover.html");
-assert.ok(popoverHtml.indexOf("./shell-state.cjs") < popoverHtml.indexOf("./inbox-popover.js"));
-assert.match(read("inbox-popover.css"), /max-height:\s*min\(220px,\s*calc\(100vh\s*-\s*8px\)\)/);
-assert.match(read("inbox-popover.css"), /\.popover-card\s*\{[\s\S]*?overflow:\s*auto/);
-assert.match(read("inbox-popover.css"), /body\s*\{\s*padding:\s*4px/);
-assert.match(read("inbox-popover.css"), /min-height:\s*35px/);
-assert.match(read("inbox-popover.css"), /padding:\s*6px\s+8px/);
-assert.match(read("inbox-popover.js"), /Escape/);
-assert.match(read("inbox-popover.js"), /inboxPopover\.close/);
-assert.match(read("inbox-popover.js"), /inboxPopover\.resize/);
-assert.match(read("inbox-popover.js"), /scrollHeight\s*\|\|\s*0\)\s*\+\s*6/);
-assert.match(read("inbox-popover.html"), /popover-close/);
 const { createInboxPopoverLifecycle } = createRequire(import.meta.url)("./inbox-popover-lifecycle.cjs");
 const popoverLifecycle = createInboxPopoverLifecycle();
 const firstPopover = popoverLifecycle.open();
@@ -314,7 +278,6 @@ assert.notEqual(secondPopover, firstPopover);
 assert.equal(popoverLifecycle.isCurrent(firstPopover), false);
 assert.equal(popoverLifecycle.close(firstPopover), false);
 assert.equal(popoverLifecycle.isCurrent(secondPopover), true);
-assert.match(main, /if \(inboxPopoverWindow && !inboxPopoverWindow\.isDestroyed\(\)\) \{\s*closeInboxPopover\(\);\s*return \{ ok: true, open: false \};/);
 assert.doesNotMatch(main, /set-shell-overlay-inset|shellOverlayInset/);
 const require = createRequire(import.meta.url);
 const {
@@ -332,8 +295,6 @@ const { navigationState, navigateHistory } = require("./navigation-history.cjs")
 const {
   classifyErpState,
   getAddressPresentation,
-  getPopoverPresentation,
-  shouldReturnFocusOnPopoverClose,
 } = require("./shell-state.cjs");
 const {
   ERP_ZOOM_DEFAULT,
@@ -355,9 +316,6 @@ assert.equal(classifyErpState({ status: "online" }, { status: "idle", tone: "war
 assert.equal(classifyErpState({ status: "error", message: "服务错误", latestTransportError: { message: "传输错误" } }, { status: "delivery_error", tone: "danger", message: "投递失败" }).aria, "ERP 通道异常：投递失败");
 assert.deepEqual(getAddressPresentation("workspace", { url: "shopeers://workstation/" }), { readOnly: true, value: "内部工作站" });
 assert.deepEqual(getAddressPresentation("erp", { url: "https://www.zhuolinkeji.cn/" }), { readOnly: true, value: "https://www.zhuolinkeji.cn/" });
-assert.deepEqual(getPopoverPresentation({ status: "online" }, { status: "idle", tone: "success" }), { status: "等待握手", error: "", reason: 'ERP 助手等待真实通信确认', showStatus: true, showError: false });
-assert.deepEqual(getPopoverPresentation({ status: "error", message: "服务错误" }, { status: "delivery_error", tone: "danger", message: "投递失败" }), { status: "", error: "ERP 通道异常：投递失败", reason: 'ERP 通道异常：投递失败', showStatus: false, showError: true });
-for (const reason of ["button", "outside", "escape"]) assert.equal(shouldReturnFocusOnPopoverClose(reason), true);
 assert.equal(ERP_ZOOM_DEFAULT, 80);
 assert.equal(normalizeErpZoomPercent(0), 70);
 assert.equal(normalizeErpZoomPercent(74), 70);
@@ -451,3 +409,9 @@ assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
 assert.equal(pkg.build.nsis.include, "installer.nsh");
 assert.match(pkg.scripts.build, /--publish never/);
 assert.match(read("installer.nsh"), /ReadRegStr \$R0 SHELL_CONTEXT.*InstallLocation/);
+
+assert.doesNotMatch(main, /desktop:(?:toggle|close|resize|get)-inbox-popover|erpReadyNoticeUntil/);
+assert.doesNotMatch(read('shell.js'), /inboxAction\.addEventListener|inboxAction\.title|erpReadyNotice|erpStatusHint/);
+assert.match(read('shell.html'), /<div id="inbox-status"[^>]*role="img"/);
+assert.doesNotMatch(read('shell.html'), /erp-status-hint|erp-ready-notice/);
+assert.match(read('smoke.mjs'), /erpIndicatorSmoke/);

@@ -95,8 +95,6 @@ input:focus-visible {
   -webkit-app-region: no-drag;
   transition: color 170ms ease, background-color 170ms ease;
 }
-.brand-status:hover { background: var(--surface-muted); }
-.brand-status:active { background: color-mix(in srgb, var(--border-strong) 68%, var(--surface)); }
 .brand-status strong { flex: none; font-size: 13px; font-weight: 650; }
 .brand-subtitle {
   min-width: 0;
@@ -123,26 +121,6 @@ input:focus-visible {
   background: var(--warning);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning) 17%, transparent);
 }
-.erp-status-hint,
-.erp-ready-notice {
-  position: fixed;
-  z-index: 20;
-  left: 8px;
-  top: 36px;
-  max-width: calc(100vw - 24px);
-  padding: 6px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-.erp-ready-notice { left: 250px; top: 5px; padding: 4px 8px; color: var(--success); }
 .version-status {
   height: 28px;
   min-width: 0;
