@@ -6,15 +6,15 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.9](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.9)。Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.2.19](https://github.com/love70805/lworkstation/releases/tag/v0.2.19)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-27（UTC+8）。0.3.0 Beta.9 已公开预发布并验证四资产匿名下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
+核对日期：2026-09-28（UTC+8）。0.3.0 Beta.10 已公开预发布并验证四资产匿名下载及通道隔离；稳定版仍为 0.2.19。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.3.0-beta.10` saved report / color lamp | 本地门禁通过，候选打包与公开发布待完成，本机不安装 | `candidates/0.3.0-beta.10-export-status/`；[验收](../docs/RELEASE_0.3.0_BETA_10.md) |
+| `0.3.0-beta.10` saved report / color lamp | 已公开预发布；925测试、Windows候选smoke、PR #115/main CI、四资产匿名回读与通道检查通过，本机未安装 | `candidates/0.3.0-beta.10-export-status/`；[验收](../docs/RELEASE_0.3.0_BETA_10.md) |
 | `0.3.0-beta.9` cost rows / identity / ERP lamp / Excel | 已公开 GitHub 预发布；920 测试、桌面 verify、packaged smoke、隔离浏览器 / Electron 通信与两类 XLSX 读回、PR #113 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.9)；`candidates/0.3.0-beta.9-cost-identity-status-export/`；[验收](../docs/RELEASE_0.3.0_BETA_9.md) |
 | `0.3.0-beta.8` published ERP evidence | 已公开 GitHub 预发布；878 测试、桌面 verify、packaged smoke、隔离 11 条采购与旧行只读恢复、PR #111 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.8)；`candidates/0.3.0-beta.8-evidence-reference/`；[验收](../docs/RELEASE_0.3.0_BETA_8.md) |
 | `0.3.0-beta.7` cost recovery | 已公开 GitHub 预发布；876 测试、桌面 verify、packaged smoke、隔离旧草稿 4.59 元业务路径、PR #109 / main CI、四资产匿名回读及通道检查通过，本机未安装 | [GitHub Release](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.7)；`candidates/0.3.0-beta.7-cost-recovery/`；[验收](../docs/RELEASE_0.3.0_BETA_7.md) |
