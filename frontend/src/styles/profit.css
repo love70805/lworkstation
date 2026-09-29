@@ -92,6 +92,21 @@
 .report-import .report-selection label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .report-import select, .report-import input:not([type="checkbox"]):not([type="file"]) { min-height:36px; max-width:100%; min-width:0; padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); }
 .report-import input[type="file"] { max-width:100%; }
+.report-import .report-mode, .report-import .report-upload { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
+.report-import .report-selection { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px; background:var(--surface-soft); border:1px solid var(--border); border-radius:8px; }
+.report-import .report-selection p { flex-basis:100%; margin:0; }
+.report-import .report-source-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.report-import .report-source-heading strong, .report-import .report-conflicts li span { min-width:0; overflow-wrap:anywhere; }
+.report-import .report-source summary { cursor:pointer; }
+.report-import .report-source summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.report-import .report-final-total { font-weight:600; }
+.report-import .report-replacement { flex:1 1 100%; margin:0 0 4px; overflow-wrap:anywhere; }
+.report-import .report-conflicts li { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:10px 0; }
+@media (max-width:600px) {
+  .report-import .report-selection label { flex:1 1 100%; }
+  .report-import .report-selection input, .report-import .report-selection select { width:100%; }
+  .report-import .report-source-heading { flex-wrap:wrap; }
+}
 .report-import .report-preview-rows table { width:100%; border-collapse:collapse; }
 .report-import .report-preview-rows td:first-child { min-width:130px; max-width:200px; white-space:normal; overflow-wrap:anywhere; }
 .report-import .report-preview-rows td:last-child { min-width:150px; max-width:260px; white-space:normal; overflow-wrap:anywhere; }

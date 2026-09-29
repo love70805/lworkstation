@@ -1,5 +1,9 @@
 # Codex 任务看板
 
+## 2026-09-29 · 0.3.1 导入简化执行
+
+本批从main 1506dc0在codex/release-0-3-1独立执行；无数量代发跳过不核算，登记人搜索筛选、自动预览和一次导入，保留重复/跨文件冲突/替换及定稿保护。parser@3保存跳过追溯，物理sourceRow身份不变，新增recordRow展示。连续完成审查、PR/CI、候选和稳定公开发布，不安装、不改真实库、不改用户CSV，保留聊天与工作区。最新契约见[0.3.1导入契约](integration/RELEASE_0_3_1_IMPORT_PLAN.md)。当前定向50测试通过，完整回归和候选尚在执行；发布以[最终验收](RELEASE_0.3.1.md)为准。
+
 ## 2026-09-28 · 0.3.0 稳定版公开发布
 
 用户在正式候选验收后明确“发布吧”，覆盖准备阶段的暂停发布限制。已将原候选发布为 [v0.3.0 GitHub Latest](https://github.com/love70805/lworkstation/releases/tag/v0.3.0)，draft=false、prerelease=false，标签固定 `9e332a4673e98a0ed14c20c62cef0479bc3376e3`；该主线CI通过。EXE/同名blockmap/latest.yml/SHA256.txt四资产匿名全量回读一致，未重新构建或安装，未写真实库，不归档聊天与工作树。公开文件名与latest.yml一致，原候选保留，证据持久保存在主仓库 `archive/release-0.3.0-public/`；[正式发布验收](RELEASE_0.3.0.md)。下方为历史阶段状态。

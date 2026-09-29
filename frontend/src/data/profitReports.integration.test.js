@@ -10,6 +10,7 @@ import { validateReportBackup } from "../domain/profitReportBackup";
 import { claimPendingSyncEnvelope } from "./syncOutbox";
 import { REPORT_FORMULA_VERSION, REPORT_TABLES, REPORT_TEMPLATE_VERSION, canonicalJson, sha256 } from "../domain/profitReports";
 import { withCurrentLedgerResults } from './repositories/ledgerOverviewRepository';
+import {inspectSupplementSource} from '../domain/monthlySupplements';
 const scope={workspaceId:"W",ledgerId:"L",period:"2026-08"};
 async function adopt(kind,patch={}){const input={...scope,kind,mode:"manual",...(kind==='dispatch'?{adoptedQuantityExact:'100',rows:[]}:{rows:[{kind,manual:true,store:'甲',signedAmountExact:'0.0009',sourceRow:1},{kind,manual:true,store:'乙',signedAmountExact:'-0.0001',sourceRow:1}]}),...patch};const preview=await previewMonthlySupplement(input);return adoptMonthlySupplement(input,preview);}
 async function report(kind='pre_deduction',baseReportId){const input={ledgerId:'L',kind,baseReportId};const preview=await previewProfitReport(input);return saveProfitReport(input,{expectedFingerprint:preview.fingerprint});}
@@ -21,6 +22,22 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('persists skipped CSV record locations outside calculation rows across reopen and backup restore',async()=>{
+ const source={fileHash:'SYNTHETIC',fileName:'synthetic.csv',sheetName:'CSV',sourceFormat:'csv',headerRow:1,cells:[['登记人','店铺','订单号','数量'],['人员','甲','EMPTY',''],['','甲','VALID',2],['','甲','ZERO',0]],sourceRows:[1,2,4,5],recordRows:[1,2,3,4]};
+ const parsed=inspectSupplementSource(source,{kind:'dispatch',ownerMarker:'人员'});
+ const input={...scope,kind:'dispatch',mode:'files',rows:parsed.rows,sources:[parsed.source]};
+ const preview=await previewMonthlySupplement(input),batch=await adoptMonthlySupplement(input,preview);
+ expect(batch).toMatchObject({parserVersion:'monthly-supplement@3',rowCount:2,adoptedQuantityExact:'2',sources:[{ignored:[{reason:'missing_quantity',sourceRow:2,recordRow:2,businessId:'EMPTY'}]}]});
+ expect(await db.monthlySupplementRows.where('batchId').equals(batch.id).toArray()).toMatchObject([{businessId:'VALID',quantityExact:'2',sourceRow:4,recordRow:3},{businessId:'ZERO',quantityExact:'0',sourceRow:5,recordRow:4}]);
+ db.close();await db.open();expect((await db.monthlySupplementBatches.get(batch.id)).sources).toEqual(batch.sources);
+ const backup=await createWorkspaceBackupPayload();await restoreWorkspaceBackupPayload(backup);
+ expect((await db.monthlySupplementBatches.get(batch.id)).sources).toEqual(batch.sources);
+ await expect(previewMonthlySupplement({...input,rows:[...input.rows,{...input.rows[0],recordRow:999}]})).rejects.toThrow('重复源行');
+ const legacy={...batch,parserVersion:'monthly-supplement@2'};await db.monthlySupplementBatches.put(legacy);
+ const saved=await report();expect(saved.totalsExact.dispatchQuantityExact).toBe('2');
+ await expect(adoptMonthlySupplement(input,preview)).rejects.toThrow('重开');
+ expect((await readSavedProfitReport(saved.id)).fileSha256).toBe(saved.fileSha256);
+});
 it('overview follows the current base and deduction batch while historical files remain immutable', async () => {
  await adopt('dispatch');
  const base = await report();
