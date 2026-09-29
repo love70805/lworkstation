@@ -7,6 +7,7 @@ import { importReturnHref } from "../lib/importNavigation";
 import { summarizeImportPeriod } from "../lib/importPeriod";
 import { createImportWorkerClient } from "../lib/importWorkerClient";
 import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, validateSalesMapping } from "../lib/salesImport";
+import { createSalesSourceCoverage } from "../domain/selectionSalesLabels";
 
 const ACCEPTED_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"]);
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -18,6 +19,12 @@ function sampleFile() {
   return new File(["供方货号,SKC,平台SKU,数量,金额\nSUP-001,SKC-001,000123,23,1245.50"], "示例店铺.csv", { type: "text/csv" });
 }
 const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function sourceIsFiltered(item) {
+  if (!item.facets || !item.filterOptions) return false;
+  const full = (key, expected) => !Array.isArray(item.filterOptions[key]) || expected.every(value => item.filterOptions[key].includes(value));
+  return !full("supplierNumbers", item.facets.supplierNumbers ?? []) || !full("movementTypes", (item.facets.movementTypes ?? []).filter(type => LEDGER_REPORT_MOVEMENT_TYPES.includes(type)));
+}
+const sourceScope = item => sourceIsFiltered(item) || item.sourceScope === "partial" ? "partial" : "full_month";
 function Totals({ summary }) {
   return <span>数量 {summary.quantity} · 销售原额 ¥{money(summary.revenue)} · 扣款 ¥{money(summary.penalty)}</span>;
 }
@@ -116,7 +123,7 @@ export default function ImportPreview() {
   const loadFiles = async (selection) => {
     if (operationRef.current || !selection.length || result || contextBlocked) return;
     operationRef.current = true; setBusy(true); invalidate();
-    const additions = Array.from(selection).map((file) => ({ file, fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
+    const additions = Array.from(selection).map((file) => ({ file, sourceScope: "full_month", importMode: "append", fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
     setFiles((current) => [...current, ...additions]);
     try {
       for (let index = 0; index < additions.length; index += 1) {
@@ -178,7 +185,9 @@ export default function ImportPreview() {
         setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, validation } : entry));
         hasErrors ||= validation.summary.errorCount > 0 || !validation.rows.length;
         items.push({ itemId: item.itemId, fileName: item.fileName, fileHash: item.fileHash, storeName: item.storeName,
-          mapping: item.mapping, filterOptions: item.filterOptions, rows: validation.rows, summary: validation.summary });
+          mapping: item.mapping, filterOptions: item.filterOptions, rows: validation.rows, summary: validation.summary,
+          sourceCoverage: createSalesSourceCoverage({ period, storeName: item.storeName, scope: sourceScope(item) }),
+          importMode: sourceScope(item) === "full_month" ? item.importMode ?? "append" : "append" });
       }
       if (hasErrors) throw new Error("部分文件有错误行或没有有效数据。请修正或明确移除问题文件后重新校验，整批尚未写入。");
       const input = { period, items };
@@ -234,7 +243,10 @@ export default function ImportPreview() {
             {item.status === "error" ? <p role="alert" className="import-error">解析失败：{item.error}</p> : item.status === "queued" ? <p>等待或正在解析 · {item.progress}%</p> : <fieldset disabled={busy} className="batch-fieldset">
               {files.some((other) => other.itemId !== item.itemId && other.fileHash === item.fileHash) && <p className="import-error" role="alert">相同文件内容重复，请移除重复文件并核对店铺。</p>}
 
+              <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
               <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列映射{item.filterOptions ? ` · 已选 ${item.filterOptions.movementTypes.length} 类变动 / ${item.filterOptions.supplierNumbers.length} 个货号` : ""}</summary>
+              <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : item.importMode })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期或筛选商品</option></select>{sourceIsFiltered(item) && <small>已缩小商品或发货类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
+              <div className="form-field"><label htmlFor={`import-mode-${item.itemId}`}>导入方式</label><select id={`import-mode-${item.itemId}`} className="text-input" value={sourceScope(item) === "partial" ? "append" : item.importMode ?? "append"} onChange={event => update(item.itemId, { importMode: event.target.value })}><option value="append">追加并替换重叠分组</option><option value="replace_store_month" disabled={sourceScope(item) !== "full_month"}>完整替换本店本月</option></select><small>默认保留未重叠分组。重新导入完整月文件时，可选择完整替换并核对预览，避免旧来源残留使七天标签无法计算。</small></div>
               <details><summary>字段映射 · {item.rowCount} 行来源数据</summary>
                 <Button variant="ghost" onClick={() => applyMapping(item)}>套用到兼容文件</Button>
                 <div className="mapping-table">{salesFields.map((field) => <div className="mapping-row" key={field.key}>
@@ -255,11 +267,11 @@ export default function ImportPreview() {
         </section>
         {error && <div className="import-error" role="alert"><AlertCircle size={18} />{error}</div>}
         {preview && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览 · {period}</h2>
-          {preview.items.map((item) => <article key={item.itemId}><h3>{item.storeName} · {item.fileName}</h3><p>{item.status === "skipped_duplicate" ? "已生效重复，本次跳过" : `新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组`} · 有效 {item.validRowCount} / 跳过 {item.ignoredRowCount} / 错误 {item.errorCount}</p><Totals summary={item.summary} />
-            {item.overlaps.map((overlap) => <div className="batch-overlap" key={overlap.groupKey}><strong>覆盖：{overlap.store} / {overlap.platformSkc || "无 SKC"} / {overlap.supplierNumber || "无供方货号"}</strong><p>原数据 {overlap.before.rowCount} 行：<Totals summary={overlap.before} /></p><p>新数据 {overlap.after.rowCount} 行：<Totals summary={overlap.after} /></p></div>)}
+          {preview.items.map((item) => <article key={item.itemId}><h3>{item.storeName} · {item.fileName}</h3><p>{item.status === "skipped_duplicate" ? "已生效重复，本次跳过" : `新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组`} · {item.removedGroupCount ? `移除 ${item.removedGroupCount} 个旧分组 · ` : ""}有效 {item.validRowCount} / 跳过 {item.ignoredRowCount} / 错误 {item.errorCount}</p><p>{item.sourceCoverage?.scope === "full_month" ? "完整月台账" : "部分或旧来源"} · {period}{item.replacementScope === "store_month" ? " · 本店本月完整替换" : " · 按分组追加或替换"}</p><Totals summary={item.summary} />
+            {item.overlaps.map((overlap) => <div className="batch-overlap" key={overlap.groupKey}><strong>{overlap.removed ? "移除旧分组：" : "覆盖："}{overlap.store} / {overlap.platformSkc || "无 SKC"} / {overlap.supplierNumber || "无供方货号"}</strong><p>原数据 {overlap.before.rowCount} 行：<Totals summary={overlap.before} /></p><p>新数据 {overlap.after.rowCount} 行：<Totals summary={overlap.after} /></p></div>)}
           </article>)}
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
-          {preview.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={(event) => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />我确认仅替换以上列出的重叠分组；其他店铺与分组保留。</label>}
+          {preview.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={(event) => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />我确认替换或移除以上列出的分组；其他店铺与未列出分组保留。</label>}
           <div className="batch-submit"><p>核对以上文件、店铺及 {period} 月份后确认。修改配置需重新校验。</p><Button variant="primary" disabled={busy || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>确认导入</Button></div>
         </section>}
       </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}

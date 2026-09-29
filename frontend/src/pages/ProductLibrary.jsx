@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
+import SelectionSalesTag from "../components/SelectionSalesTag";
+import { SELECTION_SALES_LABELS } from "../domain/selectionSalesLabels";
 import ReferenceGroupRows, { ReferenceTableHeader } from "./ReferenceGroupRows";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
@@ -12,13 +14,13 @@ import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
 import { matchesSelectionSearch } from "../lib/selectionSearch";
 import { CaptureQueueView } from "./CaptureQueue";
-import { activeSelectionStatusDefinitions, createCustomSelectionStatus, selectionStatusById } from "../domain/selectionStatuses";
+import { activeSelectionStatusDefinitions, canonicalProductStatusId, createCustomSelectionStatus, normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSkc } from "../domain/identifiers";
-import { PRODUCT_PUBLICATION_STATUSES, productPublicationStatusById } from "../domain/productPublication";
 
 const money = (value, fractionDigits = 2) => Number(value ?? 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
 const percent = (value) => value == null ? "--" : `${Number(value).toFixed(1)}%`;
 const referenceSourceLabels = {
+  erp_catalog_reference: "ERP 采购参考",
   erp_history: "ERP 历史",
   manual_confirmed: "人工确认",
   finalized_profit_history: "定稿历史",
@@ -26,6 +28,7 @@ const referenceSourceLabels = {
 };
 
 const catalogSourceLabels = {
+  erp_reference: "ERP 采购参考",
   erp: "ERP",
   manual_confirmed: "人工确认",
   finalized_profit_history: "定稿历史",
@@ -50,6 +53,7 @@ function readProductFilters(workspaceId, view) {
     return {
       store: saved.store ?? "all",
       status: saved.status ?? "all",
+      recordStatus: saved.recordStatus ?? "all",
       publicationStatus: saved.publicationStatus ?? "all",
       dataStatus: saved.dataStatus ?? "all",
       missingOnly: Boolean(saved.missingOnly),
@@ -57,6 +61,7 @@ function readProductFilters(workspaceId, view) {
       productSort: saved.productSort === "cost" ? "lowestCost" : saved.productSort ?? "updated",
       referenceSource: saved.referenceSource ?? "all",
       negativeOnly: Boolean(saved.negativeOnly),
+      salesLabel: saved.salesLabel ?? "all",
     };
   } catch {
     return { store: "all", status: "all", publicationStatus: "all", dataStatus: "all", missingOnly: false, duplicatesOnly: false, productSort: "updated", referenceSource: "all", negativeOnly: false };
@@ -114,14 +119,15 @@ function ProductLibraryView({ workspaceId, view }) {
   const [query, setQuery] = useState(savedView?.query ?? "");
   const [queueFilter, setQueueFilter] = useState(savedView?.queueFilter ?? "all");
   const [store, setStore] = useState(initialFilters.store);
-  const [status, setStatus] = useState(initialFilters.status);
-  const [publicationStatus, setPublicationStatus] = useState(initialFilters.publicationStatus);
+  const [status, setStatus] = useState(["draft", "inactive"].includes(initialFilters.status) ? "all" : canonicalProductStatusId(initialFilters.status === "all" && initialFilters.publicationStatus && initialFilters.publicationStatus !== "all" ? initialFilters.publicationStatus : initialFilters.status));
+  const [recordStatus, setRecordStatus] = useState(["draft", "inactive"].includes(initialFilters.status) ? initialFilters.status : initialFilters.recordStatus ?? "all");
   const [dataStatus, setDataStatus] = useState(initialFilters.dataStatus);
   const [missingOnly, setMissingOnly] = useState(initialFilters.missingOnly);
   const [duplicatesOnly, setDuplicatesOnly] = useState(initialFilters.duplicatesOnly);
   const [productSort, setProductSort] = useState(initialFilters.productSort);
   const [referenceSource, setReferenceSource] = useState(initialFilters.referenceSource);
   const [negativeOnly, setNegativeOnly] = useState(initialFilters.negativeOnly);
+  const [salesLabel, setSalesLabel] = useState(initialFilters.salesLabel ?? "all");
   const [exporting, setExporting] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState("");
@@ -145,7 +151,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const catalogProducts = catalogSnapshot ?? EMPTY_ROWS;
   const captureRead = useSelectionRead(listPendingCaptureRecords);
   const pendingCaptures = captureRead.data ?? EMPTY_ROWS;
-  const salesStatusDefinitions = statusRead.data ?? EMPTY_ROWS;
+  const salesStatusDefinitions = useMemo(() => normalizeSelectionStatusDefinitions(statusRead.data), [statusRead.data]);
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
   const pendingCount = pendingCaptures.length;
   const missingProductCount = catalogProducts.filter((product) => product.dataReadiness?.hasGaps || product.skuCount === 0).length;
@@ -169,21 +175,22 @@ function ProductLibraryView({ workspaceId, view }) {
   const referenceRead = useSelectionRead(readReferenceRows);
   const referenceSnapshot = referenceRead.data;
   const referenceRows = referenceSnapshot ?? EMPTY_ROWS;
-  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly } };
+  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel } };
 
   useEffect(() => {
     localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
       store,
       status,
-      publicationStatus,
+      recordStatus,
       dataStatus,
       missingOnly,
       duplicatesOnly,
       productSort,
       referenceSource,
       negativeOnly,
+      salesLabel,
     }));
-  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, productSort, publicationStatus, referenceSource, status, store, workspaceId, view]);
+  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, recordStatus, referenceSource, status, store, workspaceId, view]);
 
   useEffect(() => {
     if (statusManagerOpen && statusRead.status === "ready") setStatusDraft(salesStatusDefinitions);
@@ -206,8 +213,8 @@ function ProductLibraryView({ workspaceId, view }) {
       product.skus.map((sku) => [sku.platformSku, sku.warehouseSku]),
     ]);
     const matchesStore = store === "all" || product.store === store;
-    const matchesStatus = status === "all" || product.salesStatus === status || product.status === status;
-    const matchesPublication = publicationStatus === "all" || product.publicationStatus === publicationStatus;
+    const matchesStatus = status === "all" || resolveProductStatus(product, salesStatusDefinitions).statusId === status;
+    const matchesRecord = recordStatus === "all" || product.status === recordStatus;
     const matchesData = dataStatus === "all"
       || (dataStatus === "missing_purchase" && product.dataReadiness?.purchase.status !== "complete")
       || (dataStatus === "missing_profit" && product.dataReadiness?.profit.status !== "complete")
@@ -217,7 +224,7 @@ function ProductLibraryView({ workspaceId, view }) {
       || (dataStatus === "mapping_complete" && product.dataReadiness?.warehouseMapping.status === "complete");
     const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps;
     const matchesDuplicate = !duplicatesOnly || duplicateSkcProductIds.has(product.id);
-    return matchesQuery && matchesStore && matchesStatus && matchesPublication && matchesData && matchesMissing && matchesDuplicate;
+    return matchesQuery && matchesStore && matchesStatus && matchesRecord && matchesData && matchesMissing && matchesDuplicate && (salesLabel === "all" || product.automaticSalesTag?.label === salesLabel);
   }).toSorted((a, b) => {
     if (productSort === "lowestCost") return (a.lowestReferenceCost ?? Number.POSITIVE_INFINITY) - (b.lowestReferenceCost ?? Number.POSITIVE_INFINITY);
     if (productSort === "coverage") {
@@ -228,7 +235,7 @@ function ProductLibraryView({ workspaceId, view }) {
     }
     if (productSort === "name") return a.name.localeCompare(b.name, "zh-CN");
     return String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
-  }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, publicationStatus, query, status, store]);
+  }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, recordStatus, query, salesStatusDefinitions, salesLabel, status, store]);
   const filteredProductIds = useMemo(() => filteredProducts.map((product) => product.id), [filteredProducts]);
   const selectedProductIdSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
   const allFilteredSelected = filteredProductIds.length > 0 && filteredProductIds.every((id) => selectedProductIdSet.has(id));
@@ -236,8 +243,9 @@ function ProductLibraryView({ workspaceId, view }) {
   const filteredReferences = useMemo(() => referenceRows.filter((row) => {
     return matchesSelectionSearch(query, [row.platformSku, row.platformSkc, row.productName, row.warehouseSku, row.supplierCode, row.supplierName])
       && (referenceSource === "all" || row.referenceKind === referenceSource)
-      && (!negativeOnly || row.hasNegativeProfit);
-  }), [negativeOnly, query, referenceRows, referenceSource]);
+      && (!negativeOnly || row.hasNegativeProfit)
+      && (salesLabel === "all" || row.automaticSalesTag?.label === salesLabel);
+  }), [negativeOnly, query, referenceRows, referenceSource, salesLabel]);
   const groupedReferences = useMemo(() => groupSelectionReferenceRows(filteredReferences), [filteredReferences]);
 
   const statusLabel = { active: "启用", draft: "草稿", inactive: "停用" };
@@ -282,7 +290,6 @@ function ProductLibraryView({ workspaceId, view }) {
       cell: ({ row }) => <div className="product-name-cell product-skc-cell">
         <strong className="truncate-name">{row.original.name || "未命名商品"}</strong>
         <span className="product-skc-identity"><strong className="mono">{row.original.platformSkc || "未填写 SKC"}</strong><button type="button" title="复制 SKC 与平台 SKU" aria-label={`复制 ${row.original.name} 的 SKC 与平台 SKU`} onClick={(event) => { event.stopPropagation(); copyProductIdentity(row.original); }}><Copy size={13} /></button></span>
-        <span className="product-publication-line"><Badge>{row.original.salesPlatform || "未设平台"}</Badge><Badge tone={productPublicationStatusById(row.original.publicationStatus).tone}>{productPublicationStatusById(row.original.publicationStatus).label}</Badge></span>
         {row.original.tags?.length || duplicateSkcCountByProductId.has(row.original.id) ? <span className="product-tag-list">{duplicateSkcCountByProductId.has(row.original.id) ? <small className="product-conflict-tag">重复 SKC · {duplicateSkcCountByProductId.get(row.original.id)} 份档案</small> : null}{(row.original.tags ?? []).slice(0, 3).map((tag) => <small key={tag}>{tag}</small>)}</span> : null}
         {row.original.skuCount === 0 ? <span className="missing-sku"><AlertCircle size={12} />{row.original.pendingVariantCount ? `待分配平台 SKU · ${row.original.pendingVariantCount} 个属性分支` : "缺少平台 SKU"}</span> : <span className="product-sku-branches">{row.original.skuReferences.map((sku) => <span className="product-sku-branch" key={sku.id ?? sku.platformSku}><strong className="mono">{sku.platformSku}</strong><small>{sku.attribute || "未填写属性"}</small></span>)}</span>}
       </div>,
@@ -293,7 +300,7 @@ function ProductLibraryView({ workspaceId, view }) {
       enableSorting: false,
       cell: ({ row }) => {
         const suppliers = row.original.supplierProfiles ?? row.original.offers ?? [];
-        return suppliers.length ? <div className="product-supplier-stack">{suppliers.map((offer) => <span className="product-supplier-line" key={`${offer.id ?? offer.supplierCode}-${offer.sourceUrl ?? ""}`}><span><strong>{offer.supplierCode || offer.supplierName || "未填写供应商"}</strong><small>{offer.supplierName && offer.supplierCode ? offer.supplierName : "1688 供应商"}</small></span>{offer.sourceUrl ? <a href={offer.sourceUrl} target="_blank" rel="noreferrer" title="打开 1688 来源" aria-label={`打开 ${offer.supplierCode || offer.supplierName || row.original.name} 的 1688 来源`} onClick={(event) => event.stopPropagation()}><ExternalLink size={14} /></a> : null}</span>)}</div> : <span className="pending-text">待补供应商</span>;
+        return suppliers.length ? <div className="product-supplier-stack">{suppliers.map((offer) => <span className="product-supplier-line" key={`${offer.id ?? offer.supplierCode}-${offer.sourceUrl ?? ""}`}><span><strong>{offer.supplierName || "未填写供应商"}</strong><small>{"1688 供应商"}</small></span>{offer.sourceUrl ? <a href={offer.sourceUrl} target="_blank" rel="noreferrer" title="打开 1688 来源" aria-label={`打开 ${offer.supplierName || row.original.name} 的 1688 来源`} onClick={(event) => event.stopPropagation()}><ExternalLink size={14} /></a> : null}</span>)}</div> : <span className="pending-text">待补供应商</span>;
       },
     },
     {
@@ -302,11 +309,12 @@ function ProductLibraryView({ workspaceId, view }) {
       enableSorting: false,
       cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-warehouse-stack">{row.original.skuReferences.map((sku) => <span className="product-warehouse-line" key={sku.id ?? sku.platformSku}>{sku.warehouseSku ? <><Warehouse size={14} /><strong className="mono">{sku.warehouseSku}</strong></> : <Badge tone="warning">待映射</Badge>}</span>)}</span>,
     },
-    { accessorKey: "cost", header: "SKU 参考成本", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-cost-stack">{row.original.skuReferences.map((sku) => <span className="product-cost-line" key={sku.id ?? sku.platformSku}>{sku.unitCost == null ? <Badge tone="warning">待补</Badge> : <><strong className="mono money-cell">{money(sku.unitCost, sku.source === "erp" ? 4 : 2)}</strong><Badge tone={sku.source === "erp" ? "success" : sku.source === "manual_confirmed" ? "info" : "neutral"}>{catalogSourceLabels[sku.source] ?? "参考"}</Badge></>}</span>)}</span> },
+    { accessorKey: "cost", header: "SKU 参考成本", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-cost-stack">{row.original.skuReferences.map((sku) => <span className="product-cost-line" key={sku.id ?? sku.platformSku}>{sku.unitCost == null ? <Badge tone="warning">待补</Badge> : <><strong className="mono money-cell">{money(sku.unitCost, ["erp", "erp_reference"].includes(sku.source) ? 4 : 2)}</strong><Badge tone={sku.source === "erp" ? "success" : ["manual_confirmed", "erp_reference"].includes(sku.source) ? "info" : "neutral"}>{catalogSourceLabels[sku.source] ?? "参考"}</Badge></>}</span>)}</span> },
     { accessorKey: "salePrice", header: "SKU 售价", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-price-stack">{row.original.skuReferences.map((sku) => <span className="product-price-line mono" key={sku.id ?? sku.platformSku}>{sku.salePrice == null ? "待填写" : money(sku.salePrice)}</span>)}</span> },
     { id: "referenceProfit", header: "参考单件利润", enableSorting: false, cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-profit-stack">{row.original.skuReferences.map((sku) => <span className={`product-profit-line ${sku.referenceUnitProfit == null ? "" : sku.referenceUnitProfit < 0 ? "danger-text" : "success-text"}`} key={sku.id ?? sku.platformSku}>{sku.referenceUnitProfit == null ? <span className="pending-text">待成本/售价</span> : <><strong className="mono">{money(sku.referenceUnitProfit)}</strong><small>{percent(sku.referenceProfitRate)}</small></>}</span>)}</span> },
     { accessorKey: "store", header: "店铺", cell: ({ getValue }) => <Badge>{getValue()}</Badge> },
-    { accessorKey: "salesStatus", header: "选品状态", cell: ({ getValue }) => { const definition = resolveSalesStatus(getValue()); return <Badge tone={definition?.tone ?? "neutral"} dot>{definition?.label ?? "未设置"}</Badge>; } },
+    { id: "productStatus", header: "状态", cell: ({ row }) => { const resolved = resolveProductStatus(row.original, salesStatusDefinitions); const definition = resolveSalesStatus(resolved.statusId); return <span><Badge tone={definition?.tone ?? "neutral"} dot>{definition?.label ?? "未设置"}</Badge>{row.original.legacyStatusConflict || resolved.legacyConflict ? <small className="row-subtitle">旧状态待选择</small> : null}</span>; } },
+    { id: "salesLabel", header: "月末七天销量", enableSorting: false, cell: ({ row }) => <SelectionSalesTag item={row.original.automaticSalesTag} /> },
     { id: "dataReadiness", header: "经营数据", enableSorting: false, cell: ({ row }) => <span className="product-data-stack"><small>采购 <Badge tone={row.original.dataReadiness?.purchase.status === "complete" ? "success" : row.original.dataReadiness?.purchase.status === "partial" ? "warning" : "neutral"}>{dataStatusLabels[row.original.dataReadiness?.purchase.status] ?? "暂无"}</Badge></small><small>利润 <Badge tone={row.original.dataReadiness?.profit.status === "complete" ? "success" : row.original.dataReadiness?.profit.status === "partial" ? "warning" : "neutral"}>{dataStatusLabels[row.original.dataReadiness?.profit.status] ?? "暂无"}</Badge></small><small>映射 <Badge tone={row.original.dataReadiness?.warehouseMapping.status === "complete" ? "success" : row.original.dataReadiness?.warehouseMapping.status === "partial" ? "warning" : "neutral"}>{dataStatusLabels[row.original.dataReadiness?.warehouseMapping.status] ?? "暂无"}</Badge></small></span> },
     { accessorKey: "updatedAt", header: "最后更新", cell: ({ getValue }) => <span className="mono">{formatUpdatedAt(getValue())}</span> },
   ], [allFilteredSelected, duplicateSkcCountByProductId, notify, salesStatusDefinitions, selectedProductIdSet]);
@@ -332,21 +340,22 @@ function ProductLibraryView({ workspaceId, view }) {
         平台SKU数量: product.skuCount,
         平台SKU: product.skus.map((sku) => sku.platformSku).join(", "),
         ERP仓库SKU映射: product.skuReferences.map((sku) => `${sku.platformSku || "未填写SKU"}=${sku.warehouseSku || "待映射"}`).join("；"),
-        供应商编号: product.supplier,
+        供应商名称: (product.supplierProfiles ?? []).map(supplier => supplier.supplierName).filter(Boolean).join("；"),
         SKU参考成本明细: product.skuReferences.map((sku) => sku.unitCost == null ? `${sku.platformSku || "未填写SKU"}=待补` : `${sku.platformSku || "未填写SKU"}=${sku.unitCost}（${catalogSourceLabels[sku.source] ?? "参考"}）`).join("；"),
         SKU参考成本覆盖: `${product.referenceCostCoverage?.coveredSkuCount ?? 0}/${product.referenceCostCoverage?.totalSkuCount ?? product.skuCount ?? 0}`,
         售价: product.salePrice ?? "",
         币种: "CNY",
         店铺: product.store,
-        发布平台: product.salesPlatform || "",
-        发布状态: productPublicationStatusById(product.publicationStatus).label,
         采购数据: dataStatusLabels[product.dataReadiness?.purchase.status] ?? "暂无",
         利润数据: dataStatusLabels[product.dataReadiness?.profit.status] ?? "暂无",
         仓库SKU映射: dataStatusLabels[product.dataReadiness?.warehouseMapping.status] ?? "暂无",
         数据状态: statusLabel[product.status] ?? product.status,
-        选品状态: salesStatusLabel(product.salesStatus),
+        状态: salesStatusLabel(resolveProductStatus(product, salesStatusDefinitions).statusId),
         重复SKC档案数: duplicateSkcCountByProductId.get(product.id) ?? 1,
         供应商数量: product.supplierCount,
+        七天销量标签: product.automaticSalesTag?.label ?? "",
+        七天统计区间: product.automaticSalesTag?.rangeLabel ?? "",
+        七天销量: product.automaticSalesTag?.quantityExact ?? "",
         最后更新: product.updatedAt,
       })), "product-library.xlsx", "商品库");
       notify(`已导出 ${exportRows.length} 条商品记录。`);
@@ -402,6 +411,9 @@ function ProductLibraryView({ workspaceId, view }) {
         近三月利润: row.recentProfit,
         单件参考利润: row.referenceUnitProfit ?? "",
         参考利润率: row.referenceProfitRate ?? "",
+        七天销量标签: row.automaticSalesTag?.label ?? "",
+        七天统计区间: row.automaticSalesTag?.rangeLabel ?? "",
+        七天销量: row.automaticSalesTag?.quantityExact ?? "",
       })), "selection-reference.xlsx", "选品参考");
       notify(`已导出 ${filteredReferences.length} 条选品参考记录。`);
     } catch (error) {
@@ -496,6 +508,7 @@ function ProductLibraryView({ workspaceId, view }) {
     }
   };
 
+  const salesLabelFilter = <select className="select-input" aria-label="按七天销量筛选" value={salesLabel} onChange={event => setSalesLabel(event.target.value)}><option value="all">全部销量标签</option>{SELECTION_SALES_LABELS.map(label => <option value={label} key={label}>{label}</option>)}</select>;
   const referenceWithHistory = referenceRows.filter((row) => row.latestPeriod).length;
   const referenceWithErp = referenceRows.filter((row) => row.authoritativeSource === "erp").length;
   const negativeCount = referenceRows.filter((row) => row.hasNegativeProfit).length;
@@ -538,6 +551,7 @@ function ProductLibraryView({ workspaceId, view }) {
               <select className="select-input" aria-label="按参考成本来源筛选" value={referenceSource} onChange={(event) => setReferenceSource(event.target.value)}>
                 <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">定稿历史</option><option value="supplier_landed">1688 参考</option>
               </select>
+              {salesLabelFilter}
               <button className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly((value) => !value)}><AlertCircle size={17} />只看负利润</button>
             </div>
             <span className="reference-filter-count">{referenceRead.status === "ready" ? `当前 ${filteredReferences.length} 条` : "尚未取得参考记录"}</span>
@@ -549,7 +563,7 @@ function ProductLibraryView({ workspaceId, view }) {
                 ref={tableRef}
                 initialViewState={savedView?.table}
                 dataReady={referenceSnapshot !== undefined}
-                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly])}
+                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly, salesLabel])}
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
@@ -566,12 +580,11 @@ function ProductLibraryView({ workspaceId, view }) {
               <select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
                 <option value="all">全部店铺</option>{store !== "all" && !catalogProducts.some(product => product.store === store) ? <option value={store}>{store}</option> : null}{[...new Set(catalogProducts.map((product) => product.store).filter(Boolean))].map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
               </select>
-              <select className="select-input" aria-label="按选品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
-                <option value="all">全部状态</option>{!["all", "draft", "inactive"].includes(status) && !salesStatusDefinitions.some(item => item.id === status) ? <option value={status}>当前选中状态（等待读取）</option> : null}{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}<option value="draft">草稿资料</option><option value="inactive">停用资料</option>
+              <select className="select-input" aria-label="按商品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
+                <option value="all">全部状态</option>{status !== "all" && !salesStatusDefinitions.some(item => item.id === status) ? <option value={status}>当前选中状态（等待读取）</option> : null}{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}
               </select>
-              <select className="select-input" aria-label="按发布状态筛选" value={publicationStatus} onChange={(event) => setPublicationStatus(event.target.value)}>
-                <option value="all">全部发布状态</option>{PRODUCT_PUBLICATION_STATUSES.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}</option>)}
-              </select>
+              <select className="select-input" aria-label="按档案类型筛选" value={recordStatus} onChange={event => setRecordStatus(event.target.value)}><option value="all">全部档案</option><option value="active">正式档案</option><option value="draft">草稿资料</option><option value="inactive">停用资料</option></select>
+              {salesLabelFilter}
               <select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
                 <option value="all">全部经营数据</option><option value="missing_purchase">缺少采购数据</option><option value="missing_profit">缺少利润数据</option><option value="missing_mapping">缺少仓库 SKU 映射</option><option value="erp_complete">采购数据已覆盖</option><option value="profit_complete">已有利润数据</option><option value="mapping_complete">仓库 SKU 已映射</option>
               </select>
@@ -606,7 +619,7 @@ function ProductLibraryView({ workspaceId, view }) {
               ref={tableRef}
               initialViewState={savedView?.table}
               dataReady={catalogSnapshot !== undefined}
-              paginationResetKey={JSON.stringify([query, store, status, publicationStatus, dataStatus, missingOnly, duplicatesOnly, productSort])}
+              paginationResetKey={JSON.stringify([query, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort])}
               columns={productColumns}
               data={filteredProducts}
               getRowId={(row) => row.id}
@@ -619,7 +632,7 @@ function ProductLibraryView({ workspaceId, view }) {
       <Modal
         open={bulkConfirmOpen}
         size="small"
-        title="确认批量更新选品状态"
+        title="确认批量更新商品状态"
         description={`将 ${selectedProductIds.length} 条商品更新为“${salesStatusLabel(bulkStatus)}”。此操作会写入商品操作记录。`}
         onClose={() => setBulkConfirmOpen(false)}
         footer={<><Button variant="ghost" onClick={() => setBulkConfirmOpen(false)}>取消</Button><Button variant="primary" loading={updatingBulkStatus} onClick={confirmBulkStatusUpdate}>确认更新</Button></>}
@@ -627,7 +640,7 @@ function ProductLibraryView({ workspaceId, view }) {
       <Modal
         open={statusManagerOpen}
         className="status-manager-modal"
-        title="管理销售状态"
+        title="管理商品状态"
         description="状态可用于筛选、批量更新和商品档案。系统预置状态可以改名或调整颜色；自定义状态可归档，已使用的历史状态会保留在商品记录中。"
         onClose={() => setStatusManagerOpen(false)}
         footer={<><Button variant="ghost" onClick={() => setStatusManagerOpen(false)}>取消</Button><Button variant="primary" loading={savingStatusDefinitions} disabled={savingStatusDefinitions} onClick={saveStatusDefinitions}>保存状态</Button></>}
@@ -638,13 +651,13 @@ function ProductLibraryView({ workspaceId, view }) {
             <select className="select-input" aria-label={`${statusItem.label} 状态颜色`} value={statusItem.tone} disabled={Boolean(statusItem.archivedAt)} onChange={(event) => updateStatusDraft(statusItem.id, { tone: event.target.value })}>
               <option value="neutral">灰色</option><option value="info">蓝色</option><option value="success">绿色</option><option value="warning">黄色</option><option value="danger">红色</option>
             </select>
-            <label className="status-readiness-toggle"><input type="checkbox" checked={Boolean(statusItem.requiresReadiness)} disabled={Boolean(statusItem.archivedAt)} onChange={(event) => updateStatusDraft(statusItem.id, { requiresReadiness: event.target.checked })} />需资料完整</label>
+
             {!statusItem.isSystem && !statusItem.archivedAt ? <Button variant="ghost" icon={Trash2} onClick={() => archiveStatusDraft(statusItem.id)}>归档</Button> : <span className="status-manager-kind">{statusItem.archivedAt ? "已归档" : "系统"}</span>}
           </div>)}
         </div>
         <div className="status-manager-add">
-          <input className="text-input" aria-label="新销售状态名称" value={newStatusLabel} onChange={(event) => setNewStatusLabel(event.target.value)} placeholder="新增状态名称" />
-          <select className="select-input" aria-label="新销售状态颜色" value={newStatusTone} onChange={(event) => setNewStatusTone(event.target.value)}><option value="neutral">灰色</option><option value="info">蓝色</option><option value="success">绿色</option><option value="warning">黄色</option><option value="danger">红色</option></select>
+          <input className="text-input" aria-label="新商品状态名称" value={newStatusLabel} onChange={(event) => setNewStatusLabel(event.target.value)} placeholder="新增状态名称" />
+          <select className="select-input" aria-label="新商品状态颜色" value={newStatusTone} onChange={(event) => setNewStatusTone(event.target.value)}><option value="neutral">灰色</option><option value="info">蓝色</option><option value="success">绿色</option><option value="warning">黄色</option><option value="danger">红色</option></select>
           <Button icon={Plus} disabled={!newStatusLabel.trim()} onClick={addCustomStatus}>新增状态</Button>
         </div>
       </Modal>

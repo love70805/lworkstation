@@ -1,9 +1,10 @@
 import { AlertCircle, Pencil } from "lucide-react";
 import { Badge, Button } from "../components/UI";
+import SelectionSalesTag from "../components/SelectionSalesTag";
 import ReferenceIdentityEvidence from "../components/ReferenceIdentityEvidence";
 
 const columnLabels = ["平台 SKU / 属性", "当前参考成本", "最近定稿月", "近三月经营", "最近实际利润", "单件参考利润", "参考状态"];
-const sourceLabels = { erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "定稿历史", supplier_landed: "1688 参考" };
+const sourceLabels = { erp_catalog_reference: "ERP 采购参考", erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "定稿历史", supplier_landed: "1688 参考" };
 const money = (value, fractionDigits = 2) => Number(value ?? 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
 const percent = value => value == null ? "--" : `${Number(value).toFixed(1)}%`;
 const count = value => Number(value ?? 0).toLocaleString("zh-CN");
@@ -19,8 +20,8 @@ export function ReferenceTableHeader() {
 function ReferenceCost({ variant }) {
   if (variant.referenceUnitCost == null) return <Badge tone="danger">缺失</Badge>;
   return <div className="reference-value-stack">
-    <strong className="mono reference-money">{money(variant.referenceUnitCost, variant.authoritativeSource === "erp" ? 4 : 2)}</strong>
-    <span title={variant.referenceNote ?? undefined}><Badge tone={variant.authoritativeSource === "erp" ? "success" : "neutral"}>{sourceLabels[variant.referenceKind] ?? "参考"}</Badge></span>
+    <strong className="mono reference-money">{money(variant.referenceUnitCost, ["erp", "erp_reference"].includes(variant.authoritativeSource) ? 4 : 2)}</strong>
+    <span title={variant.referenceNote ?? undefined}><Badge tone={variant.authoritativeSource === "erp" ? "success" : variant.authoritativeSource === "erp_reference" ? "info" : "neutral"}>{sourceLabels[variant.referenceKind] ?? "参考"}</Badge></span>
     {variant.referenceKind === "manual_confirmed" ? <small>{shortDate(variant.referenceUpdatedAt) ? `确认于 ${shortDate(variant.referenceUpdatedAt)}` : "已确认"}{variant.manualCostHistoryCount > 1 ? ` · ${variant.manualCostHistoryCount} 条记录` : ""}</small> : null}
   </div>;
 }
@@ -37,7 +38,7 @@ function ReferenceStatus({ variant }) {
 export default function ReferenceGroupRows({ group, onEdit, onOpenLedger }) {
   const openLedger = variant => variant.latestLedgerId && onOpenLedger(variant.latestLedgerId);
   return <table className="reference-group-table" aria-label={`平台 SKC ${group.platformSkc} 经营参考`}>
-    <caption><div className="reference-group-heading"><strong className="mono">{group.platformSkc}</strong><span>{group.skuCount} 个 SKU · {group.productName}</span><Button variant="ghost" icon={Pencil} onClick={event => { event.stopPropagation(); onEdit(); }}>{group.productId ? "编辑档案" : "建立档案"}</Button></div></caption>
+    <caption><div className="reference-group-heading"><strong className="mono">{group.platformSkc}</strong><span>{group.skuCount} 个 SKU · {group.productName}</span><SelectionSalesTag item={group.automaticSalesTag} /><Button variant="ghost" icon={Pencil} onClick={event => { event.stopPropagation(); onEdit(); }}>{group.productId ? "查看档案" : "建立档案"}</Button></div></caption>
     <colgroup>{columnLabels.map((label, index) => <col key={label} className={`reference-column-${index}`} />)}</colgroup>
     <thead className="visually-hidden"><tr>{columnLabels.map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
     <tbody>{group.variants.map(variant => <tr key={variant.canonicalPlatformSku} data-platform-sku={variant.platformSku}

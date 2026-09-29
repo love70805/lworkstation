@@ -4,6 +4,8 @@ const INBOX_ROUTE_METHODS = new Map([
   ["/erp/v1/requests", new Set(["GET", "POST"])],
   ["/erp/v1/cost-batches", new Set(["GET", "POST"])],
   ["/erp/v1/cost-results", new Set(["POST"])],
+  ["/erp/v1/catalog-results", new Set(["POST"])],
+  ["/erp/v1/catalog-batches", new Set(["GET", "POST"])],
   ["/erp/v1/extension-status", new Set(["GET", "POST"])],
   ["/selection/v1/status", new Set(["GET"])],
   ["/selection/v1/context", new Set(["GET", "POST"])],
@@ -109,18 +111,23 @@ function enforceWorkspaceContext(request, committed) {
   const protectedRoute = request.route.includes("/requests")
     || request.route.includes("/cost-batches")
     || request.route.includes("/cost-results")
+    || request.route.includes("/catalog-results")
+    || request.route.includes("/catalog-batches")
     || request.route.includes("/captures");
   if (!protectedRoute) return request;
   if (!committed?.workspaceId || !committed?.memberId) {
     throw ipcError("工作区上下文尚未提交，已拒绝本机收件请求。", 409, "WORKSPACE_CONTEXT_REQUIRED");
   }
   const source = request.method === "GET" ? request.query : request.body?.value;
-  const candidates = [source?.workspaceId, source?.batch?.workspaceId, source?.request?.workspaceId, source?.result?.workspaceId]
+  const scopedBodies = [source, source?.batch, source?.request, source?.result, source?.catalog,
+    source?.catalogRequest, source?.envelope, source?.envelope?.catalog, source?.result?.catalog,
+    source?.request?.catalogRequest].filter((value) => value && typeof value === "object");
+  const candidates = scopedBodies.map((value) => value.workspaceId)
     .filter((value) => value != null && String(value).trim());
   if (candidates.some((value) => String(value).trim() !== committed.workspaceId)) {
     throw ipcError("请求工作区与桌面已提交上下文不匹配。", 403, "WORKSPACE_CONTEXT_MISMATCH");
   }
-  const memberCandidates = [source?.memberId, source?.ownerId, source?.batch?.memberId, source?.request?.memberId]
+  const memberCandidates = scopedBodies.flatMap((value) => [value.memberId, value.ownerId])
     .filter((value) => value != null && String(value).trim());
   if (memberCandidates.some((value) => String(value).trim() !== committed.memberId)) {
     throw ipcError("请求成员与桌面已提交上下文不匹配。", 403, "WORKSPACE_MEMBER_MISMATCH");
@@ -133,7 +140,7 @@ function enforceWorkspaceContext(request, committed) {
     body.workspaceId = committed.workspaceId;
     body.memberId = committed.memberId;
     body.ownerId = committed.memberId;
-    for (const key of ["batch", "request", "result"]) {
+    for (const key of ["batch", "request", "result", "catalogRequest"]) {
       if (body[key] && typeof body[key] === "object") {
         body[key] = { ...body[key], workspaceId: committed.workspaceId, memberId: committed.memberId };
       }

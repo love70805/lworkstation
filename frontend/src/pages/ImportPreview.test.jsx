@@ -162,3 +162,31 @@ it('keeps a user-selected month when later file inspection completes',async()=>{
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
   expect(container.querySelector('#ledger-period').value).toBe('2026-08');
 });
+
+it('declares a complete historical month without adding a per-file confirmation and can mark partial sources', async () => {
+  await upload();
+  expect(container.textContent).toContain('完整月台账：2026-08');
+  await click('统一校验与预览');
+  expect(mocks.preview.mock.calls[0][0].items[0]).toMatchObject({sourceCoverage:{version:1,period:'2026-08',store:'甲店',scope:'full_month',declarationSource:'import_preview'},importMode:'append'});
+  expect(container.querySelector('.batch-advanced').open).toBe(false);
+  const scope=container.querySelector('select[id^=source-scope-]');
+  await act(async()=>Simulate.change(scope,{target:{value:'partial'}}));
+  expect(container.querySelector('.batch-preview')).toBeNull();
+  expect(container.textContent).toContain('部分来源：2026-08');
+  await click('统一校验与预览');
+  expect(mocks.preview.mock.calls[1][0].items[0].sourceCoverage.scope).toBe('partial');
+});
+it('uses explicit complete replacement only when the user selects that mode', async () => {
+  await upload();
+  const mode=container.querySelector('select[id^=import-mode-]');
+  await act(async()=>Simulate.change(mode,{target:{value:'replace_store_month'}}));
+  await click('统一校验与预览');
+  expect(mocks.preview.mock.calls[0][0].items[0].importMode).toBe('replace_store_month');
+});
+it('automatically marks narrowed sales filters partial while retaining monthly import', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'ledger_report',facets:{movementTypes:['平台客单发货','客单发货'],supplierNumbers:['货号A','货号B']}});
+  await upload();
+  await act(async()=>container.querySelector('.batch-filters input').click());
+  await click('统一校验与预览');
+  expect(mocks.preview.mock.calls[0][0].items[0]).toMatchObject({sourceCoverage:{scope:'partial'},importMode:'append'});
+});
