@@ -306,14 +306,16 @@ async function verifyLedgerScopedEvidenceDelivery() {
         data = orderId === "PO-1688"
           ? [...validDetails, ...invalid]
           : [detail("REGULAR-NEWEST", "2026-08-01 00:00:00")];
+      } else if (url.pathname === "/purchase/product/v1/product-page") {
+        data = [];
       } else {
         assert.equal(url.pathname, "/purchase/product/v1/product-info-sku", "only fixture ERP endpoints are allowed");
-        data = [{ platformSku: "SKU-MONTH", platformSkc: "SKC-MONTH" }];
+        data = [{ associatedProductId: url.searchParams.get("productId"), platformSku: "SKU-MONTH", platformSkc: "SKC-MONTH" }];
       }
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     };
     try {
-      for (const file of ["result-policy.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
+      for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
         window.eval(await readFile(path.join(path.dirname(policyPath), file), "utf8"));
       }
       window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", {
@@ -364,3 +366,23 @@ async function verifyLedgerScopedEvidenceDelivery() {
 
 await verifyLedgerScopedEvidenceDelivery();
 console.log("ERP result policy, trusted-month preview and full raw evidence delivery tests passed");
+
+const observedMapping = policy.normalizeCatalogMappings([{ associatedProductId: 'WH-OBSERVED', barcodeSkuid: 'SKU-TARGET', barcodeSkcid: 'SKC-TARGET', barcodeAttributeSet: '蓝色 / 加厚', barcodePrimaryAttribute: 'CODE-NOT-ATTRIBUTE', barcodeImageLink: 'https://images.example.invalid/sku.jpg', productSellerId: 'OTHER-PERSON' }, { associatedProductId: 'WH-OBSERVED', barcodeSkuid: 'SKU-TARGET', barcodeSkcid: 'CONFLICT' }, { associatedProductId: 'WH-FOREIGN', barcodeSkuid: 'SKU-FOREIGN', barcodeSkcid: 'SKC-TARGET' }], 'WH-OBSERVED');
+assert.equal(observedMapping[0].attribute, '蓝色 / 加厚');
+assert.equal(observedMapping[0].imageUrl, 'https://images.example.invalid/sku.jpg');
+assert.equal(observedMapping[0].warehouseSku, 'WH-OBSERVED');
+assert.equal(Object.hasOwn(observedMapping[0], 'productSellerId'), false);
+const strictCatalog = policy.filterCatalogBySkc([{ warehouseSku: 'WH-OBSERVED', mappings: policy.normalizeMappings(observedMapping) }], ['SKC-TARGET']);
+assert.deepEqual(Array.from(strictCatalog.results[0].mappings, item => item.platformSku), ['SKU-TARGET']);
+assert.equal(policy.normalizeMappings(observedMapping).filter(item => item.platformSku === 'SKU-TARGET').length, 2, 'conflicting parent evidence stays visible');
+assert.equal(policy.filterCatalogBySkc([{ warehouseSku: 'SKC-TARGET', mappings: [{ platformSku: 'OTHER', platformSkc: 'OTHER' }] }], ['SKC-TARGET']).results.length, 0, 'warehouse equality never widens platform SKC scope');
+const observedProduct = policy.catalogProduct({ itemId: 'WH-OBSERVED', tradeName: '已观测商品名称', productColor: '仓库颜色', specificationAndModel: '仓库规格', commoditySpecificationAndModel1688: '1688规格', proportionOfGoodsPurchased1688: '1-1', supplierData: [{ supplierName: '供应商乙', unitPrices: 999 }, { supplierName: '供应商甲' }], productSellerId: 'PERSON', '7-daySales': 999, '30DaySales': 999, platformSkuCost: 999 });
+assert.deepEqual(Array.from(observedProduct.supplierNames).sort(), ['供应商乙', '供应商甲'].sort());
+assert.equal(observedProduct.supplierName, '', 'multiple suppliers are retained instead of arbitrarily binding one');
+assert.equal(observedProduct.purchaseCatalog.purchaseSpecificationAndModel1688, '1688规格');
+assert.equal(observedProduct.purchaseCatalog.purchaseProportion1688, '1-1');
+assert.equal(Object.hasOwn(observedProduct, 'unitConversion'), false, 'an unverified ratio does not create a cost-unit relation');
+assert.equal(observedProduct.unitCost, null);
+for (const field of ['productSellerId','7-daySales','30DaySales','platformSkuCost']) assert.equal(Object.hasOwn(observedProduct, field), false);
+assert.deepEqual(Array.from(policy.annotateCostWarnings([{ unitPrice: 0.00001 }])[0].warningReasons), [], 'a micro positive price is not mislabeled zero');
+console.log('Observed catalog aliases, strict shared-warehouse scope and micro-price checks passed');

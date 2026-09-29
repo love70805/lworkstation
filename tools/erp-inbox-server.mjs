@@ -1,3 +1,5 @@
+import { validateErpCatalogRequest, buildErpCatalogInboxEnvelope, normalizeErpCatalogPurchaseEvidence } from './erp-inbox-server-catalog-contract.mjs';
+import { normalizeErpCatalogCoverage, normalizeErpUnitConversion } from './erp-inbox-server-catalog-contract.mjs';
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -270,10 +272,12 @@ function sanitizeCatalogMappings(values) {
     const mapping = {
       platformSku, platformSkc,
       warehouseSku: catalogText(item?.warehouseSku),
+      ...(Object.hasOwn(item, "unitConversion") ? { unitConversion: normalizeErpUnitConversion(item.unitConversion) } : {}),
       productName: catalogText(item?.productName),
       imageUrl: catalogImageUrl(item?.imageUrl),
       attribute: catalogText(item?.attribute),
       storeName: catalogText(item?.storeName),
+      ...(Object.hasOwn(item ?? {}, "storeId") ? { storeId: catalogText(item.storeId) } : {}),
       articleNumber: catalogText(item?.articleNumber),
       platform: catalogText(item?.platform),
     };
@@ -304,6 +308,8 @@ function sanitizeSupplierLinks(values) {
 
 function sanitizeCatalogFields(source, { includeMappings = false } = {}) {
   return {
+    ...(source && Object.hasOwn(source, "unitConversion") ? { unitConversion: normalizeErpUnitConversion(source.unitConversion) } : {}),
+    ...(Array.isArray(source?.supplierNames) ? { supplierNames: uniqueStrings(source.supplierNames) } : {}),
     ...(source?.imageUrl !== undefined ? { imageUrl: catalogImageUrl(source.imageUrl) } : {}),
     ...(source?.attribute !== undefined ? { attribute: catalogText(source.attribute) } : {}),
     ...(includeMappings && Array.isArray(source?.catalogMappings) ? { catalogMappings: sanitizeCatalogMappings(source.catalogMappings) } : {}),
@@ -903,7 +909,7 @@ function scopeMismatch(message) {
 
 function chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs }) {
   const now = Date.now();
-  const active = records.filter((item) => item.kind === "request" && item.status === "registered" && !requestExpired(item, now));
+  const active = records.filter((item) => item.kind === "request" && item.requestKind !== "catalog" && item.status === "registered" && !requestExpired(item, now));
   const queriedSkcs = querySkcSet(querySkcs);
   const candidates = active.filter((item) => (
     item.requestId === requestId
@@ -950,6 +956,7 @@ function directInboxInputHash(payload) {
 function findDirectRequestContext(records, batch) {
   const requestedSkcs = querySkcSet(batch?.query?.platformSkcs);
   const candidates = records.filter((item) => item.kind === "request"
+    && item.requestKind !== "catalog"
     && item.status === "registered"
     && !requestExpired(item)
     && item.requestId === String(batch?.requestId ?? "").trim()
@@ -1027,6 +1034,12 @@ const server = http.createServer(async (req, res) => {
           .map((item) => ({ ...item, online: extensionIsOnline(item, now) }))
           .toSorted((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)));
         return json(res, 200, { records: extensionRecords, online: extensionRecords.some((item) => item.online), ttlMs: extensionTtlMs });
+      }
+      if (url.pathname === '/erp/v1/catalog-batches') {
+        const workspaceId = String(url.searchParams.get('workspaceId') || '').trim();
+        if (!workspaceId) return json(res, 400, { error: 'INVALID_INBOX_QUERY', message: '资料收件查询缺少 workspaceId。' });
+        const pending = records.filter(item => item.kind === 'catalog-batch' && item.status === 'pending' && item.workspaceId === workspaceId).toSorted((a,b) => String(a.receivedAt).localeCompare(String(b.receivedAt))).slice(0,100);
+        return json(res, 200, { records: pending });
       }
       if (url.pathname !== "/erp/v1/cost-batches") return json(res, 404, { error: "NOT_FOUND" });
       const workspaceId = String(url.searchParams.get("workspaceId") || "").trim();
@@ -1113,7 +1126,61 @@ const server = http.createServer(async (req, res) => {
       await writeSpool(records);
       return json(res, 200, { ok: true, acknowledged: true, deliveryId });
     }
+    if (requestUrl.pathname === '/erp/v1/catalog-batches') {
+      const deliveryId = String(payload?.deliveryId || '').trim(), workspaceId = String(payload?.workspaceId || '').trim();
+      if (payload?.status !== 'acknowledged' || !deliveryId || !workspaceId) return json(res, 400, { error: 'INVALID_INBOX_ACK', message: '资料收件确认缺少投递标识或工作区。' });
+      const index = records.findIndex(item => item.kind === 'catalog-batch' && item.deliveryId === deliveryId && item.workspaceId === workspaceId);
+      if (index < 0) return json(res, 404, { error: 'DELIVERY_NOT_FOUND' });
+      records[index] = { ...records[index], status: 'acknowledged', acknowledgedAt: new Date().toISOString() };
+      await writeSpool(records);
+      return json(res, 200, { acknowledged: true, deliveryId });
+    }
+    if (requestUrl.pathname === '/erp/v1/catalog-results') {
+      const resultDeliveryId = String(payload?.resultDeliveryId || '').trim();
+      if (!resultDeliveryId) return json(res, 400, { error: 'INVALID_RESULT_DELIVERY', message: '资料结果缺少稳定投递标识。' });
+      const inputHash = crypto.createHash('sha256').update(stableJson(stripExtensionDecisions(payload))).digest('hex');
+      const duplicate = records.find(item => item.kind === 'catalog-batch' && item.resultDeliveryId === resultDeliveryId);
+      if (duplicate) {
+        if (duplicate.resultInputHash !== inputHash) return json(res, 409, { error: 'ERP_RESULT_DELIVERY_CONFLICT', message: '资料投递标识已绑定不同内容。' });
+        return json(res, 200, { accepted: true, idempotent: true, deliveryId: duplicate.deliveryId, batchId: duplicate.batchId, envelope: duplicate.envelope });
+      }
+      const request = records.find(item => item.kind === 'request' && item.requestKind === 'catalog' && item.status === 'registered' && !requestExpired(item) && item.requestId === payload?.requestId && item.workspaceId === payload?.workspaceId);
+      if (!request) return json(res, 409, { error: 'ERP_REQUEST_NOT_FOUND', message: '没有匹配且有效的已登记资料请求。' });
+      const rawEvidence = normalizeErpCatalogPurchaseEvidence(stripExtensionDecisions(payload?.warehouseEvidence ?? []));
+      const warehouseScope = new Set((payload?.rows ?? []).map(row => canonicalSku(row?.warehouseSku)).filter(Boolean));
+      if (rawEvidence.some(entry => !warehouseScope.has(entry.canonicalWarehouseSku))) return json(res, 400, { error: 'INVALID_ERP_EVIDENCE', message: '资料采购证据超出已确认仓库映射。' });
+      const now = new Date().toISOString();
+      const envelope = buildErpCatalogInboxEnvelope({ deliveryId: 'ERP-CATALOG-DELIVERY-' + crypto.randomUUID(), sentAt: now, catalog: { batchId: 'ERP-CATALOG-BATCH-' + crypto.randomUUID(), workspaceId: request.workspaceId, requestId: request.requestId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, generatedAt: now, query: { unit: 'platform_skc', platformSkcs: payload?.querySkcs }, rows: stripExtensionDecisions(payload?.rows ?? []), warehouseEvidence: sanitizeWarehouseEvidence(stripExtensionDecisions(payload?.warehouseEvidence ?? []), (payload?.rows ?? []).map(row => row?.warehouseSku).filter(Boolean)), coverage: payload?.catalogCoverage } }, { request: request.catalogRequest });
+      records.push({ kind: 'catalog-batch', resultDeliveryId, resultInputHash: inputHash, deliveryId: envelope.deliveryId, batchId: envelope.catalog.batchId, workspaceId: request.workspaceId, requestId: request.requestId, receivedAt: now, status: 'pending', envelope });
+      await writeSpool(records);
+      return json(res, 202, { accepted: true, idempotent: false, deliveryId: envelope.deliveryId, batchId: envelope.catalog.batchId, envelope });
+    }
     if (requestUrl.pathname === "/erp/v1/requests") {
+      if (payload?.request?.kind === 'catalog') {
+        if (payload.request.cancel === true) {
+          const requestId = String(payload.request.id ?? payload.request.requestId ?? '').trim();
+          const workspaceId = String(payload.request.workspaceId ?? '').trim();
+          const existing = records.find(item => item.kind === 'request' && item.requestKind === 'catalog' && item.requestId === requestId && item.workspaceId === workspaceId);
+          if (!existing) return json(res, 409, { error: 'ERP_REQUEST_CONFLICT', message: '取消资料请求的身份或工作区不匹配。' });
+          if (existing.status === 'registered') { existing.status = 'superseded'; existing.supersededAt = new Date().toISOString(); await writeSpool(records); }
+          return json(res, 200, { accepted: true, requestId, status: existing.status });
+        }
+        const catalogRequest = validateErpCatalogRequest(payload.request);
+        const inputHash = crypto.createHash('sha256').update(stableJson(catalogRequest)).digest('hex');
+        const existing = records.find(item => item.kind === 'request' && item.requestId === catalogRequest.id);
+        if (existing) {
+          if (existing.requestInputHash !== inputHash) return json(res, 409, { error: 'ERP_REQUEST_CONFLICT', message: '请求标识已绑定不同资料范围。' });
+          return json(res, 200, { accepted: true, idempotent: true, requestId: existing.requestId, status: existing.status });
+        }
+        if (catalogRequest.supersedesRequestId) {
+          const previous = records.find(item => item.kind === 'request' && item.requestId === catalogRequest.supersedesRequestId);
+          if (previous && (previous.requestKind !== 'catalog' || previous.workspaceId !== catalogRequest.workspaceId)) return json(res, 409, { error: 'ERP_REQUEST_CONFLICT', message: '被替代资料请求的类型或工作区不匹配。' });
+          if (previous?.status === 'registered') { previous.status = 'superseded'; previous.supersededAt = new Date().toISOString(); }
+        }
+        records.push({ ...catalogRequest, kind: 'request', requestKind: 'catalog', requestId: catalogRequest.id, expectedSkus: catalogRequest.confirmedSkus, catalogRequest, requestInputHash: inputHash, registeredAt: new Date().toISOString(), status: 'registered' });
+        await writeSpool(records);
+        return json(res, 202, { accepted: true, idempotent: false, requestId: catalogRequest.id, status: 'registered' });
+      }
       const requestId = String(payload?.request?.id ?? payload?.requestId ?? "").trim();
       const workspaceId = String(payload?.request?.workspaceId ?? payload?.workspaceId ?? "").trim();
       const ledgerId = payload?.request?.ledgerId ?? payload?.ledgerId ?? null;
@@ -1126,14 +1193,14 @@ const server = http.createServer(async (req, res) => {
       const supersedeLedgerRequests = (exceptRequestId = null) => {
         let changed = false;
         for (const record of records) {
-          if (record.kind === "request" && record.status === "registered" && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) {
+          if (record.kind === "request" && record.requestKind !== "catalog" && record.status === "registered" && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) {
             record.status = "superseded"; changed = true;
           }
         }
         return changed;
       };
       if (payload?.request?.cancel === true) {
-        const existing = records.find((item) => item.kind === "request" && item.requestId === requestId);
+        const existing = records.find((item) => item.kind === "request" && item.requestKind !== "catalog" && item.requestId === requestId);
         if (replaceLedgerScope) {
           if (existing && (existing.workspaceId !== workspaceId || existing.ledgerId !== ledgerId)) return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "取消请求的工作区或账本不匹配。" });
           if (supersedeLedgerRequests()) await writeSpool(records);
@@ -1164,6 +1231,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { accepted: true, idempotent: true, requestId, status: existingRequest.status });
       }
       const superseded = records.find((item) => item.kind === "request" && item.requestId === payload.request?.supersedesRequestId);
+      if (superseded && superseded.requestKind === "catalog") return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "成本请求不能替代资料请求。" });
       if (superseded && superseded.workspaceId === workspaceId && superseded.ledgerId === ledgerId) superseded.status = "superseded";
       if (replaceLedgerScope) supersedeLedgerRequests(requestId);
       records.push({
@@ -1343,6 +1411,7 @@ const server = http.createServer(async (req, res) => {
           mappingFallbackCount: 0,
           querySkcCount: platformSkcs.length,
         },
+        ...(payload?.sourceMeta?.catalogCoverage ? { catalogVersion: 1, catalogCoverage: normalizeErpCatalogCoverage(payload.sourceMeta.catalogCoverage) } : {}),
         sourceMeta: { ...sourceMeta, sourceFormat: "erp-v8-http-bridge" },
         warehouseEvidence,
         evidenceStatus: sourceMeta.evidenceComplete ? "complete" : "legacy_partial",

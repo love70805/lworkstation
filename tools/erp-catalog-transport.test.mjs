@@ -80,7 +80,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: "8.0.23" }),
+        getManifest: () => ({ version: "8.0.24" }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -148,8 +148,10 @@ export async function verifyErpCatalogTransport({
           productLink1688: "https://detail.1688.com/offer/333333333333.html",
           purchasingLink1688: "https://detail.1688.com/offer/333333333333.html",
         })];
+      } else if (url.pathname === "/purchase/product/v1/product-page") {
+        data = [];
       } else {
-        assert.equal(url.pathname, "/purchase/product/v1/product-info-sku", "only the existing three ERP endpoints can be queried");
+        assert.equal(url.pathname, "/purchase/product/v1/product-info-sku", "only observed read-only ERP endpoints can be queried");
         const warehouseSku = url.searchParams.get("productId");
         assert.ok(["WH-CATALOG", "WH-BLUE"].includes(warehouseSku));
         data = warehouseSku === "WH-CATALOG" ? [
@@ -157,15 +159,16 @@ export async function verifyErpCatalogTransport({
           ...(includeConflict ? [{ barcodeSkuid: "SKU-RED", barcodeSkcid: "SKC-CONFLICT" }] : []),
         ] : [{ barcodeSkuid: "SKU-BLUE", barcodeSkcid: "SKC-CATALOG", barcodeArticleNumber: "GOODS-1", platform: "Shein", storeName: "店铺甲" }];
       }
+      if (url.pathname === "/purchase/product/v1/product-info-sku") data = data.map(item => ({ ...item, associatedProductId: url.searchParams.get("productId") }));
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     };
-    for (const file of ["result-policy.js", "request-context.js", "shopeers-bridge.js", "content.js"]) window.eval(await fs.readFile(path.join(extensionRoot, file), "utf8"));
+    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) window.eval(await fs.readFile(path.join(extensionRoot, file), "utf8"));
     window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", { detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-CATALOG" } }));
     window.document.getElementById("erpa-cost-trigger").click();
     for (let attempt = 0; attempt < 200 && !submitted.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(submitted.length, 1, window.document.body.textContent);
     assert.equal(submitted[0].response.ok, true, submitted[0].response.message);
-    assert.equal(new Set(requestedPaths).size, 3);
+    assert.equal(new Set(requestedPaths).size, 4);
     const resultResponse = await fetch(`${base}/erp/v1/cost-batches?workspaceId=${encodeURIComponent(workspaceId)}&ledgerId=${encodeURIComponent(ledgerId)}`, { headers: { authorization: `Bearer ${capability}` } });
     assert.equal(resultResponse.status, 200);
     const inbox = await resultResponse.json();

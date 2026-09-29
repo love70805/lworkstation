@@ -11,7 +11,7 @@ const sourceRoot = path.join(workspaceRoot, 'integrations/erp-assistant-extensio
 const purchasePath = '/view/system/purchaseOrderModule/purchasingManagement.html';
 const origin = 'https://www.zhuolinkeji.cn';
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
-const sources = await Promise.all(['query-hook.js', 'result-policy.js', 'request-context.js', 'shopeers-bridge.js', 'content.js'].map(file => readFile(path.join(sourceRoot, file), 'utf8')));
+const sources = await Promise.all(['query-hook.js', 'result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js'].map(file => readFile(path.join(sourceRoot, file), 'utf8')));
 
 async function createPage(url, { topWindow, connected = true, earlySessionResponse = false } = {}) {
   const window = new Window({ url });

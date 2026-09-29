@@ -1299,6 +1299,48 @@ try {
   assert.equal(directCatalogBatch.warehouseEvidence[0].purchaseRecords[0].attribute, "采购详情属性");
   assert.deepEqual(directCatalogBatch.warehouseEvidence[0].purchaseRecords[0].purchaseCatalog, catalogRecord.purchaseCatalog);
 
+  const independentRequest = { kind: 'catalog', id: 'ONLY-CATALOG-REQ', workspaceId: 'workspace-independent', ledgerPeriod: '2026-08', platformSkcs: ['SKC-ONLY'], confirmedSkus: [{ platformSku: 'SKU-SOLD', platformSkc: 'SKC-ONLY' }], sourceProductIds: ['PRODUCT-CONFIRMED'], missingGroups: ['directory', 'mappings', 'purchaseEvidence'], idempotencyKey: 'ONLY-REFRESH-1', requestedAt: new Date().toISOString() };
+  response = await rawPost('/erp/v1/requests', { request: independentRequest });
+  assert.equal(response.status, 202, 'confirmed catalog request needs no ledger or sales');
+  response = await rawPost('/erp/v1/requests', { request: independentRequest });
+  assert.equal((await response.json()).idempotent, true);
+  response = await rawPost('/erp/v1/requests', { request: { ...independentRequest, ledgerPeriod: '2026-09' } });
+  assert.equal(response.status, 409);
+  const identity = { platformSku: 'SKU-UNSOLD', platformSkc: 'SKC-ONLY', warehouseSku: 'WH-ONLY', attribute: '平台属性', unitConversion: { warehouseUnits: 2, platformUnits: 1, source: 'erp_platform_mapping', sourceRef: 'MAP-ONLY' } };
+  const catalogDelivery = { resultDeliveryId: 'CATALOG-RESULT-ONLY', requestId: independentRequest.id, workspaceId: independentRequest.workspaceId, querySkcs: independentRequest.platformSkcs, rows: [{ ...identity, catalogMappings: [identity], productName: '无销量商品', unitCost: 999 }], catalogCoverage: { directory: { state: 'complete' }, mappings: { state: 'complete' }, images: { state: 'unavailable', reasons: ['missing'] }, suppliers: { state: 'partial' }, purchaseEvidence: { state: 'complete' } }, warehouseEvidence: { warehouses: [{ warehouseSku: 'WH-ONLY', evidenceComplete: true, purchaseRecords: [{ recordId: 'PURCHASE-ONLY', quantity: 2, unitPrice: 0.00001, purchaseDate: '2026-08-20', purchaseCatalog: { purchaseSpecificationAndModel1688: '采购规格' } }] }] } };
+  response = await rawPost('/erp/v1/catalog-results', catalogDelivery);
+  assert.equal(response.status, 202, await response.clone().text());
+  const catalogReceived = await response.json();
+  assert.equal(catalogReceived.envelope.type, 'shopeers.erp.catalog.batch');
+  assert.equal(catalogReceived.envelope.catalog.ledgerPeriod, '2026-08');
+  assert.equal(catalogReceived.envelope.catalog.rows[0].unitCost, undefined, 'catalog carries no monthly costs');
+  assert.deepEqual(catalogReceived.envelope.catalog.rows[0].unitConversion, identity.unitConversion);
+  assert.equal(catalogReceived.envelope.catalog.warehouseEvidence[0].purchaseRecords[0].unitPrice, 0.00001);
+  response = await rawPost('/erp/v1/catalog-results', catalogDelivery);
+  assert.equal((await response.json()).idempotent, true);
+  for (const changed of [{ ...catalogDelivery, workspaceId: 'foreign' }, { ...catalogDelivery, rows: [{ ...catalogDelivery.rows[0], productName: 'changed' }] }]) {
+    response = await rawPost('/erp/v1/catalog-results', changed); assert.equal(response.status, 409);
+  }
+  response = await rawPost('/erp/v1/catalog-results', { ...catalogDelivery, resultDeliveryId: 'CATALOG-WIDENED', querySkcs: ['FOREIGN'] }); assert.equal(response.status, 400);
+  response = await rawPost('/erp/v1/cost-results', { ...catalogDelivery, resultDeliveryId: 'CATALOG-AS-COST', ledgerId: 'FAKE' }); assert.equal(response.status, 409, 'catalog request is never a formal cost request');
+  response = await fetch(base + '/erp/v1/cost-batches?workspaceId=workspace-independent'); assert.equal((await response.json()).records.length, 0);
+  response = await fetch(base + '/erp/v1/catalog-batches?workspaceId=workspace-independent'); assert.equal((await response.json()).records.length, 1);
+  response = await rawPost('/erp/v1/catalog-batches', { status: 'acknowledged', deliveryId: catalogReceived.deliveryId, workspaceId: 'foreign' }); assert.equal(response.status, 404);
+  response = await rawPost('/erp/v1/catalog-batches', { status: 'acknowledged', deliveryId: catalogReceived.deliveryId, workspaceId: independentRequest.workspaceId }); assert.equal(response.status, 200);
+  response = await fetch(base + '/erp/v1/catalog-batches?workspaceId=workspace-independent'); assert.equal((await response.json()).records.length, 0);
+
+  response = await rawPost('/erp/v1/catalog-results', { ...catalogDelivery, resultDeliveryId: 'CATALOG-FOREIGN-EVIDENCE', warehouseEvidence: { warehouses: [...catalogDelivery.warehouseEvidence.warehouses, { warehouseSku: 'FOREIGN', purchaseRecords: [] }] } }); assert.equal(response.status, 400);
+  response = await rawPost('/erp/v1/catalog-results', { ...catalogDelivery, resultDeliveryId: 'CATALOG-FOREIGN-RECORD', warehouseEvidence: { warehouses: [{ ...catalogDelivery.warehouseEvidence.warehouses[0], purchaseRecords: [{ ...catalogDelivery.warehouseEvidence.warehouses[0].purchaseRecords[0], warehouseSku: 'FOREIGN' }] }] } }); assert.equal(response.status, 400);
+  response = await rawPost('/erp/v1/requests', { request: { id: independentRequest.id, workspaceId: independentRequest.workspaceId, ledgerId: null, cancel: true } }); assert.equal(response.status, 409, 'cost cancel never cancels catalog requests');
+  response = await rawPost('/erp/v1/requests', { request: { id: 'COST-REPLACE-CATALOG', workspaceId: independentRequest.workspaceId, ledgerId: null, platformSkcs: independentRequest.platformSkcs, supersedesRequestId: independentRequest.id }, expectedSkus: independentRequest.confirmedSkus }); assert.equal(response.status, 409, 'cost never supersedes a catalog request');
+  const replacementCatalog = { ...independentRequest, id: 'ONLY-CATALOG-REPLACEMENT', idempotencyKey: 'ONLY-REFRESH-2', supersedesRequestId: independentRequest.id };
+  response = await rawPost('/erp/v1/requests', { request: { ...replacementCatalog, supersedesRequestId: 'DIRECT-CATALOG-REQUEST' } }); assert.equal(response.status, 409, 'catalog never supersedes a formal cost request');
+  response = await rawPost('/erp/v1/requests', { request: replacementCatalog }); assert.equal(response.status, 202);
+  response = await rawPost('/erp/v1/catalog-results', { ...catalogDelivery, resultDeliveryId: 'CATALOG-STALE-REQUEST' }); assert.equal(response.status, 409);
+  response = await rawPost('/erp/v1/requests', { request: { kind: 'catalog', id: replacementCatalog.id, workspaceId: 'foreign', cancel: true } }); assert.equal(response.status, 409);
+  response = await rawPost('/erp/v1/requests', { request: { kind: 'catalog', id: replacementCatalog.id, workspaceId: replacementCatalog.workspaceId, cancel: true } }); assert.equal(response.status, 200);
+  response = await fetch(base + '/erp/v1/requests?workspaceId=workspace-independent'); assert.equal((await response.json()).records.length, 0);
+
   await post("/erp/v1/requests", request("EXPIRED", "SKU-EXPIRED"));
   const spool = JSON.parse(await fs.readFile(spoolPath, "utf8"));
   const expired = spool.find((item) => item.kind === "request" && item.requestId === "EXPIRED");
