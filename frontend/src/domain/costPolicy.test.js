@@ -123,6 +123,11 @@ describe("formal cost policy", () => {
 });
 
 describe("selection reference cost", () => {
+  it("distinguishes true zero and small positive references from empty values", () => {
+    expect(selectSelectionReferenceCost({ erpHistory: [{ id: "ZERO", unitCost: 0, resolutionStatus: "resolved" }] })).toMatchObject({ unitCost: 0, referenceKind: "erp_history" });
+    expect(selectSelectionReferenceCost({ erpHistory: [{ id: "TINY", unitCost: 0.000001, resolutionStatus: "resolved" }] })).toMatchObject({ unitCost: 0.000001 });
+    expect(selectSelectionReferenceCost({ erpHistory: [{ id: "EMPTY", unitCost: "", resolutionStatus: "resolved" }] })).toBeNull();
+  });
   it("uses ERP history before finalized profit history and supplier landed cost", () => {
     expect(selectSelectionReferenceCost({
       erpHistory: [

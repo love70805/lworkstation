@@ -13,7 +13,7 @@ import {
   normalizeWarehouseSku,
   normalizeWorkspaceId,
 } from "./identifiers";
-import { normalizeErpCatalogFields } from "./erpCatalogFields";
+import { normalizeErpCatalogFields, normalizeErpCatalogCoverage } from "./erpCatalogFields";
 
 export const ERP_COST_BATCH_FORMAT = "shopeers-erp-cost-batch";
 export const ERP_COST_BATCH_VERSION = 2;
@@ -448,6 +448,7 @@ export function validateErpCostBatchEnvelope(payload, {
       algorithmVersion: ERP_COST_ALGORITHM_VERSION,
       query: { unit: "platform_skc", platformSkcs },
       summary: { outputRowCount: rows.length, warehouseSkuCount: uniqueWarehouseSkus.size, mappingFallbackCount, querySkcCount: platformSkcs.length },
+      ...(payload.catalogCoverage ? { catalogVersion: 1, catalogCoverage: normalizeErpCatalogCoverage(payload.catalogCoverage) } : {}),
       sourceMeta: normalizeSourceMeta(topLevelWarnings.hasField
         ? { ...payload.sourceMeta, sourceWarnings: topLevelWarnings.warnings }
         : payload.sourceMeta, { evidenceComplete, legacy, scopedIncomplete }),
@@ -577,6 +578,7 @@ export function buildErpCostBatchEnvelope({
       querySkcCount: normalizedSkcs.length,
     },
     sourceMeta,
+    ...(sourceMeta.catalogCoverage ? { catalogVersion: 1, catalogCoverage: normalizeErpCatalogCoverage(sourceMeta.catalogCoverage) } : {}),
     warehouseEvidence,
     rows,
   };

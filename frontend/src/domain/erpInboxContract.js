@@ -119,3 +119,12 @@ export function parseErpInboxMessage(message, options = {}) {
   return validateErpCostInboxEnvelope(payload, options);
 }
 
+
+import { validateErpCatalogInboxEnvelope } from './erpCatalogRequest.js';
+export { ERP_CATALOG_MESSAGE_TYPE, ERP_CATALOG_INBOX_FORMAT, buildErpCatalogInboxEnvelope, validateErpCatalogInboxEnvelope } from './erpCatalogRequest.js';
+
+export function parseErpCatalogInboxMessage(message, options = {}) {
+  let payload = message;
+  if (typeof message === 'string') { try { payload = JSON.parse(message); } catch { throw new Error('ERP 资料收件消息 JSON 无法解析。'); } }
+  return validateErpCatalogInboxEnvelope(payload, options);
+}

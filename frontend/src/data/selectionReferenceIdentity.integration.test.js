@@ -51,7 +51,10 @@ describe("selection reference trusted ledger snapshot", () => {
     expect(await Promise.all(db.tables.map(table => table.toArray()))).toEqual(before);
     await setActiveMemberContext({ workspaceId: "workspace-b" });
     expect((await getSelectionReferenceSnapshot()).ledgerIdentityRows).toHaveLength(1);
-    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot())).toHaveLength(0);
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot())).toMatchObject([
+      { platformSku: "SKU-A", platformSkc: "OTHER", referenceUnitCost: null, productId: null },
+    ]);
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot())).toHaveLength(1);
   });
 
   it("never associates unscoped legacy default-workspace references with a different active workspace", async () => {

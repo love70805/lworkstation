@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeErpCatalogFields, normalizeErpCatalogMappings, normalizeErpCatalogUrl, normalizeErpPurchaseCatalog, normalizeErpSupplierLinks } from "./erpCatalogFields";
+import { normalizeErpCatalogCoverage, normalizeErpUnitConversion, normalizeErpCatalogFields, normalizeErpCatalogMappings, normalizeErpCatalogUrl, normalizeErpPurchaseCatalog, normalizeErpSupplierLinks } from "./erpCatalogFields";
 
 describe("optional ERP catalog carriers", () => {
   it("keeps purchase specifications and ratios separate from platform attributes in a fixed whitelist", () => {
@@ -46,5 +46,19 @@ describe("optional ERP catalog carriers", () => {
 
   it.each(["javascript:alert(1)", "file:///C:/private/a.png", "data:image/png;base64,private", "https://user:secret@cbu01.alicdn.com/a.jpg", "https://cbu01.alicdn.com/a.jpg?access_token=private", "https://cbu01.alicdn.com/a.jpg?capability=private"])("omits unsafe catalog URL %s", (url) => {
     expect(normalizeErpCatalogUrl(url)).toBeNull();
+  });
+});
+
+describe('catalog coverage and explicit conversion', () => {
+  it('does not call uncollected groups complete, preserves complete empty groups and ignores unsafe extra data', () => {
+    const coverage = normalizeErpCatalogCoverage({ directory: { state: 'complete', recordCount: 0, pageCount: 1, cookie: 'discard' }, images: { state: 'partial', reasons: ['missing', 'missing'], attemptedAt: '2026-09-29T00:00:00Z' } });
+    expect(coverage.directory).toEqual({ state: 'complete', reasons: [], pageCount: 1, recordCount: 0 });
+    expect(coverage.mappings).toEqual({ state: 'unavailable', reasons: ['not_collected'] });
+    expect(coverage.images.reasons).toEqual(['missing']);
+    expect(JSON.stringify(coverage)).not.toContain('discard');
+  });
+  it('accepts only a documented positive conversion source and never invents one-to-one', () => {
+    expect(normalizeErpUnitConversion({ warehouseUnits: 2, platformUnits: 1, source: 'erp_platform_mapping', sourceRef: 'row-1' })).toEqual({ warehouseUnits: 2, platformUnits: 1, source: 'erp_platform_mapping', sourceRef: 'row-1' });
+    for (const value of [null, {}, { warehouseUnits: 1, platformUnits: 1 }, { warehouseUnits: 0, platformUnits: 1, source: 'erp_platform_mapping', sourceRef: 'row-1' }, { warehouseUnits: 1, platformUnits: 1, source: 'guessed', sourceRef: 'row-1' }]) expect(normalizeErpUnitConversion(value)).toBeNull();
   });
 });

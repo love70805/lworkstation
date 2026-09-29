@@ -67,6 +67,18 @@ function recoveryVoidPair({ legacy = false } = {}) {
 }
 
 describe("sync recovery contract", () => {
+  it("replays an explicitly confirmed full store/month replacement without keeping vanished SKCs", () => {
+    const ledger = { id: "L-1", workspaceId: "workspace-default", period: "2026-08", status: "cost_pending", currency: "CNY" };
+    const oldRows = [
+      { id: 1, workspaceId: "workspace-default", ledgerId: ledger.id, batchId: "I-1", groupKey: "OLD", platformSku: "OLD", store: "甲店" },
+      { id: 2, workspaceId: "workspace-default", ledgerId: ledger.id, batchId: "I-1", groupKey: "OTHER", platformSku: "OTHER", store: "乙店" },
+    ];
+    const newRows = [{ id: 3, workspaceId: "workspace-default", ledgerId: ledger.id, batchId: "I-2", groupKey: "NEW", platformSku: "NEW", store: "甲店" }];
+    const events = [event("1", "imported", "I-1", { importBatch: { id: "I-1", workspaceId: "workspace-default", ledgerId: ledger.id }, salesRows: oldRows, ledger }),
+      event("2", "imported", "I-2", { importBatch: { id: "I-2", workspaceId: "workspace-default", ledgerId: ledger.id, store: "甲店", importMode: "replace_store_month", sourceCoverage: { scope: "full_month", period: "2026-08", store: "甲店", version: 1 } }, salesRows: newRows, ledger })];
+    const payload = buildSyncRecoveryPayload({ workspaceId: "workspace-default", events });
+    expect(replaySyncRecoveryPayload(payload).tables.salesRows.map(row => row.platformSku).sort()).toEqual(["NEW", "OTHER"]);
+  });
   it("replays composite product, sales, cost and finalized profit facts", () => {
     const events = [
       event("1", "product_created", "P-1", {

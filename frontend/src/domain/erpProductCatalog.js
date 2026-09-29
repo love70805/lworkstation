@@ -1,5 +1,6 @@
 import { canonicalPlatformSkc, canonicalPlatformSku, canonicalWarehouseSku } from "./identifiers";
 import { normalizeErpCatalogFields, normalizeErpCatalogUrl, normalizeErpPurchaseCatalog, normalizeErpSupplierLinks } from "./erpCatalogFields";
+import { suggestErpProductTitles } from "./erpProductTitles";
 
 const text = value => String(value ?? "").trim();
 const fields = ["platformSkc", "productName", "imageUrl", "attribute", "warehouseSku", "storeName"];
@@ -46,7 +47,7 @@ export function erpProductCatalogRowsFromEnvelope(envelope, { batchId, published
     platformSku: text(row.platformSku), platformSkc: text(row.platformSkc), warehouseSku: text(row.warehouseSku),
     productName: catalogProductName(row.productName),
     ...normalizeErpCatalogFields(row),
-    catalogQuerySkcs: (envelope.query?.platformSkcs ?? []).map(item => item.platformSkc),
+    catalogQuerySkcs: (envelope.query?.platformSkcs ?? []).map(item => item.platformSkc ?? item),
     evidenceRef: row.evidenceRef ?? null,
     supplierName: text(row.supplierName), supplier1688Url: erpSupplierLink(row.supplier1688Url)?.url || "",
     mappingFallback: Boolean(row.mappingFallback),
@@ -84,11 +85,14 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
     const canonicalRowWarehouse = rowWarehouse ? canonicalWarehouseSku(rowWarehouse) : "";
     // A full warehouse mapping can be attached to many expected cost rows.
     // Resolve each purchase/link set once and expand it once per catalog SKU.
-    const records = row.purchaseRecords?.length ? row.purchaseRecords : [{
+    const purchaseRecords = row.purchaseRecords?.length ? row.purchaseRecords : [{
       supplierName: row.supplierName,
       supplier1688Links: (row.supplier1688Links ?? []).filter(link => text(link.supplierName)),
       ...(row.purchaseCatalog ? { purchaseCatalog: row.purchaseCatalog } : {}),
     }];
+    const directoryNames = [...new Set((row.supplierNames ?? []).map(text).filter(Boolean))];
+    const records = [...purchaseRecords, ...directoryNames.filter(name => !purchaseRecords.some(record => text(record.supplierName) === name))
+      .map(supplierName => ({ supplierName, warehouseSku: row.warehouseSku, directoryOnly: true }))];
     const purchaseKey = JSON.stringify(records.map(record => [record.recordId, record.purchaseOrderId, record.purchaseOrderNo, record.warehouseSku, record.supplierName, record.supplier1688Url, record.supplier1688Links, record.purchaseCatalog]));
     if (!purchaseCache.has(purchaseKey)) purchaseCache.set(purchaseKey, records.flatMap(record => {
       const name = text(record.supplierName);
@@ -164,6 +168,7 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
     if (!catalog.fields.platformSkc.has(key)) catalog.fields.platformSkc.set(key, { value: entry.platformSkc, sources: [] });
     appendUnique(catalog.fields.platformSkc.get(key).sources, entry.source);
   }
+  for (const catalog of index.values()) if (catalog.fields.warehouseSku.size > 1) catalog.relationshipConflict = true;
   return index;
 }
 
@@ -207,6 +212,7 @@ function catalogDisplaySources(entries) {
 export function prefillErpProductDraft({ draft, rows, platformSku = "", platformSkc = "", productId = null, ownership = [] }) {
   const anchor = platformSku ? rows.find(row => row.canonicalPlatformSku === canonicalPlatformSku(platformSku)) : null;
   const warnings = [];
+  const identityConflicts = [];
   const ownershipBySku = new Map(ownership.map(item => [item.canonicalPlatformSku || canonicalPlatformSku(item.platformSku), item]));
   const trustedSkc = draft.platformSkc || (anchor?.platformSkcConflict || anchor?.erpCatalogRelationshipConflict ? "" : anchor?.platformSkc) || (!anchor ? platformSkc : "");
   const target = trustedSkc ? canonicalPlatformSkc(trustedSkc) : "";
@@ -214,14 +220,22 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     if (!target) return anchor && row.canonicalPlatformSku === anchor.canonicalPlatformSku;
     const belongs = row.platformSkc && canonicalPlatformSkc(row.platformSkc) === target || row.erpCatalogSources?.some(item => canonicalPlatformSkc(item.platformSkc) === target);
     if (!belongs) return false;
-    if ((row.platformSkcConflict || row.erpCatalogRelationshipConflict) && row.platformSkcSource !== "catalog") { warnings.push(`${row.platformSku} 的 SKC 来源有冲突，未自动加入同组。`); return false; }
+    if ((row.platformSkcConflict || row.erpCatalogRelationshipConflict) && row.platformSkcSource !== "catalog") {
+      warnings.push(`${row.platformSku} 的 SKC 来源有冲突，请明确排除或核对该分支。`);
+      identityConflicts.push({ platformSku: row.platformSku, reason: "relationship_conflict", sources: row.erpCatalogSources ?? [] });
+      return false;
+    }
     return true;
   });
   if (anchor?.platformSkcConflict) warnings.push(`${anchor.platformSku} 的 SKC 来源有冲突，请核对后填写。`);
   if (anchor?.erpCatalogRelationshipConflict) warnings.push(`${anchor.platformSku} 的 ERP 映射超出查询范围或仓库关联不一致，请核对。`);
   const allowed = selected.filter(row => {
     const owner = ownershipBySku.get(row.canonicalPlatformSku);
-    if (owner?.productId && owner.productId !== productId) { warnings.push(`${row.platformSku} 已属于其他商品，未加入本次草稿。`); return false; }
+    if (owner?.productId && owner.productId !== productId) {
+      warnings.push(`${row.platformSku} 已属于其他商品，请明确排除该分支。`);
+      identityConflicts.push({ platformSku: row.platformSku, reason: "owned_elsewhere", productId: owner.productId });
+      return false;
+    }
     return true;
   });
   const unique = field => {
@@ -229,20 +243,27 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     if (values.length > 1) warnings.push(`${({ productName: "商品名称", imageUrl: "商品图片", storeName: "店铺" })[field]}有多个 ERP 来源，请核对。`);
     return values.length === 1 ? values[0] : "";
   };
-  const erpName = unique("productName");
+  const titles = suggestErpProductTitles(allowed);
+  const erpName = titles.name;
+  const protectedField = field => Boolean(draft.fieldEdits?.[field]);
   const primarySku = text(draft.variants?.[0]?.platformSku);
   const primaryRow = anchor ?? (primarySku ? allowed.find(row => row.canonicalPlatformSku === canonicalPlatformSku(primarySku)) : null) ?? allowed[0];
   // Different warehouse/SKU pictures are valid branch images. The anchor's
   // unique image can be the catalog cover; a disputed image for that SKU stays
   // empty rather than borrowing another SKU's picture.
-  const erpImage = primaryRow?.erpImage?.conflict ? "" : primaryRow?.erpImage?.value || unique("imageUrl");
+  const erpImage = titles.needsChoice || primaryRow?.erpImage?.conflict ? "" : primaryRow?.erpImage?.value || unique("imageUrl");
   const variants = [...(draft.variants ?? [])].map(variant => ({ ...variant }));
   allowed.forEach(row => {
     let variant = variants.find(item => text(item.platformSku) && canonicalPlatformSku(item.platformSku) === row.canonicalPlatformSku);
     if (!variant) { variant = { platformSku: row.platformSku, attribute: "", warehouseSku: "", imageUrl: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1, salePrice: "" }; variants.push(variant); }
-    variant.attribute ||= row.attribute;
-    variant.warehouseSku ||= row.warehouseSku;
-    variant.imageUrl ||= row.erpImage?.value;
+    const edited = draft.fieldEdits?.variants?.[row.canonicalPlatformSku] ?? {};
+    if (!edited.attribute) variant.attribute ||= row.attribute;
+    if (!edited.warehouseSku) variant.warehouseSku ||= row.warehouseSku;
+    if (!edited.imageUrl) variant.imageUrl ||= row.erpImage?.value;
+    variant.referenceUnitCost = row.referenceUnitCost;
+    variant.referenceKind = row.referenceKind;
+    variant.referenceCostId = row.referenceCostId;
+    variant.referencePeriod = row.referencePeriod ?? row.latestPeriod;
     if (row.attributeConflict) warnings.push(`${row.platformSku} 的属性有不同来源，请核对。`);
   });
   const erpSuppliers = erpCatalogSuppliers(allowed);
@@ -256,20 +277,23 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
       return supplier;
     }
     const source = matches[0];
-    return { ...source, ...supplier, supplierName: supplier.supplierName || source.supplierName, sourceUrl: supplier.sourceUrl || source.sourceUrl, sourceProductId: supplier.sourceProductId || source.sourceProductId };
+    const edited = draft.fieldEdits?.suppliers?.[supplier.supplierId || supplier.id] ?? {};
+    return { ...source, ...supplier, supplierName: edited.supplierName ? supplier.supplierName : supplier.supplierName || source.supplierName, sourceUrl: edited.sourceUrl ? supplier.sourceUrl : supplier.sourceUrl || source.sourceUrl, sourceProductId: supplier.sourceProductId || source.sourceProductId };
   });
   const firstSupplier = suppliers[0] ?? {};
   const next = {
     ...draft,
-    name: catalogProductName(draft.name) || erpName,
+    name: protectedField("name") ? draft.name : catalogProductName(draft.name) || erpName,
     platformSkc: trustedSkc,
-    imageUrl: draft.imageUrl || erpImage,
-    store: draft.store || unique("storeName"),
+    imageUrl: protectedField("imageUrl") ? draft.imageUrl : draft.imageUrl || erpImage,
+    store: protectedField("store") ? draft.store : draft.store || unique("storeName"),
     variants, suppliers,
-    supplierName: draft.supplierName || firstSupplier.supplierName || "",
-    sourceUrl: draft.sourceUrl || firstSupplier.sourceUrl || "",
+    supplierName: protectedField("supplierName") ? draft.supplierName : draft.supplierName || firstSupplier.supplierName || "",
+    sourceUrl: protectedField("sourceUrl") ? draft.sourceUrl : draft.sourceUrl || firstSupplier.sourceUrl || "",
     sourceProductId: draft.sourceProductId || firstSupplier.sourceProductId || "",
     sourceUrlKind: draft.sourceUrlKind || firstSupplier.sourceUrlKind || null,
+    ...(productId || !allowed.length ? {} : { productStatus: "on_sale", catalogOrigin: "accounting" }),
+    identityConflicts,
   };
   const sources = catalogDisplaySources(allowed.flatMap(row => row.erpCatalogSources ?? []));
   const purchasesBySource = new Map();
@@ -282,5 +306,5 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     if (!purchase.platformSkus.includes(item.platformSku)) purchase.platformSkus.push(item.platformSku);
   });
   const conflicts = allowed.flatMap(row => ["platformSkc", "attribute"].filter(field => row[`${field}Conflict`]).map(field => ({ platformSku: row.platformSku, field, candidates: row[`${field}Evidence`] })));
-  return { draft: next, prefill: { source: sources.length ? "erp" : null, skuCount: allowed.length, warnings: [...new Set(warnings)], sources, purchases: [...purchasesBySource.values()], conflicts, suppliers: erpSuppliers } };
+  return { draft: next, prefill: { source: sources.length ? "erp" : null, skuCount: allowed.length, warnings: [...new Set(warnings)], sources, purchases: [...purchasesBySource.values()], conflicts, identityConflicts, titleCandidates: titles.candidates, suggestedName: titles.suggestedName, needsTitleChoice: titles.needsChoice, suppliers: erpSuppliers } };
 }

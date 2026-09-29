@@ -5,6 +5,13 @@ const variant = { platformSku: "SKU-A", attribute: "红色", purchaseUnitPrice: 
 const draft = { name: "商品 A", platformSkc: "SKC-A", store: "甲店", sourceUrl: "https://detail.1688.com/offer/1.html", variants: [variant] };
 
 describe("current selection draft", () => {
+  it("批量目标已上架也使用名称与明确 SKC—SKU 门槛", () => {
+    const statusDefinition = { id: "on_sale", requiresReadiness: false };
+    const draft = { name: "手工待补商品", productStatus: "off_sale", quoteEditIntent: { supplierIds: [] }, variants: [] };
+    expect(productSaveReadiness({ draft, statusDefinition })).toMatchObject({ valid: false, issues: ["platform_skc_required", "platform_sku_required"] });
+    expect(productSaveReadiness({ draft: { ...draft, platformSkc: "SKC-1", variants: [{ platformSku: "SKU-A" }] }, statusDefinition }).valid).toBe(true);
+  });
+
   it("uses edited supplier quotations instead of old persisted 1688 references", () => {
     const [reference] = productDraftReferences(draft, [{ canonicalPlatformSku: "SKU-A", referenceKind: "supplier_landed", referenceUnitCost: 10 }]);
     expect(reference).toMatchObject({ unitCost: 20, referenceKind: "supplier_landed", sourceLabel: "1688 参考" });
@@ -31,10 +38,12 @@ describe("current selection draft", () => {
   it("normalizes tag delimiters only when committing the raw input", () => {
     expect(normalizeProductTags("A,B，C、A\n D ")).toEqual(["A", "B", "C", "D"]);
   });
-  it("requires SKU and positive sale price for readiness, including custom statuses", () => {
+  it("requires identity for listed products while optional costs, links and sale prices remain optional", () => {
     expect(productSaveReadiness({ draft, statusDefinition: { requiresReadiness: true } }).valid).toBe(true);
     expect(productSaveReadiness({ draft: { ...draft, variants: [] }, statusDefinition: { requiresReadiness: true } }).issues).toContain("platform_sku_required");
-    expect(productSaveReadiness({ draft: { ...draft, variants: [{ ...variant, salePrice: 0 }] }, statusDefinition: { requiresReadiness: true } }).issues).toContain("variant_0_sale_price_required");
+    expect(productSaveReadiness({ draft: { name: "未售商品", platformSkc: "SKC-A", productStatus: "on_sale", variants: [{ platformSku: "SKU-A", salePrice: 0 }] } }).valid).toBe(true);
+    expect(productSaveReadiness({ draft: { name: "未售商品", productStatus: "on_sale" } }).issues).toContain("platform_skc_required");
     expect(productSaveReadiness({ draft: { name: "未完成" }, statusDefinition: { requiresReadiness: false } }).valid).toBe(true);
+    expect(productSaveReadiness({ draft: { name: "核算档案", catalogOrigin: "accounting", productStatus: "observing", variants: [] } }).issues).toContain("platform_sku_required");
   });
 });

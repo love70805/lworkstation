@@ -34,7 +34,7 @@ describe("product catalog", () => {
     });
 
     expect(validation.valid).toBe(false);
-    expect(validation.warningIssues).toContain("package_weight_missing");
+    expect(validation.warningIssues).not.toContain("package_weight_missing");
     expect(validation.blockingIssues).toContain("variant_1_platform_sku_duplicate");
   });
 
@@ -60,7 +60,23 @@ describe("product catalog", () => {
     expect(validation.blockingCount).toBe(0);
   });
 
-  it("在要求资料完整的销售状态下检查店铺、供应商、售价和参考成本", () => {
+  it("只改名称时保留旧异常报价，但显式报价仍验证采购量", () => {
+    const draft = {
+      name: "改名商品",
+      platformSkc: "SKC-1",
+      variants: [{ platformSku: "SKU-A", purchaseUnitPrice: 5, purchasePackCount: 0, unitsPerPack: 0 }],
+    };
+    expect(validateProductDraft({ ...draft, quoteEditIntent: { supplierIds: [] } })).toMatchObject({ valid: true, blockingIssues: [] });
+    for (const quoteEditIntent of [undefined, null, { supplierIds: ["primary"] }]) {
+      expect(validateProductDraft({ ...draft, quoteEditIntent }).blockingIssues).toEqual([
+        "variant_0_purchase_pack_count_invalid", "variant_0_units_per_pack_invalid",
+      ]);
+    }
+    expect(validateProductDraft({ ...draft, name: "", quoteEditIntent: { supplierIds: [] } }).blockingIssues).toContain("product_name_required");
+    expect(validateProductDraft({ ...draft, quoteEditIntent: { supplierIds: [] }, variants: [...draft.variants, { platformSku: "ＳＫＵ－Ａ" }] }).blockingIssues).toContain("variant_1_platform_sku_duplicate");
+  });
+
+  it("已上架只检查商品名称和明确的 SKC—SKU 关系", () => {
     const readiness = validateProductSalesReadiness({
       draft: {
         name: "测试商品",
@@ -73,6 +89,8 @@ describe("product catalog", () => {
     });
 
     expect(readiness).toEqual({ ready: true, issues: [] });
-    expect(validateProductSalesReadiness({ draft: { variants: [{}] }, referenceCosts: [] }).issues).toContain("store_required");
+    expect(validateProductSalesReadiness({ draft: { name: "缺项商品", platformSkc: "SKC-1", variants: [{ platformSku: "SKU-A" }] } })).toEqual({ ready: true, issues: [] });
+    expect(validateProductSalesReadiness({ draft: { variants: [{}] } }).issues).toContain("platform_sku_required");
+    expect(validateProductDraft({ name: "商品", shippingAmount: 10, variants: [{ platformSku: "SKU-A", purchaseUnitPrice: "", purchasePackCount: 0 }] }).warningIssues).not.toEqual(expect.arrayContaining(["english_title_missing", "supplier_code_missing", "package_weight_missing", "variant_0_purchase_price_missing"]));
   });
 });
