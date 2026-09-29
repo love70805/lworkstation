@@ -1,6 +1,19 @@
 import { requestInbox } from "./inboxTransport";
 
 const deliveryWorkspaces = new Map();
+const catalogDeliveryWorkspaces = new Map();
+
+export async function pollErpCatalogInbox({ workspaceId = null, limit = 20, signal } = {}) {
+  const payload = await requestInbox({ route: "/erp/v1/catalog-batches", query: { workspaceId, limit } }, { signal });
+  const records = Array.isArray(payload?.records) ? payload.records : [];
+  records.forEach(record => { if (record.deliveryId && record.workspaceId) catalogDeliveryWorkspaces.set(record.deliveryId, record.workspaceId); });
+  return records;
+}
+
+export async function acknowledgeErpCatalogInbox(deliveryId, { workspaceId = null } = {}) {
+  await requestInbox({ route: "/erp/v1/catalog-batches", method: "POST", body: { deliveryId, workspaceId: workspaceId || catalogDeliveryWorkspaces.get(deliveryId) || "", status: "acknowledged" } });
+  catalogDeliveryWorkspaces.delete(deliveryId);
+}
 
 export async function pollErpInbox({ workspaceId = null, ledgerId = null, limit = 20, signal } = {}) {
   const payload = await requestInbox({

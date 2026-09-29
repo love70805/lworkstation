@@ -1,5 +1,6 @@
 import { createLedgerGroupKey, createLedgerSkuKey, summarizeLedgerRows } from "./ledgerImport";
 import { validateSalesMapping } from "../lib/salesImport";
+import { normalizeSalesSourceCoverage } from "./selectionSalesLabels";
 
 export const canonicalStore = (value) => String(value ?? "").normalize("NFKC").trim().toUpperCase();
 
@@ -14,6 +15,8 @@ export function importSignature(value) {
 export function effectiveImportOptions(item) {
   const filters = item.filterOptions ?? {};
   return {
+    importMode: item.importMode ?? "append",
+    sourceCoverage: item.sourceCoverage ?? null,
     mapping: Object.fromEntries(Object.entries(item.mapping ?? {}).filter(([, value]) => Boolean(value))),
     filterOptions: {
       deriveAmountFromUnitPrice: Boolean(filters.deriveAmountFromUnitPrice),
@@ -31,7 +34,7 @@ function effectiveRowsSignature(rows) {
   return importSignature(rows.map((row) => ({ ...sourceSalesRow(row), store: canonicalStore(row.store) })));
 }
 
-export function prepareSalesImportItems(items) {
+export function prepareSalesImportItems(items, { period } = {}) {
   if (!Array.isArray(items) || !items.length) throw new Error("请至少选择一个台账文件。");
   const stores = new Set();
   const hashes = new Set();
@@ -40,6 +43,10 @@ export function prepareSalesImportItems(items) {
     const fail = (message) => { throw new Error(`${item.fileName || "台账文件"}：${message}`); };
     const storeName = String(item.storeName ?? "").normalize("NFKC").trim();
     const store = canonicalStore(storeName);
+    const sourceCoverage = normalizeSalesSourceCoverage(item.sourceCoverage, { period, storeName });
+    const importMode = item.importMode ?? "append";
+    if (!["append", "replace_store_month"].includes(importMode)) fail("导入方式无效。");
+    if (importMode === "replace_store_month" && sourceCoverage?.scope !== "full_month") fail("完整替换本店本月需要声明完整月台账。");
     if (!item.itemId || ids.has(item.itemId)) fail("文件标识缺失或重复，请重新选择文件。");
     if (!store) fail("请确认店铺。");
     if (stores.has(store)) fail("整批不能有两个文件属于同一店铺。");
@@ -59,8 +66,16 @@ export function prepareSalesImportItems(items) {
       return row;
     });
     stores.add(store); hashes.add(item.fileHash); ids.add(item.itemId);
-    return { ...item, storeName, rows };
+    return { ...item, storeName, sourceCoverage, importMode, rows };
   });
+}
+
+// Caller passes one ledger's current rows. Whole-store deletion is authorized
+// only by the explicit mode; a completeness declaration alone keeps group scope.
+export function getSalesImportReplacementRows(existingRows, pendingItems) {
+  const keys = new Set(pendingItems.flatMap(item => item.rows.map(row => row.groupKey)));
+  const stores = new Set(pendingItems.filter(item => item.importMode === "replace_store_month" && item.sourceCoverage?.scope === "full_month").map(item => canonicalStore(item.storeName)));
+  return existingRows.filter(row => keys.has(row.groupKey) || stores.has(canonicalStore(row.store)));
 }
 
 export function planSalesImports({ ledger, existingRows, batches, items, ledgerId }) {
@@ -82,33 +97,39 @@ export function planSalesImports({ ledger, existingRows, batches, items, ledgerI
     const duplicate = candidates.find((batch) => batch.status === "completed"
       && importSignature(effectiveImportOptions(batch)) === importSignature(effectiveImportOptions(item))
       && batch.validRowCount === item.rows.length
-      && effectiveRowsSignature(rowsByBatch.get(batch.id) ?? []) === rowSignature);
+      && effectiveRowsSignature(rowsByBatch.get(batch.id) ?? []) === rowSignature
+      && (item.importMode !== "replace_store_month" || effectiveRowsSignature(existingRows.filter(row => canonicalStore(row.store) === canonicalStore(item.storeName))) === rowSignature));
     const incomingGroups = new Map();
     for (const row of item.rows) {
       if (!incomingGroups.has(row.groupKey)) incomingGroups.set(row.groupKey, []);
       incomingGroups.get(row.groupKey).push(row);
     }
     const keys = new Set(incomingGroups.keys());
-    const overlaps = duplicate ? [] : [...keys].flatMap((groupKey) => {
+    const replaceStore = item.importMode === "replace_store_month";
+    const replacementKeys = replaceStore ? new Set([...keys, ...existingRows.filter(row => canonicalStore(row.store) === canonicalStore(item.storeName)).map(row => row.groupKey)]) : keys;
+    const overlaps = duplicate ? [] : [...replacementKeys].flatMap((groupKey) => {
       const oldRows = rowsByGroup.get(groupKey) ?? [];
       if (!oldRows.length) return [];
-      const newRows = incomingGroups.get(groupKey);
-      return [{ groupKey, store: item.storeName, platformSkc: newRows[0].platformSkc, supplierNumber: newRows[0].supplierNumber,
+      const newRows = incomingGroups.get(groupKey) ?? [];
+      const identity = newRows[0] ?? oldRows[0];
+      return [{ groupKey, store: item.storeName, platformSkc: identity.platformSkc, supplierNumber: identity.supplierNumber, removed: !newRows.length,
         before: { ...summarizeLedgerRows(oldRows), rowCount: oldRows.length },
         after: { ...summarizeLedgerRows(newRows), rowCount: newRows.length } }];
     });
     return { itemId: item.itemId, fileName: item.fileName, storeName: item.storeName,
       status: duplicate ? "skipped_duplicate" : "ready", batchId: duplicate?.id ?? null,
       validRowCount: item.rows.length, ignoredRowCount: item.summary.ignoredCount ?? 0, errorCount: 0,
-      summary: summarizeLedgerRows(item.rows), overlaps,
-      addedGroupCount: duplicate ? 0 : keys.size - overlaps.length, replacedGroupCount: overlaps.length };
+      summary: summarizeLedgerRows(item.rows), overlaps, replacementScope: replaceStore ? "store_month" : "groups",
+      sourceCoverage: item.sourceCoverage ?? null, importMode: item.importMode ?? "append",
+      removedGroupCount: overlaps.filter(group => group.removed).length,
+      addedGroupCount: duplicate ? 0 : keys.size - overlaps.filter(group => !group.removed).length, replacedGroupCount: overlaps.filter(group => !group.removed).length };
   });
   const pending = items.filter((item, index) => results[index].status !== "skipped_duplicate");
-  const keys = new Set(pending.flatMap((item) => item.rows.map((row) => row.groupKey)));
+  const replacementRows = new Set(getSalesImportReplacementRows(existingRows, pending));
   return { ledgerId, items: results,
     inputSignature: importSignature(items),
     targetSignature: importSignature({ ledger: ledger ?? null, existingRows, batches }),
     summary: summarizeLedgerRows(pending.flatMap((item) => item.rows)),
-    finalSummary: summarizeLedgerRows([...existingRows.filter((row) => !keys.has(row.groupKey)), ...pending.flatMap((item) => item.rows)]),
+    finalSummary: summarizeLedgerRows([...existingRows.filter(row => !replacementRows.has(row)), ...pending.flatMap((item) => item.rows)]),
     requiresOverwrite: results.some((item) => item.overlaps.length > 0) };
 }

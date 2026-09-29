@@ -10,11 +10,17 @@ import { ToastProvider } from "../components/UI";
 import { db, saveProductCatalogRecord, createManualCaptureRecord, updateCaptureDraft } from "../data/database";
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
-const delayedWrite = vi.hoisted(() => ({ wait: null }));
+const delayedWrite = vi.hoisted(() => ({ wait: null, input: null }));
+const editorSnapshotOverride = vi.hoisted(() => ({ value: null }));
+const catalogRequests = vi.hoisted(() => ({ input: null, registered: false }));
+vi.mock("../data/repositories/erpCatalogRepository", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, requestErpProductCatalog: async input => { catalogRequests.input = input; return { request: { id: "SYNTHETIC-CATALOG-REQUEST" }, registered: catalogRequests.registered, status: "waiting" }; } };
+});
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main>{children}</main> }));
 vi.mock("../data/database", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, saveProductCatalogRecord: async (input) => { if (delayedWrite.wait) await delayedWrite.wait; return actual.saveProductCatalogRecord(input); } };
+  return { ...actual, getProductEditorSnapshot: async input => editorSnapshotOverride.value ?? actual.getProductEditorSnapshot(input), saveProductCatalogRecord: async (input) => { delayedWrite.input = input; if (delayedWrite.wait) await delayedWrite.wait; return actual.saveProductCatalogRecord(input); } };
 });
 
 let container, root, router;
@@ -46,7 +52,7 @@ const mount = async (url, { library = false, initialEntries, initialIndex } = {}
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  delayedWrite.wait = null;
+  delayedWrite.wait = null; delayedWrite.input = null; catalogRequests.input = null; catalogRequests.registered = false; editorSnapshotOverride.value = null;
   await db.delete(); await db.open();
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -57,6 +63,81 @@ afterEach(async () => {
 });
 
 describe("product editing workflow", () => {
+  it("offers newly returned SKUs without overwriting an unsaved manual title", async () => {
+    const id = await db.erpCostRows.add(erpProductCatalogFixture());
+    await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
+    await change(input("商品名称"), "本次未保存标题");
+    const row = await db.erpCostRows.get(id);
+    await act(async () => { await db.erpCostRows.update(id, { catalogMappings: [...row.catalogMappings, { ...row.catalogMappings[0], platformSku: "SKU-GREEN", attribute: "绿色" }] }); });
+    await waitFor(() => button("带入新增资料"));
+    expect(input("商品名称").value).toBe("本次未保存标题");
+    expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
+    await click("带入新增资料");
+    expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(3);
+    expect(input("商品名称").value).toBe("本次未保存标题");
+    await click("保存商品"); await waitFor(async () => await db.platformSkus.count() === 3);
+    expect((await db.products.toArray())[0].name).toBe("本次未保存标题");
+  });
+
+  it("requires a title candidate and explicit identity-branch exclusion, then saves the clear SKU in one step", async () => {
+    const conflict = { platformSku: "CONFLICT-SKU", reason: "relationship_conflict" };
+    editorSnapshotOverride.value = { mode: "new", product: null, capture: null, draft: { name: "", platformSkc: "SAMPLE-SKC", productStatus: "on_sale", variants: [{ platformSku: "CLEAR-SKU" }], suppliers: [], identityConflicts: [conflict] }, prefill: { source: "erp", skuCount: 1, warnings: [], sources: [], purchases: [], titleCandidates: [{ name: "收腰神器", rawNames: ["1个蓝色收腰神器-HHX sh680"] }, { name: "备用毛巾扣", rawNames: ["备用毛巾扣"] }], needsTitleChoice: true, identityConflicts: [conflict] } };
+    await mount("/products/edit?skc=SAMPLE-SKC");
+    expect(input("商品名称").value).toBe(""); expect(button("保存商品").disabled).toBe(true);
+    await click("收腰神器"); expect(input("商品名称").value).toBe("收腰神器");
+    expect(button("保存商品").disabled).toBe(true);
+    await click("排除此冲突分支"); expect(button("保存商品").disabled).toBe(false);
+    await click("保存商品"); await waitFor(async () => await db.products.count() === 1);
+    expect((await db.platformSkus.toArray()).map(row => row.platformSku)).toEqual(["CLEAR-SKU"]);
+    expect(delayedWrite.input.draft.excludedIdentitySkus).toEqual(["CONFLICT-SKU"]);
+    expect(delayedWrite.input.draft.fieldEdits.name).toBe(true);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("requests optional ERP catalog data for a saved unsold product using an explicit month and keeps registration retryable", async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { name: "无销售档案", platformSkc: "UNSOLD-SKC", variants: [{ platformSku: "UNSOLD-SKU" }] } });
+    await mount(`/products/edit?product=${product.id}`);
+    expect(input("资料采购截止月份").value).toBe("");
+    expect(button("补充 ERP 资料").disabled).toBe(true);
+    await change(input("资料采购截止月份"), "2026-08"); await click("补充 ERP 资料");
+    await waitFor(() => container.textContent.includes("尚未送达 ERP"));
+    expect(catalogRequests.input).toMatchObject({ productId: product.id, platformSkcs: ["UNSOLD-SKC"], period: "2026-08" });
+    expect(button("重试补充资料").disabled).toBe(false);
+    catalogRequests.registered = true; await click("重试补充资料");
+    await waitFor(() => container.textContent.includes("资料请求已登记"));
+    expect(await db.salesRows.count()).toBe(0);
+  });
+
+  it("preserves hidden historical fees and quotations during a metadata-only edit", async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { ...draft, imageUrl: "https://images.example.invalid/old.png", shippingAmount: 8, handlingFee: 2, packageWeight: 0.8, englishTitle: "Legacy", supplierCode: "OLD", sourceProductId: "123" } });
+    const offers = await db.supplierOffers.toArray();
+    await mount(`/products/edit?product=${product.id}`);
+    for (const label of ["英文标题", "供应商编号", "1688 商品 ID", "整单运费（CNY）", "单份操作费（CNY）", "包装重量（kg）", "发布平台"]) expect(input(label)).toBeNull();
+    expect(container.querySelector(".validation-panel")).toBeNull();
+    expect(container.textContent).not.toContain("采购总份数");
+    await change(input("商品名称"), "人工标题"); await change(input("商品图片链接"), "");
+    await click("保存修改");
+    await waitFor(async () => (await db.products.get(product.id)).name === "人工标题");
+    expect(await db.supplierOffers.toArray()).toEqual(offers);
+    expect(delayedWrite.input.draft.fieldEdits).toMatchObject({ name: true, imageUrl: true });
+    expect(delayedWrite.input.draft.quoteEditIntent?.supplierIds ?? []).toEqual([]);
+    expect(delayedWrite.input.draft).toMatchObject({ shippingAmount: 8, handlingFee: 2, packageWeight: 0.8, englishTitle: "Legacy" });
+  });
+
+  it("asks for one status choice on conflicting historical statuses and retains their raw values", async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    await db.products.update(product.id, { productStatus: null, salesStatus: "on_sale", publicationStatus: "off_shelf" });
+    await mount(`/products/edit?product=${product.id}`);
+    expect(input("商品状态").value).toBe("");
+    expect(button("保存修改").disabled).toBe(true);
+    expect((await db.products.get(product.id)).publicationStatus).toBe("off_shelf");
+    await change(input("商品状态"), "off_sale");
+    expect(button("保存修改").disabled).toBe(false);
+    await click("保存修改");
+    await waitFor(() => delayedWrite.input?.draft.productStatus === "off_sale");
+    expect(delayedWrite.input.draft.statusEdited).toBe(true);
+  });
+
   it("edits a sparse secondary supplier quote by SKU rather than array position", async () => {
     const { product } = await saveProductCatalogRecord({ draft: {
       name: "两仓库商品", platformSkc: "SKC-SPARSE", variants: [{ platformSku: "SKU-A", attribute: "A" }, { platformSku: "SKU-B", attribute: "B" }],
@@ -95,8 +176,10 @@ describe("product editing workflow", () => {
     expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
     expect(container.textContent).toContain("ERP 档案资料");
     expect(input("第 1 个采购价").value).toBe("");
-    await click("确认进入工作台");
-    await click("确认写入");
+    expect(input("商品状态").value).toBe("on_sale");
+    expect(input("英文标题")).toBeNull(); expect(input("供应商编号")).toBeNull(); expect(input("发布状态")).toBeNull();
+    expect(button("确认进入工作台")).toBeUndefined();
+    await click("保存商品");
     await waitFor(async () => await db.products.count() === 1);
     expect(await db.platformSkus.count()).toBe(2);
     expect(await db.supplierOffers.count()).toBe(0);
@@ -129,21 +212,23 @@ describe("product editing workflow", () => {
   it("protects back/refresh, preserves failed save, and allows continuing or discarding", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     await mount(`/products/edit?product=${product.id}`);
-    await change(input("选品状态"), "on_sale");
+    await change(input("商品状态"), "on_sale");
+    expect(button("保存修改").disabled).toBe(false);
+    await change(input("商品名称"), "");
     expect(button("保存修改").disabled).toBe(true);
     const beforeUnload = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(beforeUnload); expect(beforeUnload.defaultPrevented).toBe(true);
     await act(async () => { await router.navigate(-1); });
     expect(container.querySelector('[role="dialog"]').textContent).toContain("商品有未保存修改");
     await click("保存后离开");
-    await waitFor(() => container.textContent.includes("保存失败：商品 A：未分配店铺"));
+    await waitFor(() => container.textContent.includes("请先处理商品名称、身份或状态选择"));
     expect(router.state.location.pathname).toBe("/products/edit");
-    await click("继续编辑"); expect(input("选品状态").value).toBe("on_sale");
+    await click("继续编辑"); expect(input("商品状态").value).toBe("on_sale");
     await click("商品管理"); await click("放弃修改");
     expect(router.state.location.pathname).toBe("/products");
     await act(async () => { await router.navigate(-1); });
-    await waitFor(() => input("选品状态"));
-    expect(input("选品状态").value).toBe("pending_review");
+    await waitFor(() => input("商品状态"));
+    expect(input("商品状态").value).toBe("pending_review");
     await act(async () => { await router.navigate(1); });
     expect(router.state.location.pathname).toBe("/products");
   });

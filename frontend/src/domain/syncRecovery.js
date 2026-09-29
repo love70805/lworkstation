@@ -244,7 +244,9 @@ export function replaySyncRecoveryPayload(payload) {
         const groupKeys = new Set(incomingRows.map((row) => String(row.groupKey ?? "")).filter(Boolean));
         state.salesRows = replaceRows(
           state.salesRows,
-          (row) => row.ledgerId === batch.ledgerId && groupKeys.has(String(row.groupKey ?? "")),
+          (row) => row.ledgerId === batch.ledgerId && (groupKeys.has(String(row.groupKey ?? ""))
+            || batch.importMode === "replace_store_month" && batch.sourceCoverage?.scope === "full_month"
+              && String(row.store ?? "").normalize("NFKC").trim().toUpperCase() === String(batch.store ?? "").normalize("NFKC").trim().toUpperCase()),
           incomingRows,
         );
         if (snapshot.ledger) putRecord(state.ledgers, snapshot.ledger, "月度账本");

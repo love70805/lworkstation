@@ -1,3 +1,4 @@
+import { canonicalProductStatusId } from "./selectionStatuses";
 import { canonicalPlatformSku } from "./identifiers";
 import { calculateSupplierLandedUnitCost, validateProductDraft, validateProductSalesReadiness } from "./productCatalog";
 
@@ -46,20 +47,20 @@ export function productDraftReferences(draft = {}, historicalRows = []) {
     return {
       unitCost: authoritative?.referenceUnitCost ?? supplier?.unitCost ?? null,
       referenceKind: authoritative?.referenceKind ?? (supplier ? "supplier_landed" : null),
-      sourceLabel: authoritative ? ({ erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "定稿历史" }[authoritative.referenceKind] ?? "历史参考") : "1688 参考",
+      sourceLabel: authoritative ? ({ erp_catalog_reference: "ERP 采购参考", erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "定稿历史" }[authoritative.referenceKind] ?? "历史参考") : "1688 参考",
       historical: authoritative,
       supplier,
     };
   });
 }
 
-export function productSaveReadiness({ draft, statusDefinition, historicalRows = [] }) {
+export function productSaveReadiness({ draft = {}, statusDefinition, historicalRows = [] }) {
   const validation = validateProductDraft(draft);
   const references = productDraftReferences(draft, historicalRows);
-  const readiness = statusDefinition?.requiresReadiness
+  const readiness = statusDefinition?.requiresReadiness || draft.catalogOrigin === "accounting" || canonicalProductStatusId(statusDefinition?.id ?? draft.productStatus ?? draft.salesStatus) === "on_sale"
     ? validateProductSalesReadiness({ draft, referenceCosts: references.map((reference) => reference.unitCost) })
     : { ready: true, issues: [] };
-  return { valid: validation.valid && readiness.ready, issues: [...validation.blockingIssues, ...readiness.issues], validation, readiness, references };
+  return { valid: validation.valid && readiness.ready, issues: [...new Set([...validation.blockingIssues, ...readiness.issues])], validation, readiness, references };
 }
 
 export function productReadinessIssueLabel(issue) {

@@ -14,6 +14,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.3` 选品建档与销量标签 | Windows 候选验收通过，待最终 PR/main CI 及公开发布；1107 测试、16 组桌面验证、隐藏 EXE smoke、476 文件/429 输入一致；未安装 | `candidates/0.3.3/`；`archive/release-0.3.3/`；[验收与哈希](../docs/RELEASE_0.3.3.md) |
 | `0.3.2` 共享1688单号 | 已公开稳定 GitHub Latest；PR #125/main CI、1015 测试、隐藏 EXE smoke、461 文件/414 输入哈希、四资产匿名回读和真实更新通道及持久复制通过；未安装 | 主仓库 `candidates/0.3.2/`、其中 `public/` 匿名下载原件及 `archive/release-0.3.2/`；[验收与升级操作](../docs/RELEASE_0.3.2.md) |
 | `0.3.1` 导入简化 | 历史公开稳定版，原标签及资产保留；PR #122/#123及main CI通过，1004测试、低级别审计、隐藏EXE smoke、461文件/414输入比对、四资产匿名完整回读与真实更新通道通过；未安装 | 主仓库 `candidates/0.3.1/`、`candidates/0.3.1-public/`；`archive/release-0.3.1/`；[发布验收及哈希](../docs/RELEASE_0.3.1.md) |
 | `0.3.0` 正式版 | 历史公开稳定版，原标签及资产保留；PR #119/#120及main CI通过，984测试、隐藏EXE smoke、包体/资源哈希和四资产匿名回读通过；未安装 | 主仓库 `releases/candidates/0.3.0-public/`；原候选 `releases/candidates/0.3.0/`；[验收及哈希](../docs/RELEASE_0.3.0.md) |

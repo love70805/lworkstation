@@ -54,7 +54,7 @@ async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion 
   if (cache) window.localStorage.setItem(cacheKey, JSON.stringify(cache));
   if (legacyCache) window.localStorage.setItem(`erpAssistantV8_latest_cost_result_v${legacyVersion}`, JSON.stringify(legacyCache));
   try {
-    for (const file of ["result-policy.js", "request-context.js", "content.js"]) {
+    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "content.js"]) {
       let source = await readFile(path.join(extensionRoot, "src", file), "utf8");
       if (file === "content.js") source = source.replace("function handleDeliveryStatus(detail = {}) {", "window.__csvCell = csvCell; window.__deliveryStatus = handleDeliveryStatus; function handleDeliveryStatus(detail = {}) {");
       window.eval(source);
@@ -206,7 +206,8 @@ async function verifyCalculatedCsv(extensionRoot) {
       const data = {
         "/purchase/purchase/v1/purchase-order-page": [{ purchaseOrderId: "PO-CSV", purchaseOrderNo: "=1+1", supplierName: "+供应商" }],
         "/purchase/purchase/v1/purchase-order-details": [originalDetail],
-        "/purchase/product/v1/product-info-sku": [{ platformSku: "SKU-CSV", platformSkc: "SKC-CSV" }],
+        "/purchase/product/v1/product-info-sku": [{ associatedProductId: new URL(url).searchParams.get("productId"), platformSku: "SKU-CSV", platformSkc: "SKC-CSV" }],
+        "/purchase/product/v1/product-page": [],
       }[endpoint];
       assert.ok(data, `only fixture ERP endpoints are allowed: ${endpoint}`);
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
@@ -222,9 +223,9 @@ async function verifyCalculatedCsv(extensionRoot) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 5, "the catalog lookup and full warehouse purchase-list check add two read-only requests");
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.23");
+    assert.equal(delivery.meta.extensionVersion, "8.0.24");
     assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
@@ -284,9 +285,11 @@ async function verifyChronologicalPreview(extensionRoot) {
           const fixture = fixtures.find(({ order }) => order.purchaseOrderId === url.searchParams.get("purchaseOrderId"));
           assert.ok(fixture, "only synthetic purchase orders may be fetched");
           data = [fixture.detail];
+        } else if (url.pathname === "/purchase/product/v1/product-page") {
+          data = [];
         } else {
           assert.equal(url.pathname, "/purchase/product/v1/product-info-sku");
-          data = [{ platformSku: "SKU-CHRONO", platformSkc: "SKC-CHRONO" }];
+          data = [{ associatedProductId: url.searchParams.get("productId"), platformSku: "SKU-CHRONO", platformSkc: "SKC-CHRONO" }];
         }
         return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
       },
@@ -364,7 +367,7 @@ async function verifyLedgerPreview(extensionRoot) {
     const extension = await loadExtension(extensionRoot, { ledgerPeriod, fetchImpl: async rawUrl => {
       const url = new URL(rawUrl);
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-MONTH', purchaseOrderNo: 'PO-MONTH' }]
-        : url.pathname.endsWith('purchase-order-details') ? records : [{ platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }];
+        : url.pathname.endsWith('purchase-order-details') ? records : url.pathname.endsWith('product-page') ? [] : [{ associatedProductId: url.searchParams.get('productId'), platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }];
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     } });
     try {

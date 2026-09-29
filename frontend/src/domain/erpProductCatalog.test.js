@@ -3,6 +3,16 @@ import { buildErpProductCatalogIndex, erpCatalogField, erpProductCatalogRowsFrom
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 describe("ERP catalog evidence projection", () => {
+  it("retains all directory supplier names without pairing another supplier's purchase link", () => {
+    const fixture = erpProductCatalogFixture();
+    fixture.supplierNames = ["供应商甲", "档案供应商乙", "档案供应商乙"];
+    fixture.purchaseRecords = [fixture.purchaseRecords[0]];
+    const catalog = buildErpProductCatalogIndex([fixture]).get("SKU-RED");
+    expect(catalog.suppliers.map(item => [item.supplierName, item.sourceUrl])).toEqual([
+      ["供应商甲", "https://detail.1688.com/offer/730242606884.html"], ["档案供应商乙", ""],
+    ]);
+    expect(catalog.purchases).toHaveLength(0);
+  });
   it("retains verified auxiliary warehouse metadata without financial fields", () => {
     const envelope = {
       workspaceId: "workspace-default", ledgerId: "L-1", query: { platformSkcs: [{ platformSkc: "SKC-1" }] },

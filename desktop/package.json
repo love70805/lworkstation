@@ -1,6 +1,6 @@
 {
   "name": "shopeers-desktop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
   "author": "Lworkstation Team",
@@ -79,6 +79,10 @@
       {
         "from": "../tools/erp-inbox-server.mjs",
         "to": "runtime/erp-inbox-server.mjs"
+      },
+      {
+        "from": "../tools/erp-inbox-server-catalog-contract.mjs",
+        "to": "runtime/erp-inbox-server-catalog-contract.mjs"
       }
     ],
     "publish": [

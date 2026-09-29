@@ -1,27 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { AlertCircle, CheckCircle2, ChevronRight, ExternalLink, Image, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronRight, ExternalLink, Image, Pencil, Plus, Trash2 } from "lucide-react";
 import AppShell from "../components/AppShell";
+import SelectionSalesTag from "../components/SelectionSalesTag";
 import ProductEditorLeaveGuard from "../components/ProductEditorLeaveGuard";
 import { productLibraryReturnPath } from "../components/productLibraryViewState";
-import { Badge, Button, Modal, Panel, ProgressBar, useToast } from "../components/UI";
+import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
 import { getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
-import { validateProductDraft, validateProductSalesReadiness } from "../domain/productCatalog";
-import { normalizeProductTags, productDraftReferences, productSalePrice, productReadinessIssueLabel } from "../domain/productSelectionDraft";
-import { PRODUCT_PUBLICATION_STATUSES } from "../domain/productPublication";
+import { normalizeProductTags, productDraftReferences, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
+import { requestErpProductCatalog } from "../data/repositories/erpCatalogRepository";
+import { ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
-import { selectionStatusById } from "../domain/selectionStatuses";
-
-const issueLabels = {
-  product_name_required: "缺少商品名称",
-  platform_skc_missing: "尚未填写平台 SKC",
-  platform_sku_missing: "尚未添加平台 SKU",
-  package_weight_missing: "存在运费但尚未填写包装重量",
-  english_title_missing: "尚未填写英文标题",
-  supplier_code_missing: "尚未填写供应商编号",
-  source_url_missing: "尚未填写 1688 来源链接",
-};
+import { normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
+import { canonicalPlatformSku } from "../domain/identifiers";
 
 function createVariant() {
   return {
@@ -111,26 +103,6 @@ const visibilityOptions = [
   ["workspace", "工作区共享"],
 ];
 
-function formatIssue(issue) {
-  if (issueLabels[issue]) return issueLabels[issue];
-  const match = /^variant_(\d+)_(.+)$/.exec(issue);
-  if (!match) return issue;
-  const index = Number(match[1]) + 1;
-  const detail = {
-    platform_sku_required: "缺少平台 SKU",
-    platform_sku_duplicate: "平台 SKU 与其他规格重复",
-    purchase_price_missing: "缺少 1688 采购价",
-    purchase_pack_count_invalid: "采购份数必须大于 0",
-    units_per_pack_invalid: "每份单品数必须大于 0",
-  }[match[2]] ?? match[2];
-  return `第 ${index} 个规格：${detail}`;
-}
-
-function shortReferenceDate(value) {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) : null;
-}
-
 function modeLabel(snapshot) {
   if (snapshot?.mode === "capture") return "待确认采集";
   if (snapshot?.mode === "product") return "正式商品";
@@ -177,36 +149,51 @@ function ProductEditor() {
   const [manualCostAmount, setManualCostAmount] = useState("");
   const [manualCostNote, setManualCostNote] = useState("");
   const [savingManualCost, setSavingManualCost] = useState(false);
+  const [catalogRequestPeriod, setCatalogRequestPeriod] = useState("");
+  const [requestingCatalog, setRequestingCatalog] = useState(false);
+  const [catalogRequestMessage, setCatalogRequestMessage] = useState("");
+  const [catalogRequestFailed, setCatalogRequestFailed] = useState(false);
+  const [saveFieldErrors, setSaveFieldErrors] = useState({});
 
   useEffect(() => {
     if (!snapshot) return;
     const key = `${snapshot.mode}:${snapshot.capture?.id ?? snapshot.product?.id ?? `${referenceSkc}:${referenceSku}:${referenceName}`}`;
-    if (loadedKeyRef.current === key) return;
+    const sameRecord = loadedKeyRef.current === key;
+    if (sameRecord && currentDraftRef.current?.fingerprint !== savedFingerprint) return;
     loadedKeyRef.current = key;
     const nextDraft = {
       ...snapshot.draft,
       variants: Array.isArray(snapshot.draft.variants) ? snapshot.draft.variants : [],
       suppliers: Array.isArray(snapshot.draft.suppliers) ? snapshot.draft.suppliers : [],
       tags: Array.isArray(snapshot.draft.tags) ? snapshot.draft.tags : [],
-      salesStatus: snapshot.draft.salesStatus ?? (snapshot.product?.status === "active" ? "on_sale" : "pending_review"),
+      productStatus: snapshot.draft.legacyStatusConflict ? undefined : snapshot.draft.productStatus ?? (resolveProductStatus(snapshot.draft).legacyConflict ? undefined : resolveProductStatus(snapshot.draft).statusId),
     };
     const nextTags = nextDraft.tags.join(", ");
+    if (sameRecord && JSON.stringify({ draft: nextDraft, tagsText: nextTags }) === currentDraftRef.current?.fingerprint) return;
     setDraft(nextDraft);
     setTagsText(nextTags);
     setSavedFingerprint(JSON.stringify({ draft: nextDraft, tagsText: nextTags }));
     setPersistedProduct(snapshot.product ?? null);
     setSaved(false);
+    const sourcePeriod = snapshot.prefill?.referencePeriod ?? snapshot.draft.referencePeriod ?? snapshot.draft.variants?.map(variant => variant.referencePeriod).filter(Boolean).sort().at(-1) ?? "";
+    setCatalogRequestPeriod(current => sameRecord && current ? current : sourcePeriod);
   }, [snapshot]);
 
-  const validation = useMemo(() => validateProductDraft(draft ?? {}), [draft]);
-  const totalPurchasePacks = useMemo(() => (draft?.variants ?? []).reduce((sum, variant) => sum + Number(variant.purchasePackCount ?? 0), 0), [draft?.variants]);
   const historicalRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows(referenceSnapshot) : [], [referenceSnapshot]);
   const draftReferences = useMemo(() => productDraftReferences(draft ?? {}, historicalRows), [draft, historicalRows]);
-  const referenceCosts = useMemo(() => draftReferences.map((reference) => reference.unitCost), [draftReferences]);
-  const selectedStatusDefinition = useMemo(() => selectionStatusById(salesStatusDefinitions, draft?.salesStatus), [draft?.salesStatus, salesStatusDefinitions]);
-  const salesReadiness = useMemo(() => validateProductSalesReadiness({ draft: draft ?? {}, referenceCosts }), [draft, referenceCosts]);
-  const statusRequiresReadiness = Boolean(selectedStatusDefinition?.requiresReadiness);
-  const statusTransitionReady = !statusRequiresReadiness || salesReadiness.ready;
+  const referenceCosts = useMemo(() => draftReferences.map(reference => reference.unitCost), [draftReferences]);
+  const userStatus = useMemo(() => resolveProductStatus(draft ?? {}, salesStatusDefinitions), [draft, salesStatusDefinitions]);
+  const selectedStatusDefinition = useMemo(() => selectionStatusById(salesStatusDefinitions, userStatus.statusId), [userStatus.statusId, salesStatusDefinitions]);
+  const statusOptions = useMemo(() => {
+    const definitions = normalizeSelectionStatusDefinitions(salesStatusDefinitions);
+    if (!definitions.some(status => status.id === userStatus.statusId)) definitions.push(selectedStatusDefinition);
+    return definitions.filter(status => !status.archivedAt || status.id === userStatus.statusId);
+  }, [salesStatusDefinitions, userStatus.statusId, selectedStatusDefinition]);
+  const saveReadiness = useMemo(() => productSaveReadiness({ draft: { ...(draft ?? {}), ...(snapshot?.prefill?.source === "erp" ? { catalogOrigin: "accounting" } : {}) }, statusDefinition: selectedStatusDefinition, historicalRows }), [draft, selectedStatusDefinition, historicalRows]);
+  const validation = saveReadiness.validation;
+  const unresolvedConflicts = (snapshot?.prefill?.identityConflicts ?? []).filter(conflict => !(draft?.excludedIdentitySkus ?? []).some(sku => canonicalPlatformSku(sku) === canonicalPlatformSku(conflict.platformSku)));
+  const statusChoiceRequired = Boolean(draft?.legacyStatusConflict || userStatus.legacyConflict) && !draft?.statusEdited;
+  const canSave = saveReadiness.valid && !statusChoiceRequired && !unresolvedConflicts.length;
 
   if (snapshot === undefined) {
     return <AppShell pageClass="editor-page"><Panel className="route-loader">正在读取商品资料...</Panel></AppShell>;
@@ -224,21 +211,28 @@ function ProductEditor() {
   const updateDraft = (field, value) => {
     setSaved(false);
     setDraft((current) => {
-      const next = { ...current, [field]: value };
+      const next = { ...current, [field]: value, fieldEdits: { ...current.fieldEdits, [field]: true } };
+      if (field === "productStatus") next.statusEdited = true;
       const primarySupplierFields = new Set(["supplierCode", "supplierName", "sourceProductId", "sourceUrl", "shippingAmount", "handlingFee"]);
       if (primarySupplierFields.has(field) && current.suppliers?.length) {
         next.suppliers = current.suppliers.map((supplier, index) => index === 0 ? { ...supplier, [field]: value } : supplier);
+        const supplierId = current.suppliers[0].id ?? "primary";
+        next.fieldEdits.suppliers = { ...current.fieldEdits?.suppliers, [supplierId]: { ...current.fieldEdits?.suppliers?.[supplierId], [field]: true } };
       }
       return next;
     });
   };
 
   const updateVariant = (index, field, value) => {
-    setSaved(false);
+    setSaved(false); setSaveFieldErrors({});
     setDraft((current) => {
       const previousVariant = current.variants[index];
       const variants = current.variants.map((variant, rowIndex) => rowIndex === index ? { ...variant, [field]: value } : variant);
-      const next = { ...current, variants };
+      const skuKey = canonicalPlatformSku(previousVariant?.platformSku || value);
+      const next = { ...current, variants, fieldEdits: { ...current.fieldEdits, variants: { ...current.fieldEdits?.variants, [skuKey]: { ...current.fieldEdits?.variants?.[skuKey], [field]: true } } } };
+      if (["purchaseUnitPrice", "purchasePackCount", "unitsPerPack"].includes(field)) {
+        next.quoteEditIntent = { supplierIds: [...new Set([...(current.quoteEditIntent?.supplierIds ?? []), current.suppliers?.[0]?.id ?? "primary"])] };
+      }
       if (field === "platformSku") {
         next.suppliers = syncSupplierVariantRenamed(current.suppliers, previousVariant?.platformSku, value, index);
       } else if (current.suppliers?.length && current.suppliers[0]?.variants?.length) {
@@ -281,6 +275,7 @@ function ProductEditor() {
     setDraft((current) => ({
       ...current,
       suppliers: current.suppliers.map((supplier, index) => index === supplierIndex ? { ...supplier, [field]: value } : supplier),
+      fieldEdits: { ...current.fieldEdits, suppliers: { ...current.fieldEdits?.suppliers, [current.suppliers[supplierIndex].id ?? `supplier-${supplierIndex}`]: { ...current.fieldEdits?.suppliers?.[current.suppliers[supplierIndex].id ?? `supplier-${supplierIndex}`], [field]: true } } },
     }));
   };
 
@@ -288,6 +283,7 @@ function ProductEditor() {
     setSaved(false);
     setDraft((current) => ({
       ...current,
+      quoteEditIntent: { supplierIds: [...new Set([...(current.quoteEditIntent?.supplierIds ?? []), current.suppliers[supplierIndex].id ?? (supplierIndex === 0 ? "primary" : `supplier-${supplierIndex}`)])] },
       suppliers: current.suppliers.map((supplier, index) => {
         if (index !== supplierIndex) return supplier;
         const key = String(platformSku).trim().toUpperCase();
@@ -339,8 +335,18 @@ function ProductEditor() {
     window.setTimeout(() => { allowNavigationRef.current = false; }, 0);
   };
   const isFormalProduct = (persistedProduct ?? snapshot.product)?.status === "active";
+  const locateSaveError = error => {
+    const variantIndex = draft.variants.findIndex(variant => variant.platformSku && (error.message.includes(variant.platformSku) || error.message.toUpperCase().includes(canonicalPlatformSku(variant.platformSku))));
+    if (variantIndex < 0 || !/SKU|SKC|身份|重复/i.test(error.message)) return;
+    const sku = canonicalPlatformSku(draft.variants[variantIndex].platformSku);
+    setSaveFieldErrors({ [sku]: error.message });
+    window.setTimeout(() => document.getElementById(`variant-${variantIndex}-sku`)?.focus(), 0);
+  };
   const saveDraft = async ({ stay = false } = {}) => {
     if (saving) return false;
+    if (!canSave && (snapshot.prefill?.source === "erp" || isFormalProduct)) {
+      notify("请先处理商品名称、身份或状态选择。", "error"); return false;
+    }
     const submitted = currentDraftRef.current;
     const submittedDraft = { ...submitted.draft, tags: normalizeProductTags(submitted.tagsText) };
     setSaving(true);
@@ -361,6 +367,7 @@ function ProductEditor() {
       setSaved(true);
       return currentDraftRef.current.fingerprint === submitted.fingerprint;
     } catch (error) {
+      locateSaveError(error);
       notify(`保存失败：${error.message}`, "error");
       return false;
     } finally {
@@ -387,144 +394,138 @@ function ProductEditor() {
       if (currentDraftRef.current.fingerprint === submitted.fingerprint) navigateSaved(returnTo);
       else notify("已提交的内容已保存；保存期间的新修改仍保留在编辑器中。", "info");
     } catch (error) {
-      notify(`确认入库失败：${error.message}`, "error");
+      locateSaveError(error);
+      notify(`保存商品失败：${error.message}`, "error");
     } finally {
       setSaving(false);
     }
   };
 
   const breadcrumbTarget = returnTo;
-  const referenceCostCount = referenceCosts.filter((value) => Number.isFinite(value) && value > 0).length;
+  const referenceCostCount = referenceCosts.filter(value => value != null && Number.isFinite(Number(value)) && Number(value) >= 0).length;
+  const isAccountingDraft = snapshot.mode === "new" && (snapshot.prefill?.source === "erp" || Boolean(referenceSkc || referenceSku));
+  const issueText = issue => saveReadiness.issues.includes(issue) ? productReadinessIssueLabel(issue) : null;
+  const showFieldIssue = (id, issue) => issueText(issue) ? <small id={id} className="field-error" role="status">{issueText(issue)}</small> : null;
+  const excludeConflict = conflict => {
+    setDraft(current => ({ ...current, excludedIdentitySkus: [...new Set([...(current.excludedIdentitySkus ?? []), conflict.platformSku])], variants: current.variants.filter(variant => canonicalPlatformSku(variant.platformSku) !== canonicalPlatformSku(conflict.platformSku)) }));
+  };
+  const supplierRows = draft.suppliers.length ? draft.suppliers : [{ id: "primary", supplierName: draft.supplierName, sourceUrl: draft.sourceUrl, variants: draft.variants }];
+  const prefill = snapshot.prefill;
+  const pendingNewVariants = (snapshot.draft.variants ?? []).filter(candidate => candidate.platformSku && !draft.variants.some(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(candidate.platformSku)) && !(draft.excludedIdentitySkus ?? []).some(sku => canonicalPlatformSku(sku) === canonicalPlatformSku(candidate.platformSku)));
+  const addNewCatalogData = () => {
+    setDraft(current => {
+      const identity = supplier => supplier.supplierId || supplier.id;
+      const suppliers = current.suppliers.map(supplier => {
+        const incoming = (snapshot.draft.suppliers ?? []).find(item => identity(item) === identity(supplier));
+        if (!incoming) return supplier;
+        return { ...supplier, variants: [...(supplier.variants ?? []), ...(incoming.variants ?? []).filter(candidate => !(supplier.variants ?? []).some(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(candidate.platformSku)))] };
+      });
+      for (const incoming of snapshot.draft.suppliers ?? []) if (!suppliers.some(item => identity(item) === identity(incoming))) suppliers.push(incoming);
+      return { ...current, variants: [...current.variants, ...pendingNewVariants], suppliers };
+    });
+  };
+  const catalogCoverage = prefill?.catalogCoverage ?? draft.catalogCoverage ?? {};
+  const missingCatalogGroups = ERP_CATALOG_GROUPS.filter(group => (catalogCoverage[group]?.status ?? catalogCoverage[group]) !== "complete");
+  const requestCatalog = async () => {
+    if (requestingCatalog || !draft.platformSkc || !catalogRequestPeriod) return;
+    setRequestingCatalog(true); setCatalogRequestFailed(false);
+    try {
+      const result = await requestErpProductCatalog({ platformSkcs: [draft.platformSkc], productId: currentProductId ?? null, period: catalogRequestPeriod, missingGroups: missingCatalogGroups });
+      setCatalogRequestMessage(result.registered ? "资料请求已登记，等待 ERP 返回资料。" : "资料请求已保存在本机，尚未送达 ERP；请重试登记。");
+      setCatalogRequestFailed(!result.registered);
+    } catch (error) {
+      setCatalogRequestMessage(`资料请求未完成：${error.message}`); setCatalogRequestFailed(true);
+    } finally { setRequestingCatalog(false); }
+  };
+
 
   return (
     <AppShell searchPlaceholder="搜索商品、SKU 或供应商..." pageClass="editor-page">
       <ProductEditorLeaveGuard dirty={dirty} saving={saving} allowNavigationRef={allowNavigationRef} onSave={() => saveDraft({ stay: true })} />
-      <div className="editor-breadcrumb"><button onClick={() => navigate(breadcrumbTarget)}>商品管理</button><ChevronRight size={15} /><span>{modeLabel(snapshot)}{snapshot.capture?.id ? `（${snapshot.capture.id}）` : ""}</span></div>
+      <div className="editor-breadcrumb"><button onClick={() => navigate(breadcrumbTarget)}>商品管理</button><ChevronRight size={15} /><span>{modeLabel(snapshot)}</span></div>
       <div className="editor-titlebar">
-        <div><h1>{draft.name || "未命名商品"}</h1><Badge tone={validation.valid ? "success" : "warning"}>{validation.valid ? "可保存" : `${validation.blockingCount} 个阻断项`}</Badge>{dirty ? <Badge tone="warning">未保存修改</Badge> : saved ? <Badge tone="success">已保存</Badge> : <Badge tone="info">编辑中</Badge>}</div>
-        <div className="page-actions">{isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !validation.valid || !statusTransitionReady} onClick={saveDraft}>保存修改</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!validation.valid || !statusTransitionReady || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
+        <div className="editor-heading"><h1>{draft.name || "新建商品档案"}</h1>{dirty ? <Badge tone="warning">未保存修改</Badge> : saved ? <Badge tone="success">已保存</Badge> : null}</div>
+        <div className="page-actions"><Button variant="ghost" disabled={saving} onClick={() => navigate(returnTo)}>取消</Button>{isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
       </div>
 
-      {snapshot.prefill?.source === "erp" || snapshot.prefill?.warnings?.length ? <Panel className="erp-catalog-prefill">
-        <div className="panel-header"><div className="panel-title"><h2>ERP 档案资料</h2><span className="panel-subtitle">已带入 {snapshot.prefill.skuCount} 个关联 SKU；保存后建立档案</span></div><Badge tone="info">ERP 来源</Badge></div>
-        <p className="erp-catalog-note">已有档案资料优先保留。采购规格与平台 SKU 属性分别展示；采购比例保持原义，供应商报价需有独立报价记录。</p>
-        {snapshot.prefill.warnings.map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
-        <details><summary>核对 ERP 资料与供应商来源</summary>
-          <ul className="erp-catalog-evidence">{snapshot.prefill.sources.map((item, index) => <li key={index}><strong className="mono">{item.platformSku}</strong><span>{item.platformSkc} · {item.attribute || "平台 SKU 属性未提供"} · {item.productName || "商品名称尚未取得"}</span>{item.imageUrl ? <a href={item.imageUrl} target="_blank" rel="noreferrer">查看图片<ExternalLink size={12} /></a> : <span>商品图片未提供</span>}{item.trusted === false ? <span>映射关系待核对，未自动采用</span> : null}{item.supplierSummary?.link ? <><span>旧供应商摘要：{item.supplierSummary.supplierName || "未提供名称"}</span><a href={item.supplierSummary.link.url} target="_blank" rel="noreferrer">旧链接未能确认采购对应<ExternalLink size={12} /></a></> : null}</li>)}</ul>
-          {snapshot.prefill.purchases?.length ? <>
-            <h3 className="erp-purchase-heading">采购详情参考</h3>
-            <ul className="erp-catalog-evidence erp-purchase-evidence">{snapshot.prefill.purchases.map((item, index) => {
-              const purchase = item.purchaseCatalog;
-              return <li key={index}>
-                <strong>{item.supplierName || "供应商未提供"} · <span className="mono">{item.source.purchaseOrderNo || item.source.recordId || "采购明细"}{item.source.lineNumber != null ? ` · 明细行号 ${item.source.lineNumber}` : ""}</span></strong>
-                <span className="mono">仓库 {item.warehouseSku} · {item.platformSkus.join("、")}</span>
-                <span>采购规格：{purchase.purchaseSpecificationAndModel1688 || "未提供"}{purchase.model1688 ? ` · 型号/颜色：${purchase.model1688}` : ""}</span>
-                {purchase.specificationAndModel || purchase.productColor ? <span>仓库规格：{[purchase.specificationAndModel, purchase.productColor].filter(Boolean).join(" · ")}</span> : null}
-                {purchase.purchaseProportion1688 ? <span>采购比例：{purchase.purchaseProportion1688.replace(/^(\d+)-(\d+)$/, "$1:$2")}</span> : null}
-                {purchase.picturesLinking ? <a href={purchase.picturesLinking} target="_blank" rel="noreferrer">仓库图片<ExternalLink size={12} /></a> : null}
-                {purchase.pictureLink1688 ? <a href={purchase.pictureLink1688} target="_blank" rel="noreferrer">1688 采购图片<ExternalLink size={12} /></a> : null}
-              </li>;
-            })}</ul>
-          </> : null}
-          <ul className="erp-catalog-evidence">{snapshot.prefill.suppliers.map(item => <li key={item.id}><strong>{item.supplierName || "供应商名称待核对"}</strong><span className="mono">{[...new Set(item.sourceRecords.map(source => source.platformSku))].join("、")}</span>{item.sourceUrl ? <a href={item.sourceUrl} target="_blank" rel="noreferrer">{item.sourceUrlKind === "product" ? "1688 商品" : "1688 供应商店铺"}<ExternalLink size={12} /></a> : <span>该采购记录未提供链接</span>}</li>)}</ul>
-        </details>
-      </Panel> : null}
-
       <div className="editor-grid">
-        <div className="editor-left">
-          <Panel className="product-gallery">
-            <div className="main-product-image">{draft.imageUrl ? <img src={draft.imageUrl} alt={draft.name || "商品图片"} /> : <span className="catalog-image-placeholder"><Image size={34} /><small>尚未填写商品图片链接</small></span>}</div>
-            <div className="form-field image-url-field"><label>商品图片链接</label><input aria-label="商品图片链接" className="text-input" value={draft.imageUrl} onChange={(event) => updateDraft("imageUrl", event.target.value)} placeholder="https://..." /></div>
-          </Panel>
-
-          <Panel className="source-panel">
-            <div className="section-heading"><h2>1688 来源与报价</h2>{draft.sourceUrl ? <a className="inline-link" href={draft.sourceUrl} target="_blank" rel="noreferrer">{draft.sourceUrlKind === "store" ? "供应商店铺" : "打开来源"}<ExternalLink size={14} /></a> : null}</div>
-            <div className="form-field"><label>1688 来源链接</label><input aria-label="1688 来源链接" className="text-input" value={draft.sourceUrl} onChange={(event) => updateDraft("sourceUrl", event.target.value)} placeholder="https://detail.1688.com/offer/..." /></div>
-            <div className="source-two-col">
-              <div className="form-field"><label>1688 商品 ID</label><input aria-label="1688 商品 ID" className="text-input mono" value={draft.sourceProductId} onChange={(event) => updateDraft("sourceProductId", event.target.value)} /></div>
-              <div className="form-field"><label>供应商编号</label><input aria-label="供应商编号" className="text-input mono" value={draft.supplierCode} onChange={(event) => updateDraft("supplierCode", event.target.value)} /></div>
+        <Panel className="editor-basic-panel">
+          <div className="section-heading"><h2>基本信息</h2>{prefill?.source === "erp" ? <Badge tone="info">ERP 来源 · {prefill.skuCount ?? draft.variants.length} 个 SKU</Badge> : null}</div>
+          <div className="editor-basic-layout">
+            <div className="product-gallery">
+              <div className="main-product-image">{draft.imageUrl ? <img src={draft.imageUrl} alt={draft.name || "商品图片"} /> : <span className="catalog-image-placeholder"><Image size={28} aria-hidden="true" /><small>图片可后续补充</small></span>}</div>
+              <div className="form-field image-url-field"><label htmlFor="product-image-url">商品图片链接</label><input id="product-image-url" aria-label="商品图片链接" className="text-input" value={draft.imageUrl ?? ""} onChange={event => updateDraft("imageUrl", event.target.value)} placeholder="https://..." /></div>
             </div>
-            <div className="form-field"><label>供应商名称</label><input aria-label="供应商名称" className="text-input" value={draft.supplierName} onChange={(event) => updateDraft("supplierName", event.target.value)} /></div>
-            <div className="source-two-col procurement-grid">
-              <div className="form-field"><label>整单运费（CNY）</label><input aria-label="整单运费（CNY）" className="text-input mono" type="number" min="0" step="0.01" value={draft.shippingAmount} onChange={(event) => updateDraft("shippingAmount", event.target.value)} /></div>
-              <div className="form-field"><label>单份操作费（CNY）</label><input aria-label="单份操作费（CNY）" className="text-input mono" type="number" min="0" step="0.01" value={draft.handlingFee} onChange={(event) => updateDraft("handlingFee", event.target.value)} /></div>
-              <div className="form-field"><label>采购总份数</label><div className="source-inline mono">{totalPurchasePacks || 0} 份</div></div>
-              <div className="form-field"><label>包装重量（kg）</label><input aria-label="包装重量（kg）" className="text-input mono" type="number" min="0" step="0.01" value={draft.packageWeight} onChange={(event) => updateDraft("packageWeight", event.target.value)} /></div>
+            <div className="editor-basic-fields">
+              <div className="form-field"><label className="required" htmlFor="product-name">商品名称</label><input id="product-name" aria-label="商品名称" aria-invalid={Boolean(issueText("product_name_required"))} aria-describedby={issueText("product_name_required") ? "product-name-error" : undefined} className="text-input" value={draft.name ?? ""} onChange={event => updateDraft("name", event.target.value)} />{showFieldIssue("product-name-error", "product_name_required")}
+                {prefill?.titleCandidates?.length > 0 && prefill.needsTitleChoice && !draft.name ? <div className="title-candidates"><small>主体名称需要选择；可直接修改名称。</small>{prefill.titleCandidates.map(candidate => <button type="button" key={candidate.name} onClick={() => updateDraft("name", candidate.name)} title={(candidate.rawNames ?? []).join("；")}>{candidate.name}</button>)}</div> : null}
+              </div>
+              <div className="mapping-two-col">
+                <div className="form-field"><label htmlFor="product-user-status">状态</label><select id="product-user-status" aria-label="商品状态" aria-describedby={statusChoiceRequired ? "product-status-conflict" : undefined} className="select-input" value={statusChoiceRequired ? "" : userStatus.statusId} onChange={event => updateDraft("productStatus", event.target.value)}>{statusChoiceRequired ? <option value="">请选择统一状态</option> : null}{statusOptions.map(status => <option value={status.id} key={status.id}>{status.label}{status.archivedAt ? "（已归档）" : ""}</option>)}</select>{statusChoiceRequired ? <small id="product-status-conflict" className="field-error">旧选品状态“{selectionStatusById(salesStatusDefinitions, userStatus.legacyStatuses.salesStatus).label}”与旧发布状态“{selectionStatusById(salesStatusDefinitions, userStatus.legacyStatuses.publicationStatus).label}”不一致，请选择一次。</small> : null}</div>
+                <div className="form-field"><label htmlFor="product-tags">手工标签</label><input id="product-tags" aria-label="商品标签" className="text-input" value={tagsText} onChange={event => { setTagsText(event.target.value); setDraft(current => ({ ...current, fieldEdits: { ...current.fieldEdits, tags: true } })); }} placeholder="逗号分隔，例如：高潜、活动款" /></div>
+              </div>
+              <div className="mapping-two-col">
+                <div className="form-field"><label htmlFor="product-platform-skc">平台 SKC</label><input id="product-platform-skc" aria-label="平台 SKC" aria-invalid={Boolean(issueText("platform_skc_required"))} aria-describedby={issueText("platform_skc_required") ? "product-skc-error" : undefined} className="text-input mono" value={draft.platformSkc ?? ""} onChange={event => updateDraft("platformSkc", event.target.value)} />{showFieldIssue("product-skc-error", "platform_skc_required")}</div>
+                <div className="form-field"><label htmlFor="product-store">店铺来源</label><input id="product-store" aria-label="分配店铺" className="text-input" value={draft.store ?? ""} onChange={event => updateDraft("store", event.target.value)} placeholder="可后续补充" /></div>
+              </div>
+              <SelectionSalesTag item={draft.automaticSalesTag} />
+              <details className="editor-secondary-details"><summary>备注与可见范围</summary><div className="form-field"><label htmlFor="product-notes">选品备注</label><textarea id="product-notes" aria-label="选品备注" className="text-area" rows="3" value={draft.notes ?? ""} onChange={event => updateDraft("notes", event.target.value)} /></div><div className="mapping-two-col"><div className="form-field"><label htmlFor="product-visibility">可见范围</label><select id="product-visibility" aria-label="商品可见范围" className="select-input" value={draft.visibility ?? "workspace"} onChange={event => updateDraft("visibility", event.target.value)}>{visibilityOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div><div className="form-field"><label>归属账号</label><div className="field-readonly mono">{draft.ownerId || "当前账号"}</div></div></div></details>
             </div>
-          </Panel>
-
-          <Panel className="supplier-list-panel">
-            <div className="panel-header"><div className="panel-title"><h2>其他供应商</h2><span className="panel-subtitle">同一 SKC 可保留多个 1688 来源与参考报价</span></div><Button variant="ghost" icon={Plus} onClick={addSupplier}>添加供应商</Button></div>
-            {draft.suppliers.length === 0 ? <div className="supplier-empty"><strong>尚未添加供应商</strong><span>可先建立商品档案，后续再补充多个 1688 来源。</span></div> : draft.suppliers.length === 1 ? <div className="supplier-empty"><strong>当前使用默认供应商</strong><span>如需对比不同供货方，可在这里继续添加供应商。</span></div> : draft.suppliers.slice(1).map((supplier, relativeIndex) => {
-              const supplierIndex = relativeIndex + 1;
-              return <div className="supplier-card" key={supplier.id ?? supplierIndex}>
-                <div className="supplier-card-heading"><strong>供应商 {supplierIndex + 1}</strong><button className="icon-button danger" aria-label={`删除供应商 ${supplierIndex + 1}`} title="删除供应商" onClick={() => removeSupplier(supplierIndex)}><Trash2 size={16} /></button></div>
-                <div className="source-two-col"><div className="form-field"><label>供应商名称</label><input className="text-input" value={supplier.supplierName ?? ""} onChange={(event) => updateSupplier(supplierIndex, "supplierName", event.target.value)} /></div><div className="form-field"><label>供应商编号</label><input className="text-input mono" value={supplier.supplierCode ?? ""} onChange={(event) => updateSupplier(supplierIndex, "supplierCode", event.target.value)} /></div></div>
-                <div className="source-two-col"><div className="form-field"><label>1688 来源链接</label><input className="text-input" value={supplier.sourceUrl ?? ""} onChange={(event) => updateSupplier(supplierIndex, "sourceUrl", event.target.value)} placeholder="https://detail.1688.com/offer/..." /></div><div className="form-field"><label>1688 商品 ID</label><input className="text-input mono" value={supplier.sourceProductId ?? ""} onChange={(event) => updateSupplier(supplierIndex, "sourceProductId", event.target.value)} /></div></div>
-                <div className="source-two-col"><div className="form-field"><label>整单运费（CNY）</label><input className="text-input mono" type="number" min="0" step="0.01" value={supplier.shippingAmount ?? 0} onChange={(event) => updateSupplier(supplierIndex, "shippingAmount", event.target.value)} /></div><div className="form-field"><label>单份操作费（CNY）</label><input className="text-input mono" type="number" min="0" step="0.01" value={supplier.handlingFee ?? 0} onChange={(event) => updateSupplier(supplierIndex, "handlingFee", event.target.value)} /></div></div>
-                <div className="supplier-sku-grid supplier-sku-grid-detailed">{draft.variants.map(variant => {
-                  const offer = supplier.variants.find(item => String(item.platformSku).trim().toUpperCase() === String(variant.platformSku).trim().toUpperCase()) ?? {};
-                  return <div className="supplier-sku-row" key={variant.platformSku || variant.id}>
-                    <span className="mono">{variant.platformSku || "未填写 SKU"}</span>
-                    {[
-                      ["purchaseUnitPrice", "采购价/份", "采购价", "0.01", "0"],
-                      ["purchasePackCount", "采购份数", "采购份数", "1", "0"],
-                      ["unitsPerPack", "每份单品数", "每份单品数", "1", "1"],
-                    ].map(([field, label, accessibleLabel, step, min]) => <label className="supplier-quote-field" key={field}>
-                      <span>{label}</span>
-                      <input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} ${accessibleLabel}`} className="table-input mono" type="number" min={min} step={step} value={offer[field] ?? (field === "unitsPerPack" ? 1 : "")} onChange={event => updateSupplierVariant(supplierIndex, variant.platformSku, field, event.target.value)} />
-                    </label>)}
-                  </div>;
-                })}</div>
-              </div>;
-            })}
-          </Panel>
-        </div>
-
-        <div className="editor-center">
-          <Panel className="mapping-panel">
-            <div className="section-heading"><h2>平台映射</h2><Badge tone="info">平台 SKU 工作区全局唯一</Badge></div>
-            <div className="form-field"><label className="required">商品名称</label><input aria-label="商品名称" className="text-input" value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} /></div>
-            <div className="form-field"><label>英文标题</label><input aria-label="英文标题" className="text-input" value={draft.englishTitle} onChange={(event) => updateDraft("englishTitle", event.target.value)} /></div>
-            <div className="mapping-two-col">
-              <div className="form-field"><label>发布平台</label><input aria-label="发布平台" className="text-input" value={draft.salesPlatform ?? ""} onChange={(event) => updateDraft("salesPlatform", event.target.value)} placeholder="例如：SHEIN" /></div>
-              <div className="form-field"><label>发布状态</label><select aria-label="发布状态" className="select-input" value={draft.publicationStatus ?? "unpublished"} onChange={(event) => updateDraft("publicationStatus", event.target.value)}>{PRODUCT_PUBLICATION_STATUSES.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}</option>)}</select></div>
-            </div>
-            <div className="mapping-two-col">
-              <div className="form-field"><label>平台 SKC</label><input aria-label="平台 SKC" className="text-input mono" value={draft.platformSkc} onChange={(event) => updateDraft("platformSkc", event.target.value)} /></div>
-              <div className="form-field"><label>分配店铺</label><input aria-label="分配店铺" className="text-input" value={draft.store} onChange={(event) => updateDraft("store", event.target.value)} placeholder="例如：美国主店" /></div>
-            </div>
-            <div className="mapping-two-col">
-              <div className="form-field"><label>选品状态</label><select aria-label="选品状态" className="select-input" value={draft.salesStatus} onChange={(event) => updateDraft("salesStatus", event.target.value)}>{salesStatusDefinitions.filter((status) => !status.archivedAt || status.id === draft.salesStatus).map((status) => <option value={status.id} key={status.id}>{status.label}{status.archivedAt ? "（已归档）" : ""}</option>)}</select></div>
-              <div className="form-field"><label>标签</label><input aria-label="商品标签" className="text-input" value={tagsText} onChange={(event) => setTagsText(event.target.value)} placeholder="以逗号分隔，例如：高潜, 活动款" /></div>
-            </div>
-            <div className="mapping-two-col">
-              <div className="form-field"><label>可见范围</label><select aria-label="商品可见范围" className="select-input" value={draft.visibility ?? "workspace"} onChange={(event) => updateDraft("visibility", event.target.value)}>{visibilityOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
-              <div className="form-field"><label>归属账号</label><div className="field-readonly mono">{draft.ownerId || "当前账号"}</div></div>
-            </div>
-            <div className="form-field"><label>选品备注</label><textarea aria-label="选品备注" className="text-area" rows="3" value={draft.notes ?? ""} onChange={(event) => updateDraft("notes", event.target.value)} placeholder="记录选品判断、供应商沟通或后续动作" /></div>
-          </Panel>
-
-          <Panel className="variants-panel catalog-variants-panel">
-            <div className="panel-header"><div className="panel-title"><h2>平台 SKU 属性分支</h2><span className="panel-subtitle">平台 SKU 全工作区唯一；一个 ERP 仓库 SKU 可复用给多个平台 SKU</span></div><Button variant="ghost" icon={Plus} onClick={() => setDraft((current) => { const variant = createVariant(); return { ...current, variants: [...current.variants, variant], suppliers: syncSupplierVariantAdded(current.suppliers, variant) }; })}>添加规格</Button></div>
-            <div className="table-wrap">
-              <table className="data-table variants-table catalog-variants-table">
-                <thead><tr><th>规格</th><th>平台 SKU</th><th>ERP 仓库 SKU</th><th>1688 来源 SKU</th><th>SKU 图片</th><th>采购价/份</th><th>售价</th><th>采购份数</th><th>每份单品数</th><th>参考单件成本</th><th>参考单件利润</th><th>操作</th></tr></thead>
-                <tbody>{draft.variants.length === 0 ? <tr><td className="pending-text" colSpan="12">尚未添加平台 SKU 分支</td></tr> : draft.variants.map((variant, index) => { const platformSku = String(variant.platformSku ?? "").trim(); const reference = draftReferences[index]; const referenceRow = reference.historical; const referenceCost = reference.unitCost; const referenceSource = reference.sourceLabel; const manualDetail = referenceRow?.referenceKind === "manual_confirmed" ? `${shortReferenceDate(referenceRow.referenceUpdatedAt) ? `确认于 ${shortReferenceDate(referenceRow.referenceUpdatedAt)}` : "已确认"}${referenceRow.manualCostHistoryCount > 1 ? ` · ${referenceRow.manualCostHistoryCount} 条记录` : ""}` : null; const salePrice = productSalePrice(variant.salePrice); const referenceProfit = salePrice != null && referenceCost != null ? salePrice - referenceCost - 0.7 : null; return <tr key={variant.id ?? index}><td><input aria-label={`第 ${index + 1} 个规格名称`} className="table-input catalog-text-input" value={variant.attribute} onChange={(event) => updateVariant(index, "attribute", event.target.value)} placeholder="颜色/尺寸" /></td><td><input aria-label={`第 ${index + 1} 个平台 SKU`} className="table-input catalog-sku-input mono" value={variant.platformSku} onChange={(event) => updateVariant(index, "platformSku", event.target.value)} /></td><td><input aria-label={`第 ${index + 1} 个 ERP 仓库 SKU`} className="table-input catalog-sku-input mono" value={variant.warehouseSku ?? ""} onChange={(event) => updateVariant(index, "warehouseSku", event.target.value)} placeholder="可被多个平台 SKU 复用" /></td><td><input aria-label={`第 ${index + 1} 个 1688 来源 SKU`} className="table-input catalog-sku-input mono" value={variant.sourceSku} onChange={(event) => updateVariant(index, "sourceSku", event.target.value)} /></td><td><input aria-label={`第 ${index + 1} 个 SKU 图片链接`} className="table-input catalog-sku-input" value={variant.imageUrl ?? ""} onChange={(event) => updateVariant(index, "imageUrl", event.target.value)} placeholder="图片链接" /></td><td><input aria-label={`第 ${index + 1} 个采购价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.purchaseUnitPrice} onChange={(event) => updateVariant(index, "purchaseUnitPrice", event.target.value)} /></td><td><input aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice} onChange={(event) => updateVariant(index, "salePrice", event.target.value)} /></td><td><input aria-label={`第 ${index + 1} 个采购份数`} className="table-input mono" type="number" min="1" step="1" value={variant.purchasePackCount} onChange={(event) => updateVariant(index, "purchasePackCount", event.target.value)} /></td><td><input aria-label={`第 ${index + 1} 个每份单品数`} className="table-input mono" type="number" min="1" step="1" value={variant.unitsPerPack} onChange={(event) => updateVariant(index, "unitsPerPack", event.target.value)} /></td><td className="mono"><span>{referenceCost == null ? "--" : `¥${referenceCost.toFixed(2)}`}</span>{referenceCost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote ?? undefined}>{manualDetail ?? referenceSource}</small> : null}{reference.historical && reference.supplier ? <small className="row-subtitle">当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}（仅作参考）</small> : null}{(persistedProduct?.id ?? snapshot.product?.id) && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, referenceCost)}><Pencil size={13} /></button> : null}</td><td className={`mono ${referenceProfit != null && referenceProfit < 0 ? "danger-text" : "success-text"}`}>{salePrice == null ? "待填写售价" : referenceProfit == null ? "待参考成本" : `¥${referenceProfit.toFixed(2)}`}</td><td><button className="variant-remove" aria-label={`删除第 ${index + 1} 个规格`} onClick={() => removeVariant(index)}><Trash2 size={16} /></button></td></tr>; })}</tbody>
-              </table>
-            </div>
-          </Panel>
-        </div>
-
-        <Panel className={`validation-panel ${validation.valid ? "validation-passed" : ""}`}>
-          <div className="validation-heading">{validation.valid ? <CheckCircle2 size={23} /> : <TriangleAlert size={23} />}<h2>入库校验</h2></div>
-          {validation.blockingIssues.slice(0, 4).map((issue) => <div className="validation-item blocking" key={issue}><AlertCircle size={18} /><div><h3>{formatIssue(issue)}</h3><p>请先修正后再保存商品档案。</p></div></div>)}
-          {validation.warningIssues.slice(0, 3).map((issue) => <div className="validation-item warning" key={issue}><AlertCircle size={18} /><div><h3>{formatIssue(issue)}</h3><p>商品档案可先保存，后续按发布进度补齐。</p></div></div>)}
-          {validation.valid ? <div className="validation-item passed"><CheckCircle2 size={18} /><div><h3>商品档案可保存</h3><p>填写平台 SKU 时会检查其是否已属于其他商品。</p></div></div> : null}
-          {statusRequiresReadiness ? (salesReadiness.ready ? <div className="validation-item passed"><CheckCircle2 size={18} /><div><h3>{selectedStatusDefinition.label}状态资料已完整</h3><p>店铺、供应商来源、SKU 属性、售价和参考成本均已具备。</p></div></div> : <div className="validation-item warning"><AlertCircle size={18} /><div><h3>{selectedStatusDefinition.label}状态还不能确认</h3><p>{salesReadiness.issues.map(productReadinessIssueLabel).join("；")}。</p></div></div>) : null}
-          <div className="validation-item passed"><CheckCircle2 size={18} /><div><h3>成本口径已锁定</h3><p>{referenceCostCount === 0 ? "尚无可计算的参考成本。" : `已为 ${referenceCostCount}/${draft.variants.length} 个平台 SKU 形成参考成本；优先采用 ERP 历史，1688 仅作参考，不会自动成为月度正式成本。`}</p></div></div>
-          <div className="readiness"><span>资料准备度 <strong>{validation.readiness}%</strong></span><ProgressBar value={validation.readiness} tone={validation.valid ? "success" : "warning"} /></div>
+          </div>
         </Panel>
+
+        <Panel className="variants-panel catalog-variants-panel">
+          <div className="panel-header"><div className="panel-title"><h2>SKU 规格与成本</h2><span className="panel-subtitle">名称和明确的 SKC—SKU 关系即可保存；图片、售价及参考成本可后续补充。</span></div><Button variant="ghost" icon={Plus} onClick={() => setDraft(current => { const variant = createVariant(); return { ...current, variants: [...current.variants, variant], suppliers: syncSupplierVariantAdded(current.suppliers, variant) }; })}>添加规格</Button></div>
+          {showFieldIssue("product-sku-error", "platform_sku_required")}
+          {pendingNewVariants.length ? <div className="catalog-new-data"><span>新资料有 {pendingNewVariants.length} 个明确 SKU，可带入当前草稿。</span><Button variant="ghost" onClick={addNewCatalogData}>带入新增资料</Button></div> : null}
+          {unresolvedConflicts.length ? <div className="identity-conflicts" role="alert">{unresolvedConflicts.map((conflict, index) => <div key={`${conflict.platformSku}-${index}`}><span><strong className="mono">{conflict.platformSku}</strong> · {({ relationship_conflict: "SKC 与仓库映射存在冲突", owned_elsewhere: "已属于其他商品档案" })[conflict.reason] || conflict.reason || "身份关系存在冲突"}{conflict.productId ? <a href={`/products/edit?product=${encodeURIComponent(conflict.productId)}`}>查看对应档案</a> : null}</span><Button variant="ghost" onClick={() => excludeConflict(conflict)}>排除此冲突分支</Button></div>)}</div> : null}
+          {draft.excludedIdentitySkus?.length ? <p className="editor-inline-note">已明确排除 {draft.excludedIdentitySkus.join("、")}；冲突线索会保留供后续补充。</p> : null}
+          <div className="table-wrap" tabIndex="0" aria-label="SKU 规格与成本表，可横向滚动">
+            <table className="data-table variants-table catalog-variants-table">
+              <thead><tr><th>平台属性 / 规格</th><th>平台 SKU</th><th>参考单件成本</th><th>当前售价</th><th>参考单件利润</th><th>详情</th><th>操作</th></tr></thead>
+              <tbody>{draft.variants.length === 0 ? <tr><td className="pending-text" colSpan="7">尚未添加平台 SKU 分支</td></tr> : draft.variants.map((variant, index) => {
+                const platformSku = String(variant.platformSku ?? "").trim();
+                const reference = draftReferences[index] ?? {};
+                const referenceRow = reference.historical;
+                const cost = reference.unitCost;
+                const salePrice = productSalePrice(variant.salePrice);
+                const profit = salePrice != null && cost != null ? salePrice - cost - 0.7 : null;
+                const skuIssue = issueText(`variant_${index}_platform_sku_duplicate`) || saveFieldErrors[canonicalPlatformSku(platformSku)];
+                return <tr key={variant.id ?? index}>
+                  <td><input aria-label={`第 ${index + 1} 个规格名称`} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" /></td>
+                  <td><input id={`variant-${index}-sku`} aria-label={`第 ${index + 1} 个平台 SKU`} aria-invalid={Boolean(skuIssue)} aria-describedby={skuIssue ? `variant-${index}-sku-error` : undefined} className="table-input catalog-sku-input mono" value={variant.platformSku ?? ""} onChange={event => updateVariant(index, "platformSku", event.target.value)} />{skuIssue ? <small className="field-error" id={`variant-${index}-sku-error`}>{skuIssue}</small> : null}</td>
+                  <td><div className="catalog-cost-cell"><strong className="mono">{cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
+                  <td><input aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice ?? ""} onChange={event => updateVariant(index, "salePrice", event.target.value)} /></td>
+                  <td className={`mono ${profit != null && profit < 0 ? "danger-text" : ""}`}>{salePrice == null ? "待填写售价" : profit == null ? "待参考成本" : `¥${profit.toFixed(2)}`}</td>
+                  <td><details className="sku-details"><summary>查看 / 编辑</summary><div className="sku-detail-fields">{[["warehouseSku", "ERP 仓库 SKU"], ["sourceSku", "1688 来源 SKU"], ["imageUrl", "SKU 图片链接"]].map(([field, label]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个 ${label}`} className="text-input" value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} /></label>)}{variant.purchaseSpecification ? <p>采购规格：{variant.purchaseSpecification}</p> : null}{referenceRow?.referenceEvidence?.unitConversion ? <p>采购单位换算：{referenceRow.referenceEvidence.unitConversion.warehouseUnits} 个仓库单位对应 {referenceRow.referenceEvidence.unitConversion.platformUnits} 个平台单品</p> : null}<div className="sku-quote-fields">{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个${label}`} className="table-input mono" type="number" min={min} step={step} value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} />{showFieldIssue(`variant-${index}-${field}-error`, `variant_${index}_${field === "purchasePackCount" ? "purchase_pack_count_invalid" : "units_per_pack_invalid"}`)}</label>)}</div><small>报价只在主动修改时更新；采购规格与平台属性分别保留。</small></div></details></td>
+                  <td><button type="button" className="variant-remove" aria-label={`删除第 ${index + 1} 个规格`} onClick={() => removeVariant(index)}><Trash2 size={16} /></button></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+          <p className="editor-inline-note">参考成本覆盖 {referenceCostCount}/{draft.variants.length} 个 SKU。ERP 与 1688 来源各自保留；本页保存不会写入月度正式利润。</p>
+        </Panel>
+
+        <Panel className="supplier-list-panel">
+          <div className="panel-header"><div className="panel-title"><h2>供应商来源</h2><span className="panel-subtitle">每个供应商保留自己的链接和 SKU 关联</span></div><Button variant="ghost" icon={Plus} onClick={addSupplier}>添加供应商</Button></div>
+          <div className="editor-supplier-grid">{supplierRows.map((supplier, index) => <div className="supplier-card" key={supplier.id ?? index}>
+            <div className="supplier-card-heading"><strong>{supplier.supplierName || `供应商 ${index + 1}`}</strong><span>{supplier.sourceUrl ? <a className="inline-link" href={supplier.sourceUrl} target="_blank" rel="noreferrer">打开来源<ExternalLink size={14} /></a> : null}{index > 0 ? <button type="button" className="icon-button danger" aria-label={`删除供应商 ${index + 1}`} onClick={() => removeSupplier(index)}><Trash2 size={16} /></button> : null}</span></div>
+            <div className="form-field"><label htmlFor={`supplier-${index}-name`}>供应商名称</label><input id={`supplier-${index}-name`} aria-label={index === 0 ? "供应商名称" : `供应商 ${index + 1} 名称`} className="text-input" value={supplier.supplierName ?? ""} onChange={event => index === 0 ? updateDraft("supplierName", event.target.value) : updateSupplier(index, "supplierName", event.target.value)} /></div>
+            <div className="form-field"><label htmlFor={`supplier-${index}-url`}>1688 来源链接</label><input id={`supplier-${index}-url`} aria-label={index === 0 ? "1688 来源链接" : `供应商 ${index + 1} 来源链接`} className="text-input" value={supplier.sourceUrl ?? ""} onChange={event => index === 0 ? updateDraft("sourceUrl", event.target.value) : updateSupplier(index, "sourceUrl", event.target.value)} placeholder="可后续补充" /></div>
+            <small className="supplier-associated-skus">{(supplier.variants ?? []).map(variant => variant.platformSku).filter(Boolean).join(" · ") || "保存后可补充 SKU 关联"}</small>
+            {index > 0 ? <details className="editor-secondary-details"><summary>参考报价与单位换算</summary><div className="supplier-sku-grid supplier-sku-grid-detailed">{draft.variants.map(variant => { const offer = supplier.variants?.find(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(variant.platformSku)) ?? {}; return <div className="supplier-sku-row" key={variant.platformSku || variant.id}><span className="mono">{variant.platformSku || "未填写 SKU"}</span>{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="supplier-quote-field" key={field}><span>{label}</span><input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} ${label}`} className="table-input mono" type="number" min={min} step={step} value={offer[field] ?? (field === "unitsPerPack" ? 1 : "")} onChange={event => updateSupplierVariant(index, variant.platformSku, field, event.target.value)} /></label>)}</div>; })}</div></details> : null}
+          </div>)}</div>
+        </Panel>
+
+        {prefill?.source === "erp" || prefill?.warnings?.length || currentProductId && draft.platformSkc ? <Panel className="erp-catalog-prefill"><details><summary>ERP 档案资料与来源详情</summary>
+          <div className="catalog-request-controls"><label className="form-field"><span>资料采购截止月份</span><input aria-label="资料采购截止月份" className="text-input" type="month" value={catalogRequestPeriod} onChange={event => setCatalogRequestPeriod(event.target.value)} /></label><Button variant="ghost" loading={requestingCatalog} disabled={requestingCatalog || !draft.platformSkc || !catalogRequestPeriod || !missingCatalogGroups.length} onClick={requestCatalog}>{catalogRequestFailed ? "重试补充资料" : "补充 ERP 资料"}</Button></div>
+          {!catalogRequestPeriod ? <p className="editor-inline-note">请选择明确的采购截止月份；没有销量也可以为已确认身份的档案补充资料。</p> : null}
+          {!missingCatalogGroups.length ? <p className="editor-inline-note">资料已收齐。</p> : null}
+          {catalogRequestMessage ? <p className={`editor-inline-note ${catalogRequestFailed ? "field-error" : ""}`} role="status">{catalogRequestMessage}</p> : null}
+          {(prefill.warnings ?? []).map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
+          <ul className="erp-catalog-evidence">{(prefill.sources ?? []).map((item, index) => <li key={index}><strong className="mono">{item.platformSku}</strong><span>{item.platformSkc} · {item.attribute || "平台属性未提供"} · {item.productName || "原始名称未提供"}</span>{item.trusted === false ? <span>身份关系待核对</span> : null}</li>)}</ul>
+          <ul className="erp-catalog-evidence erp-purchase-evidence">{(prefill.purchases ?? []).map((item, index) => { const purchase = item.purchaseCatalog ?? {}; return <li key={index}><strong>{item.supplierName || "供应商未提供"} · {item.source?.purchaseOrderNo || item.source?.recordId || "采购明细"}</strong><span className="mono">仓库 {item.warehouseSku} · {(item.platformSkus ?? []).join("、")}</span><span>采购规格：{purchase.purchaseSpecificationAndModel1688 || "未提供"}</span>{purchase.purchaseProportion1688 ? <span>单位换算：{purchase.purchaseProportion1688.replace(/^(\d+)-(\d+)$/, "$1:$2")}</span> : null}{purchase.pictureLink1688 ? <a href={purchase.pictureLink1688} target="_blank" rel="noreferrer">采购图片<ExternalLink size={12} /></a> : null}</li>; })}</ul>
+        </details></Panel> : null}
       </div>
 
       <Modal open={confirmDialog} title={snapshot.product?.status === "active" ? "保存商品档案" : "确认进入工作台"} description="系统会在同一事务中写入商品档案、已填写的平台 SKU、1688 供应商资料和审计记录。" onClose={() => setConfirmDialog(false)} footer={<><Button onClick={() => setConfirmDialog(false)}>取消</Button><Button variant="primary" loading={saving} disabled={saving} onClick={confirmEntry}>确认写入</Button></>}>

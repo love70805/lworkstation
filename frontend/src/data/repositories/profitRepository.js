@@ -7,7 +7,8 @@ import {
   normalizePlatformSku,
 } from "../../domain/identifiers";
 import { summarizeLedgerRows } from "../../domain/ledgerImport";
-import { planSalesImports, prepareSalesImportItems } from "../../domain/batchSalesImport";
+import { planSalesImports, prepareSalesImportItems, getSalesImportReplacementRows } from "../../domain/batchSalesImport";
+import { normalizeSalesSourceCoverage, salesSourceDateEvidence } from "../../domain/selectionSalesLabels";
 import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../domain/erpCostBatchEnvelope";
 import { normalizeErpCatalogFields } from "../../domain/erpCatalogFields";
 import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
@@ -198,7 +199,7 @@ async function readSalesImportPlan(workspaceId, period, items) {
 
 export async function previewSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, period, items }) {
   const normalizedPeriod = normalizeLedgerPeriod(period);
-  const prepared = prepareSalesImportItems(items);
+  const prepared = prepareSalesImportItems(items, { period: normalizedPeriod });
   return db.transaction("r", db.ledgers, db.salesRows, db.importBatches, async () => {
     const { plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared);
     return plan;
@@ -215,7 +216,7 @@ export async function saveSalesImports({
 }) {
   const normalizedPeriod = normalizeLedgerPeriod(period);
   // Clone the payload before any asynchronous work, so caller edits cannot change a pending write.
-  const prepared = prepareSalesImportItems(structuredClone(items));
+  const prepared = prepareSalesImportItems(structuredClone(items), { period: normalizedPeriod });
   const auditActor = await resolveProfitAuditActor(importedBy);
   return db.transaction("rw", db.workspaces, db.ledgers, db.importBatches, db.salesRows, db.auditEvents, async () => {
     const { ledger, existingRows, plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared);
@@ -229,8 +230,7 @@ export async function saveSalesImports({
     await ensureDefaultWorkspace();
     const createdAt = new Date().toISOString();
     const pending = prepared.filter((item, index) => plan.items[index].status !== "skipped_duplicate");
-    const keys = new Set(pending.flatMap((item) => item.rows.map((row) => row.groupKey)));
-    const replacementIds = existingRows.filter((row) => keys.has(row.groupKey)).map((row) => row.id);
+    const replacementIds = getSalesImportReplacementRows(existingRows, pending).map(row => row.id);
     if (replacementIds.length) await db.salesRows.bulkDelete(replacementIds);
     const savedLedger = {
       ...(ledger ?? { id: plan.ledgerId, workspaceId, period: normalizedPeriod, type: "monthly_profit", currency: "CNY", warehouseRate: 0.7, createdBy: auditActor, createdAt }),
@@ -246,6 +246,8 @@ export async function saveSalesImports({
         sourceRowCount: item.summary.sourceRowCount, validRowCount: item.rows.length,
         ignoredRowCount: item.summary.ignoredCount ?? 0, errorCount: 0, skippedRowCount: item.summary.ignoredCount ?? 0,
         replacedGroupCount: result.replacedGroupCount, addedGroupCount: result.addedGroupCount,
+        sourceCoverage: item.sourceCoverage ?? null, dateEvidence: salesSourceDateEvidence(item.rows, { period: normalizedPeriod }),
+        importMode: item.importMode ?? "append", removedGroupCount: result.removedGroupCount ?? 0,
       };
       await db.importBatches.add(savedBatch);
       await db.salesRows.bulkAdd(item.rows.map((row) => ({ ...row, workspaceId, ledgerId: plan.ledgerId, batchId, importedAt: createdAt })));
@@ -274,6 +276,7 @@ export async function saveSalesImport({
   filterOptions = null,
   workspaceId = DEFAULT_WORKSPACE_ID,
   importedBy = "local-user",
+  sourceCoverage = null,
 }) {
   const normalizedPeriod = normalizeLedgerPeriod(period);
   const ledgerId = monthlyLedgerId(workspaceId, normalizedPeriod);
@@ -316,6 +319,8 @@ export async function saveSalesImport({
         fileHash,
         mapping,
         filterOptions,
+        sourceCoverage: normalizeSalesSourceCoverage(sourceCoverage, { period: normalizedPeriod, storeName }),
+        dateEvidence: salesSourceDateEvidence(rows, { period: normalizedPeriod }),
         createdAt,
         status: "completed",
         store: storeName,
@@ -730,6 +735,7 @@ async function publishVerifiedErpCostBatch({
       evidenceStatus: verifiedSourceEnvelope.evidenceStatus,
       warehouseEvidence: verifiedSourceEnvelope.warehouseEvidence,
       catalogRows: erpProductCatalogRowsFromEnvelope(verifiedSourceEnvelope, { batchId, publishedAt }),
+      ...(verifiedSourceEnvelope.catalogCoverage ? { catalogCoverage: verifiedSourceEnvelope.catalogCoverage, catalogVersion: 1 } : {}),
     };
     const savedBatch = {
       id: batchId,

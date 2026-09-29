@@ -49,12 +49,6 @@ function hasText(value) {
   return text(value).length > 0;
 }
 
-function hasPurchaseInput(variant = {}) {
-  return hasText(variant.purchaseUnitPrice)
-    || hasText(variant.purchasePackCount)
-    || hasText(variant.unitsPerPack);
-}
-
 export function validateProductDraft(draft = {}) {
   const blockingIssues = [];
   const warningIssues = [];
@@ -63,13 +57,11 @@ export function validateProductDraft(draft = {}) {
   if (!text(draft.name)) blockingIssues.push("product_name_required");
   if (!text(draft.platformSkc)) warningIssues.push("platform_skc_missing");
   if (variants.length === 0 || !variants.some((variant) => text(variant.platformSku))) warningIssues.push("platform_sku_missing");
-  if (!text(draft.englishTitle)) warningIssues.push("english_title_missing");
-  if (!text(draft.supplierCode)) warningIssues.push("supplier_code_missing");
   if (!text(draft.sourceUrl)) warningIssues.push("source_url_missing");
-  if (Number(draft.shippingAmount ?? 0) > 0 && !positive(draft.packageWeight)) {
-    warningIssues.push("package_weight_missing");
-  }
 
+  const validateQuotes = draft.quoteEditIntent == null
+    || !Array.isArray(draft.quoteEditIntent.supplierIds)
+    || draft.quoteEditIntent.supplierIds.length > 0;
   const seenSkus = new Set();
   variants.forEach((variant, index) => {
     const platformSku = text(variant.platformSku);
@@ -77,11 +69,10 @@ export function validateProductDraft(draft = {}) {
     const canonicalSku = canonicalPlatformSku(platformSku);
     if (seenSkus.has(canonicalSku)) blockingIssues.push(`variant_${index}_platform_sku_duplicate`);
     seenSkus.add(canonicalSku);
-    if (platformSku && !positive(variant.purchaseUnitPrice)) warningIssues.push(`variant_${index}_purchase_price_missing`);
-    if (platformSku && hasPurchaseInput(variant) && !positive(variant.purchasePackCount)) {
+    if (validateQuotes && hasText(variant.purchaseUnitPrice) && !positive(variant.purchasePackCount)) {
       blockingIssues.push(`variant_${index}_purchase_pack_count_invalid`);
     }
-    if (platformSku && hasPurchaseInput(variant) && !positive(variant.unitsPerPack ?? 1)) {
+    if (validateQuotes && hasText(variant.purchaseUnitPrice) && !positive(variant.unitsPerPack ?? 1)) {
       blockingIssues.push(`variant_${index}_units_per_pack_invalid`);
     }
   });
@@ -100,27 +91,20 @@ export function validateProductDraft(draft = {}) {
   };
 }
 
-export function validateProductSalesReadiness({ draft = {}, referenceCosts = [] } = {}) {
+
+// User status is independent of optional images, costs, supplier links and selling prices.
+export function validateProductSalesReadiness({ draft = {} } = {}) {
   const issues = [];
   const variants = Array.isArray(draft.variants) ? draft.variants : [];
-  const suppliers = Array.isArray(draft.suppliers) && draft.suppliers.length ? draft.suppliers : [draft];
-
   if (!text(draft.name)) issues.push("product_name_required");
   if (!text(draft.platformSkc)) issues.push("platform_skc_required");
-  if (!text(draft.store)) issues.push("store_required");
-  if (!suppliers.some((supplier) => text(supplier.sourceUrl))) issues.push("supplier_source_required");
-  if (variants.length === 0) issues.push("platform_sku_required");
-
+  if (!variants.some(variant => text(variant.platformSku))) issues.push("platform_sku_required");
+  const seen = new Set();
   variants.forEach((variant, index) => {
-    if (!text(variant.platformSku)) issues.push(`variant_${index}_platform_sku_required`);
-    if (!text(variant.attribute)) issues.push(`variant_${index}_attribute_required`);
-    if (!positive(variant.salePrice)) issues.push(`variant_${index}_sale_price_required`);
-    const referenceCost = Number(referenceCosts[index]);
-    if (!Number.isFinite(referenceCost) || referenceCost <= 0) issues.push(`variant_${index}_reference_cost_required`);
+    if (!text(variant.platformSku)) return;
+    const sku = canonicalPlatformSku(variant.platformSku);
+    if (seen.has(sku)) issues.push(`variant_${index}_platform_sku_duplicate`);
+    seen.add(sku);
   });
-
-  return {
-    ready: issues.length === 0,
-    issues,
-  };
+  return { ready: issues.length === 0, issues };
 }

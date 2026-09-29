@@ -85,15 +85,16 @@ function latestValidCost(items, kind) {
   return (items ?? [])
     .map((item, index) => {
       if (kind === "erp_history" && !isResolvedErpCost(item)) return null;
-      const amount = positiveAmount(item.unitCost ?? item.amount);
+      const raw = item.unitCost ?? item.amount;
+      let amount = null;
+      try { if (raw != null && String(raw).trim() !== "") { const parsed = new Decimal(raw); if (parsed.isFinite() && parsed.gte(0)) amount = parsed; } } catch { /* Invalid references remain missing. */ }
       const currency = String(item.currency ?? DEFAULT_CURRENCY).trim().toUpperCase();
       if (!amount || currency !== DEFAULT_CURRENCY) return null;
-      if (kind === "erp_history" && amount.toDecimalPlaces(4, Decimal.ROUND_DOWN).isZero()) return null;
       const dateText = text(item.effectiveAt ?? item.calculatedAt ?? item.finalizedAt ?? item.createdAt);
       const timestamp = dateText && Number.isFinite(Date.parse(dateText)) ? Date.parse(dateText) : index;
       return {
         ...item,
-        unitCost: kind === "finalized_profit_history"
+        unitCost: kind === "finalized_profit_history" || amount.gt(0) && amount.toDecimalPlaces(kind === "erp_history" ? 4 : 2, Decimal.ROUND_DOWN).isZero()
           ? amount.toNumber()
           : amount.toDecimalPlaces(kind === "erp_history" ? 4 : 2, Decimal.ROUND_DOWN).toNumber(),
         currency,

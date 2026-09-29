@@ -59,17 +59,17 @@ describe("selection read recovery", () => {
     await saveProductCatalogRecord({ draft });
     let release; faults.wait = new Promise(resolve => { release = resolve; }); faults.catalog = true;
     await mount(); await waitFor(() => container.textContent.includes("正在读取商品档案"));
-    await waitFor(() => field("按选品状态筛选").querySelector('option[value="pending_review"]'));
+    await waitFor(() => field("按商品状态筛选").querySelector('option[value="pending_review"]'));
     expect(container.textContent).not.toContain("没有符合当前筛选条件的商品");
-    await change("搜索商品档案", "恢复验收"); await change("按选品状态筛选", "pending_review");
+    await change("搜索商品档案", "恢复验收"); await change("按商品状态筛选", "pending_review");
     await act(async () => release()); faults.wait = null;
     await waitFor(() => container.textContent.includes("商品档案读取失败"));
     expect(container.querySelector('[data-testid="shell"]')).not.toBeNull();
     expect(container.textContent).not.toContain("页面暂时无法读取");
     expect(container.textContent).not.toContain("没有符合当前筛选条件的商品");
-    expect(field("搜索商品档案").value).toBe("恢复验收"); expect(field("按选品状态筛选").value).toBe("pending_review");
+    expect(field("搜索商品档案").value).toBe("恢复验收"); expect(field("按商品状态筛选").value).toBe("pending_review");
     faults.catalog = false; await retry(); await waitFor(() => container.querySelector(".product-table")?.textContent.includes(draft.name));
-    expect(field("搜索商品档案").value).toBe("恢复验收"); expect(field("按选品状态筛选").value).toBe("pending_review");
+    expect(field("搜索商品档案").value).toBe("恢复验收"); expect(field("按商品状态筛选").value).toBe("pending_review");
   });
 
   it("keeps the queue search and filter after a live read fails, and recovers its tab count together", async () => {

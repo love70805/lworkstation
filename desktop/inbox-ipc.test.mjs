@@ -64,4 +64,20 @@ const derivedCapture = enforceWorkspaceContext(normalizeInboxRequest({
 }), committed);
 assert.equal(derivedCapture.body.value.ownerId, "member-a");
 assert.equal(derivedCapture.body.value.memberId, "member-a");
+for (const body of [
+  { catalog: { workspaceId: "workspace-other" } },
+  { envelope: { catalog: { workspaceId: "workspace-other" } } },
+  { result: { catalog: { workspaceId: "workspace-other" } } },
+]) {
+  assert.throws(() => enforceWorkspaceContext(normalizeInboxRequest({
+    route: "/erp/v1/catalog-results", method: "POST", body,
+  }), committed), /工作区/);
+}
+assert.throws(() => enforceWorkspaceContext(normalizeInboxRequest({
+  route: "/erp/v1/requests", method: "POST", body: { catalogRequest: { workspaceId: "workspace-other" } },
+}), committed), /工作区/);
+const catalogAck = enforceWorkspaceContext(normalizeInboxRequest({
+  route: "/erp/v1/catalog-batches", method: "POST", body: { batchId: "catalog-1" },
+}), committed);
+assert.equal(catalogAck.body.value.workspaceId, "workspace-a");
 console.log("desktop inbox IPC contract tests passed");

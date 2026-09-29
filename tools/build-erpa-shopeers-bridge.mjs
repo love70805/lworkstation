@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -15,8 +16,13 @@ const toolsRoot = path.dirname(fileURLToPath(import.meta.url));
 const canonicalExtensionDir = path.join(toolsRoot, "..", "integrations", "erp-assistant-extension");
 const canonicalSourceDir = path.join(canonicalExtensionDir, "src");
 const canonicalManifest = JSON.parse(await fs.readFile(path.join(canonicalExtensionDir, "manifest.json"), "utf8"));
+const frontendRequire = createRequire(path.join(toolsRoot, "..", "frontend", "package.json"));
+const esbuild = createRequire(frontendRequire.resolve("vite/package.json"))("esbuild");
+const catalogBundle = await esbuild.build({ entryPoints: [path.join(toolsRoot, "..", "frontend", "src", "domain", "erpCatalogRequest.js")], bundle: true, absWorkingDir: path.join(toolsRoot, ".."), format: "esm", platform: "node", write: false, legalComments: "none" });
+await fs.writeFile(path.join(toolsRoot, "erp-inbox-server-catalog-contract.mjs"), catalogBundle.outputFiles[0].text, "utf8");
 const secureModules = [
   "background.js",
+  "catalog-collector.js",
   "content.css",
   "content.js",
   "query-hook.js",
@@ -31,6 +37,7 @@ await Promise.all(secureModules.map((file) => fs.copyFile(
   path.join(canonicalSourceDir, file),
   path.join(outputDir, "src", file),
 )));
+await fs.copyFile(path.join(canonicalExtensionDir, "README.md"), path.join(outputDir, "README.md"));
 await fs.rm(path.join(outputDir, "src", "inbox-config.js"), { force: true });
 
 const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));

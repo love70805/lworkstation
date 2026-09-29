@@ -38,7 +38,10 @@ describe("read-only selection reference identity", () => {
       { ...source, platformSku: "ledger-only", platformSkc: "NO-REFERENCE" },
       { platformSku: "", platformSkc: "EMPTY-SKU" },
     ], profitLines: [{ platformSku: "sku-b", groupSkc: "SUPPLIER", quantity: 1 }] });
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
+    expect(rows.find(row => row.canonicalPlatformSku === "LEDGER-ONLY")).toMatchObject({
+      platformSkc: "NO-REFERENCE", referenceUnitCost: null, latestQuantity: 0, latestProfit: null, productId: null,
+    });
     expect(rows.find(row => row.platformSku === "sku-a")).toMatchObject({ platformSkc: "", attribute: "", platformSkcConflict: true, attributeConflict: true });
     expect(rows.find(row => row.platformSku === "sku-b").platformSkc).toBe("");
   });

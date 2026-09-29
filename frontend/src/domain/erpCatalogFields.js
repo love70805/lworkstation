@@ -56,9 +56,10 @@ export function normalizeErpCatalogMappings(values) {
       imageUrl: normalizeErpCatalogUrl(entry.imageUrl),
       attribute: text(entry.attribute),
     };
-    for (const key of ["storeName", "articleNumber", "platform"]) {
+    for (const key of ["storeName", "storeId", "articleNumber", "platform"]) {
       if (hasOwn(entry, key)) mapping[key] = text(entry[key]);
     }
+    if (hasOwn(entry, "unitConversion")) mapping.unitConversion = normalizeErpUnitConversion(entry.unitConversion);
     const key = JSON.stringify(mapping);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -85,10 +86,35 @@ export function normalizeErpPurchaseCatalog(value) {
 
 export function normalizeErpCatalogFields(value, { includeMappings = true } = {}) {
   const fields = {};
+  if (hasOwn(value, "supplierNames")) fields.supplierNames = [...new Set((Array.isArray(value.supplierNames) ? value.supplierNames : []).map(text).filter(Boolean))];
+  if (hasOwn(value, "unitConversion")) fields.unitConversion = normalizeErpUnitConversion(value.unitConversion);
   if (hasOwn(value, "imageUrl")) fields.imageUrl = normalizeErpCatalogUrl(value.imageUrl);
   if (hasOwn(value, "attribute")) fields.attribute = text(value.attribute);
   if (includeMappings && hasOwn(value, "catalogMappings")) fields.catalogMappings = normalizeErpCatalogMappings(value.catalogMappings);
   if (hasOwn(value, "supplier1688Links")) fields.supplier1688Links = normalizeErpSupplierLinks(value.supplier1688Links);
   if (hasOwn(value, "purchaseCatalog")) fields.purchaseCatalog = normalizeErpPurchaseCatalog(value.purchaseCatalog);
   return fields;
+}
+
+export const ERP_CATALOG_COVERAGE_GROUPS = Object.freeze(['directory', 'mappings', 'images', 'suppliers', 'purchaseEvidence']);
+
+export function normalizeErpCatalogCoverage(value) {
+  return Object.fromEntries(ERP_CATALOG_COVERAGE_GROUPS.map(group => {
+    const input = value?.[group];
+    const state = ['complete', 'partial', 'unavailable'].includes(input?.state) ? input.state : 'unavailable';
+    const normalized = { state, reasons: [...new Set((Array.isArray(input?.reasons) ? input.reasons : []).map(text).filter(Boolean))] };
+    if (!input) normalized.reasons.push('not_collected');
+    if (text(input?.attemptedAt) && Number.isFinite(Date.parse(input.attemptedAt))) normalized.attemptedAt = input.attemptedAt;
+    for (const key of ['pageCount', 'recordCount', 'missingCount']) if (Number.isInteger(input?.[key]) && input[key] >= 0) normalized[key] = input[key];
+    return [group, normalized];
+  }));
+}
+
+// A conversion is accepted only with an explicit positive relation and its
+// verified ERP source. A missing ratio never silently becomes one-to-one.
+export function normalizeErpUnitConversion(value) {
+  if (!value || !['erp_platform_mapping', 'erp_purchase_detail'].includes(value.source) || !text(value.sourceRef)) return null;
+  const warehouseUnits = Number(value.warehouseUnits), platformUnits = Number(value.platformUnits);
+  if (!Number.isFinite(warehouseUnits) || !Number.isFinite(platformUnits) || warehouseUnits <= 0 || platformUnits <= 0) return null;
+  return { warehouseUnits, platformUnits, source: value.source, sourceRef: text(value.sourceRef) };
 }

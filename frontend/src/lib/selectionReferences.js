@@ -4,6 +4,8 @@ import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../domain/
 import { sumMoney } from "./money";
 import { buildReferenceIdentityIndex, projectReferenceIdentity } from "../domain/selectionReferenceIdentity";
 import { buildErpProductCatalogIndex, catalogProductName, erpCatalogField, erpCatalogIdentityRows } from "../domain/erpProductCatalog";
+import { buildSelectionSalesLabels } from "../domain/selectionSalesLabels";
+import { resolveProductStatus } from "../domain/selectionStatuses";
 
 function timestamp(item) {
   const value = item?.finalizedAt ?? item?.publishedAt ?? item?.calculatedAt ?? item?.updatedAt ?? "";
@@ -28,14 +30,16 @@ function groupBySku(items) {
 
 function supplierReference(offer) {
   if (!offer) return null;
-  const unitCost = Number(
+  const rawCost = (
     offer.landedUnitCost
       ?? offer.referenceUnitCost
       ?? offer.referenceCost
       ?? offer.unitCost
-      ?? offer.cost,
+      ?? offer.cost
   );
-  if (!Number.isFinite(unitCost) || unitCost <= 0) return null;
+  if (rawCost == null || String(rawCost).trim() === "") return null;
+  const unitCost = Number(rawCost);
+  if (!Number.isFinite(unitCost) || unitCost < 0) return null;
   return {
     id: offer.referenceCostId ?? offer.id,
     platformSku: offer.platformSku ?? offer.sku,
@@ -55,6 +59,11 @@ export function buildSelectionReferenceRows({
   erpCatalogRows = [],
   profitLines = [],
   ledgerIdentityRows = [],
+  erpCatalogReferences = [],
+  salesRows = [],
+  importBatches = [],
+  ledgers = [],
+  workspaceId = null,
 }) {
   const erpCatalogBySku = buildErpProductCatalogIndex([...erpCosts, ...erpCatalogRows]);
   const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku) });
@@ -68,6 +77,7 @@ export function buildSelectionReferenceRows({
   const manualCostBySku = groupBySku((catalogManualCosts ?? []).filter((item) => item.status === "active"));
   const profitBySku = groupBySku(profitLines);
   const offerBySku = groupBySku((supplierOffers ?? []).filter((offer) => offer.status !== "superseded"));
+  const catalogCostBySku = groupBySku(erpCatalogReferences);
   const allSkus = new Set([
     ...platformSkuByCanonical.keys(),
     ...erpBySku.keys(),
@@ -75,9 +85,10 @@ export function buildSelectionReferenceRows({
     ...profitBySku.keys(),
     ...offerBySku.keys(),
     ...erpCatalogBySku.keys(),
+    ...identityBySku.keys(),
   ]);
 
-  return [...allSkus].map((canonicalSku) => {
+  const rows = [...allSkus].map((canonicalSku) => {
     const skuRecord = platformSkuByCanonical.get(canonicalSku);
     const product = skuRecord?.productId ? productById.get(skuRecord.productId) : null;
     const erpCatalog = erpCatalogBySku.get(canonicalSku);
@@ -90,7 +101,7 @@ export function buildSelectionReferenceRows({
       .toSorted((a, b) => String(b.period ?? "").localeCompare(String(a.period ?? "")) || timestamp(b) - timestamp(a));
     const supplierOffer = latest(offerBySku.get(canonicalSku));
     const referenceCost = selectSelectionReferenceCost({
-      erpHistory,
+      erpHistory: erpHistory.filter(row => row.catalogEligible !== false),
       manualConfirmedCost: manualCost ? {
         ...manualCost,
         platformSku: manualCost.platformSku,
@@ -100,7 +111,7 @@ export function buildSelectionReferenceRows({
       } : null,
       finalizedProfitHistory: finalizedHistory,
       supplierLandedCost: supplierReference(supplierOffer),
-    });
+    }) ?? (erpCatalog?.relationshipConflict ? null : latest(catalogCostBySku.get(canonicalSku)));
     const latestProfit = finalizedHistory[0] ?? null;
     const recentPeriods = [...new Set(finalizedHistory.map((item) => item.period).filter(Boolean))].slice(0, 3);
     const recentHistory = finalizedHistory.filter((item) => recentPeriods.includes(item.period));
@@ -108,7 +119,8 @@ export function buildSelectionReferenceRows({
     const recentRevenue = sumMoney(recentHistory.map((item) => item.revenue));
     const recentProfit = sumMoney(recentHistory.map((item) => item.profit));
     const latestQuantity = Number(latestProfit?.quantity ?? 0);
-    const catalogSalePrice = Number(skuRecord?.salePrice ?? skuRecord?.price);
+    const rawSalePrice = skuRecord?.salePrice ?? skuRecord?.price;
+    const catalogSalePrice = rawSalePrice == null || String(rawSalePrice).trim() === "" ? NaN : Number(rawSalePrice);
     const averageSalePrice = latestQuantity > 0
       ? Number(latestProfit.revenue ?? 0) / latestQuantity
       : Number.isFinite(catalogSalePrice) && catalogSalePrice >= 0 ? catalogSalePrice : null;
@@ -128,16 +140,19 @@ export function buildSelectionReferenceRows({
       ?? latest(erpHistory)?.platformSku
       ?? supplierOffer?.platformSku
       ?? canonicalSku;
+    const identity = projectReferenceIdentity(skuRecord, identityBySku.get(canonicalSku));
+    const variantEdits = product?.attributes?.fieldEdits?.variants?.[canonicalSku] ?? {};
 
     return {
       id: canonicalSku,
       canonicalPlatformSku: canonicalSku,
       platformSku,
-      ...projectReferenceIdentity(skuRecord, identityBySku.get(canonicalSku)),
-      warehouseSku: skuRecord?.warehouseSku || erpCatalogField(erpCatalog, "warehouseSku").value,
+      ...identity,
+      attribute: variantEdits.attribute ? skuRecord?.attribute ?? "" : identity.attribute,
+      warehouseSku: variantEdits.warehouseSku ? skuRecord?.warehouseSku ?? "" : skuRecord?.warehouseSku || erpCatalogField(erpCatalog, "warehouseSku").value,
       productId: product?.id ?? null,
       productName: catalogProductName(product?.name || product?.title) || erpName.value || "未建立商品档案",
-      imageUrl: product?.imageUrl || product?.image || skuRecord?.imageUrl || erpImage.value,
+      imageUrl: product?.attributes?.fieldEdits?.imageUrl ? product.imageUrl ?? "" : product?.imageUrl || product?.image || (product?.attributes?.fieldEdits?.variants?.[canonicalSku]?.imageUrl ? skuRecord?.imageUrl ?? "" : skuRecord?.imageUrl || erpImage.value),
       erpProductName: erpName,
       erpImage,
       erpCatalogSuppliers: erpCatalog?.suppliers ?? [],
@@ -146,6 +161,8 @@ export function buildSelectionReferenceRows({
       erpCatalogPurchases: erpCatalog?.purchases ?? [],
       erpCatalogRelationshipConflict: Boolean(erpCatalog?.relationshipConflict),
       productStatus: product?.status ?? "unlinked",
+      userStatus: product ? resolveProductStatus(product).statusId : null,
+      storeNames: [...new Set((erpCatalog?.entries ?? []).map(entry => entry.storeName).filter(Boolean))],
       supplierCode: supplierOffer?.supplierCode ?? "",
       supplierName: supplierOffer?.supplierName || [...new Set((erpCatalog?.suppliers ?? []).map(item => item.supplierName).filter(Boolean))].join("、"),
       referenceUnitCost: referenceCost?.unitCost ?? null,
@@ -153,6 +170,8 @@ export function buildSelectionReferenceRows({
       authoritativeSource: referenceCost?.authoritativeSource ?? null,
       referenceCostId: referenceCost?.id ?? null,
       referenceLedgerId: referenceCost?.ledgerId ?? null,
+      referencePeriod: referenceCost?.period ?? null,
+      referenceEvidence: referenceCost?.referenceOnly ? { evidenceRef: referenceCost.evidenceRef, warehouseSku: referenceCost.warehouseSku, selectedRecordIds: referenceCost.selectedRecordIds, unitConversion: referenceCost.unitConversion, batchId: referenceCost.batchId } : null,
       referenceApprovalId: referenceCost?.costApprovalId ?? referenceCost?.approvalId ?? null,
       referenceCurrency: referenceCost?.currency ?? "CNY",
       referenceUpdatedAt: referenceCost?.publishedAt ?? referenceCost?.finalizedAt ?? referenceCost?.calculatedAt ?? referenceCost?.confirmedAt ?? referenceCost?.updatedAt ?? null,
@@ -180,6 +199,9 @@ export function buildSelectionReferenceRows({
     String(b.latestPeriod ?? "").localeCompare(String(a.latestPeriod ?? ""))
       || a.platformSku.localeCompare(b.platformSku)
   ));
+  const labels = buildSelectionSalesLabels({ salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId });
+  const labelBySkc = new Map(labels.items.map(item => [item.canonicalPlatformSkc, { ...item, period: labels.period, startDate: labels.startDate, endDate: labels.endDate, rangeLabel: labels.rangeLabel }]));
+  return rows.map(row => ({ ...row, automaticSalesTag: row.platformSkc ? labelBySkc.get(canonicalPlatformSkc(row.platformSkc)) ?? null : null }));
 }
 
 /** Keep the reference dataset at SKU granularity while grouping the UI by SKC. */
@@ -210,6 +232,7 @@ export function groupSelectionReferenceRows(rows = []) {
       productName: latest.productName,
       productId: latest.productId,
       latestLedgerId: latest.latestLedgerId,
+      automaticSalesTag: latest.automaticSalesTag,
       hasNegativeProfit: negative,
       variants,
     };

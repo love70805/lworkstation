@@ -169,11 +169,13 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
       supplierCount: 2,
       erpCoveredSkuCount: 0,
     });
-    expect(catalogBeforeErp.offers).toHaveLength(2);
-    expect(catalogBeforeErp.offers.find((offer) => offer.supplierCode === "SUP-B")).toMatchObject({
-      purchaseUnitPrice: null,
-      landedUnitCost: null,
+    expect(catalogBeforeErp.offers).toHaveLength(1);
+    expect(catalogBeforeErp.offers[0]).toMatchObject({ supplierCode: "SUP-A", platformSku: "SKU-MULTI-RED", purchaseUnitPrice: 10, landedUnitCost: 10 });
+    expect(catalogBeforeErp.supplierProfiles.find(supplier => supplier.supplierCode === "SUP-B")).toMatchObject({
+      sourceUrl: "https://detail.1688.com/offer/b",
+      variants: [{ platformSku: "", purchaseUnitPrice: 8 }],
     });
+    expect(catalogBeforeErp.skuReferences).toMatchObject([{ platformSku: "SKU-MULTI-RED", unitCost: 10, source: "supplier_landed" }]);
 
     await db.erpCostRows.add({
       id: "ERP-COST-MULTI-1",
@@ -947,7 +949,8 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
     })).resolves.toHaveLength(2);
 
     const records = await listProductCatalogRecords();
-    expect(records.filter((product) => [first.id, second.id].includes(product.id)).map((product) => product.salesStatus)).toEqual(["off_sale", "off_sale"]);
+    expect(records.filter((product) => [first.id, second.id].includes(product.id)).map((product) => product.productStatus)).toEqual(["off_sale", "off_sale"]);
+    expect(await db.products.bulkGet([first.id, second.id])).toMatchObject([{ salesStatus: first.salesStatus, publicationStatus: first.publicationStatus }, { salesStatus: second.salesStatus, publicationStatus: second.publicationStatus }]);
     const events = (await db.auditEvents.toArray()).filter((event) => event.action === "product_sales_status_bulk_updated");
     expect(events).toHaveLength(2);
     expect(events.every((event) => event.actorId === "reviewer-a" && event.after.salesStatus === "off_sale" && event.after.batchSize === 2)).toBe(true);

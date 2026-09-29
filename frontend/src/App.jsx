@@ -12,6 +12,9 @@ import { runSyncOnce } from "./data/syncRunner";
 import { runtimeConfig } from "./config/runtimeConfig";
 import { parseErpInboxMessage } from "./domain/erpInboxContract";
 import { acknowledgeErpInbox, pollErpInbox } from "./lib/erpInboxTransport";
+import { acknowledgeErpCatalogInbox, pollErpCatalogInbox } from "./lib/erpInboxTransport";
+import { receiveErpCatalogInboxEnvelope } from "./data/repositories/erpCatalogRepository";
+import { validateErpCatalogInboxEnvelope } from "./domain/erpCatalogRequest";
 import { receiveAndAcknowledgeInboxRecord } from "./lib/inboxDelivery";
 import { recoverCompleteErpCostDrafts } from "./lib/erpLegacyDraftRecovery";
 import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectionCaptureContext } from "./lib/selectionCaptureTransport";
@@ -99,12 +102,38 @@ export function createErpInboxPoller(options = {}) {
   };
 }
 
+export async function runErpCatalogInboxCycle({ isDisposed = () => false, getContext = getActiveMemberContext, pollRecords = pollErpCatalogInbox, receive = receiveErpCatalogInboxEnvelope, acknowledge = acknowledgeErpCatalogInbox, emit = envelope => window.dispatchEvent(new CustomEvent("shopeers:erp-catalog-received", { detail: envelope })) } = {}) {
+  const failures = []; let received = 0;
+  try {
+    const context = await getContext();
+    if (isDisposed()) return { received, failures };
+    const records = await pollRecords({ workspaceId: context.workspaceId });
+    for (const record of records) {
+      if (isDisposed()) break;
+      try {
+        const validated = validateErpCatalogInboxEnvelope(record.envelope, { expectedWorkspaceId: context.workspaceId });
+        await receiveAndAcknowledgeInboxRecord({ record, receive: () => receive({ envelope: validated.envelope }), acknowledge: () => acknowledge(record.deliveryId, { workspaceId: context.workspaceId }) });
+        received++; emit(validated.envelope);
+      } catch (error) { failures.push(error); }
+    }
+  } catch (error) { failures.push(error); }
+  return { received, failures };
+}
+
 function ErpInboxListener() {
   useEffect(() => {
     let disposed = false;
     const poll = createErpInboxPoller({ isDisposed: () => disposed });
     void poll();
-    const timer = window.setInterval(poll, 5000);
+    let catalogRunning = false;
+    const pollCatalog = async () => {
+      if (disposed || catalogRunning) return;
+      catalogRunning = true;
+      try { await runErpCatalogInboxCycle({ isDisposed: () => disposed }); }
+      finally { catalogRunning = false; }
+    };
+    void pollCatalog();
+    const timer = window.setInterval(() => { void poll(); void pollCatalog(); }, 5000);
     return () => {
       disposed = true;
       window.clearInterval(timer);

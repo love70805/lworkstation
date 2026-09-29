@@ -30,6 +30,14 @@ afterEach(async () => {
 });
 
 describe("selection reference shared SKU rows", () => {
+  it("shows verified ERP purchase references separately with zero and small positive precision", async () => {
+    await render([variant("UNSOLD-ZERO", { referenceKind: "erp_catalog_reference", authoritativeSource: "erp_reference", referenceUnitCost: 0, latestLedgerId: null, latestPeriod: null }), variant("UNSOLD-TINY", { referenceKind: "erp_catalog_reference", authoritativeSource: "erp_reference", referenceUnitCost: 0.0003 })]);
+    const rows = [...container.querySelectorAll("tbody > tr")];
+    expect(rows[0].querySelector(".reference-cost-cell").textContent).toContain("¥0.0000");
+    expect(rows[0].querySelector(".reference-cost-cell").textContent).toContain("ERP 采购参考");
+    expect(rows[1].querySelector(".reference-cost-cell").textContent).toContain("¥0.0003");
+  });
+
   it("keeps each SKU, source, cost and profit in one actual row when long identity evidence expands", async () => {
     const longSku = "SKU-1234567890123456789012345678901234567890";
     const variants = [variant(longSku, { attribute: "象牙白色 / 加长袖口 / 最大尺寸 / 双层面料", ...ledgerIdentity }), variant("SKU-B", { referenceUnitCost: 7.34, latestProfit: -5 }), variant("SKU-C", { referenceUnitCost: 0 })];
@@ -81,7 +89,7 @@ describe("selection reference shared SKU rows", () => {
   it("keeps the archive action at group level and existing product editing distinct from ledger navigation", async () => {
     const props = await render([variant("SKU-A"), variant("SKU-B")], { group: { platformSkc: "SKC-1", skuCount: 2, productId: "PRODUCT-1", productName: "商品档案", variants: [variant("SKU-A"), variant("SKU-B")] } });
     const action = container.querySelector("caption button");
-    expect(action.textContent).toBe("编辑档案");
+    expect(action.textContent).toBe("查看档案");
     await act(async () => action.click());
     expect(props.onEdit).toHaveBeenCalledOnce();
     expect(props.onOpenLedger).not.toHaveBeenCalled();

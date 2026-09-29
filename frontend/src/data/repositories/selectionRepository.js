@@ -11,6 +11,10 @@ import { calculateSupplierLandedUnitCost, validateProductDraft } from "../../dom
 import { normalizeProductTags, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../../domain/productSelectionDraft";
 import { buildSelectionReferenceRows } from "../../lib/selectionReferences";
 import { catalogProductName, prefillErpProductDraft } from "../../domain/erpProductCatalog";
+import { productFieldEdits, supplierQuoteEdited } from "../../domain/productMetadata";
+import { erpCatalogReferenceCosts } from "../../domain/erpCatalogReference";
+import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
+import { readTrustedErpCatalogRecords, readTrustedErpCostInboxCatalogRecords } from "./erpCatalogRepository";
 import { buildProductDataReadiness, normalizeProductPublicationStatus } from "../../domain/productPublication";
 import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../../domain/profitCalculations";
 import {
@@ -18,6 +22,7 @@ import {
   defaultSelectionStatusDefinitions,
   normalizeSelectionStatusDefinitions,
   resolveSelectionStatusId,
+  resolveProductStatus,
   selectionStatusById,
 } from "../../domain/selectionStatuses";
 import { db } from "../db/clientDatabase";
@@ -485,8 +490,8 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
     const product = await db.products.get(productId);
     if (!product || !selectionRecordVisible(product, memberContext)) return null;
     const [skuRows, storedOffers] = await Promise.all([
-      db.platformSkus.where("productId").equals(productId).toArray(),
-      db.supplierOffers.where("productId").equals(productId).toArray(),
+      db.platformSkus.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
+      db.supplierOffers.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
     ]);
     const offers = storedOffers.filter(activeSupplierOffer);
     const offerBySku = new Map();
@@ -522,12 +527,14 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
       const naturalKey = catalogSupplierNaturalKey(profile);
       const current = supplierGroups.get(profile.supplierId) ?? (naturalKey ? supplierGroupsByNaturalKey.get(naturalKey) : null);
       if (current) {
+        const protectedFields = product.attributes?.fieldEdits?.suppliers?.[profile.supplierId] ?? {};
+        const isPrimary = current === supplierGroups.values().next().value;
         supplierGroups.set(profile.supplierId, current);
         if (naturalKey) supplierGroupsByNaturalKey.set(naturalKey, current);
         current.supplierCode ||= profile.supplierCode;
-        current.supplierName ||= profile.supplierName;
+        if (!protectedFields.supplierName && !(isPrimary && product.attributes?.fieldEdits?.supplierName)) current.supplierName ||= profile.supplierName;
         current.sourceProductId ||= profile.sourceProductId;
-        current.sourceUrl ||= profile.sourceUrl;
+        if (!protectedFields.sourceUrl && !(isPrimary && product.attributes?.fieldEdits?.sourceUrl)) current.sourceUrl ||= profile.sourceUrl;
         current.shippingAmount ||= profile.shippingAmount;
         current.handlingFee ||= profile.handlingFee;
         if (!current.profileVariants.length && profile.variants.length) current.profileVariants = profile.variants;
@@ -607,6 +614,13 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
       ownerId: product.ownerId ?? "",
       visibility: product.visibility ?? "workspace",
       salesStatus: resolveSelectionStatusId(product.salesStatus ?? (product.status === "active" ? "on_sale" : "pending_review"), statusDefinitions),
+      productStatus: resolveProductStatus(product, statusDefinitions).legacyConflict ? "" : resolveProductStatus(product, statusDefinitions).statusId,
+      legacyStatusConflict: resolveProductStatus(product, statusDefinitions).legacyConflict,
+      legacyStatuses: resolveProductStatus(product, statusDefinitions).legacyStatuses,
+      fieldEdits: product.attributes?.fieldEdits ?? {},
+      catalogOrigin: product.attributes?.catalogOrigin ?? null,
+      quoteEditIntent: { supplierIds: [] },
+      excludedIdentitySkus: product.attributes?.excludedIdentitySkus ?? [],
       tags: Array.isArray(product.tags) ? product.tags : [],
       notes: product.notes ?? "",
       suppliers,
@@ -641,6 +655,10 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
     return getProductEditorSnapshot({ productId: linkedProductId });
   }
   const projection = prefillErpProductDraft({ draft, rows, platformSku, platformSkc, ownership });
+  const relatedRows = rows.filter(row => projection.draft.platformSkc && row.platformSkc && canonicalPlatformSkc(row.platformSkc) === canonicalPlatformSkc(projection.draft.platformSkc));
+  projection.draft.automaticSalesTag = relatedRows.find(row => row.automaticSalesTag)?.automaticSalesTag ?? null;
+  projection.prefill.referencePeriod = relatedRows.find(row => row.referencePeriod)?.referencePeriod ?? snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(projection.draft.platformSkc)))?.period ?? null;
+  projection.prefill.catalogCoverage = snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(projection.draft.platformSkc)))?.groups ?? null;
   if (!projection.draft.name && !projection.prefill.sources.length) projection.draft.name = catalogProductName(productName);
   if (!projection.draft.variants.length && platformSku && !anchor?.productId) projection.draft.variants = [{ platformSku: normalizePlatformSku(platformSku), attribute: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1 }];
   return { mode: "new", product: null, capture: null, ...projection, validation: validateProductDraft(projection.draft) };
@@ -649,7 +667,13 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
 async function productEditorErpPrefill({ draft, productId }) {
   const context = await getActiveMemberContext();
   const [snapshot, ownership] = await Promise.all([getSelectionReferenceSnapshot(), db.platformSkus.where("workspaceId").equals(context.workspaceId).toArray()]);
-  return prefillErpProductDraft({ draft, productId, rows: buildSelectionReferenceRows(snapshot), ownership });
+  const rows = buildSelectionReferenceRows(snapshot);
+  const projection = prefillErpProductDraft({ draft, productId, rows, ownership });
+  const related = rows.filter(row => row.platformSkc && draft.platformSkc && canonicalPlatformSkc(row.platformSkc) === canonicalPlatformSkc(draft.platformSkc));
+  projection.draft.automaticSalesTag = related.find(row => row.automaticSalesTag)?.automaticSalesTag ?? null;
+  projection.prefill.referencePeriod = related.find(row => row.referencePeriod)?.referencePeriod ?? snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(draft.platformSkc)))?.period ?? null;
+  projection.prefill.catalogCoverage = snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(draft.platformSkc)))?.groups ?? null;
+  return projection;
 }
 
 export async function listProductCatalogRecords() {
@@ -663,17 +687,20 @@ export async function listProductCatalogRecords() {
     getActiveMemberContext(),
   ]);
   const skusByProduct = new Map();
-  platformSkus.forEach((sku) => {
+  platformSkus.filter(sku => (sku.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId).forEach((sku) => {
     if (!skusByProduct.has(sku.productId)) skusByProduct.set(sku.productId, []);
     skusByProduct.get(sku.productId).push(sku);
   });
   const offersByProduct = new Map();
-  supplierOffers.filter(activeSupplierOffer).forEach((offer) => {
+  supplierOffers.filter(offer => activeSupplierOffer(offer) && (offer.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId).forEach((offer) => {
     if (!offersByProduct.has(offer.productId)) offersByProduct.set(offer.productId, []);
     offersByProduct.get(offer.productId).push(offer);
   });
   const latestErpCostBySku = new Map();
   const statusDefinitions = await getSelectionStatusDefinitions();
+  const projectedReferences = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+  const projectedReferenceBySku = new Map(projectedReferences.map(row => [row.canonicalPlatformSku, row]));
+  const automaticTagBySkc = new Map(projectedReferences.filter(row => row.platformSkc && row.automaticSalesTag).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag]));
   erpCosts
     .filter((cost) => !cost.workspaceId || cost.workspaceId === context.workspaceId)
     .forEach((cost) => {
@@ -733,20 +760,10 @@ export async function listProductCatalogRecords() {
         const manualCost = latestManualCostBySku.get(key);
         const finalizedCost = latestFinalizedCostBySku.get(key);
         const supplierCost = supplierCostBySku.get(key);
-        const unitCost = erpCost
-          ? Number(erpCost.unitCost)
-          : manualCost
-            ? Number(manualCost.amount)
-            : finalizedCost
-              ? Number(finalizedCost.formalUnitCost ?? finalizedCost.unitCost)
-              : supplierCost;
-        const source = erpCost
-          ? "erp"
-          : manualCost
-            ? "manual_confirmed"
-            : finalizedCost
-              ? "finalized_profit_history"
-              : supplierCost == null ? null : "supplier_landed";
+        const projectedReference = projectedReferenceBySku.get(key);
+        const unitCost = projectedReference?.referenceUnitCost ?? null;
+        const source = projectedReference?.referenceKind === "erp_history" ? "erp"
+          : projectedReference?.referenceKind === "erp_catalog_reference" ? "erp_reference" : projectedReference?.referenceKind ?? null;
         const referenceProfit = source && salePrice != null
           ? calculateReferenceProfitLine({
             revenue: salePrice,
@@ -765,6 +782,8 @@ export async function listProductCatalogRecords() {
           salePrice,
           unitCost: source ? unitCost : null,
           source,
+          referencePeriod: projectedReference?.referencePeriod ?? null,
+          referenceEvidence: projectedReference?.referenceEvidence ?? null,
           manualCostId: manualCost?.id ?? null,
           supplierCount: new Set(supplierOffers.map((offer) => `${offer.supplierCode ?? ""}\u001f${offer.supplierName ?? ""}\u001f${offer.sourceUrl ?? ""}`)).size,
           referenceUnitProfit: referenceProfit?.profit ?? null,
@@ -773,6 +792,7 @@ export async function listProductCatalogRecords() {
       });
       const referenceCosts = skuReferences.map((item) => item.unitCost).filter((amount) => amount != null);
       const erpCoveredSkuCount = skuReferences.filter((item) => item.source === "erp").length;
+      const erpReferenceCoveredSkuCount = skuReferences.filter((item) => item.source === "erp_reference").length;
       const manualCoveredSkuCount = skuReferences.filter((item) => item.source === "manual_confirmed").length;
       const finalizedCoveredSkuCount = skuReferences.filter((item) => item.source === "finalized_profit_history").length;
       const supplierCoveredSkuCount = skuReferences.filter((item) => item.source === "supplier_landed").length;
@@ -781,7 +801,7 @@ export async function listProductCatalogRecords() {
       const warehouseMappedSkuCount = skuReferences.filter((item) => item.canonicalWarehouseSku).length;
       const dataReadiness = buildProductDataReadiness({
         skuCount: skus.length,
-        erpCoveredSkuCount,
+        erpCoveredSkuCount: erpCoveredSkuCount + erpReferenceCoveredSkuCount,
         profitHistorySkuCount,
         warehouseMappedSkuCount,
       });
@@ -789,6 +809,9 @@ export async function listProductCatalogRecords() {
       const highestReferenceCost = referenceCosts.length > 0 ? Math.max(...referenceCosts) : null;
       return {
         ...product,
+        productStatus: resolveProductStatus(product, statusDefinitions).statusId,
+        legacyStatusConflict: resolveProductStatus(product, statusDefinitions).legacyConflict,
+        automaticSalesTag: product.platformSkc ? automaticTagBySkc.get(canonicalPlatformSkc(product.platformSkc)) ?? null : null,
         image: product.imageUrl ?? product.image ?? null,
         skuCount: skus.length,
         pendingVariantCount,
@@ -808,12 +831,15 @@ export async function listProductCatalogRecords() {
           coveredSkuCount: referenceCoveredSkuCount,
           missingSkuCount: Math.max(0, skus.length - referenceCoveredSkuCount),
           erpCoveredSkuCount,
+          erpReferenceCoveredSkuCount,
           manualCoveredSkuCount,
           finalizedCoveredSkuCount,
           supplierCoveredSkuCount,
         },
         costSource: erpCoveredSkuCount === skus.length && skus.length > 0
           ? "erp"
+          : erpReferenceCoveredSkuCount === referenceCoveredSkuCount && referenceCoveredSkuCount > 0
+            ? "erp_reference"
           : referenceCoveredSkuCount === 0
             ? null
             : manualCoveredSkuCount === referenceCoveredSkuCount
@@ -824,6 +850,7 @@ export async function listProductCatalogRecords() {
                 ? "supplier_landed"
                 : "mixed",
         erpCoveredSkuCount,
+        erpReferenceCoveredSkuCount,
         referenceCoveredSkuCount,
         profitHistorySkuCount,
         warehouseMappedSkuCount,
@@ -1019,14 +1046,14 @@ export async function bulkUpdateProductCatalogSalesStatus({ productIds, salesSta
   const updatedAt = new Date().toISOString();
   const updatedProducts = [];
 
-  await db.transaction("rw", db.products, db.auditEvents, db.platformSkus, db.supplierOffers, db.catalogManualCosts, db.erpCostRows, db.erpCostBatches, db.erpCostRequests, db.profitLines, db.salesRows, db.ledgers, db.importBatches, db.settings, db.workspaces, async () => {
+  await db.transaction("rw", db.products, db.auditEvents, db.platformSkus, db.supplierOffers, db.catalogManualCosts, db.erpCostRows, db.erpCostBatches, db.erpCostRequests, db.erpCostInbox, db.profitLines, db.salesRows, db.ledgers, db.importBatches, db.settings, db.workspaces, async () => {
     const products = await db.products.bulkGet(ids);
     for (const product of products) {
       if (!product) throw new Error("部分商品记录不存在，页面已刷新。");
       if (!selectionRecordVisible(product, context)) throw new Error("当前账号无权修改选中的商品。");
     }
 
-    if (statusDefinition.requiresReadiness) {
+    if (statusDefinition.requiresReadiness || statusDefinition.id === "on_sale") {
       const historicalRows = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
       for (const product of products) {
         const snapshot = await getProductEditorSnapshot({ productId: product.id });
@@ -1035,7 +1062,7 @@ export async function bulkUpdateProductCatalogSalesStatus({ productIds, salesSta
     }
 
     for (const product of products) {
-      const savedProduct = { ...product, salesStatus: statusDefinition.id, updatedAt };
+      const savedProduct = { ...product, productStatus: statusDefinition.id, updatedAt };
       await db.products.put(savedProduct);
       updatedProducts.push(savedProduct);
       await db.auditEvents.add({
@@ -1066,6 +1093,7 @@ export async function saveProductCatalogRecord({
   status = "active",
   savedBy = "local-user",
   workspaceId = null,
+  quoteEditIntent = draft?.quoteEditIntent ?? null,
 }) {
   await ensureDefaultWorkspace();
   const memberContext = await getActiveMemberContext();
@@ -1115,7 +1143,7 @@ export async function saveProductCatalogRecord({
       variants: Array.isArray(supplier.variants) ? supplier.variants : [],
     }))
     .filter(catalogSupplierHasData);
-  const supplierProfiles = catalogSupplierProfiles(normalizedSuppliers);
+  let supplierProfiles = catalogSupplierProfiles(normalizedSuppliers);
   const pendingVariants = catalogPendingVariants(normalizedDraft.variants);
   const primarySupplier = supplierProfiles[0] ?? {};
   const now = new Date().toISOString();
@@ -1133,6 +1161,7 @@ export async function saveProductCatalogRecord({
     db.erpCostRows,
     db.erpCostBatches,
     db.erpCostRequests,
+    db.erpCostInbox,
     db.profitLines,
     db.salesRows,
     db.ledgers,
@@ -1147,10 +1176,14 @@ export async function saveProductCatalogRecord({
       if (existingProduct && !selectionRecordVisible(existingProduct, memberContext)) throw new Error("当前账号无权访问该商品。");
       if (capture && !selectionRecordVisible(capture, memberContext)) throw new Error("当前账号无权访问该采集记录。");
       if (capture && ["confirmed", "ignored"].includes(capture.status)) throw new Error("该采集记录已经结束处理。");
+      const excluded = new Set((normalizedDraft.excludedIdentitySkus ?? []).map(canonicalPlatformSku));
+      const unresolved = (normalizedDraft.identityConflicts ?? []).filter(item => !excluded.has(canonicalPlatformSku(item.platformSku)));
+      if (unresolved.length) throw new Error(`平台 SKU ${unresolved.map(item => item.platformSku).join("、")} 的归属有冲突，请定位并明确排除冲突分支后保存。`);
+      if (normalizedDraft.legacyStatusConflict && !normalizedDraft.statusEdited) throw new Error("旧状态含有矛盾信息，请选择本次商品状态后保存。");
       // A draft-save call must not silently downgrade an existing formal record.
       if (existingProduct?.status === "active") status = "active";
       if (status === "active") {
-        const statusDefinition = selectionStatusById(statusDefinitions, normalizedDraft.salesStatus);
+        const statusDefinition = selectionStatusById(statusDefinitions, normalizedDraft.productStatus ?? normalizedDraft.salesStatus);
         const historicalRows = statusDefinition?.requiresReadiness ? buildSelectionReferenceRows(await getSelectionReferenceSnapshot()) : [];
         assertProductSaveReadiness(normalizedDraft, statusDefinition, historicalRows);
       }
@@ -1165,8 +1198,23 @@ export async function saveProductCatalogRecord({
         }
       }
 
-      const existingSkus = await db.platformSkus.where("productId").equals(resolvedProductId).toArray();
-      const existingOffers = await db.supplierOffers.where("productId").equals(resolvedProductId).toArray();
+      const existingSkus = await db.platformSkus.where("productId").equals(resolvedProductId).filter(row => (row.workspaceId ?? workspaceId) === workspaceId).toArray();
+      const existingOffers = await db.supplierOffers.where("productId").equals(resolvedProductId).filter(row => (row.workspaceId ?? workspaceId) === workspaceId).toArray();
+      const oldProfiles = catalogDisplaySupplierProfiles(existingProduct, existingOffers);
+      normalizedSuppliers.forEach((supplier, index) => {
+        const original = (draft.suppliers?.length ? draft.suppliers[index] : draft) ?? {};
+        const old = oldProfiles.find(profile => profile.supplierId === supplier.supplierId)
+          ?? (!original.supplierId && !original.id ? oldProfiles[index] : null);
+        if (!old) return;
+        supplier.supplierId = old.supplierId;
+        if (!Object.hasOwn(original, "supplierCode")) supplier.supplierCode = old.supplierCode;
+        if (!Object.hasOwn(original, "sourceProductId")) supplier.sourceProductId = old.sourceProductId;
+        if (!Object.hasOwn(original, "shippingAmount") || quoteEditIntent != null && !(quoteEditIntent.supplierIds ?? []).includes(supplier.supplierId)) supplier.shippingAmount = old.shippingAmount;
+        if (!Object.hasOwn(original, "handlingFee") || quoteEditIntent != null && !(quoteEditIntent.supplierIds ?? []).includes(supplier.supplierId)) supplier.handlingFee = old.handlingFee;
+      });
+      supplierProfiles = catalogSupplierProfiles(normalizedSuppliers);
+      const fieldEdits = productFieldEdits({ draft, existingProduct, existingSkus });
+      if (existingProduct && normalizedSkc && existingSkus.some(sku => sku.platformSkc && canonicalPlatformSkc(sku.platformSkc) !== canonicalSkc && normalizedVariants.some(variant => variant.canonicalPlatformSku === sku.canonicalPlatformSku))) throw new Error("已有平台 SKU 的 SKC 关系发生冲突，不能静默改绑，请定位对应分支。");
       const skuByCanonical = new Map(existingSkus.map((sku) => [sku.canonicalPlatformSku, sku]));
       const skuRows = normalizedVariants.map((variant) => ({
         id: skuByCanonical.get(variant.canonicalPlatformSku)?.id ?? makeId("SKU"),
@@ -1196,7 +1244,7 @@ export async function saveProductCatalogRecord({
           supplierId: catalogSupplierIdentity(offer, offer.id),
           canonicalPlatformSku: offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku),
         }), offer]));
-      const activeOfferKeys = new Set();
+      const activeOfferKeys = new Set(activeOfferByKey.keys());
       const replacementRows = [];
       const nextActiveOffers = normalizedSuppliers.flatMap((supplier, supplierIndex) => {
         const legacyPrimaryQuote = supplierIndex === 0 && supplier.catalogSource !== "erp";
@@ -1213,8 +1261,22 @@ export async function saveProductCatalogRecord({
             unitsPerPack: supplierVariant.unitsPerPack ?? (legacyPrimaryQuote ? variant.unitsPerPack : 1),
           };
         });
+        const pendingProfile = oldProfiles.find(profile => profile.supplierId === supplier.supplierId);
+        const pendingQuotes = pendingProfile?.variants?.filter(item => !catalogText(item.platformSku) && catalogText(item.purchaseUnitPrice)) ?? [];
+        const pricedVariants = supplierVariants.filter(item => catalogText(item.purchaseUnitPrice));
+        // First assigning platform identities materializes an already saved pending
+        // quotation. Only unchanged quote values qualify; metadata cannot create one.
+        const pendingBinding = Boolean(existingProduct && existingSkus.length === 0 && existingOffers.length === 0
+          && pricedVariants.length > 0 && pricedVariants.length === pendingQuotes.length
+          && pricedVariants.every((variant, index) => {
+            const pending = pendingQuotes.find(item => catalogText(item.sourceSku) && catalogText(item.sourceSku) === catalogText(variant.sourceSku)) ?? pendingQuotes[index];
+            return ["purchaseUnitPrice", "purchasePackCount", "unitsPerPack"].every(field => Number(variant[field]) === Number(pending?.[field]));
+          }));
+        const editQuote = supplierQuoteEdited({ supplier, supplierIndex, variants: supplierVariants, existingOffers, isNew: !existingProduct, intent: quoteEditIntent, pendingBinding });
+        if (!editQuote) return existingOffers.filter(offer => activeSupplierOffer(offer) && catalogSupplierIdentity(offer, offer.id) === supplier.supplierId);
+        for (const offer of existingOffers.filter(offer => activeSupplierOffer(offer) && catalogSupplierIdentity(offer, offer.id) === supplier.supplierId)) activeOfferKeys.delete(offer.offerKey ?? catalogSupplierOfferKey({ productId: resolvedProductId, supplierId: supplier.supplierId, canonicalPlatformSku: offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku) }));
         const totalPurchasePacks = supplierVariants.reduce((sum, variant) => sum + Number(variant.purchasePackCount ?? 0), 0);
-        return supplierVariants.filter(variant => supplier.catalogSource !== "erp" || catalogText(variant.purchaseUnitPrice)).map((variant) => {
+        return supplierVariants.filter(variant => catalogText(variant.purchaseUnitPrice)).map((variant) => {
           const landedUnitCost = calculateSupplierLandedUnitCost({
             purchaseUnitPrice: variant.purchaseUnitPrice,
             shippingAmount: supplier.shippingAmount,
@@ -1245,7 +1307,7 @@ export async function saveProductCatalogRecord({
             supplierCode: supplier.supplierCode,
             supplierName: supplier.supplierName,
             sourceSku: catalogText(variant.sourceSku),
-            purchaseUnitPrice: Number(variant.purchaseUnitPrice) || null,
+            purchaseUnitPrice: Number(variant.purchaseUnitPrice),
             shippingAmount: supplier.shippingAmount,
             handlingFee: supplier.handlingFee,
             purchasePackCount: Number(variant.purchasePackCount) || 0,
@@ -1276,30 +1338,34 @@ export async function saveProductCatalogRecord({
         })))
         .map((offer) => ({ ...offer, status: "superseded", supersededAt: now, updatedAt: now }));
       const unchangedHistory = existingOffers.filter((offer) => !activeSupplierOffer(offer));
+      const untouchedOffers = existingOffers.filter(offer => activeSupplierOffer(offer) && activeOfferKeys.has(offer.offerKey ?? catalogSupplierOfferKey({ productId: resolvedProductId, supplierId: catalogSupplierIdentity(offer, offer.id), canonicalPlatformSku: offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku) })) && !nextActiveOffers.some(item => item.offerKey === (offer.offerKey ?? catalogSupplierOfferKey({ productId: resolvedProductId, supplierId: catalogSupplierIdentity(offer, offer.id), canonicalPlatformSku: offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku) }))));
+      nextActiveOffers.push(...untouchedOffers);
       const offerRows = [...unchangedHistory, ...replacementRows, ...retiredRows, ...nextActiveOffers];
       const referenceCosts = nextActiveOffers.map((offer) => offer.landedUnitCost).filter((cost) => Number.isFinite(cost) && cost > 0);
       savedProduct = {
+        ...(existingProduct ?? {}),
         id: resolvedProductId,
         workspaceId,
         name: catalogText(normalizedDraft.name),
-        englishTitle: catalogText(normalizedDraft.englishTitle),
-        salesPlatform: catalogText(normalizedDraft.salesPlatform),
-        publicationStatus: normalizeProductPublicationStatus(normalizedDraft.publicationStatus),
+        englishTitle: existingProduct?.englishTitle ?? catalogText(normalizedDraft.englishTitle),
+        salesPlatform: existingProduct?.salesPlatform ?? catalogText(normalizedDraft.salesPlatform),
+        publicationStatus: existingProduct?.publicationStatus ?? normalizeProductPublicationStatus(normalizedDraft.publicationStatus),
+        productStatus: resolveProductStatus({ ...normalizedDraft, productStatus: normalizedDraft.productStatus ?? normalizedDraft.salesStatus }, statusDefinitions).statusId,
         platformSkc: normalizedSkc,
         canonicalPlatformSkc: canonicalSkc,
         store: catalogText(normalizedDraft.store),
         imageUrl: catalogText(normalizedDraft.imageUrl),
-        packageWeight: Number(normalizedDraft.packageWeight) || null,
+        packageWeight: existingProduct?.packageWeight ?? (Number(normalizedDraft.packageWeight) || null),
         supplierCode: primarySupplier.supplierCode ?? catalogText(normalizedDraft.supplierCode),
         supplierName: primarySupplier.supplierName ?? catalogText(normalizedDraft.supplierName),
         sourceProductId: primarySupplier.sourceProductId ?? catalogText(normalizedDraft.sourceProductId),
         sourceUrl: primarySupplier.sourceUrl ?? catalogText(normalizedDraft.sourceUrl),
         ownerId: existingProduct?.ownerId ?? capture?.ownerId ?? (catalogText(normalizedDraft.ownerId) || memberContext.memberId),
         visibility: catalogText(normalizedDraft.visibility) || existingProduct?.visibility || (memberContext.canSeeAllSelection ? "workspace" : "private"),
-        salesStatus: resolveSelectionStatusId(catalogText(normalizedDraft.salesStatus) || (status === "active" ? "on_sale" : "pending_review"), statusDefinitions),
+        salesStatus: existingProduct ? existingProduct.salesStatus : resolveSelectionStatusId(catalogText(normalizedDraft.salesStatus) || (status === "active" ? "on_sale" : "pending_review"), statusDefinitions),
         tags: normalizeProductTags(normalizedDraft.tags),
         notes: catalogText(normalizedDraft.notes),
-        sourceCaptureId: captureId,
+        sourceCaptureId: captureId ?? existingProduct?.sourceCaptureId ?? null,
         status,
         skuCount: skuRows.length,
         referenceCost: referenceCosts.length > 0 ? Math.min(...referenceCosts) : null,
@@ -1308,13 +1374,16 @@ export async function saveProductCatalogRecord({
           ...(existingProduct?.attributes ?? {}),
           supplierProfiles,
           pendingVariants,
+          fieldEdits,
+          catalogOrigin: existingProduct?.attributes?.catalogOrigin ?? normalizedDraft.catalogOrigin ?? null,
+          excludedIdentitySkus: normalizedDraft.excludedIdentitySkus ?? existingProduct?.attributes?.excludedIdentitySkus ?? [],
         },
         createdAt: existingProduct?.createdAt ?? now,
         updatedAt: now,
       };
 
       await db.products.put(savedProduct);
-      await db.platformSkus.where("productId").equals(resolvedProductId).delete();
+      await db.platformSkus.bulkDelete(existingSkus.map(sku => sku.id));
       if (skuRows.length > 0) await db.platformSkus.bulkAdd(skuRows);
       if (offerRows.length > 0) await db.supplierOffers.bulkPut(offerRows);
 
@@ -1439,7 +1508,7 @@ export async function saveCatalogManualCost({
 
 export async function getSelectionReferenceSnapshot() {
   const context = await getActiveMemberContext();
-  const [platformSkus, products, supplierOffers, catalogManualCosts, erpCosts, profitLines, salesRows, ledgers, importBatches, erpBatches, erpRequests] = await Promise.all([
+  const [platformSkus, products, supplierOffers, catalogManualCosts, erpCosts, profitLines, salesRows, ledgers, importBatches, erpBatches, erpRequests, independentCatalogRecords, receivedCatalogRecords] = await Promise.all([
     db.platformSkus.toArray(),
     db.products.toArray(),
     db.supplierOffers.toArray(),
@@ -1451,6 +1520,8 @@ export async function getSelectionReferenceSnapshot() {
     db.importBatches.toArray(),
     db.erpCostBatches.toArray(),
     db.erpCostRequests.toArray(),
+    readTrustedErpCatalogRecords(context),
+    readTrustedErpCostInboxCatalogRecords(context),
   ]);
   const visibleProducts = products.filter((product) => selectionRecordVisible(product, context));
   const visibleProductIds = new Set(visibleProducts.map((product) => product.id));
@@ -1463,6 +1534,8 @@ export async function getSelectionReferenceSnapshot() {
       && request?.workspaceId === batch.workspaceId && request?.ledgerId === batch.ledgerId
       && batch.sourceContract?.requestId === request?.id;
   }).map(batch => [batch.id, batch]));
+  const publishedSourceBatchIds = new Set([...publishedCatalogBatches.values()].map(batch => batch.sourceContract.batchId));
+  const pendingCatalogRecords = receivedCatalogRecords.filter(record => !publishedSourceBatchIds.has(record.batchId));
   const catalogScope = batch => {
     const requested = new Set((requestById.get(batch.requestId)?.platformSkcs ?? []).map(item => item?.platformSkc ?? item).filter(Boolean).map(canonicalPlatformSkc));
     return (batch.sourceContract?.query?.platformSkcs ?? []).map(item => item?.platformSkc ?? item).filter(value => value && requested.has(canonicalPlatformSkc(value)));
@@ -1479,7 +1552,16 @@ export async function getSelectionReferenceSnapshot() {
     ledgerId: row.ledgerId, period: ledgerById.get(row.ledgerId).period, batchId: row.batchId,
     store: row.store, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow,
   }));
+  const catalogEnvelopes = [
+    ...[...publishedCatalogBatches.values()].map(batch => ({ envelope: { workspaceId: batch.workspaceId, ledgerId: batch.ledgerId, query: { unit: "platform_skc", platformSkcs: catalogScope(batch) }, rows: (batch.sourceContract.catalogRows ?? []).filter(row => catalogRowMatches(row, batch)), warehouseEvidence: batch.sourceContract.warehouseEvidence ?? [] }, batchId: batch.id, publishedAt: batch.publishedAt, period: ledgerById.get(batch.ledgerId)?.period, coverage: batch.sourceContract.catalogCoverage })),
+    ...independentCatalogRecords.map(record => ({ envelope: record.catalog, batchId: record.catalog.batchId, publishedAt: record.receivedAt, period: record.catalog.ledgerPeriod, coverage: record.catalog.coverage })),
+    ...pendingCatalogRecords,
+  ];
   return {
+    workspaceId: context.workspaceId,
+    salesRows: salesRows.filter(row => workspaceMatch(row) && batchById.get(row.batchId)?.ledgerId === row.ledgerId),
+    importBatches: [...batchById.values()],
+    ledgers: [...ledgerById.values()],
     platformSkus: platformSkus.filter((sku) => workspaceMatch(sku) && (!sku.productId || visibleProductIds.has(sku.productId))),
     products: visibleProducts,
     supplierOffers: supplierOffers.filter((offer) => activeSupplierOffer(offer) && workspaceMatch(offer) && (!offer.productId || visibleProductIds.has(offer.productId))),
@@ -1492,8 +1574,12 @@ export async function getSelectionReferenceSnapshot() {
       const batch = publishedCatalogBatches.get(row.batchId);
       return { ...row, catalogEligible: catalogRowMatches(row, batch), ...(batch ? { catalogQuerySkcs: catalogScope(batch) } : {}) };
     }),
-    erpCatalogRows: [...publishedCatalogBatches.values()].flatMap(batch => Array.isArray(batch.sourceContract?.catalogRows)
+    erpCatalogRows: [...[...publishedCatalogBatches.values()].flatMap(batch => Array.isArray(batch.sourceContract?.catalogRows)
       ? batch.sourceContract.catalogRows.filter(row => catalogRowMatches(row, batch)).map(row => ({ ...row, catalogQuerySkcs: catalogScope(batch) })) : []),
+      ...independentCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.catalog, { batchId: record.catalog.batchId, publishedAt: record.receivedAt })),
+      ...pendingCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.envelope, record))],
+    erpCatalogReferences: catalogEnvelopes.flatMap(source => erpCatalogReferenceCosts(source.envelope, source)),
+    catalogCoverage: catalogEnvelopes.map(source => ({ batchId: source.batchId, period: source.period, platformSkcs: (source.envelope.query.platformSkcs ?? []).map(item => item.platformSkc ?? item), groups: source.coverage ?? null })),
     profitLines: profitLines.filter(workspaceMatch),
     ledgerIdentityRows,
   };

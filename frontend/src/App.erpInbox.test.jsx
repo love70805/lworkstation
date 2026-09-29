@@ -8,7 +8,8 @@ vi.mock('./data/database', () => ({
   receiveSelectionCaptureEnvelope: vi.fn(),
 }));
 
-import { createErpInboxPoller, runErpInboxCycle } from './App';
+import { createErpInboxPoller, runErpInboxCycle, runErpCatalogInboxCycle } from './App';
+import { buildErpCatalogInboxEnvelope } from './domain/erpCatalogRequest';
 
 const envelope = id => ({ deliveryId: id });
 const record = id => ({ deliveryId: id, envelope: envelope(id) });
@@ -25,6 +26,34 @@ const defaults = overrides => ({
   recoverDrafts: vi.fn(async () => ({ recovered: 0, failures: [] })),
   emit: vi.fn(),
   ...overrides,
+});
+
+describe('independent catalog durable delivery', () => {
+  const makeCatalog = id => buildErpCatalogInboxEnvelope({ deliveryId: id,
+    catalog: { batchId: id, requestId: 'CAT-REQ', workspaceId: 'W1', ledgerPeriod: '2026-08', query: { unit: 'platform_skc', platformSkcs: ['SKC-A'] },
+      coverage: { directory: { state: 'complete' }, mappings: { state: 'complete' }, images: { state: 'unavailable' }, suppliers: { state: 'unavailable' }, purchaseEvidence: { state: 'unavailable' } },
+      rows: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', warehouseSku: 'WH-A' }], warehouseEvidence: [], generatedAt: '2026-09-29T00:00:00Z' },
+  });
+  it('acknowledges and refreshes only after durable receipt and isolates rejected deliveries', async () => {
+    const calls = [], rejected = makeCatalog('rejected'), good = makeCatalog('good');
+    const result = await runErpCatalogInboxCycle({
+      getContext: async () => ({ workspaceId: 'W1' }), pollRecords: async () => [{ deliveryId: 'rejected', envelope: rejected }, { deliveryId: 'good', envelope: good }],
+      receive: async ({ envelope }) => { calls.push(`save:${envelope.deliveryId}`); if (envelope.deliveryId === 'rejected') throw Error('original request mismatch'); return { id: 'saved' }; },
+      acknowledge: async id => { calls.push(`ack:${id}`); }, emit: envelope => calls.push(`refresh:${envelope.deliveryId}`),
+    });
+    expect(result.received).toBe(1);
+    expect(result.failures.map(error => error.message)).toEqual(['original request mismatch']);
+    expect(calls).toEqual(['save:rejected', 'save:good', 'ack:good', 'refresh:good']);
+  });
+  it('rejects foreign workspace before receipt and does no work after disposal', async () => {
+    const foreign = makeCatalog('foreign'); foreign.catalog.workspaceId = 'OTHER';
+    const receive = vi.fn();
+    expect((await runErpCatalogInboxCycle({ getContext: async () => ({ workspaceId: 'W1' }), pollRecords: async () => [{ deliveryId: 'foreign', envelope: foreign }], receive })).failures).toHaveLength(1);
+    expect(receive).not.toHaveBeenCalled();
+    const pollRecords = vi.fn();
+    expect(await runErpCatalogInboxCycle({ isDisposed: () => true, getContext: async () => ({ workspaceId: 'W1' }), pollRecords })).toEqual({ received: 0, failures: [] });
+    expect(pollRecords).not.toHaveBeenCalled();
+  });
 });
 
 describe('ERP inbox background delivery and adoption', () => {

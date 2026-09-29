@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const frontendRequire = createRequire(path.join(root, 'frontend', 'package.json'));
+const esbuild = createRequire(frontendRequire.resolve('vite/package.json'))('esbuild');
+const bundled = await esbuild.build({ entryPoints: [path.join(root, 'frontend/src/domain/erpCatalogRequest.js')], bundle: true, absWorkingDir: root, format: 'esm', platform: 'node', write: false, legalComments: 'none' });
+assert.equal((await readFile(path.join(root, 'tools/erp-inbox-server-catalog-contract.mjs'), 'utf8')).replace(/\r\n/g, '\n'), bundled.outputFiles[0].text.replace(/\r\n/g, '\n'), 'server catalog runtime must match frontend contract source');
+const contract = await import('./erp-inbox-server-catalog-contract.mjs');
+assert.equal(contract.ERP_CATALOG_MESSAGE_TYPE, 'shopeers.erp.catalog.batch');
+assert.equal(typeof contract.normalizeErpCatalogPurchaseEvidence, 'function');
+console.log('ERP catalog runtime source/bundle parity passed');

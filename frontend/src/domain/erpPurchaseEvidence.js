@@ -4,7 +4,7 @@ import { purchaseTimestamp } from "./erpPurchaseSelection";
 import { normalizeErpCatalogFields } from "./erpCatalogFields";
 
 const text = value => String(value ?? "").trim() || null;
-const finiteNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
+const finiteNumber = value => value != null && String(value).trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
 const CANCELLED_PURCHASE_STATUS = /(?:^|[\s:：])(?:11|cancel(?:led)?|void(?:ed)?|已取消|取消|已作废|作废|已关闭|关闭)(?:$|[\s:：])/i;
 
 export function validateCostPeriod(period) {
