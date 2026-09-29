@@ -14,6 +14,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.2` 共享1688单号 | 本机候选验收通过，PR #125 首轮 CI 通过，最终记录待集成与公开回读；1015 测试、隐藏 EXE smoke、461 文件/414 输入哈希及持久复制通过；未安装 | 主仓库 `candidates/0.3.2/`、`archive/release-0.3.2/`；[验收与升级操作](../docs/RELEASE_0.3.2.md) |
 | `0.3.1` 导入简化 | 已公开 GitHub Latest；PR #122/#123及main CI通过，1004测试、低级别审计、隐藏EXE smoke、461文件/414输入比对、四资产匿名完整回读与真实更新通道通过；未安装 | 主仓库 `candidates/0.3.1/`、`candidates/0.3.1-public/`；`archive/release-0.3.1/`；[发布验收及哈希](../docs/RELEASE_0.3.1.md) |
 | `0.3.0` 正式版 | 历史公开稳定版，原标签及资产保留；PR #119/#120及main CI通过，984测试、隐藏EXE smoke、包体/资源哈希和四资产匿名回读通过；未安装 | 主仓库 `releases/candidates/0.3.0-public/`；原候选 `releases/candidates/0.3.0/`；[验收及哈希](../docs/RELEASE_0.3.0.md) |
 | `0.3.0-rc.2` ERP自动采用修复 | 历史验收记录；应用归档后原安装包未寻获，源码已恢复至正式候选；未公开或安装 | [验收记录](../docs/RELEASE_0.3.0_RC_2.md) |
