@@ -1,6 +1,6 @@
 # 0.3.3 发布与验收
 
-2026-09-29。0.3.3 Windows 候选已通过验收，PR 集成及公开发布继续执行；尚未标记公开发布。统一交付 ERP Assistant 8.0.24。本机不覆盖安装，不改真实业务数据库或已定稿报告。基线为 main `d34e1f75d08ac251c5645eb25fabd74ece1a7789`，实现分支 `codex/release-0-3-3`，复用应用工作区 d308。
+2026-09-29 19:03:45（UTC+8），[0.3.3](https://github.com/love70805/lworkstation/releases/tag/v0.3.3) 已公开为稳定 GitHub Latest，四资产匿名完整回读及实际更新通道通过。统一交付 ERP Assistant 8.0.24。本机不覆盖安装，不改真实业务数据库或已定稿报告。基线为 main `d34e1f75d08ac251c5645eb25fabd74ece1a7789`，实现分支 `codex/release-0-3-3`，复用应用工作区 d308。
 
 ## 交付行为
 
@@ -21,7 +21,7 @@
 
 已完成独立交叉审查、工作区及权限隔离、并发幂等、最小保存门槛、旧报价/人工清空及来源完整性回归。选品和导入页面使用 Windows Edge headless、隔离合成 IndexedDB，覆盖浅深色和 1440/1000/390 宽度，包括实际保存、资料保留、完整来源替换及另一店铺不受影响。
 
-候选登记于 [发布清单](../releases/README.md)，原件位置为 `releases/candidates/0.3.3/`，原始脱敏证据为 `archive/release-0.3.3/`；交付前复制并回读到主仓库持久目录。
+候选登记于 [发布清单](../releases/README.md)。候选四资产、930 项源码清单、源码 ZIP 和脱敏验收证据已复制并回读到主仓库持久目录；候选原件为 `releases/candidates/0.3.3/`，公开下载原件在其 `public/` 子目录，证据为 `archive/release-0.3.3/`。
 
 ## 候选验收
 
@@ -35,11 +35,30 @@ Windows `release:build`、`release:organize`、`release:check` 和隐藏 `smoke:
 | `Lworkstation Setup 0.3.3.exe.blockmap` | `200D5B58F8109BE8A54C02DA46489781C8CA8934457533B4601827C2A62A7AC5` |
 | `latest.yml` | `128CC4D8877DA818B850AF06AA7AE7EA8C1F20D2770A61E4171107F6D9E718E2` |
 
-ERP 扩展 ZIP SHA256：`062B792B0C8D275C9888AEBE6548ECFD190A6474E9A197F354AD7815ADC7D17F`。[PR #127](https://github.com/love70805/lworkstation/pull/127) 软件提交的首轮 CI 已通过；最终文档提交、主线 CI、稳定标签及公开四资产回读在完成后记录。验收合格的同一 EXE 用于发布，不因文档更新重新构建。
+ERP 扩展 ZIP SHA256：`062B792B0C8D275C9888AEBE6548ECFD190A6474E9A197F354AD7815ADC7D17F`。[PR #127](https://github.com/love70805/lworkstation/pull/127) 最终提交 `59a1a75` 的 [CI](https://github.com/love70805/lworkstation/actions/runs/36558446939) 通过，合入 main `966b2aa63874d2a421e7deb8dbe93c727e22a192`；该主线 [CI](https://github.com/love70805/lworkstation/actions/runs/36558817589) 通过。主线与构建提交仅相差三份验收文档，所有生产目录树一致；同一 EXE 用于发布，未重新构建。
+
+## 公开发布与保全
+
+`v0.3.3` 标签固定 `966b2aa63874d2a421e7deb8dbe93c727e22a192`，匿名标签回读一致。草稿四资产大小、GitHub digest 及稳定通道核对通过后公开，`draft=false`、`prerelease=false`，Latest 为 0.3.3。
+
+| 公开文件 | 字节数 | SHA256 |
+| --- | --- | --- |
+| `Lworkstation-Setup-0.3.3.exe` | 117114898 | `1BFAFD8A56BE42441269D800DBBDC577991FEBEE067E98AB734EA3A7EA8464A8` |
+| `Lworkstation-Setup-0.3.3.exe.blockmap` | 123019 | `200D5B58F8109BE8A54C02DA46489781C8CA8934457533B4601827C2A62A7AC5` |
+| `latest.yml` | 353 | `128CC4D8877DA818B850AF06AA7AE7EA8C1F20D2770A61E4171107F6D9E718E2` |
+| `SHA256.txt` | 276 | `68D25B946C4FE3908F8DE70961DA5B4B94AD8F4F3C7161B91DFAEA74CFE9A2B4` |
+
+四资产通过不带认证的 HTTP 完整下载，大小、SHA256 与 GitHub digest 一致，`latest.yml` 文件名、EXE SHA512 及大小正确。公开 EXE、blockmap 和 metadata 与候选逐字节相同；公开 SHA256 清单只随文件名规范化更新。下载原件已持久复制并逐项回读。
+
+真实生产 `AppUpdater`、`ChannelGitHubProvider` 和更新 runtime 使用匿名 HTTP：0.2.19 / 0.3.0 / 0.3.1 / 0.3.2 指向 0.3.3，0.3.3 为 current；Beta.9 指向 Beta.10，Beta.10 为 current；RC.1 / RC.2 禁用且零请求。验证的 updater 下载及安装调用为零。原 0.3.0 / 0.3.1 / 0.3.2 的公开标签及资产名/大小/digest、主仓库原候选 EXE 哈希均未变，Beta 最新保持 0.3.0-beta.10。
+
+保留构建/候选文档提交的源码清单与 `source-59a1a75.zip`，以及 `source-main-966b2aa.zip`、生产目录树一致性和 PR/main CI 记录。`anonymous-verification.json`、`public-update-channels.json`、`historical-releases-check.json`、`anonymous-tag-check.json`、`durable-public-check.json` 记录实际回读，不以仅上传成功代替公开验收。不归档聊天或工作区。
 
 ## 使用与验收边界
 
 已有利润采集能力继续复用。ERP Assistant 8.0.24 新增商品档案及资料补取：工作台先登记资料请求，再在 ERP 助手点击“补充资料”；正常成本操作也同步补充目录。只读 ERP，回传现有本机 loopback 收件服务。
+
+稳定桌面版可使用检查更新或下载 [0.3.3 安装包](https://github.com/love70805/lworkstation/releases/download/v0.3.3/Lworkstation-Setup-0.3.3.exe)。桌面包内含新助手；独立浏览器继续使用工作台 ERP 助手配置入口提供的 8.0.24 扩展。此次交付没有替用户执行安装。
 
 真实 ERP 商品接口形状已由决策端只读核对，真实样本未跨商品分页；新采集链路使用生产代码和合成响应验证，未重采真实 ERP 登录账号。未验证方向的采购比例只保留证据，不推定平台单位换算。完整采购证据但没有明确换算的 SKU 仍显示对应缺项。
 
