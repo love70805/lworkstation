@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "candidateOnly": true,
-  "integrationBranch": "codex/release-0-3-0-stable",
+  "integrationBranch": "codex/release-0-3-1",
   "requiredCommits": [
+    {
+      "commit": "bb384f0daf30e9e647be8f0c5ab68d23df8539b9",
+      "module": "blank-quantity-and-simplified-import"
+    },
+    {
+      "module": "0.3.1-main-baseline",
+      "commit": "1506dc0e166d180b7c2350133876c68e7baa6168"
+    },
     {
       "module": "rc2-erp-catalog-and-default-member-adoption-recovery",
       "commit": "d758375"
