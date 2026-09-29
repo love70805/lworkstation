@@ -1,65 +1,148 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
 import { readMonthlyReportState, readSavedProfitReport, previewMonthlySupplement, adoptMonthlySupplement, previewProfitReport, saveProfitReport } from "../data/repositories/profitReportRepository";
-import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore } from "../domain/monthlySupplements";
+import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate } from "../domain/monthlySupplements";
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
 import { downloadReportFile } from "../lib/profitReportWorkbook";
-import { displayMoney } from "../domain/profitReports";
+import { displayMoney, exactSum } from "../domain/profitReports";
 import { currentLedgerResult, reportReadiness } from "../domain/ledgerWorkflow";
 
 const fieldLabels={owner:'登记人',date:'日期',store:'实际店铺',platformSkc:'SKC',supplierNumber:'供方货号',businessId:'业务单号',order1688:'1688单号',quantity:'数量',amount:'采用金额列'};
-export function SupplementEditor({ state, kind, onClose }) {
-  const {notify}=useToast();
-  const current=state[kind];
-  const [selection,setSelection]=useState(''),[matchMode,setMatchMode]=useState('exact'),[reviewed,setReviewed]=useState(false);
-  const [mode,setMode]=useState('files'),[sources,setSources]=useState([]),[retaining,setRetaining]=useState(true),[quantity,setQuantity]=useState(current?.adoptedQuantityExact??''),[amounts,setAmounts]=useState({}),[zeroStores,setZeroStores]=useState([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[preview,setPreview]=useState(null);
-  const patch=(index,value)=>{setSources(items=>items.map((item,i)=>i===index?{...item,...value}:item));setPreview(null);setReviewed(false);};
-  const markers=[...new Set(sources.flatMap(source=>supplementMarkers(source,kind)))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
-  function selectAcrossSources(marker,matching=matchMode){setSelection(marker);setMatchMode(matching);setReviewed(false);setPreview(null);setSources(items=>items.map(source=>({...source,ownerMarker:marker,matchMode:matching,includeAll:false,enabled:Boolean(marker.trim())&&supplementMarkers(source,kind).some(value=>kind==='deduction'&&matching==='contains'?value.includes(marker.trim()):value===marker.trim())})));}
-  async function upload(files){setBusy(true);setError('');try{
-    const loaded=(await Promise.all([...files].map(file=>readSupplementWorkbook(file,kind)))).flat();
-    const keys=new Set(sources.map(item=>`${item.fileHash}/${item.sheetName}`));
-    const added=loaded.filter(source=>{const key=`${source.fileHash}/${source.sheetName}`;if(keys.has(key))return false;keys.add(key);return true;}).map(source=>({...source,enabled:false,headerRow:source.headerRow??1,mapping:suggestSupplementMapping(supplementHeaders(source,source.headerRow??1)),ownerMarker:'',ownerField:kind==='dispatch'?'owner':'supplierNumber',matchMode:'exact',store:suggestSupplementStore(source.sheetName,state.stores),includeAll:false}));
-    setSources(previous=>[...previous,...added]);setSelection('');setPreview(null);setReviewed(false);
-    if(added.length<loaded.length)setError('重复文件/工作表已拦截，请使用已加载来源；不会重复累加。');
-  }catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function prepare(){setBusy(true);setError('');try{
-    const input={kind,ledgerId:state.ledger.id,workspaceId:state.ledger.workspaceId,period:state.ledger.period,mode,rows:[],sources:[],reviewedCrossFileConflicts:reviewed};
-    if(mode==='manual'){
-      if(kind==='dispatch')input.adoptedQuantityExact=quantity;
-      else input.rows=state.stores.filter(store=>String(amounts[store]??'').trim()!=='').map(store=>({kind,manual:true,store,signedAmountExact:amounts[store],sourceName:'人工录入',businessId:'',sourceRow:1}));
-    }else{
-      if(retaining&&current){input.rows=state.adoptedRows.filter(row=>row.kind===kind);input.sources=[...(current.sources??[])];}
-      for(const source of sources.filter(item=>item.enabled)){
-        const parsed=inspectSupplementSource(source,{kind,...source,stores:state.stores});
-        if(parsed.errors.length)throw new Error(`${source.fileName} / ${source.sheetName}：${parsed.errors.length} 行异常，${parsed.errors.slice(0,10).map(row=>row.sourceRow).join("、")} 行${parsed.errors.length>10?"等":""}：${parsed.errors[0].message}`);
-        if(!parsed.rows.length)throw new Error(`${source.sheetName} 无有效选中行，请检查本人标记、表头和映射。`);
-        input.rows.push(...parsed.rows);input.sources.push(parsed.source);
+const ALL_MARKERS='__all_source_records__';
+function missingSourceFields(source,kind) {
+  return [kind==='dispatch'?'owner':'supplierNumber',kind==='dispatch'?'quantity':'amount'].filter(field=>!(Number(source.mapping[field])>=0));
+}
+function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}) {
+  const input={kind,ledgerId:state.ledger.id,workspaceId:state.ledger.workspaceId,period:state.ledger.period,mode,rows:[],sources:[],reviewedCrossFileConflicts:reviewed};
+  const stats={addedRows:[],retainedCount:0,skipped:0,duplicates:0,sourceCount:0};
+  try {
+    if(mode==='manual') {
+      if(kind==='dispatch') {if(!String(quantity).trim())return {ready:false,stats};input.adoptedQuantityExact=quantity;}
+      else {input.rows=state.stores.filter(store=>String(amounts[store]??'').trim()!=='').map(store=>({kind,manual:true,store,signedAmountExact:amounts[store],sourceName:'人工录入',businessId:'',sourceRow:1}));if(!input.rows.length)return {ready:false,stats};}
+    } else {
+      if(!selection&&!zeroStores.length)return {ready:false,stats};
+      const retained=retaining&&current?state.adoptedRows.filter(row=>row.kind===kind):[];
+      // Preserve a previously explicit manual aggregate when adding source files.
+      if(retaining&&current?.mode==='manual'&&kind==='dispatch'&&!retained.length)retained.push({kind,manual:true,store:'',quantityExact:current.adoptedQuantityExact,sourceName:'此前手工总代发',sourceRow:1});
+      input.rows=[...retained];input.sources=retaining&&current?[...(current.sources??[])]:[];stats.retainedCount=retained.length;
+      const priorKeys=new Set(retained.map(supplementRowIdentity)),seen=new Set(priorKeys);
+      for(const source of sources) {
+        const missing=missingSourceFields(source,kind);
+        if(missing.length)throw new Error(`${source.fileName} / ${source.sheetName}：未识别${missing.map(field=>fieldLabels[field]).join('、')}列，请展开此来源的高级设置。`);
+        const includeAll=selection===ALL_MARKERS;
+        const matches=supplementMarkers(source,kind).some(marker=>kind==='deduction'&&matchMode==='contains'?marker.includes(selection.trim()):marker===selection);
+        if(!selection||(!includeAll&&!matches))continue;
+        stats.sourceCount++;
+        const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll?'':selection,includeAll,matchMode,store:source.store,stores:state.stores});
+        stats.skipped+=parsed.ignored.filter(row=>row.reason==='missing_quantity').length;
+        if(parsed.errors.length)throw new Error(`${source.fileName} / ${source.sheetName}：${parsed.errors.length} 条异常，${parsed.errors.slice(0,10).map(supplementRowLabel).join('；')}${parsed.errors.length>10?'等':''}。${parsed.errors[0].message}`);
+        const removed=[];
+        for(const row of parsed.rows) {
+          const key=supplementRowIdentity(row);
+          if(excludedRows.includes(key)){removed.push({sourceRow:row.sourceRow,recordRow:row.recordRow,businessId:row.businessId});continue;}
+          if(seen.has(key)){stats.duplicates++;continue;}
+          seen.add(key);input.rows.push(row);stats.addedRows.push(row);
+        }
+        if(removed.length||stats.addedRows.some(row=>row.fileHash===source.fileHash&&row.sourceSheet===source.sheetName)||parsed.ignored.some(row=>row.reason==='missing_quantity'))input.sources.push({...parsed.source,excludedRows:removed});
       }
-      if(kind==='deduction')for(const store of zeroStores){if(input.rows.some(row=>row.store===store))throw new Error(`${store} 已有来源金额，不能同时标记无扣款。`);input.rows.push({kind,manual:true,store,signedAmountExact:'0',sourceName:'明确零扣款',sourceRow:1,businessId:''});}
+      if(kind==='deduction')for(const store of zeroStores){
+        if(input.rows.some(row=>row.store===store))throw new Error(`${store} 已有来源金额，不能同时标记无扣款。`);
+        const row={kind,manual:true,store,signedAmountExact:'0',sourceName:'明确零扣款',sourceRow:1,businessId:''};input.rows.push(row);stats.addedRows.push(row);
+      }
+      if(!stats.addedRows.length) {
+        const error=stats.duplicates?'所选记录已在当前来源中，不会重复计数。':`所选${kind==='dispatch'?'登记人':'货号'}没有有效记录${stats.skipped?`，已跳过 ${stats.skipped} 条无数量记录`:''}。请调整筛选或来源。`;
+        return {ready:false,error,stats};
+      }
+      const normalized=normalizeSupplementCandidate(input,{ledger:state.ledger,stores:state.stores});
+      // Previously reviewed overlaps entirely inside retained rows need no new decision.
+      if(current?.reviewedCrossFileConflicts&&normalized.conflicts.every(row=>priorKeys.has(supplementRowIdentity(row))&&priorKeys.has(supplementRowIdentity({fileHash:row.previousFileHash,sourceSheet:row.previousSourceSheet,sourceRow:row.previousSourceRow}))))input.reviewedCrossFileConflicts=true;
     }
-    const check=await previewMonthlySupplement(input);setPreview({input,...check});
-  }catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function adopt(){setBusy(true);setError('');try{await adoptMonthlySupplement(preview.input,preview);notify(`${state.ledger.period} ${kind==='dispatch'?'代发':'扣款'}来源已采用`);onClose();}catch(e){setError(e.message);setPreview(null);}finally{setBusy(false);}}
-  return <Modal open size="large" className="report-import" title={`${state.ledger.period} · ${kind==='dispatch'?'代发':'扣款'}来源`} description="采用范围是本工作区整月，不受页面店铺筛选影响。收到或录入日期不会改变目标账本月份。" onClose={()=>!busy&&onClose()} footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button disabled={busy} onClick={prepare}>预览采用</Button>{preview?<Button variant="primary" disabled={busy||Boolean(preview.candidate.conflicts?.length&&!preview.candidate.reviewedCrossFileConflicts)} onClick={adopt}>确认采用本月来源</Button>:null}</>}>
-    <label>来源方式 <select value={mode} onChange={e=>{setMode(e.target.value);setPreview(null);setReviewed(false);}}><option value="files">导入来源表</option><option value="manual">手工录入{kind==='dispatch'?'总代发件数':'各店扣款'}</option></select></label>
+    return {ready:true,input,stats};
+  } catch(failure) {return {ready:false,error:failure.message,stats};}
+}
+
+export function SupplementEditor({ state, kind, onClose }) {
+  const {notify}=useToast(),current=state[kind];
+  const [selection,setSelection]=useState(''),[search,setSearch]=useState(''),[matchMode,setMatchMode]=useState('exact'),[reviewed,setReviewed]=useState(false),[excludedRows,setExcludedRows]=useState([]);
+  const [mode,setMode]=useState('files'),[sources,setSources]=useState([]),[retaining,setRetaining]=useState(true),[quantity,setQuantity]=useState(current?.adoptedQuantityExact??''),[amounts,setAmounts]=useState({}),[zeroStores,setZeroStores]=useState([]);
+  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[previewPending,setPreviewPending]=useState(false),[preview,setPreview]=useState(null),[retry,setRetry]=useState(0);
+  const markers=useMemo(()=>[...new Set(sources.flatMap(source=>supplementMarkers(source,kind)))].sort((a,b)=>a.localeCompare(b,'zh-CN')),[sources,kind]);
+  const draft=useMemo(()=>buildSupplementDraft({state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}),[state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows]);
+  const activePreview=preview?.draft===draft?preview:null;
+  const finalCandidate=activePreview?.candidate;
+  useEffect(()=>{
+    let cancelled=false;
+    setPreview(null);setError('');
+    if(!draft.ready){setPreviewPending(false);return ()=>{cancelled=true;};}
+    setPreviewPending(true);
+    previewMonthlySupplement(draft.input).then(check=>{if(!cancelled)setPreview({draft,input:draft.input,...check});}).catch(failure=>{if(!cancelled)setError(failure.message);}).finally(()=>{if(!cancelled)setPreviewPending(false);});
+    return ()=>{cancelled=true;};
+  },[draft,retry]);
+  function invalidate(){setPreview(null);setError('');setReviewed(false);setExcludedRows([]);}
+  function patch(index,value){invalidate();setSources(items=>items.map((item,i)=>i===index?{...item,...value}:item));}
+  async function upload(files){
+    if(!files?.length)return;
+    setBusy(true);setError('');setNotice('');
+    try {
+      const loaded=(await Promise.all([...files].map(file=>readSupplementWorkbook(file,kind)))).flat();
+      const keys=new Set(sources.map(item=>`${item.fileHash}/${item.sheetName}`));
+      const added=loaded.filter(source=>{const key=`${source.fileHash}/${source.sheetName}`;if(keys.has(key))return false;keys.add(key);return true;}).map(source=>({...source,headerRow:source.headerRow??1,mapping:suggestSupplementMapping(supplementHeaders(source,source.headerRow??1)),store:suggestSupplementStore(source.sheetName,state.stores)}));
+      if(added.length){invalidate();setSources(previous=>[...previous,...added]);}
+      if(added.length<loaded.length)setNotice('重复文件/工作表已跳过，不会重复计数。');
+      if(!loaded.length)setNotice('文件没有有效工作表，请检查来源。');
+    }catch(failure){setError(failure.message);}finally{setBusy(false);}
+  }
+  async function adopt(){
+    if(!activePreview||busy||previewPending)return;
+    setBusy(true);setError('');
+    try{await adoptMonthlySupplement(activePreview.input,activePreview);notify(`${state.ledger.period} ${kind==='dispatch'?'代发':'扣款'}已导入${draft.stats.skipped?`，已跳过 ${draft.stats.skipped} 条无数量记录`:''}`);onClose();}
+    catch(failure){setError(failure.message);setPreview(null);}finally{setBusy(false);}
+  }
+  const label=kind==='dispatch'?'登记人':'供方货号 / 标记',unit=kind==='dispatch'?'件':'元';
+  const oldTotal=current?.adoptedQuantityExact??current?.signedAmountExact;
+  const finalTotal=finalCandidate?.adoptedQuantityExact??finalCandidate?.signedAmountExact;
+  const blocked=Boolean(finalCandidate?.conflicts?.length&&!finalCandidate.reviewedCrossFileConflicts);
+  const priorKeys=new Set(state.adoptedRows.filter(row=>row.kind===kind).map(supplementRowIdentity));
+  const visibleConflicts=(finalCandidate?.conflicts??[]).filter(row=>!(current?.reviewedCrossFileConflicts&&retaining&&priorKeys.has(supplementRowIdentity(row))&&priorKeys.has(supplementRowIdentity({fileHash:row.previousFileHash,sourceSheet:row.previousSourceSheet,sourceRow:row.previousSourceRow}))));
+  return <Modal open size="large" className="report-import" title={`${state.ledger.period} · ${kind==='dispatch'?'代发':'扣款'}来源`} description="本工作区整月全部店铺，收到或录入日期不改变账本月份。" onClose={()=>!busy&&onClose()} footer={<>
+    {current&&finalCandidate?<p className="report-replacement">整月 {oldTotal} → {finalTotal} {unit}；导入后更新 r{current.revision}，旧版本保留。{mode==='files'&&retaining?'已有来源保留。':'全部已有来源将被本次内容替换。'}</p>:null}
+    <Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy||previewPending||!activePreview||blocked} onClick={adopt}>{current?'导入并更新本月来源':'导入本月来源'}</Button>
+  </>}>
+    <label className="report-mode">来源方式<select disabled={busy} value={mode} onChange={event=>{invalidate();setMode(event.target.value);}}><option value="files">导入来源表</option><option value="manual">手工录入{kind==='dispatch'?'总代发件数':'各店扣款'}</option></select></label>
     {mode==='files'?<>
-      <p><input type="file" multiple accept={kind==='dispatch'?'.xlsx,.csv':'.xlsx'} disabled={busy} onChange={e=>void upload(e.target.files)} /></p>
-      {sources.length?<div className="report-selection"><label>{kind==='dispatch'?'登记人（姓名完整匹配）':'供方货号 / 标记'}{kind==='dispatch'?<select value={selection} onChange={e=>selectAcrossSources(e.target.value)}><option value="">请选择登记人</option>{markers.map(marker=><option key={marker}>{marker}</option>)}</select>:<><input aria-label="供方货号或标记" list="supplier-markers" value={selection} onChange={e=>selectAcrossSources(e.target.value)} /><datalist id="supplier-markers">{markers.map(marker=><option key={marker} value={marker}/>)}</datalist><select aria-label="货号匹配方式" value={matchMode} onChange={e=>selectAcrossSources(selection,e.target.value)}><option value="exact">货号完整匹配</option><option value="contains">包含此标记</option></select></>}</label><p>已选 {sources.filter(source=>source.enabled).length} 个来源。{kind==='dispatch'?'按源表数量相加，不发、引流、退款等仅作备注。':'按所选金额列归集，分摊金额优先；请核对各来源实际店铺。'}</p></div>:null}
-      {current?<label><input type="checkbox" checked={retaining} onChange={e=>{setRetaining(e.target.checked);setPreview(null);setReviewed(false);}} />保留当前已采用来源（{current.sources?.length??0} 个来源，{current.rowCount} 行）</label>:null}
-      {sources.map((source,index)=><details key={`${source.fileHash}/${source.sheetName}`} className="report-source"><summary><input type="checkbox" checked={source.enabled} onChange={e=>patch(index,{enabled:e.target.checked})} /> {source.fileName} / {source.sheetName} · {source.cells.length} 行</summary>
-        <label>表头行 <input type="number" min="1" max={source.sourceRows?.at(-1)??source.cells.length} value={source.headerRow} onChange={e=>patch(index,{headerRow:Number(e.target.value),mapping:suggestSupplementMapping(supplementHeaders(source,Number(e.target.value)))})} /></label>
-        <div className="report-mapping">{Object.keys(supplementFields).filter(field=>kind==='dispatch'?field!=='amount':field!=='quantity').map(field=><label key={field}>{fieldLabels[field]}<select value={source.mapping[field]} onChange={e=>patch(index,{mapping:{...source.mapping,[field]:e.target.value}})}><option value="-1">未映射</option>{supplementHeaders(source,source.headerRow).map((header,col)=><option key={col} value={col}>{col+1} · {String(header)}</option>)}</select></label>)}</div>
-        <label>{kind==='dispatch'?'登记人（完整姓名）':'供方货号 / 标记'}<input value={source.ownerMarker} onChange={e=>patch(index,{ownerMarker:e.target.value})} /></label>
-        <label><input type="checkbox" checked={source.includeAll} onChange={e=>patch(index,{includeAll:e.target.checked})} />明确采用此来源全部有效记录</label>
-        {kind==='deduction'?<label>工作表“{source.sheetName}”对应实际店铺（无店铺列时使用，可调整） <select value={source.store} onChange={e=>patch(index,{store:e.target.value})}><option value="">请选择实际店铺</option>{state.stores.map(store=><option key={store}>{store}</option>)}</select></label>:null}
-      </details>)}
-    </>:null}
-    {kind==='dispatch'?(mode==='manual'?<label className="form-field">采用总代发件数<input className="text-input" type="number" min="0" step="1" value={quantity} onChange={e=>{setQuantity(e.target.value);setPreview(null);}} /></label>:<p>采用数量以选中来源明细之和为准{current?`；原采用 ${current.adoptedQuantityExact} 件，请核对预览变化`:''}。</p>):mode==='manual'?state.stores.map(store=><label className="form-field" key={store}>{store} 扣款金额（保留正负，真实零填 0，未取得留空）<input className="text-input" type="number" step="any" value={amounts[store]??''} onChange={e=>{setAmounts({...amounts,[store]:e.target.value});setPreview(null);}} /></label>):<div><p>没有扣款来源的店铺，可明确记录真实零值：</p>{state.stores.map(store=><label key={store}><input type="checkbox" checked={zeroStores.includes(store)} onChange={e=>{setZeroStores(previous=>e.target.checked?[...previous,store]:previous.filter(name=>name!==store));setPreview(null);}} />{store} 本月扣款为 0 </label>)}</div>}
-    {preview?<Panel className="report-adoption-preview"><strong>{state.ledger.period} 整月采用预览</strong><p>本次 {preview.candidate.sources.length} 个来源 / {preview.candidate.rows.length} 行；{kind==='dispatch'?`采用 ${preview.candidate.adoptedQuantityExact} 件`:`有符号扣款合计 ${preview.candidate.signedAmountExact} 元`}</p>{current?<p>确认后替换当前 r{current.revision}（{current.sources?.length??0} 个来源 / {current.rowCount} 行），旧版本保留。{mode==='manual'||!retaining?'本次不保留此前来源，请核对是否完整。':''}</p>:null}{preview.candidate.missingStores.length?<p>尚未取得扣款：{preview.candidate.missingStores.join('、')}；财务报告会等待这些店铺明确金额。</p>:null}<div className="report-preview-rows"><table><thead><tr><th>来源 / 行</th><th>店铺 / 本人标记</th><th>单号 / SKC</th><th>{kind==='dispatch'?'件数':'金额'}</th><th>来源说明 / 备注</th></tr></thead><tbody>{preview.candidate.rows.slice(0,100).map((row,i)=><tr key={i}><td>{row.sourceName} / {row.sourceSheet} / {row.sourceRow}</td><td>{row.store} / {row.ownerMarker}</td><td>{row.businessId} / {row.platformSkc}</td><td>{row.quantityExact??row.signedAmountExact}</td><td>{row.inheritedFrom?`登记人沿用第 ${row.inheritedFrom} 行；`:''}{row.amountHeader}{(row.remarks??[]).map(note=>`${note.header||`第${note.column}列`}：${note.value}`).join('；')}</td></tr>)}</tbody></table></div>{preview.candidate.rows.length>100?<p>预览前100行，采用包括全部 {preview.candidate.rows.length} 行。</p>:null}</Panel>:null}
-    {preview?.candidate.conflicts?.length?<Panel><strong>跨文件相似业务记录（不会自动删除）</strong><ul>{preview.candidate.conflicts.map((row,index)=><li key={index}>{row.businessId} / {row.platformSkc}：{row.previousSourceName} 第 {row.previousSourceRow} 行与 {row.sourceName} / {row.sourceSheet} 第 {row.sourceRow} 行</li>)}</ul><label><input type="checkbox" checked={reviewed} onChange={e=>{setReviewed(e.target.checked);setPreview(null);}} />已核对这些来源，保留全部分摊；勾选后重新预览</label></Panel>:null}
-    {error?<p role="alert" tabIndex="-1">{error}</p>:null}
+      <label className="report-upload">选择文件<input type="file" multiple accept={kind==='dispatch'?'.xlsx,.csv':'.xlsx'} disabled={busy} onChange={event=>{void upload(event.target.files);event.target.value='';}} /></label>
+      {sources.length?<div className="report-selection">
+        {kind==='dispatch'?<><label>搜索登记人<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="搜索源表姓名" disabled={busy}/></label><label>登记人<select aria-label="登记人" value={selection} disabled={busy} onChange={event=>{invalidate();setSelection(event.target.value);}}><option value="">请选择登记人</option><option value={ALL_MARKERS}>全部登记人（所有有效记录）</option>{markers.filter(marker=>marker===selection||marker.includes(search.trim())).map(marker=><option key={marker}>{marker}</option>)}</select></label></>:<><label>{label}<input aria-label="供方货号或标记" list="supplier-markers" value={selection===ALL_MARKERS?'':selection} disabled={busy} onChange={event=>{invalidate();setSelection(event.target.value);}}/><datalist id="supplier-markers">{markers.map(marker=><option key={marker} value={marker}/>)}</datalist></label><label>货号匹配方式<select aria-label="货号匹配方式" value={matchMode} disabled={busy} onChange={event=>{invalidate();setMatchMode(event.target.value);}}><option value="exact">货号完整匹配</option><option value="contains">包含此标记</option></select></label><Button disabled={busy||selection===ALL_MARKERS} onClick={()=>{invalidate();setSelection(ALL_MARKERS);}}>采用全部货号</Button></>}
+        <p>{selection?`当前筛选：${selection===ALL_MARKERS?'全部记录':selection} · ${draft.stats.sourceCount} 个来源`:'先选择筛选范围，预览会自动更新'}。{kind==='dispatch'?'不发、退款等仅作备注，按有数量记录计入。':'保留源金额正负，分摊金额优先。'}</p>
+      </div>:null}
+      {current?<label className="report-mode">已有来源处理<select aria-label="已有来源处理" disabled={busy} value={retaining?'append':'replace'} onChange={event=>{invalidate();setRetaining(event.target.value==='append');}}><option value="append">保留已有来源，加入本次筛选</option><option value="replace">以本次筛选替换全部已有来源</option></select></label>:null}
+      <div className="report-source-list">{sources.map((source,index)=>{
+        const missing=missingSourceFields(source,kind);
+        return <div className="report-source" key={`${source.fileHash}/${source.sheetName}`}><div className="report-source-heading"><strong>{source.fileName} / {source.sheetName}</strong><Button disabled={busy} onClick={()=>{invalidate();setSources(items=>items.filter((_,i)=>i!==index));}}>移除此来源</Button></div>
+          <p>{source.cells.length} 条表格记录 · {missing.length?`未识别${missing.map(field=>fieldLabels[field]).join('、')}列，请展开高级设置修复。`:`已识别${kind==='dispatch'?'登记人、数量':'供方货号、金额'}${kind==='deduction'?`（${supplementHeaders(source,source.headerRow)[Number(source.mapping.amount)]}）`:''}`}</p>
+          {kind==='deduction'?<label>无店铺列时使用的实际店铺<select disabled={busy} value={source.store} onChange={event=>patch(index,{store:event.target.value})}><option value="">请选择实际店铺</option>{state.stores.map(store=><option key={store}>{store}</option>)}</select></label>:null}
+          <details><summary>高级设置 · 表头与字段映射</summary><label>表头行（{source.sourceFormat==='csv'?'CSV 物理行':'工作表行'}）<input disabled={busy} type="number" min="1" max={source.sourceRows?.at(-1)??source.cells.length} value={source.headerRow} onChange={event=>patch(index,{headerRow:Number(event.target.value),mapping:suggestSupplementMapping(supplementHeaders(source,Number(event.target.value)))})}/></label>
+            <div className="report-mapping">{Object.keys(supplementFields).filter(field=>kind==='dispatch'?field!=='amount':field!=='quantity').map(field=><label key={field}>{fieldLabels[field]}<select disabled={busy} value={source.mapping[field]} onChange={event=>patch(index,{mapping:{...source.mapping,[field]:event.target.value}})}><option value="-1">未映射</option>{supplementHeaders(source,source.headerRow).map((header,column)=><option key={column} value={column}>{column+1} · {String(header)}</option>)}</select></label>)}</div>
+          </details>
+        </div>;
+      })}</div>
+    </>:kind==='dispatch'?<label className="form-field">采用总代发件数<input className="text-input" type="number" min="0" step="1" disabled={busy} value={quantity} onChange={event=>{invalidate();setQuantity(event.target.value);}}/></label>:state.stores.map(store=><label className="form-field" key={store}>{store} 扣款金额（保留正负，真实零填 0，未取得留空）<input className="text-input" type="number" step="any" disabled={busy} value={amounts[store]??''} onChange={event=>{invalidate();setAmounts(previous=>({...previous,[store]:event.target.value}));}}/></label>)}
+    {kind==='deduction'&&mode==='files'?<details><summary>没有扣款来源的店铺：明确真实零值</summary>{state.stores.map(store=><label key={store}><input type="checkbox" disabled={busy} checked={zeroStores.includes(store)} onChange={event=>{invalidate();setZeroStores(previous=>event.target.checked?[...previous,store]:previous.filter(name=>name!==store));}}/>{store} 本月扣款为 0</label>)}</details>:null}
+    {notice?<p role="status">{notice}</p>:null}
+    {draft.stats.skipped?<p role="status">已跳过 {draft.stats.skipped} 条无数量记录，来源位置已保留。</p>:null}
+    {draft.stats.duplicates?<p>已有 {draft.stats.duplicates} 条重复源记录已跳过。</p>:null}
+    {previewPending?<p role="status">正在更新预览…</p>:null}
+    {finalCandidate?<Panel className="report-adoption-preview"><strong>{state.ledger.period} 整月导入预览</strong>
+      {mode==='files'?<p>本次筛选新增 {draft.stats.addedRows.length} 行 / {exactSum(draft.stats.addedRows,kind==='dispatch'?'quantityExact':'signedAmountExact')} {unit}；保留已有 {draft.stats.retainedCount} 行{current&&retaining?`（原采用 ${oldTotal} ${unit}）`:''}。</p>:null}
+      <p className="report-final-total">最终整月：{kind==='dispatch'?`采用 ${finalTotal} 件`:`有符号扣款合计 ${finalTotal} 元`} · 共 {finalCandidate.rows.length} 行</p>
+      {finalCandidate.missingStores.length?<p>尚未取得扣款：{finalCandidate.missingStores.join('、')}。</p>:null}
+      <div className="report-preview-rows"><table><thead><tr><th>来源 / 位置</th><th>店铺 / {label}</th><th>单号 / SKC</th><th>{kind==='dispatch'?'件数':'金额'}</th><th>来源说明 / 备注</th></tr></thead><tbody>{finalCandidate.rows.slice(0,100).map((row,index)=><tr key={index}><td>{row.sourceName} / {row.sourceSheet}<br/>{supplementRowLabel(row)}</td><td>{row.store} / {row.ownerMarker}</td><td>{row.businessId} / {row.platformSkc}</td><td>{row.quantityExact??row.signedAmountExact}</td><td>{row.inheritedFrom?`登记人沿用${row.sourceFormat==='csv'?'CSV 物理':'来源'}第 ${row.inheritedFrom} 行；`:''}{row.amountHeader}{(row.remarks??[]).map(note=>`${note.header||`第${note.column}列`}：${note.value}`).join('；')}</td></tr>)}</tbody></table></div>
+      {finalCandidate.rows.length>100?<p>预览前 100 行，导入包含全部 {finalCandidate.rows.length} 行。</p>:null}
+    </Panel>:null}
+    {visibleConflicts.length?<Panel className="report-conflicts"><strong>跨文件相似记录 · {visibleConflicts.length} 条</strong><p>核对后可排除重复行，或保留合法分摊；预览自动更新。</p><ul>{visibleConflicts.map((row,index)=><li key={index}><span>{row.previousSourceName} / {supplementRowLabel({sourceSheet:row.previousSourceSheet,sourceRow:row.previousSourceRow,recordRow:row.previousRecordRow,sourceFormat:row.previousSourceFormat,businessId:row.businessId})} 与 {row.sourceName} / {supplementRowLabel(row)} · {row.platformSkc}</span><Button disabled={busy} onClick={()=>{setPreview(null);setReviewed(false);setExcludedRows(previous=>[...previous,supplementRowIdentity(row)]);}}>排除此条</Button></li>)}</ul>{blocked?<Button disabled={busy} onClick={()=>{setPreview(null);setReviewed(true);}}>保留全部记录</Button>:<p role="status">已核对并保留全部记录。</p>}</Panel>:null}
+    {draft.error||error?<p role="alert">{draft.error||error}</p>:null}
+    {error&&draft.ready?<Button disabled={busy||previewPending} onClick={()=>setRetry(value=>value+1)}>重新读取预览</Button>:null}
   </Modal>;
 }
 

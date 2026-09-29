@@ -1,7 +1,7 @@
 import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@2";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@3";
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
@@ -33,6 +33,12 @@ export function supplementMarkers(source, kind) {
   return [...new Set(source.cells.slice(start+1).map(row=>normalized(row[column])).filter(value=>value&&!['登记人','姓名','供方货号','货号','无'].includes(value)))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
 }
 export function supplementHeaders(source,headerRow){const index=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;return source.cells[index]??[];}
+export const supplementRowIdentity = row => canonicalJson([row.fileHash,row.sourceSheet,row.sourceRow,row.manual?row.store:null]);
+export function supplementRowLabel(row) {
+  const csv=row.sourceFormat==='csv'||(!row.sourceFormat&&row.sourceSheet==='CSV');
+  const position=row.recordRow?`表格第 ${row.recordRow} 行${csv?`（CSV 物理第 ${row.sourceRow} 行）`:''}`:`${csv?'CSV 物理':'工作表'}第 ${row.sourceRow} 行`;
+  return `${position}${row.businessId?` · 单号 ${row.businessId}`:''}`;
+}
 export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store = "", stores = [], includeAll = false } = {}) {
   const cells = source.cells ?? [];
   const headerIndex=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;
@@ -40,15 +46,17 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
   const headers = cells[headerIndex] ?? [];
   const fields = mapping ?? suggestSupplementMapping(headers);
   const marker = normalized(ownerMarker);
-  if (!includeAll && !marker) throw new Error("请选择本人标记或明确采用该来源全部记录。");
-  if (!includeAll && !(Number(fields[ownerField]) >= 0)) throw new Error("请映射本人姓名或供方货号列。");
-  if (!(Number(fields[kind === "dispatch" ? "quantity" : "amount"]) >= 0)) throw new Error("请映射数量或扣款金额列。");
+  if (!includeAll && !marker) throw new Error(kind==='dispatch'?"请选择登记人或全部登记人。":"请选择供方货号或全部记录。");
+  if (!includeAll && !(Number(fields[ownerField]) >= 0)) throw new Error(kind==='dispatch'?"未识别登记人列，请在高级设置中映射。":"未识别供方货号列，请在高级设置中映射。");
+  if (!(Number(fields[kind === "dispatch" ? "quantity" : "amount"]) >= 0)) throw new Error(kind==='dispatch'?"未识别数量列，请在高级设置中映射。":"未识别扣款金额列，请在高级设置中映射。");
   const rows = [], errors = [], ignored = [];
   let group=null;
   for (let index = headerIndex+1; index < cells.length; index++) {
     const values = cells[index];
     if (!values.some(value => normalized(value))) {group=null;continue;}
     const sourceRow = source.sourceRows?.[index] ?? index + 1;
+    const position={sourceRow,recordRow:source.recordRows?.[index]??index+1,sourceFormat:source.sourceFormat??(source.sheetName==='CSV'?'csv':'xlsx'),businessId:normalized(values[Number(fields.businessId)]),sourceSheet:source.sheetName};
+    const missingQuantity=kind==='dispatch'&&!normalized(values[Number(fields.quantity)]);
     const mergedFrom={};
     const get = field => {
       const column=Number(fields[field]), value=values[column]??'';
@@ -58,9 +66,9 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
       mergedFrom[field]=merge.s.r+1;
       return cells[merge.s.r]?.[column]??'';
     };
-    if (!normalized(get('businessId')) && values.some(value => /^(合计|总计|小计|总合计|汇总)([:：\s]|$)/.test(normalized(value)))) {group=null;ignored.push({ sourceRow, reason:"total" }); continue; }
-    if (headerKey(get(kind === "dispatch" ? "quantity" : "amount")) === headerKey(headers[Number(fields[kind === "dispatch" ? "quantity" : "amount"])])) {group=null;ignored.push({ sourceRow, reason:"header" }); continue; }
-    if(kind==='deduction'&&!['businessId','platformSkc','supplierNumber','amount'].some(field=>normalized(get(field)))){ignored.push({sourceRow,reason:'separator'});continue;}
+    if (!normalized(get('businessId')) && values.some(value => /^(合计|总计|小计|总合计|汇总)([:：\s]|$)/.test(normalized(value)))) {group=null;ignored.push({ ...position, reason:"total" }); continue; }
+    if (headerKey(get(kind === "dispatch" ? "quantity" : "amount")) === headerKey(headers[Number(fields[kind === "dispatch" ? "quantity" : "amount"])])) {group=null;ignored.push({ ...position, reason:"header" }); continue; }
+    if(kind==='deduction'&&!['businessId','platformSkc','supplierNumber','amount'].some(field=>normalized(get(field)))){ignored.push({...position,reason:'separator'});continue;}
     let owner=normalized(get(kind==='dispatch'?'owner':'supplierNumber')), sourceStore=normalized(get('store')), inheritedFrom=null;
     let platformSkc=normalized(get('platformSkc')), order1688=normalized(get('order1688'));
     const inheritedIdentifiers={};
@@ -71,31 +79,36 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
       // A registrant can span stores; changing stores resets product/order identity only.
       if (group&&sourceStore&&sourceStore!==group.store) group={owner:group.owner,date:group.date,sourceRow:group.sourceRow,store:sourceStore};
       const hasOrder=normalized(get('businessId'))||(owner&&normalized(get('quantity')));
-      if(!hasOrder){group=null;ignored.push({sourceRow,reason:'separator'});continue;}
+      if(!hasOrder){group=owner?{owner,store:sourceStore,date,sourceRow,platformSkc,skcRow:sourceRow,order1688,order1688Row:sourceRow}:null;ignored.push({...position,reason:'separator'});continue;}
       if(owner){
         if(group?.owner!==owner)group=null;
         sourceStore=sourceStore||group?.store||'';
         group={...group,owner,store:sourceStore,date:date||group?.date||'',sourceRow};
       }else if(group){owner=group.owner;sourceStore=sourceStore||group.store;inheritedFrom=group.sourceRow;}
-      else {errors.push({sourceRow,message:'连续记录的登记人归属不确定，请核对日期/分组并补齐来源登记人。'});continue;}
+      else {
+        if(missingQuantity)ignored.push({...position,reason:'missing_quantity',ownerMarker:'',inheritedFrom:null});
+        else errors.push({...position,message:'连续记录的登记人归属不确定，请核对日期/分组并补齐来源登记人。'});
+        continue;
+      }
       if(platformSkc&&platformSkc!==group.platformSkc){group.order1688='';group.order1688Row=null;}
       if(platformSkc){group.platformSkc=platformSkc;group.skcRow=sourceRow;}
       else if(group.platformSkc){platformSkc=group.platformSkc;inheritedIdentifiers.platformSkc=group.skcRow;}
       if(order1688){group.order1688=order1688;group.order1688Row=sourceRow;}
       else if(platformSkc&&group.order1688){order1688=group.order1688;inheritedIdentifiers.order1688=group.order1688Row;}
     }
-    if (!includeAll && !(kind==='deduction'&&matchMode==='contains'?owner.includes(marker):owner===marker)) { ignored.push({ sourceRow, reason:"owner_excluded" }); continue; }
+    if (!includeAll && !(kind==='deduction'&&matchMode==='contains'?owner.includes(marker):owner===marker)) { ignored.push({ ...position, reason:"owner_excluded" }); continue; }
+    if(missingQuantity){ignored.push({...position,reason:'missing_quantity',ownerMarker:owner,inheritedFrom,inheritedIdentifiers,mergedFrom});continue;}
     const amount = decimalSource(get(kind === "dispatch" ? "quantity" : "amount"), null);
-    if (amount === null || (kind === "dispatch" && !/^\d+$/.test(exact(amount)))) { errors.push({ sourceRow, message:"数量须为非负整数，金额须为有效数值，请核对源行/映射。" }); continue; }
+    if (amount === null || (kind === "dispatch" && !/^\d+$/.test(exact(amount)))) { errors.push({ ...position, message:kind==='dispatch'?"数量须为非负整数，请核对源数量列。":"扣款金额须为有效数值，空金额不能按零计入。" }); continue; }
     const identifiers = ["businessId", "order1688", "platformSkc", "supplierNumber"];
-    if (identifiers.some(field => typeof get(field) === "number" && (!Number.isSafeInteger(get(field)) || Math.abs(get(field)) >= 1e15))) { errors.push({ sourceRow, message:"源表数字标识符可能已丢失精度，请使用原始文本单号。" }); continue; }
+    if (identifiers.some(field => typeof get(field) === "number" && (!Number.isSafeInteger(get(field)) || Math.abs(get(field)) >= 1e15))) { errors.push({ ...position, message:"源表数字标识符可能已丢失精度，请使用原始文本单号。" }); continue; }
     const targetStore = sourceStore ? suggestSupplementStore(sourceStore,stores)||sourceStore : normalized(store);
-    if (kind === "deduction" && !targetStore) { errors.push({ sourceRow, message:"请按实际源列或工作表映射店铺。" }); continue; }
+    if (kind === "deduction" && !targetStore) { errors.push({ ...position, message:"请按实际源列或工作表映射店铺。" }); continue; }
     const mapped=new Set(Object.values(fields).map(Number).filter(value=>value>=0));
     const remarks=values.flatMap((value,col)=>!mapped.has(col)&&normalized(value)?[{column:col+1,header:normalized(headers[col]),value:normalized(value)}]:[]);
-    rows.push({ ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceRow, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}) } : { signedAmountExact: exact(amount) }) });
+    rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}) } : { signedAmountExact: exact(amount) }) });
   }
-  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, headerRow, mapping:fields, selection:{ownerMarker:marker,ownerField,matchMode,includeAll,store}, parserVersion:SUPPLEMENT_PARSER_VERSION } };
+  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:marker,ownerField,matchMode,includeAll,store}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
 }
 
 export function normalizeSupplementCandidate(input, { ledger, stores }) {
@@ -109,13 +122,13 @@ export function normalizeSupplementCandidate(input, { ledger, stores }) {
   });
   const identities = new Set(), businessIds = new Map(), conflicts=[];
   for (const row of rows) {
-    const key = canonicalJson([row.fileHash,row.sourceSheet,row.sourceRow,row.manual ? row.store : null]);
+    const key = supplementRowIdentity(row);
     if (identities.has(key)) throw new Error("候选包含重复源行，请移除重复来源后重新采用。");
     identities.add(key);
     if (row.businessId) {
       const business = canonicalJson([row.store,row.businessId,row.platformSkc,row.supplierNumber]);
       const previous=businessIds.get(business);
-      if (previous && previous.fileHash!==row.fileHash) conflicts.push({businessId:row.businessId,platformSkc:row.platformSkc,sourceName:row.sourceName,sourceSheet:row.sourceSheet,sourceRow:row.sourceRow,previousSourceName:previous.sourceName,previousSourceRow:previous.sourceRow});
+      if (previous && previous.fileHash!==row.fileHash) conflicts.push({businessId:row.businessId,platformSkc:row.platformSkc,...Object.fromEntries(['fileHash','sourceName','sourceSheet','sourceRow','recordRow','sourceFormat'].map(field=>[field,row[field]])),previousSourceName:previous.sourceName,previousSourceSheet:previous.sourceSheet,previousSourceRow:previous.sourceRow,previousRecordRow:previous.recordRow,previousSourceFormat:previous.sourceFormat,previousFileHash:previous.fileHash});
       if (!previous) businessIds.set(business,row);
     }
   }

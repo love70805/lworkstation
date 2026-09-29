@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {inspectSupplementSource,normalizeSupplementCandidate,suggestSupplementMapping,suggestSupplementStore} from './monthlySupplements';
+import {inspectSupplementSource,normalizeSupplementCandidate,suggestSupplementMapping,suggestSupplementStore,supplementRowIdentity,supplementRowLabel,SUPPLEMENT_PARSER_VERSION} from './monthlySupplements';
 const headers=['日期','登记人','店铺','skc','订单号','sku数量','特殊情况','1688订单号','网供名字',''];
 const source=cells=>({fileHash:'HASH',fileName:'synthetic.csv',sheetName:'CSV',headerRow:1,cells:[headers,...cells]});
 const context={ledger:{id:'L',workspaceId:'W',period:'2026-08'},stores:['甲']};
@@ -58,7 +58,44 @@ it('preserves equal legitimate allocations, rejects duplicate coordinates, and r
  expect(review.rows).toHaveLength(3);expect(review.conflicts).toHaveLength(1);
  expect(review.reviewedCrossFileConflicts).toBe(false);
 });
-it.each(['-1','1.5'])('flags invalid dispatch quantity %s',value=>{
+it.each(['-1','1.5','不是数字'])('flags invalid dispatch quantity %s',value=>{
  const result=inspectSupplementSource(source([['8/1','甲人','甲','S','O',value]]),{kind:'dispatch',ownerMarker:'甲人'});
  expect(result.errors).toHaveLength(1);expect(result.rows).toHaveLength(0);
+});
+it.each([null,undefined,'','  ','\t\r\n'])('skips blank quantity %s after maintaining registrant and identifier context',value=>{
+ const s=source([
+  ['8/1','甲人','甲','S1','EMPTY',value,'退款','P1'],
+  ['','','','','VALID',3,'不发'],
+  ['','','','','ZERO',0],
+ ]);
+ const result=inspectSupplementSource(s,{kind:'dispatch',ownerMarker:'甲人'});
+ expect(result.errors).toEqual([]);expect(result.ignored).toContainEqual(expect.objectContaining({reason:'missing_quantity',sourceRow:2,recordRow:2,businessId:'EMPTY',ownerMarker:'甲人'}));
+ expect(result.rows.map(row=>row.quantityExact)).toEqual(['3','0']);
+ expect(result.rows[0]).toMatchObject({ownerMarker:'甲人',platformSkc:'S1',order1688:'P1',inheritedFrom:2});
+ expect(result.source.ignored).toEqual(result.ignored);expect(result.source.parserVersion).toBe(SUPPLEMENT_PARSER_VERSION);
+ expect(candidate('dispatch',result.rows,{sources:[result.source]}).adoptedQuantityExact).toBe('3');
+});
+it('does not report ambiguous ownership for empty quantities or inherit quantity across rows',()=>{
+ const result=inspectSupplementSource(source([
+  ['8/1','','甲','S','UNOWNED',''],
+  ['8/1','甲人','甲','S','VALID',4],
+  ['','','','','EMPTY',''],
+  ['8/2','','甲','','NEWDATE',''],
+  ['8/2','乙人','甲','T','OTHER',2],
+ ]),{kind:'dispatch',includeAll:true});
+ expect(result.errors).toEqual([]);expect(result.ignored.filter(row=>row.reason==='missing_quantity')).toHaveLength(3);
+ expect(result.rows.map(row=>row.quantityExact)).toEqual(['4','2']);
+ expect(inspectSupplementSource(source([['8/1','甲人'],['','','甲','S','VALID',2]]),{kind:'dispatch',ownerMarker:'甲人'}).rows[0].ownerMarker).toBe('甲人');
+});
+it.each(['',null,undefined,' '])('keeps missing deduction amount %s as an error',value=>{
+ const s={fileHash:'F',fileName:'synthetic.xlsx',sheetName:'甲',cells:[['货号','扣款金额','订单号'],['CODE',value,'ORDER']]};
+ const result=inspectSupplementSource(s,{kind:'deduction',ownerMarker:'CODE',store:'甲'});
+ expect(result.errors).toMatchObject([{sourceRow:2,businessId:'ORDER',message:expect.stringContaining('空金额不能按零')}]);
+ expect(result.ignored).toEqual([]);expect(result.rows).toEqual([]);
+});
+it('preserves physical source identity while displaying record coordinates and legacy labels accurately',()=>{
+ const row={fileHash:'F',sourceSheet:'CSV',sourceRow:288,recordRow:285,sourceFormat:'csv',businessId:'ORDER'};
+ expect(supplementRowLabel(row)).toBe('表格第 285 行（CSV 物理第 288 行） · 单号 ORDER');
+ expect(supplementRowIdentity(row)).toBe(supplementRowIdentity({...row,recordRow:288}));
+ expect(supplementRowLabel({...row,recordRow:undefined,sourceFormat:undefined})).toBe('CSV 物理第 288 行 · 单号 ORDER');
 });
