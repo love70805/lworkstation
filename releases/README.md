@@ -6,16 +6,16 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.3.0](https://github.com/love70805/lworkstation/releases/tag/v0.3.0)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.3.1](https://github.com/love70805/lworkstation/releases/tag/v0.3.1)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-28（UTC+8）。0.3.0 已公开为非预发布的 GitHub Latest，四资产匿名全量下载校验通过；Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。
+核对日期：2026-09-29（UTC+8）。0.3.1 已公开为非预发布的 GitHub Latest，四资产匿名全量下载及真实更新通道校验通过；0.3.0原资产保留，Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.3.1` 导入简化 | 候选验收通过；PR #122合入main，1004测试、低级别审计、隐藏EXE smoke、461文件/414生产输入比对及持久复制通过；公开回读待完成，未安装 | 主仓库 `candidates/0.3.1/`；`archive/release-0.3.1/`；[验收及哈希](../docs/RELEASE_0.3.1.md) |
-| `0.3.0` 正式版 | 已公开 GitHub Latest；PR #119/#120及main CI通过，984测试、隐藏EXE smoke、包体/资源哈希和四资产匿名回读通过；未安装 | 主仓库 `releases/candidates/0.3.0-public/`；原候选 `releases/candidates/0.3.0/`；[验收及哈希](../docs/RELEASE_0.3.0.md) |
+| `0.3.1` 导入简化 | 已公开 GitHub Latest；PR #122/#123及main CI通过，1004测试、低级别审计、隐藏EXE smoke、461文件/414输入比对、四资产匿名完整回读与真实更新通道通过；未安装 | 主仓库 `candidates/0.3.1/`、`candidates/0.3.1-public/`；`archive/release-0.3.1/`；[发布验收及哈希](../docs/RELEASE_0.3.1.md) |
+| `0.3.0` 正式版 | 历史公开稳定版，原标签及资产保留；PR #119/#120及main CI通过，984测试、隐藏EXE smoke、包体/资源哈希和四资产匿名回读通过；未安装 | 主仓库 `releases/candidates/0.3.0-public/`；原候选 `releases/candidates/0.3.0/`；[验收及哈希](../docs/RELEASE_0.3.0.md) |
 | `0.3.0-rc.2` ERP自动采用修复 | 历史验收记录；应用归档后原安装包未寻获，源码已恢复至正式候选；未公开或安装 | [验收记录](../docs/RELEASE_0.3.0_RC_2.md) |
 | `0.3.0-rc.1` ERP商品档案 | 历史验收记录；应用归档后原安装包未寻获；未公开、未安装 | [验收与限制](../docs/RELEASE_0.3.0_RC_1.md) |
 | `0.3.0-beta.10` saved report / color lamp | 已公开预发布；925测试、Windows候选smoke、PR #115/main CI、四资产匿名回读与通道检查通过，本机未安装 | `candidates/0.3.0-beta.10-export-status/`；[验收](../docs/RELEASE_0.3.0_BETA_10.md) |
@@ -52,7 +52,7 @@ QA 包使用独立应用身份，不能作为正式应用的更新包上传。Gi
 
 本机 beta.8 QA 已补“Lworkstation QA beta.8（仅测试）”桌面快捷方式，使用隔离启动器且公开更新关闭。0.2.7 临时安装验收应用已卸载，只保留证据。旧公开 beta.7 没有严格通道修复，继续 Beta 建议手工下载当前 `0.3.0-beta`；不假定旧安装包可自动升级。
 
-0.3.0本批使用 `candidateOnly:true` 和 `release:build` 正式构建，原候选四资产仍在 `candidates/0.3.0/`；后续明确授权发布后，从 `candidates/0.3.0-public/` 上传同字节EXE/blockmap/元数据及公开文件名校验清单。GitHub Latest已切到0.3.0，本机 `latest/` 目录未改动，不能以该历史目录判断公开版本。
+0.3.1使用 `candidateOnly:true` 和 `release:build` 构建稳定配置候选，验收原件位于 `candidates/0.3.1/`，公开副本位于 `candidates/0.3.1-public/`；EXE/blockmap/元数据保持同字节，公开校验清单使用规范文件名。GitHub Latest已切到0.3.1，本机 `latest/` 目录未改动，不能以该历史目录判断公开版本。0.3.0原候选和公开副本保留。
 
 ## 公开 Beta 构建与归档
 
