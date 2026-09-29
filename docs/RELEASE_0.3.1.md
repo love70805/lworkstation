@@ -14,3 +14,7 @@
 - 跳过ignored信息随来源批次持久化、重开和备份恢复通过。parser@2旧批次与定稿报告可读，无schema迁移。CSV物理sourceRow继续作为去重身份，recordRow只作展示。
 
 证据：`source-readonly-audit.json`、`browser-qa.json`、六张布局截图和合成导出位于上述主仓库持久目录。真实姓名、订单或原CSV明细没有写入证据或提交。
+
+## CI 审计补强
+
+首轮PR CI的桌面审计发现[nodejs/undici GHSA-3wwx-pv8p-q78v](https://github.com/advisories/GHSA-3wwx-pv8p-q78v)。仅将构建链node-gyp的传递undici从6.28.0升为6.28.1，仍在父级`^6.25.0`范围内；锁文件变化仅包版本、官方npm完整性和依赖快照，未修改运行依赖、工作区配置或审计门禁。`pnpm --dir desktop install --frozen-lockfile`和`audit --audit-level=low`通过，重新构建候选并补验桌面与包体。首轮安装包未发布，最终候选以之后登记哈希为准。

@@ -5,6 +5,10 @@
   "integrationBranch": "codex/release-0-3-1",
   "requiredCommits": [
     {
+      "commit": "d2d0cc49c362940e516d10871f1bae5fd946748a",
+      "module": "0.3.1-build-dependency-audit-fix"
+    },
+    {
       "commit": "bb384f0daf30e9e647be8f0c5ab68d23df8539b9",
       "module": "blank-quantity-and-simplified-import"
     },
