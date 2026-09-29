@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "candidateOnly": true,
-  "integrationBranch": "codex/release-0-3-1",
+  "integrationBranch": "codex/release-0-3-2",
   "requiredCommits": [
+    {
+      "module": "0.3.1-final-main-baseline",
+      "commit": "ff74ef9f7d01f9309af24566ca6b2ff3eb46355a"
+    },
     {
       "commit": "d2d0cc49c362940e516d10871f1bae5fd946748a",
       "module": "0.3.1-build-dependency-audit-fix"

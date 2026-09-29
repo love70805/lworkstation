@@ -23,7 +23,7 @@ it('matches trimmed registrant names exactly and retains all remarks and source 
  expect(result.rows[1].remarks.map(row=>row.value)).toEqual(['引流','尾列备注']);
  expect(candidate('dispatch',result.rows,{adoptedQuantityExact:'99'}).adoptedQuantityExact).toBe('5');
 });
-it('resets identity inheritance at changes of SKC, owner, date, store and blank separators',()=>{
+it('shares CSV purchase orders across SKCs while resetting at owner, date, store and blank boundaries',()=>{
  const result=inspectSupplementSource(source([
   ['8/1','甲人','甲','S1','O1',1,'','P1'],
   ['','','','','O2',1,'','P2'],
@@ -36,7 +36,44 @@ it('resets identity inheritance at changes of SKC, owner, date, store and blank 
   ['','','乙','','O9',1],
  ]),{kind:'dispatch',includeAll:true});
  expect(result.errors.map(row=>row.sourceRow)).toEqual([6,9]);
- expect(result.rows.map(row=>[row.businessId,row.platformSkc,row.order1688])).toEqual([['O1','S1','P1'],['O2','S1','P2'],['O3','S2',''],['O4','S2',''],['O6','S3','P3'],['O8','',''],['O9','','']]);
+ expect(result.rows.map(row=>[row.businessId,row.platformSkc,row.order1688])).toEqual([['O1','S1','P1'],['O2','S1','P2'],['O3','S2','P2'],['O4','S2','P2'],['O6','S3','P3'],['O8','',''],['O9','','']]);
+});
+it('keeps every CSV order and exact identifier across shared SKCs, blank quantities and new anchors',()=>{
+ const shared='0016371098004076071',next='3316977048023011698';
+ const result=inspectSupplementSource(source([
+  ['8/1','甲人','甲','S0','NO-ANCHOR',1],
+  ['','','','S1','ANCHOR','', '',shared],
+  ['','','','S2','ORDER-A',15,'北转'],
+  ['','','','S3','ORDER-B',10],
+  ['','','','S4','ZERO',0],
+  ['','','','S5','NEW',2,'',next],
+  ['','','','S6','AFTER',3],
+ ]),{kind:'dispatch',includeAll:true});
+ expect(result.errors).toEqual([]);
+ expect(result.rows.map(row=>[row.businessId,row.order1688,row.quantityExact])).toEqual([
+  ['NO-ANCHOR','','1'],['ORDER-A',shared,'15'],['ORDER-B',shared,'10'],['ZERO',shared,'0'],['NEW',next,'2'],['AFTER',next,'3'],
+ ]);
+ expect(result.rows[1]).toMatchObject({platformSkc:'S2',inheritedIdentifiers:{order1688:3},remarks:[{value:'北转'}]});
+ expect(result.rows[2]).toMatchObject({platformSkc:'S3',inheritedIdentifiers:{order1688:3}});
+ expect(result.rows[5].inheritedIdentifiers.order1688).toBe(7);
+ expect(result.ignored).toMatchObject([{sourceRow:3,reason:'missing_quantity'}]);
+ const normalized=candidate('dispatch',result.rows);
+ expect(normalized.adoptedQuantityExact).toBe('31');expect(normalized.rows).toHaveLength(6);expect(normalized.conflicts).toEqual([]);
+ expect(()=>candidate('dispatch',[...result.rows,result.rows[1]])).toThrow('重复源行');
+ expect(candidate('dispatch',[...result.rows,{...result.rows[1],fileHash:'OTHER'}]).conflicts).toHaveLength(1);
+});
+it.each(['owner','date','store','blank','header','total','separator'])('does not carry a CSV purchase anchor across a %s boundary',boundary=>{
+ const rows=[['8/1','甲人','甲','S1','O1',1,'','P1']];
+ const reset={owner:['','乙人','甲','S1','O2',1],date:['8/2','甲人','甲','S1','O2',1],store:['','','乙','S1','O2',1],blank:[],header:headers,total:['合计'],separator:['','','','','','','分隔']}[boundary];
+ rows.push(reset,['','甲人','甲','S1','AFTER',1]);
+ const result=inspectSupplementSource(source(rows),{kind:'dispatch',includeAll:true});
+ expect(result.errors).toEqual([]);expect(result.rows.at(-1).order1688).toBe('');
+});
+it('does not infer purchase anchors from later rows or a prior source',()=>{
+ const first=inspectSupplementSource(source([['8/1','甲人','甲','S','O1',1],['','','','T','O2',1,'','P']]),{kind:'dispatch',includeAll:true});
+ expect(first.rows.map(row=>row.order1688)).toEqual(['','P']);
+ const next=inspectSupplementSource({...source([['8/1','甲人','甲','S','O3',1]]),fileHash:'OTHER'},{kind:'dispatch',includeAll:true});
+ expect(next.rows[0].order1688).toBe('');
 });
 it.each(['扣款金额','金额','分摊金额','运费金额','分摊后运费'])('reads %s by supplier code with exact sign and traceable classification',header=>{
  const s={...source([]),sheetName:'甲',cells:[['补扣款单号','SKC','货号',header,'分类'],['00001','S','CODE-X','-4.1525','运费']]};

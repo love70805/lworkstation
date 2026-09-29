@@ -1,7 +1,7 @@
 import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@3";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@4";
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
@@ -90,11 +90,12 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
         else errors.push({...position,message:'连续记录的登记人归属不确定，请核对日期/分组并补齐来源登记人。'});
         continue;
       }
-      if(platformSkc&&platformSkc!==group.platformSkc){group.order1688='';group.order1688Row=null;}
       if(platformSkc){group.platformSkc=platformSkc;group.skcRow=sourceRow;}
       else if(group.platformSkc){platformSkc=group.platformSkc;inheritedIdentifiers.platformSkc=group.skcRow;}
-      if(order1688){group.order1688=order1688;group.order1688Row=sourceRow;}
-      else if(platformSkc&&group.order1688){order1688=group.order1688;inheritedIdentifiers.order1688=group.order1688Row;}
+      // CSV loses merge metadata: one purchase order can cover multiple SKCs.
+      // XLSX blanks are filled only by the explicit vertical merge in get().
+      if(order1688){group.order1688=order1688;group.order1688Row=mergedFrom.order1688??sourceRow;}
+      else if(position.sourceFormat==='csv'&&group.order1688){order1688=group.order1688;inheritedIdentifiers.order1688=group.order1688Row;}
     }
     if (!includeAll && !(kind==='deduction'&&matchMode==='contains'?owner.includes(marker):owner===marker)) { ignored.push({ ...position, reason:"owner_excluded" }); continue; }
     if(missingQuantity){ignored.push({...position,reason:'missing_quantity',ownerMarker:owner,inheritedFrom,inheritedIdentifiers,mergedFrom});continue;}
