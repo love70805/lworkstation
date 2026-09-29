@@ -1,8 +1,8 @@
 # 0.3.2 发布与验收
 
-2026-09-29，基线远端 main `ff74ef9f7d01f9309af24566ca6b2ff3eb46355a`（0.3.1 / PR #124），应用工作区 d308 / `codex/release-0-3-2`。软件提交 `57c1d07b5fecd67bc81c37fc01a597d568348b66`。[关联契约](integration/RELEASE_0_3_2_SHARED_1688.md)。
+2026-09-29 11:39:55（UTC+8），[v0.3.2](https://github.com/love70805/lworkstation/releases/tag/v0.3.2)已公开为稳定 GitHub Latest，draft=false、prerelease=false。基线远端 main `ff74ef9f7d01f9309af24566ca6b2ff3eb46355a`（0.3.1 / PR #124），应用工作区 d308 / `codex/release-0-3-2`。软件提交 `57c1d07b5fecd67bc81c37fc01a597d568348b66`，标签固定主线 `67eec80dcfdfe5491bc941d7b49c22c87d860c78`。[关联契约](integration/RELEASE_0_3_2_SHARED_1688.md)。
 
-本机最终候选、源码和脱敏证据已复制并回读到主仓库 `C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.2/` 及 `archive/release-0.3.2/`。候选验收通过，PR/main CI 集成及公开资产回读状态分别登记，尚不以本机候选表示已公开。
+本机最终候选、源码和脱敏证据已复制并回读到主仓库 `C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.2/` 及 `archive/release-0.3.2/`。四个匿名下载原件另在候选目录 `public/`，与公开资产及候选逐项核对。候选验收、PR/main CI 集成、公开匿名资产及真实更新通道回读均通过。未安装、未改真实库或源文件。
 
 ## 修复与使用
 
@@ -10,7 +10,7 @@
 
 parser@4 无 schema 迁移，物理 sourceRow 身份和 recordRow 展示语义不变，空数量跳过、真实零、登记人筛选、自动预览/一次导入、追加/替换、冲突与定稿保护沿用 0.3.1。现有 UI 与导出右侧汇总、表头、冻结首行、列宽、配色及表结构均未改动。
 
-升级仅修正新导入或重新导入的解析，不能自动补回旧批次已保存的空关联。已有错误来源请在现有来源登记中重新选择原文件、原登记人，明确选择“替换来源”后导入；避免追加重复，旧采用版本保留。已定稿月份先沿用原有显式重开流程，原定稿报告不会静默改写。本批未操作用户真实库。
+升级仅修正新导入或重新导入的解析，不能自动补回旧批次已保存的空关联。已有错误来源请重新选择本月需保留的全部原来源文件及相同登记人筛选范围，在“已有来源处理”中选择“以本次筛选替换全部已有来源”后导入；该操作替换整月已有来源，应先核对最终整月数量，旧采用版本保留。已定稿月份先沿用原有显式重开流程，原定稿报告不会静默改写。本批未操作用户真实库。
 
 ## 实现与候选验收
 
@@ -32,7 +32,20 @@ parser@4 无 schema 迁移，物理 sourceRow 身份和 recordRow 展示语义�
 
 ## 集成与公开状态
 
-[PR #125](https://github.com/love70805/lworkstation/pull/125)首轮 [CI 36517260132](https://github.com/love70805/lworkstation/actions/runs/36517260132)全部通过，包含前端低级别依赖审计、完整 release:check 和 Windows 桌面验证/审计。最终候选记录随同一 PR 提交，最终 PR/main CI 通过后再公开 v0.3.2；公开匿名回读与真实更新通道结果待补记。
+[PR #125](https://github.com/love70805/lworkstation/pull/125)首轮 [CI 36517260132](https://github.com/love70805/lworkstation/actions/runs/36517260132)、候选记录提交 `7fbb5b6a8af788d42e3ec8451c1c189dc75643af` 的[最终 PR CI 36517548671](https://github.com/love70805/lworkstation/actions/runs/36517548671)及[主线 CI 36517836509](https://github.com/love70805/lworkstation/actions/runs/36517836509)全部通过，包含前端低级别依赖审计、完整 release:check 和 Windows 桌面验证/审计。PR 合入 `67eec80dcfdfe5491bc941d7b49c22c87d860c78`，frontend/desktop/integrations/tools 软件文件树与构建提交 57c1d07 完全一致；标签固定该已通过主线。主线源码快照 `source-67eec80.zip` 也已持久保存。
+
+草稿四资产大小/GitHub SHA256 与候选一致后公开，Latest 接口返回 v0.3.2。四资产匿名全量下载并逐项回读，latest.yml 的版本/路径/116982570 字节/SHA512 与实际 EXE 一致，blockmap 与校验清单完整核对。公开 EXE 和 blockmap 仅规范文件名，字节与候选相同；公开 SHA256.txt 按规范文件名更新，所以清单哈希不同。
+
+| 公开文件 | 字节 | SHA256 |
+| --- | ---: | --- |
+| Lworkstation-Setup-0.3.2.exe | 116982570 | `AD0C5C89F2861DA926CEF25FF05DA0324803B6CA220D5AD6DBF22CC7C84F756A` |
+| Lworkstation-Setup-0.3.2.exe.blockmap | 123105 | `056B4525B4C22C57B142A509B977970E039F460FAD0F5AE537468D6057A3AFCC` |
+| latest.yml | 353 | `B43943CE78E90CDB62CEF325B69413A75554428899A1FCDA29BE1EDFB78ECB31` |
+| SHA256.txt | 276 | `853D6742623CE306920C3C2364B58B0231EB685C2BAF533BCBAB7921684DBDD5` |
+
+[Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.3.2/Lworkstation-Setup-0.3.2.exe)。生产 AppUpdater、ChannelGitHubProvider 及更新 runtime 连接真实匿名公开 HTTP：0.2.19/0.3.0/0.3.1 显示可更新至 0.3.2，0.3.2 显示当前；Beta.9 只提示 Beta.10，Beta.10 显示当前，Beta 不读取 stable Latest；RC.1/RC.2 禁用且不发请求。更新器下载/安装调用均为 0，未用 fixture 代替公开通道。
+
+0.3.0 和 0.3.1 原公开标签、资产名称/大小/SHA256 与发布前只读快照一致，本机原候选哈希也不变。`public-release.json`、`anonymous-verification.json`、`anonymous-tag-check.json`、`public-update-channels.json`、`historical-releases-check.json`、`durable-public-check.json`、四个匿名下载原件及原始 CI/公开日志均保存在主仓库 `archive/release-0.3.2/`；93 项阶段证据复制回读通过，后续发布记录继续追加。未归档聊天或工作区。
 
 ## 验收边界
 
