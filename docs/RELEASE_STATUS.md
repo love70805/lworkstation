@@ -2,9 +2,9 @@
 
 更新时间：2026-09-30
 
-## 0.3.4 正式候选验收通过，公开待完成
+## 当前公开稳定Latest：0.3.4
 
-1108测试、16组桌面verify、真实60秒慢路径、隔离22MiB收件、headless用户路径、隐藏EXE smoke与489文件/442输入一致性通过。PR #129等待最终CI/主线集成与稳定四资产匿名回读；未安装、未改真实库。当前公开稳定Latest仍为0.3.3，Beta为0.3.0-beta.10。见[0.3.4验收](RELEASE_0.3.4.md)。
+1108测试、16组桌面verify、真实60秒慢路径、隔离22MiB收件、headless用户路径、隐藏EXE smoke与489文件/442输入一致性通过。[PR #129](https://github.com/love70805/lworkstation/pull/129)及main CI通过；[v0.3.4](https://github.com/love70805/lworkstation/releases/tag/v0.3.4)已于10:23公开，标签固定b399a6a，稳定四资产匿名全量回读及实际更新通道核验通过。旧0.3.0至0.3.3标签/资产保留；Beta仍为0.3.0-beta.10、RC禁用。未安装、未改真实库。见[0.3.4验收](RELEASE_0.3.4.md)。
 
 ## 历史公开稳定版 0.3.1
 
