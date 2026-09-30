@@ -49,6 +49,7 @@ export function productDraftReferences(draft = {}, historicalRows = []) {
       referenceKind: authoritative?.referenceKind ?? (supplier ? "supplier_landed" : null),
       sourceLabel: authoritative ? ({ erp_catalog_reference: "ERP 采购参考", erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "定稿历史" }[authoritative.referenceKind] ?? "历史参考") : "1688 参考",
       historical: authoritative,
+      erpPurchaseState: historical?.erpPurchaseState ?? "not_checked",
       supplier,
     };
   });

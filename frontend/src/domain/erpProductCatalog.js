@@ -5,6 +5,13 @@ import { suggestErpProductTitles } from "./erpProductTitles";
 const text = value => String(value ?? "").trim();
 const fields = ["platformSkc", "productName", "imageUrl", "attribute", "warehouseSku", "storeName"];
 
+// Only explicit markers identify promotional/traffic variants; price, 1pc,
+// color and accessory words alone are never exclusion evidence.
+export function selectionTrafficReason(row = {}) {
+  const value = [row.attribute, row.productName].map(text).join(" ").normalize("NFKC");
+  return /引流|(?:^|[^\d.])1\s*%\s*of\s*people\s*choose\b/i.test(value) ? "明确引流标记" : null;
+}
+
 export function catalogProductName(value) {
   const name = text(value);
   return ["未建立商品档案", "未命名商品"].includes(name) ? "" : name;
@@ -193,15 +200,8 @@ export function erpCatalogIdentityRows(index) {
 
 export function erpCatalogSuppliers(rows = []) {
   const suppliers = new Map();
-  const uniqueUrlsBySupplier = new Map();
   rows.forEach(row => (row.erpCatalogSuppliers ?? []).forEach(item => {
-    if (!item.stableSupplierId || !item.sourceUrl) return;
-    if (!uniqueUrlsBySupplier.has(item.stableSupplierId)) uniqueUrlsBySupplier.set(item.stableSupplierId, new Set());
-    uniqueUrlsBySupplier.get(item.stableSupplierId).add(item.sourceUrl);
-  }));
-  rows.forEach(row => (row.erpCatalogSuppliers ?? []).forEach(item => {
-    const oneUrl = item.stableSupplierId && uniqueUrlsBySupplier.get(item.stableSupplierId)?.size === 1 ? [...uniqueUrlsBySupplier.get(item.stableSupplierId)][0] : "";
-    const key = item.stableSupplierId ? `ERP-SUPPLIER:${item.stableSupplierId}:${item.sourceUrl || oneUrl}` : JSON.stringify([item.supplierName, item.sourceUrl]);
+    const key = item.stableSupplierId ? `ERP-SUPPLIER:${item.stableSupplierId}` : JSON.stringify([item.supplierName, item.sourceUrl]);
     if (!suppliers.has(key)) suppliers.set(key, { ...item, id: `ERP-${key}`, supplierId: `ERP-${key}`, catalogSource: "erp", shippingAmount: 0, handlingFee: 0, sourceRecords: [], variants: [] });
     const supplier = suppliers.get(key);
     supplier.sourceRecords.push(...item.sourceRecords);
@@ -257,12 +257,15 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     }
     return true;
   });
-  const unique = field => {
-    const values = [...new Set(allowed.flatMap(row => row.erpCatalogFields?.[field]?.candidates?.map(item => item.value) ?? []).filter(Boolean))];
-    if (values.length > 1) warnings.push(`${({ productName: "商品名称", imageUrl: "商品图片", storeName: "店铺" })[field]}有多个 ERP 来源，请核对。`);
-    return values.length === 1 ? values[0] : "";
-  };
-  const titles = suggestErpProductTitles(allowed);
+  const choices = { ...(draft.variantChoices ?? {}) };
+  const excludedVariants = [...(draft.excludedVariants ?? [])].map(item => ({ ...item }));
+  const identityExcluded = new Set((draft.excludedIdentitySkus ?? []).map(canonicalPlatformSku));
+  for (const row of allowed) {
+    const key = row.canonicalPlatformSku, reason = selectionTrafficReason(row);
+    if (!choices[key] && reason) choices[key] = { state: "excluded", reason, source: "automatic" };
+  }
+  const activeRows = allowed.filter(row => choices[row.canonicalPlatformSku]?.state !== "excluded" && !identityExcluded.has(row.canonicalPlatformSku));
+  const titles = suggestErpProductTitles(activeRows);
   const erpName = titles.name;
   const protectedField = field => Boolean(draft.fieldEdits?.[field]);
   const primarySku = text(draft.variants?.[0]?.platformSku);
@@ -270,25 +273,38 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
   // Different warehouse/SKU pictures are valid branch images. The anchor's
   // unique image can be the catalog cover; a disputed image for that SKU stays
   // empty rather than borrowing another SKU's picture.
-  const imageRows = allowed.filter(row => row.erpImage?.value && !row.erpImage?.conflict)
+  const imageRows = activeRows.filter(row => row.erpImage?.value && !row.erpImage?.conflict)
     .toSorted((a, b) => Number(b.coverSalesQuantity ?? 0) - Number(a.coverSalesQuantity ?? 0)
       || a.canonicalPlatformSku.localeCompare(b.canonicalPlatformSku));
-  const erpImage = imageRows[0]?.erpImage.value || (!primaryRow?.erpImage?.conflict ? primaryRow?.erpImage?.value : "") || unique("imageUrl");
-  const variants = [...(draft.variants ?? [])].map(variant => ({ ...variant }));
+  const erpImage = imageRows[0]?.erpImage.value || (activeRows.includes(primaryRow) && !primaryRow?.erpImage?.conflict ? primaryRow?.erpImage?.value : "") || "";
+  const variants = [...(draft.variants ?? [])].filter(variant => {
+    const key = canonicalPlatformSku(variant.platformSku);
+    if (choices[key]?.state !== "excluded" && !identityExcluded.has(key)) return true;
+    if (!excludedVariants.some(item => canonicalPlatformSku(item.platformSku) === key)) excludedVariants.push({ ...variant });
+    return false;
+  }).map(variant => ({ ...variant }));
   allowed.forEach(row => {
-    let variant = variants.find(item => text(item.platformSku) && canonicalPlatformSku(item.platformSku) === row.canonicalPlatformSku);
-    if (!variant) { variant = { platformSku: row.platformSku, attribute: "", warehouseSku: "", imageUrl: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1, salePrice: "" }; variants.push(variant); }
+    const excluded = choices[row.canonicalPlatformSku]?.state === "excluded" || identityExcluded.has(row.canonicalPlatformSku);
+    const collection = excluded ? excludedVariants : variants;
+    let variant = collection.find(item => text(item.platformSku) && canonicalPlatformSku(item.platformSku) === row.canonicalPlatformSku);
+    if (!variant) { variant = { platformSku: row.platformSku, attribute: "", warehouseSku: "", imageUrl: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1, salePrice: "" }; collection.push(variant); }
     const edited = draft.fieldEdits?.variants?.[row.canonicalPlatformSku] ?? {};
     if (!edited.attribute) variant.attribute ||= row.attribute;
     if (!edited.warehouseSku) variant.warehouseSku ||= row.warehouseSku;
     if (!edited.imageUrl) variant.imageUrl ||= row.erpImage?.value;
+    if (!edited.salePrice && (variant.salePriceSource?.kind === "ledger" || variant.salePrice == null || variant.salePrice === "")) {
+      if (row.ledgerSalePrice) {
+        variant.salePrice = row.ledgerSalePrice.status === "ready" ? row.ledgerSalePrice.value : "";
+        variant.salePriceSource = row.ledgerSalePrice;
+      }
+    }
     variant.referenceUnitCost = row.referenceUnitCost;
     variant.referenceKind = row.referenceKind;
     variant.referenceCostId = row.referenceCostId;
     variant.referencePeriod = row.referencePeriod ?? row.latestPeriod;
     if (row.attributeConflict) warnings.push(`${row.platformSku} 的属性有不同来源，请核对。`);
   });
-  const erpSuppliers = erpCatalogSuppliers(allowed);
+  const erpSuppliers = erpCatalogSuppliers(activeRows);
   let suppliers = draft.suppliers?.length ? draft.suppliers.map(item => ({ ...item })) : erpSuppliers;
   // Existing manual profiles remain authoritative. Fill missing fields only
   // from a uniquely matching purchase pair; additional sources stay reviewable.
@@ -308,8 +324,8 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     name: protectedField("name") ? draft.name : catalogProductName(draft.name) || erpName,
     platformSkc: trustedSkc,
     imageUrl: protectedField("imageUrl") ? draft.imageUrl : draft.imageUrl || erpImage,
-    store: protectedField("store") ? draft.store : draft.store || unique("storeName"),
-    variants, suppliers,
+    store: protectedField("store") ? draft.store : draft.store || ([...new Set(activeRows.flatMap(row => row.storeNames ?? []))].length === 1 ? activeRows.flatMap(row => row.storeNames ?? [])[0] : ""),
+    variants, suppliers, variantChoices: choices, excludedVariants,
     supplierName: protectedField("supplierName") ? draft.supplierName : draft.supplierName || firstSupplier.supplierName || "",
     sourceUrl: protectedField("sourceUrl") ? draft.sourceUrl : draft.sourceUrl || firstSupplier.sourceUrl || "",
     sourceProductId: draft.sourceProductId || firstSupplier.sourceProductId || "",

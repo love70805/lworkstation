@@ -89,3 +89,20 @@ it("does not assign zero to either side of a globally conflicting SKU relationsh
  const result=build({productSkus:[{platformSkc:"SKC-X",platformSku:"CONFLICT",store:"甲店"},{platformSkc:"SKC-Y",platformSku:"CONFLICT",store:"甲店"}]});
  expect(item(result,"SKC-X").label).toBeNull();expect(item(result,"SKC-Y").label).toBeNull();
 });
+
+it("labels each product using only its own source stores without combining different months", () => {
+  const result = build({ ledgers: [ledger(), ledger("2026-07")], importBatches: [batch(), batch({ id: "J", ledgerId: "2026-07", period: "2026-07", store: "乙店", sourceCoverage: createSalesSourceCoverage({ period: "2026-07", storeName: "乙店" }) })], salesRows: [sale(), sale({ id: "RJ", batchId: "J", ledgerId: "2026-07", store: "乙店", platformSku: "SKU-B", platformSkc: "SKC-B", sourceAddedDate: "2026-07-31", quantityExact: "20" })] });
+  expect(result.status).toBe("no_common_month");
+  expect(item(result)).toMatchObject({ status: "ready", period: "2026-08", quantityExact: "100", label: "高销" });
+  expect(item(result, "SKC-B")).toMatchObject({ status: "ready", period: "2026-07", quantityExact: "20", label: "一般" });
+});
+it("does not let an unrelated incomplete shop erase a complete shop's label", () => {
+  const result = build({ importBatches: [batch(), batch({ id: "B2", store: "乙店", sourceCoverage: null })], salesRows: [sale(), sale({ id: "R2", batchId: "B2", store: "乙店", platformSku: "SKU-B", platformSkc: "SKC-B" })] });
+  expect(item(result).label).toBe("高销");
+  expect(item(result, "SKC-B")).toMatchObject({ status: "no_complete_month", quantityExact: null });
+});
+
+it("uses a verified SKU mapping to attribute a legacy row's actual store without inventing ownership", () => {
+  const result = build({ productSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-A" }], salesRows: [sale({ platformSkc: "" })] });
+  expect(item(result)).toMatchObject({ status: "ready", stores: ["甲店"], quantityExact: "100" });
+});

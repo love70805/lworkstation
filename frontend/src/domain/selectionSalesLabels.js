@@ -96,6 +96,11 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     if (name) storeNames.set(key(name),name);
     ensureGroup(row.platformSkc, name ? [name] : [], row.platformSku ?? row.sku);
   }
+  for (const row of rows) {
+    if (text(row.platformSkc)) continue;
+    const candidates = skuSkcs.get(key(row.platformSku ?? row.sku));
+    if (candidates?.size === 1) ensureGroup([...candidates][0], [row.store]);
+  }
   for (const skcs of skuSkcs.values()) if (skcs.size > 1) for (const skc of skcs) identityConflictedGroups.add(skc);
   const rowsByBatch = new Map(), rowCountByScope = new Map();
   for (const row of rows) {
@@ -122,14 +127,24 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
   const covered = chosenPeriod && selectedStores.length && selectedStores.every(name => completeMonths.get(name)?.has(chosenPeriod));
   const status = covered ? "ready" : selectedStores.length > 1 ? "no_common_month" : "no_complete_month";
   const window = windowFor(chosenPeriod), storeProblems = new Set(), groupProblems = new Map(), totals = new Map();
+  // A product uses only its own source stores. An unrelated incomplete store
+  // must not invalidate it; a multi-store product still needs a common month.
+  const groupPeriods = new Map([...groups.values()].map(group => {
+    const stores = [...group.stores].filter(name => selectedStoreKeys.has(name));
+    const months = stores.length ? [...(completeMonths.get(stores[0]) ?? [])].filter(month => stores.every(name => completeMonths.get(name)?.has(month))).sort().reverse() : [];
+    return [group.canonicalPlatformSkc, period ?? months[0] ?? null];
+  }));
   const addProblem = (skc, reason) => { if (!groupProblems.has(skc)) groupProblems.set(skc,new Set()); groupProblems.get(skc).add(reason); };
   for (const skc of identityConflictedGroups) addProblem(skc,"identity_conflict");
   const resolveSkc = row => key(row.platformSkc) || (skuSkcs.get(key(row.platformSku ?? row.sku))?.size === 1 ? [...skuSkcs.get(key(row.platformSku ?? row.sku))][0] : "");
   for (const row of [...rows, ...conflicts]) {
     const storeKey = key(row.store), ledger = ledgerById.get(row.ledgerId);
-    if (!covered || ledger?.period !== chosenPeriod || !selectedStoreKeys.has(storeKey) || !isSale(row)) continue;
+    if (!selectedStoreKeys.has(storeKey) || !isSale(row)) continue;
     const skc = resolveSkc(row);
-    if (!skc) { storeProblems.add(storeKey); continue; }
+    if (!skc) { storeProblems.add(JSON.stringify([storeKey, ledger?.period])); continue; }
+    const itemPeriod = groupPeriods.get(skc);
+    if (!itemPeriod || ledger?.period !== itemPeriod) continue;
+    const itemWindow = windowFor(itemPeriod);
     ensureGroup(skc, [row.store], row.platformSku ?? row.sku);
     if (!totals.has(skc)) totals.set(skc,{ month: new Exact(0), window: new Exact(0), sourceRowCount: 0 });
     const total = totals.get(skc), quantity = decimalSource(row.quantityExact ?? row.quantity ?? row.qty, null);
@@ -138,21 +153,23 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     if (quantity === null) { addProblem(skc,"invalid_quantity"); continue; }
     total.month = total.month.plus(quantity);
     if (skuSkcs.get(key(row.platformSku ?? row.sku))?.size > 1) addProblem(skc,"identity_conflict");
-    const parsed = parseSalesAddedDate(row.sourceAddedDate ?? row.rawAddedAt,{period:chosenPeriod});
+    const parsed = parseSalesAddedDate(row.sourceAddedDate ?? row.rawAddedAt,{period:itemPeriod});
     if (parsed.dateStatus !== "valid") { addProblem(skc,"missing_dates"); continue; }
-    if (parsed.sourceAddedDate >= window.startDate && parsed.sourceAddedDate <= window.endDate) total.window = total.window.plus(quantity);
+    if (parsed.sourceAddedDate >= itemWindow.startDate && parsed.sourceAddedDate <= itemWindow.endDate) total.window = total.window.plus(quantity);
   }
   const items = [...groups.values()].map(group => {
     const scopedStores = [...group.stores].filter(name => selectedStoreKeys.has(name));
     const total = totals.get(group.canonicalPlatformSkc), problems = groupProblems.get(group.canonicalPlatformSkc) ?? new Set();
-    let itemStatus = status, reason = status;
+    const itemPeriod = groupPeriods.get(group.canonicalPlatformSkc);
+    const itemCovered = itemPeriod && scopedStores.length && scopedStores.every(name => completeMonths.get(name)?.has(itemPeriod));
+    let itemStatus = itemCovered ? "ready" : scopedStores.length > 1 ? "no_common_month" : "no_complete_month", reason = itemStatus;
     if (!group.stores.size) { itemStatus = "unknown_store"; reason = "unknown_store"; }
     else if (!scopedStores.length) { itemStatus = "out_of_scope"; reason = "out_of_scope"; }
-    else if (covered && scopedStores.some(name => storeProblems.has(name))) { itemStatus = "insufficient"; reason = "unresolved_identity"; }
-    else if (covered && problems.size) { itemStatus = "insufficient"; reason = [...problems][0]; }
+    else if (itemCovered && scopedStores.some(name => storeProblems.has(JSON.stringify([name, itemPeriod])))) { itemStatus = "insufficient"; reason = "unresolved_identity"; }
+    else if (itemCovered && problems.size) { itemStatus = "insufficient"; reason = [...problems][0]; }
     if (itemStatus === "ready" && ((total?.window ?? new Exact(0)).lt(0) || (total?.month ?? new Exact(0)).lt(0))) { itemStatus = "insufficient"; reason = "invalid_quantity"; }
     const quantityExact = itemStatus === "ready" ? (total?.window ?? new Exact(0)).toFixed() : null;
-    return { platformSkc: group.platformSkc, canonicalPlatformSkc: group.canonicalPlatformSkc, status: itemStatus, reason: itemStatus === "ready" ? null : reason, label: quantityExact === null ? null : selectionSalesLabel(quantityExact), quantityExact, knownQuantityExact: total?.window.toFixed() ?? null, monthQuantityExact: total?.month.toFixed() ?? null, sourceRowCount: total?.sourceRowCount ?? 0, stores: scopedStores.map(name => storeNames.get(name) ?? name), period: chosenPeriod, ...window, rule: SELECTION_SALES_LABEL_RULE };
+    return { platformSkc: group.platformSkc, canonicalPlatformSkc: group.canonicalPlatformSkc, status: itemStatus, reason: itemStatus === "ready" ? null : reason, label: quantityExact === null ? null : selectionSalesLabel(quantityExact), quantityExact, knownQuantityExact: total?.window.toFixed() ?? null, monthQuantityExact: total?.month.toFixed() ?? null, sourceRowCount: total?.sourceRowCount ?? 0, stores: scopedStores.map(name => storeNames.get(name) ?? name), period: itemPeriod, ...windowFor(itemPeriod), rule: SELECTION_SALES_LABEL_RULE };
   }).sort((a,b) => a.canonicalPlatformSkc.localeCompare(b.canonicalPlatformSkc));
   return { period: chosenPeriod, ...window, status, stores: selectedStores.map(name => storeNames.get(name) ?? name), timezone: SALES_TIMEZONE, rule: SELECTION_SALES_LABEL_RULE, items };
 }

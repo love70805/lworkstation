@@ -24,7 +24,7 @@ describe("selection reference rows", () => {
     const input = { workspaceId: "W", platformSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-A", store: "甲店" }], ledgers: [{ id: "AUG", workspaceId: "W", period: "2026-08" }, { id: "JUL", workspaceId: "W", period: "2026-07" }],
       importBatches: [{ id: "A", workspaceId: "W", ledgerId: "AUG", period: "2026-08", store: "甲店", status: "completed", validRowCount: 1, sourceCoverage: createSalesSourceCoverage({ period: "2026-08", storeName: "甲店" }) }, { id: "B", workspaceId: "W", ledgerId: "JUL", period: "2026-07", store: "乙店", status: "completed", validRowCount: 1, sourceCoverage: createSalesSourceCoverage({ period: "2026-07", storeName: "乙店" }) }],
       salesRows: [{ id: "R1", workspaceId: "W", ledgerId: "AUG", batchId: "A", store: "甲店", platformSku: "SKU-A", platformSkc: "SKC-A", sourceRow: 1, sourceAddedDate: "2026-08-30", quantityExact: "100" }, { id: "R2", workspaceId: "W", ledgerId: "JUL", batchId: "B", store: "乙店", platformSku: "SKU-B", platformSkc: "SKC-B", sourceRow: 1, sourceAddedDate: "2026-07-30", quantityExact: "20" }] };
-    expect(buildSelectionReferenceRows({ ...input, store: "all" })[0].automaticSalesTag.status).toBe("no_common_month");
+    expect(buildSelectionReferenceRows({ ...input, store: "all" })[0].automaticSalesTag).toMatchObject({ status: "ready", period: "2026-08", quantityExact: "100", label: "高销" });
     expect(buildSelectionReferenceRows({ ...input, store: "甲店" })[0].automaticSalesTag).toMatchObject({ period: "2026-08", quantityExact: "100", label: "高销" });
   });
   it("prefers ERP history and calculates a reference unit profit", () => {
@@ -177,4 +177,12 @@ describe("selection reference rows", () => {
     expect(groups[0]).toMatchObject({ platformSkc: "SKC-1", skuCount: 2 });
     expect(groups[0].variants.map((item) => item.platformSku).toSorted()).toEqual(["SKU-BLUE", "SKU-RED"]);
   });
+});
+
+it("never fills a tied or manually cleared current price with historical average revenue", () => {
+  const input = { workspaceId: "W", ledgers: [{ id: "L", workspaceId: "W", period: "2026-08" }], importBatches: [{ id: "B", workspaceId: "W", ledgerId: "L", status: "completed", store: "店" }], ledgerIdentityRows: [{ platformSku: "A", platformSkc: "S", store: "店" }], salesRows: [10,12].map((unitPrice,index) => ({ id: `R${index}`, sourceRow: index+2, workspaceId: "W", ledgerId: "L", batchId: "B", store: "店", platformSku: "A", platformSkc: "S", quantity: 1, unitPrice, rawAddedAt: "2026-08-31 12:00:00" })), erpCosts: [{ platformSku: "A", unitCost: 2 }], profitLines: [{ platformSku: "A", quantity: 10, revenue: 990, period: "2026-07" }] };
+  const [tied] = buildSelectionReferenceRows(input);
+  expect(tied).toMatchObject({ ledgerSalePrice: { status: "choose" }, catalogSalePrice: null, averageSalePrice: null, historicalAverageSalePrice: 99, referenceUnitProfit: null });
+  const [cleared] = buildSelectionReferenceRows({ ...input, salesRows: [input.salesRows[0]], platformSkus: [{ platformSku: "A", productId: "P", salePrice: null, salePriceSource: { kind: "manual" } }], products: [{ id: "P", platformSkc: "S", attributes: { fieldEdits: { variants: { A: { salePrice: true } } } } }] });
+  expect(cleared).toMatchObject({ catalogSalePrice: null, averageSalePrice: null, referenceUnitProfit: null });
 });

@@ -252,3 +252,10 @@
 
 .catalog-new-data { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 18px 12px; padding: 8px 12px; border: 1px solid var(--border); background: var(--surface-soft); color: var(--text-muted); font-size: 12px; }
 .catalog-new-data .button { min-height: 32px; padding: 4px 8px; }
+
+.sale-price-source { margin-top: 4px; font-size: 12px; color: var(--text-muted); max-width: 240px; overflow-wrap: anywhere; }
+.sale-price-source summary { cursor: pointer; }
+.sale-price-source small { display: block; }
+.excluded-variant { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.excluded-variant span { min-width: 0; overflow-wrap: anywhere; }
+.excluded-variant small { display: block; color: var(--text-muted); }

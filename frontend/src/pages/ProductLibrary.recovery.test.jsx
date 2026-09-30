@@ -113,3 +113,20 @@ describe("selection read recovery", () => {
     await act(async () => button("重新加载页面").click()); expect(reload).toHaveBeenCalledOnce();
   });
 });
+
+it("searches all reference identities by supplier number and store, then clears to the full dataset", async () => {
+  const workspaceId = "workspace-default";
+  await db.ledgers.add({ id: "SEARCH-L", workspaceId, period: "2026-08" });
+  await db.importBatches.bulkAdd(["甲店", "乙店"].map((store, index) => ({ id: `SEARCH-B${index}`, workspaceId, ledgerId: "SEARCH-L", store, status: "completed" })));
+  await db.salesRows.bulkAdd(Array.from({ length: 15 }, (_, index) => ({ id: `SEARCH-R${index}`, workspaceId, ledgerId: "SEARCH-L", batchId: index < 10 ? "SEARCH-B0" : "SEARCH-B1", store: index < 10 ? "甲店" : "乙店", platformSku: `SEARCH-SKU${index}`, platformSkc: `SEARCH-SKC${index}`, supplierNumber: `货号${index}`, attribute: "正常", quantity: 1, amount: 1, sourceRow: index + 2 })));
+  await mount("/products?view=reference");
+  await waitFor(() => container.textContent.includes("匹配 15 / 15 条"));
+  await change("按供方货号筛选", "货号14");
+  await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
+  expect(container.querySelector(".selection-reference-table").textContent).toContain("SEARCH-SKC14");
+  await change("参考来源店铺", "甲店");
+  await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
+  await act(async () => button("清空筛选").click());
+  await waitFor(() => container.textContent.includes("匹配 15 / 15 条"));
+  expect(await db.salesRows.count()).toBe(15);
+});
