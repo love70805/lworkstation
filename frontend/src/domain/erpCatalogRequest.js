@@ -71,7 +71,7 @@ export function normalizeErpCatalogPurchaseEvidence(value) {
       purchaseDate: optional(record?.purchaseDate ?? record?.date), order1688: optional(record?.order1688), purchaseOrderNo: optional(record?.purchaseOrderNo), purchaseOrderId: optional(record?.purchaseOrderId),
       supplierName: optional(record?.supplierName), supplier1688Url: normalizeErpCatalogUrl(record?.supplier1688Url), ...normalizeErpCatalogFields(record, { includeMappings: false }),
       eligible: excluded ? false : record?.eligible !== false, selectedForPreview: false, exclusionReasons: unique(record?.exclusionReasons), warningReasons: unique(record?.warningReasons),
-      statusFields: Object.fromEntries(Object.entries(record?.statusFields ?? {}).filter(([key, child]) => ['purchaseStatus', 'paymentStatus', 'payStatus', 'orderStatus', 'order1688Status', 'purchaseOrderStatus', 'status'].includes(key) && child != null && ['string', 'number', 'boolean'].includes(typeof child))),
+      statusFields: Object.fromEntries(Object.entries(record?.statusFields ?? {}).filter(([key, child]) => ['purchaseStatus', 'paymentStatus', 'payStatus', 'orderStatus', 'order1688Status', 'orderStatus1688', 'purchaseOrderStatus1688', 'purchaseOrderStatus', 'status'].includes(key) && child != null && ['string', 'number', 'boolean'].includes(typeof child))),
       };
     });
     const sourceWarnings = unique(entry?.sourceWarnings);

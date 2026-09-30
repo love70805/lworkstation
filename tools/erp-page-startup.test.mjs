@@ -75,7 +75,7 @@ export async function verifyErpPageStartup() {
     assert.equal(window.document.querySelector('#erpa-recalculate').disabled, true);
     window.history.replaceState({}, '', purchasePath);
     assert.match(window.document.querySelector('#erpa-statusbar').textContent, /等待采购页面查询/, 'return never reuses a stale query snapshot');
-    window.localStorage.setItem('erpAssistantV8_latest_cost_result_v6', JSON.stringify({
+    window.localStorage.setItem('erpAssistantV8_latest_cost_result_v7', JSON.stringify({
       timestamp: Date.now(), results: [], meta: { filters: {} },
       capturedUrl: origin + '/purchase/purchase/v1/purchase-order-page?sku=OLD-CACHED',
       queryCapturedAt: new Date().toISOString(), resultDeliveryId: 'ERP-RESULT-OLD-CACHED',

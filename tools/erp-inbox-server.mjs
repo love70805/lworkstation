@@ -351,12 +351,14 @@ function sanitizePurchaseRecord(record, warehouseSku, index, excluded = false) {
     warningReasons: uniqueStrings(record?.warningReasons ?? record?.anomalyReasons),
     statusFields: Object.fromEntries(Object.entries({
       ...(record?.statusFields && typeof record.statusFields === "object" && !Array.isArray(record.statusFields) ? record.statusFields : {}),
-      purchaseStatus: record?.purchaseStatus,
-      paymentStatus: record?.paymentStatus ?? record?.payStatus,
-      orderStatus: record?.orderStatus,
-      order1688Status: record?.order1688Status ?? record?.orderStatus1688,
-      purchaseOrderStatus: record?.purchaseOrderStatus,
-      status: record?.status,
+      purchaseStatus: record?.purchaseStatus ?? record?.statusFields?.purchaseStatus,
+      paymentStatus: record?.paymentStatus ?? record?.payStatus ?? record?.statusFields?.paymentStatus,
+      orderStatus: record?.orderStatus ?? record?.statusFields?.orderStatus,
+      order1688Status: record?.order1688Status ?? record?.orderStatus1688 ?? record?.statusFields?.order1688Status,
+      purchaseOrderStatus1688: record?.purchaseOrderStatus1688 ?? record?.statusFields?.purchaseOrderStatus1688,
+      orderStatus1688: record?.orderStatus1688 ?? record?.statusFields?.orderStatus1688,
+      purchaseOrderStatus: record?.purchaseOrderStatus ?? record?.statusFields?.purchaseOrderStatus,
+      status: record?.status ?? record?.statusFields?.status,
     }).filter(([, value]) => value != null && ["string", "number", "boolean"].includes(typeof value))),
   };
 }
@@ -451,7 +453,7 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
   expectedRows = null,
   expectedSkus = null,
 } = {}) {
-  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "evidenceRecordCount", "excludedEvidenceCount"];
+  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount"];
   const topLevelWarnings = sourceWarningsContract(meta, { strict: strictSourceWarnings });
   const evidenceByRef = new Map(warehouseEvidence.map((entry) => [entry.evidenceRef, entry]));
   const expectedScope = normalizedExpectedSkus(expectedSkus);
@@ -474,7 +476,7 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
     const value = optionalNumber(meta?.[field]);
     if (value != null && value >= 0) result[field] = value;
   }
-  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt"]) {
+  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku"]) {
     const value = String(meta?.[field] ?? "").trim();
     if (value) result[field] = value;
   }

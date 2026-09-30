@@ -8,16 +8,37 @@ import { createOrGetMonthlyLedger, db, getProductEditorSnapshot, getSelectionRef
 beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemberContext({ workspaceId: "workspace-default" }); });
 afterEach(async () => { db.close(); await db.delete(); });
 
-async function nativeCatalogDelivery() {
+async function nativeCatalogDelivery(options = {}) {
   const ledger = await createOrGetMonthlyLedger({ period: "2026-09" });
   const expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }];
   const request = buildErpCostRequest({ id: "REQ-NATIVE-CATALOG", workspaceId: ledger.workspaceId, ledgerId: ledger.id, platformSkcs: ["SKC-CATALOG"], expectedSkus, requestedAt: "2026-09-20T10:00:00.000Z", requestedBy: "catalog-test" });
   await saveErpCostRequest(request);
   // The ledger supplies only cost scope, with no product name, image or attribute.
   await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-RED", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 1, amount: 30 });
-  const { batch, envelope } = await verifyErpCatalogTransport({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, expectedSkus, includeConflict: false });
+  const { batch, envelope } = await verifyErpCatalogTransport({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, expectedSkus, includeConflict: false, ...options });
   return { ledger, request, batch, envelope };
 }
+
+it('retains observed cancellation and normal status through actual extension, inbox, persisted reopen and formal/reference selection', async () => {
+  const { envelope } = await nativeCatalogDelivery({ includeCancelled: true });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope, receivedVia: 'isolated-cancelled-status-test' });
+  expect(receipt.status, receipt.adoptionError).toBe('applied');
+  db.close(); await db.open();
+  const evidence = (await db.erpCostBatches.toArray())[0].sourceContract.warehouseEvidence;
+  const storedContract = (await db.erpCostBatches.toArray())[0].sourceContract;
+  expect(storedContract.sourceMeta.exclusionStats.find(row => row.purchaseOrderId === 'PO-CANCELLED')).toMatchObject({ purchaseOrderStatus1688: 4, exclusionReasons: 'cancelled_or_closed' });
+  expect(storedContract.sourceMeta).toMatchObject({ purchaseHistoryScope: 'complete_target_history', historyQueryRange: '0', historyTargetSku: 'SKC-CATALOG' });
+  for (const warehouseSku of ['WH-CATALOG', 'WH-BLUE']) {
+    const warehouse = evidence.find(row => row.warehouseSku === warehouseSku);
+    expect(warehouse.excludedRecords.find(row => row.recordId === 'CANCELLED-' + warehouseSku)).toMatchObject({ eligible: false, exclusionReasons: ['cancelled_or_closed'], statusFields: { purchaseOrderStatus1688: '4' } });
+    expect(warehouse.purchaseRecords[0].statusFields).toMatchObject({ purchaseStatus: 4, paymentStatus: 4, purchaseOrderStatus1688: 2 });
+  }
+  expect((await db.erpCostRows.toArray())[0].unitCost).toBe(5);
+  const editor = await getProductEditorSnapshot({ platformSku: 'SKU-BLUE', platformSkc: 'SKC-CATALOG' });
+  await saveProductCatalogRecord({ draft: editor.draft });
+  const references = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+  expect(references.find(row => row.platformSku === 'SKU-BLUE')).toMatchObject({ referenceUnitCost: 5, referenceKind: 'erp_catalog_reference', latestQuantity: 0 });
+}, 20000);
 
 it("parses verified purchase field shapes through the actual extension, inbox, persistence, reopening and explicit cross-warehouse catalog save", async () => {
   const { ledger, request, batch, envelope } = await nativeCatalogDelivery();

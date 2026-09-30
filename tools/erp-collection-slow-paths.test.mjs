@@ -30,7 +30,8 @@ async function fixture(mode, realClock = false) {
    if ((mode === 'login' || (mode === 'login-detail' && endpoint === 'purchase-order-details')) && fail) return { ok: false, status: 401, statusText: 'Unauthorized', json: async () => ({}) };
    let body;
    if (endpoint === 'purchase-order-page') {
-     assert.equal(url.searchParams.get('sku'), 'SKC-A', 'every supplemental history read retains captured SKC, never guessed warehouse filters');
+     assert.equal(url.searchParams.get('sku'), optional ? 'WH-UNSOLD' : 'SKC-A', 'history reads stay in the captured target or its verified warehouse mapping');
+     assert.equal(url.searchParams.get('queryRange'), '0');
      assert.equal(url.searchParams.get('storeId'), 'STORE-A');
      if (optional && mode === 'huge') body = response(Array.from({ length: 50 }, (_, i) => ({ purchaseOrderId: 'H-' + url.searchParams.get('page') + '-' + i })), 100000);
      else body = response([{ purchaseOrderId: 'PO-A' }]);

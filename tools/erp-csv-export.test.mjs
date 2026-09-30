@@ -8,7 +8,7 @@ const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
 const frontendRequire = createRequire(path.join(workspaceRoot, "frontend", "package.json"));
 const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
 const Papa = frontendRequire("papaparse");
-const cacheKey = "erpAssistantV8_latest_cost_result_v6";
+const cacheKey = "erpAssistantV8_latest_cost_result_v7";
 const legacyCacheKey = "erpAssistantV8_latest_cost_result_v5";
 const erpUrl = "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html";
 
@@ -225,7 +225,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3, "cost completion needs only list, details and mapping; optional catalog is independent");
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.25");
+    assert.equal(delivery.meta.extensionVersion, "8.0.26");
     assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
