@@ -191,6 +191,19 @@ it('shows read errors and returns to the trend', async () => {
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
 });
 
+it('keeps an explicitly selected range end when a newer month arrives', async () => {
+  await click(button('月度'));
+  await change(byLabel('月份范围'), '6');
+  await click(button('每日'));
+  mocks.months.mockResolvedValue(['2026-08', '2026-09'].map(period => ({
+    ...buildSalesMonth({ period, sourceRows: source(period) }, { today: '2026-10-18' }), ledgerId: period,
+  })));
+  await click(button('月度'));
+  expect(container.querySelectorAll('.sales-month-group')).toHaveLength(6);
+  expect(monthBar('2026-08')).toBeTruthy();
+  expect(monthBar('2026-09')).toBeUndefined();
+});
+
 it('ignores late period results after rapid month changes', async () => {
   await click(button('月度')); await click(monthBar('2026-08'));
   let finish;

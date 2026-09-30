@@ -643,6 +643,13 @@
     }
 
     async function fetchAllOrders(filters, run) {
+        if (run.controller.signal.aborted) throw run.controller.signal.reason || new DOMException('核算已取消', 'AbortError');
+        const snapshotKey = 'purchase_pages_v2_' + JSON.stringify([run.requestId || run.queryCapturedAt || '', run.ledgerPeriod || '', filters]);
+        const complete = getCache(snapshotKey + ':complete');
+        if (complete?.countMismatch === false && Array.isArray(complete.orders)) {
+            setLoading('复用已读齐的目标采购', complete.orders.length + ' 个订单 · ' + complete.pageCount + ' 页', 24);
+            return complete;
+        }
         setLoading('正在读取采购单', '读取第 1 页', 5);
         const capturedPageSize = Number(filters.limit);
         const fallbackPageSize = Number.isFinite(capturedPageSize) && capturedPageSize > 0 ? capturedPageSize : null;
@@ -671,7 +678,7 @@
         const rawCount = firstResponse.count ?? firstResponse.total ?? firstResponse.totalCount;
         const reportedCount = rawCount == null || rawCount === '' ? NaN : Number(rawCount);
         if (rawCount != null && rawCount !== '' && (!Number.isInteger(reportedCount) || reportedCount < 0)) throw new CostError('采购列表总数无效', '请重试ERP查询，不能以异常总数判定读取完整。');
-        const hasReportedCount = Number.isFinite(reportedCount) && reportedCount > 0;
+        const hasReportedCount = Number.isFinite(reportedCount) && reportedCount >= 0;
         const rowsPerPage = firstPage.length || pageSize;
         const reportedPageCount = hasReportedCount ? Math.max(1, Math.ceil(reportedCount / rowsPerPage)) : null;
         const allOrders = [];
@@ -680,7 +687,6 @@
         let terminalPage = false;
         let completedPageCount = 0;
         const pageRowCounts = [];
-        const snapshotKey = 'purchase_pages_v2_' + JSON.stringify([run.requestId || run.queryCapturedAt || '', run.ledgerPeriod || '', filters]);
         const firstFingerprint = JSON.stringify(firstResponse);
         const previous = getCache(snapshotKey);
         const cacheRevision = previous?.firstFingerprint === firstFingerprint ? previous.revision : String(Date.now());
@@ -730,7 +736,7 @@
                 hasReportedCount ? Math.min(24, 5 + Math.round((uniqueOrders.size / Math.max(reportedCount, 1)) * 19)) : null
             );
         }
-        return {
+        const completed = {
             orders: allOrders,
             pageCount: completedPageCount,
             reportedCount: hasReportedCount ? reportedCount : null,
@@ -741,6 +747,8 @@
             maxReturnedPerPage: pageRowCounts.length > 0 ? Math.max(...pageRowCounts) : 0,
             pageRowCounts
         };
+        if (!completed.countMismatch) setCache(snapshotKey + ':complete', completed);
+        return completed;
     }
 
     async function fetchAllDetails(orders, run) {
@@ -1133,7 +1141,7 @@
                 firstPageRowCount: orderState.firstPageRowCount,
                 maxReturnedPerPage: orderState.maxReturnedPerPage,
                 pageRowCounts: orderState.pageRowCounts,
-                reportedOrderCount: orderState.reportedCount,
+                reportedOrderCount: targetStates.length === 1 ? orderState.reportedCount : null,
                 orderCountMismatch: orderState.countMismatch,
                 validOrderCount: detailState.validOrderCount,
                 skippedOrderCount: detailState.skippedOrderCount,

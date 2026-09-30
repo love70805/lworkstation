@@ -35,3 +35,11 @@ it('rejects residual scope, cross-workspace and finalized changes', async () => 
   await db.ledgers.update(scope.ledgerId, { workspaceId: 'other' });
   await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).rejects.toThrow('权限');
 });
+it('does not certify known error rows or an earlier product prefilter as complete', async () => {
+  const scope = await fixture();
+  await db.importBatches.update(scope.batchId, { errorCount: 1 });
+  await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).rejects.toThrow('重新导入');
+  await db.importBatches.update(scope.batchId, { errorCount: 0, filterOptions: { supplierNumbers: ['ONLY-ONE'] } });
+  await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).rejects.toThrow('重新导入');
+  expect((await db.importBatches.get(scope.batchId)).sourceCoverage).toBeNull();
+});

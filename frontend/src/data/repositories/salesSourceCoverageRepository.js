@@ -8,7 +8,8 @@ async function candidates(ledgerId) {
   return batches.filter(batch => batch.status === 'completed' && key(batch.store) && batch.sourceCoverage?.scope !== 'full_month').map(batch => {
     const active = rows.filter(row => row.batchId === batch.id);
     const storeRows = rows.filter(row => key(row.store) === key(batch.store));
-    return { batch, active, eligible: active.length > 0 && batch.validRowCount === active.length && active.length === storeRows.length && active.every(row => key(row.store) === key(batch.store)) };
+    const productFiltered = ['supplierNumbers', 'platformSkcs', 'platformSkus', 'skcs', 'skus'].some(field => Array.isArray(batch.filterOptions?.[field]) && batch.filterOptions[field].length > 0);
+    return { batch, active, eligible: !(batch.errorCount > 0) && !productFiltered && active.length > 0 && batch.validRowCount === active.length && active.length === storeRows.length && active.every(row => key(row.store) === key(batch.store)) };
   });
 }
 export async function listSalesSourceConfirmations(ledgerId) {
