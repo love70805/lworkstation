@@ -1,8 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { buildErpProductCatalogIndex, erpCatalogField, erpProductCatalogRowsFromEnvelope } from "./erpProductCatalog";
+import { buildErpProductCatalogIndex, erpCatalogField, erpCatalogSuppliers, erpProductCatalogRowsFromEnvelope, prefillErpProductDraft } from "./erpProductCatalog";
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 describe("ERP catalog evidence projection", () => {
+  it("keeps a valid branch image when product titles disagree", () => {
+    const rows = ["主体一", "主体二"].map((name, index) => ({ platformSku: `SKU-${index}`, canonicalPlatformSku: `SKU-${index}`, platformSkc: "SKC-A", erpImage: { value: `https://images.example.invalid/${index}.png`, conflict: false }, erpCatalogFields: { productName: { candidates: [{ value: name }] }, imageUrl: { candidates: [{ value: `https://images.example.invalid/${index}.png` }] } } }));
+    const result = prefillErpProductDraft({ draft: { name: "", platformSkc: "SKC-A", variants: [], suppliers: [] }, rows });
+    expect(result.prefill.needsTitleChoice).toBe(true);
+    expect(result.draft.imageUrl).toBe("https://images.example.invalid/0.png");
+  });
+  it("merges empty and linked purchases with one stable supplier identity", () => {
+    const fixture = erpProductCatalogFixture();
+    fixture.purchaseRecords = [
+      { recordId: "A", supplierName: "供应商甲", purchaseCatalog: { supplierId: "ERP-77" } },
+      { recordId: "B", supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/730242606884.html", purchaseCatalog: { supplierId: "ERP-77" } },
+    ];
+    const row = { canonicalPlatformSku: "SKU-RED", platformSku: "SKU-RED", erpCatalogSuppliers: buildErpProductCatalogIndex([fixture]).get("SKU-RED").suppliers };
+    expect(erpCatalogSuppliers([row])).toHaveLength(1);
+    expect(erpCatalogSuppliers([row])[0].sourceUrl).toBe("https://detail.1688.com/offer/730242606884.html");
+  });
+  it("uses a newer image while retaining an older title when a partial retry omits it", () => {
+    const fixture = erpProductCatalogFixture();
+    const older = { ...fixture, batchId: "OLD", publishedAt: "2026-08-01T00:00:00Z", imageUrl: "https://images.example.invalid/old.png", catalogMappings: fixture.catalogMappings.map(mapping => ({ ...mapping, imageUrl: "https://images.example.invalid/old.png" })) };
+    const newer = { ...fixture, batchId: "NEW", publishedAt: "2026-09-01T00:00:00Z", productName: "", imageUrl: "https://images.example.invalid/new.png", catalogMappings: fixture.catalogMappings.map(mapping => ({ ...mapping, productName: "", imageUrl: "https://images.example.invalid/new.png" })) };
+    const catalog = buildErpProductCatalogIndex([older, newer]).get("SKU-RED");
+    expect(erpCatalogField(catalog, "imageUrl")).toMatchObject({ value: "https://images.example.invalid/new.png", conflict: false });
+    expect(erpCatalogField(catalog, "productName").value).toBe(fixture.productName);
+    expect(catalog.entries.some(entry => entry.source.batchId === "OLD")).toBe(true);
+  });
   it("retains all directory supplier names without pairing another supplier's purchase link", () => {
     const fixture = erpProductCatalogFixture();
     fixture.supplierNames = ["供应商甲", "档案供应商乙", "档案供应商乙"];

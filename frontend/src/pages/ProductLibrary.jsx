@@ -43,7 +43,6 @@ const dataStatusLabels = {
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
 const EMPTY_ROWS = [];
-const readReferenceRows = async () => buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
 
 const productFiltersKey = (workspaceId, view) => `${PRODUCT_FILTERS_KEY}:${JSON.stringify([workspaceId, view])}`;
 
@@ -148,7 +147,15 @@ function ProductLibraryView({ workspaceId, view }) {
   const statusRead = useSelectionRead(getSelectionStatusDefinitions);
   const catalogState = catalogRead.status !== "ready" ? catalogRead : statusRead;
   const catalogSnapshot = catalogState.status === "ready" ? catalogRead.data : undefined;
-  const catalogProducts = catalogSnapshot ?? EMPTY_ROWS;
+  const catalogProductsRaw = catalogSnapshot ?? EMPTY_ROWS;
+  const referenceRead = useSelectionRead(getSelectionReferenceSnapshot);
+  const referenceSnapshot = referenceRead.data;
+  const referenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows({ ...referenceSnapshot, store }) : EMPTY_ROWS, [referenceSnapshot, store]);
+  const catalogProducts = useMemo(() => {
+    if (store === "all" || !referenceSnapshot) return catalogProductsRaw;
+    const tags = new Map(referenceRows.filter(row => row.platformSkc).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag]));
+    return catalogProductsRaw.map(product => ({ ...product, automaticSalesTag: tags.get(canonicalPlatformSkc(product.platformSkc)) ?? null }));
+  }, [catalogProductsRaw, referenceRows, referenceSnapshot, store]);
   const captureRead = useSelectionRead(listPendingCaptureRecords);
   const pendingCaptures = captureRead.data ?? EMPTY_ROWS;
   const salesStatusDefinitions = useMemo(() => normalizeSelectionStatusDefinitions(statusRead.data), [statusRead.data]);
@@ -172,9 +179,6 @@ function ProductLibraryView({ workspaceId, view }) {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  const referenceRead = useSelectionRead(readReferenceRows);
-  const referenceSnapshot = referenceRead.data;
-  const referenceRows = referenceSnapshot ?? EMPTY_ROWS;
   navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel } };
 
   useEffect(() => {

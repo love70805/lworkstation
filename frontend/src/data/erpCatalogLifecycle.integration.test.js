@@ -7,6 +7,26 @@ import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope } from "../domain/erpInboxContract";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import vm from "node:vm";
+
+function extensionCatalogRows(records) {
+  const source = resolve(process.cwd(), "../integrations/erp-assistant-extension/src");
+  const policySandbox = { window: {}, URL };
+  vm.runInNewContext(readFileSync(resolve(source, "result-policy.js"), "utf8"), policySandbox);
+  const policy = policySandbox.window.ShopeersErpResultPolicy;
+  const chrome = { runtime: { onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { onAlarm: { addListener() {} } } };
+  const backgroundSandbox = { __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, crypto: { randomUUID: () => "TEST" }, setTimeout, clearTimeout };
+  vm.runInNewContext(readFileSync(resolve(source, "background.js"), "utf8"), backgroundSandbox);
+  const results = records.map(({ product, mappings }) => {
+    const result = policy.catalogProduct(product);
+    result.catalogMappings = policy.normalizeCatalogMappings(mappings, result.warehouseSku);
+    result.mappings = policy.normalizeMappings(result.catalogMappings);
+    return result;
+  });
+  return JSON.parse(JSON.stringify(backgroundSandbox.__SHOPEERS_ERP_BACKGROUND_TEST_API__.buildCatalogRows(results, ["SKC-PRODUCTION"])));
+}
 
 beforeEach(async () => { await db.delete(); await db.open(); });
 afterEach(async () => { db.close(); await db.delete(); });
@@ -47,6 +67,30 @@ async function fixture() {
 }
 
 describe("independent trusted catalog lifecycle", () => {
+  it("carries production extension catalog output through receipt, save and reopen without inventing a platform unit conversion", async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { name: "人工商品", platformSkc: "SKC-PRODUCTION", variants: [{ platformSku: "SKU-SOLD" }] } });
+    const request = buildErpCatalogRequest({ id: "PRODUCTION-CAT", workspaceId: product.workspaceId, ledgerPeriod: "2026-08", platformSkcs: ["SKC-PRODUCTION"], confirmedSkus: [{ platformSku: "SKU-SOLD", platformSkc: "SKC-PRODUCTION" }], sourceProductIds: [product.id], idempotencyKey: "production-catalog" });
+    await saveErpCatalogRequest(request);
+    const rows = extensionCatalogRows(["SKU-SOLD", "SKU-UNSOLD"].map((sku, index) => ({ product: { itemId: `WH-${index}`, tradeName: `1个蓝色商品-${index}`, picturesLinking: `https://images.example.invalid/${index}.jpg`, proportionOfGoodsPurchased1688: "1-1", supplierData: [{ supplierName: "来源供货方" }] }, mappings: [{ barcodeSkuid: sku, barcodeSkcid: "SKC-PRODUCTION", associatedProductId: `WH-${index}`, barcodeImageLink: `https://images.example.invalid/sku-${index}.jpg`, barcodeAttributeSet: index ? "蓝色" : "红色" }] })));
+    expect(rows).toHaveLength(2);
+    expect(rows.every(row => row.unitConversion === undefined && row.catalogMappings.every(mapping => mapping.unitConversion === undefined))).toBe(true);
+    const envelope = buildErpCatalogInboxEnvelope({ deliveryId: "PRODUCTION-DELIVERY", catalog: { workspaceId: product.workspaceId, ledgerId: null, ledgerPeriod: "2026-08", requestId: request.id, batchId: "PRODUCTION-BATCH", generatedAt: "2026-09-30T00:00:00Z", query: { unit: "platform_skc", platformSkcs: ["SKC-PRODUCTION"] }, rows, coverage: Object.fromEntries(ERP_CATALOG_GROUPS.map(group => [group, { state: "complete" }])), warehouseEvidence: rows.map(row => ({ warehouseSku: row.warehouseSku, evidenceComplete: true, purchaseRecords: [0, 1].map(index => ({ recordId: `PUR-${row.platformSku}-${index}`, warehouseSku: row.warehouseSku, quantity: 2, unitPrice: 4, purchaseDate: "2026-08-15", supplierName: "来源供货方", supplier1688Url: index ? "https://detail.1688.com/offer/12345678901.html" : "", purchaseCatalog: { supplierId: "ERP-SUP-1" } })) })) } }, { request });
+    await receiveErpCatalogInboxEnvelope({ envelope });
+    const editor = await getProductEditorSnapshot({ productId: product.id });
+    expect(editor.draft.variants.map(item => item.platformSku).toSorted()).toEqual(["SKU-SOLD", "SKU-UNSOLD"]);
+    expect(editor.draft.variants.find(item => item.platformSku === "SKU-UNSOLD")).toMatchObject({ attribute: "蓝色", imageUrl: "https://images.example.invalid/sku-1.jpg" });
+    expect(editor.draft.suppliers).toHaveLength(1);
+    expect(editor.draft.suppliers[0].sourceLinks).toMatchObject([{ url: "https://detail.1688.com/offer/12345678901.html" }]);
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(item => item.platformSku === "SKU-UNSOLD").referenceUnitCost).toBeNull();
+    await saveProductCatalogRecord({ productId: product.id, draft: editor.draft });
+    db.close(); await db.open();
+    const reopened = await getProductEditorSnapshot({ productId: product.id });
+    expect(reopened.draft.variants.map(item => item.platformSku).toSorted()).toEqual(["SKU-SOLD", "SKU-UNSOLD"]);
+    expect(reopened.draft.suppliers).toHaveLength(1);
+    expect(reopened.draft.suppliers[0].sourceLinks).toMatchObject([{ url: "https://detail.1688.com/offer/12345678901.html" }]);
+    expect(await db.salesRows.count()).toBe(0);
+    expect(await db.erpCostRows.count()).toBe(0);
+  });
   it("supersedes only a matching catalog request while keeping previous evidence immutable", async () => {
     const { request, envelope } = await fixture();
     await receiveErpCatalogInboxEnvelope({ envelope });

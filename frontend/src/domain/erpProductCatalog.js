@@ -116,7 +116,7 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
       if (outsideQuery || wrongWarehouse) { rejected.push({ platformSku, platformSkc, warehouseSku, source: sourceFor(row, { platformSku, platformSkc, warehouseSku }), reason: outsideQuery ? "query_outside" : "warehouse_mismatch" }); continue; }
       const key = canonicalPlatformSku(platformSku);
       if (!index.has(key)) {
-        const catalog = { platformSku, entries: [], suppliers: [], purchases: [], fields: Object.fromEntries(fields.map(field => [field, new Map()])) };
+        const catalog = { platformSku, entries: [], suppliers: [], purchases: [], fields: Object.fromEntries(fields.map(field => [field, new Map()])), fieldVersions: {} };
         index.set(key, catalog); supplierMaps.set(catalog, new Map()); supplierExpansions.set(catalog, new Set());
       }
       const catalog = index.get(key);
@@ -133,6 +133,13 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
       for (const field of newEntry ? fields : []) {
         const value = entry[field];
         if (!value) continue;
+        if (["productName", "imageUrl", "attribute", "storeName"].includes(field)) {
+          const version = Date.parse(row.publishedAt ?? "") || 0;
+          const previous = catalog.fieldVersions[field] ?? -1;
+          if (version < previous) continue;
+          if (version > previous) catalog.fields[field].clear();
+          catalog.fieldVersions[field] = version;
+        }
         const normalized = field === "platformSkc" ? canonicalPlatformSkc(value) : field === "warehouseSku" ? canonicalWarehouseSku(value) : value;
         if (!catalog.fields[field].has(normalized)) catalog.fields[field].set(normalized, { value, sources: [] });
         appendUnique(catalog.fields[field].get(normalized).sources, source);
@@ -151,9 +158,12 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
         const recordSource = sourceFor(row, { platformSku, platformSkc, warehouseSku }, record);
         if (purchaseCatalog) appendUnique(catalog.purchases, { platformSku, platformSkc, warehouseSku, productName: text(record.productName), supplierName: text(record.supplierName), purchaseCatalog, source: recordSource });
         for (const pair of pairs) {
-          const id = JSON.stringify([pair.supplierName, pair.url]);
+          const stableSupplierId = text(purchaseCatalog?.supplierId);
+          const id = stableSupplierId ? `ERP-SUPPLIER:${stableSupplierId}` : JSON.stringify([pair.supplierName, pair.url]);
           let supplier = suppliersById.get(id);
-          if (!supplier) { supplier = { id, supplierName: pair.supplierName, sourceUrl: pair.url, sourceUrlKind: pair.type, sourceProductId: pair.sourceProductId, sourceRecords: [] }; catalog.suppliers.push(supplier); suppliersById.set(id, supplier); }
+          if (!supplier) { supplier = { id, stableSupplierId, supplierName: pair.supplierName, sourceUrl: pair.url, sourceUrlKind: pair.type, sourceProductId: pair.sourceProductId, sourceLinks: [], sourceRecords: [] }; catalog.suppliers.push(supplier); suppliersById.set(id, supplier); }
+          if (pair.url && !supplier.sourceLinks.some(link => link.url === pair.url)) supplier.sourceLinks.push({ url: pair.url, type: pair.type, sourceProductId: pair.sourceProductId });
+          if (!supplier.sourceUrl && pair.url) { supplier.sourceUrl = pair.url; supplier.sourceUrlKind = pair.type; supplier.sourceProductId = pair.sourceProductId; }
           appendUnique(supplier.sourceRecords, recordSource);
         }
       }
@@ -183,11 +193,20 @@ export function erpCatalogIdentityRows(index) {
 
 export function erpCatalogSuppliers(rows = []) {
   const suppliers = new Map();
+  const uniqueUrlsBySupplier = new Map();
   rows.forEach(row => (row.erpCatalogSuppliers ?? []).forEach(item => {
-    const key = JSON.stringify([item.supplierName, item.sourceUrl]);
+    if (!item.stableSupplierId || !item.sourceUrl) return;
+    if (!uniqueUrlsBySupplier.has(item.stableSupplierId)) uniqueUrlsBySupplier.set(item.stableSupplierId, new Set());
+    uniqueUrlsBySupplier.get(item.stableSupplierId).add(item.sourceUrl);
+  }));
+  rows.forEach(row => (row.erpCatalogSuppliers ?? []).forEach(item => {
+    const oneUrl = item.stableSupplierId && uniqueUrlsBySupplier.get(item.stableSupplierId)?.size === 1 ? [...uniqueUrlsBySupplier.get(item.stableSupplierId)][0] : "";
+    const key = item.stableSupplierId ? `ERP-SUPPLIER:${item.stableSupplierId}:${item.sourceUrl || oneUrl}` : JSON.stringify([item.supplierName, item.sourceUrl]);
     if (!suppliers.has(key)) suppliers.set(key, { ...item, id: `ERP-${key}`, supplierId: `ERP-${key}`, catalogSource: "erp", shippingAmount: 0, handlingFee: 0, sourceRecords: [], variants: [] });
     const supplier = suppliers.get(key);
     supplier.sourceRecords.push(...item.sourceRecords);
+    supplier.sourceLinks = [...new Map([...(supplier.sourceLinks ?? []), ...(item.sourceLinks ?? [])].map(link => [link.url, link])).values()];
+    if (!supplier.sourceUrl && item.sourceUrl) { supplier.sourceUrl = item.sourceUrl; supplier.sourceUrlKind = item.sourceUrlKind; supplier.sourceProductId = item.sourceProductId; }
     if (!supplier.variants.some(variant => canonicalPlatformSku(variant.platformSku) === row.canonicalPlatformSku)) {
       supplier.variants.push({ platformSku: row.platformSku, sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 0, unitsPerPack: 1 });
     }
@@ -251,7 +270,10 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
   // Different warehouse/SKU pictures are valid branch images. The anchor's
   // unique image can be the catalog cover; a disputed image for that SKU stays
   // empty rather than borrowing another SKU's picture.
-  const erpImage = titles.needsChoice || primaryRow?.erpImage?.conflict ? "" : primaryRow?.erpImage?.value || unique("imageUrl");
+  const imageRows = allowed.filter(row => row.erpImage?.value && !row.erpImage?.conflict)
+    .toSorted((a, b) => Number(b.coverSalesQuantity ?? 0) - Number(a.coverSalesQuantity ?? 0)
+      || a.canonicalPlatformSku.localeCompare(b.canonicalPlatformSku));
+  const erpImage = imageRows[0]?.erpImage.value || (!primaryRow?.erpImage?.conflict ? primaryRow?.erpImage?.value : "") || unique("imageUrl");
   const variants = [...(draft.variants ?? [])].map(variant => ({ ...variant }));
   allowed.forEach(row => {
     let variant = variants.find(item => text(item.platformSku) && canonicalPlatformSku(item.platformSku) === row.canonicalPlatformSku);

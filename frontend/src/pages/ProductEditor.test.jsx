@@ -69,14 +69,29 @@ describe("product editing workflow", () => {
     await change(input("商品名称"), "本次未保存标题");
     const row = await db.erpCostRows.get(id);
     await act(async () => { await db.erpCostRows.update(id, { catalogMappings: [...row.catalogMappings, { ...row.catalogMappings[0], platformSku: "SKU-GREEN", attribute: "绿色" }] }); });
-    await waitFor(() => button("带入新增资料"));
+    await waitFor(() => container.querySelectorAll(".variants-table tbody tr").length === 3);
     expect(input("商品名称").value).toBe("本次未保存标题");
-    expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
-    await click("带入新增资料");
     expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(3);
     expect(input("商品名称").value).toBe("本次未保存标题");
     await click("保存商品"); await waitFor(async () => await db.platformSkus.count() === 3);
     expect((await db.products.toArray())[0].name).toBe("本次未保存标题");
+  });
+  it("fills a late image for the same SKU while retaining an unsaved title", async () => {
+    const fixture = erpProductCatalogFixture();
+    fixture.imageUrl = "";
+    fixture.catalogMappings = fixture.catalogMappings.map(mapping => ({ ...mapping, imageUrl: "" }));
+    const id = await db.erpCostRows.add(fixture);
+    await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
+    await change(input("商品名称"), "手工未保存标题");
+    await act(async () => { await db.erpCostRows.update(id, { imageUrl: "https://images.example.invalid/late.png", catalogMappings: fixture.catalogMappings.map(mapping => ({ ...mapping, imageUrl: "https://images.example.invalid/late.png" })) }); });
+    await waitFor(() => input("商品图片链接").value === "https://images.example.invalid/late.png");
+    expect(input("商品名称").value).toBe("手工未保存标题");
+  });
+  it("does not request groups whose coverage state is complete", async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { name: "已有商品", platformSkc: "SKC-A", variants: [{ platformSku: "SKU-A" }] } });
+    editorSnapshotOverride.value = { mode: "product", product, capture: null, draft: { name: "已有商品", platformSkc: "SKC-A", variants: [{ platformSku: "SKU-A" }], suppliers: [], tags: [] }, prefill: { source: "erp", skuCount: 1, warnings: [], sources: [], purchases: [], referencePeriod: "2026-08", catalogCoverage: Object.fromEntries(["directory", "mappings", "images", "suppliers", "purchaseEvidence"].map(group => [group, { state: "complete" }])) } };
+    await mount(`/products/edit?product=${product.id}`);
+    expect(button("补充 ERP 资料").disabled).toBe(true);
   });
 
   it("requires a title candidate and explicit identity-branch exclusion, then saves the clear SKU in one step", async () => {

@@ -25,6 +25,8 @@ export const ERP_INBOX_MATCH_REASONS = Object.freeze({
   inbox_not_pending: "批次已载入或处理",
   manually_unloaded: "已保留待处理，需手动载入",
   automatic_adoption_review: "正常成本已自动处理，剩余项可查看",
+  automatic_adoption_pending: "正在处理回传成本",
+  automatic_adoption_failed: "自动处理未完成，可查看原因后重试",
 });
 
 export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformSkcs = null } = {}) {
@@ -63,6 +65,8 @@ export function evaluateErpInboxMatch({ inbox, request, ledger, currentPlatformS
   if (inbox?.status !== "pending") {
     return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "inbox_not_pending" };
   }
+  if (inbox.adoptionFailure) return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "automatic_adoption_failed" };
+  if (inbox.adoptionPending) return { scopeMatched: true, filterScopeMatched: true, canAutoLoad: false, reason: "automatic_adoption_pending" };
   if (inbox.adoption?.version) {
     // The data layer has already adopted healthy items. Opening this page must
     // not replace an in-progress review draft just to display the remainder.

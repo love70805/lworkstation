@@ -6,14 +6,15 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.3.3](https://github.com/love70805/lworkstation/releases/tag/v0.3.3)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.3.4](https://github.com/love70805/lworkstation/releases/tag/v0.3.4)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-29（UTC+8）。0.3.3 已公开为非预发布的 GitHub Latest，四资产匿名全量下载、真实更新通道及主仓库持久复制回读通过；0.3.0/0.3.1/0.3.2 原标签与资产保留，Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。
+核对日期：2026-09-30（UTC+8）。0.3.4 已公开为非预发布的 GitHub Latest，四资产匿名全量下载、真实更新通道及主仓库持久复制回读通过；更早版本原标签与资产保留，Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.5` 选品与 ERP 修复 | 本机候选已构建，真实三 SKU 的平台单位换算待确认，业务验收未通过；未公开、未安装 | `candidates/0.3.5/`；[候选记录](../docs/RELEASE_0.3.5_CANDIDATE.md) |
 | `0.3.4` 采集恢复 | 已公开稳定Latest，PR #129/main CI、四资产匿名回读及更新通道通过；1108测试、16组桌面验证、真实慢路径、隐藏EXE、489文件/442输入；ERP 8.0.25，未安装 | `candidates/0.3.4/`（含`public/`匿名原件）；`archive/release-0.3.4/`；[验收与哈希](../docs/RELEASE_0.3.4.md) |
 | `0.3.3` 选品建档与销量标签 | 历史公开稳定版，原标签及资产保留；PR #127/main CI、1107 测试、16 组桌面验证、隐藏 EXE smoke、476 文件/429 输入、四资产匿名回读、真实更新通道及持久复制通过；含 ERP 8.0.24，未安装 | 主仓库 `candidates/0.3.3/` 及其中 `public/`；`archive/release-0.3.3/`；[验收与哈希](../docs/RELEASE_0.3.3.md) |
 | `0.3.2` 共享1688单号 | 历史公开稳定版，原标签及资产保留；PR #125/main CI、1015 测试、隐藏 EXE smoke、461 文件/414 输入哈希、四资产匿名回读和真实更新通道及持久复制通过；未安装 | 主仓库 `candidates/0.3.2/`、其中 `public/` 匿名下载原件及 `archive/release-0.3.2/`；[验收与升级操作](../docs/RELEASE_0.3.2.md) |

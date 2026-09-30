@@ -98,6 +98,20 @@ export function normalizeErpCatalogFields(value, { includeMappings = true } = {}
 
 export const ERP_CATALOG_COVERAGE_GROUPS = Object.freeze(['directory', 'mappings', 'images', 'suppliers', 'purchaseEvidence']);
 
+export function selectCurrentErpCatalogCoverage(history = []) {
+  const ordered = (history ?? []).filter(item => /^\d{4}-(0[1-9]|1[0-2])$/.test(item?.period ?? ""))
+    .toSorted((a, b) => b.period.localeCompare(a.period) || (Date.parse(b.publishedAt ?? "") || 0) - (Date.parse(a.publishedAt ?? "") || 0) || String(b.batchId ?? "").localeCompare(String(a.batchId ?? "")));
+  if (!ordered.length) return null;
+  const latest = ordered[0];
+  const sameMonth = ordered.filter(item => item.period === latest.period);
+  const groups = Object.fromEntries(ERP_CATALOG_COVERAGE_GROUPS.map(group => {
+    const current = sameMonth.find(item => item.groups?.[group])?.groups[group] ?? { state: "unavailable", reasons: ["not_collected"] };
+    const complete = sameMonth.find(item => item.groups?.[group]?.state === "complete")?.groups[group];
+    return [group, complete ?? current];
+  }));
+  return { period: latest.period, batchId: latest.batchId, groups };
+}
+
 export function normalizeErpCatalogCoverage(value) {
   return Object.fromEntries(ERP_CATALOG_COVERAGE_GROUPS.map(group => {
     const input = value?.[group];

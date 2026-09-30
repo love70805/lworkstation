@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { normalizeErpCatalogCoverage, normalizeErpUnitConversion, normalizeErpCatalogFields, normalizeErpCatalogMappings, normalizeErpCatalogUrl, normalizeErpPurchaseCatalog, normalizeErpSupplierLinks } from "./erpCatalogFields";
+import { normalizeErpCatalogCoverage, normalizeErpUnitConversion, normalizeErpCatalogFields, normalizeErpCatalogMappings, normalizeErpCatalogUrl, normalizeErpPurchaseCatalog, normalizeErpSupplierLinks, selectCurrentErpCatalogCoverage } from "./erpCatalogFields";
 
 describe("optional ERP catalog carriers", () => {
+  it("chooses the latest month and retains earlier complete groups within that month", () => {
+    const history = [
+      { period: "2026-07", publishedAt: "2026-08-01", groups: { images: { state: "complete" } } },
+      { period: "2026-08", publishedAt: "2026-09-01", groups: { images: { state: "complete" }, suppliers: { state: "complete" } } },
+      { period: "2026-08", publishedAt: "2026-09-02", groups: { images: { state: "partial" }, suppliers: { state: "complete" } } },
+    ];
+    expect(selectCurrentErpCatalogCoverage(history)).toMatchObject({ period: "2026-08", groups: { images: { state: "complete" }, suppliers: { state: "complete" } } });
+  });
   it("keeps purchase specifications and ratios separate from platform attributes in a fixed whitelist", () => {
     const catalog = normalizeErpPurchaseCatalog({
       picturesLinking: "https://cbu01.alicdn.com/img/warehouse.jpg#preview", pictureLink1688: "https://user:secret@cbu01.alicdn.com/img/purchase.jpg",

@@ -13,6 +13,7 @@ import { buildSelectionReferenceRows } from "../../lib/selectionReferences";
 import { catalogProductName, prefillErpProductDraft } from "../../domain/erpProductCatalog";
 import { productFieldEdits, supplierQuoteEdited } from "../../domain/productMetadata";
 import { erpCatalogReferenceCosts } from "../../domain/erpCatalogReference";
+import { selectCurrentErpCatalogCoverage } from "../../domain/erpCatalogFields";
 import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
 import { readTrustedErpCatalogRecords, readTrustedErpCostInboxCatalogRecords } from "./erpCatalogRepository";
 import { buildProductDataReadiness, normalizeProductPublicationStatus } from "../../domain/productPublication";
@@ -535,6 +536,7 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
         if (!protectedFields.supplierName && !(isPrimary && product.attributes?.fieldEdits?.supplierName)) current.supplierName ||= profile.supplierName;
         current.sourceProductId ||= profile.sourceProductId;
         if (!protectedFields.sourceUrl && !(isPrimary && product.attributes?.fieldEdits?.sourceUrl)) current.sourceUrl ||= profile.sourceUrl;
+        current.sourceLinks = [...new Map([...(current.sourceLinks ?? []), ...(profile.sourceLinks ?? [])].map(item => [item.url, item])).values()];
         current.shippingAmount ||= profile.shippingAmount;
         current.handlingFee ||= profile.handlingFee;
         if (!current.profileVariants.length && profile.variants.length) current.profileVariants = profile.variants;
@@ -561,6 +563,7 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
       sourceProductId: supplier.sourceProductId,
       sourceUrl: supplier.sourceUrl,
       sourceUrlKind: supplier.sourceUrlKind,
+      sourceLinks: supplier.sourceLinks,
       catalogSource: supplier.catalogSource,
       sourceRecords: supplier.sourceRecords,
       shippingAmount: supplier.shippingAmount,
@@ -657,8 +660,9 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
   const projection = prefillErpProductDraft({ draft, rows, platformSku, platformSkc, ownership });
   const relatedRows = rows.filter(row => projection.draft.platformSkc && row.platformSkc && canonicalPlatformSkc(row.platformSkc) === canonicalPlatformSkc(projection.draft.platformSkc));
   projection.draft.automaticSalesTag = relatedRows.find(row => row.automaticSalesTag)?.automaticSalesTag ?? null;
-  projection.prefill.referencePeriod = relatedRows.find(row => row.referencePeriod)?.referencePeriod ?? snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(projection.draft.platformSkc)))?.period ?? null;
-  projection.prefill.catalogCoverage = snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(projection.draft.platformSkc)))?.groups ?? null;
+  const coverage = selectCurrentErpCatalogCoverage(snapshot.catalogCoverage?.filter(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(projection.draft.platformSkc))));
+  projection.prefill.referencePeriod = coverage?.period ?? relatedRows.map(row => row.referencePeriod).filter(Boolean).sort().at(-1) ?? null;
+  projection.prefill.catalogCoverage = coverage?.groups ?? null;
   if (!projection.draft.name && !projection.prefill.sources.length) projection.draft.name = catalogProductName(productName);
   if (!projection.draft.variants.length && platformSku && !anchor?.productId) projection.draft.variants = [{ platformSku: normalizePlatformSku(platformSku), attribute: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1 }];
   return { mode: "new", product: null, capture: null, ...projection, validation: validateProductDraft(projection.draft) };
@@ -671,8 +675,9 @@ async function productEditorErpPrefill({ draft, productId }) {
   const projection = prefillErpProductDraft({ draft, productId, rows, ownership });
   const related = rows.filter(row => row.platformSkc && draft.platformSkc && canonicalPlatformSkc(row.platformSkc) === canonicalPlatformSkc(draft.platformSkc));
   projection.draft.automaticSalesTag = related.find(row => row.automaticSalesTag)?.automaticSalesTag ?? null;
-  projection.prefill.referencePeriod = related.find(row => row.referencePeriod)?.referencePeriod ?? snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(draft.platformSkc)))?.period ?? null;
-  projection.prefill.catalogCoverage = snapshot.catalogCoverage?.find(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(draft.platformSkc)))?.groups ?? null;
+  const coverage = selectCurrentErpCatalogCoverage(snapshot.catalogCoverage?.filter(item => item.platformSkcs?.some(value => canonicalPlatformSkc(value) === canonicalPlatformSkc(draft.platformSkc))));
+  projection.prefill.referencePeriod = coverage?.period ?? related.map(row => row.referencePeriod).filter(Boolean).sort().at(-1) ?? null;
+  projection.prefill.catalogCoverage = coverage?.groups ?? null;
   return projection;
 }
 
@@ -1579,7 +1584,7 @@ export async function getSelectionReferenceSnapshot() {
       ...independentCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.catalog, { batchId: record.catalog.batchId, publishedAt: record.receivedAt })),
       ...pendingCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.envelope, record))],
     erpCatalogReferences: catalogEnvelopes.flatMap(source => erpCatalogReferenceCosts(source.envelope, source)),
-    catalogCoverage: catalogEnvelopes.map(source => ({ batchId: source.batchId, period: source.period, platformSkcs: (source.envelope.query.platformSkcs ?? []).map(item => item.platformSkc ?? item), groups: source.coverage ?? null })),
+    catalogCoverage: catalogEnvelopes.map(source => ({ batchId: source.batchId, period: source.period, publishedAt: source.publishedAt, platformSkcs: (source.envelope.query.platformSkcs ?? []).map(item => item.platformSkc ?? item), groups: source.coverage ?? null })),
     profitLines: profitLines.filter(workspaceMatch),
     ledgerIdentityRows,
   };

@@ -183,6 +183,10 @@ export async function verifyErpCatalogBackgroundBinding() {
   assert.equal(posted[0].ledgerId, null);
   assert.equal(posted[0].rows[0].unitCost, undefined);
   assert.equal(posted[0].rows[0].previewUnitCost, undefined);
+  const explicitConversion = { warehouseUnits: 2, platformUnits: 1, source: 'erp_platform_mapping', sourceRef: 'ERP-MAP-1' };
+  const converted = api.buildCatalogRows([{ warehouseSku: 'WH-ONE', mappings: [{ platformSku: 'SKU-ONE', platformSkc: 'SKC-TARGET', warehouseSku: 'WH-ONE', unitConversion: explicitConversion }], catalogMappings: [{ platformSku: 'SKU-ONE', platformSkc: 'SKC-TARGET', warehouseSku: 'WH-ONE', unitConversion: explicitConversion }] }], ['SKC-TARGET']);
+  assert.deepEqual(JSON.parse(JSON.stringify(converted[0].unitConversion)), explicitConversion);
+  assert.deepEqual(JSON.parse(JSON.stringify(converted[0].catalogMappings[0].unitConversion)), explicitConversion);
   assert.equal(posted[0].warehouseEvidence.warehouses[0].purchaseRecords.length, 5);
   assert.doesNotMatch(JSON.stringify(posted), /attacker|page-secret|forged/);
   assert.deepEqual(storage.shopeersErpPendingCostResultsV2, []);

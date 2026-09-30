@@ -8,6 +8,7 @@ import { selectManualOverride } from '../domain/manualCostOverride';
 import { resolveFormalCostDecision } from '../domain/costPolicy';
 import { costDraftKey } from '../lib/costMatchingDraft';
 import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
+import { buildErpInboxQueue } from '../domain/erpInboxMatching';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1'}={}){
@@ -18,6 +19,19 @@ async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:0
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
+it('marks the committed receipt before adoption so the page cannot race automatic cost adoption',async()=>{
+ const {ledger,request,envelope}=await seed({prices:[5,8],id:'receipt-race'});
+ let savedReceipt;
+ const capture=function(_key,record){savedReceipt=structuredClone(record);};
+ db.erpCostInbox.hook('creating').subscribe(capture);
+ try { await receiveErpCostInboxEnvelope({envelope}); }
+ finally {db.erpCostInbox.hook('creating').unsubscribe(capture);}
+ expect(savedReceipt).toMatchObject({status:'pending',adoptionPending:true});
+ expect(buildErpInboxQueue({inboxes:[savedReceipt],requests:[request],ledger}).autoLoad).toBeNull();
+ expect(await db.erpCostInbox.get(savedReceipt.id)).toMatchObject({status:'applied',adoptionPending:false});
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.unitCost)).toEqual([5,8]);
+ expect(await db.erpCostBatches.count()).toBe(1);
+});
 it.each(['receipt','loaded-recovery'])('uses the existing local default member with no saved setting for %s and remains idempotent after reopening',async path=>{
  await db.settings.delete('active-member-context');
  const {ledger,request,envelope}=await seed({prices:[5,8],id:path});
@@ -99,7 +113,7 @@ it('does not roll back new costs for late old requests and rejects mutated sourc
 it('retains durable receipt after an adoption transaction fails and recovery retries it',async()=>{
  const {ledger,envelope}=await seed({prices:[5,8]});const add=vi.spyOn(db.erpCostRows,'bulkAdd').mockRejectedValue(new Error('synthetic failure'));
  const receipt=await receiveErpCostInboxEnvelope({envelope});expect(receipt.adoptionError).toBe('synthetic failure');expect(await db.erpCostInbox.count()).toBe(1);expect(await db.erpCostBatches.count()).toBe(0);
- const failed=await db.erpCostInbox.get(receipt.id);expect(failed).toMatchObject({status:'pending',adoptionFailure:{name:'Error',message:'synthetic failure'}});
+ const failed=await db.erpCostInbox.get(receipt.id);expect(failed).toMatchObject({status:'pending',adoptionPending:false,adoptionFailure:{name:'Error',message:'synthetic failure'}});
  const auditCount=await db.auditEvents.count();
  db.close();await db.open();await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
  expect((await db.erpCostInbox.get(receipt.id)).adoptionFailure).toEqual(failed.adoptionFailure);expect(await db.auditEvents.count()).toBe(auditCount);expect(await db.erpCostRows.count()).toBe(0);add.mockRestore();
