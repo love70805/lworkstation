@@ -205,7 +205,6 @@
                 platform: catalogText(item && (item.platform || item.platformName)),
                 storeName: catalogText(item && (item.storeName || item.store || item.shopName)),
                 ...(Object.hasOwn(item || {}, 'storeId') ? { storeId: catalogText(item.storeId) } : {}),
-                ...(item?.unitConversion?.source === 'erp_platform_mapping' && catalogText(item.unitConversion.sourceRef) && Number.isFinite(Number(item.unitConversion.warehouseUnits)) && Number.isFinite(Number(item.unitConversion.platformUnits)) && Number(item.unitConversion.warehouseUnits) > 0 && Number(item.unitConversion.platformUnits) > 0 ? { unitConversion: { warehouseUnits: Number(item.unitConversion.warehouseUnits), platformUnits: Number(item.unitConversion.platformUnits), source: 'erp_platform_mapping', sourceRef: catalogText(item.unitConversion.sourceRef) } } : {}),
             };
             candidates.set(JSON.stringify(candidate), candidate);
         });
@@ -231,7 +230,6 @@
                 ...(item.productName ? { productName: item.productName } : {}),
                 ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
                 ...(item.attribute ? { attribute: item.attribute } : {}),
-                ...(item.unitConversion ? { unitConversion: item.unitConversion } : {}),
             });
         });
         mappings.sort((left, right) => {

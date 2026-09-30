@@ -27,7 +27,7 @@ it("parses verified purchase field shapes through the actual extension, inbox, p
   expect(receipt.status, receipt.adoptionError).toBe("applied");
   const formalRows = await db.erpCostRows.toArray();
   expect(formalRows).toHaveLength(1);
-  expect(formalRows[0]).toMatchObject({ platformSku: "SKU-RED", unitCost: 5, purchaseCatalog: { purchaseOrderDetailId: "DETAIL-NEW", lineNumber: "0", purchaseProportion1688: "1-1" } });
+  expect(formalRows[0]).toMatchObject({ platformSku: "SKU-RED", unitCost: 5, purchaseCatalog: { purchaseOrderDetailId: "DETAIL-NEW", lineNumber: "0", purchaseProportion1688: "1-2" } });
   const storedBatch = (await db.erpCostBatches.toArray())[0];
   expect(storedBatch.sourceContract.catalogRows.map(row => row.platformSku).sort()).toEqual(["SKU-BLUE", "SKU-RED"]);
   expect(storedBatch.sourceContract.catalogRows.every(row => row.unitCost === undefined && row.quantity === undefined)).toBe(true);
@@ -55,7 +55,7 @@ it("parses verified purchase field shapes through the actual extension, inbox, p
   expect(await db.supplierOffers.count()).toBe(0);
   expect(await financialSnapshot()).toEqual(financialBefore);
   const references = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
-  expect(references.find(row => row.platformSku === "SKU-BLUE")).toMatchObject({ productId: product.id, referenceUnitCost: null });
+  expect(references.find(row => row.platformSku === "SKU-BLUE")).toMatchObject({ productId: product.id, referenceUnitCost: 5, referenceKind: "erp_catalog_reference", latestQuantity: 0 });
   const reopened = await getProductEditorSnapshot({ productId: product.id });
   expect(reopened.prefill.purchases).toHaveLength(4);
   const offersBefore = await db.supplierOffers.toArray();

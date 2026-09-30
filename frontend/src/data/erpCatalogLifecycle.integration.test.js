@@ -59,7 +59,7 @@ async function fixture() {
   const { product } = await saveProductCatalogRecord({ draft: { name: "人工主体", platformSkc: "SKC-A", productStatus: "off_sale", imageUrl: "", store: "合成店", variants: [{ platformSku: "SOLD-A", attribute: "人工属性" }] } });
   const request = buildErpCatalogRequest({ id: "CAT-REQ", workspaceId: product.workspaceId, ledgerPeriod: "2026-08", platformSkcs: ["SKC-A"], confirmedSkus: [{ platformSku: "SOLD-A", platformSkc: "SKC-A" }], sourceProductIds: [product.id], idempotencyKey: "catalog-fixture" });
   await saveErpCatalogRequest(request);
-  const rows = ["SOLD-A", "UNSOLD-A"].map(platformSku => ({ platformSku, platformSkc: "SKC-A", warehouseSku: "WH", productName: "1个蓝色收腰神器-HHX sh680", attribute: "平台属性", imageUrl: "", storeName: "合成店", unitConversion: { warehouseUnits: 2, platformUnits: 1, source: "erp_platform_mapping", sourceRef: `map:${platformSku}` }, catalogMappings: [{ platformSku, platformSkc: "SKC-A", warehouseSku: "WH" }] }));
+  const rows = ["SOLD-A", "UNSOLD-A"].map(platformSku => ({ platformSku, platformSkc: "SKC-A", warehouseSku: "WH", productName: "1个蓝色收腰神器-HHX sh680", attribute: "平台属性", imageUrl: "", storeName: "合成店", purchaseCatalog: { purchaseProportion1688: "1-2" }, catalogMappings: [{ platformSku, platformSkc: "SKC-A", warehouseSku: "WH" }] }));
   const envelope = buildErpCatalogInboxEnvelope({ deliveryId: "CAT-DELIVERY", sentAt: "2026-09-29T00:00:00.000Z", catalog: { workspaceId: product.workspaceId, ledgerId: null, ledgerPeriod: "2026-08", requestId: request.id, batchId: "CAT-BATCH", generatedAt: "2026-09-29T00:00:00.000Z", query: { unit: "platform_skc", platformSkcs: ["SKC-A"] }, rows,
     coverage: Object.fromEntries(ERP_CATALOG_GROUPS.map(group => [group, { state: group === "images" ? "unavailable" : "complete", reasons: group === "images" ? ["image_not_provided"] : [] }])),
     warehouseEvidence: [{ warehouseSku: "WH", evidenceComplete: true, evidenceRef: "warehouse:WH", purchaseRecords: [{ recordId: "P1", warehouseSku: "WH", quantity: 4, unitPrice: 0.000001, purchaseDate: "2026-08-28", supplierName: "关联供应商", supplier1688Url: "https://detail.1688.com/offer/12345678901.html" }] }] } }, { request });
@@ -71,23 +71,26 @@ describe("independent trusted catalog lifecycle", () => {
     const { product } = await saveProductCatalogRecord({ draft: { name: "人工商品", platformSkc: "SKC-PRODUCTION", variants: [{ platformSku: "SKU-SOLD" }] } });
     const request = buildErpCatalogRequest({ id: "PRODUCTION-CAT", workspaceId: product.workspaceId, ledgerPeriod: "2026-08", platformSkcs: ["SKC-PRODUCTION"], confirmedSkus: [{ platformSku: "SKU-SOLD", platformSkc: "SKC-PRODUCTION" }], sourceProductIds: [product.id], idempotencyKey: "production-catalog" });
     await saveErpCatalogRequest(request);
-    const rows = extensionCatalogRows(["SKU-SOLD", "SKU-UNSOLD"].map((sku, index) => ({ product: { itemId: `WH-${index}`, tradeName: `1个蓝色商品-${index}`, picturesLinking: `https://images.example.invalid/${index}.jpg`, proportionOfGoodsPurchased1688: "1-1", supplierData: [{ supplierName: "来源供货方" }] }, mappings: [{ barcodeSkuid: sku, barcodeSkcid: "SKC-PRODUCTION", associatedProductId: `WH-${index}`, barcodeImageLink: `https://images.example.invalid/sku-${index}.jpg`, barcodeAttributeSet: index ? "蓝色" : "红色" }] })));
-    expect(rows).toHaveLength(2);
+    const rows = extensionCatalogRows(["SKU-SOLD", "SKU-UNSOLD", "SKU-SPLIT"].map((sku, index) => ({ product: { itemId: `WH-${index}`, tradeName: `1个蓝色商品-${index}`, picturesLinking: `https://images.example.invalid/${index}.jpg`, proportionOfGoodsPurchased1688: ["1-1", "1-2", "2-1"][index], supplierData: [{ supplierName: "来源供货方" }] }, mappings: [{ barcodeSkuid: sku, barcodeSkcid: "SKC-PRODUCTION", associatedProductId: `WH-${index}`, barcodeImageLink: `https://images.example.invalid/sku-${index}.jpg`, barcodeAttributeSet: index ? "蓝色" : "红色" }] })));
+    expect(rows).toHaveLength(3);
     expect(rows.every(row => row.unitConversion === undefined && row.catalogMappings.every(mapping => mapping.unitConversion === undefined))).toBe(true);
-    const envelope = buildErpCatalogInboxEnvelope({ deliveryId: "PRODUCTION-DELIVERY", catalog: { workspaceId: product.workspaceId, ledgerId: null, ledgerPeriod: "2026-08", requestId: request.id, batchId: "PRODUCTION-BATCH", generatedAt: "2026-09-30T00:00:00Z", query: { unit: "platform_skc", platformSkcs: ["SKC-PRODUCTION"] }, rows, coverage: Object.fromEntries(ERP_CATALOG_GROUPS.map(group => [group, { state: "complete" }])), warehouseEvidence: rows.map(row => ({ warehouseSku: row.warehouseSku, evidenceComplete: true, purchaseRecords: [0, 1].map(index => ({ recordId: `PUR-${row.platformSku}-${index}`, warehouseSku: row.warehouseSku, quantity: 2, unitPrice: 4, purchaseDate: "2026-08-15", supplierName: "来源供货方", supplier1688Url: index ? "https://detail.1688.com/offer/12345678901.html" : "", purchaseCatalog: { supplierId: "ERP-SUP-1" } })) })) } }, { request });
+    const envelope = buildErpCatalogInboxEnvelope({ deliveryId: "PRODUCTION-DELIVERY", catalog: { workspaceId: product.workspaceId, ledgerId: null, ledgerPeriod: "2026-08", requestId: request.id, batchId: "PRODUCTION-BATCH", generatedAt: "2026-09-30T00:00:00Z", query: { unit: "platform_skc", platformSkcs: ["SKC-PRODUCTION"] }, rows, coverage: Object.fromEntries(ERP_CATALOG_GROUPS.map(group => [group, { state: "complete" }])), warehouseEvidence: rows.map(row => ({ warehouseSku: row.warehouseSku, evidenceComplete: true, purchaseRecords: [0, 1].map(index => ({ recordId: `PUR-${row.platformSku}-${index}`, warehouseSku: row.warehouseSku, quantity: row.platformSku === "SKU-SPLIT" ? 20 : 2, unitPrice: row.platformSku === "SKU-SPLIT" ? 3 : 4, totalPrice: row.platformSku === "SKU-SPLIT" ? 60 : 8, purchaseDate: "2026-08-15", supplierName: "来源供货方", supplier1688Url: index ? "https://detail.1688.com/offer/12345678901.html" : "", purchaseCatalog: { supplierId: "ERP-SUP-1", purchaseProportion1688: row.purchaseCatalog.purchaseProportion1688 } })) })) } }, { request });
     await receiveErpCatalogInboxEnvelope({ envelope });
     const editor = await getProductEditorSnapshot({ productId: product.id });
-    expect(editor.draft.variants.map(item => item.platformSku).toSorted()).toEqual(["SKU-SOLD", "SKU-UNSOLD"]);
+    expect(editor.draft.variants.map(item => item.platformSku).toSorted()).toEqual(["SKU-SOLD", "SKU-SPLIT", "SKU-UNSOLD"]);
     expect(editor.draft.variants.find(item => item.platformSku === "SKU-UNSOLD")).toMatchObject({ attribute: "蓝色", imageUrl: "https://images.example.invalid/sku-1.jpg" });
     expect(editor.draft.suppliers).toHaveLength(1);
     expect(editor.draft.suppliers[0].sourceLinks).toMatchObject([{ url: "https://detail.1688.com/offer/12345678901.html" }]);
-    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(item => item.platformSku === "SKU-UNSOLD").referenceUnitCost).toBeNull();
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(item => item.platformSku === "SKU-UNSOLD")).toMatchObject({ referenceUnitCost: 4, referenceKind: "erp_catalog_reference", latestQuantity: 0 });
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(item => item.platformSku === "SKU-SPLIT")).toMatchObject({ referenceUnitCost: 3, referenceKind: "erp_catalog_reference", latestQuantity: 0 });
     await saveProductCatalogRecord({ productId: product.id, draft: editor.draft });
     db.close(); await db.open();
     const reopened = await getProductEditorSnapshot({ productId: product.id });
-    expect(reopened.draft.variants.map(item => item.platformSku).toSorted()).toEqual(["SKU-SOLD", "SKU-UNSOLD"]);
+    expect(reopened.draft.variants.map(item => item.platformSku).toSorted()).toEqual(["SKU-SOLD", "SKU-SPLIT", "SKU-UNSOLD"]);
     expect(reopened.draft.suppliers).toHaveLength(1);
     expect(reopened.draft.suppliers[0].sourceLinks).toMatchObject([{ url: "https://detail.1688.com/offer/12345678901.html" }]);
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(item => item.platformSku === "SKU-UNSOLD").referenceUnitCost).toBe(4);
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(item => item.platformSku === "SKU-SPLIT").referenceUnitCost).toBe(3);
     expect(await db.salesRows.count()).toBe(0);
     expect(await db.erpCostRows.count()).toBe(0);
   });
@@ -109,7 +112,7 @@ describe("independent trusted catalog lifecycle", () => {
     db.close(); await db.open();
     const snapshot = await getSelectionReferenceSnapshot();
     const rows = buildSelectionReferenceRows(snapshot);
-    expect(rows.find(row => row.platformSku === "UNSOLD-A")).toMatchObject({ referenceUnitCost: 0.000002, referenceKind: "erp_catalog_reference", latestQuantity: 0 });
+    expect(rows.find(row => row.platformSku === "UNSOLD-A")).toMatchObject({ referenceUnitCost: 0.000001, referenceKind: "erp_catalog_reference", latestQuantity: 0 });
     const editor = await getProductEditorSnapshot({ productId: product.id });
     expect(editor.draft).toMatchObject({ name: "人工主体", productStatus: "off_sale" });
     expect(editor.draft.variants).toHaveLength(2);
@@ -119,7 +122,7 @@ describe("independent trusted catalog lifecycle", () => {
     const backup = await createWorkspaceBackupPayload();
     await db.delete(); await db.open(); await restoreWorkspaceBackupPayload(backup);
     expect((await getProductEditorSnapshot({ productId: product.id })).draft.variants).toHaveLength(2);
-    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(row => row.platformSku === "UNSOLD-A").referenceUnitCost).toBe(0.000002);
+    expect(buildSelectionReferenceRows(await getSelectionReferenceSnapshot()).find(row => row.platformSku === "UNSOLD-A").referenceUnitCost).toBe(0.000001);
   });
 
   it("requires persisted local identity and rejects a broadened request or a mutated retry", async () => {

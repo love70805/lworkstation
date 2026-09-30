@@ -145,8 +145,9 @@ export function buildSelectionReferenceRows({
         confirmedAt: manualCost.confirmedAt,
       } : null,
       finalizedProfitHistory: finalizedHistory,
+      erpCatalogReference: erpCatalog?.relationshipConflict ? null : latest(catalogCostBySku.get(canonicalSku)),
       supplierLandedCost: supplierReference(supplierOffer),
-    }) ?? (erpCatalog?.relationshipConflict ? null : latest(catalogCostBySku.get(canonicalSku)));
+    });
     const latestProfit = finalizedHistory[0] ?? null;
     const recentPeriods = [...new Set(finalizedHistory.map((item) => item.period).filter(Boolean))].slice(0, 3);
     const recentHistory = finalizedHistory.filter((item) => recentPeriods.includes(item.period));

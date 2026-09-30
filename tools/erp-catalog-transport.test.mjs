@@ -145,6 +145,7 @@ export async function verifyErpCatalogTransport({
         const newest = url.searchParams.get("purchaseOrderId") === "PO-NEW";
         data = newest ? [
           detail("DETAIL-NEW", "WH-CATALOG", "PO-NEW", 0, "2026-09-20 10:00:00", 6, {
+            purchaseProportion1688: "1-2",
             picturesLinking: "https://images.example.invalid/catalog-red.jpg",
             pictureLink1688: "https://images.example.invalid/1688-red.jpg",
             productLink1688: "https://detail.1688.com/offer/111111111111.html?trace=erp",
@@ -217,7 +218,7 @@ export async function verifyErpCatalogTransport({
     assert.ok(red.supplier1688Links.every((link) => link.url !== blue.supplier1688Url), "a same-supplier sibling line's product link cannot be borrowed");
     assert.equal(red.purchaseCatalog.purchaseOrderDetailId, "DETAIL-NEW");
     assert.equal(red.purchaseCatalog.purchaseSpecificationAndModel1688, "采购红色规格(仅参考)");
-    assert.equal(red.purchaseCatalog.purchaseProportion1688, "1-1");
+    assert.equal(red.purchaseCatalog.purchaseProportion1688, "1-2");
     assert.equal(red.purchaseCatalog.lineNumber, "0");
     assert.equal(red.purchaseCatalog.barcodeSkuid, null);
     assert.equal(red.purchaseCatalog.barcodeSkcid, null);
@@ -243,7 +244,11 @@ export async function verifyErpCatalogTransport({
     assert.equal(oldest.purchaseOrderId, "PO-OLD");
     assert.equal(red.previewUnitCost, 5, "catalog transport must not alter weighted cost arithmetic");
     assert.equal(blue.previewUnitCost, 5);
-    assert.equal(red.totalQuantity, 6, "purchaseProportion1688 must not change cost units or quantity");
+    assert.equal(red.totalQuantity, 6, "1:2 procurement composition must not change already-normalized warehouse quantity");
+    assert.equal(red.totalPrice, 30, "1:2 procurement composition must not multiply the order amount again");
+    assert.equal(blue.purchaseCatalog.purchaseProportion1688, "2-1");
+    assert.equal(blue.totalQuantity, 2, "2:1 procurement split must retain recorded warehouse quantity");
+    assert.equal(blue.totalPrice, 10, "2:1 procurement split must retain recorded warehouse-unit price");
     const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v6"));
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
     const persisted = JSON.parse(await fs.readFile(spoolPath, "utf8"));

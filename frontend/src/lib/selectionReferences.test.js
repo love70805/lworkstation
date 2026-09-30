@@ -139,8 +139,19 @@ describe("selection reference rows", () => {
       platformSkus: [{ id: "PS-1", platformSku: "SKU-MANUAL", platformSkc: "SKC-MANUAL", salePrice: 30 }],
       catalogManualCosts: [{ id: "MANUAL-1", platformSkuId: "PS-1", platformSku: "SKU-MANUAL", amount: 12, status: "active", confirmedAt: "2026-08-10T08:00:00Z" }],
       supplierOffers: [{ id: "OFFER-1", platformSku: "SKU-MANUAL", landedUnitCost: 10, currency: "CNY" }],
+      erpCatalogReferences: [{ id: "ERP-REFERENCE", platformSku: "SKU-MANUAL", warehouseSku: "WH", unitCost: 4, currency: "CNY", referenceOnly: true }],
     });
     expect(row).toMatchObject({ referenceUnitCost: 12, referenceKind: "manual_confirmed", authoritativeSource: "manual_confirmed", referenceCostId: "MANUAL-1", manualCostHistoryCount: 1 });
+  });
+
+  it("prefers a complete ERP warehouse purchase reference to a 1688 quote for an unsold SKU", () => {
+    const [row] = buildSelectionReferenceRows({
+      platformSkus: [{ platformSku: "SKU-UNSOLD", platformSkc: "SKC-1" }],
+      erpCatalogRows: [{ platformSku: "SKU-UNSOLD", platformSkc: "SKC-1", warehouseSku: "WH", catalogQuerySkcs: ["SKC-1"] }],
+      erpCatalogReferences: [{ id: "ERP-REFERENCE", platformSku: "SKU-UNSOLD", platformSkc: "SKC-1", warehouseSku: "WH", unitCost: 3.2032, currency: "CNY", referenceOnly: true }],
+      supplierOffers: [{ id: "OFFER-1", platformSku: "SKU-UNSOLD", landedUnitCost: 8.5, currency: "CNY" }],
+    });
+    expect(row).toMatchObject({ referenceUnitCost: 3.2032, referenceKind: "erp_catalog_reference", latestQuantity: 0 });
   });
 
   it("ignores superseded supplier quotations when resolving a current reference", () => {

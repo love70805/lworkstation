@@ -199,7 +199,6 @@
         ...(Object.hasOwn(item || {}, 'storeId') ? { storeId: catalogText(item.storeId) } : {}),
         articleNumber: catalogText(item?.articleNumber),
         platform: catalogText(item?.platform),
-        ...(item?.unitConversion?.source === 'erp_platform_mapping' && catalogText(item.unitConversion.sourceRef) && Number.isFinite(Number(item.unitConversion.warehouseUnits)) && Number.isFinite(Number(item.unitConversion.platformUnits)) && Number(item.unitConversion.warehouseUnits) > 0 && Number(item.unitConversion.platformUnits) > 0 ? { unitConversion: { warehouseUnits: Number(item.unitConversion.warehouseUnits), platformUnits: Number(item.unitConversion.platformUnits), source: 'erp_platform_mapping', sourceRef: catalogText(item.unitConversion.sourceRef) } } : {}),
       };
       mappings.set(JSON.stringify(mapping), mapping);
     }
@@ -589,8 +588,7 @@
       const catalog = catalogMappings(result?.catalogMappings || result?.mappings, warehouseSku);
       for (const mapping of (Array.isArray(result?.mappings) ? result.mappings : [])) {
         if (!scope.has(canonical(mapping.platformSkc)) || !catalogText(mapping.platformSku) || !warehouseSku || canonical(mapping.warehouseSku) !== canonical(warehouseSku)) continue;
-        const explicit = catalog.find(item => canonical(item.platformSku) === canonical(mapping.platformSku) && canonical(item.platformSkc) === canonical(mapping.platformSkc))?.unitConversion;
-        rows.push({ warehouseSku, platformSku: catalogText(mapping.platformSku), platformSkc: catalogText(mapping.platformSkc), productName: catalogText(mapping.productName) || catalogText(result.name), imageUrl: catalogUrl(mapping.imageUrl) || catalogUrl(result.imageUrl), attribute: catalogText(mapping.attribute), ...(explicit ? { unitConversion: explicit } : {}), catalogMappings: catalog, purchaseCatalog: purchaseCatalog(result.purchaseCatalog), supplierName: catalogText(result.supplierName), supplierNames: (result.supplierNames || []).map(catalogText).filter(Boolean), supplier1688Links: supplierLinks(result.supplier1688Links), sourceWarnings: Array.isArray(result.sourceWarnings) ? result.sourceWarnings : [] });
+        rows.push({ warehouseSku, platformSku: catalogText(mapping.platformSku), platformSkc: catalogText(mapping.platformSkc), productName: catalogText(mapping.productName) || catalogText(result.name), imageUrl: catalogUrl(mapping.imageUrl) || catalogUrl(result.imageUrl), attribute: catalogText(mapping.attribute), catalogMappings: catalog, purchaseCatalog: purchaseCatalog(result.purchaseCatalog), supplierName: catalogText(result.supplierName), supplierNames: (result.supplierNames || []).map(catalogText).filter(Boolean), supplier1688Links: supplierLinks(result.supplier1688Links), sourceWarnings: Array.isArray(result.sourceWarnings) ? result.sourceWarnings : [] });
       }
     }
     return rows;
