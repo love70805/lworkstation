@@ -14,6 +14,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
+| `0.3.6` 完整台账、选品与销售分析 | 实施完成，候选与公开发布待验收；本机不安装 | `candidates/0.3.6/`；[发布与验收记录](../docs/RELEASE_0.3.6.md) |
 | `0.3.5` 选品与 ERP 修复 | 已公开稳定Latest；PR #131/main CI、四资产匿名全量回读及真实更新通道通过；ERP8.0.26，1141测试、16组桌面、502文件/455输入；EXE FA750D5D…；未安装、未改真实库 | `candidates/0.3.5/`（含`public/`公开原件）；`archive/release-0.3.5/publication/`；[发布记录](../docs/RELEASE_0.3.5.md) |
 | `0.3.4` 采集恢复 | 历史公开稳定版，原标签与资产保留；PR #129/main CI、四资产匿名回读及更新通道通过；1108测试、16组桌面验证、真实慢路径、隐藏EXE、489文件/442输入；ERP 8.0.25，未安装 | `candidates/0.3.4/`（含`public/`匿名原件）；`archive/release-0.3.4/`；[验收与哈希](../docs/RELEASE_0.3.4.md) |
 | `0.3.3` 选品建档与销量标签 | 历史公开稳定版，原标签及资产保留；PR #127/main CI、1107 测试、16 组桌面验证、隐藏 EXE smoke、476 文件/429 输入、四资产匿名回读、真实更新通道及持久复制通过；含 ERP 8.0.24，未安装 | 主仓库 `candidates/0.3.3/` 及其中 `public/`；`archive/release-0.3.3/`；[验收与哈希](../docs/RELEASE_0.3.3.md) |
@@ -79,3 +80,4 @@ pnpm --dir desktop release:check
 
 ## 0.2.18 堆叠销售
 位置：releases/candidates/0.2.18-stacked-sales/。Windows候选已通过并公开发布，本机未安装。详见 docs/RELEASE_0.2.18.md。
+
