@@ -39,9 +39,10 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) {
     derivedExclusionReasons.push("invalid_purchase_detail");
   }
-  if (Object.values(statusFields).some(value => {
+  if (Object.entries(statusFields).some(([key, value]) => {
     const normalized = String(value ?? "").normalize("NFKC").trim();
-    return normalized === "11" || CANCELLED_PURCHASE_STATUS.test(normalized);
+    return (['purchaseOrderStatus1688', 'order1688Status', 'orderStatus1688'].includes(key) && normalized === "4")
+      || normalized === "11" || CANCELLED_PURCHASE_STATUS.test(normalized);
   })) derivedExclusionReasons.push("cancelled_or_closed");
   if (period != null && purchasePeriod && purchasePeriod > validateCostPeriod(period)) {
     derivedExclusionReasons.push("after_ledger_period");

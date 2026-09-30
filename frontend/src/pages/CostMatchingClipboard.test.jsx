@@ -6,13 +6,21 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CostMatchingContent } from './CostMatching';
 import { costDraftKey } from '../lib/costMatchingDraft';
+import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
+import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], notify: vi.fn(), register: vi.fn(), publish: vi.fn(), retry: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn() }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
-vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : initial }));
+vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : query.toString().includes('listErpCostRequests') ? mocks.requests : initial }));
 vi.mock('../components/UI', async importOriginal => ({ ...await importOriginal(), useToast: () => ({ notify: mocks.notify }) }));
 vi.mock('../lib/autoErpRequest', async importOriginal => ({ ...await importOriginal(), ensureAutoErpRequest: mocks.register }));
-vi.mock('../data/database', async importOriginal => ({ ...await importOriginal(), savePublishedErpCostBatch: mocks.publish, processErpCostInboxAdoption: mocks.retry }));
+vi.mock('../data/database', async importOriginal => {
+  const original = await importOriginal();
+  return { ...original, savePublishedErpCostBatch: mocks.publish, processErpCostInboxAdoption: mocks.retry,
+    switchLoadedErpCostInbox: (...args) => mocks.switchInbox.getMockImplementation() ? mocks.switchInbox(...args) : original.switchLoadedErpCostInbox(...args),
+    getErpCostInbox: (...args) => mocks.readInbox.getMockImplementation() ? mocks.readInbox(...args) : original.getErpCostInbox(...args),
+  };
+});
 
 let container, root, writeText;
 const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
@@ -28,6 +36,8 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   mocks.inboxRecords = [];
+  mocks.requests = [];
+  mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
   mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.register.mockReset().mockResolvedValue(null);
   writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText } });
@@ -89,6 +99,62 @@ const formalCost = {
   publishedAt: '2026-09-01T00:00:00Z', resolutionStatus: 'resolved', evidenceComplete: true,
   selectedRecordIds: ['P-1'], purchaseRecords: [{ recordId: 'P-1', warehouseSku: 'WH-1', purchaseDate: '2026-08-10', quantity: 1, unitPrice: 10, eligible: true }],
 };
+function incomingFixture(ledgerId) {
+  const request = { id: `REQ-${ledgerId}`, workspaceId: 'W', ledgerId, ledgerPeriod: '2026-08', platformSkcs: ['SKC-1'], expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'SKC-1' }] };
+  const batch = buildErpCostBatchEnvelope({ batchId: `B-${ledgerId}`, workspaceId: 'W', ledgerId, requestId: request.id, platformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus,
+    generatedAt: '2026-09-01T00:00:00Z', results: [{ warehouseSku: 'WH-1', mappings: request.expectedSkus, unitCost: 10 }],
+    warehouseEvidence: [{ warehouseSku: 'WH-1', evidenceComplete: true, purchaseRecords: [{ recordId: 'P-1', purchaseDate: '2026-08-10', quantity: 1, unitPrice: 10 }] }],
+  });
+  return { request, inbox: { id: `INBOX-${ledgerId}`, workspaceId: 'W', ledgerId, requestId: request.id, batchId: batch.batchId, status: 'pending', envelope: buildErpCostInboxEnvelope({ batch, deliveryId: `D-${ledgerId}`, sentAt: batch.generatedAt }) } };
+}
+it('waits for automatic receipt adoption and shows adopted costs without loading a draft or a red error', async () => {
+  const ledgerId = 'RECEIPT-PENDING', { request, inbox } = incomingFixture(ledgerId);
+  mocks.requests = [request]; mocks.inboxRecords = [{ ...inbox, adoptionPending: true }];
+  mocks.switchInbox.mockRejectedValue(new Error('page must not load the receipt'));
+  await render(['SKC-1'], 'ready', { ledgerId });
+  expect(mocks.switchInbox).not.toHaveBeenCalled();
+  mocks.inboxRecords = [{ ...inbox, adoptionPending: false, status: 'applied', adoption: { version: 'erp-auto-adoption@1', state: 'applied', summary: { adoptedCount: 1, remainingCount: 0 } } }];
+  await render(['SKC-1'], 'ready', { ledgerId, costs: [formalCost] });
+  expect(container.textContent).toContain('ERP 已采用');
+  expect(container.textContent).not.toContain('当前载入状态已变化');
+  expect(mocks.switchInbox).not.toHaveBeenCalled();
+  expect(localStorage.getItem(costDraftKey(ledgerId))).toBeNull();
+});
+it('ignores only a stale load of the same receipt that was already adopted', async () => {
+  const ledgerId = 'RECEIPT-STALE', { request, inbox } = incomingFixture(ledgerId);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  mocks.readInbox.mockResolvedValue({ ...inbox, status: 'applied' });
+  mocks.switchInbox.mockRejectedValue(Object.assign(new Error('当前载入状态已变化，请刷新待处理列表后重试。'), { code: 'ERP_INBOX_STATE_CHANGED' }));
+  await render(['SKC-1'], 'ready', { ledgerId, costs: [formalCost] });
+  expect(mocks.switchInbox).toHaveBeenCalledOnce();
+  expect(container.textContent).toContain('ERP 已采用');
+  expect(container.textContent).not.toContain('当前载入状态已变化');
+  expect(mocks.notify.mock.calls.some(([, kind]) => kind === 'error')).toBe(false);
+  expect(localStorage.getItem(costDraftKey(ledgerId))).toBeNull();
+});
+it('keeps genuine stale or failed loads visible when the receipt was not adopted', async () => {
+  const ledgerId = 'RECEIPT-REJECTED', { request, inbox } = incomingFixture(ledgerId);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  mocks.readInbox.mockResolvedValue({ ...inbox, status: 'rejected' });
+  mocks.switchInbox.mockRejectedValue(Object.assign(new Error('当前载入状态已变化，请刷新待处理列表后重试。'), { code: 'ERP_INBOX_STATE_CHANGED' }));
+  await render(['SKC-1'], 'ready', { ledgerId });
+  expect(container.textContent).toContain('当前载入状态已变化');
+  expect(mocks.notify.mock.calls.some(([, kind]) => kind === 'error')).toBe(true);
+});
+it('does not start a second automatic load when receipt queries refresh during an existing load', async () => {
+  const ledgerId = 'RECEIPT-INFLIGHT', { request, inbox } = incomingFixture(ledgerId);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  let rejectLoad;
+  mocks.switchInbox.mockImplementation(() => new Promise((_resolve, reject) => { rejectLoad = reject; }));
+  mocks.readInbox.mockResolvedValue({ ...inbox, status: 'applied' });
+  await render(['SKC-1'], 'ready', { ledgerId });
+  mocks.inboxRecords = [{ ...inbox }];
+  await render(['SKC-1'], 'ready', { ledgerId, costs: [formalCost] });
+  expect(mocks.switchInbox).toHaveBeenCalledOnce();
+  await act(async () => rejectLoad(Object.assign(new Error('当前载入状态已变化'), { code: 'ERP_INBOX_STATE_CHANGED' })));
+  expect(container.textContent).not.toContain('当前载入状态已变化');
+  expect(localStorage.getItem(costDraftKey(ledgerId))).toBeNull();
+});
 it('shows adopted ERP and never offers adoption without a new evidence batch', async () => {
   await render(['SKC-1'], 'ready', { costs: [formalCost], ledgerId: 'ADOPTED' });
   expect(container.textContent).toContain('ERP 已采用');

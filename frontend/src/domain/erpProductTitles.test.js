@@ -10,4 +10,8 @@ describe("bounded ERP Chinese title suggestions", () => {
   it("does not strip semantic model, quantity, color, or arbitrary personnel strings", () => {
     for (const name of ["蓝色妖姬 12件组合", "3合1收纳架", "2个装 毛巾扣", "型号 X200 黑色", "收腰神器-HHX", "ERP 合成商品"]) expect(erpProductTitle(name)).toBe(name);
   });
+  it("normalizes compound colors and attached internal suffixes", () => {
+    expect(erpProductTitle("1个灰粉色保暖手套-LBYsh680")).toBe("保暖手套");
+    expect(erpProductTitle("1个黑灰色保暖手套-LBYsh680")).toBe("保暖手套");
+  });
 });

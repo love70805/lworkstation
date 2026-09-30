@@ -75,12 +75,14 @@ function safeStatusFields(record) {
     : {};
   return Object.fromEntries(Object.entries({
     ...explicit,
-    purchaseStatus: record?.purchaseStatus,
-    paymentStatus: record?.paymentStatus ?? record?.payStatus,
-    orderStatus: record?.orderStatus,
-    order1688Status: record?.order1688Status ?? record?.orderStatus1688,
-    purchaseOrderStatus: record?.purchaseOrderStatus,
-    status: record?.status,
+    purchaseStatus: record?.purchaseStatus ?? record?.statusFields?.purchaseStatus,
+    paymentStatus: record?.paymentStatus ?? record?.payStatus ?? record?.statusFields?.paymentStatus,
+    orderStatus: record?.orderStatus ?? record?.statusFields?.orderStatus,
+    order1688Status: record?.order1688Status ?? record?.orderStatus1688 ?? record?.statusFields?.order1688Status,
+    purchaseOrderStatus1688: record?.purchaseOrderStatus1688 ?? record?.statusFields?.purchaseOrderStatus1688,
+    orderStatus1688: record?.orderStatus1688 ?? record?.statusFields?.orderStatus1688,
+    purchaseOrderStatus: record?.purchaseOrderStatus ?? record?.statusFields?.purchaseOrderStatus,
+    status: record?.status ?? record?.statusFields?.status,
   }).filter(([, value]) => value != null && ["string", "number", "boolean"].includes(typeof value)));
 }
 
@@ -292,6 +294,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid",
     "warehouseSkuCount", "platformSkuCount", "durationMs", "detailFailureCount",
     "mappingFailureCount", "evidenceRecordCount", "excludedEvidenceCount", "costWarningCount",
+    "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount",
   ];
   const result = {
     evidenceVersion: legacy ? 0 : (Number(meta.evidenceVersion) || ERP_COST_EVIDENCE_VERSION),
@@ -302,7 +305,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     const value = Number(meta[field]);
     if (Number.isFinite(value) && value >= 0) result[field] = value;
   }
-  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt"]) {
+  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku"]) {
     if (optionalText(meta[field])) result[field] = optionalText(meta[field]);
   }
   for (const field of ["detailFailures", "mappingFailures", "exclusionStats", "failureStats", "sourceWarnings"]) {

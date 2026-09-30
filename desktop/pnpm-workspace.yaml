@@ -3,5 +3,8 @@ allowBuilds:
   electron-winstaller: false
 overrides:
   # Security fixes within the existing parent ranges (^3.0.1 and ^0.8.8).
-  'ajv@8.20.0>fast-uri': 3.1.7
+  'ajv@8.20.0>fast-uri': 3.1.8
   'plist@3.1.0>@xmldom/xmldom': 0.8.15
+  'brace-expansion@>=1 <2': 1.1.21
+  'brace-expansion@>=2 <3': 2.1.7
+  'brace-expansion@>=5 <6': 5.0.12

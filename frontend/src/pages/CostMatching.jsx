@@ -227,6 +227,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const [draftReadyLedger, setDraftReadyLedger] = useState(null);
   const previousRegistrationRef = useRef(null);
   const unloadedInboxIdsRef = useRef(new Set());
+  const inboxLoadRef = useRef(null);
   const ledgerIdentityRef = useLedgerIdentity(snapshot?.ledger?.id);
   const effectiveRequestId = costRequestId ?? latestRequest?.id ?? null;
   const requestForImport = requestRecords.find((request) => request.id === batchEnvelope?.requestId) ?? costRequest ?? latestRequest ?? null;
@@ -372,6 +373,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       notify(locked ? "当前账本已定稿或锁定，ERP 批次继续保留在待处理列表。" : `该批次暂不能载入：${ERP_INBOX_MATCH_REASONS[queueItem.reason] ?? queueItem.reason}`, "error");
       return;
     }
+    if (inboxLoadRef.current) return;
+    const loadToken = { inboxId: inbox.id, ledgerId: inbox.ledgerId };
+    inboxLoadRef.current = loadToken;
     const previousLoaded = inboxRecords.find((record) => record.status === "loaded" && record.id !== inbox.id && record.ledgerId === snapshot.ledger.id);
     const envelopeText = JSON.stringify(inbox.envelope, null, 2);
     const sourceLabel = `${automatic ? "自动收件" : "待处理批次"} · ${inbox.batchId}`;
@@ -406,8 +410,18 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       window.setTimeout(() => setResultHighlighted(false), 2400);
       notify(`${automatic ? "已自动接收" : "已载入"} ERP 成本批次 ${inbox.batchId}，共 ${result.rows.length} 行成本证据。`, "success");
     } catch (error) {
+      if (ledgerIdentityRef.current !== loadToken.ledgerId) return;
+      if (error.code === "ERP_INBOX_STATE_CHANGED") {
+        const current = await getErpCostInbox(inbox.id).catch(() => null);
+        // Adoption may finish after an old queue snapshot starts loading. The
+        // live query already displays the authoritative costs; never restore a
+        // parsed draft or demote the processed receipt.
+        if (current?.workspaceId === snapshot.ledger.workspaceId && current?.ledgerId === loadToken.ledgerId && current.status === "applied") return;
+      }
       setParseError(error.message);
       notify(`ERP 批次核对失败，已继续保留待处理：${error.message}`, "error");
+    } finally {
+      if (inboxLoadRef.current === loadToken) inboxLoadRef.current = null;
     }
   }, [expectedSkus, inboxRecords, locked, notify, snapshot?.ledger, sourceText, loadedInboxId]);
 

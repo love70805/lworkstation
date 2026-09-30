@@ -6,6 +6,7 @@ import { buildReferenceIdentityIndex, projectReferenceIdentity } from "../domain
 import { buildErpProductCatalogIndex, catalogProductName, erpCatalogField, erpCatalogIdentityRows } from "../domain/erpProductCatalog";
 import { buildSelectionSalesLabels } from "../domain/selectionSalesLabels";
 import { resolveProductStatus } from "../domain/selectionStatuses";
+import Decimal from "decimal.js";
 
 function timestamp(item) {
   const value = item?.finalizedAt ?? item?.publishedAt ?? item?.calculatedAt ?? item?.updatedAt ?? "";
@@ -50,6 +51,38 @@ function supplierReference(offer) {
   };
 }
 
+// The cover follows the ledger associated with the latest ERP catalog receipt.
+// It uses that ledger's net SKU sales, independently of the seven-day label.
+function coverSalesBySku({ erpCatalogRows, erpCosts, salesRows, importBatches, ledgers, workspaceId }) {
+  const ledgerById = new Map(ledgers.filter(item => (!workspaceId || item.workspaceId === workspaceId)).map(item => [item.id, item]));
+  const sourceBySkc = new Map();
+  const catalogSkcs = new Set(erpCatalogRows.filter(item => item.platformSkc).map(item => canonicalPlatformSkc(item.platformSkc)));
+  const catalogSources = [...erpCatalogRows, ...erpCosts.filter(item => item.platformSkc && !catalogSkcs.has(canonicalPlatformSkc(item.platformSkc)))];
+  for (const source of catalogSources) {
+    if (!source.platformSkc || !ledgerById.has(source.ledgerId) || workspaceId && source.workspaceId !== workspaceId) continue;
+    const skc = canonicalPlatformSkc(source.platformSkc);
+    const previous = sourceBySkc.get(skc);
+    if (!previous || timestamp(source) > timestamp(previous.source)) sourceBySkc.set(skc, { source });
+  }
+  const batchById = new Map(importBatches.filter(item => item.status === "completed" && ledgerById.has(item.ledgerId) && (!workspaceId || item.workspaceId === workspaceId)).map(item => [item.id, item]));
+  const totals = new Map(), coordinates = new Map(), conflicts = new Set();
+  for (const row of salesRows) {
+    if (!row.platformSkc || !(row.platformSku ?? row.sku)) continue;
+    const skc = canonicalPlatformSkc(row.platformSkc), sku = canonicalPlatformSku(row.platformSku ?? row.sku);
+    if (sourceBySkc.get(skc)?.source.ledgerId !== row.ledgerId || !ledgerById.has(row.ledgerId) || row.isDeduction || /盘亏|扣款|罚款|违约/.test(row.movementType ?? "") || workspaceId && row.workspaceId !== workspaceId) continue;
+    const batch = batchById.get(row.batchId);
+    if (!batch || batch.ledgerId !== row.ledgerId || row.store !== batch.store) continue;
+    const quantity = Number(row.quantityExact ?? row.quantity ?? row.qty);
+    if (!Number.isFinite(quantity)) { conflicts.add(sku); continue; }
+    const coordinate = row.sourceRow != null ? JSON.stringify([row.ledgerId, batch.fileHash ?? batch.id, row.store, row.sourceSheet ?? "", row.sourceRow]) : `id:${row.id}`;
+    const content = JSON.stringify([skc, sku, row.quantityExact ?? row.quantity ?? row.qty]);
+    if (coordinates.has(coordinate)) { if (coordinates.get(coordinate) !== content) conflicts.add(sku); continue; }
+    coordinates.set(coordinate, content);
+    totals.set(sku, (totals.get(sku) ?? new Decimal(0)).plus(row.quantityExact ?? row.quantity ?? row.qty));
+  }
+  return new Map([...totals].filter(([sku]) => !conflicts.has(sku)).map(([sku, quantity]) => [sku, quantity.toNumber()]));
+}
+
 export function buildSelectionReferenceRows({
   platformSkus = [],
   products = [],
@@ -64,6 +97,7 @@ export function buildSelectionReferenceRows({
   importBatches = [],
   ledgers = [],
   workspaceId = null,
+  store = "all",
 }) {
   const erpCatalogBySku = buildErpProductCatalogIndex([...erpCosts, ...erpCatalogRows]);
   const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku) });
@@ -78,6 +112,7 @@ export function buildSelectionReferenceRows({
   const profitBySku = groupBySku(profitLines);
   const offerBySku = groupBySku((supplierOffers ?? []).filter((offer) => offer.status !== "superseded"));
   const catalogCostBySku = groupBySku(erpCatalogReferences);
+  const coverSales = coverSalesBySku({ erpCatalogRows, erpCosts, salesRows, importBatches, ledgers, workspaceId });
   const allSkus = new Set([
     ...platformSkuByCanonical.keys(),
     ...erpBySku.keys(),
@@ -110,8 +145,9 @@ export function buildSelectionReferenceRows({
         confirmedAt: manualCost.confirmedAt,
       } : null,
       finalizedProfitHistory: finalizedHistory,
+      erpCatalogReference: erpCatalog?.relationshipConflict ? null : latest(catalogCostBySku.get(canonicalSku)),
       supplierLandedCost: supplierReference(supplierOffer),
-    }) ?? (erpCatalog?.relationshipConflict ? null : latest(catalogCostBySku.get(canonicalSku)));
+    });
     const latestProfit = finalizedHistory[0] ?? null;
     const recentPeriods = [...new Set(finalizedHistory.map((item) => item.period).filter(Boolean))].slice(0, 3);
     const recentHistory = finalizedHistory.filter((item) => recentPeriods.includes(item.period));
@@ -181,6 +217,7 @@ export function buildSelectionReferenceRows({
       latestLedgerId: latestProfit?.ledgerId ?? null,
       latestPeriod: latestProfit?.period ?? null,
       latestQuantity,
+      coverSalesQuantity: coverSales.get(canonicalSku) ?? null,
       latestRevenue: Number(latestProfit?.revenue ?? 0),
       latestProfit: latestProfit?.profit == null ? null : Number(latestProfit.profit),
       latestProfitRate: latestProfit?.profitRate == null ? null : Number(latestProfit.profitRate),
@@ -199,7 +236,7 @@ export function buildSelectionReferenceRows({
     String(b.latestPeriod ?? "").localeCompare(String(a.latestPeriod ?? ""))
       || a.platformSku.localeCompare(b.platformSku)
   ));
-  const labels = buildSelectionSalesLabels({ salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId });
+  const labels = buildSelectionSalesLabels({ salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId, store });
   const labelBySkc = new Map(labels.items.map(item => [item.canonicalPlatformSkc, { ...item, period: labels.period, startDate: labels.startDate, endDate: labels.endDate, rangeLabel: labels.rangeLabel }]));
   return rows.map(row => ({ ...row, automaticSalesTag: row.platformSkc ? labelBySkc.get(canonicalPlatformSkc(row.platformSkc)) ?? null : null }));
 }

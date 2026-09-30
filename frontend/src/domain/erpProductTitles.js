@@ -5,11 +5,11 @@ const text = value => String(value ?? "").normalize("NFKC").trim();
 /** Strip only observed, bounded ERP decorations; numbers/models in a title stay intact. */
 export function erpProductTitle(value) {
   let name = text(value);
-  name = name.replace(/(?:\s*-\s*(?:[A-Za-z]{2,10}\s+)?)?sh\d+[A-Za-z]*\s*$/i, "").trim();
+  name = name.replace(/(?:\s*-\s*[A-Za-z]{2,10}\s*)?sh\d+[A-Za-z]*\s*$/i, "").trim();
   const quantity = /^\d+\s*(?:pcs?(?![A-Za-z])|个(?!装|套|组合)|件(?!装|套|组合))\s*/i.exec(name);
   if (quantity) {
     name = name.slice(quantity[0].length);
-    name = name.replace(/^(?:蓝色|黑色|红色|白色|绿色|黄色|紫色|粉色|灰色|棕色)\s*/, "");
+    name = name.replace(/^(?:(?:深|浅|亮|暗)?(?:玫红|黑|白|红|蓝|绿|黄|紫|粉|灰|棕|橙|米|银|金){1,3}色)\s*/, "");
   }
   return name.trim();
 }

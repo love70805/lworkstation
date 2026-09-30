@@ -159,7 +159,32 @@ function ProductEditor() {
     if (!snapshot) return;
     const key = `${snapshot.mode}:${snapshot.capture?.id ?? snapshot.product?.id ?? `${referenceSkc}:${referenceSku}:${referenceName}`}`;
     const sameRecord = loadedKeyRef.current === key;
-    if (sameRecord && currentDraftRef.current?.fingerprint !== savedFingerprint) return;
+    if (sameRecord && currentDraftRef.current?.fingerprint !== savedFingerprint) {
+      setDraft(current => {
+        const incoming = snapshot.draft;
+        const next = { ...current };
+        for (const field of ["name", "imageUrl", "store", "supplierName", "sourceUrl"]) {
+          if (!current.fieldEdits?.[field] && !current[field] && incoming[field]) next[field] = incoming[field];
+        }
+        next.variants = (current.variants ?? []).map(variant => {
+          const key = canonicalPlatformSku(variant.platformSku);
+          const source = (incoming.variants ?? []).find(item => canonicalPlatformSku(item.platformSku) === key);
+          if (!source) return variant;
+          const merged = { ...variant };
+          for (const field of ["attribute", "warehouseSku", "imageUrl", "referenceUnitCost", "referenceKind", "referenceCostId", "referencePeriod"]) {
+            if (!current.fieldEdits?.variants?.[key]?.[field] && (merged[field] == null || merged[field] === "") && source[field] != null && source[field] !== "") merged[field] = source[field];
+          }
+          return merged;
+        });
+        const existingSkus = new Set(next.variants.filter(item => item.platformSku).map(item => canonicalPlatformSku(item.platformSku)));
+        const excludedSkus = new Set((current.excludedIdentitySkus ?? []).map(canonicalPlatformSku));
+        next.variants.push(...(incoming.variants ?? []).filter(item => item.platformSku && !existingSkus.has(canonicalPlatformSku(item.platformSku)) && !excludedSkus.has(canonicalPlatformSku(item.platformSku))));
+        const supplierIds = new Set((current.suppliers ?? []).map(item => item.supplierId || item.id));
+        next.suppliers = [...(current.suppliers ?? []), ...(incoming.suppliers ?? []).filter(item => !supplierIds.has(item.supplierId || item.id))];
+        return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+      });
+      return;
+    }
     loadedKeyRef.current = key;
     const nextDraft = {
       ...snapshot.draft,
@@ -425,7 +450,7 @@ function ProductEditor() {
     });
   };
   const catalogCoverage = prefill?.catalogCoverage ?? draft.catalogCoverage ?? {};
-  const missingCatalogGroups = ERP_CATALOG_GROUPS.filter(group => (catalogCoverage[group]?.status ?? catalogCoverage[group]) !== "complete");
+  const missingCatalogGroups = ERP_CATALOG_GROUPS.filter(group => (catalogCoverage[group]?.state ?? catalogCoverage[group]) !== "complete");
   const requestCatalog = async () => {
     if (requestingCatalog || !draft.platformSkc || !catalogRequestPeriod) return;
     setRequestingCatalog(true); setCatalogRequestFailed(false);
@@ -494,10 +519,10 @@ function ProductEditor() {
                 return <tr key={variant.id ?? index}>
                   <td><input aria-label={`第 ${index + 1} 个规格名称`} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" /></td>
                   <td><input id={`variant-${index}-sku`} aria-label={`第 ${index + 1} 个平台 SKU`} aria-invalid={Boolean(skuIssue)} aria-describedby={skuIssue ? `variant-${index}-sku-error` : undefined} className="table-input catalog-sku-input mono" value={variant.platformSku ?? ""} onChange={event => updateVariant(index, "platformSku", event.target.value)} />{skuIssue ? <small className="field-error" id={`variant-${index}-sku-error`}>{skuIssue}</small> : null}</td>
-                  <td><div className="catalog-cost-cell"><strong className="mono">{cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
+                  <td><div className="catalog-cost-cell"><strong className="mono">{cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{cost == null && referenceRow?.erpCatalogPurchases?.length ? <small>待核实完整采购证据</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
                   <td><input aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice ?? ""} onChange={event => updateVariant(index, "salePrice", event.target.value)} /></td>
                   <td className={`mono ${profit != null && profit < 0 ? "danger-text" : ""}`}>{salePrice == null ? "待填写售价" : profit == null ? "待参考成本" : `¥${profit.toFixed(2)}`}</td>
-                  <td><details className="sku-details"><summary>查看 / 编辑</summary><div className="sku-detail-fields">{[["warehouseSku", "ERP 仓库 SKU"], ["sourceSku", "1688 来源 SKU"], ["imageUrl", "SKU 图片链接"]].map(([field, label]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个 ${label}`} className="text-input" value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} /></label>)}{variant.purchaseSpecification ? <p>采购规格：{variant.purchaseSpecification}</p> : null}{referenceRow?.referenceEvidence?.unitConversion ? <p>采购单位换算：{referenceRow.referenceEvidence.unitConversion.warehouseUnits} 个仓库单位对应 {referenceRow.referenceEvidence.unitConversion.platformUnits} 个平台单品</p> : null}<div className="sku-quote-fields">{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个${label}`} className="table-input mono" type="number" min={min} step={step} value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} />{showFieldIssue(`variant-${index}-${field}-error`, `variant_${index}_${field === "purchasePackCount" ? "purchase_pack_count_invalid" : "units_per_pack_invalid"}`)}</label>)}</div><small>报价只在主动修改时更新；采购规格与平台属性分别保留。</small></div></details></td>
+                  <td><details className="sku-details"><summary>查看 / 编辑</summary><div className="sku-detail-fields">{[["warehouseSku", "ERP 仓库 SKU"], ["sourceSku", "1688 来源 SKU"], ["imageUrl", "SKU 图片链接"]].map(([field, label]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个 ${label}`} className="text-input" value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} /></label>)}{variant.purchaseSpecification ? <p>采购规格：{variant.purchaseSpecification}</p> : null}{referenceRow?.referenceEvidence?.unitConversion ? <p>平台 SKU 与仓库单位换算：{referenceRow.referenceEvidence.unitConversion.warehouseUnits} 个仓库单位对应 {referenceRow.referenceEvidence.unitConversion.platformUnits} 个平台单品</p> : null}<div className="sku-quote-fields">{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个${label}`} className="table-input mono" type="number" min={min} step={step} value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} />{showFieldIssue(`variant-${index}-${field}-error`, `variant_${index}_${field === "purchasePackCount" ? "purchase_pack_count_invalid" : "units_per_pack_invalid"}`)}</label>)}</div><small>报价只在主动修改时更新；采购规格与平台属性分别保留。</small></div></details></td>
                   <td><button type="button" className="variant-remove" aria-label={`删除第 ${index + 1} 个规格`} onClick={() => removeVariant(index)}><Trash2 size={16} /></button></td>
                 </tr>;
               })}</tbody>
@@ -520,11 +545,11 @@ function ProductEditor() {
         {prefill?.source === "erp" || prefill?.warnings?.length || currentProductId && draft.platformSkc ? <Panel className="erp-catalog-prefill"><details><summary>ERP 档案资料与来源详情</summary>
           <div className="catalog-request-controls"><label className="form-field"><span>资料采购截止月份</span><input aria-label="资料采购截止月份" className="text-input" type="month" value={catalogRequestPeriod} onChange={event => setCatalogRequestPeriod(event.target.value)} /></label><Button variant="ghost" loading={requestingCatalog} disabled={requestingCatalog || !draft.platformSkc || !catalogRequestPeriod || !missingCatalogGroups.length} onClick={requestCatalog}>{catalogRequestFailed ? "重试补充资料" : "补充 ERP 资料"}</Button></div>
           {!catalogRequestPeriod ? <p className="editor-inline-note">请选择明确的采购截止月份；没有销量也可以为已确认身份的档案补充资料。</p> : null}
-          {!missingCatalogGroups.length ? <p className="editor-inline-note">资料已收齐。</p> : null}
+          {!missingCatalogGroups.length ? <p className="editor-inline-note">ERP 基础资料已收齐；参考成本仍按对应仓库商品的有效采购证据单独判定。</p> : null}
           {catalogRequestMessage ? <p className={`editor-inline-note ${catalogRequestFailed ? "field-error" : ""}`} role="status">{catalogRequestMessage}</p> : null}
           {(prefill.warnings ?? []).map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
           <ul className="erp-catalog-evidence">{(prefill.sources ?? []).map((item, index) => <li key={index}><strong className="mono">{item.platformSku}</strong><span>{item.platformSkc} · {item.attribute || "平台属性未提供"} · {item.productName || "原始名称未提供"}</span>{item.trusted === false ? <span>身份关系待核对</span> : null}</li>)}</ul>
-          <ul className="erp-catalog-evidence erp-purchase-evidence">{(prefill.purchases ?? []).map((item, index) => { const purchase = item.purchaseCatalog ?? {}; return <li key={index}><strong>{item.supplierName || "供应商未提供"} · {item.source?.purchaseOrderNo || item.source?.recordId || "采购明细"}</strong><span className="mono">仓库 {item.warehouseSku} · {(item.platformSkus ?? []).join("、")}</span><span>采购规格：{purchase.purchaseSpecificationAndModel1688 || "未提供"}</span>{purchase.purchaseProportion1688 ? <span>单位换算：{purchase.purchaseProportion1688.replace(/^(\d+)-(\d+)$/, "$1:$2")}</span> : null}{purchase.pictureLink1688 ? <a href={purchase.pictureLink1688} target="_blank" rel="noreferrer">采购图片<ExternalLink size={12} /></a> : null}</li>; })}</ul>
+          <ul className="erp-catalog-evidence erp-purchase-evidence">{(prefill.purchases ?? []).map((item, index) => { const purchase = item.purchaseCatalog ?? {}; return <li key={index}><strong>{item.supplierName || "供应商未提供"} · {item.source?.purchaseOrderNo || item.source?.recordId || "采购明细"}</strong><span className="mono">仓库 {item.warehouseSku} · {(item.platformSkus ?? []).join("、")}</span><span>采购规格：{purchase.purchaseSpecificationAndModel1688 || "未提供"}</span>{purchase.purchaseProportion1688 ? <span>1688 采购规格比例：{purchase.purchaseProportion1688.replace(/^(\d+)-(\d+)$/, "$1:$2")}</span> : null}{purchase.pictureLink1688 ? <a href={purchase.pictureLink1688} target="_blank" rel="noreferrer">采购图片<ExternalLink size={12} /></a> : null}</li>; })}</ul>
         </details></Panel> : null}
       </div>
 

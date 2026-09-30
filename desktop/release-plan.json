@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "candidateOnly": true,
-  "integrationBranch": "codex/release-0-3-4",
+  "integrationBranch": "codex/release-0-3-5",
   "requiredCommits": [
+    {
+      "module": "0.3.5-cancelled-purchase-and-complete-history",
+      "commit": "3e4d34e"
+    },
+    {
+      "module": "0.3.4-final-main-baseline",
+      "commit": "aa1e97094e4288700718c598d93baa5723f652fb"
+    },
     {
       "module": "0.3.3-final-main-baseline",
       "commit": "e52c9a457f0ff0adeabb1a8fa1542f0593ca157f"

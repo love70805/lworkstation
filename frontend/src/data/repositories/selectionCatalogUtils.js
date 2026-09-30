@@ -46,6 +46,7 @@ export function catalogSupplierProfile(supplier = {}, fallback = "") {
     sourceUrl: catalogText(supplier.sourceUrl),
     sourceUrlKind: erpSupplierLink(supplier.sourceUrl)?.type ?? null,
     catalogSource: supplier.catalogSource === "erp" ? "erp" : null,
+    sourceLinks: [...new Map((Array.isArray(supplier.sourceLinks) ? supplier.sourceLinks : []).map(item => erpSupplierLink(item?.url)).filter(Boolean).map(item => [item.url, item])).values()],
     sourceRecords: Array.isArray(supplier.sourceRecords) ? supplier.sourceRecords.map(item => ({
       kind: "erp", platformSku: catalogText(item.platformSku), platformSkc: catalogText(item.platformSkc), warehouseSku: catalogText(item.warehouseSku),
       batchId: catalogText(item.batchId), evidenceRef: catalogText(item.evidenceRef), recordId: catalogText(item.recordId), purchaseOrderNo: catalogText(item.purchaseOrderNo), capturedAt: catalogText(item.capturedAt),
@@ -82,6 +83,7 @@ export function catalogSupplierProfiles(suppliers = []) {
       supplierName: profile.supplierName || previous.supplierName,
       sourceProductId: profile.sourceProductId || previous.sourceProductId,
       sourceUrl: profile.sourceUrl || previous.sourceUrl,
+      sourceLinks: [...new Map([...previous.sourceLinks, ...profile.sourceLinks].map(item => [item.url, item])).values()],
       variants: profile.variants.length ? profile.variants : previous.variants,
     };
     indexBySupplierId.set(profile.supplierId, previousIndex);

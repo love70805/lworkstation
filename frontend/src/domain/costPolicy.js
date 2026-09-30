@@ -92,11 +92,12 @@ function latestValidCost(items, kind) {
       if (!amount || currency !== DEFAULT_CURRENCY) return null;
       const dateText = text(item.effectiveAt ?? item.calculatedAt ?? item.finalizedAt ?? item.createdAt);
       const timestamp = dateText && Number.isFinite(Date.parse(dateText)) ? Date.parse(dateText) : index;
+      const precision = ["erp_history", "erp_catalog_reference"].includes(kind) ? 4 : 2;
       return {
         ...item,
-        unitCost: kind === "finalized_profit_history" || amount.gt(0) && amount.toDecimalPlaces(kind === "erp_history" ? 4 : 2, Decimal.ROUND_DOWN).isZero()
+        unitCost: kind === "finalized_profit_history" || amount.gt(0) && amount.toDecimalPlaces(precision, Decimal.ROUND_DOWN).isZero()
           ? amount.toNumber()
-          : amount.toDecimalPlaces(kind === "erp_history" ? 4 : 2, Decimal.ROUND_DOWN).toNumber(),
+          : amount.toDecimalPlaces(precision, Decimal.ROUND_DOWN).toNumber(),
         currency,
         referenceKind: kind,
         _timestamp: timestamp,
@@ -238,6 +239,7 @@ export function selectSelectionReferenceCost({
   erpHistory = [],
   manualConfirmedCost = null,
   finalizedProfitHistory = [],
+  erpCatalogReference = null,
   supplierLandedCost = null,
 }) {
   const erp = latestValidCost(erpHistory, "erp_history");
@@ -256,6 +258,12 @@ export function selectSelectionReferenceCost({
   if (finalized) {
     const { _timestamp, ...result } = finalized;
     return { ...result, calculationMode: "reference", authoritativeSource: finalized.costSource ?? "historical_final" };
+  }
+
+  const catalog = latestValidCost(erpCatalogReference ? [erpCatalogReference] : [], "erp_catalog_reference");
+  if (catalog) {
+    const { _timestamp, ...result } = catalog;
+    return { ...result, calculationMode: "reference", authoritativeSource: "erp_reference" };
   }
 
   const supplier = latestValidCost(supplierLandedCost ? [supplierLandedCost] : [], "supplier_landed");

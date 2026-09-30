@@ -21,6 +21,14 @@ const inbox = {
 };
 
 describe("ERP 收件批次严格匹配", () => {
+  it("does not load the durable receipt while automatic adoption is still processing", () => {
+    const queue = buildErpInboxQueue({ inboxes: [{ ...inbox, adoptionPending: true }], requests: [request], ledger: { id: "LEDGER-1", status: "cost_pending" } });
+    expect(queue.autoLoad).toBeNull();
+    expect(queue.items[0]).toMatchObject({ scopeMatched: true, canAutoLoad: false, reason: "automatic_adoption_pending" });
+  });
+  it("retains a failed automatic adoption for explicit review instead of legacy auto-load", () => {
+    expect(evaluateErpInboxMatch({ inbox: { ...inbox, adoptionFailure: { message: 'storage failed' } }, request, ledger: { id: 'LEDGER-1', status: 'cost_pending' } })).toMatchObject({ scopeMatched: true, canAutoLoad: false, reason: 'automatic_adoption_failed' });
+  });
   it("keeps explicitly unloaded batches manual and rejects workspace mismatch", () => {
     const ledger = { id: "LEDGER-1", status: "cost_pending" };
     expect(evaluateErpInboxMatch({ inbox: { ...inbox, autoLoadSuppressed: true }, request, ledger })).toMatchObject({ scopeMatched: true, canAutoLoad: false, reason: "manually_unloaded" });

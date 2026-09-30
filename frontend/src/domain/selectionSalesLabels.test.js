@@ -57,6 +57,10 @@ describe("selection sales label contract", () => {
     expect(item(build({salesRows:[sale(),sale({id:"COPY"})]})).quantityExact).toBe("100");
     expect(item(build({importBatches:[batch({validRowCount:2})],salesRows:[sale(),sale({id:"SECOND",sourceRow:3})]})).quantityExact).toBe("200");
   });
+  it("nets valid returns in the seven-day window", () => {
+    const result = build({importBatches:[batch({validRowCount:2})],salesRows:[sale({quantityExact:"105",quantity:105}),sale({id:"RETURN",sourceRow:3,quantityExact:"-5",quantity:-5})]});
+    expect(item(result)).toMatchObject({status:"ready",quantityExact:"100",label:"高销"});
+  });
   it.each([{quantityExact:"-1",quantity:-1},{sourceAddedDate:"2026-08-32"},{sourceAddedDate:"2026-09-01"}])("does not assign a label to anomalous sales %j", patch => expect(item(build({salesRows:[sale(patch)]})).label).toBeNull());
   it("does not retain full coverage after a source has been partly replaced", () => {
     const result=build({importBatches:[batch({validRowCount:2})]});

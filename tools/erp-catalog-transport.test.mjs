@@ -31,6 +31,7 @@ export async function verifyErpCatalogTransport({
   ledgerId = "LEDGER-CATALOG",
   requestId = "REQ-CATALOG",
   includeConflict = true,
+  includeCancelled = false,
   syntheticSpoolBytes = 0,
   expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }],
 } = {}) {
@@ -93,7 +94,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: "8.0.25" }),
+        getManifest: () => ({ version: "8.0.26" }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -138,13 +139,16 @@ export async function verifyErpCatalogTransport({
       let data;
       if (url.pathname === "/purchase/purchase/v1/purchase-order-page") {
         data = [
-          { purchaseOrderId: "PO-NEW", purchaseOrderNo: "PO-NEW", supplierName: "供应商甲", productLink1688: "https://detail.1688.com/offer/777777777777.html", storeUrl: "https://synthetic-a.1688.com/" },
+          { purchaseOrderId: "PO-NEW", purchaseOrderNo: "PO-NEW", purchaseStatus: 4, paymentStatus: 4, purchaseOrderStatus1688: 2, supplierName: "供应商甲", productLink1688: "https://detail.1688.com/offer/777777777777.html", storeUrl: "https://synthetic-a.1688.com/" },
           { purchaseOrderId: "PO-OLD", purchaseOrderNo: "PO-OLD", supplierName: "供应商甲" },
+          ...(includeCancelled ? [{ purchaseOrderId: 'PO-CANCELLED', purchaseOrderNo: 'PO-CANCELLED', purchaseStatus: 2, purchaseOrderStatus1688: 4 }] : []),
         ];
       } else if (url.pathname === "/purchase/purchase/v1/purchase-order-details") {
+        assert.notEqual(url.searchParams.get('purchaseOrderId'), 'PO-CANCELLED', 'cancelled header must not fan out details');
         const newest = url.searchParams.get("purchaseOrderId") === "PO-NEW";
         data = newest ? [
           detail("DETAIL-NEW", "WH-CATALOG", "PO-NEW", 0, "2026-09-20 10:00:00", 6, {
+            purchaseProportion1688: "1-2",
             picturesLinking: "https://images.example.invalid/catalog-red.jpg",
             pictureLink1688: "https://images.example.invalid/1688-red.jpg",
             productLink1688: "https://detail.1688.com/offer/111111111111.html?trace=erp",
@@ -158,6 +162,7 @@ export async function verifyErpCatalogTransport({
             purchasingLink1688: "https://detail.1688.com/offer/222222222222.html",
           }),
           detail("DETAIL-NO-LINK", "WH-CATALOG", "PO-NEW", 2, "2026-09-15 10:00:00", 5),
+          ...(includeCancelled ? ['WH-CATALOG', 'WH-BLUE'].map(warehouse => detail('CANCELLED-' + warehouse, warehouse, 'PO-NEW', 3, '2026-09-30 23:59:59', 99, { purchaseOrderStatus1688: '4' })) : []),
         ] : [detail("DETAIL-OLD", "WH-CATALOG", "PO-OLD", 0, "2026-09-10 10:00:00", 4, {
           pictureLink1688: "https://images.example.invalid/1688-old.jpg",
           productLink1688: "https://detail.1688.com/offer/333333333333.html",
@@ -217,7 +222,7 @@ export async function verifyErpCatalogTransport({
     assert.ok(red.supplier1688Links.every((link) => link.url !== blue.supplier1688Url), "a same-supplier sibling line's product link cannot be borrowed");
     assert.equal(red.purchaseCatalog.purchaseOrderDetailId, "DETAIL-NEW");
     assert.equal(red.purchaseCatalog.purchaseSpecificationAndModel1688, "采购红色规格(仅参考)");
-    assert.equal(red.purchaseCatalog.purchaseProportion1688, "1-1");
+    assert.equal(red.purchaseCatalog.purchaseProportion1688, "1-2");
     assert.equal(red.purchaseCatalog.lineNumber, "0");
     assert.equal(red.purchaseCatalog.barcodeSkuid, null);
     assert.equal(red.purchaseCatalog.barcodeSkcid, null);
@@ -243,8 +248,12 @@ export async function verifyErpCatalogTransport({
     assert.equal(oldest.purchaseOrderId, "PO-OLD");
     assert.equal(red.previewUnitCost, 5, "catalog transport must not alter weighted cost arithmetic");
     assert.equal(blue.previewUnitCost, 5);
-    assert.equal(red.totalQuantity, 6, "purchaseProportion1688 must not change cost units or quantity");
-    const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v6"));
+    assert.equal(red.totalQuantity, 6, "1:2 procurement composition must not change already-normalized warehouse quantity");
+    assert.equal(red.totalPrice, 30, "1:2 procurement composition must not multiply the order amount again");
+    assert.equal(blue.purchaseCatalog.purchaseProportion1688, "2-1");
+    assert.equal(blue.totalQuantity, 2, "2:1 procurement split must retain recorded warehouse quantity");
+    assert.equal(blue.totalPrice, 10, "2:1 procurement split must retain recorded warehouse-unit price");
+    const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v7"));
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
     const persisted = JSON.parse(await fs.readFile(spoolPath, "utf8"));
     assert.deepEqual(persisted.find((record) => record.kind === "batch" && record.workspaceId === workspaceId).envelope.batch.rows, batch.rows);
@@ -253,6 +262,10 @@ export async function verifyErpCatalogTransport({
     // Synthetic non-empty values for the observed barcode fields check source
     // ownership without changing the nominal two-warehouse return fixture.
     const shared = structuredClone(submitted[0].payload);
+    // The following ownership cases isolate valid purchase pictures; cancellation
+    // persistence is checked separately by the end-to-end regression.
+    shared.warehouseEvidence.excludedDetails = [];
+    shared.warehouseEvidence.excludedOrders = [];
     shared.results = [shared.results.find((result) => result.warehouseSku === "WH-CATALOG")];
     shared.warehouseEvidence.warehouses = shared.warehouseEvidence.warehouses.filter((warehouse) => warehouse.warehouseSku === "WH-CATALOG");
     shared.results[0].mappings = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }, { platformSku: "SKU-BLUE", platformSkc: "SKC-CATALOG" }];

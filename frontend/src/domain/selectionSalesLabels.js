@@ -135,7 +135,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     const total = totals.get(skc), quantity = decimalSource(row.quantityExact ?? row.quantity ?? row.qty, null);
     if (conflictRows.has(row)) { addProblem(skc,"source_conflict"); continue; }
     total.sourceRowCount++;
-    if (quantity === null || new Exact(quantity).lt(0)) { addProblem(skc,"invalid_quantity"); continue; }
+    if (quantity === null) { addProblem(skc,"invalid_quantity"); continue; }
     total.month = total.month.plus(quantity);
     if (skuSkcs.get(key(row.platformSku ?? row.sku))?.size > 1) addProblem(skc,"identity_conflict");
     const parsed = parseSalesAddedDate(row.sourceAddedDate ?? row.rawAddedAt,{period:chosenPeriod});
@@ -150,6 +150,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     else if (!scopedStores.length) { itemStatus = "out_of_scope"; reason = "out_of_scope"; }
     else if (covered && scopedStores.some(name => storeProblems.has(name))) { itemStatus = "insufficient"; reason = "unresolved_identity"; }
     else if (covered && problems.size) { itemStatus = "insufficient"; reason = [...problems][0]; }
+    if (itemStatus === "ready" && ((total?.window ?? new Exact(0)).lt(0) || (total?.month ?? new Exact(0)).lt(0))) { itemStatus = "insufficient"; reason = "invalid_quantity"; }
     const quantityExact = itemStatus === "ready" ? (total?.window ?? new Exact(0)).toFixed() : null;
     return { platformSkc: group.platformSkc, canonicalPlatformSkc: group.canonicalPlatformSkc, status: itemStatus, reason: itemStatus === "ready" ? null : reason, label: quantityExact === null ? null : selectionSalesLabel(quantityExact), quantityExact, knownQuantityExact: total?.window.toFixed() ?? null, monthQuantityExact: total?.month.toFixed() ?? null, sourceRowCount: total?.sourceRowCount ?? 0, stores: scopedStores.map(name => storeNames.get(name) ?? name), period: chosenPeriod, ...window, rule: SELECTION_SALES_LABEL_RULE };
   }).sort((a,b) => a.canonicalPlatformSkc.localeCompare(b.canonicalPlatformSkc));

@@ -8,6 +8,7 @@ const commands = [
   ["前端生产构建", "pnpm", ["build"]],
   ["ERP Assistant 桥接生成", "pnpm", ["erp:bridge:test"]],
   ["ERP 采集慢路径", "node", ["../tools/erp-collection-slow-paths.test.mjs"]],
+  ["ERP 完整历史与取消采购", "node", ["../tools/erp-purchase-history.test.mjs"]],
   ["ERP 收件协议", "pnpm", ["erp:inbox:test"]],
   ["同步服务冒烟", "pnpm", ["sync:check"]],
   ["云端种子合同", "pnpm", ["seed:check"]],

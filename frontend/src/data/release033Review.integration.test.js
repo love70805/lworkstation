@@ -25,10 +25,11 @@ describe("0.3.3 independent read-only review regressions",()=>{
    source.warehouseEvidence=source.rows.map(row=>evidence(row.warehouseSku));
    expect(erpCatalogReferenceCosts(source,{period:"2026-08",batchId:"B"})).toEqual([]);
  });
- it("does not copy an anchor SKU unit conversion to an auxiliary SKU lacking its own relation",()=>{
+ it("uses each explicit warehouse mapping without requiring a unit conversion",()=>{
    const source=envelope();source.rows[0].catalogMappings=[{platformSku:"SKU-B",platformSkc:"SKC",warehouseSku:"WH"}];
    const result=erpCatalogReferenceCosts(source,{period:"2026-08",batchId:"B"});
-   expect(result.map(row=>row.platformSku)).toEqual(["SKU-A"]);
+   expect(result.map(row=>row.platformSku)).toEqual(["SKU-A", "SKU-B"]);
+   expect(result.map(row=>row.unitCost)).toEqual([4, 4]);
  });
  it("does not treat a blank purchase price as a verified true zero",()=>{
    const source=envelope();source.warehouseEvidence=[evidence("WH","")];

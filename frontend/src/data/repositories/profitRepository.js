@@ -419,7 +419,7 @@ export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } 
         const failure = { name: String(error.name || 'Error').slice(0, 80), message: String(error.message || 'ERP 自动采用失败').slice(0, 500) };
         if (inbox.adoptionFailure?.name === failure.name && inbox.adoptionFailure?.message === failure.message) return;
         const attemptedAt = new Date().toISOString();
-        await db.erpCostInbox.update(inboxId, { adoptionFailure: { ...failure, attemptedAt } });
+        await db.erpCostInbox.update(inboxId, { adoptionPending: false, adoptionFailure: { ...failure, attemptedAt } });
         await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_failed', actorId: member.memberId, createdAt: attemptedAt, localOnly: true, syncState: 'local_only',
           after: { requestId: inbox.requestId, batchId: inbox.batchId, failure, systemSource: 'erp-auto-adoption' } });
       });
@@ -443,9 +443,9 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     const persistResult = async (items, state, reason = null, batchId = inbox.appliedBatchId) => {
       const summary = summarizeErpAdoption(items);
       const adoption = { version: ERP_ADOPTION_VERSION, state, items, summary, reason };
-      const changed = Boolean(inbox.adoptionFailure) || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
+      const changed = Boolean(inbox.adoptionPending || inbox.adoptionFailure) || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
       if (changed) {
-        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
+        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionPending: false, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
         await db.erpCostInbox.put(saved);
         await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_processed', actorId: member.memberId, createdAt: now, before: { adoption: inbox.adoption ?? null }, after: { adoption, requestId: inbox.requestId, batchId: inbox.batchId, adoptionMethod: resolutions.length ? 'exception_retry' : 'automatic', systemSource: 'erp-auto-adoption', snapshot: saved } });
       }
@@ -1156,7 +1156,9 @@ export async function receiveErpCostInboxEnvelope({ envelope, receivedVia = 'bro
       return;
     }
     const receivedAt = new Date().toISOString(), id = `INBOX-${validated.deliveryId}`;
-    const saved = { id, deliveryId: validated.deliveryId, batchId: batch.batchId, workspaceId: batch.workspaceId, ledgerId: batch.ledgerId, requestId: batch.requestId, status: 'pending', receivedVia: String(receivedVia || validated.envelope.transport), sentAt: validated.envelope.sentAt, receivedAt, envelope: validated.envelope };
+    // The receipt commits before adoption. Do not expose this brief interval as
+    // a legacy draft eligible for page auto-load.
+    const saved = { id, deliveryId: validated.deliveryId, batchId: batch.batchId, workspaceId: batch.workspaceId, ledgerId: batch.ledgerId, requestId: batch.requestId, status: 'pending', adoptionPending: true, receivedVia: String(receivedVia || validated.envelope.transport), sentAt: validated.envelope.sentAt, receivedAt, envelope: validated.envelope };
     await db.erpCostInbox.add(saved);
     await db.auditEvents.add({ workspaceId: batch.workspaceId, objectType: 'erp_cost_inbox', objectId: id, action: 'received', actorId: member.memberId, createdAt: receivedAt, after: { batchId: batch.batchId, ledgerId: batch.ledgerId, requestId: batch.requestId, deliveryId: validated.deliveryId, receivedVia: saved.receivedVia, outputRowCount: batch.summary.outputRowCount } });
     result = { id, deliveryId: validated.deliveryId, batchId: batch.batchId, status: 'pending', idempotent: false };
@@ -1259,11 +1261,12 @@ export async function switchLoadedErpCostInbox({ candidateId, previousId = null,
   return db.transaction("rw", db.erpCostInbox, async () => {
     const candidate = await db.erpCostInbox.get(candidateKey);
     if (!candidate) throw new Error("找不到待载入的 ERP 收件批次。");
-    if (!["pending", "loaded"].includes(candidate.status)) throw new Error("当前载入状态已变化，请刷新待处理列表后重试。");
+    const stateChanged = () => Object.assign(new Error("当前载入状态已变化，请刷新待处理列表后重试。"), { code: "ERP_INBOX_STATE_CHANGED" });
+    if (!["pending", "loaded"].includes(candidate.status)) throw stateChanged();
 
     const previous = previousKey ? await db.erpCostInbox.get(previousKey) : null;
     if (previousKey && (!previous || previous.status !== "loaded")) {
-      throw new Error("当前载入状态已变化，请刷新待处理列表后重试。");
+      throw stateChanged();
     }
     if (previous && (previous.ledgerId !== candidate.ledgerId || previous.workspaceId !== candidate.workspaceId)) {
       throw new Error("ERP 收件批次不属于同一工作区和账本，不能切换。");
@@ -1271,7 +1274,7 @@ export async function switchLoadedErpCostInbox({ candidateId, previousId = null,
 
     const otherLoaded = (await db.erpCostInbox.where("ledgerId").equals(candidate.ledgerId).toArray())
       .find((record) => record.status === "loaded" && record.id !== candidateKey && record.id !== previousKey);
-    if (otherLoaded) throw new Error("当前载入状态已变化，请刷新待处理列表后重试。");
+    if (otherLoaded) throw stateChanged();
 
     const loadedCandidate = { ...candidate, status: "loaded", loadedAt: switchedAt, updatedAt: switchedAt };
     await db.erpCostInbox.put(loadedCandidate);

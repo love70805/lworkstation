@@ -166,6 +166,12 @@ describe("selection reference cost", () => {
       supplierLandedCost: { id: "SUP-1", unitCost: 5.6 },
     })).toMatchObject({ id: "SUP-1", authoritativeSource: "1688_reference" });
   });
+  it("uses warehouse purchase evidence before a 1688 quote without treating line amount as unit cost", () => {
+    expect(selectSelectionReferenceCost({
+      erpCatalogReference: { id: "ERP-REFERENCE", unitCost: 3.2032, referenceOnly: true, currency: "CNY" },
+      supplierLandedCost: { id: "SUP-1", unitCost: 8.5 },
+    })).toMatchObject({ id: "ERP-REFERENCE", unitCost: 3.2032, referenceKind: "erp_catalog_reference", authoritativeSource: "erp_reference" });
+  });
 
   it("does not rewrite the stored cost on finalized profit history", () => {
     expect(selectSelectionReferenceCost({
