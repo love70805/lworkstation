@@ -97,6 +97,15 @@ export async function saveErpCatalogRequest(input) {
   });
 }
 
+export async function registerCostCatalogCompanion(source) {
+  const request = buildErpCatalogRequest({ id: `${source.id}-CATALOG`, workspaceId: source.workspaceId,
+    ledgerId: source.ledgerId, ledgerPeriod: source.ledgerPeriod, platformSkcs: source.platformSkcs,
+    confirmedSkus: source.expectedSkus, sourceRequestId: source.id, sourceProductIds: [],
+    requestedAt: source.requestedAt, idempotencyKey: `cost-catalog:${source.id}` });
+  await saveErpCatalogRequest(request);
+  return registerErpBridgeRequest({ request, expectedSkus: request.confirmedSkus });
+}
+
 export async function requestErpProductCatalog({ platformSkcs = [], productId = null, period = null, missingGroups = ERP_CATALOG_GROUPS } = {}) {
   const context = await getActiveMemberContext(), local = await confirmedIdentities(context);
   const targets = [...new Set(platformSkcs.filter(Boolean).map(value => String(value).trim()))];

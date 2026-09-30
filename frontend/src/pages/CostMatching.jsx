@@ -1,3 +1,4 @@
+import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
@@ -343,6 +344,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       if (!request || cancelled) return;
       if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(request.id); setCostRequest(request); }
       setRegistrationState({ status: "registered", message: "回传关联已登记，可在已选范围内分批查询" });
+      void registerCostCatalogCompanion(request).catch(() => { /* Cost registration remains usable; explicit catalog supplement can retry. */ });
     }).catch((error) => { if (!cancelled) setRegistrationState({ status: "failed", message: `登记失败：${error.message}` }); });
     return () => { cancelled = true; };
   }, [registrationScope, registrationRetry, locked]);

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
-import { beforeEach, afterEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { db, saveProductCatalogRecord, getProductEditorSnapshot, getSelectionReferenceSnapshot, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload, createOrGetMonthlyLedger, saveErpCostRequest } from "./database";
-import { saveErpCatalogRequest, receiveErpCatalogInboxEnvelope } from "./repositories/erpCatalogRepository";
+import { saveErpCatalogRequest, receiveErpCatalogInboxEnvelope, registerCostCatalogCompanion } from "./repositories/erpCatalogRepository";
 import { buildErpCatalogRequest, buildErpCatalogInboxEnvelope, ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { buildErpCostRequest } from "../domain/erpCosts";
@@ -92,4 +92,29 @@ describe("independent trusted catalog lifecycle", () => {
     await db.settings.delete(stored.key);
     expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toEqual([]);
   });
+});
+
+
+it("persists the cost catalog companion before registration and reuses it across restart", async () => {
+  const transport = await import("../lib/erpInboxTransport");
+  const { product } = await saveProductCatalogRecord({ draft: { name: "合成主体", platformSkc: "SKC-C", variants: [{ platformSku: "SKU-C" }] } });
+  const ledger = await createOrGetMonthlyLedger({ period: "2026-08" });
+  const source = buildErpCostRequest({ id: "COMPANION-SOURCE", workspaceId: product.workspaceId, ledgerId: ledger.id,
+    ledgerPeriod: ledger.period, platformSkcs: ["SKC-C"], expectedSkus: [{ platformSku: "SKU-C", platformSkc: "SKC-C" }], requestedBy: "local-user", requestedAt: "2026-09-30T01:00:00.000Z" });
+  await saveErpCostRequest(source);
+  const spy = vi.spyOn(transport, "registerErpBridgeRequest").mockImplementation(async ({ request }) => {
+    const persisted = await db.settings.get(`erp-catalog:request:${source.workspaceId}:${source.id}-CATALOG`);
+    expect(persisted.request).toEqual(request);
+    return { accepted: true, status: "registered" };
+  });
+  try {
+    await registerCostCatalogCompanion(source);
+    db.close(); await db.open();
+    await registerCostCatalogCompanion(source);
+    expect((await db.settings.toArray()).filter(item => item.kind === "erp_catalog_request")).toHaveLength(1);
+    expect((await db.auditEvents.toArray()).filter(item => item.action === "catalog_requested")).toHaveLength(1);
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(await db.erpCostRows.count()).toBe(0);
+    await expect(registerCostCatalogCompanion({ ...source, expectedSkus: [{ platformSku: "FOREIGN", platformSkc: "SKC-C" }] })).rejects.toThrow("缺少本机");
+  } finally { spy.mockRestore(); }
 });
