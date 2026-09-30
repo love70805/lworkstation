@@ -31,10 +31,16 @@ export async function verifyErpCatalogTransport({
   ledgerId = "LEDGER-CATALOG",
   requestId = "REQ-CATALOG",
   includeConflict = true,
+  syntheticSpoolBytes = 0,
   expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }],
 } = {}) {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lworkstation-erp-catalog-"));
   const spoolPath = path.join(temporaryRoot, "isolated-inbox.json");
+  if (syntheticSpoolBytes > 0) {
+    const records = Array.from({ length: 2000 }, (_, index) => ({ kind: "batch", workspaceId: "synthetic-unrelated-workspace",
+      status: "acknowledged", deliveryId: `SYNTHETIC-${index}`, sourceMeta: { padding: "x".repeat(Math.ceil(syntheticSpoolBytes / 2000)) } }));
+    await fs.writeFile(spoolPath, JSON.stringify(records));
+  }
   const port = await unusedPort();
   const base = `http://127.0.0.1:${port}`;
   const capability = `synthetic-catalog-capability-${randomUUID()}`;
@@ -68,6 +74,13 @@ export async function verifyErpCatalogTransport({
     });
     assert.equal(requestResponse.status, 202);
 
+    const catalogRegistration = await fetch(`${base}/erp/v1/requests`, {
+      method: "POST", headers: { authorization: `Bearer ${capability}`, "content-type": "application/json" },
+      body: JSON.stringify({ request: { kind: "catalog", id: `${requestId}-CATALOG`, workspaceId, ledgerId, ledgerPeriod: "2026-09",
+        platformSkcs: ["SKC-CATALOG"], confirmedSkus: expectedSkus, sourceRequestId: requestId, sourceProductIds: [],
+        idempotencyKey: `cost-catalog:${requestId}`, requestedAt: new Date().toISOString() } }),
+    });
+    assert.equal(catalogRegistration.status, 202);
     const stored = {
       shopeersErpInboxBaseUrl: base,
       shopeersErpInboxCapability: capability,
@@ -80,7 +93,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: "8.0.24" }),
+        getManifest: () => ({ version: "8.0.25" }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -93,12 +106,14 @@ export async function verifyErpCatalogTransport({
       console: { error() {}, warn() {}, info() {} }, Date, Math, Promise,
     });
     vm.runInContext(await fs.readFile(path.join(extensionRoot, "background.js"), "utf8"), worker);
-    const submitted = [];
+    const submitted = [], catalogSubmitted = [], submissionOrder = [];
     window = new Window({ url: erpUrl });
     window.document.body.innerHTML = '<table><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/999999999999.html">供应商甲</a></td></tr><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/888888888888.html">供应商甲</a></td></tr></table>';
     const sender = { frameId: 0, url: erpUrl, tab: { url: erpUrl } };
     window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
       listeners[0](message, sender, (response) => {
+        if (message.type === "shopeers.erp.submitCostResult" || message.type === "shopeers.erp.submitCatalogResult") submissionOrder.push(message.type);
+        if (message.type === "shopeers.erp.submitCatalogResult") catalogSubmitted.push({ payload: structuredClone(message.payload), response: structuredClone(response) });
         if (message.type === "shopeers.erp.submitCostResult") submitted.push({ payload: structuredClone(message.payload), response: structuredClone(response) });
         callback(response);
       });
@@ -168,7 +183,15 @@ export async function verifyErpCatalogTransport({
     for (let attempt = 0; attempt < 200 && !submitted.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(submitted.length, 1, window.document.body.textContent);
     assert.equal(submitted[0].response.ok, true, submitted[0].response.message);
+    for (let attempt = 0; attempt < 200 && !catalogSubmitted.length; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(catalogSubmitted.length, 1);
+    assert.equal(catalogSubmitted[0].response.status, "success", catalogSubmitted[0].response.message);
+    assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
     assert.equal(new Set(requestedPaths).size, 4);
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, 1, 'complete original evidence does not trigger any optional history scan');
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, 2, 'complete original mappings are reused');
+    const retryCatalog = await window.ShopeersErpDeliveryBridge.submitCatalog(catalogSubmitted[0].payload);
+    assert.equal(retryCatalog.status, "success", 'same independently delivered catalog is retry-idempotent');
     const resultResponse = await fetch(`${base}/erp/v1/cost-batches?workspaceId=${encodeURIComponent(workspaceId)}&ledgerId=${encodeURIComponent(ledgerId)}`, { headers: { authorization: `Bearer ${capability}` } });
     assert.equal(resultResponse.status, 200);
     const inbox = await resultResponse.json();
@@ -224,7 +247,7 @@ export async function verifyErpCatalogTransport({
     const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v6"));
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
     const persisted = JSON.parse(await fs.readFile(spoolPath, "utf8"));
-    assert.deepEqual(persisted.find((record) => record.kind === "batch").envelope.batch.rows, batch.rows);
+    assert.deepEqual(persisted.find((record) => record.kind === "batch" && record.workspaceId === workspaceId).envelope.batch.rows, batch.rows);
     assert.doesNotMatch(JSON.stringify(batch), /999999999999|888888888888|777777777777/, "global DOM and order-level product links must never enter detail evidence");
 
     // Synthetic non-empty values for the observed barcode fields check source

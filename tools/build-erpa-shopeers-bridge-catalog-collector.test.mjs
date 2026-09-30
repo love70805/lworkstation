@@ -14,7 +14,7 @@ const run = () => ({ controller: new AbortController() });
 const completeEvidence = warehouseSku => ({ warehouseSku, evidenceComplete: true, sourceWarnings: [], purchaseRecords: [0, 0.00001, 2, 3, 4].map((unitPrice, index) => ({ recordId: warehouseSku + ':' + index, warehouseSku, quantity: 2, unitPrice, purchaseDate: '2026-08-20', supplierName: '供应商甲', supplier1688Links: [{ type: 'product', url: 'https://detail.1688.com/offer/123456789012.html', supplierName: '供应商甲' }], selectedForPreview: false })), excludedRecords: [] });
 const response = (code, data, count = data.length) => ({ code, count, data });
 async function policyAndCollector() {
-  const sandbox = { window: {}, URL };
+  const sandbox = { window: {}, URL, AbortController, setTimeout, clearTimeout };
   for (const file of ['result-policy.js', 'catalog-collector.js']) vm.runInNewContext(await readFile(path.join(sourceRoot, file), 'utf8'), sandbox, { filename: file });
   return { policy: sandbox.window.ShopeersErpResultPolicy, create: sandbox.window.ShopeersErpCatalogCollector.create };
 }
@@ -24,7 +24,8 @@ export async function verifyErpCatalogCollection() {
   const products = Array.from({ length: 205 }, (_, index) => ({ itemId: 'WH-' + index, tradeName: '目录商品' + index, picturesLinking: 'https://images.example.invalid/warehouse.jpg', supplierData: [{ supplierName: '供应商甲' }], productSellerId: index % 2 ? 'other-person' : 'current-person', platformSkuCost: 999, '7-daySales': 999, '30DaySales': 999 }));
   const calls = [];
   const cache = new Map();
-  const reader = create({ policy, getCache: key => cache.get(key), setCache: (key, value) => cache.set(key, value), readWarehouseEvidence: async warehouseSku => completeEvidence(warehouseSku), apiGet: async (endpoint, params) => {
+  const evidenceReads = [];
+  const reader = create({ policy, getCache: key => cache.get(key), setCache: (key, value) => cache.set(key, value), readWarehouseEvidence: async warehouseSku => { evidenceReads.push(warehouseSku); return completeEvidence(warehouseSku); }, apiGet: async (endpoint, params) => {
     calls.push({ endpoint, params });
     if (endpoint.endsWith('product-page')) {
       assert.equal(params.skuGroup, 'SKC-TARGET'); assert.equal(params.composite, 1); assert.equal(params.limit, 100);
@@ -38,6 +39,8 @@ export async function verifyErpCatalogCollection() {
   const initial = { results: [{ warehouseSku: 'WH-0', unitCost: '4.2000', selectedRecordIds: ['WH-0:0'] }], warehouseEvidence: { warehouses: [completeEvidence('WH-0')] } };
   const collected = await reader.collect(['SKC-TARGET'], run(), initial);
   assert.equal(collected.coverage.directory.pageCount, 3);
+  assert.equal(evidenceReads.length, 204, 'complete initial WH-0 evidence is reused without another history read');
+  assert.equal(new Set(evidenceReads).size, evidenceReads.length, 'each warehouse is read only once');
   assert.equal(collected.results.length, 205, 'all unsold siblings from every product page remain');
   assert.equal(collected.results[0].unitCost, '4.2000', 'catalog metadata preserves existing cost fields');
   assert.equal(collected.results.every(result => result.mappings.length === 1 && result.mappings[0].platformSkc === 'SKC-TARGET'), true, 'shared warehouses do not widen the target SKC');
@@ -83,8 +86,16 @@ export async function verifyErpCatalogCollection() {
   assert.equal(preserved.results[0].unitCost, '4.2000');
   assert.deepEqual(json(preserved.results[0].mappings), originalMappings, 'an incomplete supplemental mapping never replaces a complete original mapping');
   assert.deepEqual(json(preserved.warehouseEvidence.warehouses[0]), originalEvidence, 'an incomplete supplemental warehouse read never replaces complete cost evidence');
-  assert.equal(preserved.coverage.purchaseEvidence.state, 'partial');
-  assert.notEqual(preserved.coverage.mappings.state, 'complete');
+  assert.equal(preserved.coverage.purchaseEvidence.state, 'complete');
+  assert.equal(preserved.coverage.mappings.state, 'complete');
+  let sharedReads = 0, sharedMappings = 0;
+  const shared = create({ policy, readWarehouseEvidence: async warehouseSku => { sharedReads++; return completeEvidence(warehouseSku); }, apiGet: async (endpoint, params) => {
+    if (endpoint.endsWith('product-page')) return response(0, [{ itemId: 'SHARED' }]);
+    sharedMappings++; return response(0, ['SKC-A', 'SKC-B'].map((skc, index) => ({ associatedProductId: 'SHARED', barcodeSkuid: 'SKU-' + index, barcodeSkcid: skc })));
+  } });
+  const siblings = await shared.collect(['SKC-A','SKC-B'], run());
+  assert.equal(siblings.results.length, 1); assert.equal(siblings.results[0].mappings.length, 2);
+  assert.equal(sharedReads, 1); assert.equal(sharedMappings, 1);
   console.log('ERP catalog collection: full 205-item/3-page and 128-map scope, page/count faults and optional cost preservation passed');
 }
 
@@ -124,12 +135,12 @@ export async function verifyErpCatalogButtonAndCostPipeline() {
     assert.equal(evidence.purchaseRecords[0].selectedForPreview, true);
     assert.equal(cost.meta.detailFailureCount, 0, 'auxiliary catalog detail failure does not alter original formal-cost completeness');
     assert.equal(cost.meta.mappingFailureCount, 0);
-    assert.equal(cost.meta.catalogCoverage.purchaseEvidence.state, 'partial');
+    assert.equal(cost.meta.catalogCoverage.purchaseEvidence.state, 'unavailable');
     assert.equal(cost.results.some(result => result.mappings.some(mapping => mapping.platformSkc === 'SKC-FOREIGN')), false);
-    assert.equal(cost.results.find(result => result.warehouseSku === 'WH-AUX').unitCost, null);
+    assert.equal(cost.results.some(result => result.warehouseSku === 'WH-AUX'), false, 'optional sibling is delivered on its independent channel');
     for (let attempt = 0; attempt < 100 && window.document.getElementById('erpa-supplement-catalog').disabled; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     const contextCalls = messages.filter(message => message.type === 'shopeers.erp.catalogContext').length;
-    assert.equal(contextCalls, 0, 'catalog request lookup happens only after the supplement button');
+    assert.equal(contextCalls, 1, 'optional catalog lookup follows cost dispatch');
     window.document.getElementById('erpa-supplement-catalog').click();
     for (let attempt = 0; attempt < 150 && !messages.some(message => message.type === 'shopeers.erp.submitCatalogResult'); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     const catalog = messages.find(message => message.type === 'shopeers.erp.submitCatalogResult')?.payload;
@@ -145,7 +156,7 @@ export async function verifyErpCatalogBackgroundBinding() {
   const storage = { shopeersErpInboxBaseUrl: 'http://127.0.0.1:8790', shopeersErpInboxCapability: 'synthetic-only-capability-abcdefghijklmnopqrstuvwxyz', shopeersErpWorkspaceId: 'workspace-confirmed' };
   let requests = [{ requestId: 'COST-OTHER', requestKind: 'cost', workspaceId: 'workspace-confirmed', status: 'registered', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08' }, { requestId: 'CATALOG-CONFIRMED', requestKind: 'catalog', workspaceId: 'workspace-confirmed', status: 'registered', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08', ledgerId: null }];
   const posted = [];
-  const chrome = { storage: { local: { async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, json(storage[key])])); }, async set(values) { Object.assign(storage, json(values)); } } }, runtime: { getManifest: () => ({ version: '8.0.24' }), onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  const chrome = { storage: { local: { async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, json(storage[key])])); }, async set(values) { Object.assign(storage, json(values)); } } }, runtime: { getManifest: () => ({ version: '8.0.25' }), onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const sandbox = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console: { info() {}, warn() {}, error() {} }, fetch: async (rawUrl, options) => {
     const url = new URL(rawUrl); assert.equal(url.hostname, '127.0.0.1', 'page-controlled destinations never leave loopback');
     if (url.pathname === '/erp/v1/requests') return { ok: true, status: 200, json: async () => ({ records: requests }) };
@@ -155,6 +166,12 @@ export async function verifyErpCatalogBackgroundBinding() {
   const api = sandbox.__SHOPEERS_ERP_BACKGROUND_TEST_API__;
   const sender = { frameId: 0, url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', tab: { url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' } };
   assert.equal((await api.catalogContext({}, sender)).request.requestId, 'CATALOG-CONFIRMED');
+  requests[0].registeredAt = '2026-09-01T00:00:00.000Z';
+  requests.push({ ...requests[1], requestId: 'COST-OTHER-CATALOG', sourceRequestId: 'COST-OTHER' });
+  assert.equal((await api.catalogContext({}, sender)).request.requestId, 'CATALOG-CONFIRMED', 'explicit supplement remains usable beside an automatic companion');
+  assert.equal((await api.catalogContext({ querySkcs: ['SKC-TARGET'], queryCapturedAt: '2026-09-30T00:00:00.000Z' }, sender)).request.requestId, 'COST-OTHER-CATALOG');
+  requests.pop();
+
   await assert.rejects(api.catalogContext({}, { url: 'https://attacker.invalid' }), error => error.code === 'ERP_UNTRUSTED_SENDER');
   requests.push({ ...requests[1], requestId: 'CATALOG-AMBIGUOUS' });
   await assert.rejects(api.catalogContext({}, sender), error => error.code === 'ERP_REQUEST_AMBIGUOUS'); requests.pop();
