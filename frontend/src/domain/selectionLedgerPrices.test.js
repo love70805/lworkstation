@@ -18,7 +18,7 @@ describe("ledger selling price contract", () => {
     expect(resolve([sale(), sale({ sourceRow: 3, unitPriceRaw: "12" })])).toMatchObject({ status: "choose", value: null });
   });
   it("supports true zero and ignores returns, deductions, missing prices and unrelated SKUs", () => {
-    const rows = [sale({ unitPriceRaw: "0" }), sale({ sourceRow: 3, rawAddedAt: "2026-08-31 14:00:00", unitPriceRaw: "", unitPrice: null }), sale({ sourceRow: 4, unitPriceRaw: "99", movementType: "扣款" }), sale({ sourceRow: 5, unitPriceRaw: "99", quantityExact: "-10" }), sale({ sourceRow: 6, unitPriceRaw: "99", platformSku: "B" })];
+    const rows = [sale({ unitPriceRaw: "0" }), sale({ sourceRow: 3, rawAddedAt: "2026-08-31 11:00:00", unitPriceRaw: "", unitPrice: null }), sale({ sourceRow: 4, unitPriceRaw: "99", movementType: "扣款" }), sale({ sourceRow: 5, unitPriceRaw: "99", quantityExact: "-10" }), sale({ sourceRow: 6, unitPriceRaw: "99", platformSku: "B" })];
     expect(resolve(rows)).toMatchObject({ status: "ready", value: 0 });
     expect(resolve([sale({ quantityExact: "-1" })])).toMatchObject({ status: "missing", value: null });
   });
@@ -43,4 +43,20 @@ it("does not invent same-second ordering when a legacy source contains only date
 it("keeps anomalous return signs and negative monthly candidate units pending", () => {
   expect(resolve([sale(), sale({ sourceRow: 3, movementType: "退货", quantityExact: "-2" })])).toMatchObject({ status: "choose", value: null });
   expect(resolve([sale(), sale({ sourceRow: 3, movementType: "退货", quantityExact: "20" })])).toMatchObject({ status: "choose", value: null });
+});
+
+it("keeps the latest normal sale with no price empty instead of reviving an older price", () => {
+  const missing = sale({ sourceRow: 3, rawAddedAt: "2026-08-31 13:00:00", unitPriceRaw: "", unitPrice: null });
+  for (const rows of [[sale(), missing], [missing, sale()]]) {
+    expect(resolve(rows)).toMatchObject({ status: "missing", value: null, kind: "ledger", sourceAddedAt: "2026-08-31T13:00:00.000+08:00" });
+    expect(resolve(rows).sources).toMatchObject([{ sourceRow: 3 }]);
+    expect(resolve(rows).candidates).toEqual([]);
+  }
+});
+it("leaves same-instant missing and valid prices pending, including date-only legacy uncertainty", () => {
+  expect(resolve([sale(), sale({ sourceRow: 3, unitPriceRaw: "" })])).toMatchObject({ status: "choose", value: null, reason: "missing_latest_price" });
+  expect(resolve([sale(), sale({ sourceRow: 3, rawAddedAt: "2026-08-31", unitPriceRaw: "" })])).toMatchObject({ status: "choose", value: null, reason: "missing_time" });
+});
+it("does not choose a volume winner when a month's price-less rows could change candidate units", () => {
+  expect(resolve([sale(), sale({ sourceRow: 3, unitPriceRaw: "12", quantityExact: "2" }), sale({ sourceRow: 4, rawAddedAt: "2026-08-30 12:00:00", unitPriceRaw: "", quantityExact: "100" })])).toMatchObject({ status: "choose", value: null });
 });

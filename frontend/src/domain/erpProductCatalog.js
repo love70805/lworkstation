@@ -278,9 +278,12 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
       || a.canonicalPlatformSku.localeCompare(b.canonicalPlatformSku));
   const erpImage = imageRows[0]?.erpImage.value || (activeRows.includes(primaryRow) && !primaryRow?.erpImage?.conflict ? primaryRow?.erpImage?.value : "") || "";
   const variants = [...(draft.variants ?? [])].filter(variant => {
+    // A product can be drafted before the platform assigns any SKU.
+    // Such pending variants have no identity to exclude or reconcile yet.
+    if (!text(variant.platformSku)) return true;
     const key = canonicalPlatformSku(variant.platformSku);
     if (choices[key]?.state !== "excluded" && !identityExcluded.has(key)) return true;
-    if (!excludedVariants.some(item => canonicalPlatformSku(item.platformSku) === key)) excludedVariants.push({ ...variant });
+    if (!excludedVariants.some(item => text(item.platformSku) && canonicalPlatformSku(item.platformSku) === key)) excludedVariants.push({ ...variant });
     return false;
   }).map(variant => ({ ...variant }));
   allowed.forEach(row => {

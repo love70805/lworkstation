@@ -168,7 +168,7 @@ function ProductEditor() {
         }
         next.variants = (current.variants ?? []).map(variant => {
           const key = canonicalPlatformSku(variant.platformSku);
-          const source = (incoming.variants ?? []).find(item => canonicalPlatformSku(item.platformSku) === key);
+          const source = [...(incoming.variants ?? []), ...(incoming.excludedVariants ?? [])].find(item => canonicalPlatformSku(item.platformSku) === key);
           if (!source) return variant;
           const merged = { ...variant };
           for (const field of ["attribute", "warehouseSku", "imageUrl", "referenceUnitCost", "referenceKind", "referenceCostId", "referencePeriod"]) {
@@ -180,11 +180,19 @@ function ProductEditor() {
           }
           return merged;
         });
-        const existingSkus = new Set(next.variants.filter(item => item.platformSku).map(item => canonicalPlatformSku(item.platformSku)));
-        const excludedSkus = new Set([...(current.excludedIdentitySkus ?? []).map(canonicalPlatformSku), ...Object.entries(current.variantChoices ?? {}).filter(([, choice]) => choice.state === "excluded").map(([key]) => key)]);
-        next.variants.push(...(incoming.variants ?? []).filter(item => item.platformSku && !existingSkus.has(canonicalPlatformSku(item.platformSku)) && !excludedSkus.has(canonicalPlatformSku(item.platformSku))));
+        // Apply the final choices to both collections. A late automatic marker
+        // cannot leave one SKU active and excluded; explicit user restoration wins.
         next.variantChoices = { ...incoming.variantChoices, ...current.variantChoices };
-        next.excludedVariants = [...(current.excludedVariants ?? []), ...(incoming.excludedVariants ?? []).filter(item => !current.variantChoices?.[canonicalPlatformSku(item.platformSku)] && !(current.excludedVariants ?? []).some(previous => canonicalPlatformSku(previous.platformSku) === canonicalPlatformSku(item.platformSku)))];
+        const excludedSkus = new Set([...(current.excludedIdentitySkus ?? []).map(canonicalPlatformSku), ...Object.entries(next.variantChoices).filter(([, choice]) => choice.state === "excluded").map(([key]) => key)]);
+        const newlyExcluded = next.variants.filter(item => excludedSkus.has(canonicalPlatformSku(item.platformSku)));
+        next.variants = next.variants.filter(item => !excludedSkus.has(canonicalPlatformSku(item.platformSku)));
+        const existingSkus = new Set(next.variants.filter(item => item.platformSku).map(item => canonicalPlatformSku(item.platformSku)));
+        for (const item of [...(incoming.variants ?? []), ...(incoming.excludedVariants ?? []).filter(item => next.variantChoices[canonicalPlatformSku(item.platformSku)]?.state === "included")]) {
+          if (!item.platformSku) continue;
+          const key = canonicalPlatformSku(item.platformSku);
+          if (!existingSkus.has(key) && !excludedSkus.has(key)) { next.variants.push(item); existingSkus.add(key); }
+        }
+        next.excludedVariants = [...new Map([...(incoming.excludedVariants ?? []), ...(current.excludedVariants ?? []), ...newlyExcluded].map(item => [canonicalPlatformSku(item.platformSku), item])).values()].filter(item => excludedSkus.has(canonicalPlatformSku(item.platformSku)));
         const supplierIds = new Set((current.suppliers ?? []).map(item => item.supplierId || item.id));
         next.suppliers = [...(current.suppliers ?? []), ...(incoming.suppliers ?? []).filter(item => !supplierIds.has(item.supplierId || item.id))];
         return JSON.stringify(next) === JSON.stringify(current) ? current : next;

@@ -23,8 +23,9 @@ function latest(items) {
 function groupBySku(items) {
   const grouped = new Map();
   (items ?? []).forEach((item) => {
-    const sku = canonicalPlatformSku(item.platformSku ?? item.sku);
-    if (!sku) return;
+    const rawSku = item.platformSku ?? item.sku;
+    if (!String(rawSku ?? "").normalize("NFKC").trim()) return;
+    const sku = canonicalPlatformSku(rawSku);
     if (!grouped.has(sku)) grouped.set(sku, []);
     grouped.get(sku).push(item);
   });

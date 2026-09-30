@@ -20,7 +20,7 @@ export function buildSelectionLedgerPriceIndex({ salesRows = [], importBatches =
     const sku = canonicalPlatformSku(row.platformSku ?? row.sku);
     if (!index.has(sku)) index.set(sku, new Map());
     const scopeKey = JSON.stringify([row.ledgerId, key(row.store)]), scopes = index.get(sku);
-    if (!scopes.has(scopeKey)) scopes.set(scopeKey, { ledgerId: row.ledgerId, period: ledger.period, store: row.store, latest: -Infinity, candidates: new Map(), totals: new Map(), uncertain: false, latestDate: "", dayCandidates: new Map(), uncertainTime: false });
+    if (!scopes.has(scopeKey)) scopes.set(scopeKey, { ledgerId: row.ledgerId, period: ledger.period, store: row.store, latest: -Infinity, candidates: new Map(), totals: new Map(), uncertain: false, latestDate: "", dayCandidates: new Map(), uncertainTime: false, latestMissingPrice: false, missingSources: [], dayMissingPrice: false, dayMissingSources: [], uncertainQuantity: false });
     const scope = scopes.get(scopeKey);
     const price = decimalSource(row.unitPriceRaw ?? row.unitPrice, null), quantity = decimalSource(row.quantityExact ?? row.quantity ?? row.qty, null);
     const parsed = parseSalesAddedDate(row.sourceAddedAt || row.rawAddedAt || row.sourceAddedDate, { period: ledger.period });
@@ -29,24 +29,29 @@ export function buildSelectionLedgerPriceIndex({ salesRows = [], importBatches =
     const content = JSON.stringify([sku, price, quantity, timestamp, row.movementType]);
     if (coordinate && seen.has(coordinate)) { if (seen.get(coordinate) !== content) scope.uncertain = true; continue; }
     if (coordinate) seen.set(coordinate, content);
-    if (price === null || new Exact(price).lt(0)) continue;
     if (quantity === null) { scope.uncertain = true; continue; }
-    if (/退货|退款|冲销/.test(row.movementType ?? "") && new Exact(quantity).gt(0)) { scope.uncertain = true; continue; }
-    const priceKey = new Exact(price).toFixed();
-    scope.totals.set(priceKey, (scope.totals.get(priceKey) ?? new Exact(0)).plus(quantity));
-    // Returns can offset a candidate's net units, but never become its latest sale.
+    if (/退货|退款|冲销/.test(row.movementType ?? "" ) && new Exact(quantity).gt(0)) { scope.uncertain = true; continue; }
+    const validPrice = price !== null && new Exact(price).gte(0);
+    const priceKey = validPrice ? new Exact(price).toFixed() : null;
+    if (validPrice) scope.totals.set(priceKey, (scope.totals.get(priceKey) ?? new Exact(0)).plus(quantity));
+    else scope.uncertainQuantity = true;
+    // Returns can offset net units, but only normal positive sales establish the
+    // latest instant. Missing prices at that instant must not revive old prices.
     if (new Exact(quantity).lte(0) || /退货|退款|冲销/.test(row.movementType ?? "")) continue;
     if (parsed.dateStatus !== "valid" || !Number.isFinite(timestamp)) { scope.uncertain = true; continue; }
     const precision = row.sourceTimePrecision || parsed.sourceTimePrecision;
     const source = { kind: "ledger", ledgerId: row.ledgerId, period: ledger.period, store: row.store, batchId: row.batchId, sourceSheet: row.sourceSheet ?? null, sourceRow: row.sourceRow ?? null, sourceAddedAt: parsed.sourceAddedAt, sourceTimePrecision: precision };
-    if (parsed.sourceAddedDate > scope.latestDate) { scope.latestDate = parsed.sourceAddedDate; scope.dayCandidates.clear(); scope.uncertainTime = false; }
+    if (parsed.sourceAddedDate > scope.latestDate) { scope.latestDate = parsed.sourceAddedDate; scope.dayCandidates.clear(); scope.uncertainTime = false; scope.dayMissingPrice = false; scope.dayMissingSources = []; }
     if (parsed.sourceAddedDate === scope.latestDate) {
-      if (!scope.dayCandidates.has(priceKey)) scope.dayCandidates.set(priceKey, []);
-      scope.dayCandidates.get(priceKey).push(source);
+      if (validPrice) {
+        if (!scope.dayCandidates.has(priceKey)) scope.dayCandidates.set(priceKey, []);
+        scope.dayCandidates.get(priceKey).push(source);
+      } else { scope.dayMissingPrice = true; scope.dayMissingSources.push(source); }
       scope.uncertainTime ||= precision === "day";
     }
     if (timestamp < scope.latest) continue;
-    if (timestamp > scope.latest) { scope.latest = timestamp; scope.candidates.clear(); }
+    if (timestamp > scope.latest) { scope.latest = timestamp; scope.candidates.clear(); scope.latestMissingPrice = false; scope.missingSources = []; }
+    if (!validPrice) { scope.latestMissingPrice = true; scope.missingSources.push(source); continue; }
     if (!scope.candidates.has(priceKey)) scope.candidates.set(priceKey, []);
     scope.candidates.get(priceKey).push(source);
   }
@@ -62,16 +67,16 @@ export function selectionLedgerPrice(index, platformSku, { ledgerId = null, stor
   scopes = scopes.filter(scope => scope.period === latestPeriod);
   if (scopes.length !== 1) return { status: "choose", reason: "ambiguous_store", value: null, period: latestPeriod, candidates: [], sources: scopes.map(({ ledgerId, period, store }) => ({ ledgerId, period, store })) };
   const scope = scopes[0];
-  const timeUncertain = scope.uncertainTime && scope.dayCandidates.size > 1;
+  const timeUncertain = scope.uncertainTime && (scope.dayCandidates.size > 1 || scope.dayMissingPrice);
   const candidates = [...(timeUncertain ? scope.dayCandidates : scope.candidates)].map(([price, sources]) => ({ value: Number(price), priceExact: price, quantityExact: scope.totals.get(price)?.toFixed() ?? null, sources }));
-  const sources = candidates.flatMap(candidate => candidate.sources);
+  const sources = [...candidates.flatMap(candidate => candidate.sources), ...(timeUncertain ? scope.dayMissingSources : scope.missingSources)];
   const base = { kind: "ledger", period: scope.period, store: scope.store, ledgerId: scope.ledgerId, sourceAddedAt: sources[0]?.sourceAddedAt ?? null, candidates, sources };
   if (!candidates.length) return { ...base, status: "missing", value: null };
   const invalidNet = candidates.some(candidate => new Exact(candidate.quantityExact ?? 0).lt(0));
-  if (candidates.length === 1 && !scope.uncertain && !invalidNet) return { ...base, status: "ready", value: candidates[0].value };
+  if (candidates.length === 1 && !scope.uncertain && !invalidNet && !scope.latestMissingPrice && !timeUncertain) return { ...base, status: "ready", value: candidates[0].value };
   const ranked = [...candidates].sort((a, b) => new Exact(b.quantityExact ?? 0).cmp(a.quantityExact ?? 0));
-  const uniqueWinner = !scope.uncertain && !invalidNet && !timeUncertain && ranked.length > 1 && new Exact(ranked[0].quantityExact).gt(ranked[1].quantityExact);
-  return { ...base, status: uniqueWinner ? "ready" : "choose", reason: uniqueWinner ? "net_quantity" : timeUncertain ? "missing_time" : "ambiguous_price", value: uniqueWinner ? ranked[0].value : null };
+  const uniqueWinner = !scope.uncertain && !scope.uncertainQuantity && !scope.latestMissingPrice && !invalidNet && !timeUncertain && ranked.length > 1 && new Exact(ranked[0].quantityExact).gt(ranked[1].quantityExact);
+  return { ...base, status: uniqueWinner ? "ready" : "choose", reason: uniqueWinner ? "net_quantity" : timeUncertain ? "missing_time" : scope.latestMissingPrice ? "missing_latest_price" : "ambiguous_price", value: uniqueWinner ? ranked[0].value : null };
 }
 
 export function selectionCatalogLedgerBySkc(rows = []) {
