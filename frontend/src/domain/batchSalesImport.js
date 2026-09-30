@@ -4,8 +4,8 @@ import { normalizeSalesSourceCoverage } from "./selectionSalesLabels";
 
 export const canonicalStore = (value) => String(value ?? "").normalize("NFKC").trim().toUpperCase();
 
-// Exact canonical serialization avoids collision-based overwrite approvals. These signatures
-// are ephemeral preview values, never new persisted or sync contract fields.
+// Canonical serialization is used only for bounded chunks. SHA-256 binds every
+// chunk, its position and metadata without retaining a second full ledger string.
 export function importSignature(value) {
   if (Array.isArray(value)) return `[${value.map(importSignature).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value).filter((key) => value[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${importSignature(value[key])}`).join(",")}}`;
@@ -30,8 +30,24 @@ export function sourceSalesRow(row) {
   return source;
 }
 
-function effectiveRowsSignature(rows) {
-  return importSignature(rows.map((row) => ({ ...sourceSalesRow(row), store: canonicalStore(row.store) })));
+async function digest(value) {
+  const bytes = new TextEncoder().encode(importSignature(value));
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+async function rowsSignature(rows, normalize = false) {
+  const chunks = [];
+  for (let start = 0; start < rows.length; start += 128) {
+    const chunk = rows.slice(start, start + 128);
+    chunks.push(await digest(normalize ? chunk.map(row => ({ ...sourceSalesRow(row), store: canonicalStore(row.store) })) : chunk));
+  }
+  return digest({ algorithm: "sales-import-sha256-chunks-v1", length: rows.length, chunks });
+}
+const effectiveRowsSignature = rows => rowsSignature(rows, true);
+async function inputSignature(items) {
+  const metadata = [];
+  for (const { rows, ...item } of items) metadata.push({ ...item, rowsDigest: await rowsSignature(rows) });
+  return digest(metadata);
 }
 
 export function prepareSalesImportItems(items, { period } = {}) {
@@ -60,13 +76,15 @@ export function prepareSalesImportItems(items, { period } = {}) {
     const rows = item.rows.map((raw) => {
       if (canonicalStore(raw.store) !== store) fail(`第 ${raw.sourceRow ?? "?"} 行店铺与确认店铺不一致。`);
       if (!String(raw.platformSku ?? "").trim() || ![raw.quantity, raw.amount].every(Number.isFinite)) fail("存在未经有效校验的数据行。");
-      const row = { ...sourceSalesRow(raw), store: storeName };
+      if (period && raw.sourceAddedDate && !raw.sourceAddedDate.startsWith(`${period}-`)) fail(`第 ${raw.sourceRow ?? "?"} 行来源月份与账本 ${period} 不一致，请按月处理。`);
+      const row = { ...structuredClone(sourceSalesRow(raw)), store: storeName };
       row.groupKey = createLedgerGroupKey(row);
       row.skuKey = createLedgerSkuKey(row);
       return row;
     });
     stores.add(store); hashes.add(item.fileHash); ids.add(item.itemId);
-    return { ...item, storeName, sourceCoverage, importMode, rows };
+    const { rows: originalRows, ...metadata } = item;
+    return { ...structuredClone(metadata), storeName, sourceCoverage, importMode, rows };
   });
 }
 
@@ -78,7 +96,7 @@ export function getSalesImportReplacementRows(existingRows, pendingItems) {
   return existingRows.filter(row => keys.has(row.groupKey) || stores.has(canonicalStore(row.store)));
 }
 
-export function planSalesImports({ ledger, existingRows, batches, items, ledgerId }) {
+export async function planSalesImports({ ledger, existingRows, batches, items, ledgerId }) {
   if (ledger && ["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的月度账本不能直接导入新数据。");
   const rowsByGroup = new Map();
   const rowsByBatch = new Map();
@@ -88,17 +106,25 @@ export function planSalesImports({ ledger, existingRows, batches, items, ledgerI
     rowsByGroup.get(row.groupKey).push(row);
     rowsByBatch.get(row.batchId).push(row);
   }
-  const results = items.map((item) => {
+  const results = [];
+  for (const item of items) {
     const candidates = batches.filter((batch) => batch.fileHash === item.fileHash);
     if (candidates.some((batch) => canonicalStore(batch.store) !== canonicalStore(item.storeName))) {
       throw new Error(`${item.fileName}：相同文件内容曾分配到不同店铺，请核对来源文件。`);
     }
-    const rowSignature = effectiveRowsSignature(item.rows);
-    const duplicate = candidates.find((batch) => batch.status === "completed"
-      && importSignature(effectiveImportOptions(batch)) === importSignature(effectiveImportOptions(item))
-      && batch.validRowCount === item.rows.length
-      && effectiveRowsSignature(rowsByBatch.get(batch.id) ?? []) === rowSignature
-      && (item.importMode !== "replace_store_month" || effectiveRowsSignature(existingRows.filter(row => canonicalStore(row.store) === canonicalStore(item.storeName))) === rowSignature));
+    let duplicate = null;
+    if (candidates.length) {
+      const rowSignature = await effectiveRowsSignature(item.rows);
+      for (const batch of candidates) {
+        if (batch.status === "completed"
+          && importSignature(effectiveImportOptions(batch)) === importSignature(effectiveImportOptions(item))
+          && batch.validRowCount === item.rows.length
+          && await effectiveRowsSignature(rowsByBatch.get(batch.id) ?? []) === rowSignature
+          && (item.importMode !== "replace_store_month" || await effectiveRowsSignature(existingRows.filter(row => canonicalStore(row.store) === canonicalStore(item.storeName))) === rowSignature)) {
+          duplicate = batch; break;
+        }
+      }
+    }
     const incomingGroups = new Map();
     for (const row of item.rows) {
       if (!incomingGroups.has(row.groupKey)) incomingGroups.set(row.groupKey, []);
@@ -116,19 +142,19 @@ export function planSalesImports({ ledger, existingRows, batches, items, ledgerI
         before: { ...summarizeLedgerRows(oldRows), rowCount: oldRows.length },
         after: { ...summarizeLedgerRows(newRows), rowCount: newRows.length } }];
     });
-    return { itemId: item.itemId, fileName: item.fileName, storeName: item.storeName,
+    results.push({ itemId: item.itemId, fileName: item.fileName, storeName: item.storeName,
       status: duplicate ? "skipped_duplicate" : "ready", batchId: duplicate?.id ?? null,
       validRowCount: item.rows.length, ignoredRowCount: item.summary.ignoredCount ?? 0, errorCount: 0,
       summary: summarizeLedgerRows(item.rows), overlaps, replacementScope: replaceStore ? "store_month" : "groups",
       sourceCoverage: item.sourceCoverage ?? null, importMode: item.importMode ?? "append",
       removedGroupCount: overlaps.filter(group => group.removed).length,
-      addedGroupCount: duplicate ? 0 : keys.size - overlaps.filter(group => !group.removed).length, replacedGroupCount: overlaps.filter(group => !group.removed).length };
-  });
+      addedGroupCount: duplicate ? 0 : keys.size - overlaps.filter(group => !group.removed).length, replacedGroupCount: overlaps.filter(group => !group.removed).length });
+  }
   const pending = items.filter((item, index) => results[index].status !== "skipped_duplicate");
   const replacementRows = new Set(getSalesImportReplacementRows(existingRows, pending));
   return { ledgerId, items: results,
-    inputSignature: importSignature(items),
-    targetSignature: importSignature({ ledger: ledger ?? null, existingRows, batches }),
+    inputSignature: await inputSignature(items),
+    targetSignature: await digest({ ledger: ledger ?? null, rowsDigest: await rowsSignature(existingRows), batches }),
     summary: summarizeLedgerRows(pending.flatMap((item) => item.rows)),
     finalSummary: summarizeLedgerRows([...existingRows.filter(row => !replacementRows.has(row)), ...pending.flatMap((item) => item.rows)]),
     requiresOverwrite: results.some((item) => item.overlaps.length > 0) };

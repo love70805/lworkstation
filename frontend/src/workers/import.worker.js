@@ -4,7 +4,7 @@ import { collectSalesImportFacets, collectSalesPeriodEvidence, detectLedgerRepor
 
 const jobs = new Map();
 
-function parseWorkbook(buffer, extension) {
+function parseWorkbook(buffer, extension, selectedSheet) {
   if (extension === "csv" || extension === "tsv") {
     const text = new TextDecoder("utf-8").decode(buffer);
     const result = Papa.parse(text, {
@@ -29,9 +29,21 @@ function parseWorkbook(buffer, extension) {
     }).filter((row) => Object.values(row).some((value) => String(value ?? "").trim()));
   }
 
-  const workbook = XLSX.read(buffer, { type: "array", cellDates: false });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error("工作簿中没有可读取的工作表。");
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: false, dense: true });
+  const candidates = workbook.SheetNames.filter(name => {
+    const sheet = workbook.Sheets[name];
+    if (!sheet?.["!ref"]) return false;
+    const range = XLSX.utils.decode_range(sheet["!ref"]);
+    const cells = XLSX.utils.sheet_to_json(sheet, { header: 1, range: { s: range.s, e: { r: Math.min(range.e.r, range.s.r + 1), c: range.e.c } }, defval: "" });
+    const headers = (cells[0] ?? []).map(String);
+    const mapping = suggestMappings(headers);
+    return range.e.r > range.s.r && mapping.platformSku && (mapping.platformSkc || mapping.supplierNumber)
+      && (mapping.quantity || mapping.amount || mapping.customerShipmentQuantity || mapping.platformOrderQuantity);
+  });
+  if (!candidates.length) throw new Error("未找到含平台 SKU、SKC/供方货号及数量/金额的有效明细页，请检查文件表头。");
+  if (!selectedSheet && candidates.length > 1) return { sheetCandidates: candidates };
+  const sheetName = selectedSheet || candidates[0];
+  if (!candidates.includes(sheetName)) throw new Error("所选工作表不是有效台账明细页，请重新选择。");
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
   const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
@@ -50,19 +62,24 @@ self.onmessage = ({ data }) => {
       return;
     }
     if (type === "parse") {
-      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 15 });
-      const rows = parseWorkbook(data.buffer, data.extension);
+      self.postMessage({ type: "progress", requestId, jobId: data.jobId, stage: "读取工作簿", completed: 0, total: null });
+      const rows = parseWorkbook(data.buffer, data.extension, data.selectedSheet);
+      if (rows.sheetCandidates) {
+        self.postMessage({ type: "sheet-selection-required", requestId, sheetCandidates: rows.sheetCandidates });
+        return;
+      }
       if (!rows.length) throw new Error("所选文件中没有数据行。");
       const headers = [...new Set(rows.slice(0, 100).flatMap((row) => Object.keys(row)))];
       jobs.set(data.jobId, rows);
       const ledgerReport = detectLedgerReport(headers);
       const suggestedMapping = ledgerReport ? suggestLedgerReportMapping(headers) : suggestMappings(headers);
-      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 100 });
+      self.postMessage({ type: "progress", requestId, jobId: data.jobId, stage: "解析完成", completed: rows.length, total: rows.length, value: 100 });
       self.postMessage({
         type: "parsed",
         requestId,
         headers,
         rowCount: rows.length,
+        selectedSheet: rows[0]?.__salesSource?.sourceSheet ?? "",
         previewRows: rows.slice(0, 5),
         suggestedMapping,
         preset: ledgerReport ? "ledger_report" : "generic",
@@ -74,13 +91,18 @@ self.onmessage = ({ data }) => {
     if (type === "validate") {
       const rows = jobs.get(data.jobId);
       if (!rows) throw new Error("导入预览已失效，请重新选择文件。");
-      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 20 });
-      const result = validateSalesRows(rows, data.mapping, data.options);
-      self.postMessage({ type: "progress", requestId, jobId: data.jobId, value: 100 });
+      const result = { rows: [], errors: [], ignored: [], sourceRowCount: rows.length, platformSkcMissingCount: 0 };
+      for (let start = 0; start < rows.length; start += 2000) {
+        const chunk = validateSalesRows(rows.slice(start, start + 2000), data.mapping, data.options);
+        result.rows.push(...chunk.rows); result.errors.push(...chunk.errors); result.ignored.push(...chunk.ignored);
+        result.platformSkcMissingCount += chunk.platformSkcMissingCount ?? 0;
+        self.postMessage({ type: "progress", requestId, jobId: data.jobId, stage: "校验明细", completed: Math.min(rows.length, start + 2000), total: rows.length, value: Math.min(rows.length, start + 2000) / rows.length * 100 });
+        if (data.chunked) self.postMessage({ type: "validated-chunk", requestId, rows: chunk.rows });
+      }
       self.postMessage({
         type: "validated",
         requestId,
-        rows: result.rows,
+        rows: data.chunked ? undefined : result.rows,
         summary: {
           sourceRowCount: result.sourceRowCount,
           validRowCount: result.rows.length,

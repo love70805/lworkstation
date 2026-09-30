@@ -61,6 +61,8 @@ function readProductFilters(workspaceId, view) {
       referenceSource: saved.referenceSource ?? "all",
       negativeOnly: Boolean(saved.negativeOnly),
       salesLabel: saved.salesLabel ?? "all",
+      supplierNumber: saved.supplierNumber ?? "",
+      catalogFilter: saved.catalogFilter ?? "all",
     };
   } catch {
     return { store: "all", status: "all", publicationStatus: "all", dataStatus: "all", missingOnly: false, duplicatesOnly: false, productSort: "updated", referenceSource: "all", negativeOnly: false };
@@ -127,6 +129,8 @@ function ProductLibraryView({ workspaceId, view }) {
   const [referenceSource, setReferenceSource] = useState(initialFilters.referenceSource);
   const [negativeOnly, setNegativeOnly] = useState(initialFilters.negativeOnly);
   const [salesLabel, setSalesLabel] = useState(initialFilters.salesLabel ?? "all");
+  const [supplierNumber, setSupplierNumber] = useState(initialFilters.supplierNumber ?? "");
+  const [catalogFilter, setCatalogFilter] = useState(initialFilters.catalogFilter ?? "all");
   const [exporting, setExporting] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState("");
@@ -179,7 +183,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel } };
+  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel, supplierNumber, catalogFilter } };
 
   useEffect(() => {
     localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
@@ -192,9 +196,9 @@ function ProductLibraryView({ workspaceId, view }) {
       productSort,
       referenceSource,
       negativeOnly,
-      salesLabel,
+      salesLabel, supplierNumber, catalogFilter,
     }));
-  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, recordStatus, referenceSource, status, store, workspaceId, view]);
+  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, recordStatus, referenceSource, status, store, supplierNumber, catalogFilter, workspaceId, view]);
 
   useEffect(() => {
     if (statusManagerOpen && statusRead.status === "ready") setStatusDraft(salesStatusDefinitions);
@@ -213,7 +217,7 @@ function ProductLibraryView({ workspaceId, view }) {
       product.name,
       product.supplier,
       product.platformSkc,
-      supplierSearch,
+      supplierSearch, product.supplierNumbers ?? [],
       product.skus.map((sku) => [sku.platformSku, sku.warehouseSku]),
     ]);
     const matchesStore = store === "all" || product.store === store;
@@ -228,7 +232,7 @@ function ProductLibraryView({ workspaceId, view }) {
       || (dataStatus === "mapping_complete" && product.dataReadiness?.warehouseMapping.status === "complete");
     const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps;
     const matchesDuplicate = !duplicatesOnly || duplicateSkcProductIds.has(product.id);
-    return matchesQuery && matchesStore && matchesStatus && matchesRecord && matchesData && matchesMissing && matchesDuplicate && (salesLabel === "all" || product.automaticSalesTag?.label === salesLabel);
+    return matchesSelectionSearch(supplierNumber, product.supplierNumbers ?? []) && matchesQuery && matchesStore && matchesStatus && matchesRecord && matchesData && matchesMissing && matchesDuplicate && (salesLabel === "all" || product.automaticSalesTag?.label === salesLabel);
   }).toSorted((a, b) => {
     if (productSort === "lowestCost") return (a.lowestReferenceCost ?? Number.POSITIVE_INFINITY) - (b.lowestReferenceCost ?? Number.POSITIVE_INFINITY);
     if (productSort === "coverage") {
@@ -239,17 +243,20 @@ function ProductLibraryView({ workspaceId, view }) {
     }
     if (productSort === "name") return a.name.localeCompare(b.name, "zh-CN");
     return String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
-  }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, recordStatus, query, salesStatusDefinitions, salesLabel, status, store]);
+  }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, recordStatus, query, salesStatusDefinitions, salesLabel, status, store, supplierNumber]);
   const filteredProductIds = useMemo(() => filteredProducts.map((product) => product.id), [filteredProducts]);
   const selectedProductIdSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
   const allFilteredSelected = filteredProductIds.length > 0 && filteredProductIds.every((id) => selectedProductIdSet.has(id));
 
   const filteredReferences = useMemo(() => referenceRows.filter((row) => {
-    return matchesSelectionSearch(query, [row.platformSku, row.platformSkc, row.productName, row.warehouseSku, row.supplierCode, row.supplierName])
+    return matchesSelectionSearch(query, [row.platformSku, row.platformSkc, row.productName, row.warehouseSku, row.supplierCode, row.supplierName, ...(row.supplierNumbers ?? []), ...(row.storeNames ?? [])])
+      && (store === "all" || row.storeNames?.includes(store))
+      && matchesSelectionSearch(supplierNumber, row.supplierNumbers ?? [])
+      && (catalogFilter === "all" || (catalogFilter === "linked" ? Boolean(row.productId) : !row.productId))
       && (referenceSource === "all" || row.referenceKind === referenceSource)
       && (!negativeOnly || row.hasNegativeProfit)
       && (salesLabel === "all" || row.automaticSalesTag?.label === salesLabel);
-  }), [negativeOnly, query, referenceRows, referenceSource, salesLabel]);
+  }), [negativeOnly, query, referenceRows, referenceSource, salesLabel, store, supplierNumber, catalogFilter]);
   const groupedReferences = useMemo(() => groupSelectionReferenceRows(filteredReferences), [filteredReferences]);
 
   const statusLabel = { active: "启用", draft: "草稿", inactive: "停用" };
@@ -396,7 +403,7 @@ function ProductLibraryView({ workspaceId, view }) {
         平台SKC: row.platformSkc,
         商品档案: row.productName,
         当前参考成本: row.referenceUnitCost ?? "缺失",
-        登记售价: row.catalogSalePrice ?? row.averageSalePrice ?? "缺失",
+        登记售价: row.catalogSalePrice ?? "缺失",
         参考成本来源: referenceSourceLabels[row.referenceKind] ?? "缺失",
         参考成本事实ID: row.referenceCostId ?? "",
         参考来源账本: row.referenceLedgerId ?? "",
@@ -552,13 +559,17 @@ function ProductLibraryView({ workspaceId, view }) {
           <Panel className="library-filter-panel">
             <div className="library-filters">
               <SelectionDomainSearch value={query} onChange={setQuery} label="搜索选品参考" />
+              <select className="select-input" aria-label="参考来源店铺" value={store} onChange={event => setStore(event.target.value)}><option value="all">全部店铺</option>{[...new Set(referenceRows.flatMap(row => row.storeNames ?? []))].sort().map(name => <option key={name} value={name}>{name}</option>)}</select>
+              <input className="text-input" aria-label="按供方货号筛选" placeholder="供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} />
+              <select className="select-input" aria-label="按建档情况筛选" value={catalogFilter} onChange={event => setCatalogFilter(event.target.value)}><option value="all">全部建档情况</option><option value="linked">已建档</option><option value="unlinked">未建档</option></select>
               <select className="select-input" aria-label="按参考成本来源筛选" value={referenceSource} onChange={(event) => setReferenceSource(event.target.value)}>
-                <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">定稿历史</option><option value="supplier_landed">1688 参考</option>
+                <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="erp_catalog_reference">ERP 采购参考</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">定稿历史</option><option value="supplier_landed">1688 参考</option>
               </select>
               {salesLabelFilter}
               <button className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly((value) => !value)}><AlertCircle size={17} />只看负利润</button>
             </div>
-            <span className="reference-filter-count">{referenceRead.status === "ready" ? `当前 ${filteredReferences.length} 条` : "尚未取得参考记录"}</span>
+            <Button variant="ghost" onClick={() => { setQuery(""); setStore("all"); setSupplierNumber(""); setCatalogFilter("all"); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); }}>清空筛选</Button>
+            <span className="reference-filter-count">{referenceRead.status === "ready" ? `匹配 ${filteredReferences.length} / ${referenceRows.length} 条` : "尚未取得参考记录"}</span>
           </Panel>
           <Panel className="product-table-panel">
             {referenceRead.status !== "ready" ? <SelectionReadState read={referenceRead} label="成本与利润参考" /> : referenceRows.length ? (
@@ -567,13 +578,13 @@ function ProductLibraryView({ workspaceId, view }) {
                 ref={tableRef}
                 initialViewState={savedView?.table}
                 dataReady={referenceSnapshot !== undefined}
-                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly, salesLabel])}
+                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly, salesLabel, store, supplierNumber, catalogFilter])}
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
                 emptyState="没有符合当前筛选条件的选品参考记录。"
               />
-            ) : <EmptyState icon={BarChart3} title="还没有选品经营参考" description="完成一个月度账本定稿后，平台 SKU 的正式成本与利润历史会自动出现在这里。" action={<Button variant="primary" icon={WalletCards} onClick={() => navigate("/ledger")}>打开月度账本</Button>} />}
+            ) : <EmptyState icon={BarChart3} title="还没有选品经营参考" description="导入台账或接收 ERP 资料后，可按店铺、货号和商品身份查找并建立档案。" action={<Button variant="primary" icon={WalletCards} onClick={() => navigate("/ledger")}>打开月度账本</Button>} />}
           </Panel>
         </>
       ) : view === "official" ? (
@@ -581,6 +592,7 @@ function ProductLibraryView({ workspaceId, view }) {
           <Panel className="library-filter-panel">
             <div className="library-filters">
               <SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />
+              <input className="text-input" aria-label="按供方货号筛选" placeholder="供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} />
               <select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
                 <option value="all">全部店铺</option>{store !== "all" && !catalogProducts.some(product => product.store === store) ? <option value={store}>{store}</option> : null}{[...new Set(catalogProducts.map((product) => product.store).filter(Boolean))].map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
               </select>
@@ -595,8 +607,10 @@ function ProductLibraryView({ workspaceId, view }) {
               <button className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly((value) => !value)}><AlertCircle size={17} />缺失数据（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
               {duplicateSkcGroups.length ? <button className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly((value) => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
               {duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}
+              <Button variant="ghost" onClick={() => { setQuery(""); setSupplierNumber(""); setStore("all"); setStatus("all"); setRecordStatus("all"); setDataStatus("all"); setSalesLabel("all"); setMissingOnly(false); setDuplicatesOnly(false); }}>清空筛选</Button>
               <Button variant="ghost" icon={Settings2} disabled={statusRead.status !== "ready"} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>
             </div>
+            <span className="reference-filter-count">匹配 {filteredProducts.length} / {catalogProducts.length} 条</span>
             <label className="sort-control">排序：
               <select value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="updated">最后更新</option><option value="coverage">成本覆盖情况</option><option value="lowestCost">最低 SKU 参考成本</option><option value="name">商品名称</option></select>
             </label>
@@ -623,7 +637,7 @@ function ProductLibraryView({ workspaceId, view }) {
               ref={tableRef}
               initialViewState={savedView?.table}
               dataReady={catalogSnapshot !== undefined}
-              paginationResetKey={JSON.stringify([query, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort])}
+              paginationResetKey={JSON.stringify([query, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort, supplierNumber])}
               columns={productColumns}
               data={filteredProducts}
               getRowId={(row) => row.id}

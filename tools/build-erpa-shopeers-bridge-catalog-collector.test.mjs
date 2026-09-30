@@ -55,6 +55,10 @@ export async function verifyErpCatalogCollection() {
   const productsCalls = calls.filter(call => call.endpoint.endsWith('product-page')).length;
   await reader.products('SKC-TARGET', run());
   assert.equal(calls.filter(call => call.endpoint.endsWith('product-page')).length, productsCalls, 'only count-complete product pages are cached');
+  await reader.collect(['SKC-TARGET'], run());
+  assert.equal(evidenceReads.length, 204, 'retry reuses completed warehouses including initially supplied evidence');
+  await reader.collect(['SKC-TARGET'], { ...run(), ledgerPeriod: '2026-09' });
+  assert.equal(evidenceReads.length, 409, 'a different month cannot reuse another scope\'s purchase evidence');
 
   const faultCases = [
     { name: 'repeated page', expected: 'product_page_not_advancing', request: async (_endpoint, params) => response(0, [{ itemId: 'WH-ONE' }], 2) },
@@ -156,7 +160,7 @@ export async function verifyErpCatalogBackgroundBinding() {
   const storage = { shopeersErpInboxBaseUrl: 'http://127.0.0.1:8790', shopeersErpInboxCapability: 'synthetic-only-capability-abcdefghijklmnopqrstuvwxyz', shopeersErpWorkspaceId: 'workspace-confirmed' };
   let requests = [{ requestId: 'COST-OTHER', requestKind: 'cost', workspaceId: 'workspace-confirmed', status: 'registered', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08' }, { requestId: 'CATALOG-CONFIRMED', requestKind: 'catalog', workspaceId: 'workspace-confirmed', status: 'registered', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08', ledgerId: null }];
   const posted = [];
-  const chrome = { storage: { local: { async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, json(storage[key])])); }, async set(values) { Object.assign(storage, json(values)); } } }, runtime: { getManifest: () => ({ version: '8.0.26' }), onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  const chrome = { storage: { local: { async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, json(storage[key])])); }, async set(values) { Object.assign(storage, json(values)); } } }, runtime: { getManifest: () => ({ version: '8.0.27' }), onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const sandbox = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console: { info() {}, warn() {}, error() {} }, fetch: async (rawUrl, options) => {
     const url = new URL(rawUrl); assert.equal(url.hostname, '127.0.0.1', 'page-controlled destinations never leave loopback');
     if (url.pathname === '/erp/v1/requests') return { ok: true, status: 200, json: async () => ({ records: requests }) };

@@ -1,3 +1,4 @@
+import Dexie from "dexie";
 import { calculateLedgerCostCoverage, ledgerStatusFromCoverage } from "../../domain/costCoverage";
 import { resolveFormalCostDecision } from "../../domain/costPolicy";
 import {
@@ -7,7 +8,8 @@ import {
   normalizePlatformSku,
 } from "../../domain/identifiers";
 import { summarizeLedgerRows } from "../../domain/ledgerImport";
-import { planSalesImports, prepareSalesImportItems, getSalesImportReplacementRows } from "../../domain/batchSalesImport";
+import { getSalesImportReplacementRows } from "../../domain/batchSalesImport";
+import { computeSalesImportPlan, prepareSalesImportSnapshot } from "../../lib/salesImportPlanner";
 import { normalizeSalesSourceCoverage, salesSourceDateEvidence } from "../../domain/selectionSalesLabels";
 import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../domain/erpCostBatchEnvelope";
 import { normalizeErpCatalogFields } from "../../domain/erpCatalogFields";
@@ -189,19 +191,19 @@ export async function createOrGetMonthlyLedger({
   return ledger;
 }
 
-async function readSalesImportPlan(workspaceId, period, items) {
+async function readSalesImportPlan(workspaceId, period, items, signal) {
   const ledgerId = monthlyLedgerId(workspaceId, period);
   const ledger = await db.ledgers.get(ledgerId);
   const existingRows = await db.salesRows.where("ledgerId").equals(ledgerId).toArray();
   const batches = await db.importBatches.where("ledgerId").equals(ledgerId).toArray();
-  return { ledger, existingRows, plan: planSalesImports({ ledger, existingRows, batches, items, ledgerId }) };
+  return { ledger, existingRows, plan: await Dexie.waitFor(computeSalesImportPlan({ ledger, existingRows, batches, items, ledgerId }, { signal })) };
 }
 
-export async function previewSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, period, items }) {
+export async function previewSalesImports({ workspaceId = DEFAULT_WORKSPACE_ID, period, items, signal }) {
   const normalizedPeriod = normalizeLedgerPeriod(period);
-  const prepared = prepareSalesImportItems(items, { period: normalizedPeriod });
+  const prepared = await prepareSalesImportSnapshot(items, { period: normalizedPeriod, signal });
   return db.transaction("r", db.ledgers, db.salesRows, db.importBatches, async () => {
-    const { plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared);
+    const { plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared, signal);
     return plan;
   });
 }
@@ -213,13 +215,18 @@ export async function saveSalesImports({
   preview,
   overwriteSignature = null,
   importedBy = "local-user",
+  signal,
+  onProgress,
 }) {
+  const checkCancelled = () => { if (signal?.aborted) throw new Error("导入已取消，整批写入已回滚。"); };
+  checkCancelled();
   const normalizedPeriod = normalizeLedgerPeriod(period);
   // Clone the payload before any asynchronous work, so caller edits cannot change a pending write.
-  const prepared = prepareSalesImportItems(structuredClone(items), { period: normalizedPeriod });
+  const prepared = await prepareSalesImportSnapshot(items, { period: normalizedPeriod, signal });
   const auditActor = await resolveProfitAuditActor(importedBy);
   return db.transaction("rw", db.workspaces, db.ledgers, db.importBatches, db.salesRows, db.auditEvents, async () => {
-    const { ledger, existingRows, plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared);
+    checkCancelled();
+    const { ledger, existingRows, plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared, signal);
     if (!preview || preview.ledgerId !== plan.ledgerId || preview.inputSignature !== plan.inputSignature) {
       throw new Error("导入配置已变化，请重新校验整批文件。");
     }
@@ -230,6 +237,8 @@ export async function saveSalesImports({
     await ensureDefaultWorkspace();
     const createdAt = new Date().toISOString();
     const pending = prepared.filter((item, index) => plan.items[index].status !== "skipped_duplicate");
+    const total = pending.reduce((count, item) => count + item.rows.length, 0);
+    let completed = 0;
     const replacementIds = getSalesImportReplacementRows(existingRows, pending).map(row => row.id);
     if (replacementIds.length) await db.salesRows.bulkDelete(replacementIds);
     const savedLedger = {
@@ -250,8 +259,18 @@ export async function saveSalesImports({
         importMode: item.importMode ?? "append", removedGroupCount: result.removedGroupCount ?? 0,
       };
       await db.importBatches.add(savedBatch);
-      await db.salesRows.bulkAdd(item.rows.map((row) => ({ ...row, workspaceId, ledgerId: plan.ledgerId, batchId, importedAt: createdAt })));
-      const persistedRows = await db.salesRows.where("batchId").equals(batchId).toArray();
+      const persistedRows = [];
+      for (let start = 0; start < item.rows.length; start += 2000) {
+        checkCancelled();
+        const chunk = item.rows.slice(start, start + 2000);
+        const storedRows = chunk.map((row) => ({ ...row, workspaceId, ledgerId: plan.ledgerId, batchId, importedAt: createdAt }));
+        const keys = await db.salesRows.bulkAdd(storedRows, { allKeys: true });
+        storedRows.forEach((row, index) => { row.id = keys[index]; });
+        persistedRows.push(...storedRows);
+        completed += chunk.length;
+        onProgress?.({ completed, total });
+      }
+      checkCancelled();
       await db.auditEvents.add({
         workspaceId, objectType: "sales_import_batch", objectId: batchId, action: "imported", actorId: auditActor, createdAt,
         after: { ledgerId: plan.ledgerId, fileName: item.fileName, validRowCount: item.rows.length,
@@ -261,6 +280,7 @@ export async function saveSalesImports({
       result.status = "imported";
       result.batchId = batchId;
     }
+    checkCancelled();
     return plan;
   });
 }

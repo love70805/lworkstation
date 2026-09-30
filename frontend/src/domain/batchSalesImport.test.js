@@ -17,24 +17,34 @@ it("does not expand deletion scope merely because an import declares a complete 
  const rows=[sale("NEW"),sale("RETAIN"),sale("OTHER","乙店")];
  expect(getSalesImportReplacementRows(rows,[file()])).toEqual([rows[0]]);
 });
-it("requires full declared coverage for an explicit store-month replacement",()=>{
+it("requires full declared coverage for an explicit store-month replacement",async()=>{
  expect(()=>prepareSalesImportItems([file({importMode:"replace_store_month",sourceCoverage:null})])).toThrow();
  expect(()=>prepareSalesImportItems([file({importMode:"replace_store_month",sourceCoverage:createSalesSourceCoverage({period:"2026-08",storeName:"甲店",scope:"partial"})})])).toThrow();
 });
-it("previews absent old groups as removed only during an explicit store-month replacement",()=>{
+it("previews absent old groups as removed only during an explicit store-month replacement",async()=>{
  const rows=[sale("NEW"),sale("REMOVED"),sale("OTHER","乙店")], incoming=file({importMode:"replace_store_month"});
  expect(getSalesImportReplacementRows(rows,[incoming])).toEqual(rows.slice(0,2));
- const plan=planSalesImports({existingRows:rows,batches:[],items:[incoming],ledgerId:"L"});
+ const plan=await planSalesImports({existingRows:rows,batches:[],items:[incoming],ledgerId:"L"});
  expect(plan.items[0]).toMatchObject({replacementScope:"store_month",removedGroupCount:1,replacedGroupCount:1});
  expect(plan.items[0].overlaps.find(group=>group.platformSkc==="REMOVED")).toMatchObject({removed:true,after:{rowCount:0,quantity:0}});
  expect(plan.requiresOverwrite).toBe(true);expect(plan.finalSummary.quantity).toBe(2);
 });
 
-it("does not skip an explicit whole-month replacement when unrelated appended groups changed its target",()=>{
+it("does not skip an explicit whole-month replacement when unrelated appended groups changed its target",async()=>{
  const incoming=file({importMode:"replace_store_month"});
  const persisted=incoming.rows.map(row=>({...row,batchId:"B"}));
  const batch={...incoming,id:"B",store:incoming.storeName,status:"completed",validRowCount:incoming.rows.length};
- const plan=planSalesImports({existingRows:[...persisted,sale("ADDED")],batches:[batch],items:[incoming],ledgerId:"L"});
+ const plan=await planSalesImports({existingRows:[...persisted,sale("ADDED")],batches:[batch],items:[incoming],ledgerId:"L"});
  expect(plan.items[0]).toMatchObject({status:"ready",removedGroupCount:1});
  expect(plan.finalSummary.quantity).toBe(1);
+});
+
+it('uses bounded cryptographic snapshots that still detect an interior row change across chunks',async()=>{
+ const incoming=file({rows:Array.from({length:300},(_,index)=>sale('G'+index))});
+ const before=await planSalesImports({existingRows:[],batches:[],items:[incoming],ledgerId:'L'});
+ expect(before.inputSignature).toMatch(/^[a-f0-9]{64}$/);
+ incoming.rows[129].amount=2;
+ const after=await planSalesImports({existingRows:[],batches:[],items:[incoming],ledgerId:'L'});
+ expect(after.inputSignature).not.toBe(before.inputSignature);
+ expect(after.targetSignature).toBe(before.targetSignature);
 });

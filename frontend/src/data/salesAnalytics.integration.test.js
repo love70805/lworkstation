@@ -32,6 +32,7 @@ it('reads monthly series and SKC detail only within the active workspace and inv
   expect((await readLedgerPeriodSalesDetails(scope)).rows[0].platformSkc).toBe('SKC');
   await db.salesRows.where('ledgerId').equals('JUL').modify({ quantity: 5 });
   expect((await readLedgerPeriodSalesDetails(scope)).totalsExact.quantityExact).toBe('5');
+  expect((await readWorkspaceSalesMonths({ workspaceId: 'W' }))[0].monthTotalsExact.quantityExact).toBe('5');
   expect((await readWorkspaceSalesMonths({ workspaceId: 'W', store: '乙' }))[0].missingStore).toBe(true);
   expect((await readLedgerPeriodSalesDetails({ ...scope, store: '乙' })).status).toBe('unknown');
   await expect(readWorkspaceSalesMonths({ workspaceId: 'foreign' })).rejects.toThrow('工作区');
@@ -43,4 +44,17 @@ it("reads exact scoped rows and rejects foreign workspaces, ledgers and stores a
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L", store: "甲" })).monthTotalsExact.revenueExact).toBe("0.009");
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L" })).monthTotalsExact.revenueExact).toBe("4.009");
   for (const scope of [{ workspaceId: "foreign", ledgerId: "F" }, { workspaceId: "W", ledgerId: "F" }, { workspaceId: "W", ledgerId: "L", store: "不存在" }]) await expect(readLedgerSalesAnalytics(scope)).rejects.toThrow();
+});
+
+it('reuses compact monthly summaries without rescanning raw source rows on warm reads', async () => {
+  let reads = 0;
+  const onRead = row => { reads++; return row; };
+  db.salesRows.hook('reading', onRead);
+  try {
+    await readWorkspaceSalesMonths({ workspaceId: 'W' });
+    expect(reads).toBeGreaterThan(0);
+    reads = 0;
+    await readWorkspaceSalesMonths({ workspaceId: 'W' });
+    expect(reads).toBe(0);
+  } finally { db.salesRows.hook('reading').unsubscribe(onRead); }
 });

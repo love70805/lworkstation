@@ -80,7 +80,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.26" }),
+      getManifest: () => ({ version: "8.0.27" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -185,9 +185,9 @@ function resultInput(overrides = {}) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.26");
+  assert.equal(manifest.version, "8.0.27");
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.26";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.27";/, "the download action must recommend the patched package");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
@@ -238,13 +238,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.26-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.27-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.26");
+    assert.equal(manifest.version, "8.0.27");
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -256,7 +256,7 @@ async function verifyPublishedPackage() {
     const canonicalContent = await readFile(sourcePath("content.js"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
     assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v7';/);
-    assert.match(content, /const EXTENSION_VERSION = '8\.0\.26';/);
+    assert.match(content, /const EXTENSION_VERSION = '8\.0\.27';/);
     for (const file of ["background.js", "catalog-collector.js", "content.css", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
       assert.equal(
         (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
@@ -384,7 +384,7 @@ async function verifyTrustedPreviewPeriod() {
   });
   const input = { ...resultInput(), queryCapturedAt: "2026-09-22T00:00:00.000Z", ledgerPeriod: "2026-09" };
   const result = await background.api.previewContext(input, embeddedSender);
-  assert.deepEqual(jsonClone(result), { ok: true, ledgerPeriod: "2026-08" }, "September queries must use the actual August ledger month, with no private context exposed");
+  assert.deepEqual(jsonClone(result), { ok: true, ledgerPeriod: "2026-08", requestId: records[0].requestId, platformSkcs: records[0].platformSkcs }, "The trusted request supplies August and its full target scope without credentials");
   await assert.rejects(() => background.api.previewContext(input, { url: "https://attacker.invalid" }), { code: "ERP_UNTRUSTED_SENDER" });
   await assert.rejects(() => background.api.previewContext({ ...input, queryCapturedAt: "" }, sender), { code: "ERP_REQUEST_CONTEXT_MISSING" });
   assert.equal(fetchCount, 1, "untrusted senders and invalid snapshots must not access loopback");

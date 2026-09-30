@@ -313,3 +313,43 @@ describe("product editing workflow", () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 });
+
+it("restores an explicitly excluded traffic SKU and keeps an unsaved price when ERP data arrives", async () => {
+  const fixture = erpProductCatalogFixture();
+  fixture.catalogMappings = fixture.catalogMappings.map(row => row.platformSku === "SKU-BLUE" ? { ...row, attribute: "1% of people choose" } : row);
+  const id = await db.erpCostRows.add(fixture);
+  await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
+  expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(1);
+  expect(container.textContent).toContain("已排除规格（1）");
+  await change(input("第 1 个售价"), "17");
+  await act(async () => input("恢复规格 SKU-BLUE").click());
+  expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
+  await act(async () => db.erpCostRows.update(id, { productName: "晚到标题" }));
+  await waitFor(() => input("第 1 个售价").value === "17");
+  expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
+  await click("保存商品"); await waitFor(async () => await db.platformSkus.count() === 2);
+  const product = (await db.products.toArray())[0];
+  expect(product.attributes.variantChoices["SKU-BLUE"].state).toBe("included");
+  expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-RED").salePrice).toBe(17);
+});
+
+it("moves a late automatic traffic exclusion out of an edited active list while retaining manual fields for restore", async () => {
+  const fixture = erpProductCatalogFixture();
+  const id = await db.erpCostRows.add(fixture);
+  await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
+  await change(input("商品名称"), "本次手工标题");
+  const blueRow = [...container.querySelectorAll(".variants-table tbody tr")].find(row => row.querySelector('input[aria-label*="平台 SKU"]')?.value === "SKU-BLUE");
+  await change(blueRow.querySelector('input[aria-label$="个售价"]'), "17");
+  await act(async () => db.erpCostRows.update(id, { catalogMappings: fixture.catalogMappings.map(row => row.platformSku === "SKU-BLUE" ? { ...row, attribute: "1% of people choose" } : row) }));
+  await waitFor(() => container.textContent.includes("已排除规格（1）"));
+  expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(1);
+  expect(input("商品名称").value).toBe("本次手工标题");
+  await act(async () => input("恢复规格 SKU-BLUE").click());
+  expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
+  expect(input("第 2 个售价").value).toBe("17");
+  await click("保存商品"); await waitFor(async () => await db.platformSkus.count() === 2);
+  const product = (await db.products.toArray())[0];
+  expect(product.attributes.variantChoices["SKU-BLUE"].state).toBe("included");
+  expect(product.attributes.excludedVariants).toEqual([]);
+  expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-BLUE").salePrice).toBe(17);
+});

@@ -14,11 +14,13 @@ export function createImportWorkerClient(onProgress) {
 
   worker.onmessage = ({ data }) => {
     if (data.type === "progress") {
-      onProgress?.(data.value, data.jobId);
+      onProgress?.(data.value, data.jobId, data);
       return;
     }
     const request = pending.get(data.requestId);
     if (!request) return;
+    if (data.type === "validated-chunk") { request.rows.push(...data.rows); return; }
+    if (data.type === "validated" && !data.rows) data.rows = request.rows;
     pending.delete(data.requestId);
     if (data.type === "error") request.reject(new Error(data.message));
     else request.resolve(data);
@@ -27,18 +29,18 @@ export function createImportWorkerClient(onProgress) {
   const request = (message, transfer = []) => new Promise((resolve, reject) => {
     if (failure) { reject(new Error(failure)); return; }
     const requestId = crypto.randomUUID();
-    pending.set(requestId, { resolve, reject });
+    pending.set(requestId, { resolve, reject, rows: [] });
     try { worker.postMessage({ ...message, requestId }, transfer); }
     catch (error) { pending.delete(requestId); reject(error); }
   });
 
   return {
-    parse: async (file, jobId) => {
+    parse: async (file, jobId, selectedSheet) => {
       const buffer = await file.arrayBuffer();
       const extension = file.name.split(".").pop()?.toLowerCase();
-      return request({ type: "parse", jobId, extension, buffer }, [buffer]);
+      return request({ type: "parse", jobId, extension, buffer, selectedSheet }, [buffer]);
     },
-    validate: (jobId, mapping, options) => request({ type: "validate", jobId, mapping, options }),
+    validate: (jobId, mapping, options) => request({ type: "validate", jobId, mapping, options, chunked: true }),
     inspectPeriod: (jobId, mapping, options) => request({ type: "inspect-period", jobId, mapping, options }),
     release: (jobId) => request({ type: "release", jobId }),
     terminate: () => {

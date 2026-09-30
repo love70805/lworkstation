@@ -2,6 +2,8 @@ import { createLedgerGroupKey, createLedgerSkuKey } from "../domain/ledgerImport
 import Decimal from "decimal.js";
 import { decimalSource, parseSalesAddedDate } from "../domain/salesAnalytics";
 
+const Exact = Decimal.clone({ precision: 80 });
+
 export const salesFields = [
   { key: "sourceAddedAt", label: "添加时间", description: "用于来源月份核对和每日销售趋势；不使用导入时间或采购日期代替。", required: false, aliases: ["添加时间", "添加日期", "sourceAddedAt", "source_added_at"] },
   { key: "activity", label: "活动", description: "保留台账实际活动信息；缺失不表示未参加。", required: false, aliases: ["活动", "活动信息", "活动名称", "活动类型", "是否活动", "activity"] },
@@ -234,7 +236,6 @@ export function validateSalesRows(rawRows, mapping, {
 
     const isDeduction = ["扣款", "罚款", "违约"].some((keyword) => movementType.includes(keyword));
     const exactValue = (key) => decimalSource(rawRow.__salesSource?.rawValues?.[mapping[key]] ?? mappedValue(rawRow, mapping, key));
-    const Exact = Decimal.clone({ precision: 80 });
     let quantityExact = exactValue("quantity");
     if (new Exact(quantityExact).isZero()) quantityExact = new Exact(exactValue("customerShipmentQuantity")).plus(exactValue("platformOrderQuantity")).toFixed();
     let amountExact = deriveAmountFromUnitPrice && hasUnitPrice ? new Exact(quantityExact).times(exactValue("unitPrice")).toFixed() : exactValue("amount");
@@ -311,6 +312,12 @@ export function collectSalesPeriodEvidence(rawRows, mapping, options = {}) {
     errorCount: validation.errors.length,
     ignoredCount: validation.ignored.length,
     eligibleCount: validation.rows.length,
+    validationSummary: {
+      sourceRowCount: validation.sourceRowCount, validRowCount: validation.rows.length,
+      errorCount: validation.errors.length, ignoredCount: validation.ignored.length,
+      platformSkcMissingCount: validation.platformSkcMissingCount ?? 0,
+      errors: validation.errors.slice(0, 50), ignored: validation.ignored.slice(0, 50),
+    },
     suggestedPeriod: distribution.length === 1 && missingCount === 0 && invalidCount === 0 && validation.errors.length === 0
       ? distribution[0].month : null,
   };

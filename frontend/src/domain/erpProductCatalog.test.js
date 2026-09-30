@@ -97,3 +97,25 @@ describe("ERP catalog evidence projection", () => {
     expect(merged.suppliers[0].sourceRecords.map(record => record.recordId)).toEqual(["REC-A", "REC-DISTINCT"]);
   });
 });
+
+it("excludes only explicit traffic markers, supports restoration, and uses a normal SKU cover/title", () => {
+  const rows = [
+    { platformSku: "NORMAL", canonicalPlatformSku: "NORMAL", platformSkc: "S", attribute: "1pc 白色", coverSalesQuantity: 1, erpImage: { value: "https://images.example.invalid/normal.png" }, erpCatalogFields: { productName: { candidates: [{ value: "正常商品" }] } }, ledgerSalePrice: { kind: "ledger", status: "ready", value: 0 } },
+    { platformSku: "TRAFFIC", canonicalPlatformSku: "TRAFFIC", platformSkc: "S", attribute: "1% of people choose", coverSalesQuantity: 100, erpImage: { value: "https://images.example.invalid/traffic.png" }, erpCatalogFields: { productName: { candidates: [{ value: "引流商品" }] } } },
+  ];
+  const { draft } = prefillErpProductDraft({ draft: { platformSkc: "S", variants: [] }, rows });
+  expect(draft.variants).toMatchObject([{ platformSku: "NORMAL", salePrice: 0 }]);
+  expect(draft).toMatchObject({ name: "正常商品", imageUrl: "https://images.example.invalid/normal.png", excludedVariants: [{ platformSku: "TRAFFIC" }] });
+  const restored = prefillErpProductDraft({ draft: { ...draft, variantChoices: { TRAFFIC: { state: "included", source: "manual" } }, variants: [...draft.variants, ...draft.excludedVariants], excludedVariants: [] }, rows }).draft;
+  expect(restored.variants).toHaveLength(2);
+  expect(restored.excludedVariants).toHaveLength(0);
+});
+it("updates only system selling prices while respecting manual prices and explicit clears", () => {
+  const rows = [{ platformSku: "A", canonicalPlatformSku: "A", platformSkc: "S", ledgerSalePrice: { kind: "ledger", status: "ready", value: 12 } }];
+  const system = { platformSkc: "S", variants: [{ platformSku: "A", salePrice: 10, salePriceSource: { kind: "ledger" } }] };
+  expect(prefillErpProductDraft({ draft: system, rows }).draft.variants[0].salePrice).toBe(12);
+  for (const salePrice of ["", 0, 5]) {
+    const draft = { ...system, variants: [{ ...system.variants[0], salePrice }], fieldEdits: { variants: { A: { salePrice: true } } } };
+    expect(prefillErpProductDraft({ draft, rows }).draft.variants[0].salePrice).toBe(salePrice);
+  }
+});

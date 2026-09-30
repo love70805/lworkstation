@@ -35,158 +35,127 @@ beforeEach(async()=>{
   await act(async()=>root.render(<MemoryRouter><ToastProvider><ImportPreview/></ToastProvider></MemoryRouter>));
 });
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
-it('validates without per-file checkboxes and clears overwrite approval after configuration edits',async()=>{
-  await upload(); await click('统一校验与预览');
-  expect(container.querySelector('.batch-store input[type=checkbox]')).toBeNull();
+
+async function settled() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); }); }
+it('automatically validates and previews all files without any write or product filter', async () => {
+  await upload(); await settled();
   expect(mocks.validate).toHaveBeenCalledTimes(2);
-  expect(button('确认导入').disabled).toBe(true);
-  await click('确认导入');expect(mocks.save).not.toHaveBeenCalled();
-  await act(async()=>container.querySelector('.batch-overwrite input').click());
-  expect(button('确认导入').disabled).toBe(false);
-  // Removing a file is a configuration change and releases its Worker job.
-  await click('移除');
-  expect(container.querySelector('.batch-preview')).toBeNull();
-  expect(mocks.release).toHaveBeenCalledTimes(1);
-  await click('统一校验与预览');
-  expect(button('确认导入').disabled).toBe(true);
-});
-it('previews without writing and submits once directly without a second confirmation dialog',async()=>{
-  await upload();await click('统一校验与预览');
-  await act(async()=>container.querySelector('.batch-overwrite input').click());
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
   expect(mocks.save).not.toHaveBeenCalled();
-  expect(container.querySelector('[role=dialog]')).toBeNull();
-  let finish;
-  mocks.save.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
-  const submit=button('确认导入');
-  await act(async()=>{submit.click();submit.click();});
-  expect(mocks.save).toHaveBeenCalledTimes(1);
-  expect(submit.disabled).toBe(true);
-  await act(async()=>finish({items:[],finalSummary:summary,ledgerId:'L'}));
-  expect(mocks.save.mock.calls[0][0]).toMatchObject({overwriteSignature:'snapshot',items:[{storeName:'甲店'},{storeName:'乙店'}]});
+  expect(button('统一校验与预览')).toBeUndefined();
+  expect(container.querySelector('.batch-filters')).toBeNull();
+  expect(button('导入').disabled).toBe(true);
 });
-it('keeps errors visible per file and blocks the entire preview when any file has error rows',async()=>{
-  await upload();
-  mocks.validate.mockResolvedValueOnce({rows:[{}],summary:{errorCount:1,ignoredCount:2,errors:[{sourceRow:3,messages:['数量不是有效数字']} ]}});
-  await click('统一校验与预览');
-  expect(mocks.preview).not.toHaveBeenCalled();expect(mocks.save).not.toHaveBeenCalled();
-  expect(container.textContent).toContain('第 3 行：数量不是有效数字');
-  expect(container.textContent).toContain('整批尚未写入');
-});
-it('blocks an empty store and invalidates the preview when the month, store or mapping changes',async()=>{
-  await upload();
-  const store=container.querySelector('.batch-store input');
-  await act(async()=>Simulate.change(store,{target:{value:''}}));
-  expect(button('统一校验与预览').disabled).toBe(true);
-  await click('统一校验与预览');expect(mocks.validate).not.toHaveBeenCalled();
-  expect(container.textContent).toContain('请填写所属店铺');
-  await act(async()=>Simulate.change(store,{target:{value:'甲店'}}));
-  for(const [selector,value] of [['#ledger-period','2026-07'],['.batch-store input','修正店铺'],['select[aria-label="甲店.csv 平台 SKU"]','']]){
-    await click('统一校验与预览');
-    expect(container.querySelector('.batch-preview')).not.toBeNull();
-    const input=container.querySelector(selector);
-    expect(input).not.toBeNull();
-    await act(async()=>Simulate.change(input,{target:{value}}));
-    expect(container.querySelector('.batch-preview')).toBeNull();
-    expect(button('确认导入')).toBeUndefined();
-  }
-});
-it('imports a non-overwriting preview with one confirmation and no extra checkbox',async()=>{
-  const original=mocks.preview.getMockImplementation();
-  mocks.preview.mockImplementationOnce(async input=>({...await original(input),requiresOverwrite:false}));
-  await upload();await click('统一校验与预览');
+it('imports a normal batch with one click and prevents double submits', async () => {
+  const original = mocks.preview.getMockImplementation();
+  mocks.preview.mockImplementation(async input => ({ ...await original(input), requiresOverwrite:false }));
+  await upload(); await settled();
   expect(container.querySelector('input[type=checkbox]')).toBeNull();
-  expect(button('确认导入').disabled).toBe(false);
-  await click('确认导入');
+  let finish;
+  mocks.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await act(async () => { button('导入').click(); button('导入').click(); });
   expect(mocks.save).toHaveBeenCalledTimes(1);
-  expect(container.querySelector('[role=dialog]')).toBeNull();
+  expect(button('导入').disabled).toBe(true);
+  await act(async () => finish({items:[],finalSummary:summary,ledgerId:'L'}));
   expect(container.textContent).toContain('整批处理完成');
 });
-it('retains default movement filters and invalidates the preview when a filter changes',async()=>{
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'ledger_report',facets:{movementTypes:['平台客单发货','客单发货','盘亏'],supplierNumbers:['货号A','货号B']}});
-  await upload();await click('统一校验与预览');
-  expect(mocks.validate.mock.calls[0][2]).toMatchObject({movementTypes:['平台客单发货','客单发货'],supplierNumbers:['货号A','货号B'],deriveAmountFromUnitPrice:true});
-  expect(container.querySelector('.batch-advanced').open).toBe(false);
-  await act(async()=>container.querySelector('.batch-filters input').click());
+it('invalidates overwrite approval and automatically rebuilds the preview after a file is removed', async () => {
+  await upload(); await settled();
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  expect(button('导入').disabled).toBe(false);
+  await click('移除');
   expect(container.querySelector('.batch-preview')).toBeNull();
-  await click('统一校验与预览');
-  expect(mocks.validate.mock.calls[2][2].movementTypes).toEqual(['客单发货']);
+  await settled();
+  expect(mocks.release).toHaveBeenCalledTimes(1);
+  expect(button('导入').disabled).toBe(true);
 });
-it.each(['同一店铺不能重复分配','文件含多个店铺，与目标店铺冲突'])('surfaces store validation rejection: %s',async message=>{
-  await upload();mocks.preview.mockRejectedValueOnce(new Error(message));
-  await click('统一校验与预览');
-  expect(container.textContent).toContain(message);
-  expect(container.querySelector('.batch-preview')).toBeNull();
+it('retains errors on the corresponding file and allows explicit removal before importing the rest', async () => {
+  mocks.validate.mockResolvedValueOnce({rows:[{}],summary:{validRowCount:1,errorCount:1,ignoredCount:2,errors:[{sourceRow:3,messages:['数量不是有效数字']}]}});
+  await upload(); await settled();
+  expect(container.textContent).toContain('第 3 行：数量不是有效数字');
+  expect(mocks.preview).not.toHaveBeenCalled();
   expect(mocks.save).not.toHaveBeenCalled();
-  expect(mocks.validate.mock.calls[0][2]).toMatchObject({defaultStore:'甲店',enforceSingleStore:true});
+  await click('移除'); await settled();
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
 });
-it('keeps parse failure visible and blocks validation',async()=>{
+it('uses all supplier numbers with the existing normal shipment business types', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'ledger_report',facets:{movementTypes:['平台客单发货','客单发货','盘亏'],supplierNumbers:['货号A','货号B']}});
+  await upload(); await settled();
+  expect(mocks.validate.mock.calls[0][2]).toMatchObject({movementTypes:['平台客单发货','客单发货'],deriveAmountFromUnitPrice:true});
+  expect(mocks.validate.mock.calls[0][2].supplierNumbers).toBeUndefined();
+  expect(container.textContent).not.toContain('文件筛选');
+  expect(mocks.preview.mock.calls[0][0].items[0].sourceCoverage.scope).toBe('full_month');
+});
+it('keeps parse failure visible while the other file remains parsed', async () => {
   mocks.parse.mockRejectedValueOnce(new Error('无法读取文件'));
-  await upload();
+  await upload(); await settled();
   expect(container.textContent).toContain('解析失败：无法读取文件');
-  expect(button('统一校验与预览').disabled).toBe(true);
+  expect(mocks.preview).not.toHaveBeenCalled();
+  await click('移除'); await settled();
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
+});
+it('blocks cross-month records on their file even when a month was explicitly selected', async () => {
+  mocks.inspectPeriod.mockResolvedValueOnce({evidence:{distribution:[{month:'2026-07',count:1},{month:'2026-08',count:1}],suggestedPeriod:null}});
+  await upload(); await settled();
+  expect(container.textContent).toContain('来源含 2026-07，与账本 2026-08 不一致');
   expect(mocks.preview).not.toHaveBeenCalled();
 });
-it('requires a fresh preview and overwrite approval after an atomic submission fails',async()=>{
-  await upload();await click('统一校验与预览');
-  await act(async()=>container.querySelector('.batch-overwrite input').click());
-  mocks.save.mockRejectedValueOnce(new Error('账本状态已变化'));
-  await click('确认导入');
-  expect(container.textContent).toContain('整批未写入：账本状态已变化');
-  expect(container.querySelector('.batch-preview')).toBeNull();
-  await click('统一校验与预览');
-  expect(button('确认导入').disabled).toBe(true);
-  expect(mocks.save).toHaveBeenCalledTimes(1);
-});
-it('auto-selects a complete single source month and requires an explicit choice after a new conflicting file',async()=>{
-  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-07',count:2}], suggestedPeriod:'2026-07', missingCount:0, invalidCount:0, errorCount:0 } });
-  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-07',count:1}], suggestedPeriod:'2026-07', missingCount:0, invalidCount:0, errorCount:0 } });
-  await upload(false);
+it('auto-selects the reliable source month and requires no extra validation click', async () => {
+  mocks.inspectPeriod.mockResolvedValue({evidence:{distribution:[{month:'2026-07',count:1}],suggestedPeriod:'2026-07',missingCount:0,invalidCount:0,errorCount:0}});
+  await upload(false); await settled();
   expect(container.querySelector('#ledger-period').value).toBe('2026-07');
-  expect(button('统一校验与预览').disabled).toBe(false);
-  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-08',count:1}], suggestedPeriod:'2026-08', missingCount:0, invalidCount:0, errorCount:0 } });
-  const input=container.querySelector('input[type=file]');
-  Object.defineProperty(input,'files',{configurable:true,value:[new File(['third'],'丙店.csv')]});
-  await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
-  expect(container.querySelector('#ledger-period').value).toBe('');
-  expect(container.textContent).toContain('2026-07');
-  expect(container.textContent).toContain('2026-08');
-  expect(button('统一校验与预览').disabled).toBe(true);
-  await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
-  expect(button('统一校验与预览').disabled).toBe(false);
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  expect(container.querySelector('.batch-preview h2').textContent).toBe('整批处理完成 · 2026-07');
 });
-it('keeps a user-selected month when later file inspection completes',async()=>{
+it('asks for a sheet only for the ambiguous file and parses the chosen sheet', async () => {
+  mocks.parse.mockResolvedValueOnce({type:'sheet-selection-required',sheetCandidates:['明细甲','明细乙']});
+  await upload(); await settled();
+  const select = container.querySelector('select[id^=sheet-]');
+  expect(select).not.toBeNull();
+  expect(mocks.preview).not.toHaveBeenCalled();
+  await act(async () => Simulate.change(select,{target:{value:'明细乙'}}));
+  await settled();
+  expect(mocks.parse.mock.calls[2][2]).toBe('明细乙');
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
+});
+it('keeps partial-source and complete-replacement choices explicit and revalidates automatically', async () => {
+  await upload(); await settled();
+  await act(async () => Simulate.change(container.querySelector('select[id^=source-scope-]'),{target:{value:'partial'}}));
+  await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({sourceCoverage:{scope:'partial'},importMode:'append'});
+});
+it('rejects an empty store before any automatic preview', async () => {
   await upload();
-  mocks.inspectPeriod.mockResolvedValueOnce({ evidence: { distribution:[{month:'2026-06',count:1}], suggestedPeriod:'2026-06', missingCount:0, invalidCount:0, errorCount:0 } });
-  const input=container.querySelector('input[type=file]');
-  Object.defineProperty(input,'files',{configurable:true,value:[new File(['third'],'丙店.csv')]});
-  await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
-  expect(container.querySelector('#ledger-period').value).toBe('2026-08');
+  await act(async () => Simulate.change(container.querySelector('.batch-store input'),{target:{value:''}}));
+  await settled();
+  expect(mocks.preview).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('请填写所属店铺');
+});
+it('supports cancelling the write through an AbortSignal', async () => {
+  await upload(); await settled();
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  mocks.save.mockImplementationOnce(({signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('导入已取消，整批写入已回滚。')))));
+  await click('导入'); await click('取消当前处理');
+  expect(mocks.save.mock.calls[0][0].signal.aborted).toBe(true);
+  expect(container.textContent).toContain('整批写入已回滚');
 });
 
-it('declares a complete historical month without adding a per-file confirmation and can mark partial sources', async () => {
-  await upload();
-  expect(container.textContent).toContain('完整月台账：2026-08');
-  await click('统一校验与预览');
-  expect(mocks.preview.mock.calls[0][0].items[0]).toMatchObject({sourceCoverage:{version:1,period:'2026-08',store:'甲店',scope:'full_month',declarationSource:'import_preview'},importMode:'append'});
-  expect(container.querySelector('.batch-advanced').open).toBe(false);
-  const scope=container.querySelector('select[id^=source-scope-]');
-  await act(async()=>Simulate.change(scope,{target:{value:'partial'}}));
-  expect(container.querySelector('.batch-preview')).toBeNull();
-  expect(container.textContent).toContain('部分来源：2026-08');
-  await click('统一校验与预览');
-  expect(mocks.preview.mock.calls[1][0].items[0].sourceCoverage.scope).toBe('partial');
-});
-it('uses explicit complete replacement only when the user selects that mode', async () => {
-  await upload();
-  const mode=container.querySelector('select[id^=import-mode-]');
-  await act(async()=>Simulate.change(mode,{target:{value:'replace_store_month'}}));
-  await click('统一校验与预览');
-  expect(mocks.preview.mock.calls[0][0].items[0].importMode).toBe('replace_store_month');
-});
-it('automatically marks narrowed sales filters partial while retaining monthly import', async () => {
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'ledger_report',facets:{movementTypes:['平台客单发货','客单发货'],supplierNumbers:['货号A','货号B']}});
-  await upload();
-  await act(async()=>container.querySelector('.batch-filters input').click());
-  await click('统一校验与预览');
-  expect(mocks.preview.mock.calls[0][0].items[0]).toMatchObject({sourceCoverage:{scope:'partial'},importMode:'append'});
+it('exposes every overlap through pagination and confirms the full affected scope beyond thirty groups', async () => {
+  const original = mocks.preview.getMockImplementation();
+  mocks.preview.mockImplementation(async input => {
+    const preview = await original(input);
+    preview.items[0].replacementScope = 'store_month';
+    preview.items[0].overlaps = Array.from({length:31},(_,index)=>({groupKey:'group-'+index,store:'甲店',platformSkc:'父-'+index,removed:index===30,before:{...summary,rowCount:1},after:{...summary,rowCount:index===30?0:1}}));
+    return preview;
+  });
+  await upload(); await settled();
+  expect(container.textContent).toContain('共 31 组均受影响');
+  expect(container.querySelector('.batch-overwrite').textContent).toContain('全部替换范围（含分页内容）');
+  expect(container.querySelector('.batch-overwrite').textContent).not.toContain('未列出分组保留');
+  expect(container.textContent).not.toContain('父-30');
+  await act(async()=>container.querySelector('[aria-label="甲店.csv 下一页覆盖范围"]').click());
+  expect(container.textContent).toContain('移除旧分组：甲店 / 父-30');
+  expect(container.textContent).toContain('第 2 / 2 页');
 });

@@ -1,6 +1,6 @@
 import { db } from "../db/clientDatabase";
 import { getActiveMemberContext } from "./selectionRepository";
-import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
+import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { runDerivedComputation } from './derivedComputationService';
 import { canonicalStore } from "../../domain/batchSalesImport";
@@ -52,11 +52,23 @@ export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
     const current = await getActiveMemberContext();
     if (!workspaceId || current.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
     const ledgers = await db.ledgers.where('workspaceId').equals(workspaceId).toArray();
+    await observeSourceRevision();
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
     const months = [];
-    // Bound source-row memory while walking historical ledgers.
+    // Historical plotting retains compact summaries only. Read each cold ledger
+    // transiently instead of filling the shared raw-row cache with up to 600k rows.
     for (const ledger of ledgers.sort((a, b) => a.period.localeCompare(b.period) || a.id.localeCompare(b.id))) {
-      const data = await readLedgerSalesAnalytics({ workspaceId, ledgerId: ledger.id, store, allowMissingStore: true });
-      months.push({ ...data.chartMonth, ledgerId: ledger.id });
+      const chartMonth = await cachedDerived({
+        scope: [workspaceId, ledger.id, store === 'all' ? null : canonicalStore(store), ledger.period, today],
+        formula: 'monthly-chart@1', revision,
+        compute: async () => {
+          const rows = await db.salesRows.where('ledgerId').equals(ledger.id).filter(row => row.workspaceId === workspaceId && (store === 'all' || canonicalStore(row.store) === canonicalStore(store))).toArray();
+          assertSourceRevision(revision);
+          const data = await runDerivedComputation('sales', { rows, period: ledger.period, store, today });
+          return data.chartMonth;
+        },
+      });
+      months.push({ ...chartMonth, ledgerId: ledger.id });
     }
     assertSourceRevision(revision);
     return months;

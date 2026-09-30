@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Badge } from "./UI";
 
 const reasonLabels = {
@@ -15,9 +16,9 @@ const reasonLabels = {
 export default function SelectionSalesTag({ item, className = "" }) {
   if (!item) return null;
   const available = item.label != null && item.quantityExact != null;
-  const description = available ? `${item.rangeLabel ?? ""} · ${item.quantityExact} 件` : reasonLabels[item.reason ?? item.status] ?? "台账信息不足，七天销量无法计算";
+  const description = available ? `${(item.stores ?? []).join("、")} · ${item.rangeLabel ?? ""} · ${item.quantityExact} 件` : reasonLabels[item.reason ?? item.status] ?? "台账信息不足，七天销量无法计算";
   return <span className={`selection-sales-tag ${className}`} title={description}>
     <Badge tone={available ? item.label === "爆款" ? "success" : "info" : "neutral"}>{available ? item.label : "七天销量暂不可计算"}</Badge>
-    <small>{description}</small>
+    <small>{description}{!available ? <> · <Link to="/ledger">查看台账来源</Link></> : null}</small>
   </span>;
 }

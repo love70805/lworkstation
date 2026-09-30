@@ -516,6 +516,7 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
           unitsPerPack: offer.unitsPerPack ?? 1,
           landedUnitCost: offer.landedUnitCost ?? null,
           salePrice: sku.salePrice ?? sku.price ?? "",
+          salePriceSource: sku.salePriceSource ?? null,
           imageUrl: sku.imageUrl ?? "",
         };
       }),
@@ -624,6 +625,8 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
       catalogOrigin: product.attributes?.catalogOrigin ?? null,
       quoteEditIntent: { supplierIds: [] },
       excludedIdentitySkus: product.attributes?.excludedIdentitySkus ?? [],
+      variantChoices: product.attributes?.variantChoices ?? {},
+      excludedVariants: product.attributes?.excludedVariants ?? [],
       tags: Array.isArray(product.tags) ? product.tags : [],
       notes: product.notes ?? "",
       suppliers,
@@ -664,7 +667,7 @@ export async function getProductEditorSnapshot({ captureId = null, productId = n
   projection.prefill.referencePeriod = coverage?.period ?? relatedRows.map(row => row.referencePeriod).filter(Boolean).sort().at(-1) ?? null;
   projection.prefill.catalogCoverage = coverage?.groups ?? null;
   if (!projection.draft.name && !projection.prefill.sources.length) projection.draft.name = catalogProductName(productName);
-  if (!projection.draft.variants.length && platformSku && !anchor?.productId) projection.draft.variants = [{ platformSku: normalizePlatformSku(platformSku), attribute: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1 }];
+  if (!projection.draft.variants.length && platformSku && !anchor?.productId && projection.draft.variantChoices?.[canonicalPlatformSku(platformSku)]?.state !== "excluded") projection.draft.variants = [{ platformSku: normalizePlatformSku(platformSku), attribute: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1 }];
   return { mode: "new", product: null, capture: null, ...projection, validation: validateProductDraft(projection.draft) };
 }
 
@@ -760,12 +763,12 @@ export async function listProductCatalogRecords() {
       const skuReferences = skus.map((sku) => {
         const key = sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku);
         const erpCost = latestErpCostBySku.get(key);
-        const salePrice = productSalePrice(sku.salePrice ?? sku.price);
+        const projectedReference = projectedReferenceBySku.get(key);
+        const salePrice = projectedReference ? projectedReference.catalogSalePrice : productSalePrice(sku.salePrice ?? sku.price);
         const supplierOffers = offers.filter((offer) => (offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku)) === key);
         const manualCost = latestManualCostBySku.get(key);
         const finalizedCost = latestFinalizedCostBySku.get(key);
         const supplierCost = supplierCostBySku.get(key);
-        const projectedReference = projectedReferenceBySku.get(key);
         const unitCost = projectedReference?.referenceUnitCost ?? null;
         const source = projectedReference?.referenceKind === "erp_history" ? "erp"
           : projectedReference?.referenceKind === "erp_catalog_reference" ? "erp_reference" : projectedReference?.referenceKind ?? null;
@@ -806,6 +809,7 @@ export async function listProductCatalogRecords() {
       const warehouseMappedSkuCount = skuReferences.filter((item) => item.canonicalWarehouseSku).length;
       const dataReadiness = buildProductDataReadiness({
         skuCount: skus.length,
+        supplierNumbers: [...new Set(skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.supplierNumbers ?? []))],
         erpCoveredSkuCount: erpCoveredSkuCount + erpReferenceCoveredSkuCount,
         profitHistorySkuCount,
         warehouseMappedSkuCount,
@@ -819,6 +823,7 @@ export async function listProductCatalogRecords() {
         automaticSalesTag: product.platformSkc ? automaticTagBySkc.get(canonicalPlatformSkc(product.platformSkc)) ?? null : null,
         image: product.imageUrl ?? product.image ?? null,
         skuCount: skus.length,
+        supplierNumbers: [...new Set(skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.supplierNumbers ?? []))],
         pendingVariantCount,
         skus,
         offers,
@@ -1238,6 +1243,7 @@ export async function saveProductCatalogRecord({
         imageUrl: catalogText(variant.imageUrl),
         status: status === "active" ? "active" : "draft",
         salePrice: productSalePrice(variant.salePrice),
+        salePriceSource: fieldEdits.variants?.[variant.canonicalPlatformSku]?.salePrice ? { kind: "manual" } : variant.salePriceSource ?? null,
         createdAt: skuByCanonical.get(variant.canonicalPlatformSku)?.createdAt ?? now,
         updatedAt: now,
       }));
@@ -1382,6 +1388,8 @@ export async function saveProductCatalogRecord({
           fieldEdits,
           catalogOrigin: existingProduct?.attributes?.catalogOrigin ?? normalizedDraft.catalogOrigin ?? null,
           excludedIdentitySkus: normalizedDraft.excludedIdentitySkus ?? existingProduct?.attributes?.excludedIdentitySkus ?? [],
+          variantChoices: normalizedDraft.variantChoices ?? existingProduct?.attributes?.variantChoices ?? {},
+          excludedVariants: normalizedDraft.excludedVariants ?? existingProduct?.attributes?.excludedVariants ?? [],
         },
         createdAt: existingProduct?.createdAt ?? now,
         updatedAt: now,
@@ -1555,7 +1563,7 @@ export async function getSelectionReferenceSnapshot() {
   }).map(row => ({
     platformSku: row.platformSku, platformSkc: row.platformSkc, attribute: row.attribute,
     ledgerId: row.ledgerId, period: ledgerById.get(row.ledgerId).period, batchId: row.batchId,
-    store: row.store, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow,
+    store: row.store, supplierNumber: row.supplierNumber, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow,
   }));
   const catalogEnvelopes = [
     ...[...publishedCatalogBatches.values()].map(batch => ({ envelope: { workspaceId: batch.workspaceId, ledgerId: batch.ledgerId, query: { unit: "platform_skc", platformSkcs: catalogScope(batch) }, rows: (batch.sourceContract.catalogRows ?? []).filter(row => catalogRowMatches(row, batch)), warehouseEvidence: batch.sourceContract.warehouseEvidence ?? [] }, batchId: batch.id, publishedAt: batch.publishedAt, period: ledgerById.get(batch.ledgerId)?.period, coverage: batch.sourceContract.catalogCoverage })),

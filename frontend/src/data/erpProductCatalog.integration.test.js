@@ -138,3 +138,44 @@ describe("ERP catalog draft projection", () => {
     expect(await db.supplierOffers.count()).toBe(0);
   });
 });
+
+it("persists system prices and traffic choices across reopen while retaining financial rows", async () => {
+  const workspaceId = "workspace-default";
+  await db.ledgers.add({ id: "PRICE-L", workspaceId, period: "2026-08", status: "draft" });
+  await db.importBatches.add({ id: "PRICE-B", workspaceId, ledgerId: "PRICE-L", period: "2026-08", store: "甲店", status: "completed", fileHash: "PRICE-H", validRowCount: 3, sourceCoverage: { version: 1, period: "2026-08", store: "甲店", scope: "full_month", declarationSource: "import_preview" } });
+  const rows = [
+    { id: "PRICE-R1", platformSku: "SKU-RED", attribute: "红色", quantityExact: "30", unitPriceRaw: "10", sourceRow: 2 },
+    { id: "PRICE-R2", platformSku: "SKU-RED", attribute: "红色", quantityExact: "5", unitPriceRaw: "12", sourceRow: 3, rawAddedAt: "2026-08-31 18:00:00" },
+    { id: "PRICE-R3", platformSku: "SKU-BLUE", attribute: "1% of people choose", quantityExact: "100", unitPriceRaw: "0.1", sourceRow: 4 },
+  ].map(row => ({ workspaceId, ledgerId: "PRICE-L", batchId: "PRICE-B", store: "甲店", platformSkc: "SKC-CATALOG", rawAddedAt: "2026-08-31 12:00:00", sourceAddedDate: "2026-08-31", amount: 1, ...row }));
+  await db.salesRows.bulkAdd(rows);
+  const erp = erpProductCatalogFixture();
+  erp.catalogMappings = erp.catalogMappings.map(row => row.platformSku === "SKU-BLUE" ? { ...row, attribute: "1% of people choose" } : row);
+  await db.erpCostRows.add(erp);
+  const snapshot = await getProductEditorSnapshot({ platformSku: "SKU-RED" });
+  expect(snapshot.draft.variants).toMatchObject([{ platformSku: "SKU-RED", salePrice: 12 }]);
+  expect(snapshot.draft.excludedVariants).toMatchObject([{ platformSku: "SKU-BLUE" }]);
+  expect(snapshot.draft.automaticSalesTag).toMatchObject({ quantityExact: "135", label: "高销", period: "2026-08" });
+  const financialBefore = await db.salesRows.toArray();
+  const { product } = await saveProductCatalogRecord({ draft: snapshot.draft });
+  db.close(); await db.open();
+  let reopened = await getProductEditorSnapshot({ productId: product.id });
+  expect(reopened.draft.variants).toMatchObject([{ salePrice: 12, salePriceSource: { kind: "ledger" } }]);
+  expect(reopened.draft.excludedVariants).toHaveLength(1);
+  await db.salesRows.update("PRICE-R2", { unitPriceRaw: "13" });
+  reopened = await getProductEditorSnapshot({ productId: product.id });
+  expect(reopened.draft.variants[0].salePrice).toBe(13);
+  reopened.draft.variants[0].salePrice = "";
+  reopened.draft.fieldEdits = { variants: { "SKU-RED": { salePrice: true } } };
+  reopened.draft.variantChoices["SKU-BLUE"] = { state: "included", source: "manual" };
+  reopened.draft.variants.push(reopened.draft.excludedVariants[0]);
+  reopened.draft.excludedVariants = [];
+  await saveProductCatalogRecord({ productId: product.id, draft: reopened.draft });
+  await db.salesRows.update("PRICE-R2", { unitPriceRaw: "12" });
+  const restored = await getProductEditorSnapshot({ productId: product.id });
+  expect(restored.draft.variants).toHaveLength(2);
+  expect(restored.draft.variants.find(row => row.platformSku === "SKU-RED").salePrice).toBe("");
+  expect(restored.draft.excludedVariants).toHaveLength(0);
+  expect(await db.salesRows.toArray()).toEqual(financialBefore);
+  expect(await db.profitLines.count()).toBe(0);
+});

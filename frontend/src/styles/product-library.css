@@ -245,3 +245,6 @@
 .selection-sales-tag { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 250px; }
 .selection-sales-tag small { color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .reference-group-heading .selection-sales-tag { flex-direction: row; align-items: center; flex-wrap: wrap; max-width: none; }
+
+.library-filters > .text-input { width: min(100%, 180px); min-width: 0; }
+@media (max-width: 760px) { .library-filters > .text-input { width: 100%; } }

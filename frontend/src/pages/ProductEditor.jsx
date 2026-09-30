@@ -162,23 +162,37 @@ function ProductEditor() {
     if (sameRecord && currentDraftRef.current?.fingerprint !== savedFingerprint) {
       setDraft(current => {
         const incoming = snapshot.draft;
-        const next = { ...current };
+        const next = { ...current, automaticSalesTag: incoming.automaticSalesTag };
         for (const field of ["name", "imageUrl", "store", "supplierName", "sourceUrl"]) {
           if (!current.fieldEdits?.[field] && !current[field] && incoming[field]) next[field] = incoming[field];
         }
         next.variants = (current.variants ?? []).map(variant => {
           const key = canonicalPlatformSku(variant.platformSku);
-          const source = (incoming.variants ?? []).find(item => canonicalPlatformSku(item.platformSku) === key);
+          const source = [...(incoming.variants ?? []), ...(incoming.excludedVariants ?? [])].find(item => canonicalPlatformSku(item.platformSku) === key);
           if (!source) return variant;
           const merged = { ...variant };
           for (const field of ["attribute", "warehouseSku", "imageUrl", "referenceUnitCost", "referenceKind", "referenceCostId", "referencePeriod"]) {
             if (!current.fieldEdits?.variants?.[key]?.[field] && (merged[field] == null || merged[field] === "") && source[field] != null && source[field] !== "") merged[field] = source[field];
           }
+          if (!current.fieldEdits?.variants?.[key]?.salePrice && (variant.salePriceSource?.kind === "ledger" || variant.salePrice == null || variant.salePrice === "")) {
+            merged.salePrice = source.salePrice;
+            merged.salePriceSource = source.salePriceSource;
+          }
           return merged;
         });
+        // Apply the final choices to both collections. A late automatic marker
+        // cannot leave one SKU active and excluded; explicit user restoration wins.
+        next.variantChoices = { ...incoming.variantChoices, ...current.variantChoices };
+        const excludedSkus = new Set([...(current.excludedIdentitySkus ?? []).map(canonicalPlatformSku), ...Object.entries(next.variantChoices).filter(([, choice]) => choice.state === "excluded").map(([key]) => key)]);
+        const newlyExcluded = next.variants.filter(item => excludedSkus.has(canonicalPlatformSku(item.platformSku)));
+        next.variants = next.variants.filter(item => !excludedSkus.has(canonicalPlatformSku(item.platformSku)));
         const existingSkus = new Set(next.variants.filter(item => item.platformSku).map(item => canonicalPlatformSku(item.platformSku)));
-        const excludedSkus = new Set((current.excludedIdentitySkus ?? []).map(canonicalPlatformSku));
-        next.variants.push(...(incoming.variants ?? []).filter(item => item.platformSku && !existingSkus.has(canonicalPlatformSku(item.platformSku)) && !excludedSkus.has(canonicalPlatformSku(item.platformSku))));
+        for (const item of [...(incoming.variants ?? []), ...(incoming.excludedVariants ?? []).filter(item => next.variantChoices[canonicalPlatformSku(item.platformSku)]?.state === "included")]) {
+          if (!item.platformSku) continue;
+          const key = canonicalPlatformSku(item.platformSku);
+          if (!existingSkus.has(key) && !excludedSkus.has(key)) { next.variants.push(item); existingSkus.add(key); }
+        }
+        next.excludedVariants = [...new Map([...(incoming.excludedVariants ?? []), ...(current.excludedVariants ?? []), ...newlyExcluded].map(item => [canonicalPlatformSku(item.platformSku), item])).values()].filter(item => excludedSkus.has(canonicalPlatformSku(item.platformSku)));
         const supplierIds = new Set((current.suppliers ?? []).map(item => item.supplierId || item.id));
         next.suppliers = [...(current.suppliers ?? []), ...(incoming.suppliers ?? []).filter(item => !supplierIds.has(item.supplierId || item.id))];
         return JSON.stringify(next) === JSON.stringify(current) ? current : next;
@@ -350,8 +364,22 @@ function ProductEditor() {
         ...current,
         variants: current.variants.filter((_, rowIndex) => rowIndex !== index),
         suppliers: syncSupplierVariantRemoved(current.suppliers, removed?.platformSku, index),
+        ...(removed?.platformSku ? {
+          variantChoices: { ...current.variantChoices, [canonicalPlatformSku(removed.platformSku)]: { state: "excluded", reason: "手动排除", source: "manual" } },
+          excludedVariants: [...(current.excludedVariants ?? []).filter(item => canonicalPlatformSku(item.platformSku) !== canonicalPlatformSku(removed.platformSku)), removed],
+        } : {}),
       };
     });
+  };
+
+  const restoreVariant = (variant) => {
+    setSaved(false);
+    setDraft(current => ({ ...current,
+      variantChoices: { ...current.variantChoices, [canonicalPlatformSku(variant.platformSku)]: { state: "included", source: "manual" } },
+      excludedVariants: (current.excludedVariants ?? []).filter(item => canonicalPlatformSku(item.platformSku) !== canonicalPlatformSku(variant.platformSku)),
+      variants: current.variants.some(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(variant.platformSku)) ? current.variants : [...current.variants, variant],
+      suppliers: syncSupplierVariantAdded(current.suppliers, variant),
+    }));
   };
 
   const navigateSaved = (target, options) => {
@@ -436,7 +464,7 @@ function ProductEditor() {
   };
   const supplierRows = draft.suppliers.length ? draft.suppliers : [{ id: "primary", supplierName: draft.supplierName, sourceUrl: draft.sourceUrl, variants: draft.variants }];
   const prefill = snapshot.prefill;
-  const pendingNewVariants = (snapshot.draft.variants ?? []).filter(candidate => candidate.platformSku && !draft.variants.some(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(candidate.platformSku)) && !(draft.excludedIdentitySkus ?? []).some(sku => canonicalPlatformSku(sku) === canonicalPlatformSku(candidate.platformSku)));
+  const pendingNewVariants = (snapshot.draft.variants ?? []).filter(candidate => candidate.platformSku && !draft.variants.some(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(candidate.platformSku)) && !(draft.excludedIdentitySkus ?? []).some(sku => canonicalPlatformSku(sku) === canonicalPlatformSku(candidate.platformSku)) && draft.variantChoices?.[canonicalPlatformSku(candidate.platformSku)]?.state !== "excluded");
   const addNewCatalogData = () => {
     setDraft(current => {
       const identity = supplier => supplier.supplierId || supplier.id;
@@ -519,8 +547,13 @@ function ProductEditor() {
                 return <tr key={variant.id ?? index}>
                   <td><input aria-label={`第 ${index + 1} 个规格名称`} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" /></td>
                   <td><input id={`variant-${index}-sku`} aria-label={`第 ${index + 1} 个平台 SKU`} aria-invalid={Boolean(skuIssue)} aria-describedby={skuIssue ? `variant-${index}-sku-error` : undefined} className="table-input catalog-sku-input mono" value={variant.platformSku ?? ""} onChange={event => updateVariant(index, "platformSku", event.target.value)} />{skuIssue ? <small className="field-error" id={`variant-${index}-sku-error`}>{skuIssue}</small> : null}</td>
-                  <td><div className="catalog-cost-cell"><strong className="mono">{cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{cost == null && referenceRow?.erpCatalogPurchases?.length ? <small>待核实完整采购证据</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
-                  <td><input aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice ?? ""} onChange={event => updateVariant(index, "salePrice", event.target.value)} /></td>
+                  <td><div className="catalog-cost-cell"><strong className="mono">{cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{cost == null ? <small>{({ not_checked: "尚未查询采购", incomplete: "采购证据尚未读齐", no_valid_purchase: "已读齐，无有效采购", mapping_conflict: "商品映射待核对" })[reference.erpPurchaseState] ?? "采购资料待补"}</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
+                  <td><input aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice ?? ""} onChange={event => updateVariant(index, "salePrice", event.target.value)} />
+                    {!draft.fieldEdits?.variants?.[canonicalPlatformSku(variant.platformSku)]?.salePrice && variant.salePriceSource?.kind === "ledger" ? <details className="sale-price-source"><summary>{variant.salePriceSource.status === "choose" ? "售价待选择" : `台账 · ${variant.salePriceSource.sourceAddedAt?.slice(0, 10) ?? variant.salePriceSource.period}`}</summary>
+                      <small>{variant.salePriceSource.store} · {variant.salePriceSource.sourceAddedAt?.replace("T", " ").replace("+08:00", " 北京时间")}</small>
+                      {variant.salePriceSource.candidates?.map(candidate => <div key={candidate.priceExact}><span>¥{candidate.priceExact} · 净销 {candidate.quantityExact} 件</span>{variant.salePriceSource.status === "choose" ? <Button variant="ghost" onClick={() => updateVariant(index, "salePrice", candidate.value)}>采用 ¥{candidate.priceExact}</Button> : null}</div>)}
+                      <small>{variant.salePriceSource.sources?.map(source => `${source.store} · ${source.sourceSheet || "台账"} 第 ${source.sourceRow ?? "—"} 行 · 批次 ${source.batchId}`).join("；")}</small>
+                    </details> : null}</td>
                   <td className={`mono ${profit != null && profit < 0 ? "danger-text" : ""}`}>{salePrice == null ? "待填写售价" : profit == null ? "待参考成本" : `¥${profit.toFixed(2)}`}</td>
                   <td><details className="sku-details"><summary>查看 / 编辑</summary><div className="sku-detail-fields">{[["warehouseSku", "ERP 仓库 SKU"], ["sourceSku", "1688 来源 SKU"], ["imageUrl", "SKU 图片链接"]].map(([field, label]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个 ${label}`} className="text-input" value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} /></label>)}{variant.purchaseSpecification ? <p>采购规格：{variant.purchaseSpecification}</p> : null}{referenceRow?.referenceEvidence?.unitConversion ? <p>平台 SKU 与仓库单位换算：{referenceRow.referenceEvidence.unitConversion.warehouseUnits} 个仓库单位对应 {referenceRow.referenceEvidence.unitConversion.platformUnits} 个平台单品</p> : null}<div className="sku-quote-fields">{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个${label}`} className="table-input mono" type="number" min={min} step={step} value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} />{showFieldIssue(`variant-${index}-${field}-error`, `variant_${index}_${field === "purchasePackCount" ? "purchase_pack_count_invalid" : "units_per_pack_invalid"}`)}</label>)}</div><small>报价只在主动修改时更新；采购规格与平台属性分别保留。</small></div></details></td>
                   <td><button type="button" className="variant-remove" aria-label={`删除第 ${index + 1} 个规格`} onClick={() => removeVariant(index)}><Trash2 size={16} /></button></td>
@@ -528,6 +561,7 @@ function ProductEditor() {
               })}</tbody>
             </table>
           </div>
+          {draft.excludedVariants?.length ? <details className="editor-secondary-details excluded-variants"><summary>已排除规格（{draft.excludedVariants.length}）</summary>{draft.excludedVariants.map(variant => <div className="excluded-variant" key={variant.platformSku}><span><strong>{variant.attribute || variant.platformSku}</strong><small>{variant.platformSku} · {draft.variantChoices?.[canonicalPlatformSku(variant.platformSku)]?.reason || "已排除"}</small></span><Button variant="ghost" onClick={() => restoreVariant(variant)} aria-label={`恢复规格 ${variant.platformSku}`}>恢复</Button></div>)}</details> : null}
           <p className="editor-inline-note">参考成本覆盖 {referenceCostCount}/{draft.variants.length} 个 SKU。ERP 与 1688 来源各自保留；本页保存不会写入月度正式利润。</p>
         </Panel>
 

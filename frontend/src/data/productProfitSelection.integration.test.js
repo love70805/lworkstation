@@ -686,7 +686,11 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
       latestQuantity: 10,
       latestRevenue: 100,
       latestProfit: 53,
-      referenceUnitProfit: 5.3,
+      // This source has no reliable latest sale price; its finalized average
+      // remains historical evidence and cannot become the current reference.
+      historicalAverageSalePrice: 10,
+      averageSalePrice: null,
+      referenceUnitProfit: null,
     });
 
     expect(ledgerSnapshotBeforeCost.ledger.status).toBe("cost_pending");
