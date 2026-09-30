@@ -22,7 +22,7 @@ it('confirms once with audit, preserving financial rows', async () => {
   expect(await listSalesSourceConfirmations(scope.ledgerId)).toEqual([]);
   expect(await db.salesRows.toArray()).toEqual(before);
   expect(await db.profitLines.count()).toBe(0);
-  expect((await db.auditEvents.toArray()).some(event => event.action === 'confirm_sales_source_coverage' && event.workspaceId === DEFAULT_WORKSPACE_ID)).toBe(true);
+  expect((await db.auditEvents.toArray()).find(event => event.action === 'confirm_sales_source_coverage')).toMatchObject({ workspaceId: DEFAULT_WORKSPACE_ID, objectType: 'sales_import_batch', objectId: scope.batchId, actorId: 'local-user', after: { sourceCoverage: { scope: 'full_month' } } });
 });
 it('rejects residual scope, cross-workspace and finalized changes', async () => {
   const scope = await fixture();

@@ -1,7 +1,6 @@
 import { db } from '../db/clientDatabase';
 import { getActiveMemberContext } from './selectionRepository';
 import { createSalesSourceCoverage, salesSourceDateEvidence } from '../../domain/selectionSalesLabels';
-import { makeId } from '../db/utils';
 
 const key = value => String(value ?? '').normalize('NFKC').trim().toUpperCase();
 async function candidates(ledgerId) {
@@ -31,7 +30,7 @@ export async function confirmSalesSourceCoverage({ ledgerId, batchId, confirmed 
     const sourceCoverage = createSalesSourceCoverage({ period: ledger.period, storeName: entry.batch.store, declarationSource: 'manual' });
     const now = new Date().toISOString();
     await db.importBatches.update(batchId, { sourceCoverage, dateEvidence: salesSourceDateEvidence(entry.active, { period: ledger.period }) });
-    await db.auditEvents.add({ id: makeId('AUDIT'), workspaceId: member.workspaceId, entityType: 'import_batch', entityId: batchId, action: 'confirm_sales_source_coverage', actor: member.memberId, createdAt: now, payload: { ledgerId, previousCoverage: entry.batch.sourceCoverage ?? null, sourceCoverage } });
+    await db.auditEvents.add({ workspaceId: member.workspaceId, objectType: 'sales_import_batch', objectId: batchId, action: 'confirm_sales_source_coverage', actorId: member.memberId, createdAt: now, before: { sourceCoverage: entry.batch.sourceCoverage ?? null }, after: { ledgerId, sourceCoverage } });
     return sourceCoverage;
   });
 }
