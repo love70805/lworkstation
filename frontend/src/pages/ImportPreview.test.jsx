@@ -105,6 +105,9 @@ it('auto-selects the reliable source month and requires no extra validation clic
   await upload(false); await settled();
   expect(container.querySelector('#ledger-period').value).toBe('2026-07');
   expect(mocks.preview).toHaveBeenCalledTimes(1);
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  expect(container.querySelector('.batch-preview h2').textContent).toBe('整批处理完成 · 2026-07');
 });
 it('asks for a sheet only for the ambiguous file and parses the chosen sheet', async () => {
   mocks.parse.mockResolvedValueOnce({type:'sheet-selection-required',sheetCandidates:['明细甲','明细乙']});

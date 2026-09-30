@@ -73,8 +73,8 @@ export default function ImportPreview() {
   const periodEvidence = summarizeImportPeriod(files, requestedLedgerId ? period : null);
   const suggestedPeriod = periodEvidence.suggestedPeriod;
   useEffect(() => {
-    if (!requestedLedgerId && !periodChoiceRef.current) setPeriod(suggestedPeriod ?? "");
-  }, [requestedLedgerId, suggestedPeriod]);
+    if (!result && !requestedLedgerId && !periodChoiceRef.current) setPeriod(suggestedPeriod ?? "");
+  }, [requestedLedgerId, suggestedPeriod, result]);
   const returnHref = importReturnHref(location.search, location.state?.importReturnTo, result?.ledgerId);
   const returnLabel = returnHref.startsWith('/workspace') ? '返回经营概览' : returnHref.startsWith('/ledger') ? '返回月度账本' : '返回利润面板';
   useEffect(() => {
