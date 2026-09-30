@@ -34,15 +34,15 @@ it('hover/focus reads both exact values without database work; toggling/reopenin
  const negative=container.querySelector('.is-negative');expect(negative.style.top).toBe(container.querySelector('.sales-zero-line').style.top);
  await click(dayButton());expect(container.querySelector('.sales-day-details').textContent).not.toContain('OTHER-DAY');
  await click(button('销量'));expect(mocks.day).toHaveBeenCalledTimes(1);expect(mocks.month).toHaveBeenCalledTimes(1);
- await click(button('返回总览'));await click(dayButton());expect(mocks.month).toHaveBeenCalledTimes(1);
+ await click(button('返回趋势'));await click(dayButton());expect(mocks.month).toHaveBeenCalledTimes(1);
  await act(async()=>Simulate.keyDown(container.querySelector('.sales-day-details'),{key:'Escape'}));expect(container.querySelector('.sales-day-details')).toBeNull();
 });
 it('paginates selected-period SKCs and searches without changing totals',async()=>{
- await click(dayButton());expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
+ await click(dayButton());await click(container.querySelector('.sales-store-entry'));expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
  expect(container.querySelector('tbody tr').textContent).toContain('skc-00');
  expect(container.querySelector('.sales-activities')).toBeNull();
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
- await click(button('下一页'));expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
+ await click(button('下一页'));expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
  const sort=container.querySelector('.sales-details-controls select');await act(async()=>Simulate.change(sort,{target:{value:'quantityExact'}}));
  expect(container.querySelector('tbody tr').textContent).toContain('skc-14');
  const before=container.querySelector('.sales-details-heading p').textContent;
@@ -66,15 +66,15 @@ it('keeps store parent-controlled, displays async wait/failure and clears select
 });
 it('distinguishes a known zero day from an unlocated unknown day',async()=>{
  await click(container.querySelectorAll('.sales-daily-bar')[2]);expect(container.textContent).toContain('当天已知销售额与销量为 0');
- await click(button('返回总览'));mocks.day.mockResolvedValueOnce(aggregateDailySalesDetails([],{period,date}));
+ await click(button('返回趋势'));mocks.day.mockResolvedValueOnce(aggregateDailySalesDetails([],{period,date}));
  await click(dayButton());expect(container.querySelector('.sales-day-details').textContent).toContain('销售原额 待查 · 销量 待查');
 });
 it('uses the period read contract for date clicks and refreshes it when the scope reloads',async()=>{
  mocks.month.mockImplementation(async()=>({...aggregateDailySales(rows,{period,includeSkuStats:false}),sourceRows:rows}));
  await render({ledgerId:'cached'});
- await click(dayButton());
+ await click(dayButton());await click(container.querySelector('.sales-store-entry'));
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
- await click(button('返回总览'));
+ await click(button('趋势'));
  await click(container.querySelectorAll('.sales-daily-bar')[1]);
  expect(container.querySelector('.sales-details-heading p').textContent).toContain('¥-0.009');
  expect(mocks.day).toHaveBeenCalledTimes(2);

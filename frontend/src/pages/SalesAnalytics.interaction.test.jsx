@@ -45,16 +45,18 @@ it('replaces daily stacks with a store pie, retains SKC details and resets only 
   expect(container.querySelectorAll('.sales-store-pie [role="button"]')).toHaveLength(2);
   expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(2);
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
-  expect(container.textContent).toContain('SKC1');
+  await act(async () => container.querySelector('.sales-store-entry').click());
+  expect(container.textContent).toContain('SKC');
   const table = container.querySelector('.sales-day-table'); table.scrollTop = 200; document.documentElement.scrollTop = 400;
   await act(async () => Simulate.scroll(table));
   await act(async () => find('下一页').click());
   expect(table.scrollTop).toBe(0); expect(document.documentElement.scrollTop).toBe(400);
-  await act(async () => find('返回总览').click());
+  await act(async () => find('趋势').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
 });
 it('search changes reset pagination without destroying the input element', async () => {
   await act(async () => container.querySelector('.sales-daily-bar').click());
+  await act(async () => container.querySelector('.sales-store-entry').click());
   await act(async () => find('下一页').click());
   const input = container.querySelector('input'); input.focus();
   await choose(input, 'SKC24');
@@ -80,8 +82,8 @@ it('keeps monthly data lazy, stacks daily stores on a shared column, and keeps h
   expect(container.querySelectorAll('.sales-stack-segment')).toHaveLength(1);
   expect(container.querySelector('.sales-month-totals').textContent).toContain('250');
   await act(async () => container.querySelector('.sales-daily-bar').click());
-  expect(container.querySelector('.sales-list-scope').textContent).toContain('25/25');
-  expect(container.querySelectorAll('tbody tr')).toHaveLength(6);
+  expect(container.querySelector('.sales-list-scope').textContent).toContain('2/2');
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
 });
 it('hover and keyboard focus keep chart and details DOM stable without extra data reads', async () => {
   const bar = container.querySelector('.sales-daily-bar');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSalesMonth, salesScale, salesSegments, salesStoreColor, salesDayDifference, salesGroupedScale, salesGroupedSegments } from './salesChartModel';
+import { buildSalesMonth, salesScale, salesSegments, salesStoreColor, salesDayDifference, salesGroupedScale, salesGroupedSegments, salesMonthRange, salesOverviewMonths, assignSalesStoreColors } from './salesChartModel';
 const row = (store, date, amount, quantity = '1') => ({ store, sourceAddedDate: date, amountExact: amount, quantityExact: quantity });
 const model = (rows, period = '2026-08', store = 'all') => buildSalesMonth({ period, sourceRows: rows }, { store, today: '2026-09-14' });
 describe('sales chart semantic model', () => {
@@ -96,4 +96,24 @@ describe('sales chart semantic model', () => {
       }
     }
   });
+});
+
+it('keeps ten distinct soft colors stable across scope changes and new identities', () => {
+  const assignments = new Map();
+  const first = assignSalesStoreColors(Array.from({ length: 10 }, (_, index) => '店' + index), assignments);
+  expect(new Set(Object.values(first)).size).toBe(10);
+  expect(assignSalesStoreColors(['店1', '店2', '新店'], assignments)).toMatchObject(first);
+  expect(salesStoreColor('店1')).toBe(salesStoreColor(' 店1 '));
+});
+
+it('fills calendar gaps as unknown while retaining the selected end month and exact overview sums', () => {
+  const a = { ...model([row('甲', '2026-06-01', '10'), row('乙', '2026-06-01', '-3')], '2026-06'), ledgerId: 'J' };
+  const b = { ...model([row('甲', '2026-08-01', '0.009')]), ledgerId: 'A' };
+  const range = salesMonthRange([a, b], 3, '2026-08');
+  expect(range.map(item => item.period)).toEqual(['2026-06', '2026-07', '2026-08']);
+  expect(range[1]).toMatchObject({ missingLedger: true, coverage: 'unknown', monthTotalsExact: { revenueExact: null } });
+  const overview = salesOverviewMonths(range);
+  expect(overview[0].monthlySegments[0].revenueExact).toBe('7');
+  expect(overview[1].monthlySegments).toEqual([]);
+  expect(salesGroupedScale(overview, 'revenueExact', { monthly: true }).max).toBe(7.56);
 });

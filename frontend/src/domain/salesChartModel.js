@@ -4,13 +4,40 @@ import { parseSalesAddedDate } from './salesAnalytics';
 const Exact = Decimal.clone({ precision: 80 });
 const total = () => ({ revenueExact: '0', quantityExact: '0' });
 export const salesStoreKey = name => canonicalStore(name || '店铺待查');
-export function salesStoreColor(name) {
+function storeHash(name) {
   let hash = 2166136261;
   for (const char of salesStoreKey(name)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
-  // Deliberately spaced hues keep common stores distinct without changing
-  // their color when the month, filter or legend visibility changes.
-  const hues = [217, 166, 270, 32, 140, 345, 190, 290, 48, 110, 15, 245];
-  return `hsl(${hues[(hash >>> 0) % hues.length]} 68% 46%)`;
+  return hash >>> 0;
+}
+export function salesStoreColor(name) {
+  const palette = ['#6687b6', '#639c91', '#9584ab', '#b38d6d', '#749aa8', '#b97d89', '#889764', '#a28e68', '#7f89a7', '#a18798'];
+  return `var(--sales-store-${storeHash(name)}, ${palette[storeHash(name) % palette.length]})`;
+}
+// Allocate the ten distinguishable palette slots once per analytics scope.
+// Adding a store cannot recolor existing identities; filters never release slots.
+export function assignSalesStoreColors(names, assignments = new Map()) {
+  for (const name of [...new Set(names.map(salesStoreKey))].sort()) {
+    if (assignments.has(name)) continue;
+    let slot = storeHash(name) % 10;
+    if (assignments.size < 10) while ([...assignments.values()].includes(slot)) slot = (slot + 1) % 10;
+    assignments.set(name, slot);
+  }
+  return Object.fromEntries([...assignments].map(([name, slot]) => [`--sales-store-${storeHash(name)}`, `var(--sales-palette-${slot})`]));
+}
+
+// Calendar slots retain absent months as unknown instead of inventing zero sales.
+export function salesMonthRange(months, length = 12, endPeriod = months.at(-1)?.period) {
+  if (!endPeriod) return [];
+  const [year, month] = endPeriod.split('-').map(Number);
+  return Array.from({ length }, (_, index) => {
+    const date = new Date(Date.UTC(year, month - length + index, 1));
+    const period = date.toISOString().slice(0, 7);
+    return months.find(item => item.period === period) ?? { period, ledgerId: `missing:${period}`, missingLedger: true, coverage: 'unknown', daily: [], monthlySegments: [], monthTotalsExact: { revenueExact: null, quantityExact: null } };
+  });
+}
+
+export function salesOverviewMonths(months) {
+  return months.map(month => ({ ...month, monthlySegments: month.coverage === 'unknown' || month.missingStore ? [] : [{ ...month.monthTotalsExact, key: 'all', store: '全部店铺' }] }));
 }
 export function buildSalesMonth(data, { store = 'all', today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }) } = {}) {
   const period = data.period, byDay = new Map(), stores = new Map(), byStore = new Map();
