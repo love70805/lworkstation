@@ -9,7 +9,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'C:/Users/Administra
 const extension = path.join(root, 'integrations/erp-assistant-extension/src');
 const source = (await Promise.all(['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'].map(file => readFile(path.join(extension,file),'utf8')))).join('\n');
 const css = await readFile(path.join(extension,'content.css'),'utf8');
-const out = path.join(root,'archive/release-0.3.4'); await mkdir(out,{recursive:true});
+const version = JSON.parse(await readFile(path.join(root, 'frontend/package.json'), 'utf8')).version;
+const out = process.env.ERP_UI_EVIDENCE_DIR || path.join(root, 'archive', 'release-' + version, 'headless-collection'); await mkdir(out,{recursive:true});
 const browser = await chromium.launch({ channel:'msedge',headless:true });
 const context = await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
 const messages = [], requests = [], errors = []; let releaseDirectory;
