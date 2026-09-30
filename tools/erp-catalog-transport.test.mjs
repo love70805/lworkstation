@@ -31,10 +31,16 @@ export async function verifyErpCatalogTransport({
   ledgerId = "LEDGER-CATALOG",
   requestId = "REQ-CATALOG",
   includeConflict = true,
+  syntheticSpoolBytes = 0,
   expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }],
 } = {}) {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lworkstation-erp-catalog-"));
   const spoolPath = path.join(temporaryRoot, "isolated-inbox.json");
+  if (syntheticSpoolBytes > 0) {
+    const records = Array.from({ length: 2000 }, (_, index) => ({ kind: "batch", workspaceId: "synthetic-unrelated-workspace",
+      status: "acknowledged", deliveryId: `SYNTHETIC-${index}`, sourceMeta: { padding: "x".repeat(Math.ceil(syntheticSpoolBytes / 2000)) } }));
+    await fs.writeFile(spoolPath, JSON.stringify(records));
+  }
   const port = await unusedPort();
   const base = `http://127.0.0.1:${port}`;
   const capability = `synthetic-catalog-capability-${randomUUID()}`;
@@ -241,7 +247,7 @@ export async function verifyErpCatalogTransport({
     const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v6"));
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
     const persisted = JSON.parse(await fs.readFile(spoolPath, "utf8"));
-    assert.deepEqual(persisted.find((record) => record.kind === "batch").envelope.batch.rows, batch.rows);
+    assert.deepEqual(persisted.find((record) => record.kind === "batch" && record.workspaceId === workspaceId).envelope.batch.rows, batch.rows);
     assert.doesNotMatch(JSON.stringify(batch), /999999999999|888888888888|777777777777/, "global DOM and order-level product links must never enter detail evidence");
 
     // Synthetic non-empty values for the observed barcode fields check source
