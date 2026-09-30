@@ -9,6 +9,7 @@ import { filterMonthlyLedgers } from "../lib/ledgerFilter";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
 import { currentLedgerResult } from "../domain/ledgerWorkflow";
+import { confirmSalesSourceCoverage, listSalesSourceConfirmations } from '../data/repositories/salesSourceCoverageRepository';
 
 const money = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 
@@ -49,6 +50,15 @@ export default function MonthlyLedger() {
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [query, setQuery] = useState("");
+  const [sourceLedger, setSourceLedger] = useState(null);
+  const [confirmingSource, setConfirmingSource] = useState(false);
+  const sources = useLiveQuery(() => sourceLedger ? listSalesSourceConfirmations(sourceLedger.id) : [], [sourceLedger?.id], []);
+  const confirmSource = async batchId => {
+    setConfirmingSource(true);
+    try { await confirmSalesSourceCoverage({ ledgerId: sourceLedger.id, batchId, confirmed: true }); notify('已确认整月来源，销量标签将自动刷新。'); }
+    catch (error) { notify(error.message, 'error'); }
+    finally { setConfirmingSource(false); }
+  };
 
   const filteredItems = useMemo(() => filterMonthlyLedgers(items, query, ledgerStateLabels), [items, query]);
 
@@ -141,7 +151,7 @@ export default function MonthlyLedger() {
                   <small>{current.label}{current.state === 'deduction_pending' ? ' · 当前金额为未扣款基础' : ''}</small>
                   {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`成本确认进度 ${progress}%`} /> : null}
                 </div>
-                <div className="ledger-card-footer"><Button icon={locked ? LockKeyhole : BarChart3} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(ledger.id)}`)}>{locked ? "查看归档" : finalized ? "查看本月" : "继续核算"}</Button></div>
+                <div className="ledger-card-footer"><Button icon={locked ? LockKeyhole : BarChart3} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(ledger.id)}`)}>{locked ? "查看归档" : finalized ? "查看本月" : "继续核算"}</Button><Button onClick={() => setSourceLedger(ledger)}>台账来源</Button></div>
               </Panel>
             );
           })}
@@ -149,6 +159,9 @@ export default function MonthlyLedger() {
       )}
 
       <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
+      <Modal open={Boolean(sourceLedger)} title="确认台账来源" description="仅在原文件包含该店整月全部商品时确认。确认后更新销量参考，不修改销售明细或正式利润。" onClose={() => { if (!confirmingSource) setSourceLedger(null); }}>
+        {sources.length ? sources.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或账本已定稿，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
+      </Modal>
     </AppShell>
   );
 }
