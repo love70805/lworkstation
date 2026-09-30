@@ -28,6 +28,12 @@
 
 销售行新增非索引 sourceAddedAt/sourceAddedDate/rawAddedAt/dateStatus/timezone、unitPriceRaw/amountExact、activityRaw/activityStatus、sourceSheet/真实 sourceRow；不从 orderDate/importedAt 补造日期。小型筛选偏好可放 settings（按工作区），业务批次和报告不得塞 settings。
 
+0.3.6 补充：`sourceAddedAt` 为北京时间完整 ISO 时间（含毫秒及 `+08:00`），`sourceAddedTimestamp` 为同一时刻的 epoch 毫秒，`sourceTimePrecision` 为 `day` / `second` / `millisecond`。Excel 日期小数保留时分秒，1904 日期系统沿源文件解释；显式时区归一到北京时间。原 `sourceAddedDate` 日字段与 `rawAddedAt` 保留，缺失/无效日期的新增字段为 null；不将仅日期的旧来源伪装成已知时分秒。选品售价可据此比较业务时间，正式台账收入不变。备份/同步继续携带原行附加字段，无新增索引或真实库批量改写。
+
+批量台账导入自动识别具有 SKU、SKC/供方货号及数量/金额表头的非空明细页，多个有效候选由用户逐文件选择。标准台账保留原正常发货分类，不提供商品/货号预筛；原始/有效/业务排除/错误行数独立统计。相同文件、映射与来源范围的重复和替换保护沿用。已知跨月行在页面与 repository 双重拒绝。Worker 校验以 2,000 行传输，持久化以 2,000 行写入同一事务；`saveSalesImports` 可接受仅运行时的 `signal` / `onProgress`，取消抛错回滚整批，不新增持久字段。
+
+浏览器中的输入快照归一、分组汇总与预览签名由一次性 Worker 计算；输入在 `postMessage` 时形成隔离快照，账本与来源批次快照仍在 Dexie 事务内读取，`Dexie.waitFor` 保持事务直到后台校验返回。签名为固定 128 行分块的 SHA-256 摘要，并绑定分块顺序、总行数与全部配置/目标元数据，替代整批 JSON 长字符串；摘要只在本次预览中使用，不写入库或同步协议。解析 Worker 在生成全部规范行后立即释放；修改配置会按原始 File 和已选明细页重新读取，不能复用过期预览。
+
 ## 两阶段流程
 
 - 核算草稿期间可导入销售、发布 ERP/人工更正、填写/选取代发。非负代发数量采用用户输入；0 与未填写区分，不受销售件数上限限制、不分摊各店。

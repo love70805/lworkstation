@@ -23,7 +23,7 @@ describe('batch import Worker jobs', () => {
     expect(result.rows[0]).toMatchObject({sourceSheet:'台账',sourceRow:2,quantityExact:'0.5',unitPriceRaw:'0.009',amountExact:'0.0045',activityStatus:'known',activityRaw:'促销'});
     expect(result.rows[1]).toMatchObject({sourceRow:4,dateStatus:'out_of_period',activityStatus:'missing'});
   });
-  it('keeps four formats/jobs isolated, preserves Chinese/leading zero and only reads the first worksheet', async () => {
+  it('keeps four formats/jobs isolated, preserves Chinese/leading zero and requires explicit selection of ambiguous detail sheets', async () => {
     const send = await worker();
     for (const extension of ['csv','tsv','xlsx','xls']) {
       const cells = [headers, ['甲店','供方01','父商品','000123','2','10']];
@@ -35,7 +35,10 @@ describe('batch import Worker jobs', () => {
         XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers,['乙店','错误','错误','999','999','999']]), '忽略');
         buffer = XLSX.write(book, {type:'array',bookType:extension === 'xls' ? 'biff8' : 'xlsx'});
       }
-      expect(send({type:'parse',jobId:extension,extension,buffer})).toMatchObject({type:'parsed',rowCount:1});
+      if (extension === 'xls' || extension === 'xlsx') {
+        expect(send({type:'parse',jobId:extension,extension,buffer})).toMatchObject({type:'sheet-selection-required',sheetCandidates:['首表','忽略']});
+      }
+      expect(send({type:'parse',jobId:extension,extension,buffer,selectedSheet:'首表'})).toMatchObject({type:'parsed',rowCount:1});
     }
     for (const jobId of ['csv','tsv','xlsx','xls']) {
       expect(send({type:'validate',jobId,mapping,options:{defaultStore:'甲店',enforceSingleStore:true}})).toMatchObject({type:'validated',rows:[{platformSku:'000123',store:'甲店',amount:10}],summary:{errorCount:0}});
@@ -54,4 +57,24 @@ describe('batch import Worker jobs', () => {
     send({type:'parse',jobId:'mixed',extension:'csv',buffer});
     expect(send({type:'validate',jobId:'mixed',mapping,options:{defaultStore:'甲店',enforceSingleStore:true,supplierNumbers:['供方01']}})).toMatchObject({summary:{validRowCount:1,errorCount:1,ignoredCount:1}});
   });
+});
+
+it('finds the actual detail sheet after a personnel summary and ignores an empty anomaly sheet', async () => {
+  const send = await worker();
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['人员','SKC','计数'], ['某人','父',9]]), '人员汇总');
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers, ['甲店','供方','父','001',2,10]]), '台账变动明细');
+  XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([headers]), '异常');
+  expect(send({ type:'parse',jobId:'actual',extension:'xlsx',buffer:XLSX.write(book,{type:'array',bookType:'xlsx'}) })).toMatchObject({type:'parsed',selectedSheet:'台账变动明细',rowCount:1});
+  expect(send({type:'validate',jobId:'actual',mapping})).toMatchObject({rows:[{sourceSheet:'台账变动明细',sourceRow:2,platformSku:'001'}]});
+});
+it('streams validated rows in bounded chunks with real progress', async () => {
+  const send = await worker();
+  const buffer = new TextEncoder().encode(headers.join(',')+'\n'+Array.from({length:4101},(_,i)=>`甲店,货号${i},父${i},${i},1,2`).join('\n')).buffer;
+  send({type:'parse',jobId:'large',extension:'csv',buffer});
+  const result = send({type:'validate',jobId:'large',mapping,chunked:true});
+  expect(result.rows).toBeUndefined();
+  expect(result.summary.validRowCount).toBe(4101);
+  expect(messages.filter(item=>item.type==='validated-chunk').map(item=>item.rows.length)).toEqual([2000,2000,101]);
+  expect(messages.filter(item=>item.type==='progress').at(-1)).toMatchObject({completed:4101,total:4101,value:100});
 });

@@ -135,3 +135,15 @@ describe("sales import row compatibility", () => {
     ], mapping)).toMatchObject({ supplierNumbers: ["YW-A", "YW-B"], movementTypes: expect.arrayContaining(["平台客单发货", "客单发货"]) });
   });
 });
+
+it('preserves full Beijing business timestamps including Excel fractions independently of import order', () => {
+  const mapping = {platformSku:'SKU',platformSkc:'SKC',quantity:'数量',unitPrice:'单价',sourceAddedAt:'添加时间'};
+  const result = validateSalesRows([
+    {SKU:'001',SKC:'父',数量:1,单价:2,添加时间:46235.75},
+    {SKU:'001',SKC:'父',数量:1,单价:3,添加时间:'2026-08-01 18:00:00.123'},
+    {SKU:'001',SKC:'父',数量:1,单价:4,添加时间:'2026-08-01T10:00:00.123Z'},
+  ], mapping, {defaultStore:'甲',deriveAmountFromUnitPrice:true,period:'2026-08'});
+  expect(result.rows.map(row=>row.sourceAddedAt)).toEqual(['2026-08-01T18:00:00.000+08:00','2026-08-01T18:00:00.123+08:00','2026-08-01T18:00:00.123+08:00']);
+  expect(result.rows[1].sourceAddedTimestamp).toBe(result.rows[2].sourceAddedTimestamp);
+  expect(result.rows[0].sourceTimePrecision).toBe('second');
+});

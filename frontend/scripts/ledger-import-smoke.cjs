@@ -1,0 +1,29 @@
+const {app,BrowserWindow,session}=require('electron');
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'../..');const XLSX=require(path.join(root,'frontend/node_modules/xlsx'));
+const origin=process.env.LEDGER_SMOKE_ORIGIN||'http://127.0.0.1:5198';
+if(new URL(origin).hostname!=='127.0.0.1')throw new Error('loopback only');
+const output=path.join(root,'archive/release-0.3.6-ledger/synthetic-ui');fs.mkdirSync(output,{recursive:true});
+app.setPath('userData',path.join(output,'profile-'+Date.now()));
+const headers=['添加时间','变动类型','供方货号','SKC','平台SKU','属性集','数量','单价'];
+function source(name,count){const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['人员','SKC计数'],['合成人员',99]]),'人员汇总');const rows=Array.from({length:count},(_,i)=>['2026-08-31 21:32:10','平台客单发货','合成货号-'+i,'SKC-'+i,'SKU-'+name+'-'+i,'合成正常规格',1,2]);rows.push(['2026-08-31','盘亏','排除','LOSS','LOSS-'+name,'盘亏',1,2]);XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([headers,...rows]),'台账变动明细');XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([headers]),'空异常页');const file=path.join(output,name+'.xlsx');XLSX.writeFile(book,file);return file;}
+const files=[source('合成甲店',12001),source('合成乙店',3)];
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const result={checks:[]};
+app.whenReady().then(async()=>{
+ session.defaultSession.webRequest.onBeforeRequest((d,cb)=>{const u=new URL(d.url);cb({cancel:['http:','https:'].includes(u.protocol)&&u.origin!==origin})});
+ const win=new BrowserWindow({width:1200,height:850,show:false,webPreferences:{backgroundThrottling:false}});const ev=c=>win.webContents.executeJavaScript(c);
+ const until=async(code,timeout=60000)=>{const end=Date.now()+timeout;while(Date.now()<end){if(await ev(`Boolean(${code})`))return;await sleep(25)}throw new Error('timeout '+code+' '+await ev('document.body.innerText.slice(-1000)'))};
+ const click=async text=>ev(`{const b=[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)});if(!b||b.disabled)throw new Error('missing/enabled button');b.click()}`);
+ await win.loadURL(origin+'/import-preview');await until("document.querySelector('input[type=file]')");win.webContents.debugger.attach('1.3');
+ const {root:dom}=await win.webContents.debugger.sendCommand('DOM.getDocument');const {nodeId}=await win.webContents.debugger.sendCommand('DOM.querySelector',{nodeId:dom.nodeId,selector:'input[type=file]'});await win.webContents.debugger.sendCommand('DOM.setFileInputFiles',{nodeId,files});
+ await until("document.querySelector('.batch-preview')");assert.equal(await ev("document.querySelector('#ledger-period').value"),'2026-08');assert.equal(await ev("document.querySelectorAll('.batch-file').length"),2);assert.equal(await ev("document.querySelector('.batch-filters')!==null"),false);result.checks.push('actual multi-sheet worker auto-detects source and auto-previews all products');
+ for(const [width,theme] of [[1200,'light'],[800,'dark'],[360,'light'],[320,'dark']]){win.setContentSize(width,850);await ev(`(async()=>{const {applyAppearance}=await import('/src/lib/appearance.js');applyAppearance(${JSON.stringify(theme)});document.querySelector('.batch-files').scrollIntoView({block:'start'})})()`);await sleep(220);assert.equal(await ev('document.documentElement.dataset.appearance'),theme);assert.equal(await ev('document.documentElement.scrollWidth>innerWidth'),false);fs.writeFileSync(path.join(output,`files-${width}-${theme}.png`),(await win.webContents.capturePage()).toPNG());await ev("document.querySelector('.batch-preview').scrollIntoView({block:'start'})");await sleep(100);fs.writeFileSync(path.join(output,`preview-${width}-${theme}.png`),(await win.webContents.capturePage()).toPNG());}
+ result.checks.push('populated file and preview layouts at 1200/800/360/320 in actual light/dark appearance');
+ await ev("document.querySelector('.batch-store input').focus()");win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab'});await sleep(50);assert.equal(await ev("document.activeElement.getAttribute('aria-label')"),'移除 合成甲店.xlsx');result.checks.push('native Tab moves from store input to its removal button');
+ await click('导入');await until("/写入 [0-9,]+ \\/ [0-9,]+ 行/.test(document.querySelector('.import-progress')?.innerText||'')");await click('取消当前处理');await until("document.body.innerText.includes('整批写入已回滚')");
+ const cancelled=await ev("(async()=>{const {db}=await import('/src/data/database.js');return {rows:await db.salesRows.count(),batches:await db.importBatches.count(),ledgers:await db.ledgers.count()}})()");assert.deepEqual(cancelled,{rows:0,batches:0,ledgers:0});result.checks.push('cancel after real chunk write rolls back rows/batches/ledger');
+ await click('重新校验');await until("document.querySelector('.batch-preview')");await click('导入');await until("document.body.innerText.includes('整批处理完成')");
+ result.persisted=await ev("(async()=>{const {db}=await import('/src/data/database.js');const audits=(await db.auditEvents.toArray()).filter(e=>e.action==='imported');return {rows:await db.salesRows.count(),auditedRows:audits.reduce((s,e)=>s+e.after.snapshot.salesRows.length,0),allAuditIds:audits.every(e=>e.after.snapshot.salesRows.every(r=>Number.isInteger(r.id)))}})()");assert.deepEqual(result.persisted,{rows:12004,auditedRows:12004,allAuditIds:true});result.checks.push('retry writes once with compatible complete audit snapshots and real IDs');
+ fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));win.destroy();app.quit();
+}).catch(e=>{fs.writeFileSync(path.join(output,'failure.txt'),e.stack);console.error(e);app.exit(1)});

@@ -15,33 +15,39 @@ export function decimalSource(value, fallback = "0") {
 
 export function parseSalesAddedDate(value, { period, date1904 = false } = {}) {
   const rawAddedAt = String(value ?? "").trim();
-  const result = { rawAddedAt, sourceAddedDate: null, dateStatus: rawAddedAt ? "invalid" : "missing", timezone: SALES_TIMEZONE };
+  const result = { rawAddedAt, sourceAddedDate: null, sourceAddedAt: null, sourceAddedTimestamp: null, sourceTimePrecision: null, dateStatus: rawAddedAt ? "invalid" : "missing", timezone: SALES_TIMEZONE };
   if (!rawAddedAt) return result;
-  let date;
+  let localTimestamp, precision;
   if (typeof value === "number" || /^\d+(\.\d+)?$/.test(rawAddedAt)) {
     const serial = Number(value);
-    // Excel's fictitious 1900-02-29 is not a valid calendar date.
     if (!Number.isFinite(serial) || serial < 0 || (!date1904 && Math.floor(serial) === 60)) return result;
     const origin = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 31);
     const days = Math.floor(serial) - (!date1904 && serial >= 60 ? 1 : 0);
-    const instant = new Date(origin + days * 86400000);
-    if (!Number.isFinite(instant.getTime())) return result;
-    date = instant.toISOString().slice(0, 10);
+    // Excel fractions are wall-clock time in Beijing, independent of the host timezone.
+    localTimestamp = origin + days * 86400000 + Math.round((serial - Math.floor(serial)) * 86400000);
+    precision = Number.isInteger(serial) ? "day" : localTimestamp % 1000 ? "millisecond" : "second";
   } else {
-    const match = rawAddedAt.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/);
+    const match = rawAddedAt.match(/^(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/);
     if (!match) return result;
-    const [, y, m, d, h = "0", min = "0", sec = "0", zone] = match;
+    const [, y, m, d, h = "0", min = "0", sec = "0", fraction = "", zone] = match;
     const instant = new Date(Date.UTC(+y, +m - 1, +d));
     if (instant.getUTCFullYear() !== +y || instant.getUTCMonth() !== +m - 1 || instant.getUTCDate() !== +d || +h > 23 || +min > 59 || +sec > 59) return result;
-    date = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-    if (zone) {
-      const timestamp = Date.parse(`${date}T${h.padStart(2, "0")}:${min}:${sec}${zone}`);
-      if (!Number.isFinite(timestamp)) return result;
-      date = new Date(timestamp + 8 * 3600000).toISOString().slice(0, 10);
-    }
+    localTimestamp = Date.UTC(+y, +m - 1, +d, +h, +min, +sec, Number(fraction.padEnd(3, "0").slice(0, 3)));
+    if (zone && zone !== "Z") {
+      const offset = zone.slice(1).replace(":", "");
+      if (+offset.slice(0, 2) > 23 || +offset.slice(2) > 59) return result;
+      const offsetMinutes = (+offset.slice(0, 2) * 60 + +offset.slice(2)) * (zone[0] === "+" ? 1 : -1);
+      localTimestamp += (480 - offsetMinutes) * 60000;
+    } else if (zone === "Z") localTimestamp += 8 * 3600000;
+    precision = match[4] === undefined ? "day" : fraction ? "millisecond" : "second";
   }
+  if (!Number.isFinite(localTimestamp)) return result;
+  const localDate = new Date(localTimestamp);
+  if (!Number.isFinite(localDate.getTime())) return result;
+  const local = localDate.toISOString().replace("Z", "+08:00");
+  const date = local.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return result;
-  return { ...result, sourceAddedDate: date, dateStatus: period && !date.startsWith(`${period}-`) ? "out_of_period" : "valid" };
+  return { ...result, sourceAddedDate: date, sourceAddedAt: local, sourceAddedTimestamp: localTimestamp - 8 * 3600000, sourceTimePrecision: precision, dateStatus: period && !date.startsWith(`${period}-`) ? "out_of_period" : "valid" };
 }
 
 const emptyTotal = () => ({ quantityExact: "0", revenueExact: "0", count: 0 });

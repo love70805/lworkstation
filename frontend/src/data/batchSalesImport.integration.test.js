@@ -136,3 +136,23 @@ describe("同月多店铺原子台账导入", () => {
     expect((await previewSalesImports({ period, items: [file("甲店")] })).items[0].status).toBe("skipped_duplicate");
   });
 });
+
+it('cancels between write chunks and atomically restores all previous rows and audit events', async () => {
+  await commit([file('保留店')]);
+  const raw = Array.from({length:4101},(_,index)=>({SKU:`SKU-${index}`,SKC:'大商品',数量:1,金额:2}));
+  const items = [file('大店',2,{raw})];
+  const input = {period,items};
+  const preview = await previewSalesImports(input);
+  const before = await facts();
+  const controller = new AbortController();
+  const progress = [];
+  await expect(saveSalesImports({...input,preview,signal:controller.signal,onProgress:value=>{progress.push(value);controller.abort();}})).rejects.toThrow('已回滚');
+  expect(progress).toEqual([{completed:2000,total:4101}]);
+  expect(await facts()).toEqual(before);
+});
+it('rejects a known different source month even if the caller bypasses the UI', async () => {
+  const item = file('甲店');
+  item.rows[0].sourceAddedDate = '2026-07-31';
+  await expect(previewSalesImports({period,items:[item]})).rejects.toThrow('来源月份与账本');
+  expect(await db.salesRows.count()).toBe(0);
+});
