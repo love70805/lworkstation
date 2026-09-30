@@ -1153,7 +1153,10 @@
             const catalog = await catalogCollector.collect(state.meta.querySkcs, run, state.catalogInitial);
             if (run.controller.signal.aborted) return;
             if (context.request.platformSkcs.length !== state.meta.querySkcs.length) {
-                catalog.coverage.directory.state = 'partial'; catalog.coverage.directory.reasons.push('query_scope_subset');
+                for (const group of Object.values(catalog.coverage)) {
+                    if (group.state === 'complete') group.state = 'partial';
+                    group.reasons.push('query_scope_subset');
+                }
             }
             if (run.controller.signal.aborted) return;
             const response = await bridge.submitCatalog({ requestId: context.request.requestId, querySkcs: context.request.platformSkcs, results: catalog.results, warehouseEvidence: catalog.warehouseEvidence, catalogCoverage: catalog.coverage, resultDeliveryId: makeResultDeliveryId(), createdAt: new Date().toISOString() });

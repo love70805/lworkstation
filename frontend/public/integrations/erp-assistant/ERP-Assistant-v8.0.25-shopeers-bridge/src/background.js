@@ -564,7 +564,12 @@
     const config = await runtimeConfig();
     const payload = await fetchLoopbackJson('/erp/v1/requests', { query: { workspaceId: config.workspaceId }, config });
     const source = input?.queryCapturedAt ? findUniqueRequest(payload.records, { querySkcs: normalizedSkcs(input.querySkcs), registeredBefore: input.queryCapturedAt, workspaceId: config.workspaceId }) : null;
-    const candidates = (payload.records || []).filter(request => (!source || request.sourceRequestId === source.requestId) && (!request.sourceRequestId || (payload.records || []).some(cost => cost.requestId === request.sourceRequestId && cost.status === 'registered' && cost.workspaceId === config.workspaceId)) && request.requestKind === 'catalog' && request.status === 'registered' && request.workspaceId === config.workspaceId && (!input?.requestId || request.requestId === input.requestId));
+    let candidates = (payload.records || []).filter(request => (!source || request.sourceRequestId === source.requestId) && (!request.sourceRequestId || (payload.records || []).some(cost => cost.requestId === request.sourceRequestId && cost.status === 'registered' && cost.workspaceId === config.workspaceId)) && request.requestKind === 'catalog' && request.status === 'registered' && request.workspaceId === config.workspaceId && (!input?.requestId || request.requestId === input.requestId));
+    if (source) candidates = candidates.filter(request => request.requestId === `${source.requestId}-CATALOG`);
+    else if (!input?.requestId) {
+      const explicit = candidates.filter(request => request.requestId !== `${request.sourceRequestId}-CATALOG`);
+      if (explicit.length) candidates = explicit;
+    }
     if (candidates.length !== 1) throw loopbackError(candidates.length ? 'ERP_REQUEST_AMBIGUOUS' : 'ERP_REQUEST_NOT_FOUND', candidates.length ? '存在多个资料请求，请在工作台取消旧请求后再补充。' : '请先在工作台登记补充资料请求。', 409);
     assertRecordWorkspace({ workspaceId: config.workspaceId }, await runtimeConfig());
     return { request: candidates[0], config };

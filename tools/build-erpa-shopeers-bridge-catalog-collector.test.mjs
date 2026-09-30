@@ -166,6 +166,12 @@ export async function verifyErpCatalogBackgroundBinding() {
   const api = sandbox.__SHOPEERS_ERP_BACKGROUND_TEST_API__;
   const sender = { frameId: 0, url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', tab: { url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' } };
   assert.equal((await api.catalogContext({}, sender)).request.requestId, 'CATALOG-CONFIRMED');
+  requests[0].registeredAt = '2026-09-01T00:00:00.000Z';
+  requests.push({ ...requests[1], requestId: 'COST-OTHER-CATALOG', sourceRequestId: 'COST-OTHER' });
+  assert.equal((await api.catalogContext({}, sender)).request.requestId, 'CATALOG-CONFIRMED', 'explicit supplement remains usable beside an automatic companion');
+  assert.equal((await api.catalogContext({ querySkcs: ['SKC-TARGET'], queryCapturedAt: '2026-09-30T00:00:00.000Z' }, sender)).request.requestId, 'COST-OTHER-CATALOG');
+  requests.pop();
+
   await assert.rejects(api.catalogContext({}, { url: 'https://attacker.invalid' }), error => error.code === 'ERP_UNTRUSTED_SENDER');
   requests.push({ ...requests[1], requestId: 'CATALOG-AMBIGUOUS' });
   await assert.rejects(api.catalogContext({}, sender), error => error.code === 'ERP_REQUEST_AMBIGUOUS'); requests.pop();
