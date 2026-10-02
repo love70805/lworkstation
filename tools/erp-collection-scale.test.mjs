@@ -50,7 +50,7 @@ async function scenario(fault = '') {
         window.document.getElementById('erpa-recalculate').click();
         await waitFor(() => messages.some(item => item.type === 'shopeers.erp.submitCostResult'));
         const resumedPages = requests.slice(before).filter(item => item.endpoint === 'purchase-order-page' && item.sku === 'SKC-A').map(item => item.page);
-        assert.ok(resumedPages.includes(1) && resumedPages.includes(5) && !resumedPages.includes(2), 'resume verifies first page and reuses prior complete pages');
+        assert.ok(resumedPages.includes(1) && resumedPages.includes(5) && resumedPages.includes(2), 'partial resume verifies every page, including pages after an unchanged first page');
       } else return;
     } else await waitFor(() => messages.some(item => item.type === 'shopeers.erp.submitCostResult'));
     const cost = messages.find(item => item.type === 'shopeers.erp.submitCostResult').payload;
@@ -64,12 +64,13 @@ for (const fault of ['', 'repeat', 'drift', 'cancel', 'login', 'zero_count']) aw
 
 
 // Exercise the real production loop with a shorter clock budget. Repeated
-// attempts must progress across completed targets, not re-spend the entire
-// budget re-reading their first pages. No source files are altered by this test.
+// attempts must revalidate complete targets when identity/history is unverified.
+// No source files are altered by this test.
 async function resumeAcrossTargets() {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const scope = Array.from({ length: 8 }, (_, index) => `SKC-${index}`), requests = [], messages = [];
   let requestId = 'SYN-BUDGET-A';
+  let delayMs = 40, currentAccountPrice = 4;
   window.confirm = () => true;
   window.chrome = { runtime: { sendMessage(message, done) {
     messages.push(structuredClone(message));
@@ -81,11 +82,11 @@ async function resumeAcrossTargets() {
     if (endpoint === 'purchase-order-page') {
       const sku = url.searchParams.get('sku'); requests.push({ requestId, sku });
       assert.ok(scope.includes(sku));
-      await new Promise(resolve => setTimeout(resolve, 40));
+      await new Promise(resolve => setTimeout(resolve, delayMs));
       data = [{ purchaseOrderId: `${sku}-ORDER` }];
     } else if (endpoint === 'purchase-order-details') {
       const sku = url.searchParams.get('purchaseOrderId').split('-')[1];
-      data = [{ purchaseOrderDetailId: `D-${sku}`, itemId: `WH-${sku}`, creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: 4 }];
+      data = [{ purchaseOrderDetailId: `D-${sku}`, itemId: `WH-${sku}`, creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: currentAccountPrice }];
     } else if (endpoint === 'product-info-sku') {
       const sku = url.searchParams.get('productId').split('-')[1];
       data = [{ associatedProductId: `WH-${sku}`, barcodeSkuid: `SKU-${sku}`, barcodeSkcid: `SKC-${sku}` }];
@@ -103,19 +104,21 @@ async function resumeAcrossTargets() {
     }
     window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0' } }));
     const attempts = [];
-    for (let attempt = 0; attempt < 10 && !messages.some(message => message.type === 'shopeers.erp.submitCostResult'); attempt++) {
+    for (let attempt = 0; attempt < 3 && !messages.some(message => message.type === 'shopeers.erp.submitCostResult'); attempt++) {
       const before = requests.length;
+      if (attempt === 2) { delayMs = 2; currentAccountPrice = 9; }
       window.document.getElementById(attempt ? 'erpa-recalculate' : 'erpa-cost-trigger').click();
       await new Promise(resolve => setTimeout(resolve, 300));
       attempts.push(requests.slice(before).map(item => item.sku));
     }
     assert.ok(attempts.length > 1, 'the fixture must span multiple budgets');
     assert.deepEqual([...new Set(requests.map(item => item.sku))], scope, 'every pending target is eventually read');
-    assert.equal(requests.filter(item => item.sku === 'SKC-0').length, 1, 'completed target is not re-read on each retry');
+    assert.equal(requests.filter(item => item.sku === 'SKC-0').length, 3, 'unknown account/history forces complete target revalidation on every new attempt, including in the same document');
     const delivered = messages.find(message => message.type === 'shopeers.erp.submitCostResult');
     assert.ok(delivered, 'eventually submits only after all target lists are complete');
     assert.equal(delivered.payload.meta.orderCount, 8);
     assert.ok(delivered.payload.warehouseEvidence.warehouses.every(item => item.evidenceComplete));
+    assert.ok(delivered.payload.results.every(item => Number(item.unitCost) === 9), 'same-document account/evidence changes cannot reuse earlier prices');
     requestId = 'SYN-BUDGET-B';
     const before = requests.length;
     window.document.getElementById('erpa-recalculate').click();
