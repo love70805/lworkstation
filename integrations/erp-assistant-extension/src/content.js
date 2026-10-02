@@ -113,7 +113,7 @@
         const resume = document.getElementById('erpa-resume');
         if (resume) { resume.hidden = !resumableCheckpoint; resume.disabled = !available || Boolean(activeRun); }
         const task = document.getElementById('erpa-task-status');
-        if (task) task.textContent = taskStage || (resumableCheckpoint ? '待继续 · 列表进度 ' + resumableCheckpoint.completedTargets.length + '/' + resumableCheckpoint.platformSkcs.length + '；恢复时重新核验' : checkpointMessage);
+        if (task) task.textContent = taskStage || (resumableCheckpoint ? '待继续 · 列表进度 ' + resumableCheckpoint.completedTargets.length + '/' + resumableCheckpoint.platformSkcs.length + '；原账号未验证' : checkpointMessage);
     }
 
     function previewScopeLabel() {
@@ -394,7 +394,7 @@
             taskCache.clear();
             capturedListUrl = buildUrl(LIST_PATH, checkpoint.filters);
             capturedQueryCapturedAt = checkpoint.queryCapturedAt;
-            checkpointMessage = '重新核验账号与采购历史';
+            checkpointMessage = '当前登录会话重新读取；原账号未验证';
             showToast(checkpointMessage);
             await calculate(checkpoint.requestId);
         } catch (error) { resumableCheckpoint = null; showError(error); renderPageContext(); }
@@ -1298,7 +1298,7 @@
             filters,
             queryCapturedAt: capturedQueryCapturedAt || new Date().toISOString()
         };
-        const budgetTimer = window.setTimeout(() => run.controller.abort(new CostError('本次成本读取时间已到', '任务待继续；账号与采购历史版本无法确认，继续时重新核验目标。未完成证据不会变为正式完整成本。')), COST_STAGE_BUDGET_MS);
+        const budgetTimer = window.setTimeout(() => run.controller.abort(new CostError('本次成本读取时间已到', '任务待继续；原账号未验证，继续时按当前登录会话重新读取采购。未完成证据不会变为正式完整成本。')), COST_STAGE_BUDGET_MS);
         activeRun = run;
         taskStage = '读取中';
         setLoading('准备核算', '正在校验采购查询条件', 2);
@@ -1343,7 +1343,7 @@
             }
         } finally {
             window.clearTimeout(budgetTimer);
-            if (resumableCheckpoint && !run.costReadComplete) taskStage = '待继续 · 中断后重新核验';
+            if (resumableCheckpoint && !run.costReadComplete) taskStage = '待继续 · 原账号未验证，继续时重读';
             if (activeRun === run) activeRun = null;
             renderPageContext();
         }

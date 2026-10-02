@@ -68,7 +68,7 @@
       const liveFilters = checkpointFilters(input.filters);
       if (Object.keys(liveFilters).length && JSON.stringify(liveFilters) !== JSON.stringify(old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '当前查询条件已变化，请重新采集；旧任务不会混入当前范围。', 409);
       const pending = (await readPending()).find(item => item.resultDeliveryId === old.resultDeliveryId && item.workspaceId === config.workspaceId);
-      return { ok: true, checkpoint: { ...old, binding: undefined }, pendingDeliveryId: pending?.resultDeliveryId || null, reuseEvidence: false, reason: 'account_and_history_require_revalidation' };
+      return { ok: true, checkpoint: { ...old, binding: undefined }, pendingDeliveryId: pending?.resultDeliveryId || null, reuseEvidence: false, reason: 'original_account_unverified_current_session_reread' };
     }
     if (input.action !== 'save') throw loopbackError('ERP_CHECKPOINT_ACTION_INVALID', '未知检查点操作。', 400);
     if (input.state === 'completed' && (!old || input.resultDeliveryId !== old.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '旧采集送达确认不能结束新的任务。', 409);

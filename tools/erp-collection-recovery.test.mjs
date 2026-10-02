@@ -45,6 +45,8 @@ api = background();
 const restored = await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender);
 assert.equal(restored.checkpoint.resultDeliveryId, saved.checkpoint.resultDeliveryId, 'lost ACK/reopen keeps stable delivery identity');
 assert.equal(restored.reuseEvidence, false, 'unknown account/history never authorizes cross-restart evidence reuse');
+assert.equal(restored.checkpoint.accountState, 'unverified', 're-reading current-session data does not verify the original account');
+assert.equal(restored.reason, 'original_account_unverified_current_session_reread');
 assert.equal((await api.collectionCheckpoint({ action: 'list' }, sender)).records.length, 1);
 await api.collectionCheckpoint({ ...input(), state: 'completed', resultDeliveryId: saved.checkpoint.resultDeliveryId }, sender);
 const replacement = await api.collectionCheckpoint(input(), sender);
@@ -135,6 +137,7 @@ await first.window.happyDOM.close();
 for (const lifecycle of ['refresh', 'reopen', 'browser-restart']) {
   const next = await page({ cancel: lifecycle !== 'browser-restart' });
   await waitFor(() => !next.window.document.getElementById('erpa-resume').hidden);
+  assert.match(next.window.document.getElementById('erpa-task-status').textContent, /原账号未验证/);
   next.window.document.getElementById('erpa-cost-trigger').click();
   assert.equal(next.reads.length, 0, 'reopen offers explicit continuation without issuing collection');
   next.window.document.getElementById('erpa-resume').click();
