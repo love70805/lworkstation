@@ -48,7 +48,8 @@ export async function readEntry(entry, headerOnly) {
 }
 
 function sharedStringCells(xml, visit) {
-  return xml.replace(/<((?:\w+:)?c)\b([^>]*)>([\s\S]*?)<\/\1>/g, (cell, tag, attrs, body) => {
+  return xml.replace(/<(?:\w+:)?c\b[^>]*\/\s*>|<((?:\w+:)?c)\b([^>]*)>([\s\S]*?)<\/\1>/g, (cell, tag, attrs, body) => {
+    if (!tag) return cell;
     if (!/\bt\s*=\s*["']s["']/.test(attrs)) return cell;
     return `<${tag}${attrs}>${body.replace(/(<(?:\w+:)?v\b[^>]*>)(\s*[+]?\d+\s*)(<\/(?:\w+:)?v>)/, (_match, open, index, close) => `${open}${visit(Number(index))}${close}`)}</${tag}>`;
   });

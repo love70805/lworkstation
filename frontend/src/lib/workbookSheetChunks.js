@@ -19,14 +19,18 @@ async function* elements(entry, tag, container, onOpen) {
         onOpen?.(match[0]);
         pending = pending.slice(match.index + match[0].length); inside = true;
       }
+      // The container close is invariant while consuming this buffer. Searching
+      // the remaining buffer for every row/string repeatedly scans the same XML.
+      let containerEnd = close.exec(pending)?.index ?? -1;
       let match;
       while ((match = pattern.exec(pending))) {
-        const end = close.exec(pending);
-        if (end && end.index < match.index) return;
+        if (containerEnd >= 0 && containerEnd < match.index) return;
         yield match[0];
-        pending = pending.slice(match.index + match[0].length);
+        const consumed = match.index + match[0].length;
+        pending = pending.slice(consumed);
+        if (containerEnd >= 0) containerEnd -= consumed;
       }
-      if (close.test(pending) || done) return;
+      if (containerEnd >= 0 || done) return;
     }
   } finally { await reader.cancel().catch(() => {}); }
 }
@@ -45,7 +49,8 @@ function resolvePart(target) {
   return parts.join('/');
 }
 function remapStrings(xml, strings, indexes) {
-  return xml.replace(/<((?:\w+:)?c)\b([^>]*)>([\s\S]*?)<\/\1>/g, (cell, tag, attrs, body) => {
+  return xml.replace(/<(?:\w+:)?c\b[^>]*\/\s*>|<((?:\w+:)?c)\b([^>]*)>([\s\S]*?)<\/\1>/g, (cell, tag, attrs, body) => {
+    if (!tag) return cell;
     if (!/\bt\s*=\s*(["'])s\1/.test(attrs)) return cell;
     const match = body.match(/<(?:\w+:)?v\b[^>]*>(\s*[+]?\d+\s*)<\/(?:\w+:)?v>/);
     if (!match || strings[Number(match[1])] == null) throw new Error('Shared string reference is incomplete');
