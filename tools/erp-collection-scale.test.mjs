@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -10,7 +11,7 @@ async function scenario(fault = '') {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const messages = [], requests = [];
   let fail = fault;
-  window.chrome = { runtime: { sendMessage(message, done) { messages.push(structuredClone(message)); done(message.type === 'shopeers.erp.previewContext' ? { ok: true, ledgerPeriod: '2026-08', requestId: 'SYN-REQUEST', platformSkcs: ['SKC-A', 'SKC-B'] } : message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' }); } } };
+  window.chrome = { runtime: { sendMessage(message, done) { messages.push(structuredClone(message)); done(collectionReply(message, { requestId: 'SYN-REQUEST', platformSkcs: ['SKC-A', 'SKC-B'] }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' })); } } };
   window.fetch = async raw => {
     const url = new URL(raw), endpoint = url.pathname.split('/').at(-1), page = Number(url.searchParams.get('page'));
     requests.push({ endpoint, page, sku: url.searchParams.get('sku') });
@@ -87,7 +88,7 @@ async function resumeAcrossTargets() {
   window.confirm = () => true;
   window.chrome = { runtime: { sendMessage(message, done) {
     messages.push(structuredClone(message));
-    done(message.type === 'shopeers.erp.previewContext' ? { ok: true, ledgerPeriod: '2026-08', requestId, platformSkcs: scope } : message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' });
+    done(collectionReply(message, { requestId, platformSkcs: scope }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' }));
   } } };
   window.fetch = async raw => {
     const url = new URL(raw), endpoint = url.pathname.split('/').at(-1);

@@ -102,7 +102,7 @@ export async function verifyErpCatalogTransport({
       alarms: { create() {}, onAlarm: { addListener() {} } },
     };
     const worker = vm.createContext({
-      __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController,
+      __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder,
       crypto: { randomUUID, subtle: webcrypto.subtle }, fetch, setTimeout, clearTimeout,
       console: { error() {}, warn() {}, info() {} }, Date, Math, Promise,
     });

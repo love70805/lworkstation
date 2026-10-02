@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -109,7 +110,7 @@ export async function verifyErpCatalogButtonAndCostPipeline() {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const messages = [];
   const fetched = [];
-  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) { messages.push(json(message)); callback(message.type === 'shopeers.erp.previewContext' ? { ok: true, ledgerPeriod: '2026-08' } : message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CATALOG-CLICK', ledgerPeriod: '2026-08', platformSkcs: ['SKC-TARGET'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }); } } };
+  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) { messages.push(json(message)); callback(collectionReply(message) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CATALOG-CLICK', ledgerPeriod: '2026-08', platformSkcs: ['SKC-TARGET'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId })); } } };
   window.fetch = async rawUrl => {
     const url = new URL(rawUrl); fetched.push(url);
     let body;

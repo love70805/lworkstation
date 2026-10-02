@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -37,7 +38,7 @@ const mappings = ['ORANGE','WHITE','HOOK'].map(key=>({associatedProductId:'WH-'+
 async function replay(period, queryRange, { status = '4', paged = false, incomplete = false, emptyScope = false } = {}) {
  const window = new Window({url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html'});
  const messages=[],requests=[];
- window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(structuredClone(message));callback(message.type==='shopeers.erp.previewContext'?{ok:true,ledgerPeriod:period}:message.type==='shopeers.erp.catalogContext'?{ok:false,message:'isolated observation'}:{ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId});}}};
+ window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(structuredClone(message));callback(collectionReply(message,{ledgerPeriod:period}) || (message.type==='shopeers.erp.catalogContext'?{ok:false,message:'isolated observation'}:{ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId}));}}};
  window.fetch=async raw=>{
   const url=new URL(raw), endpoint=url.pathname.split('/').at(-1);requests.push({endpoint,params:Object.fromEntries(url.searchParams)});
   let data, count;

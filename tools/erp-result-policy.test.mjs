@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -287,9 +288,7 @@ async function verifyLedgerScopedEvidenceDelivery() {
         lastError: null,
         sendMessage(message, callback) {
           sent.push(JSON.parse(JSON.stringify(message)));
-          callback(message.type === "shopeers.erp.previewContext"
-            ? { ok: Boolean(ledgerPeriod), ledgerPeriod }
-            : { ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
+          callback(collectionReply(message, { ledgerPeriod }) || { ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
         },
       },
     };
@@ -322,13 +321,13 @@ async function verifyLedgerScopedEvidenceDelivery() {
         detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-MONTH" },
       }));
       window.document.getElementById("erpa-cost-trigger").click();
-      for (let attempt = 0; attempt < 100 && !sent.some((message) => message.type === "shopeers.erp.submitCostResult"); attempt += 1) {
+      for (let attempt = 0; attempt < 100 && window.document.getElementById('erpa-export').disabled; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       const deliveries = sent.filter((message) => message.type === "shopeers.erp.submitCostResult");
-      assert.equal(deliveries.length, 1, "even a collection-month-only purchase must reach the real bridge transport");
+      assert.equal(deliveries.length, ledgerPeriod ? 1 : 0, "only a bound collection reaches transport; unknown context remains a local preview");
       assert.equal(fetchedOrders.length, mixedMonths ? 2 : 1);
-      const { payload } = deliveries[0];
+      const payload = deliveries[0]?.payload || JSON.parse(window.localStorage.getItem('erpAssistantV8_latest_cost_result_v7'));
       assert.equal(payload.warehouseEvidence.warehouses.length, 1);
       const records = payload.warehouseEvidence.warehouses[0].purchaseRecords;
       assert.deepEqual(

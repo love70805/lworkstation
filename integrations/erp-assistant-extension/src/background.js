@@ -33,7 +33,7 @@
   }
   function checkpointBinding(request) {
     return JSON.stringify({ workspaceId: request.workspaceId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId,
-      registeredAt: request.registeredAt, version: request.version ?? request.updatedAt ?? null, platformSkcs: normalizedSkcs(request.platformSkcs),
+      registeredAt: request.registeredAt, version: request.version ?? null, platformSkcs: normalizedSkcs(request.platformSkcs),
       expectedSkus: (request.expectedSkus || []).map(item => [canonical(item.platformSkc), canonical(item.platformSku)]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) });
   }
   async function cleanCheckpoints() {
@@ -71,6 +71,8 @@
       return { ok: true, checkpoint: { ...old, binding: undefined }, pendingDeliveryId: pending?.resultDeliveryId || null, reuseEvidence: false, reason: 'original_account_unverified_current_session_reread' };
     }
     if (input.action !== 'save') throw loopbackError('ERP_CHECKPOINT_ACTION_INVALID', '未知检查点操作。', 400);
+    if (typeof input.requestSnapshot !== 'string' || input.requestSnapshot !== binding) throw loopbackError('ERP_COLLECTION_CONTEXT_CHANGED', '采集开始时的请求快照已变化，请回工作台重新发起采集。', 409);
+    if (input.resultDeliveryId && (!old || old.resultDeliveryId !== input.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '采集检查点已失效或被替换，旧采集不能继续回传。', 409);
     if (input.state === 'completed' && (!old || input.resultDeliveryId !== old.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '旧采集送达确认不能结束新的任务。', 409);
     if (input.rotateDelivery === true && (!old || input.resultDeliveryId !== old.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '旧采集确认不能改写新任务投递身份。', 409);
     const filters = checkpointFilters(input.filters);
@@ -78,26 +80,35 @@
     const targetSet = new Set(targetSkcs);
     if (!filters.sku || !targetSkcs.length || !Number.isFinite(Date.parse(input.queryCapturedAt))) throw loopbackError('ERP_CHECKPOINT_SCOPE_MISSING', '检查点缺少完整目标或查询时间。', 409);
     if (old && JSON.stringify(filters) !== JSON.stringify(old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '查询条件已变化，旧检查点不可覆盖。', 409);
-    const record = { schemaVersion: 1, extensionVersion: chrome.runtime.getManifest().version, workspaceId: config.workspaceId, requestId: request.requestId, ledgerPeriod: request.ledgerPeriod, binding,
+    const resultDeliveryId = input.rotateDelivery !== true && old && (old.state !== 'completed' || input.state === 'completed') ? old.resultDeliveryId : makeResultDeliveryId();
+    const record = { schemaVersion: 1, extensionVersion: chrome.runtime.getManifest().version, workspaceId: config.workspaceId, requestId: request.requestId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, binding,
       platformSkcs: targetSkcs, filters, queryCapturedAt: input.queryCapturedAt, accountState: 'unverified',
       completedTargets: normalizedSkcs(input.completedTargets).filter(skc => targetSet.has(skc)),
-      resultDeliveryId: input.rotateDelivery !== true && old && (old.state !== 'completed' || input.state === 'completed') ? old.resultDeliveryId : makeResultDeliveryId(),
+      resultDeliveryId,
+      ...(old?.resultDeliveryId === resultDeliveryId ? { submittedHash: old.submittedHash, receipt: old.receipt } : {}),
       state: input.state === 'completed' ? 'completed' : 'pending', updatedAt: Date.now() };
-    if (checkpointBytes([record]) > CHECKPOINT_MAX_BYTES) throw loopbackError('ERP_CHECKPOINT_TOO_LARGE', '任务超过本机检查点空间上限；本次读取可继续，中断后需重新查询。', 413);
+    if (checkpointBytes([record]) > CHECKPOINT_MAX_BYTES) throw loopbackError('ERP_CHECKPOINT_TOO_LARGE', '任务超过本机检查点空间上限，无法保存原请求绑定，本次采集已停止。', 413);
     records = [record, ...records.filter(item => item !== old)].slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
     await chrome.storage.local.set({ [CHECKPOINT_KEY]: records });
     return { ok: true, checkpoint: { ...record, binding: undefined } };
   }
 
-  async function acknowledgeCheckpointDelivery(record) {
+  async function acknowledgeCheckpointDelivery(record, receipt = {}) {
     const operation = checkpointWrites.catch(() => {}).then(async () => {
       const records = await cleanCheckpoints();
       const checkpoint = records.find(item => item.workspaceId === record.workspaceId && item.resultDeliveryId === record.resultDeliveryId);
       if (!checkpoint) return;
       const complete = record.sourceMeta && !record.sourceMeta.orderCountMismatch && !record.sourceMeta.detailFailureCount && !record.sourceMeta.mappingFailureCount;
       checkpoint.state = complete ? 'completed' : 'pending';
-      if (!complete) checkpoint.resultDeliveryId = makeResultDeliveryId();
+      if (complete) {
+        checkpoint.submittedHash = record.payloadHash || checkpoint.submittedHash;
+        checkpoint.receipt = { deliveryId: String(receipt.deliveryId || ''), batchId: String(receipt.batchId || '') };
+      } else {
+        checkpoint.resultDeliveryId = makeResultDeliveryId();
+        delete checkpoint.submittedHash;
+        delete checkpoint.receipt;
+      }
       checkpoint.updatedAt = Date.now();
       await chrome.storage.local.set({ [CHECKPOINT_KEY]: records });
     });
@@ -493,6 +504,12 @@
 
   async function hydrate(record, config) {
     assertRecordWorkspace(record, config);
+    if (record.collectionBinding && !record.collectionValidated) {
+      const payload = await fetchLoopbackJson('/erp/v1/requests', { query: { workspaceId: config.workspaceId }, config });
+      const request = (payload.records || []).find(item => item.requestId === record.requestId && item.workspaceId === record.workspaceId && item.status === 'registered' && item.requestKind !== 'catalog');
+      if (!request || checkpointBinding(request) !== record.collectionBinding) throw loopbackError('ERP_COLLECTION_CONTEXT_CHANGED', '原采集请求的工作区、账本、月份或登记范围已变化，旧结果不会重新绑定。请重新采集。', 409);
+      return { ...record, collectionValidated: true };
+    }
     if (record.requestKind === 'catalog' && record.requestId) return record;
     if (record.requestId && record.ledgerId && Array.isArray(record.expectedSkus)) return record;
     const payload = await fetchLoopbackJson('/erp/v1/requests', {
@@ -555,7 +572,7 @@
       });
       // Retire/rotate the task before removing its exact queued payload. If the
       // worker exits in this gap, retrying that payload remains idempotent.
-      await acknowledgeCheckpointDelivery(retryRecord);
+      await acknowledgeCheckpointDelivery(retryRecord, payload);
       await removePending(retryRecord.resultDeliveryId);
       return { ok: true, status: 'success', ...retryRecord, deliveryId: payload.deliveryId, batchId: payload.batchId, envelope: payload.envelope };
     } catch (error) {
@@ -612,8 +629,15 @@
     return `ERP-RESULT-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
   }
 
-  async function submitCostResult(input, sender) {
-    if (!senderAllowed(sender)) throw loopbackError('ERP_UNTRUSTED_SENDER', '只允许 ERP 采购管理页的隔离脚本投递。', 403);
+  async function prepareCostResult(input) {
+    const resultDeliveryId = String(input?.resultDeliveryId || '').trim();
+    const existing = (await readPending()).find(item => item.resultDeliveryId === resultDeliveryId);
+    // Once retained, only this exact original payload may be retried. It must
+    // never be rebuilt from a newly active page, workspace or request.
+    if (existing) return { record: existing };
+    const checkpoints = await cleanCheckpoints();
+    const checkpoint = checkpoints.find(item => item.resultDeliveryId === resultDeliveryId);
+    if (!checkpoint) throw loopbackError('ERP_CHECKPOINT_MISSING', '采集检查点未保存或已过期，请重新查询；旧结果不会自动回传。', 409);
     let config;
     let configurationError;
     try {
@@ -623,35 +647,64 @@
       const stored = await chrome.storage.local.get(INBOX_WORKSPACE_ID_KEY);
       config = { workspaceId: String(stored[INBOX_WORKSPACE_ID_KEY] || '').trim() };
     }
+    assertRecordWorkspace(checkpoint, config);
     const querySkcs = normalizedSkcs(input?.querySkcs ?? input?.meta?.querySkcs);
     const queryCapturedAt = String(input?.queryCapturedAt || input?.registeredBefore || input?.meta?.queryCapturedAt || '').trim();
     if (querySkcs.length === 0 || !Number.isFinite(Date.parse(queryCapturedAt))) {
       throw loopbackError('ERP_REQUEST_CONTEXT_MISSING', '缺少完整 SKC 集合或查询快照时间。', 409);
     }
+    if (!sameSkcs(querySkcs, checkpoint.platformSkcs) || queryCapturedAt !== checkpoint.queryCapturedAt) throw loopbackError('ERP_COLLECTION_CONTEXT_CHANGED', '采集结果与已保存的目标或查询快照不一致，请重新采集。', 409);
     const warehouseEvidence = stripUntrustedControl(input?.warehouseEvidence && typeof input.warehouseEvidence === 'object'
       ? input.warehouseEvidence
       : { formatVersion: 1, warehouses: [], excludedOrders: [], excludedDetails: [], detailFailures: [], mappingFailures: [] });
     const rows = buildRows(stripUntrustedControl(input?.results), warehouseEvidence);
     if (rows.length === 0) throw loopbackError('EMPTY_COST_RESULTS', '没有可识别仓库 SKU 的成本或排除证据。', 400);
-    const resultDeliveryId = /^ERP-RESULT-[A-Za-z0-9._:-]+$/.test(String(input?.resultDeliveryId || '').trim())
-      ? String(input.resultDeliveryId).trim()
-      : makeResultDeliveryId();
-    const existing = (await readPending()).find((item) => item.resultDeliveryId === resultDeliveryId);
-    const record = existing || {
+    const bound = JSON.parse(checkpoint.binding);
+    const expectedSkus = bound.expectedSkus.map(([platformSkc, platformSku]) => ({ platformSkc, platformSku }));
+    let record = {
       resultDeliveryId,
       createdAt: String(input?.createdAt || '').trim() || new Date().toISOString(),
       queryCapturedAt,
       registeredBefore: queryCapturedAt,
       attemptsTotal: 0,
-      workspaceId: config.workspaceId,
+      workspaceId: checkpoint.workspaceId,
+      requestId: checkpoint.requestId,
+      ledgerId: bound.ledgerId,
+      expectedSkus,
+      collectionBinding: checkpoint.binding,
       querySkcs,
-      rows,
+      rows: assignLedgerScopeRoles(rows, expectedSkus, querySkcs),
       sourceMeta: stripUntrustedControl(input?.meta),
       warehouseEvidence,
     };
+    const bytes = new TextEncoder().encode(JSON.stringify([record.querySkcs, record.rows, record.sourceMeta, record.warehouseEvidence]));
+    record.payloadHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    if (checkpoint.state === 'completed' && checkpoint.submittedHash === record.payloadHash && checkpoint.receipt) return { response: { ok: true, status: 'success', resultDeliveryId, ...checkpoint.receipt } };
+    if (checkpoint.state !== 'pending' || checkpoint.submittedHash && checkpoint.submittedHash !== record.payloadHash) throw loopbackError('ERP_CHECKPOINT_STATE_CHANGED', '原采集已完成或证据身份已变化，不能覆盖原回传。请重新采集。', 409);
+    if (!configurationError) {
+      try {
+        record = await hydrate(record, config);
+        assertRecordWorkspace(record, await runtimeConfig());
+      } catch (error) {
+        if (!retryable(error)) throw error;
+        // An unavailable receiver may retain evidence under its already saved
+        // binding, but an actual scope mismatch never enters the queue.
+        configurationError = error;
+      }
+    }
+    checkpoint.submittedHash = record.payloadHash;
+    await chrome.storage.local.set({ [CHECKPOINT_KEY]: checkpoints });
     await savePending(record);
-    if (configurationError) return { ...record, ok: false, status: 'failed', retained: true, code: configurationError.code, message: '证据已保留在扩展后台；安全通道未配置，尚未投递。配置后重试；缺少工作区快照时须重新采集。' };
-    return startDelivery(record);
+    if (configurationError) return { response: { ...record, ok: false, status: retryable(configurationError) ? 'cached' : 'failed', retained: true, code: configurationError.code, message: '原请求证据已保留在扩展后台；收件服务暂不可用，尚未投递。恢复后可重试原载荷。' } };
+    return { record };
+  }
+
+  async function submitCostResult(input, sender) {
+    if (!senderAllowed(sender)) throw loopbackError('ERP_UNTRUSTED_SENDER', '只允许 ERP 采购管理页的隔离脚本投递。', 403);
+    const operation = checkpointWrites.catch(() => {}).then(() => prepareCostResult(input));
+    checkpointWrites = operation;
+    const prepared = await operation;
+    return prepared.response || startDelivery(prepared.record);
   }
 
   async function catalogRequest(input, sender) {
@@ -722,7 +775,7 @@
     if (typeof request.ledgerPeriod !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(request.ledgerPeriod)) {
       throw loopbackError('ERP_LEDGER_PERIOD_INVALID', '关联请求的核算月份无效，请返回工作台重新查询。', 409);
     }
-    return { ok: true, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId, platformSkcs: request.platformSkcs };
+    return { ok: true, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId, platformSkcs: request.platformSkcs, requestSnapshot: checkpointBinding(request) };
   }
 
   async function retryPending(input, sender) {

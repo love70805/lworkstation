@@ -127,7 +127,7 @@
         const settled = await requestContextPolicy.settleRequestContext(bridge.previewContext({ querySkcs, queryCapturedAt }), 5000);
         const response = settled.context;
         return response?.ok && resultPolicy.validLedgerPeriod(response.ledgerPeriod)
-            ? { ledgerPeriod: response.ledgerPeriod, requestId: response.requestId, platformSkcs: response.platformSkcs }
+            ? { ledgerPeriod: response.ledgerPeriod, requestId: response.requestId, platformSkcs: response.platformSkcs, requestSnapshot: response.requestSnapshot }
             : { ledgerPeriod: null, message: response?.message || settled.error?.message || '未取得唯一台账月份，请回工作台选择台账后重新查询。' };
     }
 
@@ -358,23 +358,27 @@
         taskCache.set(key, { timestamp: Date.now(), value });
     }
 
-    async function refreshCheckpoint() {
+    async function refreshCheckpoint(force = false) {
         if (!isPurchasePage() || !window.ShopeersErpDeliveryBridge?.collectionCheckpoint) return;
         try {
             const response = await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'list' });
-            if (activeRun) return;
+            if (activeRun && !force) return;
             resumableCheckpoint = response?.ok ? response.records?.[0] || null : null;
             renderPageContext();
         } catch { /* Offline collection remains available; no false saved claim. */ }
     }
 
     async function saveCheckpoint(run, state = 'pending', rotateDelivery = false) {
-        if (!run.requestId || !window.ShopeersErpDeliveryBridge?.collectionCheckpoint) return;
+        if (!run.requestId) return;
+        if (!run.requestSnapshot || !window.ShopeersErpDeliveryBridge?.collectionCheckpoint) throw new CostError('采集请求快照未保存', '请重新查询；当前结果不能自动回传。');
         try {
-            const response = await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'save', requestId: run.requestId, resultDeliveryId: run.resultDeliveryId, rotateDelivery, filters: run.filters, queryCapturedAt: run.queryCapturedAt, completedTargets: run.completedTargets || [], state });
+            const response = await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'save', requestId: run.requestId, requestSnapshot: run.requestSnapshot, resultDeliveryId: run.resultDeliveryId, rotateDelivery, filters: run.filters, queryCapturedAt: run.queryCapturedAt, completedTargets: run.completedTargets || [], state });
             if (response?.ok && response.checkpoint) { run.resultDeliveryId = response.checkpoint.resultDeliveryId; resumableCheckpoint = state === 'completed' ? null : response.checkpoint; checkpointMessage = ''; }
-            else if (!response?.ok) checkpointMessage = response?.message || '检查点尚未保存；中断后需重新查询';
-        } catch { checkpointMessage = '检查点尚未保存；中断后需重新查询'; }
+            else throw new CostError('采集请求快照未保存', response?.message || '请重新查询；当前结果不能自动回传。');
+        } catch (error) {
+            checkpointMessage = error.details || error.message || '检查点尚未保存；请重新查询';
+            throw error instanceof CostError ? error : new CostError('采集请求快照未保存', checkpointMessage);
+        }
     }
 
     async function resumeCollection() {
@@ -472,6 +476,7 @@
 
     function dispatchCostResults(results, meta, warehouseEvidence, resultDeliveryId, deliveryState = {}, run = null) {
         if (!Array.isArray(results)) return;
+        if (!run?.requestId || !run.requestSnapshot || !run.resultDeliveryId) return false;
         const bridge = window.ShopeersErpDeliveryBridge;
         if (!bridge || typeof bridge.submit !== 'function') {
             console.warn(PREFIX, '隔离投递桥尚未就绪，本地预览、复制和 CSV 仍可使用。');
@@ -491,13 +496,10 @@
             registeredBefore: queryCapturedAt
         }).then(async response => {
             handleDeliveryStatus(response);
-            // Only a durable receiver/background ACK retires the recovery task.
-            if (run?.costEvidenceComplete && (response?.status === 'success' || response?.retained === true)) await saveCheckpoint(run, 'completed');
-            else if (run && !run.costEvidenceComplete) {
-                // An acknowledged partial payload is immutable in the delivery
-                // queue. The next fuller read needs a new identity; lost ACKs
-                // keep the current identity until that receipt is confirmed.
-                if (response?.status === 'success' || response?.retained === true) await saveCheckpoint(run, 'pending', true);
+            // The background owns ACK retirement/rotation. Refreshing UI state
+            // must not rotate twice or turn a durable ACK into a failed delivery.
+            await refreshCheckpoint(true);
+            if (run && !run.costEvidenceComplete && response?.status === 'success') {
                 taskStage = '待继续 · 采购或映射证据未齐';
             }
             renderPageContext();
@@ -1118,6 +1120,7 @@
         const previewContext = await readPreviewContext(capturedSkcs, run.queryCapturedAt);
         const querySkcs = Array.isArray(previewContext.platformSkcs) && previewContext.platformSkcs.length ? previewContext.platformSkcs : capturedSkcs;
         run.requestId = previewContext.requestId;
+        run.requestSnapshot = previewContext.requestSnapshot;
         run.ledgerPeriod = previewContext.ledgerPeriod;
         if (run.expectedRequestId && run.requestId !== run.expectedRequestId) throw new CostError('原采集请求已变化', '请重新查询；不能将原任务恢复到其他请求。');
         // A page remaining open is not proof of the same signed-in account or
@@ -1321,7 +1324,7 @@
             setResultCache(lastResults, lastMeta, lastWarehouseEvidence, capturedListUrl, resultDeliveryId, deliveryState);
             run.costReadComplete = true;
             run.costEvidenceComplete = !state.meta.orderCountMismatch && !state.meta.detailFailureCount && !state.meta.mappingFailureCount;
-            dispatchCostResults(lastResults, lastMeta, lastWarehouseEvidence, resultDeliveryId, deliveryState, run);
+            if (!dispatchCostResults(lastResults, lastMeta, lastWarehouseEvidence, resultDeliveryId, deliveryState, run)) taskStage = '本地预览 · 请从工作台登记请求后重新采集';
             expandedRows.clear();
             setLoading('核算完成', '正在生成结果表', 100);
             renderResults();

@@ -93,6 +93,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
   const context = vm.createContext({
     __SHOPEERS_ERP_BACKGROUND_TEST__: true,
     AbortController,
+    TextEncoder,
     URL,
     chrome,
     console: {
@@ -126,6 +127,7 @@ function requestRecord() {
   return {
     requestId: "ERP-REQ-SECURE",
     ledgerId: "LEDGER-2026-08",
+    ledgerPeriod: "2026-08",
     workspaceId: "workspace-secure",
     status: "registered",
     registeredAt: "2026-08-29T00:00:00.000Z",
@@ -181,6 +183,18 @@ function resultInput(overrides = {}) {
     workspaceId: "workspace-forged",
     ...overrides,
   };
+}
+
+// Initial cost delivery now requires the same real controller handshake as the
+// content script. Keep spoofed page control fields in the outgoing fixture.
+async function startCollection(background, input = resultInput()) {
+  const preview = await background.api.previewContext(input, sender);
+  const saved = await background.api.collectionCheckpoint({
+    action: "save", requestId: preview.requestId, requestSnapshot: preview.requestSnapshot,
+    filters: { sku: input.querySkcs.join(",") }, queryCapturedAt: input.queryCapturedAt,
+    completedTargets: [],
+  }, sender);
+  return { ...input, resultDeliveryId: saved.checkpoint.resultDeliveryId };
 }
 
 async function verifyManifestAndGenerator() {
@@ -384,12 +398,15 @@ async function verifyTrustedPreviewPeriod() {
   });
   const input = { ...resultInput(), queryCapturedAt: "2026-09-22T00:00:00.000Z", ledgerPeriod: "2026-09" };
   const result = await background.api.previewContext(input, embeddedSender);
-  assert.deepEqual(jsonClone(result), { ok: true, ledgerPeriod: "2026-08", requestId: records[0].requestId, platformSkcs: records[0].platformSkcs }, "The trusted request supplies August and its full target scope without credentials");
+  assert.deepEqual(jsonClone(result), { ok: true, ledgerPeriod: "2026-08", requestId: records[0].requestId, platformSkcs: records[0].platformSkcs, requestSnapshot: result.requestSnapshot }, "The trusted request supplies August and its full target scope without credentials");
+  assert.equal(JSON.parse(result.requestSnapshot).workspaceId, "workspace-secure");
+  assert.equal(JSON.parse(result.requestSnapshot).ledgerPeriod, "2026-08");
+  assert.doesNotMatch(result.requestSnapshot, /capability|authorization|token/i);
   await assert.rejects(() => background.api.previewContext(input, { url: "https://attacker.invalid" }), { code: "ERP_UNTRUSTED_SENDER" });
   await assert.rejects(() => background.api.previewContext({ ...input, queryCapturedAt: "" }, sender), { code: "ERP_REQUEST_CONTEXT_MISSING" });
   assert.equal(fetchCount, 1, "untrusted senders and invalid snapshots must not access loopback");
   for (const [scenario, expectedCode] of [
-    [[requestRecord()], "ERP_LEDGER_PERIOD_UNKNOWN"],
+    [[{ ...requestRecord(), ledgerPeriod: undefined }], "ERP_LEDGER_PERIOD_UNKNOWN"],
     [[{ ...requestRecord(), ledgerPeriod: "2026-13" }], "ERP_LEDGER_PERIOD_INVALID"],
     [[{ ...requestRecord(), ledgerPeriod: "2026-08", workspaceId: "workspace-forged" }], "ERP_REQUEST_NOT_FOUND"],
     [[{ ...requestRecord(), ledgerPeriod: "2026-08", registeredAt: "2026-10-01T00:00:00.000Z" }], "ERP_REQUEST_NOT_FOUND"],
@@ -434,7 +451,7 @@ async function verifyBackgroundSecurityAndDelivery() {
     (error) => error.code === "ERP_UNTRUSTED_SENDER",
   );
   assert.equal(background.api.senderAllowed(embeddedSender), true);
-  const delivered = await background.api.submitCostResult(resultInput(), sender);
+  const delivered = await background.api.submitCostResult(await startCollection(background), sender);
   assert.equal(delivered.ok, true);
   const getCall = calls.find((call) => new URL(call.url).pathname === "/erp/v1/requests");
   const postCall = calls.find((call) => new URL(call.url).pathname === "/erp/v1/cost-results");
@@ -478,14 +495,28 @@ async function verifyAtomicRuntimeConfigurationAndWorkspaceBinding() {
   ]) {
     let fetchCount = 0;
     const background = await loadBackground({
-      storageSeed,
+      storageSeed: {
+        shopeersErpInboxBaseUrl: "http://127.0.0.1:8790",
+        shopeersErpInboxCapability: capability,
+        shopeersErpWorkspaceId: "workspace-secure",
+      },
       fetchImpl: async () => {
         fetchCount += 1;
-        return response(500, { error: "UNEXPECTED_FETCH" });
+        return response(200, { records: [requestRecord()] });
       },
     });
-    const result = await background.api.submitCostResult(resultInput({ resultDeliveryId: `ERP-RESULT-CONFIG-${label.replaceAll(" ", "-")}` }), sender);
-    assert.equal(result.code, "ERP_INBOX_NOT_CONFIGURED", label);
+    const input = await startCollection(background);
+    for (const key of ["shopeersErpInboxBaseUrl", "shopeersErpInboxCapability", "shopeersErpWorkspaceId"]) delete background.storage[key];
+    Object.assign(background.storage, storageSeed);
+    fetchCount = 0;
+    if (label === "missing workspace") {
+      await assert.rejects(background.api.submitCostResult(input, sender), { code: "ERP_WORKSPACE_CONTEXT_CHANGED" });
+      assert.equal(background.storage.shopeersErpPendingCostResultsV2, undefined);
+    } else {
+      const result = await background.api.submitCostResult(input, sender);
+      assert.equal(result.code, "ERP_INBOX_NOT_CONFIGURED", label);
+      assert.equal(background.storage.shopeersErpPendingCostResultsV2[0].workspaceId, "workspace-secure", "unavailable channel preserves only the already bound workspace");
+    }
     assert.equal(fetchCount, 0, label);
   }
 
@@ -507,7 +538,7 @@ async function verifyAtomicRuntimeConfigurationAndWorkspaceBinding() {
       return response(404, { error: "NOT_FOUND" });
     },
   });
-  const delivered = await background.api.submitCostResult(resultInput({ resultDeliveryId: "ERP-RESULT-WORKSPACE-SELECT" }), sender);
+  const delivered = await background.api.submitCostResult(await startCollection(background), sender);
   assert.equal(delivered.ok, true);
   assert.equal(selectedPosts[0].requestId, "ERP-REQ-SECURE");
   assert.equal(selectedPosts[0].workspaceId, "workspace-secure");
@@ -525,8 +556,8 @@ async function verifyAtomicRuntimeConfigurationAndWorkspaceBinding() {
       return response(202, {});
     },
   });
-  const notFound = await missing.api.submitCostResult(resultInput({ resultDeliveryId: "ERP-RESULT-WORKSPACE-NOT-FOUND" }), sender);
-  assert.equal(notFound.code, "ERP_REQUEST_NOT_FOUND");
+  await assert.rejects(startCollection(missing), { code: "ERP_REQUEST_NOT_FOUND" });
+  assert.equal(missing.storage.shopeersErpPendingCostResultsV2, undefined);
   assert.equal(crossWorkspacePosts, 0);
 }
 
@@ -536,7 +567,7 @@ async function verifyPendingWorkspaceSnapshotCannotRebind() {
     shopeersErpInboxCapability: capability,
     shopeersErpWorkspaceId: "workspace-secure",
   };
-  let mode = "offline-a";
+  let mode = "workspace-a";
   const calls = [];
   const background = await loadBackground({
     storageSeed,
@@ -554,7 +585,9 @@ async function verifyPendingWorkspaceSnapshotCannotRebind() {
     },
   });
 
-  const captured = await background.api.submitCostResult(resultInput({ resultDeliveryId: "ERP-RESULT-WORKSPACE-SNAPSHOT" }), sender);
+  const input = await startCollection(background);
+  mode = "offline-a";
+  const captured = await background.api.submitCostResult(input, sender);
   assert.equal(captured.status, "cached");
   assert.equal(background.storage.shopeersErpPendingCostResultsV2[0].workspaceId, "workspace-secure");
   const attemptsAfterCapture = background.storage.shopeersErpPendingCostResultsV2[0].attemptsTotal;
@@ -643,7 +676,16 @@ async function verifyWorkspaceSwitchAfterHydrationRestoresAttemptCount() {
     },
   });
 
+  // Keep coverage for a retained pre-upgrade payload whose request had not yet
+  // been hydrated. New initial submissions are checked before entering queue.
   const input = resultInput({ resultDeliveryId: "ERP-RESULT-WORKSPACE-RACE" });
+  background.storage.shopeersErpPendingCostResultsV2 = [{
+    resultDeliveryId: input.resultDeliveryId, createdAt: input.createdAt,
+    queryCapturedAt: input.queryCapturedAt, registeredBefore: input.queryCapturedAt,
+    querySkcs: input.querySkcs, workspaceId: "workspace-secure", attemptsTotal: 0,
+    rows: background.api.buildRows(input.results, input.warehouseEvidence),
+    sourceMeta: {}, warehouseEvidence: input.warehouseEvidence,
+  }];
   const blocked = await background.api.submitCostResult(input, sender);
   assert.equal(blocked.status, "cached");
   assert.equal(blocked.code, "ERP_WORKSPACE_CONTEXT_CHANGED");
@@ -689,10 +731,12 @@ async function verifyRetryRestartAndConflicts() {
       return response(200, {});
     },
   });
-  const retryResult = await retryBackground.api.submitCostResult(resultInput(), sender);
+  const retryInput = await startCollection(retryBackground);
+  requestGets = 0;
+  const retryResult = await retryBackground.api.submitCostResult(retryInput, sender);
   assert.equal(retryResult.ok, true);
   assert.equal(requestGets, 1, "hydrated request context must be reused across retries");
-  assert.deepEqual(postIds, ["ERP-RESULT-SECURE-1", "ERP-RESULT-SECURE-1"]);
+  assert.deepEqual(postIds, [retryInput.resultDeliveryId, retryInput.resultDeliveryId]);
   assert.deepEqual(retryBackground.storage.shopeersErpPendingCostResultsV2, []);
 
   const hydratedRecord = {
@@ -735,7 +779,7 @@ async function verifyRetryRestartAndConflicts() {
       return response(409, { error: "ERP_RESULT_DELIVERY_CONFLICT", message: "delivery conflict" });
     },
   });
-  const conflict = await conflictBackground.api.submitCostResult(resultInput(), sender);
+  const conflict = await conflictBackground.api.submitCostResult(await startCollection(conflictBackground), sender);
   assert.equal(conflict.status, "failed");
   assert.equal(conflictBackground.storage.shopeersErpPendingCostResultsV2[0].deliveryTerminal, true);
   assert.ok(conflictBackground.storage.shopeersErpPendingCostResultsV2[0].warehouseEvidence);
@@ -760,14 +804,15 @@ async function verifyTimeoutAndInvalidJsonReleaseOwner() {
       return response(202, { deliveryId: "DELIVERY-RECOVERED", batchId: "BATCH-RECOVERED" });
     },
   });
-  const timedOut = await background.api.submitCostResult(resultInput(), sender);
+  const input = await startCollection(background);
+  const timedOut = await background.api.submitCostResult(input, sender);
   assert.equal(timedOut.status, "cached");
   mode = "success";
-  const recovered = await background.api.submitCostResult(resultInput(), sender);
+  const recovered = await background.api.submitCostResult(input, sender);
   assert.equal(recovered.ok, true, "same delivery must recover after body timeout releases its owner");
 
   mode = "invalid";
-  const invalidInput = resultInput({ resultDeliveryId: "ERP-RESULT-INVALID-JSON" });
+  const invalidInput = await startCollection(background);
   const invalid = await background.api.submitCostResult(invalidInput, sender);
   assert.equal(invalid.status, "cached");
   mode = "success";
