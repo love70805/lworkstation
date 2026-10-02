@@ -21,7 +21,7 @@ export function buildReferenceIdentityIndex({ ledgerIdentityRows = [], profitLin
         if (!fields[field].has(canonical)) fields[field].set(canonical, { value, sources: [] });
         const candidate = fields[field].get(canonical);
         if (compactEvidence) {
-          candidate.sourceCount = (candidate.sourceCount ?? 0) + 1;
+          candidate.sourceCount = (candidate.sourceCount ?? 0) + (row.sourceCount ?? 1);
           if (!evidenceScopes.has(candidate)) evidenceScopes.set(candidate, new Set());
           const scopes = evidenceScopes.get(candidate);
           // UI identity evidence keeps a real representative per store/source

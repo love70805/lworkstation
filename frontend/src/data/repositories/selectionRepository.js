@@ -28,8 +28,9 @@ import {
 } from "../../domain/selectionStatuses";
 import { db } from "../db/clientDatabase";
 import Dexie from "dexie";
-import { cachedDerived, sourceRevision, observeSourceRevision, retrySourceRead, assertSourceRevision } from "../db/derivedCache";
+import { cachedDerived, sourceRevision, selectionFactsRevision, observeSourceRevision, retrySourceRead, assertSourceRevision } from "../db/derivedCache";
 import { runDerivedComputation } from "./derivedComputationService";
+import { combineSelectionSalesFacts } from "../../domain/selectionSalesFacts";
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -1553,13 +1554,14 @@ export async function getSelectionReferenceSnapshot(options = {}) {
     db.catalogManualCosts.toArray(),
     db.erpCostRows.toArray(),
     db.profitLines.toArray(),
-    options.projectSales ? readSelectionSalesProjection(context.workspaceId) : db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(),
+    options.selectionSalesFacts ? [] : options.projectSales ? readSelectionSalesProjection(context.workspaceId) : db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(),
     db.ledgers.toArray(),
     db.importBatches.toArray(),
     db.erpCostBatches.toArray(),
     db.erpCostRequests.toArray(),
   ]);
-  const sourceSnapshot = { platformSkus, products, salesRows, ledgers, importBatches };
+  if (options.selectionSalesFacts && options.selectionSalesFacts.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
+  const sourceSnapshot = { platformSkus, products, salesRows: options.selectionSalesFacts?.ledgerIdentityRows ?? salesRows, ledgers, importBatches };
   const [independentCatalogRecords, receivedCatalogRecords] = await Promise.all([
     readTrustedErpCatalogRecords(context, sourceSnapshot),
     readTrustedErpCostInboxCatalogRecords(context, sourceSnapshot),
@@ -1585,11 +1587,11 @@ export async function getSelectionReferenceSnapshot(options = {}) {
     && row.platformSkc && catalogScope(batch).some(skc => canonicalPlatformSkc(skc) === canonicalPlatformSkc(row.platformSkc))
     && (!row.sourceEnvelopeBatchId || row.sourceEnvelopeBatchId === batch.sourceContract.batchId));
   const batchById = new Map(importBatches.filter(batch => batch.workspaceId === context.workspaceId && batch.status === "completed" && ledgerById.has(batch.ledgerId)).map(batch => [batch.id, batch]));
-  const ledgerIdentityRows = salesRows.filter(row => {
+  const ledgerIdentityRows = options.selectionSalesFacts?.ledgerIdentityRows ?? salesRows.filter(row => {
     const batch = batchById.get(row.batchId);
     return workspaceMatch(row) && ledgerById.has(row.ledgerId) && batch?.ledgerId === row.ledgerId;
   }).map(row => ({
-    platformSku: row.platformSku, platformSkc: row.platformSkc, attribute: row.attribute,
+    platformSku: row.platformSku ?? row.sku, platformSkc: row.platformSkc, attribute: row.attribute,
     ledgerId: row.ledgerId, period: ledgerById.get(row.ledgerId).period, batchId: row.batchId,
     store: row.store, supplierNumber: row.supplierNumber, sourceSheet: row.sourceSheet, sourceRow: row.sourceRow,
   }));
@@ -1600,6 +1602,7 @@ export async function getSelectionReferenceSnapshot(options = {}) {
   ];
   return {
     workspaceId: context.workspaceId,
+    ...(options.selectionSalesFacts ? { selectionSalesFacts: options.selectionSalesFacts } : {}),
     salesRows: salesRows.filter(row => workspaceMatch(row) && batchById.get(row.batchId)?.ledgerId === row.ledgerId),
     importBatches: [...batchById.values()],
     ledgers: [...ledgerById.values()],
@@ -1628,8 +1631,8 @@ export async function getSelectionReferenceSnapshot(options = {}) {
 
 
 const SELECTION_SALES_FIELDS = ["id", "workspaceId", "ledgerId", "batchId", "platformSku", "sku", "platformSkc", "attribute", "store", "supplierNumber", "sourceSheet", "sourceRow", "sourceAddedDate", "sourceAddedAt", "rawAddedAt", "sourceTimePrecision", "movementType", "isDeduction", "quantityExact", "quantity", "qty", "amountExact", "amount", "unitPriceRaw", "unitPrice"];
-async function readSelectionSalesProjection(workspaceId) {
-  const keys = await db.salesRows.where("workspaceId").equals(workspaceId).primaryKeys();
+async function readSelectionSalesProjection(workspaceId, ledgerId = null) {
+  const keys = await db.salesRows.where(ledgerId ? "ledgerId" : "workspaceId").equals(ledgerId ?? workspaceId).primaryKeys();
   const rows = [];
   for (let offset = 0; offset < keys.length; offset += 4000) {
     const chunk = await db.salesRows.bulkGet(keys.slice(offset, offset + 4000));
@@ -1648,14 +1651,30 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
   const context = await getActiveMemberContext();
   assertSourceRevision(revision);
   const compute = async () => {
-    const snapshot = await getSelectionReferenceSnapshot({ projectSales: true });
+    const factsRevision = selectionFactsRevision();
+    const [ledgers, importBatches] = await Promise.all([db.ledgers.where("workspaceId").equals(context.workspaceId).toArray(), db.importBatches.where("workspaceId").equals(context.workspaceId).toArray()]);
+    const parts = [];
+    for (const ledger of ledgers) {
+      const computeFacts = async () => {
+        const salesRows = await readSelectionSalesProjection(context.workspaceId, ledger.id);
+        assertSourceRevision(factsRevision, selectionFactsRevision);
+        const facts = await runDerivedComputation("selection-facts", { salesRows, ledgers: [ledger], importBatches: importBatches.filter(batch => batch.ledgerId === ledger.id), workspaceId: context.workspaceId });
+        assertSourceRevision(factsRevision, selectionFactsRevision);
+        return facts;
+      };
+      parts.push(observable ? await cachedDerived({ scope: [context.workspaceId, ledger.id], formula: "selection-ledger-facts@2", revision: factsRevision, revisionReader: selectionFactsRevision, compute: computeFacts }) : await computeFacts());
+    }
+    assertSourceRevision(factsRevision, selectionFactsRevision);
+    const selectionSalesFacts = combineSelectionSalesFacts(parts, context.workspaceId);
+    assertSourceRevision(revision);
+    const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts });
     assertSourceRevision(revision);
     if (snapshot.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
     const rows = await runDerivedComputation("selection", { ...snapshot, store });
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
   const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@1", revision, compute,
+    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@2", revision, compute,
   }) : await compute();
   assertSourceRevision(revision);
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));

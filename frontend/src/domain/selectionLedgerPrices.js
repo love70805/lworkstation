@@ -10,10 +10,14 @@ const isSale = row => !row.isDeduction && !/盘亏|扣款|罚款|违约/.test(ro
 // Read-only contract: latest normal business timestamp within one SKU/store/month.
 // Only prices at that instant compete; ties use that price's month net units.
 // Neither this projection nor its provenance changes ledger revenue/formal costs.
-export function buildSelectionLedgerPriceIndex({ salesRows = [], importBatches = [], ledgers = [], workspaceId = null } = {}) {
+export function buildSelectionLedgerPriceIndex({ salesRows = [], importBatches = [], ledgers = [], workspaceId = null, compactEvidence = false } = {}) {
   const ledgerById = new Map(ledgers.filter(row => !workspaceId || row.workspaceId === workspaceId).map(row => [row.id, row]));
   const batches = new Map(importBatches.filter(row => row.status === "completed" && (!workspaceId || row.workspaceId === workspaceId)).map(row => [row.id, row]));
   const index = new Map(), seen = new Map();
+  const addSource = (sources, source) => {
+    if (!compactEvidence || !sources.length) sources.push(source);
+    else sources[0].sourceCount = (sources[0].sourceCount ?? 1) + 1;
+  };
   for (const row of salesRows) {
     const ledger = ledgerById.get(row.ledgerId), batch = batches.get(row.batchId);
     if (!ledger || !batch || batch.ledgerId !== row.ledgerId || key(batch.store) !== key(row.store) || !text(row.platformSku ?? row.sku) || !isSale(row) || workspaceId && row.workspaceId !== workspaceId) continue;
@@ -45,15 +49,15 @@ export function buildSelectionLedgerPriceIndex({ salesRows = [], importBatches =
     if (parsed.sourceAddedDate === scope.latestDate) {
       if (validPrice) {
         if (!scope.dayCandidates.has(priceKey)) scope.dayCandidates.set(priceKey, []);
-        scope.dayCandidates.get(priceKey).push(source);
-      } else { scope.dayMissingPrice = true; scope.dayMissingSources.push(source); }
+        addSource(scope.dayCandidates.get(priceKey), { ...source });
+      } else { scope.dayMissingPrice = true; addSource(scope.dayMissingSources, { ...source }); }
       scope.uncertainTime ||= precision === "day";
     }
     if (timestamp < scope.latest) continue;
     if (timestamp > scope.latest) { scope.latest = timestamp; scope.candidates.clear(); scope.latestMissingPrice = false; scope.missingSources = []; }
-    if (!validPrice) { scope.latestMissingPrice = true; scope.missingSources.push(source); continue; }
+    if (!validPrice) { scope.latestMissingPrice = true; addSource(scope.missingSources, { ...source }); continue; }
     if (!scope.candidates.has(priceKey)) scope.candidates.set(priceKey, []);
-    scope.candidates.get(priceKey).push(source);
+    addSource(scope.candidates.get(priceKey), { ...source });
   }
   return index;
 }
@@ -68,7 +72,7 @@ export function selectionLedgerPrice(index, platformSku, { ledgerId = null, stor
   if (scopes.length !== 1) return { status: "choose", reason: "ambiguous_store", value: null, period: latestPeriod, candidates: [], sources: scopes.map(({ ledgerId, period, store }) => ({ ledgerId, period, store })) };
   const scope = scopes[0];
   const timeUncertain = scope.uncertainTime && (scope.dayCandidates.size > 1 || scope.dayMissingPrice);
-  const candidates = [...(timeUncertain ? scope.dayCandidates : scope.candidates)].map(([price, sources]) => ({ value: Number(price), priceExact: price, quantityExact: scope.totals.get(price)?.toFixed() ?? null, sources }));
+  const candidates = [...(timeUncertain ? scope.dayCandidates : scope.candidates)].map(([price, sources]) => ({ value: Number(price), priceExact: price, quantityExact: scope.totals.get(price)?.toFixed?.() ?? scope.totals.get(price) ?? null, sources }));
   const sources = [...candidates.flatMap(candidate => candidate.sources), ...(timeUncertain ? scope.dayMissingSources : scope.missingSources)];
   const base = { kind: "ledger", period: scope.period, store: scope.store, ledgerId: scope.ledgerId, sourceAddedAt: sources[0]?.sourceAddedAt ?? null, candidates, sources };
   if (!candidates.length) return { ...base, status: "missing", value: null };

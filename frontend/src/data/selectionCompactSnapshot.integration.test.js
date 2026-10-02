@@ -2,9 +2,10 @@ import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { liveQuery } from 'dexie';
 import { db, setActiveMemberContext, getSelectionReferenceSnapshot, getProductEditorSnapshot, saveProductCatalogRecord } from './database';
-import { derivedCacheDb, clearDerivedMemory } from './db/derivedCache';
+import { derivedCacheDb, clearDerivedMemory, sourceRevision, selectionFactsRevision, cachedDerived, derivedValueBytes } from './db/derivedCache';
 import { buildSelectionReferenceRows } from '../lib/selectionReferences';
 import * as computations from './repositories/derivedComputationService';
+import { ensureDefaultWorkspace } from './repositories/selectionRepository';
 
 beforeEach(async () => {
   const storage = new Map();
@@ -18,7 +19,7 @@ beforeEach(async () => {
 afterEach(async () => { await db.delete(); await derivedCacheDb.delete(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('keeps price and whole-store seven-day completeness while targeting one product', async () => {
-  const full = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+  const full = buildSelectionReferenceRows({ ...await getSelectionReferenceSnapshot(), compactEvidence: true });
   const snapshot = await getSelectionReferenceSnapshot({ compact: true, platformSkc: 'SKC-A' });
   const [row] = buildSelectionReferenceRows(snapshot);
   expect(snapshot.salesRows).toBeUndefined();
@@ -34,7 +35,7 @@ it('reuses after process cache clear, then invalidates same-count edit, replacem
   await getSelectionReferenceSnapshot({ compact: true });
   clearDerivedMemory();
   await getSelectionReferenceSnapshot({ compact: true, platformSkus: ['SKU-A'] });
-  expect(compute).toHaveBeenCalledTimes(1);
+  expect(compute).toHaveBeenCalledTimes(2); // immutable facts + current catalog projection
   const first = await db.salesRows.toCollection().first();
   await db.salesRows.update(first.id, { unitPrice: '2' });
   const updated = await getSelectionReferenceSnapshot({ compact: true });
@@ -102,4 +103,93 @@ it('preserves legacy sku-alias rows when projecting the latest sale price', asyn
   const compact = buildSelectionReferenceRows(await getSelectionReferenceSnapshot({ compact: true }));
   expect(full[0].catalogSalePrice).toBe(9);
   expect(compact[0].catalogSalePrice).toBe(9);
+});
+
+it('reuses immutable ledger facts after a real product save, including after process restart', async () => {
+  await ensureDefaultWorkspace();
+  await db.workspaces.put({ id: 'W', name: 'W' });
+  const before = await getProductEditorSnapshot({ platformSkc: 'SKC-A' });
+  const factsVersion = selectionFactsRevision(), version = sourceRevision();
+  const read = vi.spyOn(db.salesRows, 'bulkGet');
+  const draft = { ...before.draft, name: '手工标题', salesStatus: 'on_sale' };
+  await saveProductCatalogRecord({ expectedWorkspaceId: 'W', draft });
+  expect(sourceRevision()).not.toBe(version);
+  expect(selectionFactsRevision()).toBe(factsVersion);
+  const next = await getProductEditorSnapshot({ platformSkc: 'SKC-B' });
+  expect(next.draft.platformSkc).toBe('SKC-B');
+  expect(read).not.toHaveBeenCalled();
+  db.close(); derivedCacheDb.close(); clearDerivedMemory();
+  await db.open(); await derivedCacheDb.open();
+  const product = await db.products.toCollection().first();
+  await db.products.update(product.id, { name: '重启后标题' });
+  const returned = await getSelectionReferenceSnapshot({ compact: true });
+  expect(returned.computedReferenceRows.find(row => row.platformSku === 'SKU-A').productName).toBe('重启后标题');
+  expect(read).not.toHaveBeenCalled();
+  const values = await derivedCacheDb.entries.toArray();
+  for (const entry of values) expect(entry.bytes).toBe(derivedValueBytes(entry.value));
+});
+
+it('rejects fact reuse after each financial/context dependency and transaction abort', async () => {
+  await getSelectionReferenceSnapshot({ compact: true });
+  const mutations = [
+    () => db.importBatches.update('B', { fileHash: 'changed' }),
+    () => db.salesRows.toCollection().modify({ unitPrice: 0 }),
+    () => db.ledgers.update('L', { status: 'finalized' }),
+    () => db.erpCostRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU-A', unitCost: 1 }),
+    () => db.catalogManualCosts.put({ id: 'MANUAL', workspaceId: 'W', platformSku: 'SKU-A', amount: 0 }),
+    () => db.settings.put({ key: 'any-setting', value: true }),
+  ];
+  const reads = vi.spyOn(db.salesRows, 'bulkGet');
+  for (const mutation of mutations) {
+    const revision = selectionFactsRevision();
+    await mutation();
+    expect(selectionFactsRevision()).not.toBe(revision);
+    reads.mockClear();
+    await getSelectionReferenceSnapshot({ compact: true });
+    expect(reads).toHaveBeenCalled();
+  }
+  const revision = selectionFactsRevision();
+  await expect(db.transaction('rw', db.products, db.salesRows, async () => {
+    await db.products.put({ id: 'ROLLBACK', workspaceId: 'W' });
+    await db.salesRows.toCollection().modify({ quantity: 900 });
+    throw new Error('abort');
+  })).rejects.toThrow('abort');
+  expect(selectionFactsRevision()).not.toBe(revision);
+  expect(await db.products.get('ROLLBACK')).toBeUndefined();
+  expect((await getSelectionReferenceSnapshot({ compact: true })).computedReferenceRows.find(row => row.platformSku === 'SKU-A').automaticSalesTag.quantityExact).toBe('13');
+});
+
+it('rejects a cross-tab version rotation while facts are computing and falls back when sidecar is unavailable', async () => {
+  const original = computations.runDerivedComputation;
+  let changed = false;
+  vi.spyOn(computations, 'runDerivedComputation').mockImplementation(async (kind, input) => {
+    const value = await original(kind, input);
+    if (kind === 'selection-facts' && !changed) {
+      changed = true;
+      // Same storage channel used by another tab's mutation middleware.
+      localStorage.setItem('shopeers-selection-facts-revision-v1', crypto.randomUUID());
+      localStorage.setItem('shopeers-derived-source-revision-v1', crypto.randomUUID());
+    }
+    return value;
+  });
+  expect((await getSelectionReferenceSnapshot({ compact: true })).computedReferenceRows).toHaveLength(2);
+  const factsCalls = computations.runDerivedComputation.mock.calls.filter(([kind]) => kind === 'selection-facts');
+  expect(factsCalls).toHaveLength(2);
+  clearDerivedMemory();
+  vi.spyOn(derivedCacheDb.revisions, 'get').mockRejectedValue(new Error('sidecar unavailable'));
+  const read = vi.spyOn(db.salesRows, 'bulkGet');
+  expect((await getSelectionReferenceSnapshot({ compact: true })).computedReferenceRows).toHaveLength(2);
+  expect(read).toHaveBeenCalled();
+});
+
+it('retains twelve bounded fact partitions through catalog-only writes without count eviction', async () => {
+  const compute = vi.fn(async () => new Map([['values', new Set(['facts'])]]));
+  const options = scope => ({ scope, formula: 'facts-retention-test', revisionReader: selectionFactsRevision, compute });
+  for (let index = 0; index < 12; index++) await cachedDerived(options(index));
+  await db.products.put({ id: 'P', workspaceId: 'W', name: 'changed' });
+  for (let index = 0; index < 12; index++) await cachedDerived(options(index));
+  expect(compute).toHaveBeenCalledTimes(12);
+  clearDerivedMemory();
+  for (let index = 0; index < 12; index++) expect(await cachedDerived(options(index))).toEqual(new Map([['values', new Set(['facts'])]]));
+  expect(compute).toHaveBeenCalledTimes(12);
 });

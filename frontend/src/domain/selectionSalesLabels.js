@@ -59,14 +59,67 @@ function identityStores(identity) {
   return [identity.store, identity.storeName, ...(identity.stores ?? []), ...(identity.storeNames ?? []), ...(identity.platformSkcEvidence ?? []).filter(candidate => !identity.platformSkc || key(candidate.value) === key(identity.platformSkc)).flatMap(candidate => (candidate.sources ?? []).map(source => source.store))].map(value => typeof value === "object" ? value?.store ?? value?.storeName : value).map(text).filter(Boolean);
 }
 
+// Catalog-independent source facts. Deduplication and completeness precede
+// aggregation. Unresolved identities are resolved against the current catalog.
+export function prepareSelectionSalesLabelFacts({ salesRows = [], importBatches = [], ledgers = [], workspaceId = null, compact = true } = {}) {
+  const ledgerById = new Map(ledgers.filter(ledger => validPeriod(ledger.period) && (!workspaceId || ledger.workspaceId === workspaceId)).map(ledger => [ledger.id, ledger]));
+  const batchById = new Map(importBatches.filter(batch => ledgerById.has(batch.ledgerId) && (!workspaceId || batch.workspaceId === workspaceId) && (!batch.workspaceId || batch.workspaceId === ledgerById.get(batch.ledgerId).workspaceId)).map(batch => [batch.id,batch]));
+  const seen = new Map(), conflicts = [];
+  const rows = [];
+  for (const [index,row] of salesRows.entries()) {
+    const ledger = ledgerById.get(row.ledgerId), batch = batchById.get(row.batchId);
+    if (!ledger || (workspaceId && row.workspaceId !== workspaceId) || (row.workspaceId && row.workspaceId !== ledger.workspaceId) || (row.batchId && (!batch || batch.status !== "completed" || batch.ledgerId !== row.ledgerId))) continue;
+    const coordinate = row.sourceRow != null ? JSON.stringify([row.ledgerId, batch?.fileHash ?? row.batchId, key(row.store), row.sourceSheet ?? "", row.sourceRow]) : row.id != null ? `id:${row.id}` : `unlocated:${index}`;
+    const content = JSON.stringify([row.ledgerId,key(row.store),key(row.platformSkc),key(row.platformSku ?? row.sku),row.sourceAddedDate,row.rawAddedAt,row.quantityExact ?? row.quantity,row.amountExact ?? row.amount,Boolean(row.isDeduction)]);
+    if (seen.has(coordinate)) { if (seen.get(coordinate) !== content) conflicts.push(row); continue; }
+    seen.set(coordinate, content); rows.push(row);
+  }
+  const rowsByBatch = new Map(), rowCountByScope = new Map();
+  for (const row of rows) {
+    if (!rowsByBatch.has(row.batchId)) rowsByBatch.set(row.batchId,[]);
+    rowsByBatch.get(row.batchId).push(row);
+    const scopeKey = JSON.stringify([row.ledgerId,key(row.store)]);
+    rowCountByScope.set(scopeKey,(rowCountByScope.get(scopeKey) ?? 0)+1);
+  }
+  const completeMonths = new Map(), completeStoreNames = [];
+  for (const batch of batchById.values()) {
+    const ledger = ledgerById.get(batch.ledgerId), coverage = batch.sourceCoverage;
+    const activeRows = rowsByBatch.get(batch.id) ?? [];
+    const scopeRowCount = rowCountByScope.get(JSON.stringify([batch.ledgerId,key(batch.store)])) ?? 0;
+    if (batch.status !== "completed" || coverage?.version !== 1 || coverage.scope !== "full_month" || coverage.period !== ledger.period || batch.period !== ledger.period || !key(batch.store) || key(coverage.store) !== key(batch.store) || !["import_preview","manual"].includes(coverage.declarationSource) || !Number.isInteger(batch.validRowCount) || batch.validRowCount !== activeRows.length || scopeRowCount !== activeRows.length || activeRows.some(row => key(row.store) !== key(batch.store))) continue;
+    const storeKey = key(batch.store);
+    completeStoreNames.push([storeKey, text(batch.store)]);
+    if (!completeMonths.has(storeKey)) completeMonths.set(storeKey,new Set());
+    completeMonths.get(storeKey).add(ledger.period);
+  }
+  const aggregate = input => {
+    const grouped = new Map();
+    for (const row of input) {
+      const period = ledgerById.get(row.ledgerId)?.period;
+      const parsed = parseSalesAddedDate(row.sourceAddedDate ?? row.rawAddedAt, { period });
+      const quantity = decimalSource(row.quantityExact ?? row.quantity ?? row.qty, null);
+      const window = windowFor(period);
+      // The only date query in the label contract is month-end seven days.
+      const date = parsed.dateStatus !== "valid" ? "invalid" : parsed.sourceAddedDate >= window.startDate ? window.endDate : period + "-01";
+      const identity = JSON.stringify([row.ledgerId, row.store, row.platformSkc, row.platformSku ?? row.sku, date, quantity === null, isSale(row)]);
+      if (!grouped.has(identity)) grouped.set(identity, { ledgerId: row.ledgerId, store: row.store, platformSkc: row.platformSkc, platformSku: row.platformSku ?? row.sku, sourceAddedDate: date, isDeduction: !isSale(row), quantityExact: quantity === null ? null : new Exact(0), sourceCount: 0 });
+      const item = grouped.get(identity);
+      item.sourceCount++;
+      if (quantity !== null) item.quantityExact = item.quantityExact.plus(quantity);
+    }
+    return [...grouped.values()].map(row => ({ ...row, quantityExact: row.quantityExact?.toFixed() ?? null }));
+  };
+  return { rows: compact ? aggregate(rows) : rows, conflicts: compact ? aggregate(conflicts) : conflicts, completeMonths, completeStoreNames };
+}
+
 // All input tables must belong to the same workspace. The optional workspaceId
 // also enforces this in standalone callers. This is a read-only projection: it
 // never synthesizes monthly sales/cost rows or edits catalog/manual tags.
-export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], ledgers = [], products = [], productSkus = [], store = "all", period = null, workspaceId = null } = {}) {
+export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], ledgers = [], products = [], productSkus = [], store = "all", period = null, workspaceId = null, labelFacts = null } = {}) {
   if (period !== null && !validPeriod(period)) throw new Error("销量标签月份无效。");
   const ledgerById = new Map(ledgers.filter(ledger => validPeriod(ledger.period) && (!workspaceId || ledger.workspaceId === workspaceId)).map(ledger => [ledger.id, ledger]));
   const batchById = new Map(importBatches.filter(batch => ledgerById.has(batch.ledgerId) && (!workspaceId || batch.workspaceId === workspaceId) && (!batch.workspaceId || batch.workspaceId === ledgerById.get(batch.ledgerId).workspaceId)).map(batch => [batch.id,batch]));
-  const groups = new Map(), skuSkcs = new Map(), storeNames = new Map(), seen = new Map(), conflicts = [], identityConflictedGroups = new Set();
+  const groups = new Map(), skuSkcs = new Map(), storeNames = new Map(), identityConflictedGroups = new Set();
   const productById = new Map(products.map(product => [product.id,product]));
   const ensureGroup = (skc, stores = [], sku = "") => {
     if (!text(skc)) return null;
@@ -84,16 +137,11 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
   }
   for (const product of products) ensureGroup(product.platformSkc || product.skc, identityStores(product));
 
-  const rows = [];
-  for (const [index,row] of salesRows.entries()) {
-    const ledger = ledgerById.get(row.ledgerId), batch = batchById.get(row.batchId);
-    if (!ledger || (workspaceId && row.workspaceId !== workspaceId) || (row.workspaceId && row.workspaceId !== ledger.workspaceId) || (row.batchId && (!batch || batch.status !== "completed" || batch.ledgerId !== row.ledgerId))) continue;
-    const coordinate = row.sourceRow != null ? JSON.stringify([row.ledgerId, batch?.fileHash ?? row.batchId, key(row.store), row.sourceSheet ?? "", row.sourceRow]) : row.id != null ? `id:${row.id}` : `unlocated:${index}`;
-    const content = JSON.stringify([row.ledgerId,key(row.store),key(row.platformSkc),key(row.platformSku ?? row.sku),row.sourceAddedDate,row.rawAddedAt,row.quantityExact ?? row.quantity,row.amountExact ?? row.amount,Boolean(row.isDeduction)]);
-    if (seen.has(coordinate)) { if (seen.get(coordinate) !== content) conflicts.push(row); continue; }
-    seen.set(coordinate, content); rows.push(row);
+  const prepared = labelFacts ?? prepareSelectionSalesLabelFacts({ salesRows, importBatches, ledgers, workspaceId, compact: false });
+  const { rows, conflicts, completeMonths } = prepared;
+  for (const row of rows) {
     const name = text(row.store);
-    if (name) storeNames.set(key(name),name);
+    if (name) storeNames.set(key(name), name);
     ensureGroup(row.platformSkc, name ? [name] : [], row.platformSku ?? row.sku);
   }
   for (const row of rows) {
@@ -102,24 +150,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     if (candidates?.size === 1) ensureGroup([...candidates][0], [row.store]);
   }
   for (const skcs of skuSkcs.values()) if (skcs.size > 1) for (const skc of skcs) identityConflictedGroups.add(skc);
-  const rowsByBatch = new Map(), rowCountByScope = new Map();
-  for (const row of rows) {
-    if (!rowsByBatch.has(row.batchId)) rowsByBatch.set(row.batchId,[]);
-    rowsByBatch.get(row.batchId).push(row);
-    const scopeKey = JSON.stringify([row.ledgerId,key(row.store)]);
-    rowCountByScope.set(scopeKey,(rowCountByScope.get(scopeKey) ?? 0)+1);
-  }
-  const completeMonths = new Map();
-  for (const batch of batchById.values()) {
-    const ledger = ledgerById.get(batch.ledgerId), coverage = batch.sourceCoverage;
-    const activeRows = rowsByBatch.get(batch.id) ?? [];
-    const scopeRowCount = rowCountByScope.get(JSON.stringify([batch.ledgerId,key(batch.store)])) ?? 0;
-    if (batch.status !== "completed" || coverage?.version !== 1 || coverage.scope !== "full_month" || coverage.period !== ledger.period || batch.period !== ledger.period || !key(batch.store) || key(coverage.store) !== key(batch.store) || !["import_preview","manual"].includes(coverage.declarationSource) || !Number.isInteger(batch.validRowCount) || batch.validRowCount !== activeRows.length || scopeRowCount !== activeRows.length || activeRows.some(row => key(row.store) !== key(batch.store))) continue;
-    const storeKey = key(batch.store);
-    storeNames.set(storeKey,text(batch.store));
-    if (!completeMonths.has(storeKey)) completeMonths.set(storeKey,new Set());
-    completeMonths.get(storeKey).add(ledger.period);
-  }
+  for (const [storeKey, name] of prepared.completeStoreNames) storeNames.set(storeKey, name);
   const selectedStores = store === "all" ? [...new Set([...rows.map(row => key(row.store)).filter(Boolean), ...completeMonths.keys()])] : [...new Set((Array.isArray(store) ? store : [store]).map(key).filter(Boolean))];
   const selectedStoreKeys = new Set(selectedStores), conflictRows = new Set(conflicts);
   const commonMonths = selectedStores.length ? [...(completeMonths.get(selectedStores[0]) ?? [])].filter(month => selectedStores.every(name => completeMonths.get(name)?.has(month))).sort().reverse() : [];
@@ -149,7 +180,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     if (!totals.has(skc)) totals.set(skc,{ month: new Exact(0), window: new Exact(0), sourceRowCount: 0 });
     const total = totals.get(skc), quantity = decimalSource(row.quantityExact ?? row.quantity ?? row.qty, null);
     if (conflictRows.has(row)) { addProblem(skc,"source_conflict"); continue; }
-    total.sourceRowCount++;
+    total.sourceRowCount += row.sourceCount ?? 1;
     if (quantity === null) { addProblem(skc,"invalid_quantity"); continue; }
     total.month = total.month.plus(quantity);
     if (skuSkcs.get(key(row.platformSku ?? row.sku))?.size > 1) addProblem(skc,"identity_conflict");
