@@ -6,7 +6,7 @@
 
 - 执行分支`codex/release-0-3-7`，发布main基线`454b74f003bfb4e50ca534bd0d5162a9646d0293`。
 - 最终候选从`2540a66eef84a58c6bcb20a7398533b0d3179570`构建。B064首候选保存在`archive/release-0.3.7/pre-workspace-fix-candidate/`；F992中间候选因桌面旧smoke夹具未适配新协议而未通过，保存在`pre-smoke-fixture-candidate/`。两者都不用于公开发布。
-- [PR #135](https://github.com/love70805/lworkstation/pull/135)原为Draft，最新固定账号范围确认后继续受保护集成及发布；代码集成与公开资产回读分别记录。
+- [PR #135](https://github.com/love70805/lworkstation/pull/135)已受保护合入7b1a6cc，最终PR与main CI通过；该候选已公开并完成四资产匿名回读，详见[发布记录](RELEASE_0.3.7.md)。
 - 候选位于1068工作区`releases/candidates/0.3.7/`，稳定通道配置、`candidateOnly:true`、构建参数`--publish never`。安装包、隔离配置及原始验收证据只留本机忽略目录。
 
 | 文件 | 字节 | SHA256 |

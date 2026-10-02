@@ -6,16 +6,16 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.3.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.6)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.3.7](https://github.com/love70805/lworkstation/releases/tag/v0.3.7)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
 
 ## 版本清单
 
-核对日期：2026-09-30（UTC+8）。0.3.6 已公开为非预发布的 GitHub Latest，四资产匿名全量下载、真实更新通道及主仓库持久复制回读通过；更早版本原标签与资产保留，Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。
+核对日期：2026-10-03（UTC+8）。0.3.7 已公开为非预发布的 GitHub Latest，四资产匿名全量下载、真实更新通道及主仓库持久复制回读通过；更早版本原标签与资产保留，Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| `0.3.7` 导入性能与连续建档 | 2540a66修复ERP首次回传请求绑定；新候选1230测试、16组桌面、隐藏EXE/包内ERP、528文件/481输入通过；接续PR #135及发布；未安装；EXE 6FD1FFB9… | `candidates/0.3.7/`；[发布进度](../docs/RELEASE_0.3.7.md)；[候选边界](../docs/RELEASE_0.3.7_CANDIDATE.md) |
-| `0.3.6` 完整台账、选品与销售分析 | 已公开稳定Latest；PR #133/main CI、1176测试、隐藏EXE与生产UI、516安装文件/469输入、四资产匿名回读通过；EXE D009CBD7…；未安装 | `candidates/0.3.6/`；[发布与验收记录](../docs/RELEASE_0.3.6.md) |
+| `0.3.7` 导入性能与连续建档 | 已公开稳定Latest；PR #135/main CI、1230测试、16组桌面、隐藏EXE/包内ERP、528文件/481输入及四资产匿名回读通过；EXE 6FD1FFB9…；未安装 | `candidates/0.3.7/`；[发布进度](../docs/RELEASE_0.3.7.md)；[候选边界](../docs/RELEASE_0.3.7_CANDIDATE.md) |
+| `0.3.6` 完整台账、选品与销售分析 | 历史公开稳定版；PR #133/main CI、1176测试、隐藏EXE与生产UI、516安装文件/469输入、四资产匿名回读通过；EXE D009CBD7…；未安装 | `candidates/0.3.6/`；[发布与验收记录](../docs/RELEASE_0.3.6.md) |
 | `0.3.5` 选品与 ERP 修复 | 历史公开稳定版；PR #131/main CI、四资产匿名全量回读及真实更新通道通过；ERP8.0.26，1141测试、16组桌面、502文件/455输入；EXE FA750D5D…；未安装、未改真实库 | `candidates/0.3.5/`（含`public/`公开原件）；`archive/release-0.3.5/publication/`；[发布记录](../docs/RELEASE_0.3.5.md) |
 | `0.3.4` 采集恢复 | 历史公开稳定版，原标签与资产保留；PR #129/main CI、四资产匿名回读及更新通道通过；1108测试、16组桌面验证、真实慢路径、隐藏EXE、489文件/442输入；ERP 8.0.25，未安装 | `candidates/0.3.4/`（含`public/`匿名原件）；`archive/release-0.3.4/`；[验收与哈希](../docs/RELEASE_0.3.4.md) |
 | `0.3.3` 选品建档与销量标签 | 历史公开稳定版，原标签及资产保留；PR #127/main CI、1107 测试、16 组桌面验证、隐藏 EXE smoke、476 文件/429 输入、四资产匿名回读、真实更新通道及持久复制通过；含 ERP 8.0.24，未安装 | 主仓库 `candidates/0.3.3/` 及其中 `public/`；`archive/release-0.3.3/`；[验收与哈希](../docs/RELEASE_0.3.3.md) |
