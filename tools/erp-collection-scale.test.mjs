@@ -63,14 +63,27 @@ async function scenario(fault = '') {
 for (const fault of ['', 'repeat', 'drift', 'cancel', 'login', 'zero_count']) await scenario(fault);
 
 
-// Exercise the real production loop with a shorter clock budget. Repeated
-// attempts must revalidate complete targets when identity/history is unverified.
-// No source files are altered by this test.
+// Exercise the production deadline callback after a known complete target and
+// an in-flight partial target. Advance that one clock explicitly instead of
+// racing a 110ms deadline against scheduler/CI load. Successful attempts retain
+// the real five-minute budget and await observable completion, not a fixed nap.
 async function resumeAcrossTargets() {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const scope = Array.from({ length: 8 }, (_, index) => `SKC-${index}`), requests = [], messages = [];
   let requestId = 'SYN-BUDGET-A';
-  let delayMs = 40, currentAccountPrice = 4;
+  let stallSecondTarget = true, currentAccountPrice = 4, expireStageBudget;
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  window.setTimeout = (callback, ms, ...args) => {
+    if (ms === 5 * 60 * 1000) expireStageBudget = () => callback(...args);
+    return nativeSetTimeout(callback, ms, ...args);
+  };
+  const waitFor = async (predicate, message) => {
+    const deadline = Date.now() + 10000;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error(message + ': ' + window.document.body.textContent);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  };
   window.confirm = () => true;
   window.chrome = { runtime: { sendMessage(message, done) {
     messages.push(structuredClone(message));
@@ -82,7 +95,7 @@ async function resumeAcrossTargets() {
     if (endpoint === 'purchase-order-page') {
       const sku = url.searchParams.get('sku'); requests.push({ requestId, sku });
       assert.ok(scope.includes(sku));
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      if (stallSecondTarget && sku === scope[1]) return new Promise(() => {});
       data = [{ purchaseOrderId: `${sku}-ORDER` }];
     } else if (endpoint === 'purchase-order-details') {
       const sku = url.searchParams.get('purchaseOrderId').split('-')[1];
@@ -95,36 +108,46 @@ async function resumeAcrossTargets() {
   };
   try {
     for (const name of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) {
-      let source = await readFile(path.join(root, 'integrations/erp-assistant-extension/src', name), 'utf8');
-      if (name === 'content.js') {
-        assert.ok(source.includes('const COST_STAGE_BUDGET_MS = 5 * 60 * 1000;'));
-        source = source.replace('const COST_STAGE_BUDGET_MS = 5 * 60 * 1000;', 'const COST_STAGE_BUDGET_MS = 110;');
-      }
+      const source = await readFile(path.join(root, 'integrations/erp-assistant-extension/src', name), 'utf8');
+      if (name === 'content.js') assert.ok(source.includes('const COST_STAGE_BUDGET_MS = 5 * 60 * 1000;'));
       window.eval(source);
     }
     window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0' } }));
-    const attempts = [];
-    for (let attempt = 0; attempt < 3 && !messages.some(message => message.type === 'shopeers.erp.submitCostResult'); attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       const before = requests.length;
-      if (attempt === 2) { delayMs = 2; currentAccountPrice = 9; }
+      expireStageBudget = null;
       window.document.getElementById(attempt ? 'erpa-recalculate' : 'erpa-cost-trigger').click();
-      await new Promise(resolve => setTimeout(resolve, 300));
-      attempts.push(requests.slice(before).map(item => item.sku));
+      await waitFor(() => requests.slice(before).some(item => item.sku === scope[1]), 'partial target must be in flight');
+      assert.equal(typeof expireStageBudget, 'function', 'the production stage deadline is armed');
+      expireStageBudget();
+      await waitFor(() => !window.document.getElementById('erpa-loading').classList.contains('erpa-visible') && window.document.getElementById('erpa-error').classList.contains('erpa-visible') && !window.document.getElementById('erpa-recalculate').disabled && window.document.getElementById('erpa-error-title').textContent === '本次成本读取时间已到', 'deadline must abort and restore the retry action');
+      assert.deepEqual(requests.slice(before).map(item => item.sku), scope.slice(0, 2), 'each interrupted attempt starts over at the previously completed target');
+      assert.equal(messages.some(message => message.type === 'shopeers.erp.submitCostResult'), false, 'a partial/deadline attempt cannot submit complete costs');
     }
-    assert.ok(attempts.length > 1, 'the fixture must span multiple budgets');
-    assert.deepEqual([...new Set(requests.map(item => item.sku))], scope, 'every pending target is eventually read');
+    stallSecondTarget = false;
+    currentAccountPrice = 9;
+    const completeStart = requests.length;
+    window.document.getElementById('erpa-recalculate').click();
+    await waitFor(() => messages.some(message => message.type === 'shopeers.erp.submitCostResult') && !window.document.getElementById('erpa-recalculate').disabled, 'one complete budget must deliver every target');
+    assert.deepEqual(requests.slice(completeStart).map(item => item.sku), scope, 'one uninterrupted attempt reads every target without stitching prior attempts');
     assert.equal(requests.filter(item => item.sku === 'SKC-0').length, 3, 'unknown account/history forces complete target revalidation on every new attempt, including in the same document');
     const delivered = messages.find(message => message.type === 'shopeers.erp.submitCostResult');
-    assert.ok(delivered, 'eventually submits only after all target lists are complete');
+    assert.ok(delivered, 'one uninterrupted full-budget attempt submits after all target lists are complete');
     assert.equal(delivered.payload.meta.orderCount, 8);
     assert.ok(delivered.payload.warehouseEvidence.warehouses.every(item => item.evidenceComplete));
-    assert.ok(delivered.payload.results.every(item => Number(item.unitCost) === 9), 'same-document account/evidence changes cannot reuse earlier prices');
+    assert.ok(delivered.payload.results.every(item => Number(item.unitCost) === 9), 'all delivered prices come from this complete attempt');
+    currentAccountPrice = 11;
+    const changedStart = requests.length;
+    window.document.getElementById('erpa-recalculate').click();
+    await waitFor(() => messages.filter(message => message.type === 'shopeers.erp.submitCostResult').length === 2 && !window.document.getElementById('erpa-recalculate').disabled, 'same-document reread must finish');
+    assert.deepEqual(requests.slice(changedStart).map(item => item.sku), scope);
+    assert.ok(messages.filter(message => message.type === 'shopeers.erp.submitCostResult')[1].payload.results.every(item => Number(item.unitCost) === 11), 'previously complete same-document evidence must not retain stale detail prices');
     requestId = 'SYN-BUDGET-B';
     const before = requests.length;
     window.document.getElementById('erpa-recalculate').click();
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await waitFor(() => messages.filter(message => message.type === 'shopeers.erp.submitCostResult').length === 3 && !window.document.getElementById('erpa-recalculate').disabled, 'new request must complete independently');
     assert.equal(requests[before]?.sku, 'SKC-0', 'a new request cannot reuse another request target checkpoint');
   } finally { await window.happyDOM.close(); }
 }
 await resumeAcrossTargets();
-console.log('ERP scale: 602 orders / 14 pages, full targets, repeat/drift/zero-count/login stops, cancellation and cross-budget target resume passed');
+console.log('ERP scale: 602 orders / 14 pages, full targets, repeat/drift/zero-count/login stops, cancellation, deterministic deadline rejection and fresh complete-budget rereads passed');
