@@ -127,7 +127,7 @@ export async function cachedDerived({ scope, formula, revision = sourceRevision(
     }
     assertSourceRevision(revision);
     memory.set(key, value);
-    const rowCount = () => [...memory.values()].reduce((count, item) => count + (Array.isArray(item) ? item.length : item?.rows?.length ?? 0), 0);
+    const rowCount = () => [...memory.values()].reduce((count, item) => count + (Array.isArray(item) ? item.length : item?.rows?.length ?? item?.computedReferenceRows?.length ?? 0), 0);
     while (memory.size > MAX_MEMORY || rowCount() > MAX_MEMORY_ROWS) memory.delete(memory.keys().next().value);
     return value;
   })();

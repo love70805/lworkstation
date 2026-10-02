@@ -472,7 +472,16 @@ export async function listPendingCaptureRecords() {
   });
 }
 
-export async function getProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "" } = {}) {
+export async function getProductEditorSnapshot(options = {}) {
+  return retrySourceRead(async () => {
+    const revision = sourceRevision();
+    const snapshot = await readProductEditorSnapshot(options);
+    assertSourceRevision(revision);
+    return snapshot;
+  });
+}
+
+async function readProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "" } = {}) {
   const memberContext = await getActiveMemberContext();
   const statusDefinitions = await getSelectionStatusDefinitions();
   if (captureId) {
@@ -1618,7 +1627,7 @@ export async function getSelectionReferenceSnapshot(options = {}) {
 }
 
 
-const SELECTION_SALES_FIELDS = ["id", "workspaceId", "ledgerId", "batchId", "platformSku", "platformSkc", "attribute", "store", "supplierNumber", "sourceSheet", "sourceRow", "sourceAddedDate", "sourceAddedAt", "rawAddedAt", "sourceTimePrecision", "movementType", "isDeduction", "quantityExact", "quantity", "qty", "amountExact", "amount", "unitPriceRaw", "unitPrice"];
+const SELECTION_SALES_FIELDS = ["id", "workspaceId", "ledgerId", "batchId", "platformSku", "sku", "platformSkc", "attribute", "store", "supplierNumber", "sourceSheet", "sourceRow", "sourceAddedDate", "sourceAddedAt", "rawAddedAt", "sourceTimePrecision", "movementType", "isDeduction", "quantityExact", "quantity", "qty", "amountExact", "amount", "unitPriceRaw", "unitPrice"];
 async function readSelectionSalesProjection(workspaceId) {
   const keys = await db.salesRows.where("workspaceId").equals(workspaceId).primaryKeys();
   const rows = [];
@@ -1634,12 +1643,14 @@ async function readSelectionSalesProjection(workspaceId) {
 }
 
 async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [], store = "all" } = {}) {
-  const context = await getActiveMemberContext();
   const observable = await observeSourceRevision();
   const revision = sourceRevision();
+  const context = await getActiveMemberContext();
+  assertSourceRevision(revision);
   const compute = async () => {
     const snapshot = await getSelectionReferenceSnapshot({ projectSales: true });
     assertSourceRevision(revision);
+    if (snapshot.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
     const rows = await runDerivedComputation("selection", { ...snapshot, store });
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };

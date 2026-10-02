@@ -76,3 +76,30 @@ it('isolates store-specific price candidates and sales-label projections', async
   expect(await read('乙')).toMatchObject({ catalogSalePrice: 5, automaticSalesTag: { quantityExact: '700', label: '爆款' } });
   expect((await read('all')).ledgerSalePrice.status).toBe('choose');
 });
+
+it('retries a workspace switch occurring between member-context read and source snapshot', async () => {
+  const original = db.settings.get.bind(db.settings);
+  let changed = false;
+  vi.spyOn(db.settings, 'get').mockImplementation(async key => {
+    const value = await original(key);
+    if (!changed && value?.workspaceId === 'W' && value?.memberId === 'M') {
+      changed = true;
+      await setActiveMemberContext({ workspaceId: 'OTHER', memberId: 'M' });
+    }
+    return value;
+  });
+  const snapshot = await getSelectionReferenceSnapshot({ compact: true });
+  expect(snapshot.workspaceId).toBe('OTHER');
+  expect(snapshot.computedReferenceRows).toHaveLength(0);
+  expect((await getProductEditorSnapshot()).context.workspaceId).toBe('OTHER');
+});
+
+it('preserves legacy sku-alias rows when projecting the latest sale price', async () => {
+  await db.salesRows.clear();
+  await db.erpCostRows.add({ workspaceId: 'W', platformSku: 'SKU-A', platformSkc: 'SKC-A', unitCost: 1 });
+  await db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', batchId: 'B', store: '甲', sku: 'SKU-A', platformSkc: 'SKC-A', quantity: 1, unitPrice: 9, sourceAddedAt: '2026-08-31T12:00:00+08:00', sourceAddedDate: '2026-08-31' });
+  const full = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+  const compact = buildSelectionReferenceRows(await getSelectionReferenceSnapshot({ compact: true }));
+  expect(full[0].catalogSalePrice).toBe(9);
+  expect(compact[0].catalogSalePrice).toBe(9);
+});
