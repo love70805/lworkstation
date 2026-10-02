@@ -102,9 +102,12 @@ export function buildSelectionReferenceRows({
   ledgers = [],
   workspaceId = null,
   store = "all",
+  computedReferenceRows,
+  compactEvidence = false,
 }) {
+  if (computedReferenceRows) return computedReferenceRows;
   const erpCatalogBySku = buildErpProductCatalogIndex([...erpCosts, ...erpCatalogRows]);
-  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku) });
+  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku), compactEvidence });
   const platformSkuByCanonical = new Map(platformSkus.map((item) => [
     item.canonicalPlatformSku ?? canonicalPlatformSku(item.platformSku),
     item,
