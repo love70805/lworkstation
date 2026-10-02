@@ -2,11 +2,11 @@
 
 更新时间：2026-10-03
 
-## 当前公开稳定Latest：0.3.6
+## 当前公开稳定Latest：0.3.7
 
-已回读GitHub确认稳定Latest为[v0.3.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.6)，main为`454b74f`；[0.3.6发布记录](RELEASE_0.3.6.md)保存候选、CI、公开四资产及更新通道证据。
+已回读GitHub确认稳定Latest为[v0.3.7](https://github.com/love70805/lworkstation/releases/tag/v0.3.7)，标签固定`7b1a6cc`；[0.3.7发布记录](RELEASE_0.3.7.md)保存候选、PR/main CI、四公开资产、真实更新通道及持久保全证据。历史0.3.6及更早标签与资产保留。
 
-0.3.7已形成[本机候选](RELEASE_0.3.7_CANDIDATE.md)，[当前契约与验收](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。2026-10-03用户明确卓麟ERP固定使用当前账号，本版不要求跨账号保护，继续PR #135集成及公开发布。导入性能目标、1230测试和候选包内验证已通过；当前会话重读不表述为原账号已核验。最新阶段见[0.3.7发布记录](RELEASE_0.3.7.md)。
+0.3.7交付大台账导入降内存、连续建档和固定ERP账号下的本机恢复；首次回传保持原工作区/月账本/请求绑定。1230测试、16组桌面、隐藏EXE与528文件/481输入核对通过，最终EXE SHA256为6FD1FFB9…。本机未安装、真实库未改；跨账号识别和真实账号新采集未宣称通过。[候选验收](RELEASE_0.3.7_CANDIDATE.md)、[实施与实际限制](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。
 
 ## 历史公开稳定版：0.3.4
 

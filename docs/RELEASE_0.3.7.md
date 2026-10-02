@@ -12,7 +12,7 @@
 
 2026-10-03：用户要求公开发布，并明确卓麟ERP固定使用当前账号、不需要切换。跨账号身份核验与自动失效移出本版范围，不宣称已经实现。首候选基线`b76cdf9`在固定账号补验中发现首次发送前跨工作区重绑定缺陷；修复提交`2540a66`的新候选已通过验收，旧包保留本机归档、没有上传公开源。
 
-[PR #135](https://github.com/love70805/lworkstation/pull/135)继续受保护集成，完成后发布稳定v0.3.7并匿名回读公开资产。当前尚不将合并或公开回读标为完成。本机未安装、未修改真实业务库或定稿。
+[PR #135](https://github.com/love70805/lworkstation/pull/135)已合入主线`7b1a6cc5ac3eaa672cf2f3b581586940c186e0be`，标签`v0.3.7`固定该提交。[PR CI](https://github.com/love70805/lworkstation/actions/runs/37063702276)及[main CI](https://github.com/love70805/lworkstation/actions/runs/37063946018)通过。GitHub于`2026-10-02T21:06:24Z`公开为[稳定Latest 0.3.7](https://github.com/love70805/lworkstation/releases/tag/v0.3.7)；四资产匿名全量下载、SHA256/元数据SHA512、13种实际更新通道情形、六版扩展下载及旧0.3.0—0.3.6标签/资产保留均通过。正式原件、1029项源码清单/源码归档和验收证据已复制回读到主仓库忽略目录。本机未安装、未修改真实业务库或定稿。
 
 ## 已有验收
 
@@ -25,6 +25,19 @@
 - 补验首次保存/首次发送的范围竞态和11个独立场景；新包ERP模块联合回放及实际EXE的登记→preview→save→submit→ACK通过。前端应用资源与既有UI候选逐字节相同，复用未受影响的包内UI验收。
 
 最终候选EXE为117703544字节，SHA256 `6FD1FFB9F4B6724C6C90496D852F337E25D0161E505F528960D4BE3567A8DC78`。公开时仅规范化文件名为`Lworkstation-Setup-0.3.7.exe`，不修改已验收EXE内容。B064首候选和F992中间候选只作本机历史保留。
+
+## 公开资产与保全
+
+| 文件 | 字节 | SHA256 |
+| --- | --- | --- |
+| Lworkstation-Setup-0.3.7.exe | 117703544 | 6FD1FFB9F4B6724C6C90496D852F337E25D0161E505F528960D4BE3567A8DC78 |
+| Lworkstation-Setup-0.3.7.exe.blockmap | 123879 | A42CC9EF0C53FF3C89B103FA6842A2193489960B9CE09A70D1D774DF144571E7 |
+| latest.yml | 353 | A902CC95A56B3E52A04BA53A1C299FF14AC8044E3F80B68F6187135CAED45EF2 |
+| SHA256.txt | 276 | 2363C13395B641D2D1D2D70F6313B7E494B78ED8749A990B7950BEB8961D6EB2 |
+
+候选与公开EXE字节一致；公开校验清单仅随规范化文件名更新。稳定版0.2.19及0.3.0—0.3.6均可发现0.3.7，当前0.3.7不重复更新；Beta仍为0.3.0-beta.10，RC通道保持禁用。检验没有调用自动安装或覆盖本机软件。
+
+持久原件：主仓库`releases/candidates/0.3.7/`及`public/`；原始证据：`archive/release-0.3.7/`及同版本ledger、selection、continuous-catalog目录。只复制证据文件，不复制浏览器配置、Cookie或真实数据库。
 
 ## 实际限制
 
