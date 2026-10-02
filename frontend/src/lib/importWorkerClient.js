@@ -1,4 +1,4 @@
-export function createImportWorkerClient(onProgress) {
+export function createImportWorkerClient(onProgress, { stageOwner = crypto.randomUUID() } = {}) {
   const worker = new Worker(new URL("../workers/import.worker.js", import.meta.url), { type: "module" });
   const pending = new Map();
   let failure = null;
@@ -20,7 +20,7 @@ export function createImportWorkerClient(onProgress) {
     const request = pending.get(data.requestId);
     if (!request) return;
     if (data.type === "validated-chunk") { request.rows.push(...data.rows); return; }
-    if (data.type === "validated" && !data.rows) data.rows = request.rows;
+    if (data.type === "validated" && !data.rows && !data.rowSource) data.rows = request.rows;
     pending.delete(data.requestId);
     if (data.type === "error") request.reject(new Error(data.message));
     else request.resolve(data);
@@ -30,7 +30,7 @@ export function createImportWorkerClient(onProgress) {
     if (failure) { reject(new Error(failure)); return; }
     const requestId = crypto.randomUUID();
     pending.set(requestId, { resolve, reject, rows: [] });
-    try { worker.postMessage({ ...message, requestId }, transfer); }
+    try { worker.postMessage({ ...message, stageOwner, requestId }, transfer); }
     catch (error) { pending.delete(requestId); reject(error); }
   });
 

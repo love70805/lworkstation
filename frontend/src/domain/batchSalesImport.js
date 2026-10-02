@@ -1,6 +1,6 @@
 import { createLedgerGroupKey, createLedgerSkuKey, summarizeLedgerRows } from "./ledgerImport";
 import { validateSalesMapping } from "../lib/salesImport";
-import { normalizeSalesSourceCoverage } from "./selectionSalesLabels";
+import { normalizeSalesSourceCoverage, salesSourceDateEvidence } from "./selectionSalesLabels";
 
 export const canonicalStore = (value) => String(value ?? "").normalize("NFKC").trim().toUpperCase();
 
@@ -31,7 +31,8 @@ export function sourceSalesRow(row) {
 }
 
 async function digest(value) {
-  const bytes = new TextEncoder().encode(importSignature(value));
+  const bytes = new TextEncoder().encode(JSON.stringify(value, (_key, entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? Object.fromEntries(Object.keys(entry).filter(key => entry[key] !== undefined).sort().map(key => [key, entry[key]])) : entry));
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -50,7 +51,7 @@ async function inputSignature(items) {
   return digest(metadata);
 }
 
-export function prepareSalesImportItems(items, { period } = {}) {
+export function prepareSalesImportItems(items, { period, ownedRows = false } = {}) {
   if (!Array.isArray(items) || !items.length) throw new Error("请至少选择一个台账文件。");
   const stores = new Set();
   const hashes = new Set();
@@ -77,7 +78,11 @@ export function prepareSalesImportItems(items, { period } = {}) {
       if (canonicalStore(raw.store) !== store) fail(`第 ${raw.sourceRow ?? "?"} 行店铺与确认店铺不一致。`);
       if (!String(raw.platformSku ?? "").trim() || ![raw.quantity, raw.amount].every(Number.isFinite)) fail("存在未经有效校验的数据行。");
       if (period && raw.sourceAddedDate && !raw.sourceAddedDate.startsWith(`${period}-`)) fail(`第 ${raw.sourceRow ?? "?"} 行来源月份与账本 ${period} 不一致，请按月处理。`);
-      const row = { ...structuredClone(sourceSalesRow(raw)), store: storeName };
+      // Staged rows were freshly cloned by IndexedDB into a disposable worker;
+      // they have no caller aliases and do not need a second whole-file copy.
+      const row = ownedRows ? raw : structuredClone(sourceSalesRow(raw));
+      if (ownedRows) for (const key of ['id', 'workspaceId', 'ledgerId', 'batchId', 'importedAt']) delete row[key];
+      row.store = storeName;
       row.groupKey = createLedgerGroupKey(row);
       row.skuKey = createLedgerSkuKey(row);
       return row;
@@ -96,7 +101,40 @@ export function getSalesImportReplacementRows(existingRows, pendingItems) {
   return existingRows.filter(row => keys.has(row.groupKey) || stores.has(canonicalStore(row.store)));
 }
 
-export async function planSalesImports({ ledger, existingRows, batches, items, ledgerId }) {
+// Only these fields participate in grouping and the established financial
+// summary. Full source values are hashed before this disposable projection;
+// writes still read the immutable full rows from the import stage.
+const planRowFields = ['id','batchId','store','groupKey','skuKey','platformSkc','supplierNumber','platformSku','sku','attribute','sourceRow','quantity','amount','isDeduction','deductionAmount','penalty','orderId','order1688','hasDirectUnitCost','directUnitCost','hasDirectPenalty','directPenalty'];
+const projectPlanRow = row => Object.fromEntries(planRowFields.filter(key => row[key] !== undefined).map(key => [key,row[key]]));
+
+export async function compactSalesImportPlan(input, loadItem) {
+  let existingRows = input.existingRows;
+  const snapshot = { batches: new Map(), stores: new Map(), incoming: new Map(), dates: new Map() };
+  snapshot.target = await digest({ ledger: input.ledger ?? null, rowsDigest: await rowsSignature(existingRows), batches: input.batches });
+  const candidateIds = new Set(input.batches.filter(batch => input.items.some(item => item.fileHash === batch.fileHash)).map(batch => batch.id));
+  for (const id of candidateIds) snapshot.batches.set(id, await effectiveRowsSignature(existingRows.filter(row => row.batchId === id)));
+  for (const item of input.items) if (item.importMode === 'replace_store_month' && input.batches.some(batch => batch.fileHash === item.fileHash)) {
+    const store = canonicalStore(item.storeName);
+    if (!snapshot.stores.has(store)) snapshot.stores.set(store, await effectiveRowsSignature(existingRows.filter(row => canonicalStore(row.store) === store)));
+  }
+  input.existingRows = existingRows.map(projectPlanRow);
+  existingRows = null;
+  const items = [], metadata = [];
+  for (const source of input.items) {
+    let item = await loadItem(source);
+    const { rows, ...rest } = item;
+    metadata.push({ ...rest, rowsDigest: await rowsSignature(rows) });
+    if (input.batches.some(batch => batch.fileHash === item.fileHash)) snapshot.incoming.set(item.itemId, await effectiveRowsSignature(rows));
+    snapshot.dates.set(item.itemId, salesSourceDateEvidence(rows, { period: input.ledger?.period ?? item.sourceCoverage?.period ?? input.period }));
+    items.push({ ...rest, rows: rows.map(projectPlanRow) });
+    item = null;
+  }
+  snapshot.input = await digest(metadata);
+  return planSalesImportsCore({ ...input, items }, snapshot);
+}
+
+export function planSalesImports(input) { return planSalesImportsCore(input); }
+async function planSalesImportsCore({ ledger, existingRows, batches, items, ledgerId, period }, snapshot) {
   if (ledger && ["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的月度账本不能直接导入新数据。");
   const rowsByGroup = new Map();
   const rowsByBatch = new Map();
@@ -114,13 +152,13 @@ export async function planSalesImports({ ledger, existingRows, batches, items, l
     }
     let duplicate = null;
     if (candidates.length) {
-      const rowSignature = await effectiveRowsSignature(item.rows);
+      const rowSignature = snapshot ? snapshot.incoming.get(item.itemId) : await effectiveRowsSignature(item.rows);
       for (const batch of candidates) {
         if (batch.status === "completed"
           && importSignature(effectiveImportOptions(batch)) === importSignature(effectiveImportOptions(item))
           && batch.validRowCount === item.rows.length
-          && await effectiveRowsSignature(rowsByBatch.get(batch.id) ?? []) === rowSignature
-          && (item.importMode !== "replace_store_month" || await effectiveRowsSignature(existingRows.filter(row => canonicalStore(row.store) === canonicalStore(item.storeName))) === rowSignature)) {
+          && (snapshot ? snapshot.batches.get(batch.id) : await effectiveRowsSignature(rowsByBatch.get(batch.id) ?? [])) === rowSignature
+          && (item.importMode !== "replace_store_month" || (snapshot ? snapshot.stores.get(canonicalStore(item.storeName)) : await effectiveRowsSignature(existingRows.filter(row => canonicalStore(row.store) === canonicalStore(item.storeName)))) === rowSignature)) {
           duplicate = batch; break;
         }
       }
@@ -145,16 +183,16 @@ export async function planSalesImports({ ledger, existingRows, batches, items, l
     results.push({ itemId: item.itemId, fileName: item.fileName, storeName: item.storeName,
       status: duplicate ? "skipped_duplicate" : "ready", batchId: duplicate?.id ?? null,
       validRowCount: item.rows.length, ignoredRowCount: item.summary.ignoredCount ?? 0, errorCount: 0,
-      summary: summarizeLedgerRows(item.rows), overlaps, replacementScope: replaceStore ? "store_month" : "groups",
+      summary: summarizeLedgerRows(item.rows), dateEvidence: snapshot ? snapshot.dates.get(item.itemId) : salesSourceDateEvidence(item.rows, { period: ledger?.period ?? item.sourceCoverage?.period ?? period }), overlaps, replacementScope: replaceStore ? "store_month" : "groups",
       sourceCoverage: item.sourceCoverage ?? null, importMode: item.importMode ?? "append",
       removedGroupCount: overlaps.filter(group => group.removed).length,
       addedGroupCount: duplicate ? 0 : keys.size - overlaps.filter(group => !group.removed).length, replacedGroupCount: overlaps.filter(group => !group.removed).length });
   }
   const pending = items.filter((item, index) => results[index].status !== "skipped_duplicate");
   const replacementRows = new Set(getSalesImportReplacementRows(existingRows, pending));
-  return { ledgerId, items: results,
-    inputSignature: await inputSignature(items),
-    targetSignature: await digest({ ledger: ledger ?? null, rowsDigest: await rowsSignature(existingRows), batches }),
+  return { ledgerId, items: results, replacementRowIds: [...replacementRows].map(row => row.id),
+    inputSignature: snapshot ? snapshot.input : await inputSignature(items),
+    targetSignature: snapshot ? snapshot.target : await digest({ ledger: ledger ?? null, rowsDigest: await rowsSignature(existingRows), batches }),
     summary: summarizeLedgerRows(pending.flatMap((item) => item.rows)),
     finalSummary: summarizeLedgerRows([...existingRows.filter(row => !replacementRows.has(row)), ...pending.flatMap((item) => item.rows)]),
     requiresOverwrite: results.some((item) => item.overlaps.length > 0) };

@@ -135,13 +135,14 @@ export function flattenLedgerGroups(groups) {
 
 export function summarizeLedgerRows(rows) {
   const flattened = flattenLedgerGroups(aggregateLedgerRows(rows));
-  const summary = flattened.reduce((total, row) => ({
-    quantity: total.quantity.plus(row.quantity),
-    revenue: total.revenue.plus(row.revenue),
-    penalty: total.penalty.plus(row.penalty),
-    sourceRowCount: total.sourceRowCount + row.sourceRowCount,
-    realOrderIds: new Set([...total.realOrderIds, ...(row.orderIds ?? [])]),
-  }), {
+  const summary = flattened.reduce((total, row) => {
+    total.quantity = total.quantity.plus(row.quantity);
+    total.revenue = total.revenue.plus(row.revenue);
+    total.penalty = total.penalty.plus(row.penalty);
+    total.sourceRowCount += row.sourceRowCount;
+    for (const id of row.orderIds ?? []) total.realOrderIds.add(id);
+    return total;
+  }, {
     quantity: new Decimal(0),
     revenue: new Decimal(0),
     penalty: new Decimal(0),

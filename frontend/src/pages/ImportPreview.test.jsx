@@ -37,6 +37,34 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 
 async function settled() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); }); }
+it('shares a delayed reparse while rapidly editing a store and only inspects the latest configuration', async () => {
+  await upload(); await settled();
+  const parseCount = mocks.parse.mock.calls.length, inspectCount = mocks.inspectPeriod.mock.calls.length;
+  let finish;
+  mocks.parse.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const input = container.querySelector('.batch-store input');
+  for (const value of ['新', '新店', '新店铺']) await act(async () => Simulate.change(input, { target: { value } }));
+  expect(mocks.parse).toHaveBeenCalledTimes(parseCount + 1);
+  expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount);
+  await act(async () => finish({ type: 'parsed' }));
+  expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount + 1);
+  expect(mocks.inspectPeriod.mock.calls.at(-1)[2].defaultStore).toBe('新店铺');
+});
+it('reuses sealed validation after correcting the selected month without retaining workbook jobs', async () => {
+  mocks.inspectPeriod.mockResolvedValue({ rowSource: { id: 'sealed', rowCount: 1, chunkCount: 1 }, evidence: {
+    distribution: [{ month: '2026-08', count: 1 }], suggestedPeriod: '2026-08', missingCount: 0, invalidCount: 0, errorCount: 0,
+    validationSummary: { sourceRowCount: 1, validRowCount: 1, errorCount: 0, ignoredCount: 0, errors: [] },
+  } });
+  await upload(); await settled();
+  await act(async () => Simulate.change(container.querySelector('#ledger-period'), { target: { value: '2026-07' } }));
+  await settled(); expect(container.textContent).toContain('与账本 2026-07 不一致');
+  await act(async () => Simulate.change(container.querySelector('#ledger-period'), { target: { value: '2026-08' } }));
+  await settled();
+  expect(mocks.parse).toHaveBeenCalledTimes(2);
+  expect(mocks.validate).not.toHaveBeenCalled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ rowSource: { id: 'sealed' }, summary: { errorCount: 0 } });
+  expect(container.querySelector('.batch-preview')).not.toBeNull();
+});
 it('automatically validates and previews all files without any write or product filter', async () => {
   await upload(); await settled();
   expect(mocks.validate).toHaveBeenCalledTimes(2);
