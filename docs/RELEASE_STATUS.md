@@ -1,8 +1,14 @@
 # Lworkstation 发布状态
 
-更新时间：2026-09-30
+更新时间：2026-10-02
 
-## 当前公开稳定Latest：0.3.4
+## 当前公开稳定Latest：0.3.6
+
+已回读GitHub确认稳定Latest为[v0.3.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.6)，main为`454b74f`；[0.3.6发布记录](RELEASE_0.3.6.md)保存候选、CI、公开四资产及更新通道证据。
+
+0.3.7已批准实施，[当前契约与验收](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。尚未发布；ERP原账号绑定仍缺现场接口证据，不能将当前会话重读表述为原账号已核验。
+
+## 历史公开稳定版：0.3.4
 
 1108测试、16组桌面verify、真实60秒慢路径、隔离22MiB收件、headless用户路径、隐藏EXE smoke与489文件/442输入一致性通过。[PR #129](https://github.com/love70805/lworkstation/pull/129)及main CI通过；[v0.3.4](https://github.com/love70805/lworkstation/releases/tag/v0.3.4)已于10:23公开，标签固定b399a6a，稳定四资产匿名全量回读及实际更新通道核验通过。旧0.3.0至0.3.3标签/资产保留；Beta仍为0.3.0-beta.10、RC禁用。未安装、未改真实库。见[0.3.4验收](RELEASE_0.3.4.md)。
 
