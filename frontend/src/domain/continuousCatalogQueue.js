@@ -36,7 +36,7 @@ export function checkContinuousCatalogIdentity(item, snapshot) {
   const skc = skcKey(snapshot.draft?.platformSkc);
   if (item.platformSkc && skc !== item.platformSkc) return "平台 SKC 来源已变化，请返回参考列表重新核对身份。";
   if (snapshot.product) return null;
-  const sources = snapshot.prefill?.sources ?? [];
+  const sources = snapshot.referenceIdentities ?? snapshot.prefill?.sources ?? [];
   if (!sources.some(row => skuKey(row.platformSku) === item.platformSku)) return "商品来源已变化或移除，请返回参考列表重新核对。";
   return null;
 }

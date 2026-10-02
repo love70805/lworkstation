@@ -6,6 +6,7 @@ import { derivedCacheDb, clearDerivedMemory, sourceRevision, selectionFactsRevis
 import { buildSelectionReferenceRows } from '../lib/selectionReferences';
 import * as computations from './repositories/derivedComputationService';
 import { ensureDefaultWorkspace } from './repositories/selectionRepository';
+import { checkContinuousCatalogIdentity } from '../domain/continuousCatalogQueue';
 
 beforeEach(async () => {
   const storage = new Map();
@@ -109,6 +110,8 @@ it('reuses immutable ledger facts after a real product save, including after pro
   await ensureDefaultWorkspace();
   await db.workspaces.put({ id: 'W', name: 'W' });
   const before = await getProductEditorSnapshot({ platformSkc: 'SKC-A' });
+  expect(before.prefill.sources).toEqual([]);
+  expect(checkContinuousCatalogIdentity({ platformSkc: 'SKC-A', platformSku: 'SKU-A' }, before)).toBeNull();
   const factsVersion = selectionFactsRevision(), version = sourceRevision();
   const read = vi.spyOn(db.salesRows, 'bulkGet');
   const draft = { ...before.draft, name: '手工标题', salesStatus: 'on_sale' };
@@ -127,6 +130,14 @@ it('reuses immutable ledger facts after a real product save, including after pro
   expect(read).not.toHaveBeenCalled();
   const values = await derivedCacheDb.entries.toArray();
   for (const entry of values) expect(entry.bytes).toBe(derivedValueBytes(entry.value));
+  for (let index = 0; index < 4; index++) {
+    await db.products.update(product.id, { name: `继续保存${index}` });
+    await getSelectionReferenceSnapshot({ compact: true });
+  }
+  const keys = await derivedCacheDb.entries.toCollection().primaryKeys();
+  expect(keys.filter(key => key.includes('selection-reference@3'))).toHaveLength(1);
+  expect(keys.filter(key => key.includes('selection-ledger-facts@3'))).toHaveLength(1);
+  expect(read).not.toHaveBeenCalled();
 });
 
 it('rejects fact reuse after each financial/context dependency and transaction abort', async () => {

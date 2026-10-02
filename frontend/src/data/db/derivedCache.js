@@ -126,10 +126,17 @@ function persistEntry(entry, revision, revisionReader) {
         await derivedCacheDb.transaction('rw', derivedCacheDb.entries, derivedCacheDb.metadata, async () => {
           assertSourceRevision(revision, revisionReader);
           await derivedCacheDb.entries.put(entry);
-          await derivedCacheDb.metadata.put({ key: entry.key, bytes: entry.bytes, createdAt: entry.createdAt });
+          await derivedCacheDb.metadata.put({ key: entry.key, bytes: entry.bytes, createdAt: entry.createdAt, namespace: entry.namespace });
           const entries = await derivedCacheDb.metadata.orderBy('createdAt').reverse().toArray();
-          let size = 0;
-          const expired = entries.filter((item, index) => { size += item.bytes; return index >= MAX_DISK || size > MAX_DISK_BYTES; });
+          let size = 0, count = 0;
+          const expired = entries.filter(item => {
+            // Superseded final projections must not crowd out unchanged ledger
+            // facts after several catalog saves. Metadata is at most 24 rows.
+            const namespace = item.namespace ?? JSON.stringify(JSON.parse(item.key).slice(0, 2));
+            if (namespace === entry.namespace && item.key !== entry.key) return true;
+            size += item.bytes;
+            return count++ >= MAX_DISK || size > MAX_DISK_BYTES;
+          });
           await derivedCacheDb.entries.bulkDelete(expired.map(item => item.key));
           await derivedCacheDb.metadata.bulkDelete(expired.map(item => item.key));
           assertSourceRevision(revision, revisionReader);
@@ -159,7 +166,7 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
       if (persist && durable) {
         try {
           const bytes = derivedValueBytes(value);
-          if (bytes <= MAX_ENTRY_BYTES) await persistEntry({ key, value, bytes, createdAt: Date.now() }, revision, revisionReader);
+          if (bytes <= MAX_ENTRY_BYTES) await persistEntry({ key, namespace: JSON.stringify([formula, scope]), value, bytes, createdAt: Date.now() }, revision, revisionReader);
         } catch { /* quota/private mode must not block a correct calculation */ }
       }
     }

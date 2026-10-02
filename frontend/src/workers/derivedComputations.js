@@ -4,9 +4,10 @@ import { buildSalesMonth } from '../domain/salesChartModel';
 import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 import { buildSelectionReferenceRows } from '../lib/selectionReferences';
 import { prepareSelectionSalesFacts } from '../domain/selectionSalesFacts';
+import { packSelectionSalesFacts } from '../domain/selectionSalesFactsCodec';
 
 export function computeDerived(kind, input) {
-  if (kind === 'selection-facts') return prepareSelectionSalesFacts(input);
+  if (kind === 'selection-facts') return packSelectionSalesFacts(prepareSelectionSalesFacts(input), input.ledgers[0]);
   if (kind === 'selection') return buildSelectionReferenceRows({ ...input, compactEvidence: true });
   if (kind === 'period-detail') return aggregatePeriodSalesDetails(input.rows, input);
   if (kind === 'sales') {

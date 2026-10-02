@@ -9,6 +9,8 @@ import { selectCurrentErpCatalogCoverage } from "../domain/erpCatalogFields";
 import { resolveProductStatus } from "../domain/selectionStatuses";
 import Decimal from "decimal.js";
 import { buildSelectionLedgerPriceIndex, selectionLedgerPrice, selectionCatalogLedgerBySkc } from "../domain/selectionLedgerPrices";
+import { combineSelectionSalesFacts } from "../domain/selectionSalesFacts";
+import { unpackSelectionSalesFacts } from "../domain/selectionSalesFactsCodec";
 const ExactQuantity = Decimal.clone({ precision: 80 });
 
 function timestamp(item) {
@@ -108,6 +110,7 @@ export function buildSelectionReferenceRows({
   selectionSalesFacts = null,
 }) {
   if (computedReferenceRows) return computedReferenceRows;
+  if (selectionSalesFacts?.packedParts) selectionSalesFacts = combineSelectionSalesFacts(selectionSalesFacts.packedParts.map(unpackSelectionSalesFacts), workspaceId);
   const erpCatalogBySku = buildErpProductCatalogIndex([...erpCosts, ...erpCatalogRows]);
   const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku), compactEvidence });
   const platformSkuByCanonical = new Map(platformSkus.map((item) => [

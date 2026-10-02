@@ -30,7 +30,7 @@ import { db } from "../db/clientDatabase";
 import Dexie from "dexie";
 import { cachedDerived, sourceRevision, selectionFactsRevision, observeSourceRevision, retrySourceRead, assertSourceRevision } from "../db/derivedCache";
 import { runDerivedComputation } from "./derivedComputationService";
-import { combineSelectionSalesFacts } from "../../domain/selectionSalesFacts";
+import { unpackSelectionFactIdentities } from "../../domain/selectionSalesFactsCodec";
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -687,7 +687,7 @@ async function readProductEditorSnapshot({ captureId = null, productId = null, p
   projection.prefill.catalogCoverage = coverage?.groups ?? null;
   if (!projection.draft.name && !projection.prefill.sources.length) projection.draft.name = catalogProductName(productName);
   if (!projection.draft.variants.length && platformSku && !anchor?.productId && projection.draft.variantChoices?.[canonicalPlatformSku(platformSku)]?.state !== "excluded") projection.draft.variants = [{ platformSku: normalizePlatformSku(platformSku), attribute: "", sourceSku: "", purchaseUnitPrice: "", purchasePackCount: 1, unitsPerPack: 1 }];
-  return { context: memberContext, mode: "new", product: null, capture: null, ...projection, validation: validateProductDraft(projection.draft) };
+  return { context: memberContext, mode: "new", product: null, capture: null, ...projection, referenceIdentities: rows.map(row => ({ platformSku: row.platformSku, platformSkc: row.platformSkc })), validation: validateProductDraft(projection.draft) };
 }
 
 async function productEditorErpPrefill({ draft, productId }) {
@@ -1662,10 +1662,10 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
         assertSourceRevision(factsRevision, selectionFactsRevision);
         return facts;
       };
-      parts.push(observable ? await cachedDerived({ scope: [context.workspaceId, ledger.id], formula: "selection-ledger-facts@2", revision: factsRevision, revisionReader: selectionFactsRevision, compute: computeFacts }) : await computeFacts());
+      parts.push(observable ? await cachedDerived({ scope: [context.workspaceId, ledger.id], formula: "selection-ledger-facts@3", revision: factsRevision, revisionReader: selectionFactsRevision, compute: computeFacts }) : await computeFacts());
     }
     assertSourceRevision(factsRevision, selectionFactsRevision);
-    const selectionSalesFacts = combineSelectionSalesFacts(parts, context.workspaceId);
+    const selectionSalesFacts = { workspaceId: context.workspaceId, packedParts: parts, ledgerIdentityRows: parts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)) };
     assertSourceRevision(revision);
     const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts });
     assertSourceRevision(revision);
@@ -1674,7 +1674,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
   const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@2", revision, compute,
+    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@3", revision, compute,
   }) : await compute();
   assertSourceRevision(revision);
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));

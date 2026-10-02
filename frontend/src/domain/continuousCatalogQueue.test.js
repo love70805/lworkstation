@@ -13,4 +13,10 @@ describe("continuous catalog identity queue", () => {
     expect(checkContinuousCatalogIdentity(item, { draft: { platformSkc: "A", variants: [{ platformSku: "A1" }] } })).toContain("移除");
     expect(checkContinuousCatalogIdentity(item, { draft: { platformSkc: "B" }, product: { id: "linked" } })).toContain("SKC 来源已变化");
   });
+  it("accepts verified ledger-only reference identities and rejects their removal", () => {
+    const item = { platformSkc: "A", platformSku: "A1" };
+    const snapshot = { draft: { platformSkc: "A", variants: [{ platformSku: "A1" }] }, prefill: { sources: [] }, referenceIdentities: [{ platformSku: "A1", platformSkc: "A" }] };
+    expect(checkContinuousCatalogIdentity(item, snapshot)).toBeNull();
+    expect(checkContinuousCatalogIdentity(item, { ...snapshot, referenceIdentities: [] })).toContain("移除");
+  });
 });

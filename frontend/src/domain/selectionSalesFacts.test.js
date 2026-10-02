@@ -3,6 +3,7 @@ import { prepareSelectionSalesFacts } from './selectionSalesFacts';
 import { buildSelectionReferenceRows } from '../lib/selectionReferences';
 import { buildSelectionSalesLabels } from './selectionSalesLabels';
 import { derivedValueBytes } from '../data/db/derivedCache';
+import { packSelectionSalesFacts, unpackSelectionFactIdentities } from './selectionSalesFactsCodec';
 
 function fixture(patches = []) {
   const ledgers = [{ id: 'L', workspaceId: 'W', period: '2026-08' }];
@@ -15,6 +16,9 @@ function compare(input, patches = {}) {
   const full = buildSelectionReferenceRows({ ...input, ledgerIdentityRows: input.salesRows.map(row => ({ ...row, period: input.ledgers.find(ledger => ledger.id === row.ledgerId).period })), ...patches, compactEvidence: true });
   const compact = buildSelectionReferenceRows({ ...input, salesRows: [], ledgerIdentityRows: facts.ledgerIdentityRows, selectionSalesFacts: facts, ...patches, compactEvidence: true });
   expect(compact).toEqual(full);
+  const packedParts = input.ledgers.map(ledger => packSelectionSalesFacts(prepareSelectionSalesFacts({ ...input, ledgers: [ledger] }), ledger));
+  const packedRows = buildSelectionReferenceRows({ ...input, salesRows: [], ledgerIdentityRows: packedParts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)), selectionSalesFacts: { packedParts }, ...patches, compactEvidence: true });
+  expect(packedRows).toEqual(full);
   return { facts, rows: compact };
 }
 
@@ -56,7 +60,7 @@ it('keeps month/store completeness, invalid dates and every month selection', ()
   for (const [ledgerId, period, store, scope] of [['OLD', '2026-07', '甲', 'full_month'], ['OLD', '2026-07', '乙', 'full_month'], ['L', '2026-08', '乙', 'partial']]) {
     const id = `${ledgerId}-${store}`;
     input.importBatches.push({ id, workspaceId: 'W', ledgerId, period, store, status: 'completed', validRowCount: 1, sourceCoverage: { version: 1, period, store, scope, declarationSource: 'manual' } });
-    input.salesRows.push({ ...input.salesRows[0], id, ledgerId, batchId: id, store, sourceAddedDate: `${period}-28`, sourceAddedAt: `${period}-28T12:00:00+08:00` });
+    input.salesRows.push({ ...input.salesRows[0], id: input.salesRows.length + 1, ledgerId, batchId: id, store, sourceAddedDate: `${period}-28`, sourceAddedAt: `${period}-28T12:00:00+08:00` });
   }
   const facts = prepareSelectionSalesFacts(input);
   for (const store of ['all', '甲', '乙']) for (const period of [null, '2026-07', '2026-08']) {
@@ -72,4 +76,6 @@ it('has bounded per-identity/month facts rather than daily source arrays', () =>
   expect(facts.ledgerIdentityRows).toHaveLength(100);
   expect(facts.coverRows).toHaveLength(100);
   expect(derivedValueBytes(facts)).toBeLessThan(800000);
+  const packed = packSelectionSalesFacts(facts, input.ledgers[0]);
+  expect(derivedValueBytes(packed)).toBeLessThan(derivedValueBytes(facts) * 0.5);
 });
