@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProductEditor from "./ProductEditor";
 import ProductLibrary from "./ProductLibrary";
 import { ToastProvider } from "../components/UI";
-import { db, saveProductCatalogRecord, createManualCaptureRecord, updateCaptureDraft } from "../data/database";
+import { db, saveProductCatalogRecord, createManualCaptureRecord, updateCaptureDraft, setActiveMemberContext } from "../data/database";
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
+import { createContinuousCatalogQueue, continuousCatalogPath } from "../domain/continuousCatalogQueue";
 
 const delayedWrite = vi.hoisted(() => ({ wait: null, input: null }));
 const editorSnapshotOverride = vi.hoisted(() => ({ value: null }));
@@ -47,7 +48,7 @@ const mount = async (url, { library = false, initialEntries, initialIndex } = {}
     { path: "/products", element: library ? <ProductLibrary /> : <p>商品列表</p> },
   ], { initialEntries: initialEntries ?? ["/products", url], initialIndex });
   await act(async () => root.render(<ToastProvider><RouterProvider router={router} /></ToastProvider>));
-  await waitFor(() => library && !url.includes("/edit") ? input("搜索待确认采集") : input("商品名称"));
+  await waitFor(() => library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索选品参考" : "搜索待确认采集") : input("商品名称"));
 };
 
 beforeEach(async () => {
@@ -352,4 +353,133 @@ it("moves a late automatic traffic exclusion out of an edited active list while 
   expect(product.attributes.variantChoices["SKU-BLUE"].state).toBe("included");
   expect(product.attributes.excludedVariants).toEqual([]);
   expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-BLUE").salePrice).toBe(17);
+});
+
+async function seedContinuousCatalog(count = 3) {
+  const groups = [];
+  for (let index = 0; index < count; index += 1) {
+    const suffix = String(index).padStart(2, "0");
+    const platformSkc = `QUEUE-SKC-${suffix}`, platformSku = `QUEUE-SKU-${suffix}`;
+    await db.erpCostRows.add({ workspaceId: "workspace-default", platformSkc, platformSku, warehouseSku: `WH-${suffix}`, productName: `连续商品${suffix}`, attribute: "标准", unitCost: 2, publishedAt: "2026-09-01T00:00:00.000Z" });
+    groups.push({ variants: [{ platformSkc, platformSku }] });
+  }
+  return createContinuousCatalogQueue("workspace-default", groups);
+}
+
+describe("continuous catalog", () => {
+  it("starts at the first full-filter item from page two, preserves list state and handles the next page", async () => {
+    await seedContinuousCatalog(23);
+    await mount("/products?view=reference", { library: true });
+    await change(input("按建档情况筛选"), "unlinked");
+    await waitFor(() => container.textContent.includes("匹配 23 / 23 条"));
+    await change(input("搜索选品参考"), "QUEUE");
+    await act(async () => input("下一页").click());
+    await waitFor(() => container.querySelector(".selection-reference-table").textContent.includes("QUEUE-SKC-22"));
+    await click("连续建档");
+    await waitFor(() => container.textContent.includes("第 1 个 / 共 23 个"));
+    expect(input("平台 SKC").value).toBe("QUEUE-SKC-00");
+    for (let index = 0; index < 21; index += 1) {
+      await click("跳过");
+      await waitFor(() => input("平台 SKC")?.value === `QUEUE-SKC-${String(index + 1).padStart(2, "0")}`);
+    }
+    await click("保存并下一个");
+    await waitFor(() => container.textContent.includes("第 23 个 / 共 23 个"));
+    expect((await db.products.toArray())[0]).toMatchObject({ platformSkc: "QUEUE-SKC-21", status: "active", productStatus: "on_sale" });
+    await click("跳过");
+    await waitFor(() => container.querySelector(".selection-reference-table"));
+    expect(input("搜索选品参考").value).toBe("QUEUE");
+    expect(input("按建档情况筛选").value).toBe("unlinked");
+    expect(container.querySelector(".selection-reference-table").textContent).toContain("QUEUE-SKC-22");
+    expect(document.activeElement.id).toBe("continuous-catalog-start");
+  });
+
+  it("does not advance or discard new edits made during a successful save", async () => {
+    const queue = await seedContinuousCatalog();
+    await mount(continuousCatalogPath(queue, 0));
+    let release; delayedWrite.wait = new Promise(resolve => { release = resolve; });
+    await click("保存并下一个");
+    await waitFor(() => delayedWrite.input);
+    await change(input("商品名称"), "保存期间的新标题");
+    await act(async () => release());
+    await waitFor(async () => await db.products.count() === 1);
+    expect(input("商品名称").value).toBe("保存期间的新标题");
+    expect(container.textContent).toContain("第 1 个 / 共 3 个");
+    delayedWrite.wait = null;
+    await waitFor(() => !button("保存并下一个").disabled);
+    await click("保存并下一个");
+    await waitFor(() => container.textContent.includes("第 2 个 / 共 3 个"));
+    expect((await db.products.toArray())[0].name).toBe("保存期间的新标题");
+    expect(await db.products.count()).toBe(1);
+  });
+
+  it("keeps failed identity conflicts on the current item and focuses the SKU", async () => {
+    const queue = await seedContinuousCatalog();
+    await saveProductCatalogRecord({ draft: { name: "其他商品", platformSkc: "OTHER", variants: [{ platformSku: "TAKEN-SKU" }] } });
+    await mount(continuousCatalogPath(queue, 0));
+    await change(input("第 1 个平台 SKU"), "TAKEN-SKU");
+    await click("保存并下一个");
+    await waitFor(() => container.textContent.includes("保存商品失败"));
+    expect(container.textContent).toContain("第 1 个 / 共 3 个");
+    await waitFor(() => document.activeElement === input("第 1 个平台 SKU"));
+    expect(await db.products.count()).toBe(1);
+  });
+
+  it("skips targets already catalogued elsewhere and protects unsaved skip edits", async () => {
+    const queue = await seedContinuousCatalog();
+    await mount(continuousCatalogPath(queue, 0));
+    await change(input("商品名称"), "未保存标题");
+    await click("跳过");
+    await waitFor(() => button("继续编辑"));
+    await click("继续编辑");
+    expect(input("商品名称").value).toBe("未保存标题");
+    await saveProductCatalogRecord({ draft: { name: "他处建档", platformSkc: "QUEUE-SKC-01", variants: [{ platformSku: "QUEUE-SKU-01" }] } });
+    await click("跳过");
+    await waitFor(() => button("放弃修改")); await click("放弃修改");
+    await waitFor(() => input("平台 SKC")?.value === "QUEUE-SKC-02");
+    expect(container.textContent).toContain("第 3 个 / 共 3 个");
+    expect(await db.products.count()).toBe(1);
+  });
+
+  it("rejects a removed source without losing user edits", async () => {
+    const queue = await seedContinuousCatalog();
+    await mount(continuousCatalogPath(queue, 0));
+    await change(input("商品名称"), "需保留的输入");
+    await act(async () => db.erpCostRows.where("platformSku").equals("QUEUE-SKU-00").delete());
+    await waitFor(() => container.textContent.includes("商品来源已变化或移除"));
+    expect(button("保存并下一个").disabled).toBe(true);
+    expect(input("商品名称").value).toBe("需保留的输入");
+    expect(await db.products.count()).toBe(0);
+  });
+
+  it("blocks a workspace switch while retaining current edits", async () => {
+    const queue = await seedContinuousCatalog();
+    await mount(continuousCatalogPath(queue, 0));
+    await change(input("商品名称"), "原工作区输入");
+    await act(async () => setActiveMemberContext({ workspaceId: "another-workspace" }));
+    await waitFor(() => container.textContent.includes("工作区已改变"));
+    expect(button("保存并下一个").disabled).toBe(true);
+    expect(input("商品名称").value).toBe("原工作区输入");
+    expect(await db.products.count()).toBe(0);
+  });
+
+  it("saves a queued accounting product before leaving through the unsaved guard", async () => {
+    const queue = await seedContinuousCatalog();
+    await mount(continuousCatalogPath(queue, 0));
+    await change(input("商品名称"), "保存后跳过");
+    await click("跳过"); await waitFor(() => button("保存后离开"));
+    await click("保存后离开");
+    await waitFor(() => input("平台 SKC")?.value === "QUEUE-SKC-01");
+    expect((await db.products.toArray())[0]).toMatchObject({ name: "保存后跳过", status: "active", productStatus: "on_sale" });
+  });
+
+  it("does not overwrite an externally created product while editing a queued item", async () => {
+    const queue = await seedContinuousCatalog();
+    await mount(continuousCatalogPath(queue, 0));
+    await change(input("商品名称"), "我的未保存输入");
+    await act(async () => saveProductCatalogRecord({ draft: { name: "其他操作保存", platformSkc: "QUEUE-SKC-00", variants: [{ platformSku: "QUEUE-SKU-00" }] } }));
+    await waitFor(() => container.textContent.includes("此商品已由其他操作建档"));
+    expect(input("商品名称").value).toBe("我的未保存输入");
+    expect(button("保存并下一个").disabled).toBe(true);
+    expect((await db.products.toArray())[0].name).toBe("其他操作保存");
+  });
 });
