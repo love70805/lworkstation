@@ -10,6 +10,7 @@ import {
 } from "../../domain/workspaceBackup";
 import { buildWorkspaceOperationalSummary } from "../../domain/workspaceSummary";
 import { db } from "../db/clientDatabase";
+import { cachedDerived, observeSourceRevision, sourceRevision, selectionFactsRevision, assertSourceRevision, retrySourceRead } from "../db/derivedCache";
 import {
   DEFAULT_WORKSPACE_ID,
   DEFAULT_WORKSPACE_NAME,
@@ -20,19 +21,43 @@ import {
   selectionRecordVisible,
 } from "./selectionRepository";
 export async function getWorkspaceOperationalSummary() {
-  const context = await getActiveMemberContext();
+  return retrySourceRead(async () => {
+    const observable = await observeSourceRevision();
+    const revision = sourceRevision();
+    const context = await getActiveMemberContext();
+    assertSourceRevision(revision);
+    const compute = () => readWorkspaceOperationalSummary(context, observable);
+    const summary = observable ? await cachedDerived({
+      scope: [context.workspaceId, context.memberId, context.role], formula: "workspace-operational-summary@1", revision, compute,
+    }) : await compute();
+    assertSourceRevision(revision);
+    return summary;
+  });
+}
+
+async function readWorkspaceOperationalSummary(context, observable) {
   const inWorkspace = (record) => record.workspaceId === context.workspaceId;
   const ledgers = await db.ledgers.where("workspaceId").equals(context.workspaceId).toArray();
   const ledgerIds = ledgers.map((ledger) => ledger.id);
-  const [captures, products, platformSkus, auditEvents, tableCountEntries] = await Promise.all([
+  const [captures, products, platformSkus, latestActivity, tableCountEntries] = await Promise.all([
     db.captures.toArray(),
     db.products.toArray(),
     db.platformSkus.toArray(),
-    db.auditEvents.where("workspaceId").equals(context.workspaceId).toArray(),
+    // The shell displays one timestamp, not the immutable audit payloads.
+    db.auditEvents.orderBy("createdAt").reverse().filter(inWorkspace).first(),
     Promise.all(db.tables.map(async (table) => {
       if (table.name === "workspaces") return [table.name, await table.where("id").equals(context.workspaceId).count()];
       // Settings are device metadata. Keep their existing global count semantics.
       if (table.name === "settings") return [table.name, await table.count()];
+      if (table.name === "salesRows" && observable) {
+        // Indexed workspace counts still walk a million index entries. Catalog
+        // saves cannot change this count; all ledger/context writes invalidate
+        // the conservative financial-source version before and after commit.
+        const revision = selectionFactsRevision();
+        const count = await cachedDerived({ scope: [context.workspaceId], formula: "workspace-sales-row-count@1",
+          revision, revisionReader: selectionFactsRevision, compute: () => table.where("workspaceId").equals(context.workspaceId).count() });
+        return [table.name, count];
+      }
       if (table.schema.idxByName.workspaceId) return [table.name, await table.where("workspaceId").equals(context.workspaceId).count()];
       // Legacy ERP rows have no workspace index; derive ownership through their ledger.
       if (table.name === "erpCostRows") return [table.name, await table.where("ledgerId").anyOf(ledgerIds).filter((row) => !row.workspaceId || inWorkspace(row)).count()];
@@ -57,7 +82,7 @@ export async function getWorkspaceOperationalSummary() {
     products: visibleProducts,
     platformSkus: visibleSkus,
     ledgers: ledgers.filter(inWorkspace),
-    auditEvents: auditEvents.filter(inWorkspace),
+    auditEvents: latestActivity ? [{ createdAt: latestActivity.createdAt }] : [],
     tableCounts,
   });
 }
