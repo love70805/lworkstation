@@ -6,7 +6,7 @@
 
 已回读GitHub确认稳定Latest为[v0.3.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.6)，main为`454b74f`；[0.3.6发布记录](RELEASE_0.3.6.md)保存候选、CI、公开四资产及更新通道证据。
 
-0.3.7已批准实施，[当前契约与验收](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。尚未发布；ERP原账号绑定仍缺现场接口证据，不能将当前会话重读表述为原账号已核验。
+0.3.7已形成[本机候选](RELEASE_0.3.7_CANDIDATE.md)，[当前契约与验收](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。Draft PR #135，未合并或发布；导入性能目标、1230测试和候选包内验证通过，但ERP原账号绑定仍缺实现及现场接口证据，不能将当前会话重读表述为原账号已核验。
 
 ## 历史公开稳定版：0.3.4
 
