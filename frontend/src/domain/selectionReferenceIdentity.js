@@ -4,8 +4,9 @@ const text = (value) => String(value ?? "").normalize("NFKC").trim();
 
 // Inputs are workspace-scoped by the repository. Conflicts remain evidence,
 // never an arbitrary first/last identity or a write to the product catalog.
-export function buildReferenceIdentityIndex({ ledgerIdentityRows = [], profitLines = [], erpCatalogRows = [] } = {}) {
+export function buildReferenceIdentityIndex({ ledgerIdentityRows = [], profitLines = [], erpCatalogRows = [], compactEvidence = false } = {}) {
   const index = new Map();
+  const evidenceScopes = new WeakMap();
   for (const [kind, rows] of [["erp", erpCatalogRows], ["ledger", ledgerIdentityRows], ["profit", profitLines]]) {
     for (const row of rows) {
       const sku = text(row.platformSku ?? row.sku);
@@ -18,7 +19,18 @@ export function buildReferenceIdentityIndex({ ledgerIdentityRows = [], profitLin
         if (!value) continue;
         const canonical = field === "platformSkc" ? canonicalPlatformSkc(value) : value;
         if (!fields[field].has(canonical)) fields[field].set(canonical, { value, sources: [] });
-        fields[field].get(canonical).sources.push({
+        const candidate = fields[field].get(canonical);
+        if (compactEvidence) {
+          candidate.sourceCount = (candidate.sourceCount ?? 0) + (row.sourceCount ?? 1);
+          if (!evidenceScopes.has(candidate)) evidenceScopes.set(candidate, new Set());
+          const scopes = evidenceScopes.get(candidate);
+          // UI identity evidence keeps a real representative per store/source
+          // and the full count; detailed source history stays in the ledger.
+          const scope = JSON.stringify([kind, row.store, row.warehouseSku]);
+          if (scopes.has(scope)) continue;
+          scopes.add(scope);
+        }
+        candidate.sources.push({
           kind, ledgerId: row.ledgerId ?? null, period: row.period ?? null,
           batchId: row.batchId ?? null, store: row.store ?? "",
           sourceSheet: row.sourceSheet ?? "", sourceRow: row.sourceRow ?? null,

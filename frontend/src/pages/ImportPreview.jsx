@@ -5,6 +5,7 @@ import { Button, ProgressBar, useToast } from "../components/UI";
 import { getActiveMemberContext, listLedgerSummaries, previewSalesImports, saveSalesImports } from "../data/database";
 import { importReturnHref } from "../lib/importNavigation";
 import { summarizeImportPeriod } from "../lib/importPeriod";
+import { clearImportStages, removeImportStage } from "../lib/salesImportStage";
 import { createImportWorkerClient } from "../lib/importWorkerClient";
 import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, validateSalesMapping } from "../lib/salesImport";
 import { createSalesSourceCoverage } from "../domain/selectionSalesLabels";
@@ -48,6 +49,7 @@ export default function ImportPreview() {
   const [ledgerContext, setLedgerContext] = useState(null);
   const [contextRetry, setContextRetry] = useState(0);
   const { notify } = useToast();
+  const stageOwnerRef = useRef(crypto.randomUUID());
   const inputRef = useRef(null);
   const previewRef = useRef(null);
   const clientRef = useRef(null);
@@ -58,6 +60,7 @@ export default function ImportPreview() {
   const attemptedRef = useRef("");
   const validateRef = useRef(null);
   const activeJobsRef = useRef(new Set());
+  const pendingJobsRef = useRef(new Map());
   const inspectionSequenceRef = useRef(new Map());
   const [files, setFiles] = useState([]);
   const [period, setPeriod] = useState("");
@@ -100,17 +103,22 @@ export default function ImportPreview() {
 
   const makeClient = () => createImportWorkerClient((value, jobId, details) => {
     setFiles(current => current.map(item => item.itemId === jobId ? { ...item, progress: value, progressLabel: details?.total ? `${details.stage} ${details.completed.toLocaleString("zh-CN")} / ${details.total.toLocaleString("zh-CN")} 行` : details?.stage ?? "正在读取" } : item));
-  });
+  }, { stageOwner: stageOwnerRef.current });
   useEffect(() => {
+    void clearImportStages(null, { expiredOnly: true }).catch(() => {});
     clientRef.current = makeClient();
     activeJobsRef.current.clear();
-    return () => { generationRef.current += 1; abortRef.current?.abort(); clientRef.current?.terminate(); };
+    return () => { generationRef.current += 1; abortRef.current?.abort(); clientRef.current?.terminate(); void clearImportStages(stageOwnerRef.current).catch(() => {}); };
   }, []);
   const cancel = () => {
-    if (abortRef.current) { abortRef.current.abort(); return; }
+    if (abortRef.current) { setProgress({ value: null, label: "正在取消，等待整批回滚…" }); abortRef.current.abort(); return; }
     generationRef.current += 1;
     clientRef.current?.terminate();
+    const cancelledOwner = stageOwnerRef.current;
+    stageOwnerRef.current = crypto.randomUUID();
     clientRef.current = makeClient();
+    pendingJobsRef.current.clear();
+    void clearImportStages(cancelledOwner).catch(() => {});
     inspectionSequenceRef.current.clear();
     activeJobsRef.current.clear();
     setFiles([]); setPreview(null); setPayload(null); setBusy(false); operationRef.current = false;
@@ -119,20 +127,33 @@ export default function ImportPreview() {
   const invalidate = () => { setPreview(null); setPayload(null); setOverwriteSignature(null); setError(""); };
   const ensureJob = async (item) => {
     if (activeJobsRef.current.has(item.itemId)) return;
-    const parsed = await clientRef.current.parse(item.file, item.itemId, item.selectedSheet);
-    if (parsed.type === "sheet-selection-required") throw new Error("请先选择此文件的实际明细页。");
-    activeJobsRef.current.add(item.itemId);
+    const client = clientRef.current;
+    const existing = pendingJobsRef.current.get(item.itemId);
+    if (existing?.client === client) return existing.promise;
+    const promise = client.parse(item.file, item.itemId, item.selectedSheet).then(parsed => {
+      if (parsed.type === "sheet-selection-required") throw new Error("请先选择此文件的实际明细页。");
+      if (clientRef.current === client) activeJobsRef.current.add(item.itemId);
+    }).finally(() => {
+      if (pendingJobsRef.current.get(item.itemId)?.promise === promise) pendingJobsRef.current.delete(item.itemId);
+    });
+    pendingJobsRef.current.set(item.itemId, { client, promise });
+    return promise;
   };
   const inspectPeriod = async (item) => {
     const sequence = (inspectionSequenceRef.current.get(item.itemId) ?? 0) + 1;
     inspectionSequenceRef.current.set(item.itemId, sequence);
     try {
       await ensureJob(item);
-      const { evidence } = await clientRef.current.inspectPeriod(item.itemId, item.mapping, {
+      if (inspectionSequenceRef.current.get(item.itemId) !== sequence) return;
+      const { evidence, rowSource } = await clientRef.current.inspectPeriod(item.itemId, item.mapping, {
         ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
       });
       if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
-        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, periodEvidence: evidence } : entry));
+        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, periodEvidence: evidence, rowSource } : entry));
+      } else void removeImportStage(rowSource?.id).catch(() => {});
+      if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
+        activeJobsRef.current.delete(item.itemId);
+        await clientRef.current.release(item.itemId).catch(() => {});
       }
     } catch (inspectionError) {
       if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
@@ -146,7 +167,8 @@ export default function ImportPreview() {
     invalidate();
     const current = files.find((item) => item.itemId === itemId);
     if (!current) return;
-    const next = { ...current, ...patch, validation: null, periodEvidence: null, periodInspectionError: null };
+    void removeImportStage(current.rowSource?.id).catch(() => {});
+    const next = { ...current, ...patch, validation: null, periodEvidence: null, rowSource: null, periodInspectionError: null };
     setFiles((entries) => entries.map((item) => item.itemId === itemId ? next : item));
     void inspectPeriod(next);
   };
@@ -184,9 +206,12 @@ export default function ImportPreview() {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, periodEvidence: inspected.evidence,
+            filterOptions, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
+          // Each completed file is on disk; release its workbook heap before
+          // reading the next file, even while the configuration UI stays open.
+          clientRef.current.terminate(); clientRef.current = makeClient(); activeJobsRef.current.clear();
         } catch (parseError) {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, status: "error", error: parseError.message } : entry));
@@ -199,6 +224,7 @@ export default function ImportPreview() {
     if (operationRef.current) return;
     inspectionSequenceRef.current.delete(item.itemId);
     activeJobsRef.current.delete(item.itemId);
+    void removeImportStage(item.rowSource?.id).catch(() => {});
     invalidate(); setFiles((current) => current.filter((entry) => entry.itemId !== item.itemId));
     await clientRef.current.release(item.itemId).catch(() => {});
   };
@@ -209,7 +235,8 @@ export default function ImportPreview() {
     const updated = files.map((item) => {
       if (item.itemId === source.itemId || item.status !== "parsed" || !columns.every((column) => item.headers.includes(column))) return item;
       count += 1;
-      return { ...item, mapping: { ...source.mapping }, validation: null, periodEvidence: null };
+      void removeImportStage(item.rowSource?.id).catch(() => {});
+      return { ...item, mapping: { ...source.mapping }, validation: null, periodEvidence: null, rowSource: null };
     });
     setFiles(updated);
     updated.filter((item) => item.periodEvidence === null).forEach((item) => { void inspectPeriod(item); });
@@ -227,17 +254,21 @@ export default function ImportPreview() {
         const item = files[index];
         setProgress({ value: index / files.length * 100, label: `校验 ${index + 1}/${files.length}：${item.fileName}` });
         if (generation !== generationRef.current) return;
-        await ensureJob(item);
-        const validation = await clientRef.current.validate(item.itemId, item.mapping, { ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true, period });
+        let validation;
+        if (item.rowSource) validation = { rowSource: item.rowSource, summary: item.periodEvidence.validationSummary };
+        else {
+          await ensureJob(item);
+          validation = await clientRef.current.validate(item.itemId, item.mapping, { ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true, period });
+        }
         if (generation !== generationRef.current) return;
         const otherMonths = (item.periodEvidence?.distribution ?? []).filter(entry => entry.month !== period);
         if (otherMonths.length) {
           validation.summary = { ...validation.summary, errorCount: validation.summary.errorCount + 1, errors: [...validation.summary.errors, { sourceRow: "月份", messages: [`来源含 ${otherMonths.map(entry => entry.month).join("、")}，与账本 ${period} 不一致，请按月处理此文件。`] }] };
         }
         setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, validation: { summary: validation.summary } } : entry));
-        hasErrors ||= validation.summary.errorCount > 0 || !validation.rows.length;
+        hasErrors ||= validation.summary.errorCount > 0 || !(validation.rowSource?.rowCount ?? validation.rows?.length);
         items.push({ itemId: item.itemId, fileName: item.fileName, fileHash: item.fileHash, storeName: item.storeName,
-          mapping: item.mapping, filterOptions: item.filterOptions, rows: validation.rows, summary: validation.summary,
+          mapping: item.mapping, filterOptions: item.filterOptions, rows: validation.rows, rowSource: validation.rowSource, summary: validation.summary,
           sourceCoverage: createSalesSourceCoverage({ period, storeName: item.storeName, scope: sourceScope(item) }),
           importMode: sourceScope(item) === "full_month" ? item.importMode ?? "append" : "append" });
       }
@@ -272,6 +303,7 @@ export default function ImportPreview() {
       // normalized payload immediately after the atomic transaction commits.
       clientRef.current?.terminate();
       setFiles([]); setPayload(null); setPreview(null);
+      void clearImportStages(stageOwnerRef.current).catch(() => {});
     } catch (writeError) { invalidate(); setError(`整批未写入：${writeError.message}`); }
     finally { abortRef.current = null; setBusy(false); operationRef.current = false; }
   };

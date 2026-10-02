@@ -775,6 +775,7 @@ async function runErpV2SmokeFixture() {
         id: requestId,
         workspaceId,
         ledgerId,
+        ledgerPeriod: "2026-08",
         requestedAt,
         platformSkcs: [{ platformSkc }],
       },
@@ -803,10 +804,11 @@ async function runErpV2SmokeFixture() {
     location: { href: "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html" },
     addEventListener: (type, listener) => listeners.set(type, listener),
     setTimeout,
+    clearTimeout,
   };
   const chromeMock = {
     storage: { local: {
-      get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : []).map((key) => [key, storage.get(key)])),
+      get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, storage.get(key)])),
       set: async (values) => { for (const [key, value] of Object.entries(values || {})) storage.set(key, value); },
       remove: async (keys) => { for (const key of (Array.isArray(keys) ? keys : [])) storage.delete(key); },
     } },
@@ -814,7 +816,7 @@ async function runErpV2SmokeFixture() {
       onMessage: { addListener: (listener) => { runtimeMessageHandler = listener; } },
       onInstalled: { addListener: () => {} },
       onStartup: { addListener: () => {} },
-      getManifest: () => ({ version: "8.0.15" }),
+      getManifest: () => JSON.parse(fs.readFileSync(path.join(tabState.erp.extension.path, "manifest.json"), "utf8")),
       lastError: null,
       sendMessage: (message, callback) => {
         if (typeof runtimeMessageHandler !== "function") {
@@ -849,6 +851,8 @@ async function runErpV2SmokeFixture() {
     },
     URL,
     AbortController,
+    TextEncoder,
+    crypto: crypto.webcrypto,
     chrome: chromeMock,
     fetch: (url, options) => net.fetch(url, options),
     console,
@@ -865,7 +869,15 @@ async function runErpV2SmokeFixture() {
   vm.runInContext(fs.readFileSync(bridgePath, "utf8"), context, { filename: bridgePath });
   const bridge = context.window.ShopeersErpDeliveryBridge;
   if (!bridge || typeof bridge.submit !== "function") throw new Error("ERP 运行时 bridge 未加载提交接口。");
+  const preview = await bridge.previewContext({ querySkcs: [platformSkc], queryCapturedAt: deliveryCapturedAt });
+  if (!preview?.ok || preview.requestId !== requestId) throw new Error(`Packaged smoke 未绑定原登记请求：${preview?.code || preview?.message || "无响应"}`);
+  const checkpoint = await bridge.collectionCheckpoint({
+    action: "save", requestId: preview.requestId, requestSnapshot: preview.requestSnapshot,
+    filters: { sku: platformSkc }, queryCapturedAt: deliveryCapturedAt, completedTargets: [],
+  });
+  if (!checkpoint?.ok || !checkpoint.checkpoint?.resultDeliveryId) throw new Error(`Packaged smoke 未保存采集检查点：${checkpoint?.code || checkpoint?.message || "无响应"}`);
   const deliveryResult = await bridge.submit({
+      resultDeliveryId: checkpoint.checkpoint.resultDeliveryId,
       requestId,
       ledgerId,
       workspaceId,
@@ -909,6 +921,7 @@ async function runErpV2SmokeFixture() {
         mappingFailures: [],
       },
     });
+  if (!deliveryResult?.ok || deliveryResult.requestId !== requestId || deliveryResult.ledgerId !== ledgerId) throw new Error(`Packaged smoke 原请求回传失败：${deliveryResult?.code || deliveryResult?.message || "登记范围不一致"}`);
   const selectionBackgroundPath = tabState["1688"].extension?.path && path.join(tabState["1688"].extension.path, "background.js");
   if (!selectionBackgroundPath || !fs.existsSync(selectionBackgroundPath)) throw new Error("Packaged smoke 找不到 1688 运行时后台模块。");
   const selectionRequests = [];

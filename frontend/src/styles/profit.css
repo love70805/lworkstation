@@ -14,9 +14,9 @@
 .sales-hover-summary { display:flex; flex-wrap:wrap; align-content:center; gap:6px 14px; min-height:62px; font-size:13px; color:var(--text-muted); }
 .sales-hover-summary strong { color:var(--text); }
 .sales-hover-summary span, .sales-details-heading p { overflow-wrap:anywhere; }
-.sales-daily-chart { display:grid; grid-template-columns:48px minmax(0,1fr); height:220px; padding:8px 4px 26px 0; }
+.sales-daily-chart { display:grid; grid-template-columns:72px minmax(0,1fr); height:220px; padding:8px 4px 26px 0; }
 .sales-chart-axis { position:relative; margin-right:8px; color:var(--text-muted); font-size:11px; }
-.sales-chart-axis > span { position:absolute; top:0; right:0; transform:translateY(-50%); max-width:100%; overflow-wrap:anywhere; }
+.sales-chart-axis > span { position:absolute; top:0; right:0; transform:translateY(-50%); white-space:nowrap; }
 .sales-chart-axis > .sales-axis-min { top:100%; }
 .sales-chart-plot { position:relative; min-width:0; }
 .sales-zero-line { position:absolute; left:0; right:0; height:1px; background:var(--border-strong); pointer-events:none; }

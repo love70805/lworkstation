@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -109,7 +110,7 @@ export async function verifyErpCatalogButtonAndCostPipeline() {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const messages = [];
   const fetched = [];
-  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) { messages.push(json(message)); callback(message.type === 'shopeers.erp.previewContext' ? { ok: true, ledgerPeriod: '2026-08' } : message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CATALOG-CLICK', ledgerPeriod: '2026-08', platformSkcs: ['SKC-TARGET'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }); } } };
+  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) { messages.push(json(message)); callback(collectionReply(message) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CATALOG-CLICK', ledgerPeriod: '2026-08', platformSkcs: ['SKC-TARGET'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId })); } } };
   window.fetch = async rawUrl => {
     const url = new URL(rawUrl); fetched.push(url);
     let body;
@@ -160,7 +161,7 @@ export async function verifyErpCatalogBackgroundBinding() {
   const storage = { shopeersErpInboxBaseUrl: 'http://127.0.0.1:8790', shopeersErpInboxCapability: 'synthetic-only-capability-abcdefghijklmnopqrstuvwxyz', shopeersErpWorkspaceId: 'workspace-confirmed' };
   let requests = [{ requestId: 'COST-OTHER', requestKind: 'cost', workspaceId: 'workspace-confirmed', status: 'registered', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08' }, { requestId: 'CATALOG-CONFIRMED', requestKind: 'catalog', workspaceId: 'workspace-confirmed', status: 'registered', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08', ledgerId: null }];
   const posted = [];
-  const chrome = { storage: { local: { async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, json(storage[key])])); }, async set(values) { Object.assign(storage, json(values)); } } }, runtime: { getManifest: () => ({ version: '8.0.27' }), onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  const chrome = { storage: { local: { async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, json(storage[key])])); }, async set(values) { Object.assign(storage, json(values)); } } }, runtime: { getManifest: () => ({ version: '8.0.28' }), onMessage: { addListener() {} }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const sandbox = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console: { info() {}, warn() {}, error() {} }, fetch: async (rawUrl, options) => {
     const url = new URL(rawUrl); assert.equal(url.hostname, '127.0.0.1', 'page-controlled destinations never leave loopback');
     if (url.pathname === '/erp/v1/requests') return { ok: true, status: 200, json: async () => ({ records: requests }) };

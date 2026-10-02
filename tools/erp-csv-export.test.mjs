@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -48,7 +49,8 @@ async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion 
   };
   window.ShopeersErpDeliveryBridge = {
     reportStatus: async () => {},
-    previewContext: async () => ({ ok: !!ledgerPeriod, ledgerPeriod }),
+    previewContext: async () => collectionReply({ type: 'shopeers.erp.previewContext' }, { ledgerPeriod }),
+    collectionCheckpoint: async payload => collectionReply({ type: 'shopeers.erp.collectionCheckpoint', payload }, { ledgerPeriod }),
     submit: async (payload) => { deliveries.push(payload); return { status: "success" }; },
   };
   if (cache) window.localStorage.setItem(cacheKey, JSON.stringify(cache));
@@ -225,7 +227,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 3, "cost completion needs only list, details and mapping; optional catalog is independent");
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.27");
+    assert.equal(delivery.meta.extensionVersion, "8.0.28");
     assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
@@ -374,9 +376,9 @@ async function verifyLedgerPreview(extensionRoot) {
       const { window } = extension;
       window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: `${new URL(erpUrl).origin}/purchase/purchase/v1/purchase-order-page?sku=SKC-MONTH` } }));
       window.document.getElementById('erpa-cost-trigger').click();
-      for (let i = 0; i < 100 && !extension.deliveries.length; i++) await new Promise(resolve => setTimeout(resolve, 10));
-      assert.equal(extension.deliveries.length, 1, 'missing month must not stop complete evidence delivery');
-      const delivery = extension.deliveries[0];
+      for (let i = 0; i < 100 && window.document.getElementById('erpa-export').disabled; i++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(extension.deliveries.length, ledgerPeriod ? 1 : 0, 'missing request context keeps evidence in local preview only');
+      const delivery = extension.deliveries[0] || JSON.parse(window.localStorage.getItem(cacheKey));
       assert.equal(delivery.warehouseEvidence.warehouses[0].purchaseRecords.length, 3, 'future evidence remains available to other ledgers');
       const result = delivery.results[0];
       const { rows } = await extension.exportCsv();

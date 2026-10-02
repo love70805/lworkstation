@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -21,7 +22,7 @@ async function fixture(mode, realClock = false) {
  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
    if (mode === 'context-hang' && message.type === 'shopeers.erp.previewContext') return;
-   callback(message.type === 'shopeers.erp.previewContext' ? { ok: true, ledgerPeriod: '2026-08' } : message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', platformSkcs: ['SKC-A'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId });
+   callback(collectionReply(message) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', platformSkcs: ['SKC-A'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }));
  } } };
  window.fetch = async (raw, options) => {
    const url = new URL(raw), endpoint = url.pathname.split('/').at(-1); calls.push({ endpoint, params: Object.fromEntries(url.searchParams), at: Date.now() - started });
@@ -53,11 +54,11 @@ async function fixture(mode, realClock = false) {
 }
 const cost = f => f.messages.find(m => m.type === 'shopeers.erp.submitCostResult');
 const catalog = f => f.messages.find(m => m.type === 'shopeers.erp.submitCatalogResult');
-for (const mode of ['directory-hang', 'directory-failure', 'huge', 'context-hang']) {
+for (const mode of ['directory-hang', 'directory-failure', 'huge']) {
  const f = await fixture(mode);
  try {
   await until(() => cost(f));
-  assert.equal(cost(f).payload.results[0].unitCost, mode === 'context-hang' ? null : '4.0000');
+  assert.equal(cost(f).payload.results[0].unitCost, '4.0000');
   if (mode === 'directory-hang') await until(() => !f.window.document.getElementById('erpa-catalog-progress').hidden);
   assert.equal(f.window.document.getElementById('erpa-loading').classList.contains('erpa-visible'), false, 'optional phase cannot obscure completed table');
   assert.match(f.window.document.getElementById('erpa-table-body').textContent, /WH-A/);
@@ -72,6 +73,15 @@ for (const mode of ['directory-hang', 'directory-failure', 'huge', 'context-hang
    assert.equal(catalog(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);
   }
   checks.push({ mode, clock: 'accelerated deadlines only; unchanged production code', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length });
+ } finally { await f.close(); }
+}
+{
+ const f = await fixture('context-hang');
+ try {
+  await until(() => !f.window.document.getElementById('erpa-export').disabled);
+  assert.equal(cost(f), undefined, 'a request-context timeout preserves only local preview and export');
+  assert.match(f.window.document.getElementById('erpa-table-body').textContent, /WH-A/);
+  checks.push({ mode: 'context-hang', localPreview: true, automaticCostDelivery: false });
  } finally { await f.close(); }
 }
 for (const mode of ['first-hang', 'json-hang', 'login', 'login-detail']) {

@@ -4,6 +4,7 @@ import { db, DEFAULT_WORKSPACE_ID, previewSalesImports, saveSalesImports, saveSa
 import { validateSalesRows } from "../lib/salesImport";
 import { summarizeLedgerRows } from "../domain/ledgerImport";
 import { buildSyncRecoveryPayload, replaySyncRecoveryPayload } from "../domain/syncRecovery";
+import { createImportStage, appendImportStage, sealImportStage, clearImportStages } from '../lib/salesImportStage';
 
 const period = "2026-08";
 const mapping = { platformSku: "SKU", platformSkc: "SKC", quantity: "数量", amount: "金额", directPenalty: "罚款" };
@@ -25,6 +26,42 @@ beforeEach(async () => { await db.delete(); await db.open(); });
 afterEach(async () => { vi.restoreAllMocks(); db.close(); await db.delete(); });
 
 describe("同月多店铺原子台账导入", () => {
+  async function staged(item, owner = 'stage-test') {
+    const id = await createImportStage(owner);
+    // Include an empty excluded block, as a genuine workbook can contain one.
+    await appendImportStage(id, 0, []);
+    await appendImportStage(id, 1, item.rows);
+    const rowSource = await sealImportStage(id, item.rows.length, 2);
+    const { rows, ...metadata } = item;
+    return { ...metadata, rowSource };
+  }
+  it('consumes immutable staged blocks with the same precision, source fields, audit recovery and idempotence', async () => {
+    const item = file('甲店', 10.129);
+    Object.assign(item.rows[0], { rawAddedAt: '2026-08-31 23:59:59', sourceAddedDate: '2026-08-31', sourceAddedAt: '2026-08-31T23:59:59.000+08:00', sourceSheet: '台账变动明细', sourceRow: 9007, orderId: '00012345678901234567890123456789' });
+    const input = await staged(item);
+    await expect(appendImportStage(input.rowSource.id, 2, item.rows)).rejects.toThrow('封存');
+    await expect(sealImportStage(input.rowSource.id, 999, 3)).rejects.toThrow('封存');
+    const result = await commit([input]);
+    const stored = await db.salesRows.toArray();
+    expect(stored[0]).toMatchObject(item.rows[0]);
+    expect(result.finalSummary.revenue).toBe(10.12);
+    expect((await db.auditEvents.toArray()).find(e => e.action === 'imported').after.snapshot.salesRows).toEqual(stored);
+    expect((await commit([input])).items[0].status).toBe('skipped_duplicate');
+    await clearImportStages('stage-test');
+    await expect(commit([input])).rejects.toThrow('临时数据已失效');
+  });
+  it('rejects staged cross-month rows and rolls back a staged replacement cancelled after the first block', async () => {
+    await commit([file('甲店')]);
+    const before = await facts();
+    const invalid = file('乙店'); invalid.rows[0].sourceAddedDate = '2026-09-01';
+    await expect(commit([await staged(invalid)])).rejects.toThrow('来源月份');
+    const input = { period, items: [await staged(file('甲店', 30))] };
+    const preview = await previewSalesImports(input);
+    const controller = new AbortController();
+    await expect(saveSalesImports({ ...input, preview, overwriteSignature: preview.targetSignature, signal: controller.signal, onProgress: () => controller.abort() })).rejects.toThrow('已取消');
+    expect(await facts()).toEqual(before);
+    await clearImportStages('stage-test');
+  });
   it("keeps a global SKU distinct across stores and records each source with final monthly totals", async () => {
     const result = await commit([file("甲店", 10.129), file("乙店", 20.129)]);
     expect(result.items.map((item) => item.status)).toEqual(["imported", "imported"]);

@@ -7,13 +7,14 @@ import SelectionSalesTag from "../components/SelectionSalesTag";
 import ProductEditorLeaveGuard from "../components/ProductEditorLeaveGuard";
 import { productLibraryReturnPath } from "../components/productLibraryViewState";
 import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
-import { getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
+import { getActiveMemberContext, getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
 import { normalizeProductTags, productDraftReferences, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
 import { requestErpProductCatalog } from "../data/repositories/erpCatalogRepository";
 import { ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSku } from "../domain/identifiers";
+import { readContinuousCatalogQueue, continuousCatalogPath, checkContinuousCatalogIdentity } from "../domain/continuousCatalogQueue";
 
 function createVariant() {
   return {
@@ -125,15 +126,25 @@ function ProductEditor() {
   const referenceSkc = searchParams.get("skc") ?? "";
   const referenceSku = searchParams.get("sku") ?? "";
   const referenceName = searchParams.get("name") ?? "";
+  const queueId = searchParams.get("queue");
+  const catalogQueue = readContinuousCatalogQueue(queueId);
+  const queuePosition = Number(searchParams.get("position"));
+  const queueItem = catalogQueue?.items[queuePosition];
   const snapshot = useLiveQuery(
     () => getProductEditorSnapshot({ captureId, productId, platformSkc: referenceSkc, platformSku: referenceSku, productName: referenceName }),
     [captureId, productId, referenceName, referenceSkc, referenceSku],
     undefined,
   );
-  const referenceSnapshot = useLiveQuery(getSelectionReferenceSnapshot, [], null);
   const salesStatusDefinitions = useLiveQuery(getSelectionStatusDefinitions, [], []);
   const loadedKeyRef = useRef("");
   const [draft, setDraft] = useState(null);
+  const referenceScopeSkc = draft?.platformSkc ?? snapshot?.draft?.platformSkc ?? referenceSkc;
+  const referenceScopeSkus = JSON.stringify((draft?.variants ?? snapshot?.draft?.variants ?? []).map(row => row.platformSku).filter(Boolean));
+  const referenceSnapshot = useLiveQuery(() => {
+    const platformSkus = referenceSku ? [...JSON.parse(referenceScopeSkus), referenceSku] : JSON.parse(referenceScopeSkus);
+    if (!referenceScopeSkc && !platformSkus.length) return null;
+    return getSelectionReferenceSnapshot({ compact: true, platformSkc: referenceScopeSkc, platformSkus });
+  }, [referenceScopeSkc, referenceScopeSkus, referenceSku], null);
   const [tagsText, setTagsText] = useState("");
   const [savedFingerprint, setSavedFingerprint] = useState(null);
   const [persistedProduct, setPersistedProduct] = useState(null);
@@ -154,10 +165,64 @@ function ProductEditor() {
   const [catalogRequestMessage, setCatalogRequestMessage] = useState("");
   const [catalogRequestFailed, setCatalogRequestFailed] = useState(false);
   const [saveFieldErrors, setSaveFieldErrors] = useState({});
+  const [queueError, setQueueError] = useState("");
+  const [advancing, setAdvancing] = useState(false);
+  const queueOwnedProductRef = useRef(null);
+  const queueAdvanceRef = useRef(false);
+  const queueScopeError = queueId && (!queueItem ? "连续建档队列已失效，请返回参考列表重新开始。" : snapshot?.context?.workspaceId && snapshot.context.workspaceId !== catalogQueue.workspaceId ? "工作区已改变，请返回参考列表重新开始。" : "");
+
+  const advanceCatalog = async ({ saved = false, submittedFingerprint } = {}) => {
+    if (!catalogQueue || queueAdvanceRef.current) return;
+    queueAdvanceRef.current = true;
+    setAdvancing(true);
+    try {
+      const context = await getActiveMemberContext();
+      if (context.workspaceId !== catalogQueue.workspaceId) throw new Error("工作区已改变，请返回参考列表重新开始。");
+      let next = queuePosition + 1;
+      for (; next < catalogQueue.items.length; next += 1) {
+        const candidate = catalogQueue.items[next];
+        const fresh = await getProductEditorSnapshot(candidate);
+        if (fresh?.context?.workspaceId && fresh.context.workspaceId !== catalogQueue.workspaceId) throw new Error("工作区已改变，请返回参考列表重新开始。");
+        if (!fresh?.product || checkContinuousCatalogIdentity(candidate, fresh)) break;
+      }
+      const target = next < catalogQueue.items.length ? continuousCatalogPath(catalogQueue, next) : returnTo;
+      if (saved && currentDraftRef.current.fingerprint !== submittedFingerprint) {
+        notify("已提交的内容已保存；新修改仍保留在当前商品。", "info");
+        return;
+      }
+      // A skip uses the normal router blocker. Only a verified save may bypass it.
+      if (saved) allowNavigationRef.current = true;
+      navigate(target, { replace: true, state: { productLibraryReturnTo: returnTo } });
+      window.setTimeout(() => { allowNavigationRef.current = false; }, 0);
+    } catch (error) {
+      setQueueError(error.message); notify(error.message, "error");
+    } finally {
+      queueAdvanceRef.current = false; setAdvancing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!queueItem || !snapshot || queueScopeError || saving) return;
+    const issue = checkContinuousCatalogIdentity(queueItem, snapshot);
+    if (issue) { setQueueError(issue); return; }
+    if (snapshot.product && snapshot.product.id !== queueOwnedProductRef.current) {
+      if (!dirty) void advanceCatalog();
+      else setQueueError("此商品已由其他操作建档，请跳过或返回列表查看；当前输入仍保留。");
+      return;
+    }
+    setQueueError("");
+  }, [snapshot, queueScopeError, saving]);
+
+  useEffect(() => {
+    if (queueItem && draft) document.getElementById("product-name")?.focus({ preventScroll: true });
+  }, [Boolean(draft)]);
 
   useEffect(() => {
     if (!snapshot) return;
-    const key = `${snapshot.mode}:${snapshot.capture?.id ?? snapshot.product?.id ?? `${referenceSkc}:${referenceSku}:${referenceName}`}`;
+    // A write invalidates live queries. Do not merge its own reread into the
+    // submitted fingerprint before deciding whether the user's edits changed.
+    if (queueScopeError || saving) return;
+    const key = queueItem ? `${queueId}:${queuePosition}` : `${snapshot.mode}:${snapshot.capture?.id ?? snapshot.product?.id ?? `${referenceSkc}:${referenceSku}:${referenceName}`}`;
     const sameRecord = loadedKeyRef.current === key;
     if (sameRecord && currentDraftRef.current?.fingerprint !== savedFingerprint) {
       setDraft(current => {
@@ -216,7 +281,7 @@ function ProductEditor() {
     setSaved(false);
     const sourcePeriod = snapshot.prefill?.referencePeriod ?? snapshot.draft.referencePeriod ?? snapshot.draft.variants?.map(variant => variant.referencePeriod).filter(Boolean).sort().at(-1) ?? "";
     setCatalogRequestPeriod(current => sameRecord && current ? current : sourcePeriod);
-  }, [snapshot]);
+  }, [snapshot, saving]);
 
   const historicalRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows(referenceSnapshot) : [], [referenceSnapshot]);
   const draftReferences = useMemo(() => productDraftReferences(draft ?? {}, historicalRows), [draft, historicalRows]);
@@ -239,11 +304,11 @@ function ProductEditor() {
   }
 
   if (snapshot === null) {
-    return <AppShell pageClass="editor-page"><Panel className="route-loader">找不到对应的商品或采集记录。</Panel></AppShell>;
+    return <AppShell pageClass="editor-page"><Panel className="route-loader">找不到对应的商品或采集记录。<Button onClick={() => navigate(returnTo)}>返回列表</Button></Panel></AppShell>;
   }
 
   if (draft === null) {
-    return <AppShell pageClass="editor-page"><Panel className="route-loader">正在准备商品编辑器...</Panel></AppShell>;
+    return <AppShell pageClass="editor-page"><Panel className="route-loader">{queueScopeError || "正在准备商品编辑器..."}{queueScopeError ? <Button onClick={() => navigate(returnTo)}>返回列表</Button> : null}</Panel></AppShell>;
   }
   const currentProductId = persistedProduct?.id ?? snapshot.product?.id;
 
@@ -390,10 +455,23 @@ function ProductEditor() {
   const isFormalProduct = (persistedProduct ?? snapshot.product)?.status === "active";
   const locateSaveError = error => {
     const variantIndex = draft.variants.findIndex(variant => variant.platformSku && (error.message.includes(variant.platformSku) || error.message.toUpperCase().includes(canonicalPlatformSku(variant.platformSku))));
-    if (variantIndex < 0 || !/SKU|SKC|身份|重复/i.test(error.message)) return;
+    if (variantIndex < 0 || !/SKU|SKC|身份|重复/i.test(error.message)) {
+      window.setTimeout(() => document.getElementById(/SKC|身份|来源/.test(error.message) ? "product-platform-skc" : "product-name")?.focus(), 0);
+      return;
+    }
     const sku = canonicalPlatformSku(draft.variants[variantIndex].platformSku);
     setSaveFieldErrors({ [sku]: error.message });
     window.setTimeout(() => document.getElementById(`variant-${variantIndex}-sku`)?.focus(), 0);
+  };
+  const verifyQueueBeforeSave = async () => {
+    if (!queueId) return;
+    if (queueScopeError) throw new Error(queueScopeError);
+    const context = await getActiveMemberContext();
+    if (context.workspaceId !== catalogQueue.workspaceId) throw new Error("工作区已改变，请返回参考列表重新开始。");
+    const latest = await getProductEditorSnapshot(queueItem);
+    const issue = checkContinuousCatalogIdentity(queueItem, latest);
+    if (issue) throw new Error(issue);
+    if (latest.product && latest.product.id !== queueOwnedProductRef.current) throw new Error("此商品已由其他操作建档，请跳过或返回列表查看；当前输入仍保留。");
   };
   const saveDraft = async ({ stay = false } = {}) => {
     if (saving) return false;
@@ -404,12 +482,14 @@ function ProductEditor() {
     const submittedDraft = { ...submitted.draft, tags: normalizeProductTags(submitted.tagsText) };
     setSaving(true);
     try {
+      await verifyQueueBeforeSave();
       if (snapshot.mode === "capture" && !persistedProduct) {
         await updateCaptureDraft({ captureId: snapshot.capture.id, draft: submittedDraft });
         notify("采集草稿已保存，待确认队列已同步更新。", "success");
       } else {
         const status = isFormalProduct ? "active" : "draft";
-        const result = await saveProductCatalogRecord({ productId: persistedProduct?.id ?? snapshot.product?.id, draft: submittedDraft, status });
+        const result = await saveProductCatalogRecord({ productId: persistedProduct?.id ?? snapshot.product?.id, draft: submittedDraft, status, expectedWorkspaceId: catalogQueue?.workspaceId ?? snapshot.context?.workspaceId });
+        if (queueItem) queueOwnedProductRef.current = result.product.id;
         setPersistedProduct(result.product);
         notify(status === "active" ? "商品修改已保存。" : "商品草稿已保存到本机。", "success");
         if (snapshot.mode === "new" && !stay && currentDraftRef.current.fingerprint === submitted.fingerprint) {
@@ -428,27 +508,36 @@ function ProductEditor() {
     }
   };
 
-  const confirmEntry = async () => {
-    if (saving) return;
+  const confirmEntry = async ({ next = false, stay = false } = {}) => {
+    if (saving || advancing) return false;
+    if (!canSave) return false;
     const submitted = currentDraftRef.current;
     setSaving(true);
     try {
+      await verifyQueueBeforeSave();
       const result = await saveProductCatalogRecord({
         productId: persistedProduct?.id ?? snapshot.product?.id,
         captureId: persistedProduct ? undefined : snapshot.capture?.id,
         draft: { ...submitted.draft, tags: normalizeProductTags(submitted.tagsText) },
         status: "active",
+        expectedWorkspaceId: catalogQueue?.workspaceId ?? snapshot.context?.workspaceId,
       });
+      if (queueItem) queueOwnedProductRef.current = result.product.id;
       setConfirmDialog(false);
       setPersistedProduct(result.product);
       setSavedFingerprint(submitted.fingerprint);
       setSaved(true);
       notify(`${result.product.name} 已写入正式商品库；1688 成本仅作为选品参考。`, "success");
-      if (currentDraftRef.current.fingerprint === submitted.fingerprint) navigateSaved(returnTo);
+      if (currentDraftRef.current.fingerprint === submitted.fingerprint) {
+        if (next) await advanceCatalog({ saved: true, submittedFingerprint: submitted.fingerprint });
+        else if (!stay) navigateSaved(returnTo);
+      }
       else notify("已提交的内容已保存；保存期间的新修改仍保留在编辑器中。", "info");
+      return currentDraftRef.current.fingerprint === submitted.fingerprint;
     } catch (error) {
       locateSaveError(error);
       notify(`保存商品失败：${error.message}`, "error");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -494,11 +583,12 @@ function ProductEditor() {
 
   return (
     <AppShell searchPlaceholder="搜索商品、SKU 或供应商..." pageClass="editor-page">
-      <ProductEditorLeaveGuard dirty={dirty} saving={saving} allowNavigationRef={allowNavigationRef} onSave={() => saveDraft({ stay: true })} />
+      <ProductEditorLeaveGuard dirty={dirty} saving={saving || advancing} allowNavigationRef={allowNavigationRef} onSave={() => queueItem ? confirmEntry({ stay: true }) : saveDraft({ stay: true })} />
       <div className="editor-breadcrumb"><button onClick={() => navigate(breadcrumbTarget)}>商品管理</button><ChevronRight size={15} /><span>{modeLabel(snapshot)}</span></div>
+      {queueId ? <div className="continuous-catalog-progress" role="status"><span>{queueItem ? `第 ${queuePosition + 1} 个 / 共 ${catalogQueue.items.length} 个` : "连续建档"}</span><span>{queueScopeError || queueError || "沿参考列表顺序建档"}</span>{queueItem ? <Button variant="ghost" disabled={saving || advancing || Boolean(queueScopeError)} onClick={() => advanceCatalog()}>跳过</Button> : null}</div> : null}
       <div className="editor-titlebar">
         <div className="editor-heading"><h1>{draft.name || "新建商品档案"}</h1>{dirty ? <Badge tone="warning">未保存修改</Badge> : saved ? <Badge tone="success">已保存</Badge> : null}</div>
-        <div className="page-actions"><Button variant="ghost" disabled={saving} onClick={() => navigate(returnTo)}>取消</Button>{isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
+        <div className="page-actions"><Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>取消</Button>{queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
       </div>
 
       <div className="editor-grid">

@@ -291,6 +291,10 @@ export function validateSalesRows(rawRows, mapping, {
 // incomplete source date never becomes an implicit month choice.
 export function collectSalesPeriodEvidence(rawRows, mapping, options = {}) {
   const validation = validateSalesRows(rawRows, mapping, { ...options, period: undefined });
+  return salesPeriodEvidenceFromValidation(validation, mapping);
+}
+
+export function salesPeriodEvidenceFromValidation(validation, mapping) {
   const months = new Map();
   let missingCount = 0;
   let invalidCount = 0;

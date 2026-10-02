@@ -9,6 +9,9 @@ import { selectCurrentErpCatalogCoverage } from "../domain/erpCatalogFields";
 import { resolveProductStatus } from "../domain/selectionStatuses";
 import Decimal from "decimal.js";
 import { buildSelectionLedgerPriceIndex, selectionLedgerPrice, selectionCatalogLedgerBySkc } from "../domain/selectionLedgerPrices";
+import { combineSelectionSalesFacts } from "../domain/selectionSalesFacts";
+import { unpackSelectionSalesFacts } from "../domain/selectionSalesFactsCodec";
+const ExactQuantity = Decimal.clone({ precision: 80 });
 
 function timestamp(item) {
   const value = item?.finalizedAt ?? item?.publishedAt ?? item?.calculatedAt ?? item?.updatedAt ?? "";
@@ -77,11 +80,11 @@ function coverSalesBySku({ erpCatalogRows, erpCosts, salesRows, importBatches, l
     if (!batch || batch.ledgerId !== row.ledgerId || row.store !== batch.store) continue;
     const quantity = Number(row.quantityExact ?? row.quantity ?? row.qty);
     if (!Number.isFinite(quantity)) { conflicts.add(sku); continue; }
-    const coordinate = row.sourceRow != null ? JSON.stringify([row.ledgerId, batch.fileHash ?? batch.id, row.store, row.sourceSheet ?? "", row.sourceRow]) : `id:${row.id}`;
+    const coordinate = row.selectionFactId ? `aggregate:${row.selectionFactId}` : row.sourceRow != null ? JSON.stringify([row.ledgerId, batch.fileHash ?? batch.id, row.store, row.sourceSheet ?? "", row.sourceRow]) : `id:${row.id}`;
     const content = JSON.stringify([skc, sku, row.quantityExact ?? row.quantity ?? row.qty]);
     if (coordinates.has(coordinate)) { if (coordinates.get(coordinate) !== content) conflicts.add(sku); continue; }
     coordinates.set(coordinate, content);
-    totals.set(sku, (totals.get(sku) ?? new Decimal(0)).plus(row.quantityExact ?? row.quantity ?? row.qty));
+    totals.set(sku, (totals.get(sku) ?? new ExactQuantity(0)).plus(row.quantityExact ?? row.quantity ?? row.qty));
   }
   return new Map([...totals].filter(([sku]) => !conflicts.has(sku)).map(([sku, quantity]) => [sku, quantity.toNumber()]));
 }
@@ -102,9 +105,14 @@ export function buildSelectionReferenceRows({
   ledgers = [],
   workspaceId = null,
   store = "all",
+  computedReferenceRows,
+  compactEvidence = false,
+  selectionSalesFacts = null,
 }) {
+  if (computedReferenceRows) return computedReferenceRows;
+  if (selectionSalesFacts?.packedParts) selectionSalesFacts = combineSelectionSalesFacts(selectionSalesFacts.packedParts.map(unpackSelectionSalesFacts), workspaceId);
   const erpCatalogBySku = buildErpProductCatalogIndex([...erpCosts, ...erpCatalogRows]);
-  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku) });
+  const identityBySku = buildReferenceIdentityIndex({ ledgerIdentityRows, profitLines, erpCatalogRows: erpCatalogIdentityRows(erpCatalogBySku), compactEvidence });
   const platformSkuByCanonical = new Map(platformSkus.map((item) => [
     item.canonicalPlatformSku ?? canonicalPlatformSku(item.platformSku),
     item,
@@ -123,9 +131,9 @@ export function buildSelectionReferenceRows({
     coverageBySkc.get(key).push(coverage);
   }
   const ledgerIdentitiesBySku = groupBySku(ledgerIdentityRows);
-  const ledgerPrices = buildSelectionLedgerPriceIndex({ salesRows, importBatches, ledgers, workspaceId });
+  const ledgerPrices = selectionSalesFacts?.ledgerPriceIndex ?? buildSelectionLedgerPriceIndex({ salesRows, importBatches, ledgers, workspaceId, compactEvidence });
   const catalogLedgers = selectionCatalogLedgerBySkc([...erpCosts, ...erpCatalogRows]);
-  const coverSales = coverSalesBySku({ erpCatalogRows, erpCosts, salesRows, importBatches, ledgers, workspaceId });
+  const coverSales = coverSalesBySku({ erpCatalogRows, erpCosts, salesRows: selectionSalesFacts?.coverRows ?? salesRows, importBatches, ledgers, workspaceId });
   const allSkus = new Set([
     ...platformSkuByCanonical.keys(),
     ...erpBySku.keys(),
@@ -258,7 +266,7 @@ export function buildSelectionReferenceRows({
     String(b.latestPeriod ?? "").localeCompare(String(a.latestPeriod ?? ""))
       || a.platformSku.localeCompare(b.platformSku)
   ));
-  const labels = buildSelectionSalesLabels({ salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId, store });
+  const labels = buildSelectionSalesLabels({ salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId, store, labelFacts: selectionSalesFacts?.labelFacts });
   const labelBySkc = new Map(labels.items.map(item => [item.canonicalPlatformSkc, item]));
   return rows.map(row => ({ ...row, automaticSalesTag: row.platformSkc ? labelBySkc.get(canonicalPlatformSkc(row.platformSkc)) ?? null : null }));
 }

@@ -94,7 +94,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: "8.0.27" }),
+        getManifest: () => ({ version: "8.0.28" }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -102,7 +102,7 @@ export async function verifyErpCatalogTransport({
       alarms: { create() {}, onAlarm: { addListener() {} } },
     };
     const worker = vm.createContext({
-      __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController,
+      __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder,
       crypto: { randomUUID, subtle: webcrypto.subtle }, fetch, setTimeout, clearTimeout,
       console: { error() {}, warn() {}, info() {} }, Date, Math, Promise,
     });

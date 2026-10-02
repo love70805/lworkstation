@@ -15,25 +15,34 @@ const sameCatalogBasis = (a, b) => a.workspaceId === b.workspaceId && a.ledgerId
   && JSON.stringify(a.platformSkcs.map(skc).sort()) === JSON.stringify(b.platformSkcs.map(skc).sort())
   && JSON.stringify(a.sourceProductIds.toSorted()) === JSON.stringify(b.sourceProductIds.toSorted());
 
-async function confirmedIdentities(context) {
-  const [products, skus, rows, batches, ledgers] = await Promise.all([db.products.toArray(), db.platformSkus.toArray(), db.salesRows.toArray(), db.importBatches.toArray(), db.ledgers.toArray()]);
+async function confirmedIdentities(context, snapshot = null) {
+  const [products, skus, rows, batches, ledgers] = snapshot
+    ? [snapshot.products, snapshot.platformSkus, snapshot.salesRows, snapshot.importBatches, snapshot.ledgers]
+    : await Promise.all([db.products.toArray(), db.platformSkus.toArray(), db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(), db.importBatches.toArray(), db.ledgers.toArray()]);
   const visible = products.filter(product => selectionRecordVisible(product, context));
   const productIds = new Set(visible.map(product => product.id));
   const ledgerIds = new Set(ledgers.filter(ledger => ledger.workspaceId === context.workspaceId).map(ledger => ledger.id));
   const batchById = new Map(batches.filter(batch => batch.workspaceId === context.workspaceId && batch.status === "completed" && ledgerIds.has(batch.ledgerId)).map(batch => [batch.id, batch]));
-  const identities = [...skus.filter(item => item.workspaceId === context.workspaceId && productIds.has(item.productId)),
-    ...rows.filter(row => row.workspaceId === context.workspaceId && ledgerIds.has(row.ledgerId) && batchById.get(row.batchId)?.ledgerId === row.ledgerId)]
-    .filter(item => item.platformSku && item.platformSkc);
+  // Trust needs every distinct relationship, not one duplicate per sale.
+  const byIdentity = new Map();
+  const add = item => {
+    if (!item.platformSku || !item.platformSkc) return;
+    const identity = { platformSku: item.platformSku, platformSkc: item.platformSkc, productId: item.productId };
+    byIdentity.set(JSON.stringify([pair(identity), identity.productId]), identity);
+  };
+  for (const item of skus) if (item.workspaceId === context.workspaceId && productIds.has(item.productId)) add(item);
+  for (const row of rows) if (row.workspaceId === context.workspaceId && ledgerIds.has(row.ledgerId) && batchById.get(row.batchId)?.ledgerId === row.ledgerId) add(row);
+  const identities = [...byIdentity.values()];
   return { products: visible, identities, ledgers };
 }
 
 // Catalog metadata can be used after durable verified receipt, even when the
 // separate formal cost adoption is blocked. The original financial path keeps
 // its published/request checks; this projection never adopts or writes costs.
-export async function readTrustedErpCostInboxCatalogRecords(context) {
-  const [inboxes, requests, local] = await Promise.all([
-    db.erpCostInbox.toArray(), db.erpCostRequests.toArray(), confirmedIdentities(context),
-  ]);
+export async function readTrustedErpCostInboxCatalogRecords(context, snapshot = null) {
+  const [inboxes, requests] = await Promise.all([db.erpCostInbox.toArray(), db.erpCostRequests.toArray()]);
+  if (!inboxes.some(row => row.workspaceId === context.workspaceId)) return [];
+  const local = await confirmedIdentities(context, snapshot);
   const requestById = new Map(requests.filter(item => item.workspaceId === context.workspaceId).map(item => [item.id, item]));
   const known = new Set(local.identities.map(pair));
   const records = [];
@@ -58,9 +67,9 @@ export async function readTrustedErpCostInboxCatalogRecords(context) {
   return records;
 }
 
-async function assertConfirmedRequest(request, context) {
+async function assertConfirmedRequest(request, context, localSnapshot = null) {
   if (request.workspaceId !== context.workspaceId) throw new Error("ERP 资料请求不属于当前工作区。");
-  const local = await confirmedIdentities(context);
+  const local = localSnapshot ?? await confirmedIdentities(context);
   const known = new Set(local.identities.map(pair));
   for (const identity of request.confirmedSkus) {
     if (!known.has(pair(identity))) throw new Error(`平台 SKU ${identity.platformSku} 缺少本机已确认的 SKC 关系。`);
@@ -151,13 +160,15 @@ export async function receiveErpCatalogInboxEnvelope({ envelope } = {}) {
   });
 }
 
-export async function readTrustedErpCatalogRecords(context) {
+export async function readTrustedErpCatalogRecords(context, snapshot = null) {
   const settings = await db.settings.toArray(), records = [];
+  let local;
   for (const record of settings.filter(item => item.kind === "erp_catalog_result" && item.workspaceId === context.workspaceId)) {
     const stored = settings.find(item => item.key === requestKey(context.workspaceId, record.requestId));
     if (!stored?.request) continue;
     try {
-      await assertConfirmedRequest(stored.request, context);
+      local ??= await confirmedIdentities(context, snapshot);
+      await assertConfirmedRequest(stored.request, context, local);
       const result = validateErpCatalogInboxEnvelope(record.envelope, { request: stored.request, expectedWorkspaceId: context.workspaceId });
       if (result.catalog.batchId && record.key === resultKey(context.workspaceId, result.catalog.batchId)) records.push({ ...record, catalog: result.catalog, request: stored.request });
     } catch { /* Preserve invalid source history but exclude it from trusted display. */ }

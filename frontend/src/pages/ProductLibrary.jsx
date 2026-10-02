@@ -16,6 +16,8 @@ import { matchesSelectionSearch } from "../lib/selectionSearch";
 import { CaptureQueueView } from "./CaptureQueue";
 import { activeSelectionStatusDefinitions, canonicalProductStatusId, createCustomSelectionStatus, normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSkc } from "../domain/identifiers";
+import { createContinuousCatalogQueue, continuousCatalogPath } from "../domain/continuousCatalogQueue";
+
 
 const money = (value, fractionDigits = 2) => Number(value ?? 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
 const percent = (value) => value == null ? "--" : `${Number(value).toFixed(1)}%`;
@@ -111,7 +113,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const savedView = useMemo(() => readProductLibraryViewState(workspaceId, view), [workspaceId, view]);
   const navigationSnapshotRef = useRef(null);
   const navigate = useCallback((target) => {
-    saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState(), windowScrollY: window.scrollY });
+    saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState(), windowScrollY: window.scrollY, focusId: document.activeElement?.id });
     routeNavigate(target, { state: { productLibraryReturnTo: `/products?view=${view}` } });
   }, [routeNavigate, workspaceId, view]);
   const [, setSearchParams] = useSearchParams();
@@ -152,7 +154,8 @@ function ProductLibraryView({ workspaceId, view }) {
   const catalogState = catalogRead.status !== "ready" ? catalogRead : statusRead;
   const catalogSnapshot = catalogState.status === "ready" ? catalogRead.data : undefined;
   const catalogProductsRaw = catalogSnapshot ?? EMPTY_ROWS;
-  const referenceRead = useSelectionRead(getSelectionReferenceSnapshot);
+  const readCompactReferences = useCallback(() => getSelectionReferenceSnapshot({ compact: true, store }), [store]);
+  const referenceRead = useSelectionRead(readCompactReferences);
   const referenceSnapshot = referenceRead.data;
   const referenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows({ ...referenceSnapshot, store }) : EMPTY_ROWS, [referenceSnapshot, store]);
   const catalogProducts = useMemo(() => {
@@ -258,6 +261,17 @@ function ProductLibraryView({ workspaceId, view }) {
       && (salesLabel === "all" || row.automaticSalesTag?.label === salesLabel);
   }), [negativeOnly, query, referenceRows, referenceSource, salesLabel, store, supplierNumber, catalogFilter]);
   const groupedReferences = useMemo(() => groupSelectionReferenceRows(filteredReferences), [filteredReferences]);
+  useEffect(() => {
+    if (referenceRead.status !== "ready" || !savedView?.focusId) return;
+    const target = document.getElementById(savedView.focusId);
+    (target && !target.disabled ? target : document.querySelector('[aria-label="按建档情况筛选"]'))?.focus({ preventScroll: true });
+  }, [referenceRead.status, savedView]);
+  const startContinuousCatalog = () => {
+    const queue = createContinuousCatalogQueue(workspaceId, groupedReferences);
+    if (!queue.items.length) return;
+    document.getElementById("continuous-catalog-start")?.focus({ preventScroll: true });
+    navigate(continuousCatalogPath(queue, 0));
+  };
 
   const statusLabel = { active: "启用", draft: "草稿", inactive: "停用" };
   const resolveSalesStatus = (value) => selectionStatusById(salesStatusDefinitions, value);
@@ -569,6 +583,7 @@ function ProductLibraryView({ workspaceId, view }) {
               <button className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly((value) => !value)}><AlertCircle size={17} />只看负利润</button>
             </div>
             <Button variant="ghost" onClick={() => { setQuery(""); setStore("all"); setSupplierNumber(""); setCatalogFilter("all"); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); }}>清空筛选</Button>
+            {catalogFilter === "unlinked" ? <Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续建档</Button> : null}
             <span className="reference-filter-count">{referenceRead.status === "ready" ? `匹配 ${filteredReferences.length} / ${referenceRows.length} 条` : "尚未取得参考记录"}</span>
           </Panel>
           <Panel className="product-table-panel">
