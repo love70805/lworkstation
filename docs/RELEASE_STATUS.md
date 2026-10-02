@@ -1,12 +1,12 @@
 # Lworkstation 发布状态
 
-更新时间：2026-10-02
+更新时间：2026-10-03
 
 ## 当前公开稳定Latest：0.3.6
 
 已回读GitHub确认稳定Latest为[v0.3.6](https://github.com/love70805/lworkstation/releases/tag/v0.3.6)，main为`454b74f`；[0.3.6发布记录](RELEASE_0.3.6.md)保存候选、CI、公开四资产及更新通道证据。
 
-0.3.7已形成[本机候选](RELEASE_0.3.7_CANDIDATE.md)，[当前契约与验收](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。Draft PR #135，未合并或发布；导入性能目标、1230测试和候选包内验证通过，但ERP原账号绑定仍缺实现及现场接口证据，不能将当前会话重读表述为原账号已核验。
+0.3.7已形成[本机候选](RELEASE_0.3.7_CANDIDATE.md)，[当前契约与验收](integration/RELEASE_0_3_7_IMPLEMENTATION.md)。2026-10-03用户明确卓麟ERP固定使用当前账号，本版不要求跨账号保护，继续PR #135集成及公开发布。导入性能目标、1230测试和候选包内验证已通过；当前会话重读不表述为原账号已核验。最新阶段见[0.3.7发布记录](RELEASE_0.3.7.md)。
 
 ## 历史公开稳定版：0.3.4
 
