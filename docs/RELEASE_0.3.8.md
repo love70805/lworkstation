@@ -21,4 +21,6 @@
 
 ## 发布状态
 
-候选已通过，待受保护 PR / CI 集成及公开资产回读；本段不表示已经公开发布。通知图标本次按 Windows 通知区域的应用图标处理，应用内通知面板继续使用原 SVG 图标。
+图表/图标候选验收通过；[PR #137](https://github.com/love70805/lworkstation/pull/137) 的前端 CI 通过，桌面 CI 在依赖审计阶段失败，尚未合并、打标签或公开发布。
+
+阻塞项：[GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp)。`electron-builder → @electron/get → got → cacheable-request → http-cache-semantics@4.2.0` 为构建依赖链，安装器内未包含该缓存库。审计提示 >=4.2.1 修复，但 2026-10-03 npm 官方 registry 查询 4.2.1 不存在，latest 仍为 4.2.0；GitHub 上游公告也没有已发布修复版本。没有屏蔽审计、降低门槛或修改业务依赖；失败的升级尝试已回退，候选原件与生产输入不变。正式发布等待可验证修复方案；当前稳定版继续为 0.3.7。通知图标本次按 Windows 通知区域的应用图标处理，应用内通知面板继续使用原 SVG 图标。
