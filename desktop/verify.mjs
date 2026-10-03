@@ -40,9 +40,10 @@ assert.match(read("generate-brand-assets.cjs"), /backgroundColor:\s*"#00000000"/
 const ico = fs.readFileSync(path.join(root, "assets/lworkstation.ico"));
 assert.equal(ico.readUInt16LE(0), 0);
 assert.equal(ico.readUInt16LE(2), 1);
-assert.equal(ico.readUInt16LE(4), 7);
+const expectedIconSizes = [16, 20, 24, 32, 40, 48, 64, 128, 256];
+assert.equal(ico.readUInt16LE(4), expectedIconSizes.length);
 const icoSizes = [];
-for (let index = 0; index < 7; index += 1) {
+for (let index = 0; index < expectedIconSizes.length; index += 1) {
   const entry = 6 + index * 16;
   const size = ico.readUInt8(entry) || 256;
   const height = ico.readUInt8(entry + 1) || 256;
@@ -51,9 +52,11 @@ for (let index = 0; index < 7; index += 1) {
   assert.equal(height, size);
   assert.equal(ico.subarray(offset, offset + 8).toString("hex"), "89504e470d0a1a0a");
   assert.equal(offset + length <= ico.length, true);
+  assert.equal(ico.readUInt32BE(offset + 16), size, 'ICO frame must contain native-size pixels');
+  assert.equal(ico.readUInt32BE(offset + 20), size);
   icoSizes.push(size);
 }
-assert.deepEqual(icoSizes, [16, 24, 32, 48, 64, 128, 256]);
+assert.deepEqual(icoSizes, expectedIconSizes);
 const main = read("main.cjs");
 assert.doesNotMatch(read("shell.html"), /id="fallback"/);
 assert.doesNotMatch(read("shell.css"), /\.fallback/);

@@ -10,7 +10,7 @@ function storeHash(name) {
   return hash >>> 0;
 }
 export function salesStoreColor(name) {
-  const palette = ['#6687b6', '#639c91', '#9584ab', '#b38d6d', '#749aa8', '#b97d89', '#889764', '#a28e68', '#7f89a7', '#a18798'];
+  const palette = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#06b6d4', '#f43f5e', '#6366f1', '#f97316', '#84b51c', '#d946ef'];
   return `var(--sales-store-${storeHash(name)}, ${palette[storeHash(name) % palette.length]})`;
 }
 // Allocate the ten distinguishable palette slots once per analytics scope.
