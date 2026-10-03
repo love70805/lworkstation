@@ -9,7 +9,7 @@
 .sales-stack-chart .sales-chart-bars { gap: 3px; }
 .sales-stack-chart.is-day .sales-chart-bars { max-width: 110px; margin: auto; }
 .sales-stack-segment { position: absolute; left: 10%; width: 80%; box-shadow: inset 0 -1px rgb(255 255 255 / .35); color: white; overflow: hidden; pointer-events: none; }
-.sales-segment-label { display: flex; height: 100%; align-items: center; justify-content: center; padding: 0 4px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.sales-segment-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: max-content; max-width: 100%; padding: 2px 4px; border-radius: 3px; background: var(--surface-bg); color: var(--text); text-align: center; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .sales-stack-segment.is-zero { overflow: visible; }
 .sales-zero-tick { position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: var(--text-muted); }
 .sales-known-zero { position: absolute; left: 0; right: 0; text-align: center; font-size: 11px; transform: translateY(-100%); }
@@ -91,8 +91,9 @@
 }
 
 
-.sales-analytics { --sales-palette-0: #6687b6; --sales-palette-1: #639c91; --sales-palette-2: #9584ab; --sales-palette-3: #b38d6d; --sales-palette-4: #749aa8; --sales-palette-5: #b97d89; --sales-palette-6: #889764; --sales-palette-7: #a28e68; --sales-palette-8: #7f89a7; --sales-palette-9: #a18798; --sales-overview: var(--sales-palette-0); }
-html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #87a5cc; --sales-palette-1: #80b8ab; --sales-palette-2: #b09fc3; --sales-palette-3: #c9a688; --sales-palette-4: #93b6c0; --sales-palette-5: #d09da6; --sales-palette-6: #abb98b; --sales-palette-7: #c4b08c; --sales-palette-8: #9fa9c2; --sales-palette-9: #bba3b1; }
+/* Vivid categorical colors, shared by bars, pie slices and legends. */
+.sales-analytics { --sales-palette-0: #3b82f6; --sales-palette-1: #10b981; --sales-palette-2: #8b5cf6; --sales-palette-3: #f59e0b; --sales-palette-4: #06b6d4; --sales-palette-5: #f43f5e; --sales-palette-6: #6366f1; --sales-palette-7: #f97316; --sales-palette-8: #84b51c; --sales-palette-9: #d946ef; --sales-overview: var(--sales-palette-0); }
+html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sales-palette-1: #34d399; --sales-palette-2: #a78bfa; --sales-palette-3: #fbbf24; --sales-palette-4: #22d3ee; --sales-palette-5: #fb7185; --sales-palette-6: #818cf8; --sales-palette-7: #fb923c; --sales-palette-8: #a3d635; --sales-palette-9: #e879f9; }
 .sales-month-controls, .sales-month-window, .sales-detail-path, .sales-store-selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .sales-month-controls > p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text-muted); }
 .sales-month-controls label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
