@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-checkpoint-query-recovery",
+  "integrationBranch": "codex/erp-checkpoint-open-recovery",
   "requiredCommits": [
+    {
+      "module": "guard-automatic-checkpoint-open",
+      "commit": "a1b736dd34fa90bf7579bb4ba1783b859bc36d41"
+    },
     {
       "module": "erp-explicit-query-restart",
       "commit": "e0ab631"
