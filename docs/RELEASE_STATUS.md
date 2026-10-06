@@ -1,8 +1,12 @@
 # Lworkstation 发布状态
 
-更新时间：2026-10-06
+更新时间：2026-10-07
 
-## 当前公开稳定 Latest：0.3.13
+## 当前公开稳定 Latest：0.4.0
+
+[0.4.0](https://github.com/love70805/lworkstation/releases/tag/v0.4.0) 固定 eb37f7f。头像本地运营方案统一选品、利润、台账和 ERP 目标；全量事实、人工成本与定稿保护保持。1281 测试、构建、desktop verify、隔离 UI 与进程重启、隐藏 smoke、593 文件/546 输入、PR #149 / 主线 CI 通过。四资产匿名完整哈希与生产更新 provider 真实下载 URL 回读通过。ERP 8.0.33；未自动安装或触发真实核算。见 [记录](RELEASE_0.4.0.md)。
+
+## 历史公开稳定版：0.3.13
 
 [0.3.13](https://github.com/love70805/lworkstation/releases/tag/v0.3.13) 固定 9bd33f9，修复正式请求 SKC 对象被串成 [object Object] 后导致 EMPTY_COST_RESULTS。对象契约生产路径、1270 测试、构建、桌面 verify、隐藏 smoke、593 文件/546 输入一致性、PR #146 / 主线 CI、四公开资产完整哈希回读、实际更新通道及 8.0.33 ZIP 通过。未自动安装、未触发真实核算或清空数据；用户已在决策端确认 0.3.13 修复成功。见 [记录](RELEASE_0.3.13.md)。
 
