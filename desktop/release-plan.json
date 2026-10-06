@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-checkpoint-open-recovery",
+  "integrationBranch": "codex/erp-checkpoint-field-order",
   "requiredCommits": [
+    {
+      "module": "checkpoint-query-storage-key-order",
+      "commit": "bcb498fc5721da95d112ee40c7eaa6a44a9084c9"
+    },
+    {
+      "module": "0.3.11-final-main-baseline",
+      "commit": "0a2bc72"
+    },
     {
       "module": "guard-automatic-checkpoint-open",
       "commit": "a1b736dd34fa90bf7579bb4ba1783b859bc36d41"
