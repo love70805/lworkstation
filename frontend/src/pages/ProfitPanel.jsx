@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, CalendarDays, Check, CheckCircle2, ChevronDown, Download, LockKeyhole, Plus, RotateCcw, Warehouse } from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, Download, LockKeyhole, Plus, RotateCcw, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { CostMatchingContent } from "./CostMatching";
 import MonthlyReportManager from "./MonthlyReportManager";
 import { REPORT_FORMULA_VERSION, displayMoney } from "../domain/profitReports";
 import ProfitGroups from "./ProfitGroups";
-import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
+import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
+import ProfitScopeFilters from "../components/ProfitScopeFilters";
 import {
   updateLedgerWarehouseRate,
   reopenLedgerForCostCorrection,
@@ -18,7 +19,7 @@ import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { buildProfitExportRows, formatErpUnitCost, formatManualUnitCost, formatProfitAmount, isProfitSnapshot, savedProfitRows, savedProfitSummary, summarizeProfitRows } from "../lib/profitPrecision";
 import { groupProfitRowsBySkc } from "../lib/profit";
 import { exportWorkbook } from "../lib/spreadsheetExport";
-import { buildProfitHref, buildProfitQuery, filterProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
+import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
 import ManualCostDialog from "./ManualCostDialog";
 import { ledgerNextStep } from "../domain/ledgerWorkflow";
 import { readProfitViewState, saveProfitViewState } from "../lib/profitViewState";
@@ -33,66 +34,6 @@ const ledgerStatusLabels = {
   finalized: "已定稿",
   locked: "已锁定",
 };
-
-function SupplierMultiSelect({ options, selection, onChange }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-  const selected = selection ?? options;
-  const selectedSet = useMemo(() => new Set(selected), [selected]);
-  const allSelected = selection === null || options.every((item) => selectedSet.has(item));
-  const label = allSelected
-    ? "全部供方货号"
-    : selected.length === 0
-      ? "未选择供方货号"
-      : selected.length === 1
-        ? selected[0]
-        : `已选 ${selected.length} 个货号`;
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const closeOnOutside = (event) => {
-      if (!rootRef.current?.contains(event.target)) setOpen(false);
-    };
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", closeOnOutside);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnOutside);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  const toggle = (supplier) => {
-    const next = selectedSet.has(supplier)
-      ? selected.filter((item) => item !== supplier)
-      : [...selected, supplier].toSorted();
-    onChange(next.length === options.length ? null : next);
-  };
-
-  return (
-    <div className="profit-multi-select" ref={rootRef}>
-      <button type="button" className="profit-multi-select-trigger" aria-haspopup="listbox" aria-expanded={open} disabled={!options.length} onClick={() => setOpen((value) => !value)}>
-        <span>{label}</span><ChevronDown size={16} />
-      </button>
-      {open ? (
-        <div className="profit-multi-select-menu" role="listbox" aria-multiselectable="true">
-          <div className="profit-multi-select-head"><strong>供方货号</strong><span><button type="button" onClick={() => onChange(null)}>全选</button><button type="button" onClick={() => onChange([])}>清空</button></span></div>
-          <div className="profit-multi-select-options">
-            {options.map((supplier) => (
-              <label className="profit-multi-select-option" key={supplier}>
-                <input type="checkbox" checked={selectedSet.has(supplier)} onChange={() => toggle(supplier)} />
-                <code>{supplier}</code>
-                {selectedSet.has(supplier) ? <Check size={15} /> : null}
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function prepareProfitTableRows(rows) {
   let previousGroupKey = null;
@@ -138,7 +79,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
     const next = readProfitFilter(searchParams, requestedLedgerId);
     setQuery(next.query);
     setStoreFilter(next.storeFilter);
-    setSupplierSelection(next.supplierSelection);
+    setSupplierSelection((previous) => JSON.stringify(previous) === JSON.stringify(next.supplierSelection) ? previous : next.supplierSelection);
     setMissingOnly(next.missingOnly);
   }, [filterSearchKey, requestedLedgerId]);
 
@@ -176,7 +117,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
   const calculated = calculation.rows;
 
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
-  const suppliers = useMemo(() => [...new Set(calculated.map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated]);
+  const suppliers = useMemo(() => [...new Set(calculated.filter((row) => storeFilter === "all" || row.store === storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated, storeFilter]);
   const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, missingOnly }), [missingOnly, query, storeFilter, supplierSelection]);
   const viewStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, filterState]);
   const detailsStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, 'details']);
@@ -188,7 +129,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
   };
-  const filtered = useMemo(() => filterProfitRows(calculated, filterState), [calculated, filterState]);
+  const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, missingOnly }), [calculated, storeFilter, supplierSelection, missingOnly]);
+  const filtered = useMemo(() => searchProfitRows(scopedRows, query), [scopedRows, query]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
   const filteredSummary = useMemo(() => locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION && filtered.length === calculated.length && snapshot?.ledger?.profitSummary ? savedProfitSummary(snapshot.ledger.profitSummary) : summarizeProfitRows(filtered, costBySku), [costBySku, filtered, calculated.length, locked, snapshot?.ledger?.profitSummary]);
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
@@ -397,11 +339,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
         <div className="profit-purpose-formula mono">{legacySnapshot ? "利润" : "商品利润"} = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元){legacySnapshot ? " − 客退罚款" : ""}</div>
       </Panel></details>
 
-      {!suppliedSnapshot ? <div className="profit-filter-bar">
-        <label htmlFor="profit-store">查看店铺</label>
-        <select id="profit-store" className="select-input" value={storeFilter} onChange={(event) => changeFilter({ storeFilter: event.target.value })}><option value="all">全部店铺</option>{stores.map((store) => <option value={store} key={store}>{store}</option>)}</select>
-        <span>概览随筛选变化；定稿覆盖本月全部店铺。</span>
-      </div> : null}
+      {!suppliedSnapshot ? <ProfitScopeFilters filter={filterState} stores={stores} suppliers={suppliers} onChange={changeFilter} /> : null}
       <div className="profit-summary-strip">
         <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
         <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
@@ -416,12 +354,6 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
         <div className="profit-table-heading">
           <div><h2>月度利润明细</h2><p>每个 SKU 一行，SKC 用分组标识；金额和成本均为人民币 CNY。</p></div>
           <span className="profit-filter-count">当前 {groupedFiltered.length} 个 SKC · {filtered.length} 个 SKU</span>
-        </div>
-        <div className="profit-filter-bar">
-          <SearchInput value={query} onChange={(event) => changeFilter({ query: event.target.value })} placeholder="搜索 SKC、SKU、属性、供方货号或店铺..." />
-          <SupplierMultiSelect options={suppliers} selection={supplierSelection} onChange={(supplierSelection) => changeFilter({ supplierSelection })} />
-          <label className="profit-filter-check"><input type="checkbox" checked={missingOnly} onChange={(event) => changeFilter({ missingOnly: event.target.checked })} />只看缺成本</label>
-          <button className="profit-filter-reset" type="button" onClick={() => changeFilter({ query: "", storeFilter: "all", supplierSelection: null, missingOnly: false })}>重置筛选</button>
         </div>
         <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns} prepareRows={prepareProfitTableRows} />
       </Panel> : null}
@@ -445,9 +377,10 @@ export function ProfitViewsContent({ monthControl = null }) {
   const navigate = useNavigate();
   const snapshot = useLatestSalesImport(params.get("ledger"), undefined, retry);
   const view = readProfitView(params);
-  const filter = readProfitFilter(params, snapshot?.ledger?.id);
+  const filter = useMemo(() => readProfitFilter(params, snapshot?.ledger?.id), [params, snapshot?.ledger?.id]);
   const store = filter.storeFilter;
-  const stores = [...new Set((snapshot?.rows ?? []).map((row) => row.store))];
+  const stores = useMemo(() => [...new Set((snapshot?.rows ?? []).map((row) => row.store))], [snapshot?.rows]);
+  const suppliers = useMemo(() => [...new Set((snapshot?.rows ?? []).filter((row) => store === "all" || row.store === store).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [snapshot?.rows, store]);
   const valid = snapshot?.ledger && (store === "all" || stores.includes(store));
   const change = (nextView, nextStore = store) => {
     const next = buildProfitQuery({ ledgerId: snapshot.ledger.id, ...filter, storeFilter: nextStore, view: nextView });
@@ -456,11 +389,20 @@ export function ProfitViewsContent({ monthControl = null }) {
     setParams(next);
   };
   const openAllMissingCosts = () => setParams(buildProfitQuery({ ledgerId: snapshot.ledger.id, view: 'cost', storeFilter: 'all', missingOnly: true }));
+  const changeScope = (patch) => {
+    const next = { ...filter, ...patch };
+    const nextParams = buildProfitQuery({ ledgerId: snapshot.ledger.id, ...next, view });
+    nextParams.set("store", next.storeFilter || "all");
+    nextParams.set("missing", next.missingOnly ? "1" : "0");
+    setParams(nextParams, { replace: true });
+    saveProfitFilter(snapshot.ledger.id, next);
+  };
   return <>
     {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set('view', 'detail'); setParams(next); }}>查看利润明细</Button></Panel> : snapshot === undefined ? <Panel role="status">正在读取月度账本...</Panel> : snapshot?.error ? <Panel><p role="alert">账本读取失败：{snapshot.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取</Button></Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p>{snapshot?.ledger ? <Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button> : <Button onClick={() => navigate('/ledger')}>选择账本</Button>}</Panel> : <>
       <header className="profit-workspace-header"><div><h1>利润核算</h1><p>{snapshot.ledger.period} · {ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status}</p></div><div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></div></header>
       <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button></nav>
-      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></>}
+      <ProfitScopeFilters filter={filter} suppliers={suppliers} onChange={changeScope} showStore={false} />
+      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></>}
     </>}
   </>;
 }

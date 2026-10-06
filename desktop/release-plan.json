@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.7",
+  "version": "0.3.9",
   "candidateOnly": true,
-  "integrationBranch": "codex/release-0-3-7",
+  "integrationBranch": "codex/release-0-3-8",
   "requiredCommits": [
+    {
+      "module": "0.3.7-final-main-baseline",
+      "commit": "c32f78494f215dba954d56a2066b860e58f34283"
+    },
     {
       "module": "0.3.6-final-main-baseline",
       "commit": "454b74f003bfb4e50ca534bd0d5162a9646d0293"

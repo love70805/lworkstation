@@ -8,6 +8,7 @@ import { listBusinessProjectionGaps } from "./syncBusinessProjection.js";
 import { inspectCloudSeedRelations } from "./cloudSeedImportContract.js";
 import { buildSyncEnvelope } from "./syncEnvelope.js";
 import { normalizeErpVoidLifecycleSequence } from "./syncLifecycleGroup.js";
+import { decodeSalesRowsAuditSnapshot, validateSalesRowsAuditSnapshot } from "./salesRowsAuditSnapshot.js";
 
 export const SYNC_RECOVERY_FORMAT = "shopeers-sync-recovery";
 export const SYNC_RECOVERY_VERSION = 1;
@@ -125,6 +126,11 @@ function normalizedRecovery(payload) {
     generatedAt: payload.generatedAt,
     events: payload.events,
   });
+  for (const event of envelope.events) {
+    if (event.action === "imported" && event.after?.snapshot?.salesRows != null) {
+      validateSalesRowsAuditSnapshot(event.after.snapshot.salesRows);
+    }
+  }
   const gaps = listBusinessProjectionGaps(envelope.events);
   if (gaps.length > 0) {
     throw new Error(`同步恢复包包含缺少完整快照的业务事件：${gaps.map((gap) => gap.eventId).join(", ")}`);
@@ -240,7 +246,7 @@ export function replaySyncRecoveryPayload(payload) {
       case "imported": {
         const batch = cloneRecord(snapshot.importBatch ?? snapshot, ["importBatch", "salesRows", "ledger"]);
         putRecord(state.importBatches, batch, "销售导入批次");
-        const incomingRows = snapshot.salesRows ?? [];
+        const incomingRows = decodeSalesRowsAuditSnapshot(snapshot.salesRows ?? []);
         const groupKeys = new Set(incomingRows.map((row) => String(row.groupKey ?? "")).filter(Boolean));
         state.salesRows = replaceRows(
           state.salesRows,

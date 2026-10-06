@@ -6,6 +6,7 @@ import {
 } from "./syncRecovery";
 import { CLOUD_SEED_FORMAT, CLOUD_SEED_VERSION } from "./cloudSeed";
 import { buildErpVoidTransitionId } from "./syncLifecycleGroup";
+import { encodeSalesRowsAuditSnapshot, SALES_ROWS_AUDIT_MIN_ROWS } from "./salesRowsAuditSnapshot";
 
 function event(eventId, action, objectId, snapshot = null) {
   return {
@@ -67,6 +68,29 @@ function recoveryVoidPair({ legacy = false } = {}) {
 }
 
 describe("sync recovery contract", () => {
+  it("recovers dictionary snapshots with the same facts and original audit payload as legacy arrays", () => {
+    const ledger = { id: "L-1", workspaceId: "workspace-default", period: "2026-08", status: "cost_pending", currency: "CNY" };
+    const rows = Array.from({ length: SALES_ROWS_AUDIT_MIN_ROWS }, (_, index) => ({
+      id: index + 1, workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "I-1", groupKey: "甲店|SKC-1",
+      platformSku: `SKU-${index}`, store: "甲店", orderId: `00012345678901234567890123456789${index}`,
+      quantity: 0.000123456789, quantityExact: "0.000123456789123456789", amount: 12.3456789,
+      amountExact: "12.3456789123456789", raw: { 金额: "12.3456789123456789", 备注: null }, missing: undefined,
+    }));
+    const snapshot = { importBatch: { id: "I-1", workspaceId: ledger.workspaceId, ledgerId: ledger.id }, salesRows: rows, ledger };
+    const plainPayload = buildSyncRecoveryPayload({ workspaceId: ledger.workspaceId, events: [event("1", "imported", "I-1", snapshot)] });
+    const encoded = encodeSalesRowsAuditSnapshot(rows);
+    const encodedPayload = JSON.parse(JSON.stringify(buildSyncRecoveryPayload({ workspaceId: ledger.workspaceId, events: [event("1", "imported", "I-1", { ...snapshot, salesRows: encoded })] })));
+    const plain = replaySyncRecoveryPayload(plainPayload);
+    const compact = replaySyncRecoveryPayload(encodedPayload);
+    expect(compact.tables.salesRows).toEqual(plain.tables.salesRows);
+    expect(compact.tables.importBatches).toEqual(plain.tables.importBatches);
+    expect(compact.tables.ledgers).toEqual(plain.tables.ledgers);
+    expect(compact.tables.auditEvents[0].after.snapshot.salesRows).toEqual(encoded);
+    encodedPayload.events[0].after.snapshot.salesRows.strings[0] += "corrupted";
+    expect(() => validateSyncRecoveryPayload(encodedPayload)).toThrow("完整性校验失败");
+    expect(() => replaySyncRecoveryPayload(encodedPayload)).toThrow("完整性校验失败");
+  });
+
   it("replays an explicitly confirmed full store/month replacement without keeping vanished SKCs", () => {
     const ledger = { id: "L-1", workspaceId: "workspace-default", period: "2026-08", status: "cost_pending", currency: "CNY" };
     const oldRows = [

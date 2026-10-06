@@ -52,16 +52,36 @@ export function saveProfitFilter(ledgerId, filter) {
   if (ledgerId) localStorage.setItem(`${STORAGE_PREFIX}${ledgerId}`, serialized);
 }
 
-export function filterProfitRows(rows = [], filter = DEFAULT_PROFIT_FILTER) {
-  const query = String(filter.query ?? "").toLowerCase();
-  const supplierSet = filter.supplierSelection === null ? null : new Set(filter.supplierSelection ?? []);
+export function filterProfitRowsByScope(rows = [], filter = DEFAULT_PROFIT_FILTER) {
+  const storeFilter = filter.storeFilter ?? "all";
+  const supplierSet = filter.supplierSelection == null ? null : new Set(filter.supplierSelection);
   return rows.filter((row) => {
-    const searchText = `${row.groupSkc} ${row.platformSku} ${row.attribute} ${row.supplierNumber} ${row.store}`.toLowerCase();
-    return searchText.includes(query)
-      && (filter.storeFilter === "all" || row.store === filter.storeFilter)
+    return (storeFilter === "all" || row.store === storeFilter)
       && (!supplierSet || supplierSet.has(row.supplierNumber))
       && (!filter.missingOnly || !row.finalizable);
   });
+}
+
+// Calculated rows are immutable snapshots. Weak keys release the index when a
+// ledger refresh replaces its rows, without retaining old months in memory.
+const profitSearchText = new WeakMap();
+
+export function searchProfitRows(rows = [], value = "") {
+  const query = String(value ?? "").trim().toLowerCase();
+  if (!query) return rows;
+  return rows.filter((row) => {
+    let text = profitSearchText.get(row);
+    if (text === undefined) {
+      text = [row.groupSkc ?? row.platformSkc, row.platformSku, row.attribute, row.supplierNumber, row.store]
+        .map((field) => String(field ?? "").toLowerCase()).join(" ");
+      profitSearchText.set(row, text);
+    }
+    return text.includes(query);
+  });
+}
+
+export function filterProfitRows(rows = [], filter = DEFAULT_PROFIT_FILTER) {
+  return searchProfitRows(filterProfitRowsByScope(rows, filter), filter.query);
 }
 
 export function readProfitView(searchParams) {

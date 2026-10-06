@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesSelectionSearch, normalizeSelectionSearchQuery } from "./selectionSearch";
+import { createSelectionSearchIndex, matchesSelectionSearch, normalizeSelectionSearchQuery } from "./selectionSearch";
 
 describe("selection workspace search", () => {
   it("matches the catalog identity fields used by the selection workspace", () => {
@@ -16,5 +16,19 @@ describe("selection workspace search", () => {
 
     expect(matchesSelectionSearch("detail.1688.com", fields)).toBe(false);
     expect(matchesSelectionSearch("offer/9988", fields)).toBe(false);
+  });
+
+  it("indexes nested identity fields lazily and reuses a row across successive queries", () => {
+    let reads = 0;
+    const index = createSelectionSearchIndex((row) => { reads += 1; return [row.name, row.skus.map(sku => [sku.platformSku, sku.warehouseSku])]; });
+    const row = { name: "夏季", skus: [{ platformSku: "SKU-RED", warehouseSku: "WAREHOUSE-BLUE" }] };
+    expect(index(row, "")).toBe(true);
+    expect(reads).toBe(0);
+    expect(index(row, "sku-red")).toBe(true);
+    expect(index(row, "warehouse-blue")).toBe(true);
+    expect(reads).toBe(1);
+    expect(index({ ...row, name: "冬季" }, "冬季")).toBe(true);
+    expect(reads).toBe(2);
+    expect(matchesSelectionSearch("red,warehouse", [row.skus.map(sku => [sku.platformSku, sku.warehouseSku])])).toBe(false);
   });
 });

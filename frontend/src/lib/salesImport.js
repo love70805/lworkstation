@@ -13,17 +13,17 @@ export const salesFields = [
   { key: "platformSku", label: "平台 SKU", description: "成本匹配和利润计算的全局唯一标识。", required: true, aliases: ["平台sku", "商家sku", "sku", "platformsku", "platform_sku", "seller_sku"] },
   { key: "attribute", label: "属性/规格", description: "与平台 SKU 共同组成利润明细分组。", required: false, aliases: ["属性集", "属性", "规格", "颜色", "attribute", "variant"] },
   { key: "movementType", label: "变动类型", description: "识别盘亏、扣款、罚款和违约记录。", required: false, aliases: ["变动类型", "movementtype", "movement_type", "type"] },
-  { key: "quantity", label: "数量", description: "主数量字段；为 0 时回退到客单发货与平台客单之和。", required: false, aliases: ["数量", "件数", "购买数量", "quantity", "qty", "units", "soldquantity"] },
+  { key: "quantity", label: "数量", description: "主数量字段；为 0 时回退到客单发货与平台客单之和。", required: false, aliases: ["数量", "计数", "件数", "购买数量", "quantity", "qty", "units", "soldquantity"] },
   { key: "unitPrice", label: "单价", description: "标准台账报表的单价；可与数量相乘得到销售原额。", required: false, aliases: ["单价", "unitprice", "unit_price", "price"] },
   { key: "customerShipmentQuantity", label: "客单发货", description: "数量回退字段。", required: false, aliases: ["客单发货", "customershipment", "customer_shipment"] },
   { key: "platformOrderQuantity", label: "平台客单", description: "数量回退字段。", required: false, aliases: ["平台客单", "platformorderquantity", "platform_order_quantity"] },
   { key: "amount", label: "金额", description: "主金额字段；为 0 时回退到客单金额与平台金额之和。", required: false, aliases: ["金额", "实付金额", "单据金额", "amount", "revenue", "totalrevenue", "total_revenue", "salesamount"] },
   { key: "customerAmount", label: "客单金额", description: "金额回退字段。", required: false, aliases: ["客单金额", "customeramount", "customer_amount"] },
   { key: "platformAmount", label: "平台金额", description: "金额回退字段。", required: false, aliases: ["平台金额", "platformamount", "platform_amount"] },
-  { key: "orderId", label: "订单号", description: "可选，用于计算真实去重订单数。", required: false, aliases: ["orderid", "order_id", "transactionid", "transaction_id", "订单号"] },
-  { key: "orderDate", label: "订单日期", description: "可选，用于来源追踪和月份核对。", required: false, aliases: ["orderdate", "order_date", "date", "transactiondate", "交易日期"] },
+  { key: "orderId", label: "订单号", description: "可选，按订单号或业务单号去重计数，不合并销售明细。", required: false, aliases: ["订单号", "orderid", "order_id", "transactionid", "transaction_id", "业务单号"] },
+  { key: "orderDate", label: "订单日期", description: "可选，保留独立订单日期；来源月份和趋势仍使用添加时间。", required: false, aliases: ["订单日期", "orderdate", "order_date", "date", "transactiondate", "交易日期"] },
   { key: "order1688", label: "1688 单号", description: "兼容旧模板的来源单号，不作为 ERP 成本权威证明。", required: false, aliases: ["1688单号", "1688订单号", "order1688"] },
-  { key: "directUnitCost", label: "历史单件成本", description: "兼容旧模板并保留为参考；正式利润仍以 ERP 成本或审批兜底为准。", required: false, aliases: ["单件平均成本", "单件成本", "unitcost", "unit_cost"] },
+  { key: "directUnitCost", label: "历史单件成本", description: "兼容旧模板，仅保留作参考；正式成本以 ERP 或人工更正为准。", required: false, aliases: ["单件平均成本", "单件成本", "unitcost", "unit_cost"] },
   { key: "directPenalty", label: "客退罚款", description: "存在时按旧程序行为覆盖同一 SKU 已累计的扣款。", required: false, aliases: ["客退罚款", "penalty", "deduction", "罚款"] },
 ];
 
@@ -65,7 +65,7 @@ export function normalizeHeader(value) {
 export function suggestMappings(headers) {
   const normalized = headers.map((header) => ({ header, value: normalizeHeader(header) }));
   return Object.fromEntries(salesFields.map((field) => {
-    const match = normalized.find((item) => field.aliases.some((alias) => normalizeHeader(alias) === item.value));
+    const match = field.aliases.map((alias) => normalized.find((item) => normalizeHeader(alias) === item.value)).find(Boolean);
     return [field.key, match?.header ?? ""];
   }));
 }

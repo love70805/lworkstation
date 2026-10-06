@@ -253,6 +253,19 @@
 .batch-import .mapping-row small { display: block; }
 .batch-import .mapping-select { width: 100%; }
 .batch-import .mapping-row code { overflow-wrap: anywhere; white-space: normal; }
+.batch-import .batch-mapping-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.batch-import .batch-mapping-heading p, .batch-import .batch-mapping-extra > p { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.batch-import .batch-mapping .mapping-head { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; min-height: 40px; padding: 8px 0; font-size: 12px; }
+.batch-import .batch-mapping .mapping-row strong { font-size: 14px; }
+.batch-import .batch-mapping .mapping-row small { line-height: 1.6; }
+.batch-import .batch-mapping-calculated { padding: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-bg); font-size: 13px; overflow-wrap: anywhere; }
+.batch-import .batch-mapping-result { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.batch-import .batch-mapping-state { color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.batch-import .batch-mapping-state.mapped { color: var(--success); }
+.batch-import .batch-mapping-state.calculated, .batch-import .batch-mapping-state.fallback { color: var(--primary); }
+.batch-import .batch-mapping-state.required { color: var(--danger); }
+.batch-import .mapping-required .mapping-select { border-color: var(--danger); }
+.batch-import .batch-mapping-extra { border-top: 1px solid var(--border); }
 .batch-import .batch-filters > div { display: flex; flex-wrap: wrap; gap: 8px; max-height: 220px; overflow: auto; padding: 8px 0; }
 .batch-import .batch-filters label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-bg); overflow-wrap: anywhere; cursor: pointer; }
 .batch-import input[type="checkbox"] { width: 20px; height: 20px; flex-shrink: 0; accent-color: var(--primary); }
@@ -287,6 +300,7 @@
   .batch-import .import-dropzone { margin: 16px; padding: 16px; gap: 12px; }
   .batch-import .import-dropzone > div { flex: auto; }
   .batch-import .mapping-row { grid-template-columns: 1fr; padding: 12px 0; }
+  .batch-import .batch-mapping-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .batch-import .wizard-card-footer, .batch-import .batch-submit { flex-direction: column; align-items: stretch; padding: 16px; gap: 12px; }
   .batch-import .batch-submit { padding: 16px 0 0; }
   .batch-import .batch-submit .button { width: 100%; }

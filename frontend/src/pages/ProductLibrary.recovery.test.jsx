@@ -124,9 +124,35 @@ it("searches all reference identities by supplier number and store, then clears 
   await change("按供方货号筛选", "货号14");
   await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
   expect(container.querySelector(".selection-reference-table").textContent).toContain("SEARCH-SKC14");
+  await change("搜索选品参考", "SEARCH-SKU14");
+  await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
+  await change("搜索选品参考", "SEARCH-SKU13");
+  await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
+  await change("搜索选品参考", "SEARCH-SKU14");
   await change("参考来源店铺", "甲店");
   await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
   await act(async () => button("清空筛选").click());
   await waitFor(() => container.textContent.includes("匹配 15 / 15 条"));
   expect(await db.salesRows.count()).toBe(15);
+});
+
+it("searches catalog SKUs inside the selected store and supplier range without losing other stores", async () => {
+  await saveProductCatalogRecord({ draft });
+  await saveProductCatalogRecord({ draft: { ...draft, name: "乙店商品", platformSkc: "SECOND-SKC", store: "乙店", variants: [{ ...draft.variants[0], platformSku: "SECOND-SKU" }] } });
+  const workspaceId = "workspace-default";
+  await db.ledgers.add({ id: "CATALOG-SEARCH-L", workspaceId, period: "2026-08" });
+  await db.importBatches.bulkAdd(["甲店", "乙店"].map((store, index) => ({ id: `CATALOG-SEARCH-B${index}`, workspaceId, ledgerId: "CATALOG-SEARCH-L", store, status: "completed" })));
+  await db.salesRows.bulkAdd(["RECOVERY", "SECOND"].map((prefix, index) => ({ id: `CATALOG-SEARCH-R${index}`, workspaceId, ledgerId: "CATALOG-SEARCH-L", batchId: `CATALOG-SEARCH-B${index}`, store: index === 0 ? "甲店" : "乙店", platformSku: `${prefix}-SKU`, platformSkc: `${prefix}-SKC`, supplierNumber: `货号${index + 1}`, attribute: "红", quantity: 1, amount: 30, sourceRow: index + 2 })));
+  await mount(); await waitFor(() => container.textContent.includes("匹配 2 / 2 条"));
+  await change("按店铺筛选", "乙店");
+  await change("按供方货号筛选", "货号2");
+  await change("搜索商品档案", "SECOND-SKU");
+  await waitFor(() => container.textContent.includes("匹配 1 / 2 条"));
+  expect(container.querySelector(".product-table").textContent).toContain("乙店商品");
+  await change("搜索商品档案", "RECOVERY-SKU");
+  await waitFor(() => container.textContent.includes("匹配 0 / 2 条"));
+  await act(async () => button("清空筛选").click());
+  await waitFor(() => container.textContent.includes("匹配 2 / 2 条"));
+  expect(await db.salesRows.count()).toBe(2);
+  expect(await db.products.count()).toBe(2);
 });

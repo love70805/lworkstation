@@ -9,6 +9,7 @@ import {
 } from "../../domain/identifiers";
 import { summarizeLedgerRows } from "../../domain/ledgerImport";
 import { prepareSalesImportItems } from "../../domain/batchSalesImport";
+import { createSalesRowsAuditSnapshotBuilder, encodeSalesRowsAuditSnapshot } from "../../domain/salesRowsAuditSnapshot";
 import { readImportStageChunk } from "../../lib/salesImportStage";
 import { computeSalesImportPlan, prepareSalesImportSnapshot } from "../../lib/salesImportPlanner";
 import { normalizeSalesSourceCoverage, salesSourceDateEvidence } from "../../domain/selectionSalesLabels";
@@ -262,7 +263,7 @@ export async function saveSalesImports({
         importMode: item.importMode ?? "append", removedGroupCount: result.removedGroupCount ?? 0,
       };
       await db.importBatches.add(savedBatch);
-      const persistedRows = [];
+      const auditSnapshot = createSalesRowsAuditSnapshotBuilder();
       const chunkCount = item.rowSource?.chunkCount ?? Math.ceil(item.rows.length / 2000);
       for (let index = 0; index < chunkCount; index += 1) {
         checkCancelled();
@@ -273,7 +274,7 @@ export async function saveSalesImports({
         const storedRows = chunk.map((row) => ({ ...row, workspaceId, ledgerId: plan.ledgerId, batchId, importedAt: createdAt }));
         const keys = await db.salesRows.bulkAdd(storedRows, { allKeys: true });
         storedRows.forEach((row, index) => { row.id = keys[index]; });
-        persistedRows.push(...storedRows);
+        auditSnapshot.addRows(storedRows);
         completed += chunk.length;
         onProgress?.({ completed, total });
       }
@@ -282,7 +283,7 @@ export async function saveSalesImports({
         workspaceId, objectType: "sales_import_batch", objectId: batchId, action: "imported", actorId: auditActor, createdAt,
         after: { ledgerId: plan.ledgerId, fileName: item.fileName, validRowCount: (item.rowSource?.rowCount ?? item.rows.length),
           replacedGroupCount: result.replacedGroupCount, addedGroupCount: result.addedGroupCount,
-          snapshot: { ...savedBatch, importBatch: savedBatch, salesRows: persistedRows, ledger: savedLedger } },
+          snapshot: { ...savedBatch, importBatch: savedBatch, salesRows: auditSnapshot.finish(), ledger: savedLedger } },
       });
       result.status = "imported";
       result.batchId = batchId;
@@ -412,7 +413,7 @@ export async function saveSalesImport({
           snapshot: {
             ...savedBatch,
             importBatch: savedBatch,
-            salesRows: persistedRows,
+            salesRows: encodeSalesRowsAuditSnapshot(persistedRows),
             ledger: savedLedger,
           },
         },

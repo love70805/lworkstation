@@ -1,2 +1,5 @@
 allowBuilds:
   esbuild: true
+overrides:
+  # CVE-2026-93749: validate indexed source-map offsets in PostCSS's existing range.
+  'postcss@8.5.25>source-map-js': 1.2.2

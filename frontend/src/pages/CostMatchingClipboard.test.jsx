@@ -2,18 +2,20 @@
 import 'fake-indexeddb/auto';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { Simulate } from 'react-dom/test-utils';
+import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CostMatchingContent } from './CostMatching';
 import { costDraftKey } from '../lib/costMatchingDraft';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn() }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
 vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : query.toString().includes('listErpCostRequests') ? mocks.requests : initial }));
 vi.mock('../components/UI', async importOriginal => ({ ...await importOriginal(), useToast: () => ({ notify: mocks.notify }) }));
-vi.mock('../lib/autoErpRequest', async importOriginal => ({ ...await importOriginal(), ensureAutoErpRequest: mocks.register }));
+vi.mock('../lib/autoErpRequest', async importOriginal => ({ ...await importOriginal(), ensureAutoErpRequest: mocks.register, cancelAutoErpRequest: mocks.cancel }));
+vi.mock('../data/repositories/erpCatalogRepository', () => ({ registerCostCatalogCompanion: vi.fn(async () => {}) }));
 vi.mock('../data/database', async importOriginal => {
   const original = await importOriginal();
   return { ...original, savePublishedErpCostBatch: mocks.publish, processErpCostInboxAdoption: mocks.retry,
@@ -24,13 +26,17 @@ vi.mock('../data/database', async importOriginal => {
 
 let container, root, writeText;
 const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
-async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all' } = {}) {
+function ScopeControls() {
+  const [params, setParams] = useSearchParams();
+  return <input aria-label="测试查询范围" value={params.get('q') ?? ''} onChange={event => { const next = new URLSearchParams(params); next.set('q', event.target.value); setParams(next); }} />;
+}
+async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [] } = {}) {
   mocks.snapshot = {
     ledger: { id: ledgerId, workspaceId: 'W', period: '2026-08', status },
-    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: `SKU-${index}`, quantity: 1, amount: 10 })),
+    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: skuIds[index] ?? `SKU-${index}`, quantity: 1, amount: 10 })),
     costs, approvals: [],
   };
-  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><ScopeControls /><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
 }
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,7 +44,8 @@ beforeEach(() => {
   mocks.inboxRecords = [];
   mocks.requests = [];
   mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
-  mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.register.mockReset().mockResolvedValue(null);
+  mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.cancel.mockReset().mockResolvedValue(null);
+  mocks.register.mockReset().mockImplementation(async input => ({ id: `REG-${input.ledger.id}`, workspaceId: input.ledger.workspaceId, ledgerId: input.ledger.id, ledgerPeriod: input.ledger.period, platformSkcs: input.platformSkcs, expectedSkus: input.expectedSkus }));
   writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText } });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -56,15 +63,65 @@ it.each([
   expect(writeText).toHaveBeenCalledExactlyOnceWith(expected);
   expect(mocks.notify).toHaveBeenCalledWith(`已复制 ${count} 个平台 SKC。`);
 });
-it('keeps ERP request scope at the full ledger while store filtering changes only the display and copied SKCs', async () => {
+it('registers the selected store using exactly the displayed SKCs and expected SKUs while preserving the full ledger', async () => {
   await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'FULL-SCOPE', stores: ['甲', '乙'], contextStore: '甲' });
   expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({
-    platformSkcs: ['SKC-A', 'SKC-B'],
-    expectedSkus: expect.arrayContaining([{ platformSku: 'SKU-0', platformSkc: 'SKC-A' }, { platformSku: 'SKU-1', platformSkc: 'SKC-B' }]),
+    platformSkcs: ['SKC-A'],
+    expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'SKC-A' }],
   }), expect.any(Object));
   expect(container.textContent).toContain('当前查看平台 SKU1');
   await act(async () => button('复制 1 个平台 SKC').click());
   expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-A');
+  expect(mocks.snapshot.rows).toHaveLength(2);
+});
+
+it('cancels the old scope immediately and registers only the final query after rapid typing', async () => {
+  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'TYPING-SCOPE' });
+  mocks.register.mockClear(); mocks.cancel.mockClear();
+  const changeQuery = async value => act(async () => Simulate.change(container.querySelector('[aria-label="测试查询范围"]'), { target: { value } }));
+  await changeQuery('SKC-A');
+  expect(mocks.cancel).toHaveBeenCalledOnce();
+  expect(mocks.register).not.toHaveBeenCalled();
+  expect(button('复制 1 个平台 SKC').disabled).toBe(true);
+  await changeQuery('SKC');
+  await changeQuery('SKC-B');
+  expect(mocks.register).not.toHaveBeenCalled();
+  expect(mocks.cancel).toHaveBeenCalledOnce();
+  await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
+  expect(mocks.register).toHaveBeenCalledOnce();
+  expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({ platformSkcs: ['SKC-B'], expectedSkus: [{ platformSku: 'SKU-1', platformSkc: 'SKC-B' }] }), expect.any(Object));
+  expect(button('复制 1 个平台 SKC').disabled).toBe(false);
+  await act(async () => button('复制 1 个平台 SKC').click());
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-B');
+  await changeQuery('empty-range');
+  expect(mocks.cancel).toHaveBeenCalledTimes(2);
+  await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
+  expect(mocks.register).toHaveBeenCalledOnce();
+  expect(button('当前范围无明细').disabled).toBe(true);
+  expect(mocks.snapshot.rows).toHaveLength(2);
+});
+
+it('does not guess a SKU parent by filtering away conflicting ledger rows', async () => {
+  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'CONFLICT-SCOPE', stores: ['甲', '乙'], contextStore: '甲', skuIds: ['SAME-SKU', 'SAME-SKU'] });
+  expect(container.textContent).toContain('当前 SKU 在完整台账中对应多个平台 SKC');
+  expect(mocks.register).not.toHaveBeenCalled();
+  expect(button('复制 1 个平台 SKC').disabled).toBe(true);
+  expect(mocks.snapshot.rows).toHaveLength(2);
+});
+
+it('ignores a late registration acknowledgement from the previous search range', async () => {
+  let finishPrevious;
+  mocks.register.mockImplementationOnce(input => new Promise(resolve => { finishPrevious = () => resolve({ id: 'STALE-REQUEST', ...input.ledger }); }));
+  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'ACK-SCOPE' });
+  const previousIsCurrent = mocks.register.mock.calls[0][1].isCurrent;
+  expect(button('复制 2 个平台 SKC').disabled).toBe(true);
+  await act(async () => Simulate.change(container.querySelector('[aria-label="测试查询范围"]'), { target: { value: 'SKC-B' } }));
+  expect(previousIsCurrent()).toBe(false);
+  await act(async () => finishPrevious());
+  expect(button('复制 1 个平台 SKC').disabled).toBe(true);
+  await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
+  expect(button('复制 1 个平台 SKC').disabled).toBe(false);
+  expect(mocks.register.mock.calls.at(-1)[0].expectedSkus).toEqual([{ platformSku: 'SKU-1', platformSkc: 'SKC-B' }]);
 });
 it.each(['finalized', 'locked'])('allows read-only copy in %s while cost writes and registration remain blocked', async status => {
   await render(['SKC-1'], status);

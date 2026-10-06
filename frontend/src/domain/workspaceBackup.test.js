@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { validateWorkspaceBackupPayload, WORKSPACE_BACKUP_FORMAT } from "./workspaceBackup";
+import { encodeSalesRowsAuditSnapshot, SALES_ROWS_AUDIT_MIN_ROWS } from "./salesRowsAuditSnapshot";
 
 describe("workspace backup validation", () => {
+  it("validates compact imported audit snapshots while accepting legacy summary events", () => {
+    const salesRows = encodeSalesRowsAuditSnapshot(Array.from({ length: SALES_ROWS_AUDIT_MIN_ROWS }, (_, index) => ({ id: index, raw: { 金额: "0.000001" } })));
+    const payload = { format: WORKSPACE_BACKUP_FORMAT, formatVersion: 1, tables: { auditEvents: [
+      { action: "imported", after: { snapshot: { salesRows } } },
+      { action: "imported", after: { validRowCount: 5 } },
+    ] } };
+    expect(validateWorkspaceBackupPayload(payload, { tableNames: ["auditEvents"] }).recordCount).toBe(2);
+    salesRows.strings[0] = "corrupted";
+    expect(() => validateWorkspaceBackupPayload(payload, { tableNames: ["auditEvents"] })).toThrow("完整性校验失败");
+  });
+
   it("校验格式、表结构和记录数", () => {
     const result = validateWorkspaceBackupPayload({
       format: WORKSPACE_BACKUP_FORMAT,

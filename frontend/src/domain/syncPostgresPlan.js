@@ -7,6 +7,7 @@ import {
 } from "./syncEnvelope.js";
 import { projectSyncEvent } from "./syncBusinessProjection.js";
 import { SyncContractError } from "./syncServerContract.js";
+import { decodeSalesRowsAuditSnapshot } from "./salesRowsAuditSnapshot.js";
 import { syncEventContentHash } from "./syncEventHash.js";
 import { normalizeErpVoidLifecycleSequence } from "./syncLifecycleGroup.js";
 
@@ -266,7 +267,7 @@ function salesImportPlan(snapshot, workspaceId, eventId, entityId) {
   const batch = assertWorkspace(snapshot.importBatch ?? snapshot, workspaceId, "销售导入批次");
   assertEntityId(batch, entityId, "销售导入批次");
   const ledger = assertWorkspace(snapshot.ledger, workspaceId, "月度账本");
-  const rows = (snapshot.salesRows ?? []).map((row) => assertWorkspace(row, workspaceId, "销售明细"));
+  const rows = decodeSalesRowsAuditSnapshot(snapshot.salesRows ?? []).map((row) => assertWorkspace(row, workspaceId, "销售明细"));
   const batchColumns = ["id", "workspace_id", "ledger_id", "file_name", "file_hash", "mapping", "status", "store", "period", "source_row_count", "valid_row_count", "error_count", "skipped_row_count", "replaced_group_count", "added_group_count", "created_at"];
   const operations = [ledgerUpsert(ledger, workspaceId, eventId), insertOrUpdate({
     table: TABLES.importBatch,

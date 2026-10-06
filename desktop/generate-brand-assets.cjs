@@ -1,10 +1,11 @@
-const { app, BrowserWindow, nativeImage } = require("electron");
+const { app, BrowserWindow } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const MASTER_SHA256 = "07A556FA1A57EC9E147138CFA97443214FF63AB0E67CB4B3AD10EB4A5708DA53";
-const ICON_SIZES = [16, 24, 32, 48, 64, 128, 256];
+// Native 16px notification icons at 100%, 125%, 150%, 200%, 250% and 300% DPI.
+const ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const masterPath = path.resolve(__dirname, "../frontend/public/assets/brand/l7-app-icon-master.svg");
 const assetsDirectory = path.join(__dirname, "assets");
 const pngPath = path.join(assetsDirectory, "lworkstation.png");
@@ -67,38 +68,39 @@ async function generate() {
   const document = `<!doctype html><style>html,body{width:100%;height:100%;margin:0;overflow:hidden;background:transparent}svg{display:block;width:100%;height:100%}</style>${source}`;
   await renderer.loadURL(`data:text/html;base64,${Buffer.from(document).toString("base64")}`);
   // Rasterize the verified SVG directly; hidden-window Viz captures can be blank.
-  let captured;
+  let rasters;
   try {
-    captured = await renderer.webContents.executeJavaScript(`(async () => {
-      const image = new Image();
-      image.src = ${JSON.stringify(`data:image/svg+xml;base64,${sourceBuffer.toString("base64")}`)};
-      await image.decode();
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = 1024;
-      const context = canvas.getContext("2d");
-      context.drawImage(image, 0, 0, 1024, 1024);
-      const pixels = context.getImageData(0, 0, 1024, 1024).data;
-      let colored = 0;
-      for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i + 3] > 0 && Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) - Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) > 20) colored++;
+    rasters = await renderer.webContents.executeJavaScript(`(async () => {
+      const source = ${JSON.stringify(source)};
+      const results = [];
+      for (const size of ${JSON.stringify([...ICON_SIZES, 1024])}) {
+        // Give SVG its final viewport before rasterizing, not a resized 1024px bitmap.
+        const svg = source.replace('width="1024" height="1024"', 'width="' + size + '" height="' + size + '"');
+        const image = new Image();
+        image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = size;
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0, size, size);
+        const pixels = context.getImageData(0, 0, size, size).data;
+        let colored = 0, white = 0;
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i + 3] > 0 && Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) - Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) > 20) colored++;
+          if (pixels[i + 3] === 255 && Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) > 240) white++;
+        }
+        if (colored < size * size * .4 || white < size * size * .02) throw new Error('Invalid L7 raster at ' + size + 'px');
+        results.push({ size, data: canvas.toDataURL("image/png") });
       }
-      if (colored < 1000) throw new Error("L7 icon raster is blank or lacks its brand colors");
-      return canvas.toDataURL("image/png");
+      return results;
     })()`);
   } finally {
     renderer.destroy();
   }
-  const image = nativeImage.createFromDataURL(captured);
-  if (image.isEmpty() || image.getSize().width !== 1024 || image.getSize().height !== 1024) {
-    throw new Error(`Electron rendered an invalid L7 master size: ${JSON.stringify(image.getSize())}`);
-  }
-
   fs.mkdirSync(assetsDirectory, { recursive: true });
-  const png = image.resize({ width: 1024, height: 1024, quality: "best" }).toPNG();
-  const icoImages = ICON_SIZES.map((size) => ({
-    size,
-    png: image.resize({ width: size, height: size, quality: "best" }).toPNG(),
-  }));
+  const images = rasters.map(({ size, data }) => ({ size, png: Buffer.from(data.split(',')[1], 'base64') }));
+  const png = images.find(image => image.size === 1024).png;
+  const icoImages = images.filter(image => ICON_SIZES.includes(image.size));
   const ico = createIco(icoImages);
   fs.writeFileSync(pngPath, png);
   fs.writeFileSync(icoPath, ico);

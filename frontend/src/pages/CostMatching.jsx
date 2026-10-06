@@ -14,6 +14,7 @@ import { AlertCircle, CheckCircle2, ClipboardPaste, Copy, Download, FileJson, Fi
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
 import ErpAssistantSetup from "../components/ErpAssistantSetup";
+import ProfitScopeFilters from "../components/ProfitScopeFilters";
 import { isDesktopRuntime } from "../lib/desktopRuntime";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, SearchInput, useToast } from "../components/UI";
 import { getErpCostInbox, getLatestErpCostRequest, listErpCostInbox, listErpCostRequests, markErpCostInboxStatus, processErpCostInboxAdoption, rejectErpCostInboxBatches, saveErpCostRequest, savePublishedErpCostBatch, switchLoadedErpCostInbox, voidPublishedErpCostBatch } from "../data/database";
@@ -22,13 +23,13 @@ import { ERP_COST_ANOMALY_LABELS, upsertCostResolution } from "../domain/erpCost
 import { adoptedCostEvidence } from "../domain/erpPurchaseEvidence";
 import { collectErpPlatformSkcs } from "../domain/erpQueryScope";
 import { buildErpInboxQueue, ERP_INBOX_MATCH_REASONS } from "../domain/erpInboxMatching";
-import { canonicalPlatformSku } from "../domain/identifiers";
+import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { useLedgerIdentity } from "../hooks/useLedgerIdentity";
 import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
 import { groupImportedSales } from "../lib/profit";
 import { registerErpBridgeRequest } from "../lib/erpInboxTransport";
-import { buildProfitHref, filterProfitRows, readProfitFilter } from "../lib/profitFilter";
+import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, saveProfitFilter } from "../lib/profitFilter";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, groupAuxiliaryCostRows, groupCostMatchesBySkc, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "../lib/costMatching";
 import { clearCostDraft, invalidateLegacyCostDrafts, readRestorableCostDraft, writeCostDraft } from "../lib/costMatchingDraft";
@@ -43,7 +44,7 @@ export function CostMatchingContent({ validatedContext, onPublished }) {
   const snapshot = useLatestSalesImport(validatedContext?.ledgerId);
   if (snapshot === undefined) return <Panel>正在验证成本核对范围...</Panel>;
   if (!validatedContext?.ledgerId || snapshot?.ledger?.id !== validatedContext.ledgerId || snapshot?.ledger?.workspaceId !== validatedContext.workspaceId || (validatedContext.store !== "all" && !snapshot.rows.some((row) => row.store === validatedContext.store))) return <Panel><p role="alert">账本或店铺不属于当前工作区，请重新选择。</p></Panel>;
-  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}/${validatedContext.store}`} validatedContext={validatedContext} onPublished={onPublished} />;
+  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} />;
 }
 
 export default function CostMatching() {
@@ -226,6 +227,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const draftReadyLedgerRef = useRef(null);
   const [draftReadyLedger, setDraftReadyLedger] = useState(null);
   const previousRegistrationRef = useRef(null);
+  const registrationStartedRef = useRef(false);
+  const currentRegistrationScopeRef = useRef(null);
   const unloadedInboxIdsRef = useRef(new Set());
   const inboxLoadRef = useRef(null);
   const ledgerIdentityRef = useLedgerIdentity(snapshot?.ledger?.id);
@@ -309,46 +312,83 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       const decision = resolveFormalCostDecision({ ...scope, erpCost: formalCostsBySku.get(row.canonicalPlatformSku), manualOverride: selectManualOverride(snapshot?.approvals, scope) });
       return { ...row, finalizable: decision.eligibleForExactProfit };
     }), [formalCostsBySku, salesLines, snapshot?.ledger, snapshot?.approvals]);
-  const filteredSalesLines = useMemo(() => filterProfitRows(formalSalesLines, profitFilter), [formalSalesLines, profitFilter]);
+  const supplierSelectionKey = JSON.stringify(profitFilter.supplierSelection);
+  const scopedSalesLines = useMemo(() => filterProfitRowsByScope(formalSalesLines, profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly]);
+  const filteredSalesLines = useMemo(() => searchProfitRows(scopedSalesLines, profitFilter.query), [scopedSalesLines, profitFilter.query]);
+  const conflictingLedgerSkus = useMemo(() => {
+    const skcsBySku = new Map(), conflicts = new Set();
+    for (const row of formalSalesLines) {
+      if (!row.platformSkc) continue;
+      const sku = canonicalPlatformSku(row.platformSku), skc = canonicalPlatformSkc(row.platformSkc);
+      if (skcsBySku.has(sku) && skcsBySku.get(sku) !== skc) conflicts.add(sku);
+      else skcsBySku.set(sku, skc);
+    }
+    return conflicts;
+  }, [formalSalesLines]);
+  const scopeHasIdentityConflict = filteredSalesLines.some((row) => conflictingLedgerSkus.has(row.canonicalPlatformSku));
+  const stores = useMemo(() => [...new Set(formalSalesLines.map((row) => row.store).filter(Boolean))].toSorted(), [formalSalesLines]);
+  const suppliers = useMemo(() => [...new Set(formalSalesLines.filter((row) => profitFilter.storeFilter === "all" || row.store === profitFilter.storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [formalSalesLines, profitFilter.storeFilter]);
+  const changeScope = (patch) => {
+    const next = { ...profitFilter, ...patch };
+    const nextParams = buildProfitQuery({ ledgerId: snapshot?.ledger?.id ?? ledgerId, ...next, view: searchParams.get("view") });
+    nextParams.set("store", next.storeFilter || "all");
+    nextParams.set("missing", next.missingOnly ? "1" : "0");
+    setSearchParams(nextParams, { replace: true });
+    saveProfitFilter(snapshot?.ledger?.id ?? ledgerId, next);
+  };
   const expectedSkus = useMemo(() => {
     const unique = new Map();
-    formalSalesLines.forEach((row) => {
+    filteredSalesLines.forEach((row) => {
       const key = canonicalPlatformSku(row.platformSku);
       if (!unique.has(key)) unique.set(key, { platformSku: row.platformSku, platformSkc: row.platformSkc });
     });
     return [...unique.values()];
-  }, [formalSalesLines]);
-  const erpQueryScope = useMemo(() => collectErpPlatformSkcs(formalSalesLines), [formalSalesLines]);
-  const { platformSkcs } = erpQueryScope;
-  const displayQueryScope = useMemo(() => collectErpPlatformSkcs(filteredSalesLines), [filteredSalesLines]);
-  const { platformSkcs: displayPlatformSkcs, missingCount: missingPlatformSkcCount } = displayQueryScope;
+  }, [filteredSalesLines]);
+  const erpQueryScope = useMemo(() => collectErpPlatformSkcs(filteredSalesLines), [filteredSalesLines]);
+  const { platformSkcs, missingCount: missingPlatformSkcCount } = erpQueryScope;
+  const displayPlatformSkcs = platformSkcs;
   const displaySkuSet = useMemo(() => new Set(filteredSalesLines.map(row => row.canonicalPlatformSku)), [filteredSalesLines]);
   const registrationScope = erpRequestScopeKey({ ledger: snapshot?.ledger, platformSkcs, expectedSkus });
+  currentRegistrationScopeRef.current = locked || scopeHasIdentityConflict ? null : registrationScope;
+  const registrationReady = !scopeHasIdentityConflict && registrationState.status === "registered" && registrationState.scope === registrationScope;
   useEffect(() => {
-    if (locked || !snapshot?.ledger || !platformSkcs.length) return;
+    if (locked || scopeHasIdentityConflict || !snapshot?.ledger || !platformSkcs.length) return;
     const timer = window.setInterval(() => setRegistrationRetry((value) => value + 1), 60_000);
     return () => window.clearInterval(timer);
-  }, [registrationScope, locked]);
+  }, [registrationScope, locked, scopeHasIdentityConflict]);
   useEffect(() => {
     const previous = previousRegistrationRef.current;
-    previousRegistrationRef.current = snapshot?.ledger ?? null;
-    if (previous && (previous.id !== snapshot?.ledger?.id || locked || !platformSkcs.length)) {
-      void cancelAutoErpRequest(previous, { latest: getLatestErpCostRequest, register: registerErpBridgeRequest }).catch((error) => setRegistrationState({ status: "failed", message: `旧回传关联取消失败：${error.message}` }));
+    const cancelledLedger = previous && (previous.scope !== registrationScope || locked || scopeHasIdentityConflict || !platformSkcs.length)
+      ? previous.ledger
+      : snapshot?.ledger && (locked || scopeHasIdentityConflict || !platformSkcs.length) ? snapshot.ledger : null;
+    if (cancelledLedger) {
+      previousRegistrationRef.current = null;
+      void cancelAutoErpRequest(cancelledLedger, { latest: getLatestErpCostRequest, register: registerErpBridgeRequest }).catch((error) => setRegistrationState({ status: "failed", message: `旧回传关联取消失败：${error.message}` }));
     }
-    if (!snapshot?.ledger || locked || !platformSkcs.length) return;
+    if (!snapshot?.ledger || locked || scopeHasIdentityConflict || !platformSkcs.length) {
+      if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(null); setCostRequest(null); }
+      setRegistrationState({ status: "idle", message: "" });
+      return;
+    }
     let cancelled = false;
-    setRegistrationState({ status: "registering", message: "正在准备 ERP 回传关联" });
-    void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs, expectedSkus }, {
-      latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest,
-      isCurrent: () => !cancelled,
-    }).then((request) => {
-      if (!request || cancelled) return;
-      if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(request.id); setCostRequest(request); }
-      setRegistrationState({ status: "registered", message: "回传关联已登记，可在已选范围内分批查询" });
-      void registerCostCatalogCompanion(request).catch(() => { /* Cost registration remains usable; explicit catalog supplement can retry. */ });
-    }).catch((error) => { if (!cancelled) setRegistrationState({ status: "failed", message: `登记失败：${error.message}` }); });
-    return () => { cancelled = true; };
-  }, [registrationScope, registrationRetry, locked]);
+    setRegistrationState({ status: "registering", scope: registrationScope, message: "正在准备当前范围的 ERP 回传关联" });
+    const registerScope = () => {
+      registrationStartedRef.current = true;
+      previousRegistrationRef.current = { ledger: snapshot.ledger, scope: registrationScope };
+      void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs, expectedSkus }, {
+        latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest,
+        isCurrent: () => !cancelled && currentRegistrationScopeRef.current === registrationScope,
+      }).then((request) => {
+        if (!request || cancelled || currentRegistrationScopeRef.current !== registrationScope) return;
+        if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(request.id); setCostRequest(request); }
+        setRegistrationState({ status: "registered", scope: registrationScope, message: "回传关联已登记，可在已选范围内分批查询" });
+        void registerCostCatalogCompanion(request).catch(() => { /* Cost registration remains usable; explicit catalog supplement can retry. */ });
+      }).catch((error) => { if (!cancelled) setRegistrationState({ status: "failed", scope: registrationScope, message: `登记失败：${error.message}` }); });
+    };
+    const timer = registrationStartedRef.current ? window.setTimeout(registerScope, 300) : null;
+    if (timer === null) registerScope();
+    return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
+  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict]);
   const inboxQueue = useMemo(() => buildErpInboxQueue({
     inboxes: inboxRecords,
     requests: requestRecords,
@@ -614,7 +654,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   };
 
   const copySkcs = async () => {
-    if (!snapshot?.ledger || displayPlatformSkcs.length === 0) return;
+    if (!snapshot?.ledger || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)) return;
     setCopyingSkcs(true);
     try {
       await writeClipboardText(displayPlatformSkcs.join("\n"));
@@ -907,7 +947,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       {!locked && platformSkcs.length > 0 && registrationState.message ? <p className="cost-registration-status" role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
       {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>本机已收到新批次；正常项已自动处理，剩余项和当前草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></Panel> : null}
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
-      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
+      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
+      {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} onChange={changeScope} /> : null}
+      {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会自动确定父级关系，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 
       <div className="cost-flow-guide" aria-label="成本核对状态" role="status">
         <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : adoptionNotice?.title ?? (hasNewBatch ? "手动批次待核对" : allCostsReady ? "本月成本已齐" : "等待 ERP 回传或人工更正")}</strong><span>{adoptionNotice?.details ?? (hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。")}</span></div>
@@ -941,7 +983,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
           {hasNewBatch && publicationReconciliation?.unmatchedCostRows.length ? <div className="cost-audit-note"><AlertCircle size={17} />本批次有 {publicationReconciliation.unmatchedCostRows.length} 行成本不属于已登记的平台 SKU 范围，保留证据但不写入正式成本。</div> : null}
           {auxiliaryGroups.length ? <details className="cost-auxiliary-audit"><summary><Info size={17} />同查询 SKC 下、本账本未使用的额外变体 <strong>{reconciliation.summary.auxiliaryCount}</strong> 行</summary><div className="cost-auxiliary-list">{auxiliaryGroups.map((group) => <section key={group.id}><header><strong className="mono">{group.platformSkc}</strong><span>仓库 SKU <code>{group.warehouseSku}</code></span></header><p>{group.variants.map((variant) => variant.platformSku).join("、")}</p><small>采购记录 {group.purchaseRecordCount} 条 · 排除记录 {group.excludedRecordCount} 条 · 仅供预览与审计，不影响本账本成本，也不会写入正式利润。</small></section>)}</div></details> : null}
           {(sourceText.trim() || locked || !persistedCostRows.length) ? <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "正在自动核验本次回传，请稍后查看结果。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? (['pending', 'loaded'].includes(currentInbox?.status) ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>{reviewAdoptionFailure ? "重试自动采用" : "重试已处理异常"}</Button> : null) : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div> : null}
-          {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按完整账本范围核对，页面筛选不改变采用范围；人工有效值始终优先，异常证据保留。</p> : null}
+          {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按原登记范围核对；查看筛选不改已收到批次的采用范围。人工有效值始终优先，异常证据保留。</p> : null}
         </Panel>
       </div>
       {inboxQueueDialog}

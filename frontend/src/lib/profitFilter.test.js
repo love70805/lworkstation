@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCostMatchingHref, buildProfitHref, filterProfitRows, readProfitFilter, saveProfitFilter } from "./profitFilter";
+import { buildCostMatchingHref, buildProfitHref, filterProfitRows, filterProfitRowsByScope, searchProfitRows, readProfitFilter, saveProfitFilter } from "./profitFilter";
 
 describe("profit filter context", () => {
   it("round-trips selected suppliers through profit and ERP routes", () => {
@@ -41,5 +41,18 @@ describe("profit filter context", () => {
     expect(readProfitFilter(new URLSearchParams(), "")).toEqual(expected);
     expect(readProfitFilter(new URLSearchParams(), "L-9")).toEqual(expected);
     delete globalThis.localStorage;
+  });
+
+  it("narrows the ledger before constructing search text and reuses it for repeated queries", () => {
+    let reads = 0;
+    const selected = { store: "甲店", supplierNumber: "货号1", platformSku: "SKU-A", platformSkc: "SKC-A", get attribute() { reads += 1; return "红色"; } };
+    const excluded = { store: "乙店", supplierNumber: "货号2", get attribute() { throw Error("outside selected store"); } };
+    const filter = { storeFilter: "甲店", supplierSelection: ["货号1"], missingOnly: false };
+    const scoped = filterProfitRowsByScope([selected, excluded], filter);
+    expect(searchProfitRows(scoped, " skc-a ")).toEqual([selected]);
+    expect(searchProfitRows(scoped, "sku-a")).toEqual([selected]);
+    expect(reads).toBe(1);
+    expect(filterProfitRows([selected, excluded], { ...filter, query: "货号1" })).toEqual([selected]);
+    expect(searchProfitRows(scoped, "")).toBe(scoped);
   });
 });

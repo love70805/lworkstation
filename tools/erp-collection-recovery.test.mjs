@@ -22,7 +22,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.28' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.29' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -31,15 +31,32 @@ function background() {
   vm.runInContext(backgroundSource, context);
   return context.__SHOPEERS_ERP_BACKGROUND_TEST_API__;
 }
-const input = async () => ({ requestSnapshot: (await api.previewContext({ querySkcs: [request.platformSkcs[0]], queryCapturedAt: '2026-09-01T00:00:00.000Z' }, sender)).requestSnapshot, action: 'save', requestId: request.requestId, filters: { sku: 'SKC-A', storeId: 'STORE-A', queryRange: '1', token: 'NEVER-PERSIST', password: 'NEVER-PERSIST', endpoint: 'https://invalid.example' }, queryCapturedAt: '2026-09-01T00:00:00.000Z', completedTargets: ['SKC-A', 'OTHER-SKC'], account: { cookie: 'NEVER-PERSIST' } });
+// Names verified from the current official ERP form/searchArr and submit/sort
+// handlers on 2026-10-06. Synthetic values only; include empty default fields,
+// which used to block every normal form submit before its first purchase read.
+const currentQueryFilters = {
+  sku: 'SKC-A', limit: '50', storeId: 'STORE-A', queryRange: '1',
+  createTimePeriod: '2026-08-01 - 2026-08-31', orderNo: '', supplierName: '',
+  organizationName: '', createdBy: '', warehouseId: '0', paymentType: '0',
+  paymentStatus: '0', purchaseStatus: '', exceptionSheetStatus: '2',
+  tradeName: 'SYNTHETIC PRODUCT', inTransitTime: '3', exceptionHandlingStatus: '',
+  emergencySign: '', purchasingPersonnel: '', accountName1688: '',
+  storeAssociatedAccountName1688: '', suggestedPayment: '', orderType: '',
+  buildType: '', mineableType: '', adjacentToTheSameSupplier: '0', sort: '0',
+};
+const capturedQueryUrl = 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?' + new URLSearchParams({ ...currentQueryFilters, page: '1' });
+const input = async () => ({ requestSnapshot: (await api.previewContext({ querySkcs: [request.platformSkcs[0]], queryCapturedAt: '2026-09-01T00:00:00.000Z' }, sender)).requestSnapshot, action: 'save', requestId: request.requestId, filters: { ...currentQueryFilters, token: 'NEVER-PERSIST', password: 'NEVER-PERSIST', endpoint: 'https://invalid.example' }, queryCapturedAt: '2026-09-01T00:00:00.000Z', completedTargets: ['SKC-A', 'OTHER-SKC'], account: { cookie: 'NEVER-PERSIST' } });
 let api = background();
 const saved = await api.collectionCheckpoint((await input()), sender);
 assert.equal(saved.ok, true);
 assert.deepEqual([...saved.checkpoint.completedTargets], ['SKC-A']);
 assert.equal(saved.checkpoint.accountState, 'unverified');
 assert.ok(saved.checkpoint.resultDeliveryId.startsWith('ERP-RESULT-'));
+assert.deepEqual(JSON.parse(JSON.stringify(saved.checkpoint.filters)), Object.fromEntries(Object.entries(currentQueryFilters).sort(([a], [b]) => a.localeCompare(b))));
 assert.doesNotMatch(JSON.stringify(storage[checkpointKey]), /NEVER-PERSIST|cookie|token|password|endpoint/i);
 await assert.rejects(api.collectionCheckpoint({ ...(await input()), filters: { sku: 'SKC-A', unknownScope: 'cannot-silently-drop' } }, sender), /尚未验证的条件/);
+await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, tradeName: 'CHANGED' } }, sender), /查询条件已变化/);
+await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, sort: '1' } }, sender), /查询条件已变化/);
 
 // Recreate the actual background VM: no JS memory survives service worker restart.
 api = background();
@@ -117,6 +134,11 @@ async function page({ cancel = false, mappingIncomplete = false } = {}) {
   window.fetch = async raw => {
     const url = new URL(raw), name = url.pathname.split('/').at(-1), sku = url.searchParams.get('sku');
     reads.push({ name, sku });
+    if (name === 'purchase-order-page') {
+      assert.equal(url.searchParams.get('storeId'), 'STORE-A', 'selected store remains bounded');
+      assert.equal(url.searchParams.get('queryRange'), '0', 'official cost reads the full target history');
+      for (const key of ['createTimePeriod', 'tradeName', 'exceptionSheetStatus', 'inTransitTime', 'mineableType', 'buildType', 'sort']) assert.equal(url.searchParams.has(key), false, key + ' cannot silently restrict complete target history');
+    }
     if (cancel && name === 'purchase-order-page' && sku === 'SKC-B') {
       window.document.getElementById('erpa-cancel').click();
       return new Promise(() => {});
@@ -129,7 +151,7 @@ async function page({ cancel = false, mappingIncomplete = false } = {}) {
 }
 const waitFor = async predicate => { const until = Date.now() + 5000; while (!predicate()) { if (Date.now() > until) throw Error('Recovery wait timed out'); await new Promise(resolve => setTimeout(resolve, 5)); } };
 const first = await page({ cancel: true });
-first.window.dispatchEvent(new first.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-A' } }));
+first.window.dispatchEvent(new first.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl } }));
 first.window.document.getElementById('erpa-cost-trigger').click();
 await waitFor(() => first.reads.some(item => item.sku === 'SKC-B'));
 assert.equal(first.deliveries.length, 0);
@@ -157,7 +179,7 @@ for (const lifecycle of ['refresh', 'reopen', 'browser-restart']) {
 }
 storage[checkpointKey] = [];
 const partial = await page({ mappingIncomplete: true });
-partial.window.dispatchEvent(new partial.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-A' } }));
+partial.window.dispatchEvent(new partial.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl } }));
 partial.window.document.getElementById('erpa-cost-trigger').click();
 await waitFor(() => partial.deliveries.length === 1 && partial.window.document.getElementById('erpa-task-status').textContent.includes('证据未齐'));
 assert.equal(storage[checkpointKey][0].state, 'pending', 'partial ACK must preserve the task for continuation');
