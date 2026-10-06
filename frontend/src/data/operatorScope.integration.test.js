@@ -47,6 +47,7 @@ it('isolates cached trend scopes while retaining refunds and original monthly fa
 
 it('does not replace a missing finalized snapshot with zero or current costs', async () => {
   await db.profitLines.clear();
+  expect(await projectOperatorLedgers([ledger], { mode: 'mine', pairs: [] })).toEqual([]);
   await expect(projectOperatorLedgers([ledger], scope)).rejects.toThrow('历史定稿快照缺失');
   expect((await db.ledgers.get(ledger.id)).profitSummary.profit).toBe(999);
 });

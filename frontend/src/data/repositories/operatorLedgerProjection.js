@@ -12,9 +12,9 @@ export async function projectOperatorLedgers(ledgers, scope) {
   for (const ledger of ledgers) {
     const snapshot = await getLedgerSnapshot(ledger.id);
     if (!snapshot || snapshot.ledger.workspaceId !== ledger.workspaceId) continue;
-    if (isProfitSnapshot(snapshot.ledger) && (!snapshot.profitLines?.length || !snapshot.ledger.profitSummary)) throw new Error('历史定稿快照缺失，请恢复完整备份后查看负责范围。');
     const source = filterOperatorRows(snapshot.rows, scope);
     if (!source.length) continue;
+    if (isProfitSnapshot(snapshot.ledger) && (!snapshot.profitLines?.length || !snapshot.ledger.profitSummary)) throw new Error('历史定稿快照缺失，请恢复完整备份后查看负责范围。');
     const calculated = isProfitSnapshot(ledger) ? savedProfitRows(snapshot.profitLines)
       : presentReportProducts(await readCachedReportProducts({ snapshot, warehouseRate: ledger.warehouseRate ?? 0.7 }), snapshot);
     const visible = filterOperatorRows(calculated, scope, snapshot.rows);

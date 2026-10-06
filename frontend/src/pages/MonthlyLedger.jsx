@@ -44,11 +44,12 @@ export default function MonthlyLedger() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const [refresh, setRefresh] = useState(0);
-  const result = useLiveQuery(async () => {
+  const loaded = useLiveQuery(async () => {
     try { return { scope: operator.scope, items: await projectOperatorLedgers(await withCurrentLedgerResults(await listLedgerSummaries()), operator.scope) }; }
-    catch (error) { return { error: error.message }; }
+    catch (error) { return { scope: operator.scope, error: error.message }; }
   }, [refresh, operator.scope], null);
-  const items = result?.scope === operator.scope ? result.items ?? [] : [];
+  const result = loaded?.scope === operator.scope ? loaded : null;
+  const items = result?.items ?? [];
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -125,13 +126,13 @@ export default function MonthlyLedger() {
 
       {result && !result.error ? <div className="ledger-stat-grid">
         <Panel className="ledger-stat"><CalendarDays size={18} /><span>已建立月份</span><strong>{items.length}</strong></Panel>
-        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年已保存利润</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{baseMonths ? `含 ${baseMonths} 个未扣款或历史定稿月份` : '采用各月当前财务报告'}</small></Panel>
+        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年{operator.restricted ? "当前商品利润" : "已保存利润"}</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{operator.restricted ? '负责商品小计，不包含整月代发及独立扣款' : baseMonths ? `含 ${baseMonths} 个未扣款或历史定稿月份` : '采用各月当前财务报告'}</small></Panel>
         <Panel className="ledger-stat"><BarChart3 size={18} /><span>{currentYear} 年导入销量</span><strong>{yearQuantity.toLocaleString("zh-CN")}</strong></Panel>
         <Panel className="ledger-stat pending"><CalendarDays size={18} /><span>当前待处理</span><strong>{pending ? formatLedgerPeriod(pending.period) : "无"}</strong><small>{pending ? ledgerStateLabels[pending.status] : "所有账本均已处理"}</small></Panel>
       </div> : null}
 
       {!result ? <Panel><p role="status">正在读取月度账本与报告结果…</p></Panel> : result.error ? <Panel><p role="alert">账本读取失败：{result.error}</p><Button onClick={() => setRefresh(value => value + 1)}>重试</Button></Panel> : items.length === 0 ? (
-        <Panel><EmptyState icon={FileSpreadsheet} title="还没有月度账本" description="导入第一个月度销售台账后，系统会保存来源批次并进入成本核对。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
+        <Panel><EmptyState icon={FileSpreadsheet} title={operator.restricted ? "当前负责范围暂无账本" : "还没有月度账本"} description={operator.restricted ? "请在头像菜单调整负责商品或切回全部商品查看完整账本。" : "导入第一个月度销售台账后，系统会保存来源批次并进入成本核对。"} action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
       ) : filteredItems.length === 0 ? (
         <Panel><EmptyState icon={FileSpreadsheet} title="没有匹配的月度账本" description="可按月份，例如“2026-08”，或账本状态搜索。" /></Panel>
       ) : (
@@ -151,7 +152,7 @@ export default function MonthlyLedger() {
                 <div className="ledger-metrics">
                   <span>销售金额 <strong className="mono">{money(ledger.summary?.revenue ?? 0)}</strong></span>
                   <span>总销量 <strong className="mono">{(ledger.summary?.quantity ?? 0).toLocaleString("zh-CN")}</strong></span>
-                  <span>月度利润 <strong className="mono">{current.profit != null ? money(current.profit) : "待核算"}</strong></span>
+                  <span>{operator.restricted ? "商品利润" : "月度利润"} <strong className="mono">{current.profit != null ? money(current.profit) : "待核算"}</strong></span>
                   <small>{current.label}{current.state === 'deduction_pending' ? ' · 当前金额为未扣款基础' : ''}</small>
                   {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`成本确认进度 ${progress}%`} /> : null}
                 </div>
