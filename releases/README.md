@@ -1,3 +1,7 @@
+## 0.3.12 检查点字段顺序修复候选（2026-10-06）
+
+原件 releases/candidates/0.3.12/，证据 archive/release-0.3.12/。实际 Chromium 扩展存储复现旧错误与修复后成功，1270 测试、生产构建、desktop verify、隐藏 smoke、580 安装文件/533 生产输入一致性通过。PR #144 CI 与集成、公开回读待完成；不自动安装。SHA256：7F3FB1F6F605E64AED49A21458910DD53E0D97FE2DBE36FA236241D0436E3DBA。见 [记录](../docs/RELEASE_0.3.12.md)。
+
 ## 0.3.11 自动核算入口补修已公开（2026-10-06）
 
 原件 releases/candidates/0.3.11/，证据 archive/release-0.3.11/。扩展定向回归、桌面 verify、构建、隐藏 smoke 和安装包逐字节一致性、PR #142必需CI、四公开资产匿名完整回读及稳定更新通道通过；v0.3.11固定952ce6c，主线push CI未触发但合并树与CI候选树一致。未本机安装。SHA256：9B52761BA5C77EF75B7F3574519052E6C1BA69424CA59532F9DFD0E966A831A5。见 [记录](../docs/RELEASE_0.3.11.md)。
