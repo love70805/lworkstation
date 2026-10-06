@@ -17,12 +17,19 @@ sender.tab = { url: sender.url };
 const fresh = () => ({ requestId: 'ERP-REQ-RECOVERY', workspaceId: 'isolated-recovery', ledgerId: 'LEDGER-A', ledgerPeriod: '2026-08', registeredAt: '2026-08-01T00:00:00.000Z', status: 'registered', platformSkcs: ['SKC-A', 'SKC-B'], expectedSkus: [{ platformSkc: 'SKC-A', platformSku: 'SKU-A' }] });
 const storage = { shopeersErpInboxBaseUrl: 'http://127.0.0.1:5397', shopeersErpInboxCapability: 'isolated-synthetic-capability-at-least-32-characters', shopeersErpWorkspaceId: 'isolated-recovery' };
 let request = fresh();
+// Chromium's extension storage serializes dictionaries in code-point key order,
+// unlike structuredClone. Include nested query dictionaries in the round trip.
+function storageRoundTrip(value) {
+  if (Array.isArray(value)) return value.map(storageRoundTrip);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, storageRoundTrip(value[key])]));
+  return value;
+}
 function background() {
   const runtimeListeners = [];
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
-    async set(values) { Object.assign(storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.31' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+    async set(values) { Object.assign(storage, storageRoundTrip(structuredClone(values))); },
+  } }, runtime: { getManifest: () => ({ version: '8.0.32' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -54,6 +61,13 @@ assert.equal(saved.checkpoint.accountState, 'unverified');
 assert.ok(saved.checkpoint.resultDeliveryId.startsWith('ERP-RESULT-'));
 assert.deepEqual(JSON.parse(JSON.stringify(saved.checkpoint.filters)), Object.fromEntries(Object.entries(currentQueryFilters).sort(([a], [b]) => a.localeCompare(b))));
 assert.doesNotMatch(JSON.stringify(storage[checkpointKey]), /NEVER-PERSIST|cookie|token|password|endpoint/i);
+assert.notEqual(JSON.stringify(saved.checkpoint.filters), JSON.stringify(storage[checkpointKey][0].filters), 'the real storage round trip must reorder createdBy/createTimePeriod');
+const continuedSave = await api.collectionCheckpoint({ ...(await input()), resultDeliveryId: saved.checkpoint.resultDeliveryId }, sender);
+assert.equal(continuedSave.checkpoint.resultDeliveryId, saved.checkpoint.resultDeliveryId, 'identical query survives storage ordering during progress save');
+const sameQueryRestore = await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender);
+assert.equal(sameQueryRestore.checkpoint.resultDeliveryId, saved.checkpoint.resultDeliveryId, 'identical live query restores the persisted attempt');
+await assert.rejects(api.collectionCheckpoint({ ...(await input()), resultDeliveryId: saved.checkpoint.resultDeliveryId, filters: { ...currentQueryFilters, createdBy: 'CHANGED' } }, sender), /查询条件已变化/);
+await assert.rejects(api.collectionCheckpoint({ ...(await input()), resultDeliveryId: saved.checkpoint.resultDeliveryId, filters: { ...currentQueryFilters, createTimePeriod: '' } }, sender), /查询条件已变化/);
 await assert.rejects(api.collectionCheckpoint({ ...(await input()), filters: { sku: 'SKC-A', unknownScope: 'cannot-silently-drop' } }, sender), /尚未验证的条件/);
 await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, tradeName: 'CHANGED' } }, sender), /查询条件已变化/);
 await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, sort: '1' } }, sender), /查询条件已变化/);
@@ -269,4 +283,7 @@ request = fresh(); storage[checkpointKey] = []; api = background();
 const old30 = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
 storage[checkpointKey][0].extensionVersion = '8.0.30';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.30 checkpoint retained under 8.0.31');
+console.log('8.0.30 checkpoint retained under 8.0.32');
+storage[checkpointKey][0].extensionVersion = '8.0.31';
+assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
+console.log('8.0.31 checkpoint retained under 8.0.32 with current query validation');
