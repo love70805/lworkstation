@@ -1,3 +1,5 @@
+> 历史阶段记录：保留事实和设计依据，不按旧授权、审批、任务拆分或阶段状态执行。现行要求见 [AGENTS.md](../../AGENTS.md)，当前状态见 [任务看板](../CODEX_TASK_BOARD.md) 与 [发布状态](../RELEASE_STATUS.md)。
+
 # ERP 查询检查点恢复修复（2026-10-06）
 
 基线：933ca99288cbb2a97e7201deed709df49ee38fd7；分支 codex/erp-checkpoint-query-recovery。
