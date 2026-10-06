@@ -1,5 +1,7 @@
 # 0.3.11 成本预览自动入口检查点修复
 
+> 2026-10-06：本版本 GitHub Release 及附件已按用户授权撤回，标签和提交历史保留。以下为当时交付记录；旧发布附件链接已失效。元数据、正文及资产哈希见 [清理归档](integration/ERP_RELEASE_CLEANUP_2026_10.md)。
+
 用户在已安装 0.3.10 后反馈点击核算仍出现 ERP_CHECKPOINT_QUERY_CHANGED。只读核对安装和 runtime 扩展均为 8.0.30 且源码一致，不能归因于旧包。
 
 确认代码缺口：openPanel 自动核算未经过重新核算的新尝试入口；默认 list 隐藏 completed 检查点，异步刷新返回前也可能认为无任务。生产 content/bridge/background 隔离回放在旧已完成任务与改变查询时复现同一错误。合成 queryRange 差异不冒充现场字段；现场最新查询仅在页面内存，未取得其具体变化。
