@@ -120,13 +120,13 @@ assert.ok(Buffer.byteLength(JSON.stringify(storage[checkpointKey])) <= 1024 * 10
 // Closing both window + background and retaining only chrome.storage.local models
 // refresh, tab close/reopen and browser restart without touching any user profile.
 storage[checkpointKey] = []; request = fresh();
-async function page({ cancel = false, mappingIncomplete = false } = {}) {
+async function page({ cancel = false, mappingIncomplete = false, checkpointListDelay = 0 } = {}) {
   api = background();
   const window = new Window({ url: sender.url });
   const reads = [], deliveries = [];
   window.chrome = { runtime: { sendMessage(message, done) {
     const type = message.type;
-    if (type === 'shopeers.erp.collectionCheckpoint') { api.collectionCheckpoint(message.payload, sender).then(done, error => done({ ok: false, message: error.message })); return; }
+    if (type === 'shopeers.erp.collectionCheckpoint') { new Promise(resolve => setTimeout(resolve, message.payload.action === 'list' ? checkpointListDelay : 0)).then(() => api.collectionCheckpoint(message.payload, sender)).then(done, error => done({ ok: false, message: error.message })); return; }
     if (type === 'shopeers.erp.previewContext') { api.previewContext(message.payload, sender).then(done, error => done({ ok: false, message: error.message })); return; }
     if (type === 'shopeers.erp.submitCostResult') { deliveries.push(structuredClone(message.payload)); api.submitCostResult(message.payload, sender).then(done, error => done({ ok: false, message: error.message })); return; }
     done(type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true });
@@ -234,3 +234,33 @@ storage[checkpointKey][0].extensionVersion = '8.0.29';
 api = background();
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, compatible.resultDeliveryId);
 console.log('8.0.29 to 8.0.30 compatible checkpoint retention passed');
+
+// Reopen after a completed checkpoint: the normal list hides completed tasks,
+// but opening the panel must never auto-write a changed query into that task.
+request = fresh(); storage[checkpointKey] = []; api = background();
+const oldOpen = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
+await api.collectionCheckpoint({ ...(await input()), resultDeliveryId: oldOpen.resultDeliveryId, state: 'completed' }, sender);
+const openCompleted = await page({ checkpointListDelay: 100 });
+openCompleted.window.dispatchEvent(new openCompleted.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl.replace('queryRange=1', 'queryRange=0') } }));
+openCompleted.window.document.getElementById('erpa-cost-trigger').click();
+await new Promise(resolve => setTimeout(resolve, 250));
+assert.doesNotMatch(openCompleted.window.document.getElementById('erpa-error-message').textContent, /ERP_CHECKPOINT_QUERY_CHANGED/, 'opening preview must offer explicit restart, not write completed checkpoint');
+assert.equal(openCompleted.reads.length, 0);
+assert.equal(storage[checkpointKey][0].resultDeliveryId, oldOpen.resultDeliveryId);
+await openCompleted.window.happyDOM.close();
+
+request = fresh(); storage[checkpointKey] = []; api = background();
+const raceTask = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
+await assert.rejects(api.collectionCheckpoint({ ...(await input()), requireFresh: true }, sender), /ERP_CHECKPOINT_EXISTS/);
+const pendingOpen = await page({ checkpointListDelay: 100 });
+pendingOpen.window.dispatchEvent(new pendingOpen.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl.replace('queryRange=1', 'queryRange=0') } }));
+pendingOpen.window.document.getElementById('erpa-cost-trigger').click();
+await waitFor(() => pendingOpen.window.document.getElementById('erpa-task-status').textContent.includes('原任务未完成'));
+assert.equal(pendingOpen.reads.length, 0);
+assert.equal(storage[checkpointKey][0].resultDeliveryId, raceTask.resultDeliveryId);
+pendingOpen.window.confirm = () => true;
+pendingOpen.window.document.getElementById('erpa-recalculate').click();
+await waitFor(() => pendingOpen.deliveries.length === 1 && storage[checkpointKey][0].state === 'completed');
+assert.notEqual(pendingOpen.deliveries[0].resultDeliveryId, raceTask.resultDeliveryId);
+await pendingOpen.window.happyDOM.close();
+console.log('Completed/pending reopen with delayed task list, explicit recalculation and fresh-write race protection passed');

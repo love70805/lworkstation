@@ -83,6 +83,7 @@
     }
     const restart = input.action === 'restart';
     if (input.action !== 'save' && !restart) throw loopbackError('ERP_CHECKPOINT_ACTION_INVALID', '未知检查点操作。', 400);
+    if (!restart && input.requireFresh === true && old) throw loopbackError('ERP_CHECKPOINT_EXISTS', '已有采集任务，请继续原任务或点击重新核算开始新尝试。', 409);
     if (typeof input.requestSnapshot !== 'string' || input.requestSnapshot !== binding) throw loopbackError('ERP_COLLECTION_CONTEXT_CHANGED', '采集开始时的请求快照已变化，请回工作台重新发起采集。', 409);
     if (restart && ((input.previousDeliveryId || null) !== (old?.resultDeliveryId || null) || input.resultDeliveryId || input.state === 'completed')) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '原任务已变化，请刷新后重新采集。', 409);
     if (input.resultDeliveryId && (!old || old.resultDeliveryId !== input.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '采集检查点已失效或被替换，旧采集不能继续回传。', 409);
