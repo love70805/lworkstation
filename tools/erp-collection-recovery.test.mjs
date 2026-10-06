@@ -29,7 +29,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, storageRoundTrip(structuredClone(values))); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.32' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.33' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -149,7 +149,7 @@ async function page({ cancel = false, mappingIncomplete = false, checkpointListD
     const url = new URL(raw), name = url.pathname.split('/').at(-1), sku = url.searchParams.get('sku');
     reads.push({ name, sku });
     if (name === 'purchase-order-page') {
-      assert.ok(['SKC-A', 'SKC-B'].includes(sku), 'ERP query uses the SKC value, never an object serialization');
+      assert.ok(['SKC-A', 'SKC-B'].includes(sku?.toUpperCase()), 'ERP query uses the SKC value, never an object serialization');
       assert.equal(url.searchParams.get('storeId'), 'STORE-A', 'selected store remains bounded');
       assert.equal(url.searchParams.get('queryRange'), '0', 'official cost reads the full target history');
       for (const key of ['createTimePeriod', 'tradeName', 'exceptionSheetStatus', 'inTransitTime', 'mineableType', 'buildType', 'sort']) assert.equal(url.searchParams.has(key), false, key + ' cannot silently restrict complete target history');
@@ -158,7 +158,7 @@ async function page({ cancel = false, mappingIncomplete = false, checkpointListD
       window.document.getElementById('erpa-cancel').click();
       return new Promise(() => {});
     }
-    const data = name === 'purchase-order-page' ? [{ purchaseOrderId: sku + '-ORDER' }] : name === 'purchase-order-details' ? [{ purchaseOrderDetailId: url.searchParams.get('purchaseOrderId'), itemId: url.searchParams.get('purchaseOrderId').startsWith('SKC-A') ? 'WH-A' : 'WH-B', creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: 4 }] : [{ associatedProductId: url.searchParams.get('productId'), barcodeSkuid: url.searchParams.get('productId') === 'WH-A' ? 'SKU-A' : 'SKU-B', barcodeSkcid: url.searchParams.get('productId') === 'WH-A' ? 'SKC-A' : 'SKC-B' }];
+    const data = name === 'purchase-order-page' ? [{ purchaseOrderId: sku + '-ORDER' }] : name === 'purchase-order-details' ? [{ purchaseOrderDetailId: url.searchParams.get('purchaseOrderId'), itemId: url.searchParams.get('purchaseOrderId').toUpperCase().startsWith('SKC-A') ? 'WH-A' : 'WH-B', creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: 4 }] : [{ associatedProductId: url.searchParams.get('productId'), barcodeSkuid: url.searchParams.get('productId') === 'WH-A' ? 'SKU-A' : 'SKU-B', barcodeSkcid: url.searchParams.get('productId') === 'WH-A' ? 'SKC-A' : 'SKC-B' }];
     return { ok: true, status: 200, json: async () => ({ code: 0, count: mappingIncomplete && name === 'product-info-sku' ? data.length + 1 : data.length, data }) };
   };
   for (const file of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) window.eval(await readFile(path.join(src, file), 'utf8'));
@@ -284,21 +284,24 @@ request = fresh(); storage[checkpointKey] = []; api = background();
 const old30 = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
 storage[checkpointKey][0].extensionVersion = '8.0.30';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.30 checkpoint retained under 8.0.32');
+console.log('8.0.30 checkpoint retained under 8.0.33');
 storage[checkpointKey][0].extensionVersion = '8.0.31';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.31 checkpoint retained under 8.0.32 with current query validation');
+console.log('8.0.31 checkpoint retained under 8.0.33 with current query validation');
 
 // The production inbox contract returns identity objects, unlike legacy strings.
-request = { ...fresh(), platformSkcs: ['SKC-A', 'SKC-B'].map(platformSkc => ({ platformSkc, canonicalPlatformSkc: platformSkc })) };
+request = { ...fresh(), platformSkcs: ['skc-a', 'SKC-B'].map(platformSkc => ({ platformSkc, canonicalPlatformSkc: platformSkc.toUpperCase() })) };
 storage[checkpointKey] = []; storage[pendingKey] = [];
 const objectTargets = await page();
 objectTargets.window.dispatchEvent(new objectTargets.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl } }));
 objectTargets.window.document.getElementById('erpa-cost-trigger').click();
 await waitFor(() => objectTargets.deliveries.length === 1 && storage[checkpointKey][0].state === 'completed');
-assert.deepEqual(objectTargets.reads.filter(item => item.name === 'purchase-order-page').map(item => item.sku), ['SKC-A', 'SKC-B']);
-assert.deepEqual([...objectTargets.deliveries[0].meta.querySkcs], ['SKC-A', 'SKC-B']);
+assert.deepEqual(objectTargets.reads.filter(item => item.name === 'purchase-order-page').map(item => item.sku), ['skc-a', 'SKC-B'], 'original spelling is preserved separately from canonical binding');
+assert.deepEqual([...objectTargets.deliveries[0].meta.querySkcs], ['skc-a', 'SKC-B']);
 assert.equal(objectTargets.deliveries[0].meta.orderCount, 2);
 assert.equal(objectTargets.deliveries[0].results.length, 2);
 await objectTargets.window.happyDOM.close();
 console.log('Production identity-object request targets: exact ERP query values and nonempty cost delivery passed');
+storage[checkpointKey][0].extensionVersion = '8.0.32';
+assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
+console.log('8.0.32 object-target checkpoint remains recoverable under 8.0.33');
