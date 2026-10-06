@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-checkpoint-field-order",
+  "integrationBranch": "codex/erp-object-query-targets",
   "requiredCommits": [
+    {
+      "module": "erp-request-object-query-targets",
+      "commit": "cedf3743eef4ae2b2a42944168b5c6b671766179"
+    },
+    {
+      "module": "0.3.12-final-main-baseline",
+      "commit": "78a8c22f9bf4951276ffccbb2ff55f4b47118777"
+    },
     {
       "module": "checkpoint-query-storage-key-order",
       "commit": "bcb498fc5721da95d112ee40c7eaa6a44a9084c9"
