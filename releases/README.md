@@ -1,6 +1,6 @@
-## 0.3.11 自动核算入口补修候选（2026-10-06）
+## 0.3.11 自动核算入口补修已公开（2026-10-06）
 
-原件 releases/candidates/0.3.11/，证据 archive/release-0.3.11/。扩展定向回归、桌面 verify、构建、隐藏 smoke 和安装包逐字节一致性通过；未本机安装。SHA256：9B52761BA5C77EF75B7F3574519052E6C1BA69424CA59532F9DFD0E966A831A5。见 [记录](../docs/RELEASE_0.3.11.md)。
+原件 releases/candidates/0.3.11/，证据 archive/release-0.3.11/。扩展定向回归、桌面 verify、构建、隐藏 smoke 和安装包逐字节一致性、PR #142必需CI、四公开资产匿名完整回读及稳定更新通道通过；v0.3.11固定952ce6c，主线push CI未触发但合并树与CI候选树一致。未本机安装。SHA256：9B52761BA5C77EF75B7F3574519052E6C1BA69424CA59532F9DFD0E966A831A5。见 [记录](../docs/RELEASE_0.3.11.md)。
 
 ## 0.3.10 ERP 检查点恢复已公开（2026-10-06）
 
