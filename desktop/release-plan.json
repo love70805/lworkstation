@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.3.13",
+  "version": "0.4.0",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-object-query-targets",
+  "integrationBranch": "codex/v040-operator-scope",
   "requiredCommits": [
+    {
+      "module": "v0.4.0-main-baseline",
+      "commit": "0106372"
+    },
     {
       "module": "erp-request-object-query-targets",
       "commit": "cedf3743eef4ae2b2a42944168b5c6b671766179"

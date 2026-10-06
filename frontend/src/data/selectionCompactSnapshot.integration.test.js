@@ -135,7 +135,7 @@ it('reuses immutable ledger facts after a real product save, including after pro
     await getSelectionReferenceSnapshot({ compact: true });
   }
   const keys = await derivedCacheDb.entries.toCollection().primaryKeys();
-  expect(keys.filter(key => key.includes('selection-reference@3'))).toHaveLength(1);
+  expect(keys.filter(key => key.includes('selection-reference@4'))).toHaveLength(1);
   expect(keys.filter(key => key.includes('selection-ledger-facts@3'))).toHaveLength(1);
   expect(read).not.toHaveBeenCalled();
 });

@@ -230,6 +230,7 @@ export function buildSelectionReferenceRows({
       storeNames: [...new Set([product?.store, ...(identity.platformSkcEvidence ?? []).flatMap(item => (item.sources ?? []).map(source => source.store))].filter(Boolean))],
       supplierCode: supplierOffer?.supplierCode ?? "",
       supplierNumbers: [...new Set((ledgerIdentitiesBySku.get(canonicalSku) ?? []).map(item => item.supplierNumber).filter(Boolean))],
+      operatorPairs: (ledgerIdentitiesBySku.get(canonicalSku) ?? []).filter(item => item.store && item.supplierNumber).map(({ store, supplierNumber }) => ({ store, supplierNumber })),
       supplierName: supplierOffer?.supplierName || [...new Set((erpCatalog?.suppliers ?? []).map(item => item.supplierName).filter(Boolean))].join("、"),
       referenceUnitCost: referenceCost?.unitCost ?? null,
       referenceKind: referenceCost?.referenceKind ?? null,

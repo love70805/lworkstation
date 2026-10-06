@@ -1,3 +1,4 @@
+import { filterOperatorRows } from '../../domain/operatorScope';
 import { db } from "../db/clientDatabase";
 import { getActiveMemberContext } from "./selectionRepository";
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
@@ -9,7 +10,7 @@ function readScopedSales(scope, aggregate) {
   return retrySourceRead(() => readScopedSalesOnce(scope, aggregate));
 }
 
-async function readScopedSalesOnce({ workspaceId, ledgerId, store = "all", allowMissingStore = false }, aggregate) {
+async function readScopedSalesOnce({ workspaceId, ledgerId, store = "all", allowMissingStore = false, operatorScope = { mode: "all" } }, aggregate) {
     const revision = sourceRevision();
     const current = await getActiveMemberContext();
     const ledger = await db.ledgers.get(ledgerId);
@@ -17,7 +18,8 @@ async function readScopedSalesOnce({ workspaceId, ledgerId, store = "all", allow
     const rows = await readLedgerSalesRows(workspaceId, ledgerId);
     if (!allowMissingStore && store !== "all" && !rows.some((row) => canonicalStore(row.store) === canonicalStore(store))) throw new Error("店铺不属于当前账本。");
     assertSourceRevision(revision);
-    const result = await aggregate(store === "all" ? rows : rows.filter((row) => canonicalStore(row.store) === canonicalStore(store)), ledger.period);
+    const visible = filterOperatorRows(rows, operatorScope);
+    const result = await aggregate(store === "all" ? visible : visible.filter((row) => canonicalStore(row.store) === canonicalStore(store)), ledger.period);
     assertSourceRevision(revision);
     return result;
 }
@@ -27,7 +29,7 @@ export async function readLedgerSalesAnalytics(scope) {
   // clicks can reuse it without cloning the full ledger from IndexedDB again.
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   const store = scope.store ?? 'all';
-  return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today], formula: 'daily-sales@4-grouped', revision: sourceRevision(), compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
+  return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today, scope.operatorScope ?? null], formula: 'daily-sales@4-grouped', revision: sourceRevision(), compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
 }
 
 export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store = "all", date }) {
@@ -35,18 +37,18 @@ export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store
   return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date], formula: 'daily-details@1', revision: sourceRevision(), compute: () => runDerivedComputation('day', { rows, period, date }) }), scope }));
 }
 
-export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, store = 'all', date = null }) {
-  const scope = { workspaceId, ledgerId, store, date };
+export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, store = 'all', date = null, operatorScope = { mode: 'all' } }) {
+  const scope = { workspaceId, ledgerId, store, date, operatorScope };
   return readScopedSales({ ...scope, allowMissingStore: true }, async (rows, period) => ({
     ...await cachedDerived({
-      scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date],
+      scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date, operatorScope],
       formula: 'period-skc-details@1', revision: sourceRevision(),
       compute: () => runDerivedComputation('period-detail', { rows, period, date }),
     }), scope,
   }));
 }
 
-export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
+export async function readWorkspaceSalesMonths({ workspaceId, store = 'all', operatorScope = { mode: 'all' } }) {
   return retrySourceRead(async () => {
     const revision = sourceRevision();
     const current = await getActiveMemberContext();
@@ -59,12 +61,12 @@ export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
     // transiently instead of filling the shared raw-row cache with up to 600k rows.
     for (const ledger of ledgers.sort((a, b) => a.period.localeCompare(b.period) || a.id.localeCompare(b.id))) {
       const chartMonth = await cachedDerived({
-        scope: [workspaceId, ledger.id, store === 'all' ? null : canonicalStore(store), ledger.period, today],
+        scope: [workspaceId, ledger.id, store === 'all' ? null : canonicalStore(store), ledger.period, today, operatorScope],
         formula: 'monthly-chart@1', revision,
         compute: async () => {
           const rows = await db.salesRows.where('ledgerId').equals(ledger.id).filter(row => row.workspaceId === workspaceId && (store === 'all' || canonicalStore(row.store) === canonicalStore(store))).toArray();
           assertSourceRevision(revision);
-          const data = await runDerivedComputation('sales', { rows, period: ledger.period, store, today });
+          const data = await runDerivedComputation('sales', { rows: filterOperatorRows(rows, operatorScope), period: ledger.period, store, today });
           return data.chartMonth;
         },
       });

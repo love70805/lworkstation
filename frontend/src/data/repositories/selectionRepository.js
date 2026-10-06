@@ -843,6 +843,7 @@ export async function listProductCatalogRecords() {
         image: product.imageUrl ?? product.image ?? null,
         skuCount: skus.length,
         supplierNumbers: [...new Set(skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.supplierNumbers ?? []))],
+        operatorPairs: skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.operatorPairs ?? []),
         pendingVariantCount,
         skus,
         offers,
@@ -1674,7 +1675,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
   const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@3", revision, compute,
+    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@4", revision, compute,
   }) : await compute();
   assertSourceRevision(revision);
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));

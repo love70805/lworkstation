@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import SalesAnalytics from "./SalesAnalytics";
+vi.mock("../hooks/useOperatorScope", () => ({ useOperatorScope: () => ({ scope: { mode: "all", pairs: [] } }) }));
 const state = vi.hoisted(() => ({ status: "unknown" }));
-vi.mock("dexie-react-hooks", () => ({ useLiveQuery: () => ({ scope: JSON.stringify(["W","L","all"]), data: { period:"2026-08", coverage:{status:state.status}, daily:[], monthTotalsExact:{revenueExact:"0",quantityExact:"0"}, undated:{count:0}, outOfPeriod:{count:0}, skuStats:[] } }) }));
+vi.mock("dexie-react-hooks", () => ({ useLiveQuery: () => ({ scope: JSON.stringify(["W","L","all", { mode: "all", pairs: [] }]), data: { period:"2026-08", coverage:{status:state.status}, daily:[], monthTotalsExact:{revenueExact:"0",quantityExact:"0"}, undated:{count:0}, outOfPeriod:{count:0}, skuStats:[] } }) }));
 it("shows unknown month values as pending while confirmed zero remains numeric", () => {
   state.status="unknown";
   const unknown=renderToStaticMarkup(<SalesAnalytics workspaceId="W" ledgerId="L" />);

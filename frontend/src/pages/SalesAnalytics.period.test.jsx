@@ -54,12 +54,12 @@ const monthBar = period => [...container.querySelectorAll('.sales-month-group')]
 it('defaults to twelve calendar slots and one total column, preserving missing months', async () => {
   expect(mocks.months).not.toHaveBeenCalled();
   await click(button('月度'));
-  expect(mocks.months).toHaveBeenCalledWith({ workspaceId: 'W', store: 'all' });
+  expect(mocks.months).toHaveBeenCalledWith({ workspaceId: 'W', store: 'all', operatorScope: { mode: 'all', pairs: [] } });
   expect(container.querySelectorAll('.sales-month-group')).toHaveLength(12);
   expect(monthBar('2026-08').querySelectorAll('.sales-grouped-segment')).toHaveLength(1);
   expect(monthBar('2026-06').getAttribute('aria-label')).toContain('数据待查');
   await click(monthBar('2026-08'));
-  expect(mocks.detail).toHaveBeenLastCalledWith({ workspaceId: 'W', ledgerId: 'L', store: 'all' });
+  expect(mocks.detail).toHaveBeenLastCalledWith({ workspaceId: 'W', ledgerId: 'L', store: 'all', operatorScope: { mode: 'all', pairs: [] } });
   expect(container.querySelector('.sales-details-heading h3').textContent).toBe('2026-08 店铺明细');
   expect(container.querySelector('.sales-store-pie')).not.toBeNull();
   expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(2);
