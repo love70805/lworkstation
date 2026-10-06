@@ -42,6 +42,12 @@
     if (entries.some(([key, value]) => !QUERY_FIELDS.has(key) || !['string', 'number'].includes(typeof value) || String(value).length > 128000)) throw loopbackError('ERP_CHECKPOINT_QUERY_UNSUPPORTED', '查询包含尚未验证的条件，不能保存不完整的恢复范围；请更新 ERP 扩展并重新查询。', 409);
     return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, String(value)]));
   }
+  function sameCheckpointFilters(filters, storedFilters) {
+    // chrome.storage.local reads dictionaries in a different key order (e.g.
+    // createTimePeriod/createdBy). Compare both through the same normalization;
+    // property insertion order is not a change to the captured query scope.
+    return JSON.stringify(checkpointFilters(filters)) === JSON.stringify(checkpointFilters(storedFilters));
+  }
   function checkpointBinding(request) {
     return JSON.stringify({ workspaceId: request.workspaceId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId,
       registeredAt: request.registeredAt, version: request.version ?? null, platformSkcs: normalizedSkcs(request.platformSkcs),
@@ -77,7 +83,7 @@
     if (input.action === 'restore') {
       if (!old || old.state === 'completed') throw loopbackError('ERP_CHECKPOINT_MISSING', '未找到有效的未完成采集，请重新查询。', 409);
       const liveFilters = checkpointFilters(input.filters);
-      if (Object.keys(liveFilters).length && JSON.stringify(liveFilters) !== JSON.stringify(old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '当前查询条件已变化，请重新采集；旧任务不会混入当前范围。', 409);
+      if (Object.keys(liveFilters).length && !sameCheckpointFilters(liveFilters, old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '当前查询条件已变化，请重新采集；旧任务不会混入当前范围。', 409);
       const pending = (await readPending()).find(item => item.resultDeliveryId === old.resultDeliveryId && item.workspaceId === config.workspaceId);
       return { ok: true, checkpoint: { ...old, binding: undefined }, pendingDeliveryId: pending?.resultDeliveryId || null, reuseEvidence: false, reason: 'original_account_unverified_current_session_reread' };
     }
@@ -93,7 +99,7 @@
     const targetSkcs = normalizedSkcs(request.platformSkcs);
     const targetSet = new Set(targetSkcs);
     if (!filters.sku || !targetSkcs.length || !Number.isFinite(Date.parse(input.queryCapturedAt))) throw loopbackError('ERP_CHECKPOINT_SCOPE_MISSING', '检查点缺少完整目标或查询时间。', 409);
-    if (!restart && old && JSON.stringify(filters) !== JSON.stringify(old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '查询条件已变化，旧检查点不可覆盖。', 409);
+    if (!restart && old && !sameCheckpointFilters(filters, old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '查询条件已变化，旧检查点不可覆盖。', 409);
     const resultDeliveryId = !restart && input.rotateDelivery !== true && old && (old.state !== 'completed' || input.state === 'completed') ? old.resultDeliveryId : makeResultDeliveryId();
     const record = { schemaVersion: 1, extensionVersion: chrome.runtime.getManifest().version, workspaceId: config.workspaceId, requestId: request.requestId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, binding,
       platformSkcs: targetSkcs, filters, queryCapturedAt: input.queryCapturedAt, accountState: 'unverified',
