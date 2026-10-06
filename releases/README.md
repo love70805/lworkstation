@@ -1,6 +1,6 @@
-## 0.3.12 检查点字段顺序修复候选（2026-10-06）
+## 0.3.12 检查点字段顺序修复已公开（2026-10-06）
 
-原件 releases/candidates/0.3.12/，证据 archive/release-0.3.12/。实际 Chromium 扩展存储复现旧错误与修复后成功，1270 测试、生产构建、desktop verify、隐藏 smoke、580 安装文件/533 生产输入一致性通过。PR #144 CI 与集成、公开回读待完成；不自动安装。SHA256：7F3FB1F6F605E64AED49A21458910DD53E0D97FE2DBE36FA236241D0436E3DBA。见 [记录](../docs/RELEASE_0.3.12.md)。
+原件 releases/candidates/0.3.12/，证据 archive/release-0.3.12/。实际 Chromium 扩展存储复现旧错误与修复后成功，1270 测试、生产构建、desktop verify、隐藏 smoke、580 安装文件/533 生产输入一致性通过。PR #144 / 主线 CI、四公开资产匿名完整回读及实际稳定更新通道通过，v0.3.12 固定 674432d；不自动安装。SHA256：7F3FB1F6F605E64AED49A21458910DD53E0D97FE2DBE36FA236241D0436E3DBA。见 [记录](../docs/RELEASE_0.3.12.md)。
 
 ## 0.3.11 自动核算入口补修已公开（2026-10-06）
 
@@ -18,7 +18,7 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.3.7](https://github.com/love70805/lworkstation/releases/tag/v0.3.7)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。本机未安装。
+当前公开稳定版为 [0.3.12](https://github.com/love70805/lworkstation/releases/tag/v0.3.12)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。0.3.12 本机未安装；以下版本清单保留历史日期快照，不作为当前状态依据。
 
 ## 版本清单
 
