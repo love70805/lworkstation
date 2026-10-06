@@ -26,6 +26,10 @@
 
 当前公开稳定版为 [0.3.12](https://github.com/love70805/lworkstation/releases/tag/v0.3.12)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。0.3.12 本机未安装；以下版本清单保留历史日期快照，不作为当前状态依据。
 
+## v0.4.0 本机候选
+
+本地运营负责范围：候选目录 `releases/candidates/0.4.0/`，证据 `archive/release-0.4.0/`。构建与发布门禁进行中，本机不安装。见 [验收与发布](../docs/RELEASE_0.4.0.md)。
+
 ## 版本清单
 
 核对日期：2026-10-03（UTC+8）。0.3.7 已公开为非预发布的 GitHub Latest，四资产匿名全量下载、真实更新通道及主仓库持久复制回读通过；更早版本原标签与资产保留，Beta 最新仍为0.3.0-beta.10。本机按用户要求暂不安装。

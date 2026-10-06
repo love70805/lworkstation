@@ -5,6 +5,10 @@
   "integrationBranch": "codex/v040-operator-scope",
   "requiredCommits": [
     {
+      "module": "local-operator-scope",
+      "commit": "fb2cde3"
+    },
+    {
       "module": "v0.4.0-main-baseline",
       "commit": "0106372"
     },
