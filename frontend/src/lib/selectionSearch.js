@@ -6,8 +6,23 @@ export function normalizeSelectionSearchQuery(value) {
 export function matchesSelectionSearch(query, fields = []) {
   const normalizedQuery = normalizeSelectionSearchQuery(query);
   if (!normalizedQuery) return true;
-  return fields
-    .flatMap((field) => Array.isArray(field) ? field : [field])
-    .map((field) => String(field ?? "").toLocaleLowerCase())
-    .some((field) => field.includes(normalizedQuery));
+  return selectionSearchText(fields).includes(normalizedQuery);
+}
+
+function selectionSearchText(fields) {
+  return fields.flat(Infinity).map((field) => String(field ?? "").toLocaleLowerCase()).join("\u0000");
+}
+
+/** Lazy index for immutable read-model rows; call only after narrowing the scope. */
+export function createSelectionSearchIndex(readFields) {
+  const index = new WeakMap();
+  return (row, normalizedQuery) => {
+    if (!normalizedQuery) return true;
+    let text = index.get(row);
+    if (text === undefined) {
+      text = selectionSearchText(readFields(row));
+      index.set(row, text);
+    }
+    return text.includes(normalizedQuery);
+  };
 }

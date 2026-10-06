@@ -100,7 +100,7 @@ it("opens the cost details from the missing-cost action", async () => {
 it('keeps the details and search field open while filters change', async () => {
  const details = [...container.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.startsWith('查看利润明细'));
  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
- const search = container.querySelector('.profit-table-panel input[type=search]') ?? container.querySelector('.profit-table-panel .search-input input');
+ const search = container.querySelector('.profit-scope-filters .search-input input');
  expect(search).not.toBeNull();
  search.focus();
  await act(async () => Simulate.change(search, { target: { value: 'S' } }));

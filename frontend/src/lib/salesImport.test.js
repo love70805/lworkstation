@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { collectSalesImportFacets, detectLedgerReport, suggestLedgerReportMapping, suggestMappings, validateSalesMapping, validateSalesRows } from "./salesImport";
+import { summarizeLedgerRows } from "../domain/ledgerImport";
+
+const standardHeaders = ["变动类型", "结算类型", "供方货号", "SKC", "平台SKU", "商家SKU", "属性集", "数量", "单价", "金额", "币种", "业务单号", "单据号", "添加时间", "商家ID", "商家名称", "销售商家ID", "销售商家名称", "备注", "活动信息"];
 
 describe("sales import mapping", () => {
   it("suggests legacy and modern field mappings", () => {
@@ -37,6 +40,34 @@ describe("sales import mapping", () => {
       unitPrice: "单价",
       amount: "",
     });
+  });
+
+  it("recognizes the full standard headers without treating settlement amounts or legacy costs as revenue", () => {
+    const mapping = suggestLedgerReportMapping([...standardHeaders, "单件成本", "客退罚款"]);
+    expect(mapping).toMatchObject({
+      platformSku: "平台SKU", quantity: "数量", unitPrice: "单价", sourceAddedAt: "添加时间", activity: "活动信息",
+      orderId: "业务单号", orderDate: "", store: "", amount: "", customerAmount: "", platformAmount: "", directUnitCost: "", directPenalty: "",
+    });
+    const base = { 供方货号: "货号A", SKC: "父A", 平台SKU: "000123", 属性集: "白色", 单价: 10, 添加时间: "2026-08-01 09:00:00", 业务单号: "同一订单", 单件成本: 999, 客退罚款: 99 };
+    const validation = validateSalesRows([
+      { ...base, 变动类型: "平台客单发货", 数量: 2, 金额: 9999, 单据号: "发货单1" },
+      { ...base, 变动类型: "客单发货", 数量: 1, 金额: 8888, 单据号: "发货单2" },
+      { ...base, 变动类型: "客退", 数量: -1, 金额: -7777, 单据号: "退货单" },
+      { ...base, 变动类型: "平台罚款", 数量: 1, 金额: -6666, 单据号: "罚款单" },
+    ], mapping, { defaultStore: "测试店", movementTypes: ["平台客单发货", "客单发货"], deriveAmountFromUnitPrice: true, period: "2026-08" });
+    expect(validation.errors).toEqual([]);
+    expect(validation.sourceRowCount).toBe(4);
+    expect(validation.rows).toHaveLength(2);
+    expect(validation.ignored).toHaveLength(2);
+    expect(validation.rows.every(row => !row.hasDirectUnitCost && !row.hasDirectPenalty)).toBe(true);
+    expect(summarizeLedgerRows(validation.rows)).toMatchObject({ quantity: 3, revenue: 30, penalty: 0, sourceRowCount: 2, realOrderCount: 1 });
+  });
+
+  it("prefers explicit platform and order identifiers and keeps document numbers and source dates separate", () => {
+    expect(suggestMappings(["商家SKU", "平台SKU", "业务单号", "订单号", "订单日期", "添加时间", "单据号"])).toMatchObject({
+      platformSku: "平台SKU", orderId: "订单号", orderDate: "订单日期", sourceAddedAt: "添加时间",
+    });
+    expect(suggestMappings(["单据号", "添加时间"])).toMatchObject({ orderId: "", orderDate: "", sourceAddedAt: "添加时间" });
   });
 });
 

@@ -268,6 +268,14 @@
 .profit-filter-bar .search-input { flex: 1 1 280px; width: auto; max-width: 360px; }
 .profit-filter-reset { min-height: 36px; padding: 0 10px; border: 0; background: transparent; color: var(--primary); cursor: pointer; font-size: 12px; }
 .profit-filter-reset:hover { text-decoration: underline; }
+.profit-scope-filters { flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.profit-scope-field { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.profit-scope-field > span { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.profit-scope-search { flex: 1 1 280px; }
+.profit-scope-search .search-input { flex: none; width: 100%; min-height: 40px; max-width: none; }
+.profit-scope-filters .profit-filter-check, .profit-scope-filters .profit-filter-reset { min-height: 40px; }
+.profit-scope-help { flex: 1 1 100%; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.profit-scope-filters .profit-multi-select-menu { width: min(300px, calc(100vw - 64px)); }
 .profit-table { width: 100%; min-width: 1480px; table-layout: fixed; }
 .profit-page .virtual-table-scroll {
   width: 100%;

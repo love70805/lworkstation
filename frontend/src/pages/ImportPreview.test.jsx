@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ImportPreview from "./ImportPreview";
 import { ToastProvider } from "../components/UI";
+import { suggestLedgerReportMapping, suggestMappings } from "../lib/salesImport";
 const mocks = vi.hoisted(() => ({ parse:vi.fn(), inspectPeriod:vi.fn(), validate:vi.fn(), release:vi.fn(), terminate:vi.fn(), preview:vi.fn(), save:vi.fn() }));
 vi.mock('../lib/importWorkerClient', () => ({createImportWorkerClient:()=>mocks}));
 vi.mock('../data/database', () => ({previewSalesImports:mocks.preview,saveSalesImports:mocks.save}));
@@ -14,12 +15,11 @@ const mapping = {platformSku:'SKU',platformSkc:'SKC',quantity:'数量',amount:'�
 const summary = {quantity:2,revenue:10,penalty:0};
 function button(text) { return [...container.querySelectorAll('button')].find((node)=>node.textContent === text); }
 async function click(text) { await act(async()=>button(text).click()); }
-async function upload(selectPeriod = true) {
+async function upload(selectPeriod = true, files = [new File(['first'], '甲店.csv'),new File(['second'],'乙店.csv')]) {
   const input = container.querySelector('input[type=file]');
-  const files = [new File(['first'], '甲店.csv'),new File(['second'],'乙店.csv')];
   Object.defineProperty(input,'files',{configurable:true,value:files});
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
-  await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(2)); });
+  await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(files.length)); });
   if (selectPeriod) await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
 }
 beforeEach(async()=>{
@@ -37,6 +37,52 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 
 async function settled() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); }); }
+it('shows standard calculated revenue and filename store separately from optional absent source columns', async () => {
+  const headers = ['变动类型','结算类型','供方货号','SKC','平台SKU','商家SKU','属性集','数量','单价','金额','币种','业务单号','单据号','添加时间','商家ID','商家名称','销售商家ID','销售商家名称','备注','活动信息'];
+  const suggestedMapping = suggestLedgerReportMapping(headers);
+  mocks.parse.mockResolvedValue({ headers, suggestedMapping, rowCount: 1, previewRows: [{平台SKU:'000123',业务单号:'测试订单'}], preset:'ledger_report', facets:{movementTypes:['平台客单发货'],supplierNumbers:['测试货号']} });
+  await upload(); await settled();
+  const file = container.querySelector('.batch-file');
+  expect(file.querySelectorAll('.batch-mapping-main .mapping-row')).toHaveLength(8);
+  expect(file.querySelector('.batch-mapping-extra').open).toBe(false);
+  expect(file.querySelector('[data-field=amount]').textContent).toContain('由数量 × 单价计算');
+  expect(file.querySelector('[data-field=amount] select')).toBeNull();
+  expect(file.querySelector('[data-field=store]').textContent).toContain('使用文件名店铺');
+  expect(file.querySelector('[data-field=platformSku]').textContent).toContain('已自动映射');
+  expect(file.querySelector('[data-field=orderId] select').value).toBe('业务单号');
+  for (const key of ['orderDate','order1688','directUnitCost','directPenalty','customerShipmentQuantity','platformOrderQuantity']) {
+    expect(file.querySelector(`[data-field=${key}]`).textContent).toContain('可选 · 源表无该列');
+  }
+  expect(file.querySelectorAll('[aria-invalid=true]')).toHaveLength(0);
+  expect(file.textContent).not.toContain('-- 未映射 --');
+  expect(mocks.preview.mock.calls[0][0].items).toHaveLength(2);
+  expect(mocks.preview.mock.calls[0][0].items[0].mapping).toMatchObject({ amount:'', directUnitCost:'', orderId:'业务单号' });
+});
+it('keeps a single legacy template usable with optional blank fields and shows its quantity and amount fallbacks', async () => {
+  const headers = ['供方货号','平台SKU','客单发货','平台客单','客单金额','平台金额'];
+  mocks.parse.mockResolvedValue({headers,suggestedMapping:suggestMappings(headers),rowCount:1,previewRows:[{平台SKU:'000123'}],preset:'generic'});
+  await upload(true, [new File(['legacy'], '旧模板.csv')]); await settled();
+  const file = container.querySelector('.batch-file');
+  expect(file.querySelector('[data-field=quantity]').textContent).toContain('使用备用数量列');
+  expect(file.querySelector('[data-field=amount]').textContent).toContain('使用备用金额列');
+  expect(file.querySelector('[data-field=orderDate]').textContent).toContain('可选 · 源表无该列');
+  expect(file.querySelectorAll('.mapping-required')).toHaveLength(0);
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
+  await act(async()=>Simulate.change(file.querySelector('.batch-store input'),{target:{value:'确认店铺'}}));
+  expect(file.querySelector('[data-field=store]').textContent).toContain('使用填写的店铺');
+});
+it('marks an actually missing required SKU and prevents automatic preview until it is mapped', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKC','数量','金额','自定义SKU'],suggestedMapping:{platformSkc:'SKC',quantity:'数量',amount:'金额'},rowCount:1,previewRows:[{自定义SKU:'000123'}],preset:'generic'});
+  await upload(true, [new File(['custom'], '自定义店.csv')]); await settled();
+  const row = container.querySelector('[data-field=platformSku]');
+  expect(row.textContent).toContain('必需字段未映射');
+  expect(row.querySelector('select').getAttribute('aria-invalid')).toBe('true');
+  expect(mocks.preview).not.toHaveBeenCalled();
+  await act(async()=>Simulate.change(row.querySelector('select'),{target:{value:'自定义SKU'}}));
+  await settled();
+  expect(row.textContent).toContain('已手动映射');
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
+});
 it('shares a delayed reparse while rapidly editing a store and only inspects the latest configuration', async () => {
   await upload(); await settled();
   const parseCount = mocks.parse.mock.calls.length, inspectCount = mocks.inspectPeriod.mock.calls.length;

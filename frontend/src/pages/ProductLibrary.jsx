@@ -12,7 +12,7 @@ import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from ".
 import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
-import { matchesSelectionSearch } from "../lib/selectionSearch";
+import { createSelectionSearchIndex, normalizeSelectionSearchQuery } from "../lib/selectionSearch";
 import { CaptureQueueView } from "./CaptureQueue";
 import { activeSelectionStatusDefinitions, canonicalProductStatusId, createCustomSelectionStatus, normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSkc } from "../domain/identifiers";
@@ -45,6 +45,17 @@ const dataStatusLabels = {
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
 const EMPTY_ROWS = [];
+const matchesProductQuery = createSelectionSearchIndex((product) => [
+  product.name, product.supplier, product.platformSkc, product.supplierNumbers ?? [],
+  (product.supplierProfiles ?? []).map((supplier) => [supplier.supplierCode, supplier.supplierName]),
+  (product.skus ?? []).map((sku) => [sku.platformSku, sku.warehouseSku]),
+]);
+const matchesProductSupplier = createSelectionSearchIndex((product) => product.supplierNumbers ?? []);
+const matchesReferenceQuery = createSelectionSearchIndex((row) => [
+  row.platformSku, row.platformSkc, row.productName, row.warehouseSku, row.supplierCode, row.supplierName,
+  row.supplierNumbers ?? [], row.storeNames ?? [],
+]);
+const matchesReferenceSupplier = createSelectionSearchIndex((row) => row.supplierNumbers ?? []);
 
 const productFiltersKey = (workspaceId, view) => `${PRODUCT_FILTERS_KEY}:${JSON.stringify([workspaceId, view])}`;
 
@@ -214,18 +225,14 @@ function ProductLibraryView({ workspaceId, view }) {
     setSearchParams(params, { replace: true });
   };
 
-  const filteredProducts = useMemo(() => catalogProducts.filter((product) => {
-    const supplierSearch = (product.supplierProfiles ?? []).flatMap((supplier) => [supplier.supplierCode, supplier.supplierName]);
-    const matchesQuery = matchesSelectionSearch(query, [
-      product.name,
-      product.supplier,
-      product.platformSkc,
-      supplierSearch, product.supplierNumbers ?? [],
-      product.skus.map((sku) => [sku.platformSku, sku.warehouseSku]),
-    ]);
-    const matchesStore = store === "all" || product.store === store;
+  const normalizedQuery = normalizeSelectionSearchQuery(query);
+  const normalizedSupplierNumber = normalizeSelectionSearchQuery(supplierNumber);
+  const scopedProducts = useMemo(() => catalogProducts.filter((product) => {
+    if (store !== "all" && product.store !== store) return false;
+    if (recordStatus !== "all" && product.status !== recordStatus) return false;
+    if (salesLabel !== "all" && product.automaticSalesTag?.label !== salesLabel) return false;
+    if (duplicatesOnly && !duplicateSkcProductIds.has(product.id)) return false;
     const matchesStatus = status === "all" || resolveProductStatus(product, salesStatusDefinitions).statusId === status;
-    const matchesRecord = recordStatus === "all" || product.status === recordStatus;
     const matchesData = dataStatus === "all"
       || (dataStatus === "missing_purchase" && product.dataReadiness?.purchase.status !== "complete")
       || (dataStatus === "missing_profit" && product.dataReadiness?.profit.status !== "complete")
@@ -234,8 +241,7 @@ function ProductLibraryView({ workspaceId, view }) {
       || (dataStatus === "profit_complete" && product.dataReadiness?.profit.status === "complete")
       || (dataStatus === "mapping_complete" && product.dataReadiness?.warehouseMapping.status === "complete");
     const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps;
-    const matchesDuplicate = !duplicatesOnly || duplicateSkcProductIds.has(product.id);
-    return matchesSelectionSearch(supplierNumber, product.supplierNumbers ?? []) && matchesQuery && matchesStore && matchesStatus && matchesRecord && matchesData && matchesMissing && matchesDuplicate && (salesLabel === "all" || product.automaticSalesTag?.label === salesLabel);
+    return matchesStatus && matchesData && matchesMissing && matchesProductSupplier(product, normalizedSupplierNumber);
   }).toSorted((a, b) => {
     if (productSort === "lowestCost") return (a.lowestReferenceCost ?? Number.POSITIVE_INFINITY) - (b.lowestReferenceCost ?? Number.POSITIVE_INFINITY);
     if (productSort === "coverage") {
@@ -246,20 +252,21 @@ function ProductLibraryView({ workspaceId, view }) {
     }
     if (productSort === "name") return a.name.localeCompare(b.name, "zh-CN");
     return String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
-  }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, recordStatus, query, salesStatusDefinitions, salesLabel, status, store, supplierNumber]);
+  }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, recordStatus, salesStatusDefinitions, salesLabel, status, store, normalizedSupplierNumber]);
+  const filteredProducts = useMemo(() => scopedProducts.filter((product) => matchesProductQuery(product, normalizedQuery)), [scopedProducts, normalizedQuery]);
   const filteredProductIds = useMemo(() => filteredProducts.map((product) => product.id), [filteredProducts]);
   const selectedProductIdSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
   const allFilteredSelected = filteredProductIds.length > 0 && filteredProductIds.every((id) => selectedProductIdSet.has(id));
 
-  const filteredReferences = useMemo(() => referenceRows.filter((row) => {
-    return matchesSelectionSearch(query, [row.platformSku, row.platformSkc, row.productName, row.warehouseSku, row.supplierCode, row.supplierName, ...(row.supplierNumbers ?? []), ...(row.storeNames ?? [])])
-      && (store === "all" || row.storeNames?.includes(store))
-      && matchesSelectionSearch(supplierNumber, row.supplierNumbers ?? [])
+  const scopedReferences = useMemo(() => referenceRows.filter((row) => {
+    return (store === "all" || row.storeNames?.includes(store))
       && (catalogFilter === "all" || (catalogFilter === "linked" ? Boolean(row.productId) : !row.productId))
       && (referenceSource === "all" || row.referenceKind === referenceSource)
       && (!negativeOnly || row.hasNegativeProfit)
-      && (salesLabel === "all" || row.automaticSalesTag?.label === salesLabel);
-  }), [negativeOnly, query, referenceRows, referenceSource, salesLabel, store, supplierNumber, catalogFilter]);
+      && (salesLabel === "all" || row.automaticSalesTag?.label === salesLabel)
+      && matchesReferenceSupplier(row, normalizedSupplierNumber);
+  }), [negativeOnly, referenceRows, referenceSource, salesLabel, store, normalizedSupplierNumber, catalogFilter]);
+  const filteredReferences = useMemo(() => scopedReferences.filter((row) => matchesReferenceQuery(row, normalizedQuery)), [scopedReferences, normalizedQuery]);
   const groupedReferences = useMemo(() => groupSelectionReferenceRows(filteredReferences), [filteredReferences]);
   useEffect(() => {
     if (referenceRead.status !== "ready" || !savedView?.focusId) return;

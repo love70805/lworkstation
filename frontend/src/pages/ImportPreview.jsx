@@ -7,7 +7,7 @@ import { importReturnHref } from "../lib/importNavigation";
 import { summarizeImportPeriod } from "../lib/importPeriod";
 import { clearImportStages, removeImportStage } from "../lib/salesImportStage";
 import { createImportWorkerClient } from "../lib/importWorkerClient";
-import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, validateSalesMapping } from "../lib/salesImport";
+import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, suggestMappings, validateSalesMapping } from "../lib/salesImport";
 import { createSalesSourceCoverage } from "../domain/selectionSalesLabels";
 
 const ACCEPTED_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"]);
@@ -28,6 +28,71 @@ function sourceIsFiltered(item) {
 const sourceScope = item => sourceIsFiltered(item) || item.sourceScope === "partial" ? "partial" : "full_month";
 function Totals({ summary }) {
   return <span>数量 {summary.quantity} · 销售原额 ¥{money(summary.revenue)} · 扣款 ¥{money(summary.penalty)}</span>;
+}
+
+const PRIMARY_MAPPING_KEYS = ["platformSku", "platformSkc", "supplierNumber", "quantity", "unitPrice", "amount", "store", "sourceAddedAt"];
+const PRIMARY_MAPPING_FIELDS = PRIMARY_MAPPING_KEYS.map(key => salesFields.find(field => field.key === key));
+const EXTRA_MAPPING_FIELDS = salesFields.filter(field => !PRIMARY_MAPPING_KEYS.includes(field.key));
+
+function mappingState(field, item, availableMapping) {
+  const mapping = item.mapping;
+  const deriveAmount = Boolean(item.filterOptions?.deriveAmountFromUnitPrice);
+  const hasQuantity = Boolean(mapping.quantity || mapping.customerShipmentQuantity || mapping.platformOrderQuantity);
+  if (deriveAmount && field.key === "amount") return {
+    kind: hasQuantity && mapping.unitPrice ? "calculated" : "required",
+    label: hasQuantity && mapping.unitPrice ? "由数量 × 单价计算" : "需映射数量和单价",
+    readOnly: true, source: "数量 × 单价",
+    description: "标准台账的销售原额按数量 × 单价计算，源表“金额”不作为销售收入。",
+  };
+  if (deriveAmount && ["customerAmount", "platformAmount"].includes(field.key)) return {
+    kind: "unused", label: "本格式无需映射", readOnly: true, source: "使用数量 × 单价",
+    description: "标准台账已使用数量和单价计算销售原额。",
+  };
+  if (field.key === "store" && !mapping.store && item.storeName.trim()) return {
+    kind: "fallback", label: item.storeName.trim() === item.fileName.replace(/\.[^.]+$/, "").trim() ? "使用文件名店铺" : "使用填写的店铺",
+    emptyLabel: "使用所属店铺", sample: item.storeName,
+  };
+  if (field.key === "quantity" && !mapping.quantity && hasQuantity) return {
+    kind: "fallback", label: "使用备用数量列", emptyLabel: "使用客单发货与平台客单",
+  };
+  if (!deriveAmount && field.key === "amount" && !mapping.amount && (mapping.customerAmount || mapping.platformAmount)) return {
+    kind: "fallback", label: "使用备用金额列", emptyLabel: "使用客单金额与平台金额",
+  };
+  const needsGroupColumn = field.key === "platformSkc" ? !mapping.supplierNumber : field.key === "supplierNumber" && !mapping.platformSkc;
+  const needed = field.required || needsGroupColumn || (field.key === "store" && !item.storeName.trim())
+    || (deriveAmount && ["quantity", "unitPrice"].includes(field.key));
+  if (mapping[field.key]) return {
+    kind: "mapped", label: mapping[field.key] === item.suggestedMapping?.[field.key] ? "已自动映射" : "已手动映射", needed,
+    emptyLabel: needed ? "请选择来源列（必需）" : "不使用此可选字段",
+  };
+  if (needed) return {
+    kind: "required", label: needsGroupColumn ? "SKC 与供方货号至少映射一项" : "必需字段未映射", needed,
+    emptyLabel: needsGroupColumn ? "请选择 SKC 或供方货号来源列" : "请选择来源列（必需）",
+  };
+  return {
+    kind: "optional", label: availableMapping[field.key] ? "可选 · 未选择来源列" : "可选 · 源表无该列",
+    emptyLabel: availableMapping[field.key] ? "不使用此可选字段" : "源表无该列（可选）",
+  };
+}
+
+function FieldMapping({ item, onChange, onApply }) {
+  const availableMapping = suggestMappings(item.headers);
+  const renderField = (field) => {
+    const state = mappingState(field, item, availableMapping);
+    const statusId = `mapping-status-${item.itemId}-${field.key}`;
+    const sample = state.sample ?? (!state.readOnly ? item.previewRows[0]?.[item.mapping[field.key]] : null);
+    return <div className={`mapping-row${state.kind === "required" ? " mapping-required" : ""}`} data-field={field.key} data-mapping-status={state.kind} key={field.key}>
+      <div><strong>{field.key === "amount" ? "销售原额" : field.label}{state.needed ? " *" : ""}</strong><small>{state.description ?? field.description}</small></div>
+      {state.readOnly ? <div className="batch-mapping-calculated">{state.source}</div> : <label className="mapping-select"><select aria-label={`${item.fileName} ${field.label}`} aria-describedby={statusId} aria-invalid={state.kind === "required"} value={item.mapping[field.key] ?? ""} onChange={event => onChange({ ...item.mapping, [field.key]: event.target.value })}><option value="">{state.emptyLabel}</option>{item.headers.map(header => <option key={header}>{header}</option>)}</select></label>}
+      <div className="batch-mapping-result"><span id={statusId} className={`batch-mapping-state ${state.kind}`}>{state.label}</span>{sample != null && String(sample) !== "" ? <code>{String(sample)}</code> : null}</div>
+    </div>;
+  };
+  return <details className="batch-mapping"><summary>字段映射 · {item.rowCount} 行来源数据</summary>
+    <div className="batch-mapping-heading"><p>主要字段已列出，备用字段按需展开。</p><Button variant="ghost" onClick={onApply}>套用到兼容文件</Button></div>
+    <div className="mapping-head"><span>工作台字段</span><span>对应来源</span><span>识别结果与示例</span></div>
+    <div className="mapping-table batch-mapping-main">{PRIMARY_MAPPING_FIELDS.map(renderField)}</div>
+    <details className="batch-mapping-extra"><summary>备用与来源字段 · {EXTRA_MAPPING_FIELDS.length} 项</summary><p>可选字段缺列无需补齐，不影响已识别台账导入。</p><div className="mapping-table">{EXTRA_MAPPING_FIELDS.map(renderField)}</div></details>
+  </details>;
 }
 
 
@@ -355,17 +420,10 @@ export default function ImportPreview() {
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
               <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
-              <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列映射{item.filterOptions ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
+              <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
               <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : item.importMode })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期或筛选商品</option></select>{sourceIsFiltered(item) && <small>已缩小商品或发货类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
               <div className="form-field"><label htmlFor={`import-mode-${item.itemId}`}>导入方式</label><select id={`import-mode-${item.itemId}`} className="text-input" value={sourceScope(item) === "partial" ? "append" : item.importMode ?? "append"} onChange={event => update(item.itemId, { importMode: event.target.value })}><option value="append">追加并替换重叠分组</option><option value="replace_store_month" disabled={sourceScope(item) !== "full_month"}>完整替换本店本月</option></select><small>默认保留未重叠分组。重新导入完整月文件时，可选择完整替换并核对预览，避免旧来源残留使七天标签无法计算。</small></div>
-              <details><summary>字段映射 · {item.rowCount} 行来源数据</summary>
-                <Button variant="ghost" onClick={() => applyMapping(item)}>套用到兼容文件</Button>
-                <div className="mapping-table">{salesFields.map((field) => <div className="mapping-row" key={field.key}>
-                  <div><strong>{field.label}{field.required ? " *" : ""}</strong><small>{field.description}</small></div>
-                  <label className="mapping-select"><select aria-label={`${item.fileName} ${field.label}`} value={item.mapping[field.key] ?? ""} onChange={(event) => update(item.itemId, { mapping: { ...item.mapping, [field.key]: event.target.value } })}><option value="">-- 未映射 --</option>{item.headers.map((header) => <option key={header}>{header}</option>)}</select></label>
-                  <code>{String(item.previewRows[0]?.[item.mapping[field.key]] ?? "")}</code>
-                </div>)}</div>
-              </details>
+              <FieldMapping item={item} onChange={mapping => update(item.itemId, { mapping })} onApply={() => applyMapping(item)} />
 
 
               </details>
