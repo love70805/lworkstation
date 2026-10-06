@@ -372,8 +372,8 @@
         if (!run.requestId) return;
         if (!run.requestSnapshot || !window.ShopeersErpDeliveryBridge?.collectionCheckpoint) throw new CostError('采集请求快照未保存', '请重新查询；当前结果不能自动回传。');
         try {
-            const response = await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'save', requestId: run.requestId, requestSnapshot: run.requestSnapshot, resultDeliveryId: run.resultDeliveryId, rotateDelivery, filters: run.filters, queryCapturedAt: run.queryCapturedAt, completedTargets: run.completedTargets || [], state });
-            if (response?.ok && response.checkpoint) { run.resultDeliveryId = response.checkpoint.resultDeliveryId; resumableCheckpoint = state === 'completed' ? null : response.checkpoint; checkpointMessage = ''; }
+            const response = await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: run.restartCheckpoint ? 'restart' : 'save', previousDeliveryId: run.previousDeliveryId, requestId: run.requestId, requestSnapshot: run.requestSnapshot, resultDeliveryId: run.resultDeliveryId, rotateDelivery, filters: run.filters, queryCapturedAt: run.queryCapturedAt, completedTargets: run.completedTargets || [], state });
+            if (response?.ok && response.checkpoint) { run.resultDeliveryId = response.checkpoint.resultDeliveryId; run.restartCheckpoint = false; resumableCheckpoint = state === 'completed' ? null : response.checkpoint; checkpointMessage = ''; }
             else throw new CostError('采集请求快照未保存', response?.message || '请重新查询；当前结果不能自动回传。');
         } catch (error) {
             checkpointMessage = error.details || error.message || '检查点尚未保存；请重新查询';
@@ -1278,7 +1278,7 @@
         } finally { hideLoading(); }
     }
 
-    async function calculate(expectedRequestId = null) {
+    async function calculate(expectedRequestId = null, restartCheckpoint = false, previousDeliveryId = null) {
         if (activeRun) {
             activeRun.cancelledByUser = true;
             activeRun.controller.abort();
@@ -1303,6 +1303,8 @@
             controller: new AbortController(),
             cancelledByUser: false,
             expectedRequestId,
+            restartCheckpoint,
+            previousDeliveryId,
             filters,
             queryCapturedAt: capturedQueryCapturedAt || new Date().toISOString()
         };
@@ -1779,10 +1781,18 @@
         if (isPurchasePage() && !needsLogin() && capturedListUrl && lastResults.length === 0 && !activeRun && !resumableCheckpoint) calculate();
     }
 
-    function requestRecalculate() {
+    async function requestRecalculate() {
         if (activeRun || !isPurchasePage() || needsLogin() || !capturedListUrl) return;
-        if (lastResults.length > 0 && !window.confirm('重新核算将重新读取 ERP 采购列表、明细和平台 SKU 映射，可能需要较长时间。确定继续吗？')) return;
-        calculate();
+        try {
+            const filters = parseCapturedFilters();
+            const context = await readPreviewContext(extractQuerySkcs(filters), capturedQueryCapturedAt);
+            const response = context.requestId ? await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'list', includeCompleted: true }) : null;
+            if (context.requestId && !response?.ok) throw new CostError('原任务状态读取失败', '请稍后重试。');
+            const old = response?.records?.find(item => item.requestId === context.requestId);
+            if ((old || lastResults.length > 0) && !window.confirm('按当前查询重新采集将从零读取 ERP 采购列表、明细和平台 SKU 映射，并开始新的采集尝试。旧待送达结果会保留；旧任务不能覆盖新任务。确定继续吗？')) return;
+            if (activeRun) return;
+            await calculate(context.requestId || null, Boolean(context.requestId), old?.resultDeliveryId || null);
+        } catch (error) { showError(error); }
     }
 
     function closePanel() {

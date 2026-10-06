@@ -63,7 +63,7 @@
     if (!senderAllowed(sender)) throw loopbackError('ERP_UNTRUSTED_SENDER', '只允许 ERP 采购管理页管理采集检查点。', 403);
     const config = await runtimeConfig();
     let records = await cleanCheckpoints();
-    if (input.action === 'list') return { ok: true, records: records.filter(item => item.workspaceId === config.workspaceId && item.state !== 'completed').map(({ binding, ...item }) => item) };
+    if (input.action === 'list') return { ok: true, records: records.filter(item => item.workspaceId === config.workspaceId && (input.includeCompleted === true || item.state !== 'completed')).map(({ binding, ...item }) => item) };
     const payload = await fetchLoopbackJson('/erp/v1/requests', { query: { workspaceId: config.workspaceId }, config });
     const request = (payload.records || []).find(item => item.requestId === input.requestId && item.workspaceId === config.workspaceId && item.status === 'registered' && item.requestKind !== 'catalog');
     const old = records.find(item => item.requestId === input.requestId && item.workspaceId === config.workspaceId);
@@ -81,8 +81,10 @@
       const pending = (await readPending()).find(item => item.resultDeliveryId === old.resultDeliveryId && item.workspaceId === config.workspaceId);
       return { ok: true, checkpoint: { ...old, binding: undefined }, pendingDeliveryId: pending?.resultDeliveryId || null, reuseEvidence: false, reason: 'original_account_unverified_current_session_reread' };
     }
-    if (input.action !== 'save') throw loopbackError('ERP_CHECKPOINT_ACTION_INVALID', '未知检查点操作。', 400);
+    const restart = input.action === 'restart';
+    if (input.action !== 'save' && !restart) throw loopbackError('ERP_CHECKPOINT_ACTION_INVALID', '未知检查点操作。', 400);
     if (typeof input.requestSnapshot !== 'string' || input.requestSnapshot !== binding) throw loopbackError('ERP_COLLECTION_CONTEXT_CHANGED', '采集开始时的请求快照已变化，请回工作台重新发起采集。', 409);
+    if (restart && ((input.previousDeliveryId || null) !== (old?.resultDeliveryId || null) || input.resultDeliveryId || input.state === 'completed')) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '原任务已变化，请刷新后重新采集。', 409);
     if (input.resultDeliveryId && (!old || old.resultDeliveryId !== input.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '采集检查点已失效或被替换，旧采集不能继续回传。', 409);
     if (input.state === 'completed' && (!old || input.resultDeliveryId !== old.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '旧采集送达确认不能结束新的任务。', 409);
     if (input.rotateDelivery === true && (!old || input.resultDeliveryId !== old.resultDeliveryId)) throw loopbackError('ERP_CHECKPOINT_STALE_ACK', '旧采集确认不能改写新任务投递身份。', 409);
@@ -90,11 +92,11 @@
     const targetSkcs = normalizedSkcs(request.platformSkcs);
     const targetSet = new Set(targetSkcs);
     if (!filters.sku || !targetSkcs.length || !Number.isFinite(Date.parse(input.queryCapturedAt))) throw loopbackError('ERP_CHECKPOINT_SCOPE_MISSING', '检查点缺少完整目标或查询时间。', 409);
-    if (old && JSON.stringify(filters) !== JSON.stringify(old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '查询条件已变化，旧检查点不可覆盖。', 409);
-    const resultDeliveryId = input.rotateDelivery !== true && old && (old.state !== 'completed' || input.state === 'completed') ? old.resultDeliveryId : makeResultDeliveryId();
+    if (!restart && old && JSON.stringify(filters) !== JSON.stringify(old.filters)) throw loopbackError('ERP_CHECKPOINT_QUERY_CHANGED', '查询条件已变化，旧检查点不可覆盖。', 409);
+    const resultDeliveryId = !restart && input.rotateDelivery !== true && old && (old.state !== 'completed' || input.state === 'completed') ? old.resultDeliveryId : makeResultDeliveryId();
     const record = { schemaVersion: 1, extensionVersion: chrome.runtime.getManifest().version, workspaceId: config.workspaceId, requestId: request.requestId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, binding,
       platformSkcs: targetSkcs, filters, queryCapturedAt: input.queryCapturedAt, accountState: 'unverified',
-      completedTargets: normalizedSkcs(input.completedTargets).filter(skc => targetSet.has(skc)),
+      completedTargets: normalizedSkcs(restart ? [] : input.completedTargets).filter(skc => targetSet.has(skc)),
       resultDeliveryId,
       ...(old?.resultDeliveryId === resultDeliveryId ? { submittedHash: old.submittedHash, receipt: old.receipt } : {}),
       state: input.state === 'completed' ? 'completed' : 'pending', updatedAt: Date.now() };
