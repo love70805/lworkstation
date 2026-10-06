@@ -1,4 +1,5 @@
 import { assertUniquePlatformSkus } from "./identifiers.js";
+import { validateSalesRowsAuditSnapshot } from "./salesRowsAuditSnapshot.js";
 
 export const WORKSPACE_BACKUP_FORMAT = "shopeers-local-backup";
 export const WORKSPACE_BACKUP_VERSION = 1;
@@ -17,6 +18,11 @@ export function validateWorkspaceBackupPayload(payload, { tableNames = [] } = {}
 
   for (const [name, rows] of Object.entries(payload.tables)) {
     if (!Array.isArray(rows)) throw new Error(`备份数据表 ${name} 不是有效记录列表。`);
+  }
+  for (const event of payload.tables.auditEvents ?? []) {
+    if (event.action === "imported" && event.after?.snapshot?.salesRows != null) {
+      validateSalesRowsAuditSnapshot(event.after.snapshot.salesRows);
+    }
   }
 
   const platformSkus = payload.tables.platformSkus ?? [];

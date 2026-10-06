@@ -3,6 +3,7 @@ import { buildSyncEnvelope } from "./syncEnvelope";
 import { syncEventContentHash } from "./syncEventHash";
 import { buildErpVoidTransitionId } from "./syncLifecycleGroup";
 import { applySyncEnvelopeWithPostgresClient, buildSyncPostgresPlan } from "./syncPostgresPlan";
+import { encodeSalesRowsAuditSnapshot, SALES_ROWS_AUDIT_MIN_ROWS } from "./salesRowsAuditSnapshot";
 
 const createdAt = "2026-08-07T08:00:00.000Z";
 
@@ -192,6 +193,35 @@ function fakeClient({
 }
 
 describe("sync postgres transaction plan", () => {
+  it("uses the shared decoder for dictionary sales snapshots and keeps exact source payloads", async () => {
+    const rows = Array.from({ length: SALES_ROWS_AUDIT_MIN_ROWS }, (_, index) => ({
+      id: index + 1, workspaceId: "workspace-default", ledgerId: "L-1", batchId: "I-1", groupKey: "甲店|SKC-1", skuKey: `SKU-${index}`,
+      store: "甲店", platformSkc: "SKC-1", platformSku: `SKU-${index}`, canonicalPlatformSku: `SKU-${index}`,
+      quantity: 0.000123456789, quantityExact: "0.000123456789123456789", amount: 12.3456789,
+      amountExact: "12.3456789123456789", orderId: `00012345678901234567890123456789${index}`,
+      sourceRow: index + 2, raw: { 金额: "12.3456789123456789", 备注: null }, importedAt: createdAt,
+    }));
+    const snapshot = {
+      importBatch: { id: "I-1", workspaceId: "workspace-default", ledgerId: "L-1", fileName: "sales.csv", status: "completed", period: "2026-08", createdAt },
+      ledger: ledger(), salesRows: rows,
+    };
+    const salesEvent = event({ objectType: "sales_import_batch", objectId: "I-1", action: "imported", snapshot });
+    const plainPlan = await buildSyncPostgresPlan(envelope([salesEvent]));
+    const encoded = encodeSalesRowsAuditSnapshot(rows);
+    const compactEnvelope = JSON.parse(JSON.stringify(envelope([{ ...salesEvent, after: { snapshot: { ...snapshot, salesRows: encoded } } }])));
+    const compactPlan = await buildSyncPostgresPlan(compactEnvelope);
+    expect(compactPlan.eventPlans[0].operations).toEqual(plainPlan.eventPlans[0].operations);
+    expect(compactPlan.eventPlans[0].event.after.snapshot.salesRows).toEqual(encoded);
+    const insert = compactPlan.eventPlans[0].operations.find(operation => operation.table === "sales_rows" && operation.rowCount);
+    expect(insert.rowCount).toBe(rows.length);
+    expect(JSON.parse(insert.values[1])[rows.length - 1]).toMatchObject({
+      order_id: rows.at(-1).orderId, quantity: rows.at(-1).quantity, revenue: rows.at(-1).amount,
+      source_payload: rows.at(-1),
+    });
+    compactEnvelope.events[0].after.snapshot.salesRows.rows[0][1] += 1;
+    await expect(buildSyncPostgresPlan(compactEnvelope)).rejects.toThrow("完整性校验失败");
+  });
+
   it("maps product replacement into workspace-scoped, parameterized SQL", async () => {
     const plan = await buildSyncPostgresPlan(envelope([event({ snapshot: productSnapshot() })]));
     const operations = plan.eventPlans[0].operations;

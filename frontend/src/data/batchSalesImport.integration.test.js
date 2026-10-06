@@ -1,10 +1,11 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { db, DEFAULT_WORKSPACE_ID, previewSalesImports, saveSalesImports, saveSalesImport, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload } from "./database";
+import { db, DEFAULT_WORKSPACE_ID, previewSalesImports, saveSalesImports, saveSalesImport, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload, restoreWorkspaceSyncRecoveryPayload } from "./database";
 import { validateSalesRows } from "../lib/salesImport";
 import { summarizeLedgerRows } from "../domain/ledgerImport";
 import { buildSyncRecoveryPayload, replaySyncRecoveryPayload } from "../domain/syncRecovery";
 import { createImportStage, appendImportStage, sealImportStage, clearImportStages } from '../lib/salesImportStage';
+import { decodeSalesRowsAuditSnapshot, SALES_ROWS_AUDIT_FORMAT, SALES_ROWS_AUDIT_MIN_ROWS } from '../domain/salesRowsAuditSnapshot';
 
 const period = "2026-08";
 const mapping = { platformSku: "SKU", platformSkc: "SKC", quantity: "数量", amount: "金额", directPenalty: "罚款" };
@@ -22,10 +23,104 @@ async function commit(items, overrides = {}) {
 async function facts() {
   return { ledgers: await db.ledgers.toArray(), batches: await db.importBatches.toArray(), rows: await db.salesRows.toArray(), audits: await db.auditEvents.toArray() };
 }
+function largeFile(storeName, count = SALES_ROWS_AUDIT_MIN_ROWS + 3) {
+  const raw = Array.from({ length: count }, (_, index) => ({ SKU: `SKU-${index % 50}`, SKC: '大商品', 数量: '0.123456789123456789', 金额: '12.3456789123456789', 罚款: '0', 业务单号: `00012345678901234567890123456789${index}` }));
+  const item = file(storeName, 12.3456789123456789, { raw });
+  item.rows.forEach((row, index) => Object.assign(row, {
+    orderId: raw[index].业务单号, sourceSheet: '台账变动明细', sourceRow: index + 2,
+    rawAddedAt: '2026-08-31 23:59:59', sourceAddedDate: '2026-08-31', sourceAddedAt: '2026-08-31T23:59:59.000+08:00',
+    raw: raw[index],
+  }));
+  return item;
+}
 beforeEach(async () => { await db.delete(); await db.open(); });
 afterEach(async () => { vi.restoreAllMocks(); db.close(); await db.delete(); });
 
 describe("同月多店铺原子台账导入", () => {
+  it('stores one compact audit per large source and roundtrips JSON backups and sync recovery without schema changes', async () => {
+    const item = largeFile('大店');
+    const result = await commit([item, file('小店')]);
+    const state = await facts();
+    const events = state.audits.filter(event => event.action === 'imported');
+    expect(events).toHaveLength(2);
+    const largeAudit = events.find(event => event.after.fileName === item.fileName);
+    expect(largeAudit.after.snapshot.salesRows).toMatchObject({ format: SALES_ROWS_AUDIT_FORMAT, version: 1, rowCount: item.rows.length });
+    const stored = state.rows.filter(row => row.batchId === largeAudit.objectId);
+    expect(decodeSalesRowsAuditSnapshot(largeAudit.after.snapshot.salesRows)).toEqual(stored);
+    expect(stored.at(-1)).toMatchObject(item.rows.at(-1));
+    expect(Array.isArray(events.find(event => event !== largeAudit).after.snapshot.salesRows)).toBe(true);
+    const backup = JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));
+    await restoreWorkspaceBackupPayload(backup);
+    expect(await db.salesRows.toArray()).toEqual(state.rows);
+    expect(decodeSalesRowsAuditSnapshot((await db.auditEvents.toArray()).find(event => event.id === largeAudit.id).after.snapshot.salesRows)).toEqual(stored);
+    const payload = JSON.parse(JSON.stringify(buildSyncRecoveryPayload({ workspaceId: DEFAULT_WORKSPACE_ID, events })));
+    await restoreWorkspaceSyncRecoveryPayload(payload);
+    expect(await db.salesRows.toArray()).toEqual(state.rows);
+    expect((await db.ledgers.toArray())[0].summary).toEqual(result.finalSummary);
+    expect((await previewSalesImports({ period, items: [item] })).items[0].status).toBe('skipped_duplicate');
+  }, 30000);
+
+  it('rejects corrupted compact backups and sync recovery before touching existing facts', async () => {
+    await commit([largeFile('大店')]);
+    const before = await facts();
+    const backup = JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));
+    backup.tables.auditEvents.find(event => event.action === 'imported').after.snapshot.salesRows.strings[0] += 'damaged';
+    await expect(restoreWorkspaceBackupPayload(backup)).rejects.toThrow('完整性校验失败');
+    expect(await facts()).toEqual(before);
+    const payload = buildSyncRecoveryPayload({ workspaceId: DEFAULT_WORKSPACE_ID, events: structuredClone(before.audits.filter(event => event.action === 'imported')) });
+    payload.events[0].after.snapshot.salesRows.rowCount += 1;
+    await expect(restoreWorkspaceSyncRecoveryPayload(payload)).rejects.toThrow('行数不一致');
+    expect(await facts()).toEqual(before);
+  }, 30000);
+
+  it.each([false, true])('rolls back the complete multi-store transaction if a compact audit fails after two files (existing=%s)', async existing => {
+    if (existing) await commit([file('大甲店'), file('保留店')]);
+    const input = { period, items: [largeFile('大甲店'), largeFile('大乙店'), largeFile('大丙店')] };
+    const preview = await previewSalesImports(input);
+    const before = await facts();
+    const realAdd = db.auditEvents.add.bind(db.auditEvents);
+    const imported = [];
+    vi.spyOn(db.auditEvents, 'add').mockImplementation(event => {
+      if (event.action === 'imported') {
+        imported.push(event);
+        if (imported.length === 3) throw new Error('synthetic audit size failure');
+      }
+      return realAdd(event);
+    });
+    await expect(saveSalesImports({ ...input, preview, overwriteSignature: preview.targetSignature })).rejects.toThrow('synthetic audit size failure');
+    expect(imported).toHaveLength(3);
+    expect(imported.every(event => event.after.snapshot.salesRows.format === SALES_ROWS_AUDIT_FORMAT)).toBe(true);
+    expect(await facts()).toEqual(before);
+  }, 30000);
+
+  it.each(['during chunks', 'after audit'])('keeps cancellation atomic with a compact snapshot %s', async when => {
+    await commit([file('保留店')]);
+    const input = { period, items: [file('小店'), largeFile('大店', 4101)] };
+    const preview = await previewSalesImports(input);
+    const before = await facts();
+    const controller = new AbortController();
+    if (when === 'after audit') {
+      const realAdd = db.auditEvents.add.bind(db.auditEvents);
+      vi.spyOn(db.auditEvents, 'add').mockImplementation(event => realAdd(event).then(key => {
+        if (event.action === 'imported' && event.after.snapshot.salesRows.format === SALES_ROWS_AUDIT_FORMAT) controller.abort();
+        return key;
+      }));
+    }
+    await expect(saveSalesImports({ ...input, preview, signal: controller.signal, onProgress: value => {
+      if (when === 'during chunks' && value.completed === 4001) controller.abort();
+    } })).rejects.toThrow('整批写入已回滚');
+    expect(await facts()).toEqual(before);
+  }, 30000);
+
+  it('also compacts the legacy single-file API while retaining its return shape', async () => {
+    const item = largeFile('大店');
+    const result = await saveSalesImport({ ...item, period });
+    expect(result).toMatchObject({ batchId: expect.any(String), ledgerId: expect.any(String), addedGroupCount: 1, replacedGroupCount: 0 });
+    const audit = (await db.auditEvents.toArray()).find(event => event.action === 'imported');
+    expect(audit.after.snapshot.salesRows.format).toBe(SALES_ROWS_AUDIT_FORMAT);
+    expect(decodeSalesRowsAuditSnapshot(audit.after.snapshot.salesRows)).toEqual(await db.salesRows.toArray());
+  }, 30000);
+
   async function staged(item, owner = 'stage-test') {
     const id = await createImportStage(owner);
     // Include an empty excluded block, as a genuine workbook can contain one.
