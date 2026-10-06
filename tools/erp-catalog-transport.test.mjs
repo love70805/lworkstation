@@ -112,8 +112,9 @@ export async function verifyErpCatalogTransport({
     window.document.body.innerHTML = '<table><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/999999999999.html">供应商甲</a></td></tr><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/888888888888.html">供应商甲</a></td></tr></table>';
     const sender = { frameId: 0, url: erpUrl, tab: { url: erpUrl } };
     window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
+      // Assert dispatch order, not the nondeterministic completion order of two HTTP deliveries.
+      if (message.type === "shopeers.erp.submitCostResult" || message.type === "shopeers.erp.submitCatalogResult") submissionOrder.push(message.type);
       listeners[0](message, sender, (response) => {
-        if (message.type === "shopeers.erp.submitCostResult" || message.type === "shopeers.erp.submitCatalogResult") submissionOrder.push(message.type);
         if (message.type === "shopeers.erp.submitCatalogResult") catalogSubmitted.push({ payload: structuredClone(message.payload), response: structuredClone(response) });
         if (message.type === "shopeers.erp.submitCostResult") submitted.push({ payload: structuredClone(message.payload), response: structuredClone(response) });
         callback(response);
