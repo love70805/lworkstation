@@ -22,7 +22,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.30' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.31' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -233,7 +233,7 @@ const compatible = (await api.collectionCheckpoint(await input(), sender)).check
 storage[checkpointKey][0].extensionVersion = '8.0.29';
 api = background();
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, compatible.resultDeliveryId);
-console.log('8.0.29 to 8.0.30 compatible checkpoint retention passed');
+console.log('8.0.29 to 8.0.31 compatible checkpoint retention passed');
 
 // Reopen after a completed checkpoint: the normal list hides completed tasks,
 // but opening the panel must never auto-write a changed query into that task.
@@ -264,3 +264,9 @@ await waitFor(() => pendingOpen.deliveries.length === 1 && storage[checkpointKey
 assert.notEqual(pendingOpen.deliveries[0].resultDeliveryId, raceTask.resultDeliveryId);
 await pendingOpen.window.happyDOM.close();
 console.log('Completed/pending reopen with delayed task list, explicit recalculation and fresh-write race protection passed');
+
+request = fresh(); storage[checkpointKey] = []; api = background();
+const old30 = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
+storage[checkpointKey][0].extensionVersion = '8.0.30';
+assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
+console.log('8.0.30 checkpoint retained under 8.0.31');
