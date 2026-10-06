@@ -1,3 +1,5 @@
+import { useOperatorScope } from '../hooks/useOperatorScope';
+import { filterOperatorRows } from '../domain/operatorScope';
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
@@ -313,7 +315,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       return { ...row, finalizable: decision.eligibleForExactProfit };
     }), [formalCostsBySku, salesLines, snapshot?.ledger, snapshot?.approvals]);
   const supplierSelectionKey = JSON.stringify(profitFilter.supplierSelection);
-  const scopedSalesLines = useMemo(() => filterProfitRowsByScope(formalSalesLines, profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly]);
+  const operator = useOperatorScope(snapshot?.ledger?.workspaceId);
+  const scopedSalesLines = useMemo(() => filterProfitRowsByScope(filterOperatorRows(formalSalesLines, operator.scope, snapshot?.rows), profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly, operator.scope, snapshot?.rows]);
   const filteredSalesLines = useMemo(() => searchProfitRows(scopedSalesLines, profitFilter.query), [scopedSalesLines, profitFilter.query]);
   const conflictingLedgerSkus = useMemo(() => {
     const skcsBySku = new Map(), conflicts = new Set();
