@@ -1,5 +1,7 @@
 # 0.3.9 采集、导入与双面板筛选验收
 
+> 2026-10-06：本版本 GitHub Release 及附件已按用户授权撤回，标签和提交历史保留。以下为当时交付记录；旧发布附件链接已失效。元数据、正文及资产哈希见 [清理归档](integration/ERP_RELEASE_CLEANUP_2026_10.md)。
+
 ## 更新内容
 
 - ERP Assistant 8.0.29 保留当前采购表单的 27 个已验证查询字段及空值，修正 `ERP_CHECKPOINT_QUERY_UNSUPPORTED`；恢复仍绑定原请求和范围，未知条件仍明确拒绝。
