@@ -1,3 +1,7 @@
+## 0.3.10 ERP 检查点恢复候选（2026-10-06）
+
+原件：releases/candidates/0.3.10/，证据：archive/release-0.3.10/。1270 测试、构建、桌面 verify、隐藏 smoke 和包内一致性通过；未本机安装。安装包 SHA256：C1D8C4336E3C7F8E904A64CFE6344E7C899E35F904C90CA4903F5555F571D0D3。见 [发布记录](../docs/RELEASE_0.3.10.md)。
+
 # Lworkstation 发布文件
 
 - `candidates/<版本与用途>/`：仅供本机验收的候选包与校验清单，不接入公开更新源。

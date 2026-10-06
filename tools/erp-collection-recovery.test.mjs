@@ -22,7 +22,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.29' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.30' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -186,3 +186,51 @@ assert.equal(storage[checkpointKey][0].state, 'pending', 'partial ACK must prese
 assert.notEqual(storage[checkpointKey][0].resultDeliveryId, partial.deliveries[0].resultDeliveryId, 'a fuller retry cannot reuse the immutable acknowledged partial payload identity');
 await partial.window.happyDOM.close();
 console.log('ERP recovery: real background restart/storage isolation, invalidation, bounded retention, credentials exclusion, refresh/reopen/restart, cancellation, explicit continuation and stable ACK identity passed');
+
+// Explicit new attempt is a compare-and-swap; ordinary continuation stays strict.
+request = fresh(); storage[checkpointKey] = []; api = background();
+const original = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
+const pendingKey = 'shopeersErpPendingCostResultsV2';
+const retainedPayload = { workspaceId: request.workspaceId, resultDeliveryId: original.resultDeliveryId, createdAt: new Date().toISOString(), synthetic: true };
+storage[pendingKey] = [retainedPayload];
+const changed = { ...(await input()), filters: { ...currentQueryFilters, queryRange: '0' } };
+await assert.rejects(api.collectionCheckpoint(changed, sender), /ERP_CHECKPOINT_QUERY_CHANGED/);
+await assert.rejects(api.collectionCheckpoint({ ...changed, action: 'restart', previousDeliveryId: 'stale' }, sender), /ERP_CHECKPOINT_STALE_ACK/);
+const restarted = (await api.collectionCheckpoint({ ...changed, action: 'restart', previousDeliveryId: original.resultDeliveryId }, sender)).checkpoint;
+assert.notEqual(restarted.resultDeliveryId, original.resultDeliveryId);
+assert.equal(restarted.filters.queryRange, '0');
+assert.deepEqual([...restarted.completedTargets], []);
+assert.deepEqual(storage[pendingKey], [retainedPayload], 'new attempt preserves old pending payload');
+await assert.rejects(api.collectionCheckpoint({ ...changed, resultDeliveryId: original.resultDeliveryId }, sender), /ERP_CHECKPOINT_STALE_ACK/);
+await assert.rejects(api.collectionCheckpoint({ ...changed, action: 'restart', previousDeliveryId: original.resultDeliveryId }, sender), /ERP_CHECKPOINT_STALE_ACK/);
+await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender), /ERP_CHECKPOINT_QUERY_CHANGED/);
+assert.equal((await api.collectionCheckpoint({ ...changed, resultDeliveryId: restarted.resultDeliveryId }, sender)).checkpoint.resultDeliveryId, restarted.resultDeliveryId);
+console.log('Explicit changed-query restart: new identity, empty progress, retained pending payload, stale writer and stale restart rejection passed');
+
+storage[checkpointKey] = []; storage[pendingKey] = []; request = fresh(); api = background();
+const priorUi = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
+const ui = await page();
+await waitFor(() => !ui.window.document.getElementById('erpa-resume').hidden);
+ui.window.dispatchEvent(new ui.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl.replace('queryRange=1', 'queryRange=0') } }));
+let confirms = 0;
+ui.window.confirm = message => { confirms++; assert.match(message, /从零读取/); return false; };
+ui.window.document.getElementById('erpa-recalculate').click();
+await waitFor(() => confirms === 1);
+assert.equal(ui.reads.length, 0, 'cancel keeps existing task without purchase reads');
+assert.equal(storage[checkpointKey][0].resultDeliveryId, priorUi.resultDeliveryId);
+ui.window.confirm = () => true;
+ui.window.document.getElementById('erpa-recalculate').click();
+await waitFor(() => ui.deliveries.length === 1 && storage[checkpointKey][0].state === 'completed');
+assert.notEqual(ui.deliveries[0].resultDeliveryId, priorUi.resultDeliveryId);
+assert.equal(ui.reads.find(item => item.name === 'purchase-order-page').sku, 'SKC-A');
+assert.equal(storage[checkpointKey][0].filters.queryRange, '0');
+await ui.window.happyDOM.close();
+console.log('Production recalculate button: changed query confirmation, cancel preservation, from-zero reads and new delivery passed');
+
+// Patch update preserves prior compatible checkpoints and their pending payloads.
+request = fresh(); storage[checkpointKey] = []; api = background();
+const compatible = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
+storage[checkpointKey][0].extensionVersion = '8.0.29';
+api = background();
+assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, compatible.resultDeliveryId);
+console.log('8.0.29 to 8.0.30 compatible checkpoint retention passed');
