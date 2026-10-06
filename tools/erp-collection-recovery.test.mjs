@@ -149,6 +149,7 @@ async function page({ cancel = false, mappingIncomplete = false, checkpointListD
     const url = new URL(raw), name = url.pathname.split('/').at(-1), sku = url.searchParams.get('sku');
     reads.push({ name, sku });
     if (name === 'purchase-order-page') {
+      assert.ok(['SKC-A', 'SKC-B'].includes(sku), 'ERP query uses the SKC value, never an object serialization');
       assert.equal(url.searchParams.get('storeId'), 'STORE-A', 'selected store remains bounded');
       assert.equal(url.searchParams.get('queryRange'), '0', 'official cost reads the full target history');
       for (const key of ['createTimePeriod', 'tradeName', 'exceptionSheetStatus', 'inTransitTime', 'mineableType', 'buildType', 'sort']) assert.equal(url.searchParams.has(key), false, key + ' cannot silently restrict complete target history');
@@ -287,3 +288,17 @@ console.log('8.0.30 checkpoint retained under 8.0.32');
 storage[checkpointKey][0].extensionVersion = '8.0.31';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
 console.log('8.0.31 checkpoint retained under 8.0.32 with current query validation');
+
+// The production inbox contract returns identity objects, unlike legacy strings.
+request = { ...fresh(), platformSkcs: ['SKC-A', 'SKC-B'].map(platformSkc => ({ platformSkc, canonicalPlatformSkc: platformSkc })) };
+storage[checkpointKey] = []; storage[pendingKey] = [];
+const objectTargets = await page();
+objectTargets.window.dispatchEvent(new objectTargets.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: capturedQueryUrl } }));
+objectTargets.window.document.getElementById('erpa-cost-trigger').click();
+await waitFor(() => objectTargets.deliveries.length === 1 && storage[checkpointKey][0].state === 'completed');
+assert.deepEqual(objectTargets.reads.filter(item => item.name === 'purchase-order-page').map(item => item.sku), ['SKC-A', 'SKC-B']);
+assert.deepEqual([...objectTargets.deliveries[0].meta.querySkcs], ['SKC-A', 'SKC-B']);
+assert.equal(objectTargets.deliveries[0].meta.orderCount, 2);
+assert.equal(objectTargets.deliveries[0].results.length, 2);
+await objectTargets.window.happyDOM.close();
+console.log('Production identity-object request targets: exact ERP query values and nonempty cost delivery passed');

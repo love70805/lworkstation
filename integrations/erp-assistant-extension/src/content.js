@@ -1123,7 +1123,13 @@
         const startedAt = Date.now();
         const capturedSkcs = extractQuerySkcs(filters);
         const previewContext = run.previewContext || await readPreviewContext(capturedSkcs, run.queryCapturedAt);
-        const querySkcs = Array.isArray(previewContext.platformSkcs) && previewContext.platformSkcs.length ? previewContext.platformSkcs : capturedSkcs;
+        // Inbox identities are { platformSkc, canonicalPlatformSkc } objects.
+        // Canonical keys bind scope; ERP queries must use the original identifier.
+        const querySkcs = (Array.isArray(previewContext.platformSkcs) && previewContext.platformSkcs.length ? previewContext.platformSkcs : capturedSkcs).map((target) => {
+            const value = target && typeof target === 'object' ? target.platformSkc : target;
+            if (typeof value !== 'string' || !value.trim()) throw new CostError('核算目标格式无效', '平台 SKC 缺少可查询的标识，请返回工作台重新查询。');
+            return value.trim();
+        });
         run.requestId = previewContext.requestId;
         run.requestSnapshot = previewContext.requestSnapshot;
         run.ledgerPeriod = previewContext.ledgerPeriod;
