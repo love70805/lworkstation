@@ -1,22 +1,38 @@
 # Lworkstation 经营管理工作台
 
-选品工作台与利润核算面板的一体化内部工具。仅继续开发与交付 Lworkstation Windows 桌面安装版，内置工作站、ERP 和 1688 受控标签；`frontend/` 作为 Electron 内置界面维护，不开发或发布独立浏览器版本。当前交付为纯本机版本，无需云端数据库。
+面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、1688 参考采集、ERP 成本核对和利润核算放在同一个本机工作区。
 
-本 README 属于源码开发文档。源码与公开更新渠道正在分离：后续开发仓库为私有 `love70805/lworkstation-source`；公开 `love70805/lworkstation` 只承载独立干净历史、下载/更新说明和 Release 资产。当前迁移尚在进行，完成情况以 [迁移契约](docs/integration/PRIVATE_SOURCE_UPDATE_CHANNEL_2026_10.md) 和任务看板的核验记录为准。
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.5 更新说明](docs/RELEASE_0.4.5.md)
 
-## 下载与项目入口
+当前稳定版为 **v0.4.5**。工作站、ERP 和 1688 在桌面应用内分别打开；首次使用时在相应标签完成登录。本机版无需配置云端数据库，下载和安装更新由用户操作。
 
-- [稳定版与安装包](https://github.com/love70805/lworkstation/releases/latest)
-- [公开版本与分发资产](https://github.com/love70805/lworkstation/releases)
-- [当前发布状态](docs/RELEASE_STATUS.md) · [历史版本与本机候选登记](releases/README.md)
-- [下一版待改动](docs/NEXT_UPDATE.md)：需求与静态预览已整理，尚未实施，不代表当前版本功能。
-- [开发任务看板](docs/CODEX_TASK_BOARD.md) · [跨电脑续接指南](docs/CODEX_RESTART_GUIDE.md)
+## 主要功能
 
-源码、开发分支/标签、PR、内部文档、测试和 CI 只进入私有源码仓库，禁止镜像到公开更新仓库。公开版本标签指向公开仓库自身的干净提交，不指向源码提交。开发 `origin` 切换后，公开 Release 操作必须显式使用 `gh release ... --repo love70805/lworkstation`，避免默认仓库推断把安装包或更新元数据发到私有仓库。自动发布授权限于通过验收的分发产物及必要发布说明。
+- **台账导入**：同月多店批量导入，按关键词或货号后缀选择自己的商品，预览数量、金额和覆盖范围。完整月重导替换本店本月的选择，部分日期来源保留分组追加或替换规则。
+- **预存区与选品库**：导入资料先进入预存区，逐步补齐名称、图片、SKU 属性、售价及供应商来源；达到完整标准后自动进入选品库。1688 成本与利润用于选品参考。
+- **ERP 成本采集**：默认每批 20 个 SKC，分批回传，支持暂停、停止、失败重试及重启后手动继续；分别显示已采集、已送达和已采用。
+- **月度利润核算**：使用台账收入和 ERP 正式成本，人工更正优先，保留成本审计、月度定稿和历史报告。
+- **经营分析与本地管理**：每日／月度销售趋势、店铺和 SKC 构成、明细与 Excel 导出，以及工作区备份、恢复和系统检查。
 
-## 桌面界面开发
+## 开始使用
 
-在工作区根目录执行，通过 Electron 验证桌面界面：
+1. 从 [Releases](https://github.com/love70805/lworkstation/releases/latest) 下载 Windows x64 安装包并安装。
+2. 打开工作站，导入月度文件，确认月份、店铺和负责货号。
+3. 在 ERP 标签登录并采集成本，在利润核算页核对缺失或异常项。
+4. 在预存区补齐商品资料，核算完成后保存月度报告并导出。
+
+业务数据保存在本机。更换电脑或执行恢复前，先通过应用的备份功能保全工作区。不要把业务 Excel、本机数据库、登录信息、Cookie 或 Token 提交到仓库。
+
+## 业务口径
+
+- 默认币种为人民币（CNY）。平台 SKC 为商品父级，平台 SKU 为工作区全局唯一的属性分支。
+- ERP 成本用于正式利润核算，1688 成本用于参考。
+- 显式人工更正优先于 ERP，需填写非负单件成本及说明，并保留可撤销审计。
+- 后续回传不得覆盖有效人工更正，也不得静默改变已定稿利润。
+
+## 本地开发
+
+前置环境：Windows、Node.js 和 pnpm；版本及依赖以仓库锁文件和 CI 配置为准。
 
 ```powershell
 pnpm --dir frontend install
@@ -24,78 +40,38 @@ pnpm --dir desktop install
 pnpm --dir desktop dev
 ```
 
-开发命令会启动 Vite 和 Electron，Vite 只为桌面开发提供热更新资源，不作为独立浏览器产品。桌面内置界面路由：
+`frontend/` 为 Electron 内置界面，开发时由 Vite 提供热更新；当前产品以 Windows 桌面安装版交付。工作站入口和模块边界见 [AGENTS.md](AGENTS.md)。
 
-- `/workspace`：经营概览
-- `/products`：选品工作台
-- `/products?view=pending`：待确认采集
-- `/profit`：利润核算
-- `/ledger`：月度账本
-- `/cost-matching`：ERP 成本核对
-- `/data-security`：备份与恢复
-
-## Lworkstation Windows 桌面版
-
-稳定版安装包从 [原公开更新入口](https://github.com/love70805/lworkstation/releases/latest) 下载，已交付版本和验收依据见 [发布状态](docs/RELEASE_STATUS.md) 与 [任务看板](docs/CODEX_TASK_BOARD.md)。源码迁移不改变客户端 updater 的 owner/repo：仍为 `love70805/lworkstation`；不会改为私有仓库，也不要求客户端保存 GitHub Token。迁移本身不创建空软件版本，不自动安装、不改真实业务库，不改写历史许可证或第三方声明。
-
-桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
+常用验证：
 
 ```powershell
-pnpm --dir desktop install
-pnpm --dir desktop dev
+pnpm --dir frontend test
+pnpm --dir frontend build
+pnpm --dir desktop verify
 ```
 
-`dev` 会启动 Vite 和 Electron。稳定版使用 `pnpm --dir desktop build`。当前 Beta 候选使用 `release:build`，先构建 `frontend/dist`，再打入受控 beta 更新配置：
+准备桌面候选：
 
 ```powershell
-pnpm --dir desktop verify
 pnpm --dir desktop release:build
 pnpm --dir desktop smoke:packaged
 pnpm --dir desktop release:organize
 pnpm --dir desktop release:check
 ```
 
-Beta 安装包命名为 `Lworkstation-Setup-<版本>.exe`，由 `desktop/release-test/<版本>/` 整理到 `releases/prerelease/<版本>/`，更新元数据为 `beta.yml`。稳定版本使用 `pnpm --dir desktop build`，安装包命名为 `Lworkstation Setup <版本>.exe`，整理到 `releases/latest/`，历史稳定版本位于 `releases/history/<版本>/`，更新元数据为 `latest.yml`。具体目录规则见 [releases/README.md](releases/README.md)。
+按改动范围补充实际用户路径和桌面验证；构建成功不等于已经发布。发布要求及候选目录见 [开发规则](AGENTS.md)、[发布文件登记](releases/README.md) 和 [更新验收清单](desktop/UPDATE_RELEASE_CHECKLIST.md)。
 
-正式桌面包从私有源码仓库中已核对、通过验收的集成基线构建。Worktree 产物先用于候选验收；主线构建后运行 `release:organize` 和 `release:check`，检查 `desktop/release-plan.json` 中的必需提交、版本、安装包与更新元数据，并输出大小和 SHA-256。这些本地命令不上传 GitHub Release，完成本地检查不代表已经发布。公开仓库仅接收分发产物，源码提交、开发标签和完整构建证据留在私有仓库。
+## 仓库导航
 
-安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
+| 目录 | 用途 |
+| --- | --- |
+| `frontend/` | 工作站界面、业务契约、本机数据库与测试 |
+| `desktop/` | Electron 桌面壳、扩展加载、本机收件服务管理和更新 |
+| `integrations/` | ERP Assistant 与 1688 采集扩展 |
+| `tools/` | 契约验证、采集回归、构建和辅助工具 |
+| `docs/` | 当前任务、发布记录、业务契约及历史归档 |
+| `releases/` | 候选和历史产物的登记说明；安装包从 Releases 下载 |
 
-0.2.7 起稳定检查默认开启；新 Beta 构建默认开启 beta 检查，两个通道禁止互跳和降级。下载和安装需用户操作，客户端不保存 GitHub Token。旧 0.2.6 关闭检查，需手工安装新版；旧 beta.7 仍带旧更新策略，继续 Beta 建议手工下载 `0.3.0-beta`，不假定旧包能自动升级。稳定版不会自动切到 Beta。测试夹具与真实更新验收见 [desktop/UPDATE_RELEASE_CHECKLIST.md](desktop/UPDATE_RELEASE_CHECKLIST.md)。
+[当前发布状态](docs/RELEASE_STATUS.md) · [开发任务看板](docs/CODEX_TASK_BOARD.md) · [跨电脑续接](docs/CODEX_RESTART_GUIDE.md) · [贡献说明](CONTRIBUTING.md) · [安全报告](SECURITY.md)
 
-生产版工作站通过 Electron 内部 `shopeers://` 安全协议读取前端资源；ERP / 1688 采集回传只监听 `127.0.0.1` 本机回环地址，默认端口为 `8790`，测试或受控启动可使用运行时端口。桌面会把实际 inbox origin 注入内置扩展，不接受局域网连接，通常不需要放行 Windows 防火墙。开发模式仍由 Vite 提供热更新页面。
-
-桌面版会尝试加载仓库中的解压 MV3 扩展：`integrations/erp-assistant-extension` 与 `integrations/1688-selection-extension`。扩展加载失败不会影响工作站、ERP 或 1688 页面继续使用。`0.2.2` 起 Electron 会自动启动并管理本机收件服务，并把实际端口同步给内置扩展；若已有兼容服务则复用，若端口被其他程序占用则明确提示且不会终止该程序。左上 ERP 状态圆点及其紧凑浮窗显示通道正常、处理和错误状态；成本异常处置和成本核对仍在工作站业务页面完成，桌面状态浮窗不执行重试或业务跳转。
-
-ERP inbox transport v2 与 batch `formatVersion: 2` 会保留 `warehouseEvidence` 和证据完整状态。旧版 v1 只显示为 `legacy_partial` 预览，不能由桌面层标记为正式成本；正式成本仍只能在 Lworkstation `CostMatching` / `profitRepository` 中处理和发布，`unitCost` 仅为兼容预览值。
-
-自动 packaged smoke 会使用随机本机端口和可控 v2 fixture 验证“扩展格式回传 -> inbox 接收 -> 工作站轮询读取并确认 -> ERP 状态进入待核对阶段”。真实环境仍需手工检查：启动后确认工作站正常显示；分别打开 ERP / 1688 标签并完成一次真实登录；在 ERP 采购页完成一次分页采集，确认扩展注入、平台 SKU/SKC 映射、完整 `warehouseEvidence` 和供应商 1688 链接均已回传；重启桌面应用后确认登录态仍在；点击 1688 搜索结果和商品链接，确认站内新窗口留在当前标签；在任一远程页加载失败时切回“工作站”确认不受影响。最后运行 `pnpm --dir frontend test`、`pnpm --dir frontend build`、`pnpm --dir frontend erp:bridge:test`、`pnpm --dir frontend erp:inbox:test`、`pnpm --dir desktop verify` 和 `pnpm --dir desktop smoke:packaged`。
-
-## 业务口径
-
-- 平台 SKC 是商品父级标识。
-- 平台 SKU 是工作区全局唯一标识，也是 SKC 下的属性分支。
-- 利润核算从月度台账提取 SKC、SKU、属性、数量和金额。
-- 默认使用 ERP 正式成本；1688 成本只作参考。
-- 显式人工更正优先于 ERP，仅需非负单件成本和更正说明，允许真实零值与微小正数；限定当前工作区、月份、店铺和平台 SKU，可撤销并保留审计。后续回传不得覆盖人工有效值，也不得静默覆盖已定稿利润。
-- 默认币种为人民币。
-
-## 验收命令
-
-```powershell
-pnpm --dir frontend cloud:check
-pnpm --dir frontend test
-pnpm --dir frontend release:check
-```
-
-后续 GitHub Actions 与开发 PR 在私有源码仓库运行，具体触发分支以该仓库工作流为准，不把开发 CI 上传至公开分发仓库。Ubuntu 检查前端 `release:check`，Windows 检查桌面 `verify`；桌面检查覆盖静态约束、IPC、扩展运行时、导航、inbox 生命周期和更新/发布产物契约。打包 smoke、真实 ERP/1688 采集与真实更新安装仍需单独验收。
-
-## 可选云端开发资料
-
-仓库保留云端实验与部署资料：[docs/CLOUD_UPLOAD_GUIDE.md](docs/CLOUD_UPLOAD_GUIDE.md) 与 [frontend/docs/DEPLOYMENT_GUIDE.md](frontend/docs/DEPLOYMENT_GUIDE.md)。这些资料不是当前纯本机版的安装前置条件；现有资料不代表用户已配置云端，也不授权执行云端迁移。
-
-## Codex 多任务续接
-
-项目级开发规则见 [AGENTS.md](AGENTS.md)，多对话任务分工见 [docs/CODEX_TASK_BOARD.md](docs/CODEX_TASK_BOARD.md)。更换电脑或账户后的恢复步骤见 [docs/CODEX_RESTART_GUIDE.md](docs/CODEX_RESTART_GUIDE.md)。
-
-业务台账、Excel 文件、`.env`、本机数据库和备份默认被根目录 `.gitignore` 排除，不应直接提交到代码仓库。
+源码许可证为 [Apache License 2.0](LICENSE)。品牌与修改版分发说明见 [TRADEMARKS.md](TRADEMARKS.md)。历史计划和旧验收记录保留供追溯，当前开发范围以任务看板及最新用户要求为准。
