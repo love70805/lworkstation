@@ -65,11 +65,14 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
   const [serviceInfo, setServiceInfo] = useState(null);
   const [checkedAt, setCheckedAt] = useState(null);
   const previousExtensionState = useRef(null);
+  const checkGeneration = useRef(0);
 
   const checkService = useCallback(async () => {
+    const generation = ++checkGeneration.current;
     setServiceStatus("checking");
     try {
       const info = await checkInboxService();
+      if (generation !== checkGeneration.current) return;
       setServiceInfo(info);
       setServiceStatus("online");
       setCheckedAt(new Date());
@@ -85,6 +88,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
       }
       previousExtensionState.current = currentExtensionState;
     } catch {
+      if (generation !== checkGeneration.current) return;
       setServiceInfo(null);
       setServiceStatus("offline");
       setCheckedAt(new Date());
@@ -92,7 +96,10 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
     }
   }, [notify]);
 
-  useEffect(() => { checkService(); }, [checkService]);
+  useEffect(() => {
+    void checkService();
+    return () => { checkGeneration.current++; };
+  }, [checkService]);
   useEffect(() => {
     const timer = window.setInterval(checkService, 10000);
     return () => window.clearInterval(timer);
