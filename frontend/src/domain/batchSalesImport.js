@@ -61,6 +61,7 @@ export function prepareSalesImportItems(items, { period, ownedRows = false } = {
     const storeName = String(item.storeName ?? "").normalize("NFKC").trim();
     const store = canonicalStore(storeName);
     const sourceCoverage = normalizeSalesSourceCoverage(item.sourceCoverage, { period, storeName });
+    if (sourceCoverage?.version === 2 && JSON.stringify(sourceCoverage.supplierNumbers) !== JSON.stringify([...(new Set((item.filterOptions?.supplierNumbers ?? []).map(value => String(value).normalize('NFKC').trim())))].sort())) fail("导入货号与来源范围不一致，请重新预览。");
     const importMode = item.importMode ?? "append";
     if (!["append", "replace_store_month"].includes(importMode)) fail("导入方式无效。");
     if (importMode === "replace_store_month" && sourceCoverage?.scope !== "full_month") fail("完整替换本店本月需要声明完整月台账。");
@@ -75,6 +76,7 @@ export function prepareSalesImportItems(items, { period, ownedRows = false } = {
     if (!item.summary || item.summary.errorCount > 0 || item.summary.errors?.length) fail("存在错误行，请修正文件后重试。");
     if (!item.rows?.length) fail("没有有效数据行。");
     const rows = item.rows.map((raw) => {
+      if (sourceCoverage?.version === 2 && !sourceCoverage.supplierNumbers.includes(String(raw.supplierNumber ?? '').normalize('NFKC').trim())) fail("存在未选择货号的数据行，请重新预览。");
       if (canonicalStore(raw.store) !== store) fail(`第 ${raw.sourceRow ?? "?"} 行店铺与确认店铺不一致。`);
       if (!String(raw.platformSku ?? "").trim() || ![raw.quantity, raw.amount].every(Number.isFinite)) fail("存在未经有效校验的数据行。");
       if (period && raw.sourceAddedDate && !raw.sourceAddedDate.startsWith(`${period}-`)) fail(`第 ${raw.sourceRow ?? "?"} 行来源月份与账本 ${period} 不一致，请按月处理。`);
@@ -180,10 +182,14 @@ async function planSalesImportsCore({ ledger, existingRows, batches, items, ledg
         before: { ...summarizeLedgerRows(oldRows), rowCount: oldRows.length },
         after: { ...summarizeLedgerRows(newRows), rowCount: newRows.length } }];
     });
+    const additions = duplicate ? [] : [...incomingGroups].filter(([groupKey]) => !(rowsByGroup.get(groupKey)?.length)).map(([groupKey, newRows]) => ({
+      groupKey, store: item.storeName, platformSkc: newRows[0].platformSkc, supplierNumber: newRows[0].supplierNumber,
+      added: true, before: { ...summarizeLedgerRows([]), rowCount: 0 }, after: { ...summarizeLedgerRows(newRows), rowCount: newRows.length },
+    }));
     results.push({ itemId: item.itemId, fileName: item.fileName, storeName: item.storeName,
       status: duplicate ? "skipped_duplicate" : "ready", batchId: duplicate?.id ?? null,
       validRowCount: item.rows.length, ignoredRowCount: item.summary.ignoredCount ?? 0, errorCount: 0,
-      summary: summarizeLedgerRows(item.rows), dateEvidence: snapshot ? snapshot.dates.get(item.itemId) : salesSourceDateEvidence(item.rows, { period: ledger?.period ?? item.sourceCoverage?.period ?? period }), overlaps, replacementScope: replaceStore ? "store_month" : "groups",
+      summary: summarizeLedgerRows(item.rows), dateEvidence: snapshot ? snapshot.dates.get(item.itemId) : salesSourceDateEvidence(item.rows, { period: ledger?.period ?? item.sourceCoverage?.period ?? period }), overlaps, additions, replacementScope: replaceStore ? "store_month" : "groups",
       sourceCoverage: item.sourceCoverage ?? null, importMode: item.importMode ?? "append",
       removedGroupCount: overlaps.filter(group => group.removed).length,
       addedGroupCount: duplicate ? 0 : keys.size - overlaps.filter(group => !group.removed).length, replacedGroupCount: overlaps.filter(group => !group.removed).length });

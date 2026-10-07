@@ -17,7 +17,7 @@ export function packSelectionSalesFacts(facts, ledger) {
   })]);
   return { format: 1, workspaceId: facts.workspaceId, ledgerId: ledger.id, period: ledger.period, sourceRowCount: facts.sourceRowCount,
     identities: packRows(facts.ledgerIdentityRows, identityFields), cover: packRows(facts.coverRows, coverFields), prices,
-    labels: packRows(facts.labelFacts.rows, labelFields), conflicts: packRows(facts.labelFacts.conflicts, labelFields), completeMonths: [...facts.labelFacts.completeMonths].map(([store, months]) => [store, [...months]]), completeStoreNames: facts.labelFacts.completeStoreNames };
+    labels: packRows(facts.labelFacts.rows, labelFields), conflicts: packRows(facts.labelFacts.conflicts, labelFields), completeMonths: [...facts.labelFacts.completeMonths].map(([store, months]) => [store, [...months]]), completeProductMonths: [...(facts.labelFacts.completeProductMonths ?? [])].map(([identity, months]) => [identity, [...months]]), completeStoreNames: facts.labelFacts.completeStoreNames };
 }
 
 export function unpackSelectionFactIdentities(packed) {
@@ -33,5 +33,5 @@ export function unpackSelectionSalesFacts(packed) {
     return [JSON.stringify([packed.ledgerId, String(store ?? '').normalize('NFKC').trim().toUpperCase()]), scope];
   }))]));
   return { workspaceId: packed.workspaceId, sourceRowCount: packed.sourceRowCount, ledgerIdentityRows: unpackSelectionFactIdentities(packed), coverRows: unpackRows(packed.cover, coverFields, inherited), ledgerPriceIndex,
-    labelFacts: { rows: unpackRows(packed.labels, labelFields, { ledgerId: packed.ledgerId }), conflicts: unpackRows(packed.conflicts, labelFields, { ledgerId: packed.ledgerId }), completeMonths: new Map(packed.completeMonths.map(([store, months]) => [store, new Set(months)])), completeStoreNames: packed.completeStoreNames } };
+    labelFacts: { rows: unpackRows(packed.labels, labelFields, { ledgerId: packed.ledgerId }), conflicts: unpackRows(packed.conflicts, labelFields, { ledgerId: packed.ledgerId }), completeMonths: new Map(packed.completeMonths.map(([store, months]) => [store, new Set(months)])), completeProductMonths: new Map((packed.completeProductMonths ?? []).map(([identity, months]) => [identity, new Set(months)])), completeStoreNames: packed.completeStoreNames } };
 }

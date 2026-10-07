@@ -167,15 +167,17 @@ self.onmessage = async ({ data }) => {
     if (type === "inspect-period") {
       const rows = jobs.get(data.jobId);
       if (!rows) throw new Error("导入预览已失效，请重新选择文件。");
+      const facets = collectSalesImportFacets(rows, data.mapping);
+      const noSelection = Array.isArray(data.options?.supplierNumbers) && !data.options.supplierNumbers.length;
       const stageId = data.stageOwner ? await createImportStage(data.stageOwner) : null;
       const evidence = { sourceField: "sourceAddedAt", sourceColumn: data.mapping?.sourceAddedAt ?? "", distribution: [], validCount: 0, missingCount: 0, invalidCount: 0, errorCount: 0, ignoredCount: 0, eligibleCount: 0,
         validationSummary: { sourceRowCount: rows.length, validRowCount: 0, errorCount: 0, ignoredCount: 0, platformSkcMissingCount: 0, errors: [], ignored: [] } };
       const months = new Map(); let chunkCount = 0;
       for (let start = 0; start < rows.length; start += 2000) {
         const validation = validateSalesRows(rows.slice(start, start + 2000), data.mapping, { ...data.options, period: undefined });
-        const chunk = salesPeriodEvidenceFromValidation(validation, data.mapping);
+        const chunk = salesPeriodEvidenceFromValidation(noSelection ? validateSalesRows(rows.slice(start, start + 2000), data.mapping, { ...data.options, supplierNumbers: undefined, period: undefined }) : validation, data.mapping);
         for (const key of ['validCount', 'missingCount', 'invalidCount', 'errorCount', 'ignoredCount', 'eligibleCount']) evidence[key] += chunk[key];
-        for (const key of ['validRowCount', 'errorCount', 'ignoredCount', 'platformSkcMissingCount']) evidence.validationSummary[key] += chunk.validationSummary[key];
+        for (const key of ['validRowCount', 'errorCount', 'ignoredCount', 'platformSkcMissingCount']) evidence.validationSummary[key] += noSelection ? (key === 'ignoredCount' ? validation.ignored.length : 0) : chunk.validationSummary[key];
         for (const key of ['errors', 'ignored']) evidence.validationSummary[key].push(...chunk.validationSummary[key].slice(0, Math.max(0, 50 - evidence.validationSummary[key].length)));
         for (const month of chunk.distribution) months.set(month.month, (months.get(month.month) ?? 0) + month.count);
         if (stageId) await appendImportStage(stageId, chunkCount++, validation.rows);
@@ -183,8 +185,8 @@ self.onmessage = async ({ data }) => {
       }
       evidence.distribution = [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, count]) => ({ month, count }));
       evidence.suggestedPeriod = months.size === 1 && !evidence.missingCount && !evidence.invalidCount && !evidence.errorCount ? evidence.distribution[0].month : null;
-      const rowSource = stageId ? await sealImportStage(stageId, evidence.eligibleCount, chunkCount) : undefined;
-      self.postMessage({ type: "period-inspected", requestId, evidence, rowSource });
+      const rowSource = stageId ? await sealImportStage(stageId, evidence.validationSummary.validRowCount, chunkCount) : undefined;
+      self.postMessage({ type: "period-inspected", requestId, evidence, facets, rowSource });
       return;
     }
 

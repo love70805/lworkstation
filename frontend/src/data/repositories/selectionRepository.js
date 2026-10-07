@@ -843,7 +843,6 @@ export async function listProductCatalogRecords() {
         image: product.imageUrl ?? product.image ?? null,
         skuCount: skus.length,
         supplierNumbers: [...new Set(skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.supplierNumbers ?? []))],
-        operatorPairs: skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.operatorPairs ?? []),
         pendingVariantCount,
         skus,
         offers,
@@ -1663,7 +1662,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
         assertSourceRevision(factsRevision, selectionFactsRevision);
         return facts;
       };
-      parts.push(observable ? await cachedDerived({ scope: [context.workspaceId, ledger.id], formula: "selection-ledger-facts@3", revision: factsRevision, revisionReader: selectionFactsRevision, compute: computeFacts }) : await computeFacts());
+      parts.push(observable ? await cachedDerived({ scope: [context.workspaceId, ledger.id], formula: "selection-ledger-facts@4", revision: factsRevision, revisionReader: selectionFactsRevision, compute: computeFacts }) : await computeFacts());
     }
     assertSourceRevision(factsRevision, selectionFactsRevision);
     const selectionSalesFacts = { workspaceId: context.workspaceId, packedParts: parts, ledgerIdentityRows: parts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)) };

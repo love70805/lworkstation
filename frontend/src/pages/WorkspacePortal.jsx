@@ -1,5 +1,3 @@
-import { useOperatorScope } from '../hooks/useOperatorScope';
-import { filterOperatorRows } from '../domain/operatorScope';
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -67,7 +65,6 @@ function formatRelativeTime(value) {
 }
 
 export default function WorkspacePortal() {
-  const operator = useOperatorScope();
   const navigate = useNavigate();
   const { notify } = useToast();
   const ledgerScope = useWorkspaceLedgerScope();
@@ -108,9 +105,9 @@ export default function WorkspacePortal() {
     time: formatRelativeTime(event.createdAt),
   }));
 
-  const referenceRows = useMemo(() => filterOperatorRows(portalData?.referenceRows ?? [], operator.scope)
+  const referenceRows = useMemo(() => (portalData?.referenceRows ?? [])
     .toSorted((left, right) => Number(right.recentRevenue ?? 0) - Number(left.recentRevenue ?? 0))
-    .slice(0, 5), [portalData?.referenceRows, operator.scope]);
+    .slice(0, 5), [portalData?.referenceRows]);
   const workflowLedger = ledgerScope.context?.selected;
   const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
   const workflowFrozen = ['finalized', 'locked'].includes(workflowLedger?.status);
@@ -190,7 +187,6 @@ export default function WorkspacePortal() {
       {!portalData || checkingHealth ? <div className="workspace-load-state" role="status" aria-live="polite"><RefreshCw className="spin" size={16} />正在读取工作区总览...</div> : null}
       {portalData?.error ? <div className="workspace-load-state" role="alert">总览读取失败：{portalData.error}<Button onClick={runHealthCheck}>重试</Button></div> : null}
 
-      {operator.restricted ? <p className="operator-scope-help">工作区概况为全量数据；下方销售趋势与商品成本观察按我的商品展示。</p> : null}
       {summary ? <div className="dashboard-metric-grid">
         <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>正式商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待确认采集</small><strong>{summary?.pendingCaptureCount ?? 0}</strong><em>{summary?.blockedCaptureCount ?? 0} 条存在阻断项</em></span></Panel>

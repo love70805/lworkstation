@@ -9,9 +9,7 @@ const mocks = vi.hoisted(() => ({
   ledgers: [{ id: "L", period: "2026-08", status: "locked", summary: {} }],
 }));
 vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate }));
-const scope = { mode: "all", pairs: [] };
-vi.mock("../hooks/useOperatorScope", () => ({ useOperatorScope: () => ({ scope, restricted: false }) }));
-vi.mock("dexie-react-hooks", () => ({ useLiveQuery: () => ({ scope, items: mocks.ledgers }) }));
+vi.mock("dexie-react-hooks", () => ({ useLiveQuery: () => ({ items: mocks.ledgers }) }));
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock("../components/UI", async original => ({ ...await original(), useToast: () => ({ notify: mocks.notify }) }));
 vi.mock("../data/database", () => ({

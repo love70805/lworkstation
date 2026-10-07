@@ -21,16 +21,18 @@ export function normalizeSelectionSalesLabel(value) {
   return value === "热卖" ? "高销" : value === "较低" ? "一般" : SELECTION_SALES_LABELS.includes(value) ? value : null;
 }
 
-export function createSalesSourceCoverage({ period, storeName, scope = "full_month", declarationSource = "import_preview" } = {}) {
+export function createSalesSourceCoverage({ period, storeName, scope = "full_month", declarationSource = "import_preview", supplierNumbers } = {}) {
   if (!validPeriod(period) || !text(storeName) || !["full_month", "partial"].includes(scope)) throw new Error("请确认台账来源月份、店铺及完整范围。");
   if (!["import_preview", "manual"].includes(declarationSource)) throw new Error("台账完整范围声明来源无效。");
-  return { version: 1, period, store: text(storeName), scope, declarationSource };
+  if (supplierNumbers !== undefined && (!Array.isArray(supplierNumbers) || !supplierNumbers.length || supplierNumbers.some(value => !text(value)))) throw new Error("请选择本次导入的供方货号。");
+  return { version: supplierNumbers === undefined ? 1 : 2, period, store: text(storeName), scope, declarationSource,
+    ...(supplierNumbers === undefined ? {} : { supplierNumbers: [...new Set(supplierNumbers.map(text))].sort() }) };
 }
 
 export function normalizeSalesSourceCoverage(coverage, { period, storeName } = {}) {
   if (coverage == null) return null; // Legacy imports have no implicit full-month coverage.
-  if (coverage.version !== 1 || (period && coverage.period !== period) || key(coverage.store) !== key(storeName)) throw new Error("台账来源声明与确认月份或店铺不一致。");
-  return createSalesSourceCoverage({ period: coverage.period, storeName, scope: coverage.scope, declarationSource: coverage.declarationSource });
+  if (![1, 2].includes(coverage.version) || (period && coverage.period !== period) || key(coverage.store) !== key(storeName)) throw new Error("台账来源声明与确认月份或店铺不一致。");
+  return createSalesSourceCoverage({ period: coverage.period, storeName, scope: coverage.scope, declarationSource: coverage.declarationSource, ...(coverage.version === 2 ? { supplierNumbers: coverage.supplierNumbers ?? [] } : {}) });
 }
 
 export function salesSourceDateEvidence(rows = [], { period } = {}) {
@@ -81,13 +83,23 @@ export function prepareSelectionSalesLabelFacts({ salesRows = [], importBatches 
     const scopeKey = JSON.stringify([row.ledgerId,key(row.store)]);
     rowCountByScope.set(scopeKey,(rowCountByScope.get(scopeKey) ?? 0)+1);
   }
-  const completeMonths = new Map(), completeStoreNames = [];
+  const completeMonths = new Map(), completeProductMonths = new Map(), completeStoreNames = [];
   for (const batch of batchById.values()) {
     const ledger = ledgerById.get(batch.ledgerId), coverage = batch.sourceCoverage;
     const activeRows = rowsByBatch.get(batch.id) ?? [];
     const scopeRowCount = rowCountByScope.get(JSON.stringify([batch.ledgerId,key(batch.store)])) ?? 0;
-    if (batch.status !== "completed" || coverage?.version !== 1 || coverage.scope !== "full_month" || coverage.period !== ledger.period || batch.period !== ledger.period || !key(batch.store) || key(coverage.store) !== key(batch.store) || !["import_preview","manual"].includes(coverage.declarationSource) || !Number.isInteger(batch.validRowCount) || batch.validRowCount !== activeRows.length || scopeRowCount !== activeRows.length || activeRows.some(row => key(row.store) !== key(batch.store))) continue;
+    if (batch.status !== "completed" || ![1, 2].includes(coverage?.version) || coverage.scope !== "full_month" || coverage.period !== ledger.period || batch.period !== ledger.period || !key(batch.store) || key(coverage.store) !== key(batch.store) || !["import_preview","manual"].includes(coverage.declarationSource) || !Number.isInteger(batch.validRowCount) || batch.validRowCount !== activeRows.length || scopeRowCount !== activeRows.length || activeRows.some(row => key(row.store) !== key(batch.store))) continue;
     const storeKey = key(batch.store);
+    if (coverage.version === 2) {
+      if (!Array.isArray(coverage.supplierNumbers) || !coverage.supplierNumbers.length || activeRows.some(row => !coverage.supplierNumbers.includes(text(row.supplierNumber)))) continue;
+      for (const skc of new Set(activeRows.map(row => key(row.platformSkc)).filter(Boolean))) {
+        const identity = JSON.stringify([storeKey, skc]);
+        if (!completeProductMonths.has(identity)) completeProductMonths.set(identity, new Set());
+        completeProductMonths.get(identity).add(ledger.period);
+      }
+      completeStoreNames.push([storeKey, text(batch.store)]);
+      continue;
+    }
     completeStoreNames.push([storeKey, text(batch.store)]);
     if (!completeMonths.has(storeKey)) completeMonths.set(storeKey,new Set());
     completeMonths.get(storeKey).add(ledger.period);
@@ -109,7 +121,7 @@ export function prepareSelectionSalesLabelFacts({ salesRows = [], importBatches 
     }
     return [...grouped.values()].map(row => ({ ...row, quantityExact: row.quantityExact?.toFixed() ?? null }));
   };
-  return { rows: compact ? aggregate(rows) : rows, conflicts: compact ? aggregate(conflicts) : conflicts, completeMonths, completeStoreNames };
+  return { rows: compact ? aggregate(rows) : rows, conflicts: compact ? aggregate(conflicts) : conflicts, completeMonths, completeProductMonths, completeStoreNames };
 }
 
 // All input tables must belong to the same workspace. The optional workspaceId
@@ -139,6 +151,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
 
   const prepared = labelFacts ?? prepareSelectionSalesLabelFacts({ salesRows, importBatches, ledgers, workspaceId, compact: false });
   const { rows, conflicts, completeMonths } = prepared;
+  const productMonths = (store, skc) => new Set([...(completeMonths.get(store) ?? []), ...(prepared.completeProductMonths?.get(JSON.stringify([store, skc])) ?? [])]);
   for (const row of rows) {
     const name = text(row.store);
     if (name) storeNames.set(key(name), name);
@@ -162,7 +175,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
   // must not invalidate it; a multi-store product still needs a common month.
   const groupPeriods = new Map([...groups.values()].map(group => {
     const stores = [...group.stores].filter(name => selectedStoreKeys.has(name));
-    const months = stores.length ? [...(completeMonths.get(stores[0]) ?? [])].filter(month => stores.every(name => completeMonths.get(name)?.has(month))).sort().reverse() : [];
+    const months = stores.length ? [...productMonths(stores[0], group.canonicalPlatformSkc)].filter(month => stores.every(name => productMonths(name, group.canonicalPlatformSkc).has(month))).sort().reverse() : [];
     return [group.canonicalPlatformSkc, period ?? months[0] ?? null];
   }));
   const addProblem = (skc, reason) => { if (!groupProblems.has(skc)) groupProblems.set(skc,new Set()); groupProblems.get(skc).add(reason); };
@@ -192,7 +205,7 @@ export function buildSelectionSalesLabels({ salesRows = [], importBatches = [], 
     const scopedStores = [...group.stores].filter(name => selectedStoreKeys.has(name));
     const total = totals.get(group.canonicalPlatformSkc), problems = groupProblems.get(group.canonicalPlatformSkc) ?? new Set();
     const itemPeriod = groupPeriods.get(group.canonicalPlatformSkc);
-    const itemCovered = itemPeriod && scopedStores.length && scopedStores.every(name => completeMonths.get(name)?.has(itemPeriod));
+    const itemCovered = itemPeriod && scopedStores.length && scopedStores.every(name => productMonths(name, group.canonicalPlatformSkc).has(itemPeriod));
     let itemStatus = itemCovered ? "ready" : scopedStores.length > 1 ? "no_common_month" : "no_complete_month", reason = itemStatus;
     if (!group.stores.size) { itemStatus = "unknown_store"; reason = "unknown_store"; }
     else if (!scopedStores.length) { itemStatus = "out_of_scope"; reason = "out_of_scope"; }

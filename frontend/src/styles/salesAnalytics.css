@@ -112,7 +112,12 @@ html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sa
 .sales-month-group:only-child .sales-month-column { max-width: 56px; }
 .sales-column-name { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); font-size: 12px; white-space: nowrap; }
 .sales-column-value { position: absolute; left: 50%; transform: translate(-50%, -100%); font-size: 12px; white-space: nowrap; color: var(--text); }
-.sales-period-layout.is-products { grid-template-columns: minmax(0, 1fr); }
+/* Product drilldown retains the same composition/detail columns. */
+.sales-pie-legend { max-height: 240px; overflow: auto; }
+.sales-pie-legend span { min-width: 0; overflow-wrap: anywhere; }
+.sales-day-table tr[data-highlighted="true"] { background: var(--surface-hover); outline: 2px solid var(--primary); outline-offset: -2px; }
+.sales-period-composition { min-width: 0; }
+
 .sales-detail-path { font-size: 12px; color: var(--text-muted); }
 .sales-detail-path > span { overflow-wrap: anywhere; }
 .sales-store-entry { min-height: 40px; text-align: left; overflow-wrap: anywhere; border-color: transparent; }

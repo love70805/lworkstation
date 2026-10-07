@@ -1,5 +1,3 @@
-import { useOperatorScope } from '../hooks/useOperatorScope';
-import { filterOperatorRows } from '../domain/operatorScope';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
@@ -121,7 +119,6 @@ export default function ProductLibrary() {
 }
 
 function ProductLibraryView({ workspaceId, view }) {
-  const operator = useOperatorScope(workspaceId);
   const routeNavigate = useNavigate();
   const tableRef = useRef(null);
   const savedView = useMemo(() => readProductLibraryViewState(workspaceId, view), [workspaceId, view]);
@@ -167,18 +164,18 @@ function ProductLibraryView({ workspaceId, view }) {
   const statusRead = useSelectionRead(getSelectionStatusDefinitions);
   const catalogState = catalogRead.status !== "ready" ? catalogRead : statusRead;
   const catalogSnapshot = catalogState.status === "ready" ? catalogRead.data : undefined;
-  const catalogProductsRaw = useMemo(() => filterOperatorRows(catalogSnapshot ?? EMPTY_ROWS, operator.scope), [catalogSnapshot, operator.scope]);
+  const catalogProductsRaw = catalogSnapshot ?? EMPTY_ROWS;
   const readCompactReferences = useCallback(() => getSelectionReferenceSnapshot({ compact: true, store }), [store]);
   const referenceRead = useSelectionRead(readCompactReferences);
   const referenceSnapshot = referenceRead.data;
-  const referenceRows = useMemo(() => referenceSnapshot ? filterOperatorRows(buildSelectionReferenceRows({ ...referenceSnapshot, store }), operator.scope) : EMPTY_ROWS, [referenceSnapshot, store, operator.scope]);
+  const referenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows({ ...referenceSnapshot, store }) : EMPTY_ROWS, [referenceSnapshot, store]);
   const catalogProducts = useMemo(() => {
     if (store === "all" || !referenceSnapshot) return catalogProductsRaw;
     const tags = new Map(referenceRows.filter(row => row.platformSkc).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag]));
     return catalogProductsRaw.map(product => ({ ...product, automaticSalesTag: tags.get(canonicalPlatformSkc(product.platformSkc)) ?? null }));
   }, [catalogProductsRaw, referenceRows, referenceSnapshot, store]);
   const captureRead = useSelectionRead(listPendingCaptureRecords);
-  const pendingCaptures = useMemo(() => filterOperatorRows(captureRead.data ?? EMPTY_ROWS, operator.scope), [captureRead.data, operator.scope]);
+  const pendingCaptures = captureRead.data ?? EMPTY_ROWS;
   const salesStatusDefinitions = useMemo(() => normalizeSelectionStatusDefinitions(statusRead.data), [statusRead.data]);
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
   const pendingCount = pendingCaptures.length;
@@ -671,7 +668,7 @@ function ProductLibraryView({ workspaceId, view }) {
             />}
           </Panel>
         </>
-      ) : <CaptureQueueView captureRead={{ ...captureRead, data: captureRead.data ? pendingCaptures : undefined }} query={query} onQueryChange={setQuery} filter={queueFilter} onFilterChange={setQueueFilter} onOpenEditor={navigate} initialScrollY={savedView?.windowScrollY} />}
+      ) : <CaptureQueueView captureRead={captureRead} query={query} onQueryChange={setQuery} filter={queueFilter} onFilterChange={setQueueFilter} onOpenEditor={navigate} initialScrollY={savedView?.windowScrollY} />}
       <Modal
         open={bulkConfirmOpen}
         size="small"

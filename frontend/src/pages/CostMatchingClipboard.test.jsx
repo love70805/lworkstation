@@ -1,4 +1,3 @@
-import { saveOperatorConfig } from '../lib/operatorScopeStorage';
 // @vitest-environment happy-dom
 import 'fake-indexeddb/auto';
 import { act } from 'react';
@@ -342,22 +341,4 @@ it.each([{ skcs: [] }, { skcs: ['SKC-1'] }])('preserves browser extension instal
   expect(button('安装 ERP 助手')).toBeDefined();
   await act(async () => button('安装 ERP 助手').click());
   expect(container.querySelector('.erp-assistant-modal')).not.toBeNull();
-});
-
-it('switches operator schemes across pages and cancels ERP targets for an empty range without trimming the snapshot', async () => {
-  await render(['Skc-A', 'Skc-B'], 'ready', { stores: ['甲', '乙'] });
-  mocks.snapshot.rows = mocks.snapshot.rows.map(row => ({ ...row, supplierNumber: '001' }));
-  const before = JSON.stringify(mocks.snapshot);
-  const config = { version: 1, mode: 'mine', activeProfileId: 'a', profiles: [{ id: 'a', name: '甲运营', pairs: [{ store: '甲', supplierNumber: '001' }] }, { id: 'empty', name: '空方案', pairs: [] }] };
-  mocks.register.mockClear();
-  await act(async () => saveOperatorConfig('W', config));
-  await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
-  expect(mocks.register).toHaveBeenLastCalledWith(expect.objectContaining({ platformSkcs: ['Skc-A'], expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'Skc-A' }] }), expect.any(Object));
-  expect(button('复制 1 个平台 SKC')).toBeDefined();
-  mocks.register.mockClear();
-  await act(async () => saveOperatorConfig('W', { ...config, activeProfileId: 'empty' }));
-  await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
-  expect(mocks.register).not.toHaveBeenCalled();
-  expect(button('当前范围无明细').disabled).toBe(true);
-  expect(JSON.stringify(mocks.snapshot)).toBe(before);
 });

@@ -1,9 +1,21 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "candidateOnly": true,
-  "integrationBranch": "codex/v040-operator-scope",
+  "integrationBranch": "codex/v041-import-scope",
   "requiredCommits": [
+    {
+      "module": "erp-setup-lifecycle",
+      "commit": "90facb0d757f0bfc889356c24929f626342041bf"
+    },
+    {
+      "module": "v0.4.1-import-scope-and-skc-composition",
+      "commit": "ea7b230"
+    },
+    {
+      "module": "v0.4.1-main-baseline",
+      "commit": "e212d30"
+    },
     {
       "module": "local-operator-scope",
       "commit": "fb2cde3"

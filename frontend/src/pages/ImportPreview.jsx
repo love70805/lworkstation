@@ -1,3 +1,5 @@
+import ImportSupplierPicker from '../components/ImportSupplierPicker';
+import { readImportNumbers, saveImportNumbers } from '../lib/importSupplierPreferences';
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
@@ -23,7 +25,7 @@ const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", { minimumFra
 function sourceIsFiltered(item) {
   if (!item.facets || !item.filterOptions) return false;
   const full = (key, expected) => !Array.isArray(item.filterOptions[key]) || expected.every(value => item.filterOptions[key].includes(value));
-  return !full("supplierNumbers", item.facets.supplierNumbers ?? []) || !full("movementTypes", (item.facets.movementTypes ?? []).filter(type => LEDGER_REPORT_MOVEMENT_TYPES.includes(type)));
+  return !full("movementTypes", (item.facets.movementTypes ?? []).filter(type => LEDGER_REPORT_MOVEMENT_TYPES.includes(type)));
 }
 const sourceScope = item => sourceIsFiltered(item) || item.sourceScope === "partial" ? "partial" : "full_month";
 function Totals({ summary }) {
@@ -98,12 +100,13 @@ function FieldMapping({ item, onChange, onApply }) {
 
 function OverlapPreview({ item }) {
   const [page, setPage] = useState(1);
-  const pageCount = Math.ceil(item.overlaps.length / 30);
-  if (!item.overlaps.length) return null;
+  const changes = [...item.overlaps, ...(item.additions ?? [])];
+  const pageCount = Math.ceil(changes.length / 30);
+  if (!changes.length) return null;
   return <div>
-    <p>影响范围共 {item.overlaps.length} 组{item.replacementScope === "store_month" ? "；将完整替换本店本月，移除未出现在新文件中的旧分组。" : "；仅替换本文件涉及的重叠分组。"}</p>
-    {item.overlaps.slice((page - 1) * 30, page * 30).map(overlap => <div className="batch-overlap" key={overlap.groupKey}><strong>{overlap.removed ? "移除旧分组：" : "覆盖："}{overlap.store} / {overlap.platformSkc || "无 SKC"} / {overlap.supplierNumber || "无供方货号"}</strong><p>原数据 {overlap.before.rowCount} 行：<Totals summary={overlap.before} /></p><p>新数据 {overlap.after.rowCount} 行：<Totals summary={overlap.after} /></p></div>)}
-    {pageCount > 1 && <nav className="batch-submit" aria-label={`${item.fileName} 覆盖范围分页`}><Button variant="ghost" disabled={page === 1} aria-label={`${item.fileName} 上一页覆盖范围`} onClick={() => setPage(value => value - 1)}>上一页</Button><span>第 {page} / {pageCount} 页 · 共 {item.overlaps.length} 组均受影响</span><Button variant="ghost" disabled={page === pageCount} aria-label={`${item.fileName} 下一页覆盖范围`} onClick={() => setPage(value => value + 1)}>下一页</Button></nav>}
+    <p>影响范围共 {changes.length} 组{item.replacementScope === "store_month" ? "；将完整替换本店本月，移除本次未选入的旧分组。" : "；仅替换本文件涉及的重叠分组。"}</p>
+    {changes.slice((page - 1) * 30, page * 30).map(overlap => <div className="batch-overlap" key={overlap.groupKey}><strong>{overlap.added ? "新增货号：" : overlap.removed ? "移除旧分组：" : "覆盖："}{overlap.store} / {overlap.platformSkc || "无 SKC"} / {overlap.supplierNumber || "无供方货号"}</strong><p>原数据 {overlap.before.rowCount} 行：<Totals summary={overlap.before} /></p><p>新数据 {overlap.after.rowCount} 行：<Totals summary={overlap.after} /></p></div>)}
+    {pageCount > 1 && <nav className="batch-submit" aria-label={`${item.fileName} 覆盖范围分页`}><Button variant="ghost" disabled={page === 1} aria-label={`${item.fileName} 上一页覆盖范围`} onClick={() => setPage(value => value - 1)}>上一页</Button><span>第 {page} / {pageCount} 页 · 共 {changes.length} 组均受影响</span><Button variant="ghost" disabled={page === pageCount} aria-label={`${item.fileName} 下一页覆盖范围`} onClick={() => setPage(value => value + 1)}>下一页</Button></nav>}
   </div>;
 }
 
@@ -114,6 +117,7 @@ export default function ImportPreview() {
   const [ledgerContext, setLedgerContext] = useState(null);
   const [contextRetry, setContextRetry] = useState(0);
   const { notify } = useToast();
+  const importWorkspaceRef = useRef(null);
   const stageOwnerRef = useRef(crypto.randomUUID());
   const inputRef = useRef(null);
   const previewRef = useRef(null);
@@ -163,6 +167,7 @@ export default function ImportPreview() {
   }, [requestedLedgerId, contextRetry]);
   const assertImportContext = async () => {
     if (contextBlocked) throw new Error('请先确认目标账本。');
+    if (importWorkspaceRef.current && (await getActiveMemberContext()).workspaceId !== importWorkspaceRef.current) throw new Error('工作区已切换，请重新选择导入文件。');
     if (requestedLedgerId && (await getActiveMemberContext()).workspaceId !== ledgerContext.workspaceId) throw new Error('工作区已切换，请返回重新选择账本，当前文件尚未写入。');
   };
 
@@ -198,6 +203,7 @@ export default function ImportPreview() {
     const promise = client.parse(item.file, item.itemId, item.selectedSheet).then(parsed => {
       if (parsed.type === "sheet-selection-required") throw new Error("请先选择此文件的实际明细页。");
       if (clientRef.current === client) activeJobsRef.current.add(item.itemId);
+      return parsed;
     }).finally(() => {
       if (pendingJobsRef.current.get(item.itemId)?.promise === promise) pendingJobsRef.current.delete(item.itemId);
     });
@@ -210,11 +216,11 @@ export default function ImportPreview() {
     try {
       await ensureJob(item);
       if (inspectionSequenceRef.current.get(item.itemId) !== sequence) return;
-      const { evidence, rowSource } = await clientRef.current.inspectPeriod(item.itemId, item.mapping, {
+      const { evidence, rowSource, facets } = await clientRef.current.inspectPeriod(item.itemId, item.mapping, {
         ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
       });
       if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
-        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, periodEvidence: evidence, rowSource } : entry));
+        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, facets: facets ?? entry.facets, periodEvidence: evidence, rowSource } : entry));
       } else void removeImportStage(rowSource?.id).catch(() => {});
       if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
         activeJobsRef.current.delete(item.itemId);
@@ -228,23 +234,39 @@ export default function ImportPreview() {
       }
     }
   };
-  const update = (itemId, patch) => {
+  const update = async (itemId, patch) => {
     invalidate();
     const current = files.find((item) => item.itemId === itemId);
     if (!current) return;
     void removeImportStage(current.rowSource?.id).catch(() => {});
-    const next = { ...current, ...patch, validation: null, periodEvidence: null, rowSource: null, periodInspectionError: null };
+    let next = { ...current, ...patch, validation: null, periodEvidence: null, rowSource: null, periodInspectionError: null };
     setFiles((entries) => entries.map((item) => item.itemId === itemId ? next : item));
+    if (patch.mapping || patch.storeName !== undefined) {
+      const sequence = (inspectionSequenceRef.current.get(itemId) ?? 0) + 1;
+      inspectionSequenceRef.current.set(itemId, sequence);
+      try {
+        await ensureJob(next);
+        if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
+        const refreshed = await clientRef.current.inspectPeriod(itemId, next.mapping, { ...next.filterOptions, supplierNumbers: [], defaultStore: next.storeName, enforceSingleStore: true });
+        void removeImportStage(refreshed.rowSource?.id).catch(() => {});
+        if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
+        const choices = refreshed.facets?.supplierNumbers ?? next.facets?.supplierNumbers ?? [];
+        const saved = patch.storeName !== undefined ? readImportNumbers(importWorkspaceRef.current, next.storeName) : next.filterOptions?.supplierNumbers ?? [];
+        next = { ...next, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
+        setFiles(entries => entries.map(item => item.itemId === itemId ? next : item));
+      } catch (error) { setError(error.message); return; }
+    }
     void inspectPeriod(next);
   };
   const loadFiles = async (selection, retryItem = null, selectedSheet = null) => {
     if (operationRef.current || !selection.length || result || contextBlocked) return;
     const generation = generationRef.current;
     operationRef.current = true; setBusy(true); invalidate();
-    const additions = Array.from(selection).map((file) => ({ file, sourceScope: "full_month", importMode: "append", fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
+    const additions = Array.from(selection).map((file) => ({ file, sourceScope: "full_month", importMode: "replace_store_month", fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
     if (retryItem) additions[0] = { ...retryItem, status: "queued", error: null, selectedSheet };
     setFiles((current) => retryItem ? current.map(item => item.itemId === retryItem.itemId ? additions[0] : item) : [...current, ...additions]);
     try {
+      importWorkspaceRef.current = (await getActiveMemberContext()).workspaceId;
       for (let index = 0; index < additions.length; index += 1) {
         if (generation !== generationRef.current) return;
         const item = additions[index];
@@ -261,17 +283,19 @@ export default function ImportPreview() {
             continue;
           }
           activeJobsRef.current.add(item.itemId);
-          const filterOptions = parsed.preset === "ledger_report" ? {
+          const remembered = readImportNumbers(importWorkspaceRef.current, item.storeName);
+          const choices = parsed.facets?.supplierNumbers ?? [];
+          const filterOptions = { supplierNumbers: remembered.filter(value => choices.includes(value)), ...(parsed.preset === "ledger_report" ? {
             movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
             deriveAmountFromUnitPrice: true,
-          } : null;
+          } : {}) };
           const inspected = await clientRef.current.inspectPeriod(item.itemId, parsed.suggestedMapping, {
             ...filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
           });
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, missingNumbers: remembered.filter(value => !choices.includes(value)), periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before
@@ -283,7 +307,7 @@ export default function ImportPreview() {
           await clientRef.current.release(item.itemId).catch(() => {});
         }
       }
-    } finally { if (generation === generationRef.current) { setProgress({ value: 100, label: "文件解析完成" }); setBusy(false); operationRef.current = false; } }
+    } catch (error) { if (generation === generationRef.current) setError(error.message); } finally { if (generation === generationRef.current) { setProgress({ value: 100, label: "文件解析完成" }); setBusy(false); operationRef.current = false; } }
   };
   const remove = async (item) => {
     if (operationRef.current) return;
@@ -294,18 +318,8 @@ export default function ImportPreview() {
     await clientRef.current.release(item.itemId).catch(() => {});
   };
   const applyMapping = (source) => {
-    invalidate();
     const columns = Object.values(source.mapping).filter(Boolean);
-    let count = 0;
-    const updated = files.map((item) => {
-      if (item.itemId === source.itemId || item.status !== "parsed" || !columns.every((column) => item.headers.includes(column))) return item;
-      count += 1;
-      void removeImportStage(item.rowSource?.id).catch(() => {});
-      return { ...item, mapping: { ...source.mapping }, validation: null, periodEvidence: null, rowSource: null };
-    });
-    setFiles(updated);
-    updated.filter((item) => item.periodEvidence === null).forEach((item) => { void inspectPeriod(item); });
-    notify(`映射已套用到 ${count} 个兼容文件；各文件店铺保持原值。`);
+    for (const item of files) if (item.itemId !== source.itemId && item.status === 'parsed' && columns.every(column => item.headers.includes(column))) void update(item.itemId, { mapping: { ...source.mapping } });
   };
   const validate = async () => {
     if (operationRef.current || !ready || result) return;
@@ -334,8 +348,8 @@ export default function ImportPreview() {
         hasErrors ||= validation.summary.errorCount > 0 || !(validation.rowSource?.rowCount ?? validation.rows?.length);
         items.push({ itemId: item.itemId, fileName: item.fileName, fileHash: item.fileHash, storeName: item.storeName,
           mapping: item.mapping, filterOptions: item.filterOptions, rows: validation.rows, rowSource: validation.rowSource, summary: validation.summary,
-          sourceCoverage: createSalesSourceCoverage({ period, storeName: item.storeName, scope: sourceScope(item) }),
-          importMode: sourceScope(item) === "full_month" ? item.importMode ?? "append" : "append" });
+          sourceCoverage: createSalesSourceCoverage({ period, storeName: item.storeName, scope: sourceScope(item), supplierNumbers: item.filterOptions.supplierNumbers }),
+          importMode: sourceScope(item) === "full_month" ? item.importMode ?? "replace_store_month" : "append" });
       }
       // Normalized rows are sufficient for the preview. Free the XLSX heap;
       // a later mapping/store edit lazily reparses its original File.
@@ -363,6 +377,8 @@ export default function ImportPreview() {
       setProgress({ value: null, label: "正在核对并原子写入，完成前可取消" });
       setResult(await saveSalesImports({ ...payload, preview, overwriteSignature, signal: controller.signal,
         onProgress: ({ completed, total }) => setProgress({ value: completed / total * 100, label: `写入 ${completed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")} 行` }) }));
+      try { saveImportNumbers(importWorkspaceRef.current, payload.items); }
+      catch { notify("数据已导入，但货号偏好未能保存；下次请重新选择。", "warning"); }
       notify("整批处理完成，来源批次已保留。");
       // The result contains summaries only. Release raw workbook jobs and the
       // normalized payload immediately after the atomic transaction commits.
@@ -374,7 +390,7 @@ export default function ImportPreview() {
   };
   const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && !periodEvidence.awaitingEvidence && files.every((item) => {
     const columns = Object.values(item.mapping ?? {}).filter(Boolean);
-    return item.status === "parsed" && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
+    return item.status === "parsed" && item.filterOptions?.supplierNumbers?.length > 0 && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
   });
   const configurationKey = JSON.stringify([period, files.map(item => [item.itemId, item.status, item.storeName, item.mapping, item.filterOptions, item.sourceScope, item.importMode, item.periodEvidence]), contextBlocked]);
   validateRef.current = validate;
@@ -419,10 +435,11 @@ export default function ImportPreview() {
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
-              <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
-              <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
-              <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : item.importMode })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期或筛选商品</option></select>{sourceIsFiltered(item) && <small>已缩小商品或发货类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
-              <div className="form-field"><label htmlFor={`import-mode-${item.itemId}`}>导入方式</label><select id={`import-mode-${item.itemId}`} className="text-input" value={sourceScope(item) === "partial" ? "append" : item.importMode ?? "append"} onChange={event => update(item.itemId, { importMode: event.target.value })}><option value="append">追加并替换重叠分组</option><option value="replace_store_month" disabled={sourceScope(item) !== "full_month"}>完整替换本店本月</option></select><small>默认保留未重叠分组。重新导入完整月文件时，可选择完整替换并核对预览，避免旧来源残留使七天标签无法计算。</small></div>
+              <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} onChange={supplierNumbers => update(item.itemId, { filterOptions: { ...item.filterOptions, supplierNumbers } })} />
+              <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `所选货号完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
+              <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions?.movementTypes ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
+              <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : "replace_store_month" })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期来源</option></select>{sourceIsFiltered(item) && <small>已缩小销售变动类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
+              <div className="form-field"><label htmlFor={`import-mode-${item.itemId}`}>导入方式</label><select id={`import-mode-${item.itemId}`} className="text-input" value={sourceScope(item) === "partial" ? "append" : item.importMode ?? "append"} onChange={event => update(item.itemId, { importMode: event.target.value })}><option value="append">追加并替换重叠分组</option><option value="replace_store_month" disabled={sourceScope(item) !== "full_month"}>完整替换本店本月</option></select><small>完整月默认替换本店本月为此次选择；部分日期仅追加或替换重叠分组。请核对下方移除范围。</small></div>
               <FieldMapping item={item} onChange={mapping => update(item.itemId, { mapping })} onApply={() => applyMapping(item)} />
 
 
@@ -440,7 +457,7 @@ export default function ImportPreview() {
             <OverlapPreview item={item} />
           </article>)}
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
-          {preview.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={(event) => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />我确认以上文件的全部替换范围（含分页内容）；本店本月完整替换会同时移除未出现在新文件中的旧分组。</label>}
+          {preview.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={(event) => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />我确认以上文件的全部替换范围（含分页内容）；本店本月完整替换会同时移除本次未选入的旧分组。</label>}
           <div className="batch-submit"><p>核对以上文件、店铺及 {period} 月份后确认。修改配置后会自动重新校验。</p><Button variant="primary" disabled={busy || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button></div>
         </section>}
       </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}

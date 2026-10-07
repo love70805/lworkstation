@@ -1,4 +1,3 @@
-import { useOperatorScope } from '../hooks/useOperatorScope';
 import { buildSalesMonth, salesScale, salesGroupedScale, salesStoreKey, salesStoreColor, salesMonthRange, salesOverviewMonths, assignSalesStoreColors } from '../domain/salesChartModel';
 import { SalesMonthChart, SalesGroupedMonthChart, SalesHoverSummary } from './SalesMonthChart';
 import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react';
@@ -12,7 +11,6 @@ const Exact = Decimal.clone({ precision: 80 });
 const workspaceColors = new Map();
 
 function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreChange }) {
-  const operator = useOperatorScope(workspaceId);
   const [metric, setMetric] = useState('revenueExact'), [view, setView] = useState('daily');
   const [selection, setSelection] = useState(null), [hovered, setHovered] = useState(null);
   const [monthMode, setMonthMode] = useState('overview'), [rangeLength, setRangeLength] = useState(12), [rangeEnd, setRangeEnd] = useState(null), [chartOffset, setChartOffset] = useState(0);
@@ -28,16 +26,16 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     setSelection(null); setHovered(null); setStoreError(''); setChanging(false);
     setHiddenStores([]); setChosenStore(null); setListStates({});
   }, [store]);
-  const scope = JSON.stringify([workspaceId, ledgerId, store, operator.scope]);
+  const scope = JSON.stringify([workspaceId, ledgerId, store]);
   const result = useLiveQuery(async () => {
-    try { return { scope, data: await readLedgerSalesAnalytics({ workspaceId, ledgerId, store, operatorScope: operator.scope }) }; }
+    try { return { scope, data: await readLedgerSalesAnalytics({ workspaceId, ledgerId, store }) }; }
     catch (error) { return { scope, error: error.message }; }
-  }, [workspaceId, ledgerId, store, operator.scope]);
+  }, [workspaceId, ledgerId, store]);
   const monthsResult = useLiveQuery(async () => {
     if (view !== 'monthly') return null;
-    try { return { scope, data: await readWorkspaceSalesMonths({ workspaceId, store, operatorScope: operator.scope }) }; }
+    try { return { scope, data: await readWorkspaceSalesMonths({ workspaceId, store }) }; }
     catch (error) { return { scope, error: error.message }; }
-  }, [workspaceId, ledgerId, store, view, operator.scope]);
+  }, [workspaceId, ledgerId, store, view]);
   const data = result?.scope === scope ? result.data : null;
   const month = useMemo(() => data ? data.chartMonth ?? buildSalesMonth(data, { store }) : null, [data, store]);
   const months = useMemo(() => monthsResult?.scope === scope && Array.isArray(monthsResult.data)
@@ -53,13 +51,13 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     if (!selection) return null;
     if (selection.ledgerId.startsWith('missing:')) return { scope: detailScope, data: { period: selection.period, status: 'unknown', totalsExact: { revenueExact: null, quantityExact: null }, stores: [], rows: [] } };
     try {
-      const detail = await readLedgerPeriodSalesDetails({ workspaceId, ledgerId: selection.ledgerId, store, operatorScope: operator.scope, ...(selection.date ? { date: selection.date } : {}) });
+      const detail = await readLedgerPeriodSalesDetails({ workspaceId, ledgerId: selection.ledgerId, store, ...(selection.date ? { date: selection.date } : {}) });
       const selectedMonth = selection.ledgerId === ledgerId ? month : months.find(item => item.ledgerId === selection.ledgerId);
       const day = selection.date ? selectedMonth?.daily.find(item => item.date === selection.date) : null;
       if (day && !['data', 'known_zero'].includes(day.status)) return { scope: detailScope, data: { ...detail, status: 'unknown', availability: day.status, totalsExact: { revenueExact: null, quantityExact: null } } };
       return { scope: detailScope, data: detail };
     } catch (error) { return { scope: detailScope, error: error.message }; }
-  }, [workspaceId, ledgerId, store, selection, month, months, operator.scope]);
+  }, [workspaceId, ledgerId, store, selection, month, months]);
   const contextKey = selection ? JSON.stringify([selection.ledgerId, selection.date, chosenStore, selection.storeKeys]) : 'trend';
   function remember() {
     const nodes = [];

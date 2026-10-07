@@ -1,5 +1,3 @@
-import { useOperatorScope } from '../hooks/useOperatorScope';
-import { projectOperatorLedgers } from '../data/repositories/operatorLedgerProjection';
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -40,15 +38,13 @@ function ledgerProgress(ledger) {
 }
 
 export default function MonthlyLedger() {
-  const operator = useOperatorScope();
   const navigate = useNavigate();
   const { notify } = useToast();
   const [refresh, setRefresh] = useState(0);
-  const loaded = useLiveQuery(async () => {
-    try { return { scope: operator.scope, items: await projectOperatorLedgers(await withCurrentLedgerResults(await listLedgerSummaries()), operator.scope) }; }
-    catch (error) { return { scope: operator.scope, error: error.message }; }
-  }, [refresh, operator.scope], null);
-  const result = loaded?.scope === operator.scope ? loaded : null;
+  const result = useLiveQuery(async () => {
+    try { return { items: await withCurrentLedgerResults(await listLedgerSummaries()) }; }
+    catch (error) { return { error: error.message }; }
+  }, [refresh], null);
   const items = result?.items ?? [];
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -58,7 +54,6 @@ export default function MonthlyLedger() {
   const [confirmingSource, setConfirmingSource] = useState(false);
   const sources = useLiveQuery(() => sourceLedger ? listSalesSourceConfirmations(sourceLedger.id) : [], [sourceLedger?.id], []);
   const confirmSource = async batchId => {
-    if (operator.restricted) return;
     setConfirmingSource(true);
     try { await confirmSalesSourceCoverage({ ledgerId: sourceLedger.id, batchId, confirmed: true }); notify('已确认整月来源，销量标签将自动刷新。'); }
     catch (error) { notify(error.message, 'error'); }
@@ -76,7 +71,7 @@ export default function MonthlyLedger() {
   const pending = items.find((item) => !["finalized", "locked"].includes(item.status));
 
   const deleteLedger = async () => {
-    if (!deleteTarget || deleting || operator.restricted) return;
+    if (!deleteTarget || deleting) return;
     setDeleting(true);
     try {
       await deleteMonthlyLedger(deleteTarget.id, "local-user");
@@ -126,13 +121,13 @@ export default function MonthlyLedger() {
 
       {result && !result.error ? <div className="ledger-stat-grid">
         <Panel className="ledger-stat"><CalendarDays size={18} /><span>已建立月份</span><strong>{items.length}</strong></Panel>
-        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年{operator.restricted ? "当前商品利润" : "已保存利润"}</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{operator.restricted ? '负责商品小计，不包含整月代发及独立扣款' : baseMonths ? `含 ${baseMonths} 个未扣款或历史定稿月份` : '采用各月当前财务报告'}</small></Panel>
+        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年已保存利润</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{baseMonths ? `含 ${baseMonths} 个未扣款或历史定稿月份` : '采用各月当前财务报告'}</small></Panel>
         <Panel className="ledger-stat"><BarChart3 size={18} /><span>{currentYear} 年导入销量</span><strong>{yearQuantity.toLocaleString("zh-CN")}</strong></Panel>
         <Panel className="ledger-stat pending"><CalendarDays size={18} /><span>当前待处理</span><strong>{pending ? formatLedgerPeriod(pending.period) : "无"}</strong><small>{pending ? ledgerStateLabels[pending.status] : "所有账本均已处理"}</small></Panel>
       </div> : null}
 
       {!result ? <Panel><p role="status">正在读取月度账本与报告结果…</p></Panel> : result.error ? <Panel><p role="alert">账本读取失败：{result.error}</p><Button onClick={() => setRefresh(value => value + 1)}>重试</Button></Panel> : items.length === 0 ? (
-        <Panel><EmptyState icon={FileSpreadsheet} title={operator.restricted ? "当前负责范围暂无账本" : "还没有月度账本"} description={operator.restricted ? "请在头像菜单调整负责商品或切回全部商品查看完整账本。" : "导入第一个月度销售台账后，系统会保存来源批次并进入成本核对。"} action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
+        <Panel><EmptyState icon={FileSpreadsheet} title="还没有月度账本" description="导入第一个月度销售台账后，系统会保存来源批次并进入成本核对。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
       ) : filteredItems.length === 0 ? (
         <Panel><EmptyState icon={FileSpreadsheet} title="没有匹配的月度账本" description="可按月份，例如“2026-08”，或账本状态搜索。" /></Panel>
       ) : (
@@ -147,12 +142,12 @@ export default function MonthlyLedger() {
                 <div className="ledger-card-head">
                   <span className="month-tile">{Number(ledger.period.slice(5))}月</span>
                   <div><h2>{formatLedgerPeriod(ledger.period)}</h2><Badge tone={ledgerStateTones[ledger.status] ?? "neutral"}>{ledgerStateLabels[ledger.status] ?? ledger.status}</Badge></div>
-                  <span className="ledger-card-head-actions">{locked ? <LockKeyhole size={17} title="已锁定" /> : null}<button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 账本`} title="删除账本" disabled={operator.restricted} onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button></span>
+                  <span className="ledger-card-head-actions">{locked ? <LockKeyhole size={17} title="已锁定" /> : null}<button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 账本`} title="删除账本" onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button></span>
                 </div>
                 <div className="ledger-metrics">
                   <span>销售金额 <strong className="mono">{money(ledger.summary?.revenue ?? 0)}</strong></span>
                   <span>总销量 <strong className="mono">{(ledger.summary?.quantity ?? 0).toLocaleString("zh-CN")}</strong></span>
-                  <span>{operator.restricted ? "商品利润" : "月度利润"} <strong className="mono">{current.profit != null ? money(current.profit) : "待核算"}</strong></span>
+                  <span>月度利润 <strong className="mono">{current.profit != null ? money(current.profit) : "待核算"}</strong></span>
                   <small>{current.label}{current.state === 'deduction_pending' ? ' · 当前金额为未扣款基础' : ''}</small>
                   {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`成本确认进度 ${progress}%`} /> : null}
                 </div>
@@ -165,7 +160,7 @@ export default function MonthlyLedger() {
 
       <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
       <Modal open={Boolean(sourceLedger)} title="确认台账来源" description="仅在原文件包含该店整月全部商品时确认。确认后更新销量参考，不修改销售明细或正式利润。" onClose={() => { if (!confirmingSource) setSourceLedger(null); }}>
-        {sources.length ? sources.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource || operator.restricted} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或账本已定稿，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
+        {sources.length ? sources.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或账本已定稿，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
       </Modal>
     </AppShell>
   );

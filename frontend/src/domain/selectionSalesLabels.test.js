@@ -106,3 +106,13 @@ it("uses a verified SKU mapping to attribute a legacy row's actual store without
   const result = build({ productSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-A" }], salesRows: [sale({ platformSkc: "" })] });
   expect(item(result)).toMatchObject({ status: "ready", stores: ["甲店"], quantityExact: "100" });
 });
+
+it('limits complete-month v2 evidence to imported products and preserves missing-date uncertainty', () => {
+  const coverage = createSalesSourceCoverage({ period:'2026-08', storeName:'甲店', supplierNumbers:['A'] });
+  const args = { importBatches:[batch({ sourceCoverage: coverage })], salesRows:[sale({supplierNumber:'A'})], productSkus:[{platformSkc:'SKC-UNIMPORTED',platformSku:'OTHER',store:'甲店'}] };
+  const result = build(args);
+  expect(result.items.find(row=>row.platformSkc==='SKC-UNIMPORTED').label).toBeNull();
+  expect(item(result)).toMatchObject({status:'ready',quantityExact:'100'});
+  expect(item(build({...args, salesRows:[sale({supplierNumber:'A',sourceAddedDate:null})]}))).toMatchObject({status:'insufficient',reason:'missing_dates',label:null});
+  expect(item(build({...args, salesRows:[sale({supplierNumber:'OTHER'})]}))).toMatchObject({label:null});
+});
