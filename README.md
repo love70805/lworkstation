@@ -2,13 +2,17 @@
 
 选品工作台与利润核算面板的一体化内部工具。仅继续开发与交付 Lworkstation Windows 桌面安装版，内置工作站、ERP 和 1688 受控标签；`frontend/` 作为 Electron 内置界面维护，不开发或发布独立浏览器版本。当前交付为纯本机版本，无需云端数据库。
 
+本 README 属于源码开发文档。源码与公开更新渠道正在分离：后续开发仓库为私有 `love70805/lworkstation-source`；公开 `love70805/lworkstation` 只承载独立干净历史、下载/更新说明和 Release 资产。当前迁移尚在进行，完成情况以 [迁移契约](docs/integration/PRIVATE_SOURCE_UPDATE_CHANNEL_2026_10.md) 和任务看板的核验记录为准。
+
 ## 下载与项目入口
 
-- [0.3.1 最新稳定版与安装包](https://github.com/love70805/lworkstation/releases/tag/v0.3.1)
-- [v0.3.0 Beta.10 预发布](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)
+- [稳定版与安装包](https://github.com/love70805/lworkstation/releases/latest)
+- [公开版本与分发资产](https://github.com/love70805/lworkstation/releases)
 - [当前发布状态](docs/RELEASE_STATUS.md) · [历史版本与本机候选登记](releases/README.md)
 - [下一版待改动](docs/NEXT_UPDATE.md)：需求与静态预览已整理，尚未实施，不代表当前版本功能。
 - [开发任务看板](docs/CODEX_TASK_BOARD.md) · [跨电脑续接指南](docs/CODEX_RESTART_GUIDE.md)
+
+源码、开发分支/标签、PR、内部文档、测试和 CI 只进入私有源码仓库，禁止镜像到公开更新仓库。公开版本标签指向公开仓库自身的干净提交，不指向源码提交。开发 `origin` 切换后，公开 Release 操作必须显式使用 `gh release ... --repo love70805/lworkstation`，避免默认仓库推断把安装包或更新元数据发到私有仓库。自动发布授权限于通过验收的分发产物及必要发布说明。
 
 ## 桌面界面开发
 
@@ -32,7 +36,7 @@ pnpm --dir desktop dev
 
 ## Lworkstation Windows 桌面版
 
-当前稳定版为 [`0.3.1`](https://github.com/love70805/lworkstation/releases/tag/v0.3.1)，保持 GitHub Latest。[下载 Windows x64 安装包](https://github.com/love70805/lworkstation/releases/download/v0.3.1/Lworkstation-Setup-0.3.1.exe)。代发导入支持登记人搜索筛选和即时预览，空数量记录跳过并保留定位，来源追加/替换和跨文件冲突可直接处理；金额与正式成本口径、人工更正优先和定稿保护保留。1004项测试、Windows候选和公开资产/更新通道通过，见 [0.3.1发布验收](docs/RELEASE_0.3.1.md)。公开Beta仍为0.3.0-beta.10并独立更新。首次安装可选择位置，更新下载和安装仍需用户操作；本次未安装、未改真实业务库。发布状态见 [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md)。
+稳定版安装包从 [原公开更新入口](https://github.com/love70805/lworkstation/releases/latest) 下载，已交付版本和验收依据见 [发布状态](docs/RELEASE_STATUS.md) 与 [任务看板](docs/CODEX_TASK_BOARD.md)。源码迁移不改变客户端 updater 的 owner/repo：仍为 `love70805/lworkstation`；不会改为私有仓库，也不要求客户端保存 GitHub Token。迁移本身不创建空软件版本，不自动安装、不改真实业务库，不改写历史许可证或第三方声明。
 
 桌面壳保留现有 `frontend/` 作为 renderer，并在同一窗口中提供 ERP 和 1688 的受控内置标签。两个标签使用独立持久浏览会话；首次启动请在各标签中完成网页登录。
 
@@ -53,7 +57,7 @@ pnpm --dir desktop release:check
 
 Beta 安装包命名为 `Lworkstation-Setup-<版本>.exe`，由 `desktop/release-test/<版本>/` 整理到 `releases/prerelease/<版本>/`，更新元数据为 `beta.yml`。稳定版本使用 `pnpm --dir desktop build`，安装包命名为 `Lworkstation Setup <版本>.exe`，整理到 `releases/latest/`，历史稳定版本位于 `releases/history/<版本>/`，更新元数据为 `latest.yml`。具体目录规则见 [releases/README.md](releases/README.md)。
 
-正式桌面包只从集成分支构建。专职 Worktree 产物仅用于模块验收；主线构建后运行 `release:organize` 和 `release:check`，检查 `desktop/release-plan.json` 中的必需提交、版本、安装包与更新元数据，并输出大小和 SHA-256。这些本地命令不上传 GitHub Release，完成本地检查不代表已经发布。
+正式桌面包从私有源码仓库中已核对、通过验收的集成基线构建。Worktree 产物先用于候选验收；主线构建后运行 `release:organize` 和 `release:check`，检查 `desktop/release-plan.json` 中的必需提交、版本、安装包与更新元数据，并输出大小和 SHA-256。这些本地命令不上传 GitHub Release，完成本地检查不代表已经发布。公开仓库仅接收分发产物，源码提交、开发标签和完整构建证据留在私有仓库。
 
 安装时可覆盖旧版，原有 ERP / 1688 登录会话保存在对应 `persist:` 分区。当前尚未配置 Windows 代码签名，首次安装可能显示“未知发布者”。Windows 可能继续显示旧快捷方式图标缓存；覆盖安装后若图标未刷新，请删除旧快捷方式并由安装程序重新创建。
 
@@ -84,7 +88,7 @@ pnpm --dir frontend test
 pnpm --dir frontend release:check
 ```
 
-GitHub Actions 在 `main`、`master`、`develop`、`codex/selection-profit-erp-sync` 分支推送以及 Pull Request 时运行两项检查：Ubuntu 执行前端 `release:check`，Windows 执行桌面 `verify`。桌面检查覆盖静态约束、IPC、扩展运行时、导航、inbox 生命周期和更新/发布产物契约；打包 smoke、真实 ERP/1688 采集与真实更新安装仍需单独验收。
+后续 GitHub Actions 与开发 PR 在私有源码仓库运行，具体触发分支以该仓库工作流为准，不把开发 CI 上传至公开分发仓库。Ubuntu 检查前端 `release:check`，Windows 检查桌面 `verify`；桌面检查覆盖静态约束、IPC、扩展运行时、导航、inbox 生命周期和更新/发布产物契约。打包 smoke、真实 ERP/1688 采集与真实更新安装仍需单独验收。
 
 ## 可选云端开发资料
 
