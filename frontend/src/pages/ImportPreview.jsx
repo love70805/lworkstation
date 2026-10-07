@@ -1,5 +1,5 @@
 import ImportSupplierPicker from '../components/ImportSupplierPicker';
-import { readImportNumbers, saveImportNumbers } from '../lib/importSupplierPreferences';
+import { readImportPreference, restoreImportPreference, saveImportNumbers } from '../lib/importSupplierPreferences';
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
@@ -251,8 +251,9 @@ export default function ImportPreview() {
         void removeImportStage(refreshed.rowSource?.id).catch(() => {});
         if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
         const choices = refreshed.facets?.supplierNumbers ?? next.facets?.supplierNumbers ?? [];
-        const saved = patch.storeName !== undefined ? readImportNumbers(importWorkspaceRef.current, next.storeName) : next.filterOptions?.supplierNumbers ?? [];
-        next = { ...next, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
+        const preference = patch.storeName !== undefined ? readImportPreference(importWorkspaceRef.current, next.storeName) : next.supplierPreference;
+        const saved = patch.storeName !== undefined ? preference.selected : next.filterOptions?.supplierNumbers ?? [];
+        next = { ...next, supplierPreference: preference, supplierKeywords: patch.storeName !== undefined ? preference.keywords : next.supplierKeywords, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
         setFiles(entries => entries.map(item => item.itemId === itemId ? next : item));
       } catch (error) { setError(error.message); return; }
     }
@@ -283,9 +284,10 @@ export default function ImportPreview() {
             continue;
           }
           activeJobsRef.current.add(item.itemId);
-          const remembered = readImportNumbers(importWorkspaceRef.current, item.storeName);
+          const supplierPreference = readImportPreference(importWorkspaceRef.current, item.storeName);
           const choices = parsed.facets?.supplierNumbers ?? [];
-          const filterOptions = { supplierNumbers: remembered.filter(value => choices.includes(value)), ...(parsed.preset === "ledger_report" ? {
+          const restored = restoreImportPreference(supplierPreference, choices);
+          const filterOptions = { supplierNumbers: restored.selected, ...(parsed.preset === "ledger_report" ? {
             movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
             deriveAmountFromUnitPrice: true,
           } : {}) };
@@ -295,7 +297,7 @@ export default function ImportPreview() {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, missingNumbers: remembered.filter(value => !choices.includes(value)), periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before
@@ -377,7 +379,7 @@ export default function ImportPreview() {
       setProgress({ value: null, label: "正在核对并原子写入，完成前可取消" });
       setResult(await saveSalesImports({ ...payload, preview, overwriteSignature, signal: controller.signal,
         onProgress: ({ completed, total }) => setProgress({ value: completed / total * 100, label: `写入 ${completed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")} 行` }) }));
-      try { saveImportNumbers(importWorkspaceRef.current, payload.items); }
+      try { saveImportNumbers(importWorkspaceRef.current, files); }
       catch { notify("数据已导入，但货号偏好未能保存；下次请重新选择。", "warning"); }
       notify("整批处理完成，来源批次已保留。");
       // The result contains summaries only. Release raw workbook jobs and the
@@ -435,7 +437,7 @@ export default function ImportPreview() {
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
-              <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} onChange={supplierNumbers => update(item.itemId, { filterOptions: { ...item.filterOptions, supplierNumbers } })} />
+              <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} keywords={item.supplierKeywords ?? []} previousMatches={item.supplierPreference?.matched ?? []} hasSaved={item.supplierPreference?.hasSaved ?? false} onKeywordsChange={supplierKeywords => setFiles(entries => entries.map(entry => entry.itemId === item.itemId ? { ...entry, supplierKeywords } : entry))} onChange={supplierNumbers => update(item.itemId, { filterOptions: { ...item.filterOptions, supplierNumbers } })} />
               <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `所选货号完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
               <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions?.movementTypes ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
               <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : "replace_store_month" })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期来源</option></select>{sourceIsFiltered(item) && <small>已缩小销售变动类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>

@@ -7,6 +7,8 @@ const commands = [
   ["单元与集成测试", "pnpm", ["test"]],
   ["前端生产构建", "pnpm", ["build"]],
   ["ERP Assistant 桥接生成", "pnpm", ["erp:bridge:test"]],
+  ["ERP 分批任务持久化与恢复", "node", ["../tools/erp-collection-tasks.test.mjs"]],
+  ["ERP 分批采集规模与性能", "node", ["../tools/erp-collection-batches.test.mjs"]],
   ["ERP 延长时限与取消", "node", ["../tools/erp-collection-time-budget.test.mjs"]],
   ["ERP 采集慢路径", "node", ["../tools/erp-collection-slow-paths.test.mjs"]],
   ["ERP 完整历史与取消采购", "node", ["../tools/erp-purchase-history.test.mjs"]],

@@ -21,9 +21,11 @@ function fixture() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(k => Object.hasOwn(state.storage, k)).map(k => [k, structuredClone(state.storage[k])])); },
     async set(values) { if (state.failSave && values[key]?.length) throw Error('synthetic storage unavailable'); Object.assign(state.storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.34' }), onMessage: { addListener(fn) { state.dispatch = fn; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.35' }), onMessage: { addListener(fn) { state.dispatch = fn; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async (raw, init) => {
     const url = new URL(raw);
+    // This suite deliberately exercises the legacy checkpoint protocol.
+    if (url.pathname === '/erp/v1/collection-tasks') return { ok: true, status: 200, json: async () => ({ tasks: [] }) };
     if (url.pathname === '/erp/v1/requests') return { ok: true, status: 200, json: async () => ({ records: state.records.filter(r => r.workspaceId === url.searchParams.get('workspaceId')) }) };
     if (url.pathname === '/erp/v1/extension-status') return { ok: true, status: 200, json: async () => ({ ok: true }) };
     assert.equal(url.pathname, '/erp/v1/cost-results');

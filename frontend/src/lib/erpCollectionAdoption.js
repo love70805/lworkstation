@@ -1,0 +1,24 @@
+import { listErpCollectionTasks, reportErpCollectionAdoption } from './erpInboxTransport';
+import { listErpCostInbox } from '../data/database';
+
+const reported = new Map();
+// Receipt acknowledgement and adopted cost are independent facts. Retry failed
+// reports from durable local inboxes, including after app/service restart.
+export async function syncErpCollectionAdoptions({ workspaceId, listTasks = listErpCollectionTasks, listInboxes = listErpCostInbox, report = reportErpCollectionAdoption } = {}) {
+  const { tasks = [] } = await listTasks({ workspaceId });
+  if (!tasks.length) return;
+  const inboxes = await listInboxes({ statuses: ['pending', 'loaded', 'applied', 'rejected', 'voided'] });
+  const byDelivery = new Map(inboxes.filter(inbox => inbox.workspaceId === workspaceId).map(inbox => [inbox.deliveryId, inbox]));
+  for (const task of tasks) for (const batch of task.batches ?? []) {
+    const inbox = byDelivery.get(batch.deliveryId);
+    if (!inbox?.adoption || inbox.adoptionPending || inbox.adoptionFailure) continue;
+    const adoption = { ...inbox.adoption, summary: { ...inbox.adoption.summary } };
+    adoption.summary.adoptedCount = ['voided', 'rejected'].includes(inbox.status) ? 0 : Math.max(0, (adoption.summary.adoptedCount ?? 0) - (adoption.summary.manualEffectiveCount ?? 0));
+    const key = `${workspaceId}/${task.taskId}/${batch.deliveryId}`;
+    const signature = JSON.stringify([inbox.status, adoption]);
+    if (batch.adoption && reported.get(key) === signature) continue;
+    await report(task.taskId, { workspaceId, deliveryId: batch.deliveryId, adoption });
+    reported.set(key, signature);
+  }
+  if (reported.size > 5000) reported.clear();
+}

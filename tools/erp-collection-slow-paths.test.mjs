@@ -67,7 +67,7 @@ for (const mode of ['directory-hang', 'directory-failure', 'huge']) {
   if (mode === 'directory-hang') assert.equal(catalog(f).payload.catalogCoverage.directory.state, 'unavailable');
   if (mode === 'huge') {
    const lists = f.calls.filter(c => c.endpoint === 'purchase-order-page');
-   assert.ok(lists.length > 11 && lists.length <= 501, 'history continues past ten pages until the optional request/time budget, without a fixed order cap');
+   assert.ok(lists.length > 11 && lists.length <= 2001, 'history continues past ten pages until the optional time budget, without a fixed order cap');
    assert.equal(f.calls.filter(c => c.endpoint === 'purchase-order-details').length, 1, 'huge optional history stops before high fan-out details');
    assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial');
    assert.equal(catalog(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);

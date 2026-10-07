@@ -19,6 +19,17 @@ async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:0
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
+it('preserves the receipt but never adopts a batch bound to an earlier ledger import', async () => {
+ const {ledger,request,envelope}=await seed({prices:[5,8],id:'changed-import'});
+ await db.erpCostRequests.update(request.id,{ledgerVersion:'[]'});
+ await db.importBatches.add({id:'NEW-IMPORT',workspaceId:ledger.workspaceId,ledgerId:ledger.id,createdAt:'2026-10-07T00:00:00Z'});
+ const receipt=await receiveErpCostInboxEnvelope({envelope});
+ expect(receipt.adoptionError).toBeUndefined();
+ expect(receipt.adoption).toMatchObject({state:'blocked',reason:'ledger_import_changed'});
+ expect(await db.erpCostRows.count()).toBe(0);
+ expect(await db.erpCostInbox.count()).toBe(1);
+ await expect(saveErpCostRequest({...request,id:'STALE',ledgerVersion:'[]'})).rejects.toThrow('台账导入已变化');
+});
 it('marks the committed receipt before adoption so the page cannot race automatic cost adoption',async()=>{
  const {ledger,request,envelope}=await seed({prices:[5,8],id:'receipt-race'});
  let savedReceipt;

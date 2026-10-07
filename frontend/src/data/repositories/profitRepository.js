@@ -1,4 +1,5 @@
 import Dexie from "dexie";
+import { erpLedgerVersion } from '../../domain/erpLedgerVersion';
 import { calculateLedgerCostCoverage, ledgerStatusFromCoverage } from "../../domain/costCoverage";
 import { resolveFormalCostDecision } from "../../domain/costPolicy";
 import {
@@ -460,7 +461,7 @@ export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } 
 
 async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
   const member = await getActiveMemberContext();
-  return db.transaction('rw', db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+  return db.transaction('rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const inbox = await db.erpCostInbox.get(inboxId);
     if (!inbox || inbox.workspaceId !== member.workspaceId) throw new Error('ERP 收件不属于当前工作区。');
     // Recheck the current identity inside the transaction, including the same
@@ -483,6 +484,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     };
     if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return persistResult([], 'blocked', 'request_or_ledger_missing');
     if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
+    if (request.ledgerVersion != null && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) return persistResult([], 'blocked', 'ledger_import_changed');
     const [salesRows, approvals, allRows, batches] = await Promise.all([
       db.salesRows.where('ledgerId').equals(ledger.id).toArray(), db.costApprovals.where('ledgerId').equals(ledger.id).toArray(),
       db.erpCostRows.where('ledgerId').equals(ledger.id).toArray(), db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
@@ -1130,7 +1132,7 @@ export async function saveErpCostRequest(request) {
   const createdAt = request.requestedAt ?? new Date().toISOString();
   const auditActor = await resolveProfitAuditActor(request.requestedBy);
   const savedRequest = { ...request, requestedBy: auditActor };
-  await db.transaction("rw", db.ledgers, db.erpCostRequests, db.auditEvents, async () => {
+  await db.transaction("rw", db.ledgers, db.importBatches, db.erpCostRequests, db.auditEvents, async () => {
     const ledger = request.ledgerId ? await db.ledgers.get(request.ledgerId) : null;
     if (request.ledgerId && !ledger) throw new Error("找不到对应的月度账本。");
     if (ledger && (ledger.workspaceId !== request.workspaceId || ["finalized", "locked"].includes(ledger.status))) throw new Error("账本工作区不匹配或已定稿，不能登记核算请求。");
@@ -1138,9 +1140,10 @@ export async function saveErpCostRequest(request) {
     if (ledgerPeriod != null && (typeof ledgerPeriod !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod))) throw new Error("ERP 请求核算月份必须为 YYYY-MM。");
     if (request.ledgerPeriod != null && request.ledgerPeriod !== ledgerPeriod) throw new Error("ERP 请求核算月份与月度账本不匹配。");
     savedRequest.ledgerPeriod = ledgerPeriod;
+    if (request.ledgerVersion != null && ledger && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) throw new Error('台账导入已变化，请重新准备 ERP 请求。');
     const existing = await db.erpCostRequests.get(request.id);
     if (existing) {
-      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || (existing.ledgerPeriod ?? null) !== ledgerPeriod || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
+      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || (existing.ledgerPeriod ?? null) !== ledgerPeriod || (existing.ledgerVersion ?? null) !== (request.ledgerVersion ?? null) || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
       return;
     }
 

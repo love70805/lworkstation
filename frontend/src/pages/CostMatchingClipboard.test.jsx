@@ -11,6 +11,7 @@ import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 
 const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn() }));
+vi.mock('../hooks/useErpCollectionTasks', () => ({ useErpCollectionTasks: () => ({ tasks: mocks.tasks ?? [], loading: false, error: '', refresh: () => {} }) }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
 vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : query.toString().includes('listErpCostRequests') ? mocks.requests : initial }));
 vi.mock('../components/UI', async importOriginal => ({ ...await importOriginal(), useToast: () => ({ notify: mocks.notify }) }));
@@ -42,6 +43,7 @@ beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
   mocks.inboxRecords = [];
+  mocks.tasks = [];
   mocks.requests = [];
   mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
   mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.cancel.mockReset().mockResolvedValue(null);
@@ -67,12 +69,25 @@ it('registers the selected store using exactly the displayed SKCs and expected S
   await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'FULL-SCOPE', stores: ['甲', '乙'], contextStore: '甲' });
   expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({
     platformSkcs: ['SKC-A'],
-    expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'SKC-A' }],
+    expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'SKC-A', store: '甲' }],
   }), expect.any(Object));
   expect(container.textContent).toContain('当前查看平台 SKU1');
   await act(async () => button('复制 1 个平台 SKC').click());
   expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-A');
   expect(mocks.snapshot.rows).toHaveLength(2);
+});
+
+it('keeps the running task scope when display search changes or missing-cost rows shrink', async () => {
+  const request = { id: 'ACTIVE', workspaceId: 'W', ledgerId: 'TASK-L', ledgerPeriod: '2026-08', ledgerVersion: '[]', platformSkcs: ['SKC-A', 'SKC-B'], expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'SKC-A', store: '甲' }, { platformSku: 'SKU-1', platformSkc: 'SKC-B', store: '甲' }] };
+  mocks.requests = [request];
+  mocks.tasks = [{ taskId: 'TASK', requestId: request.id, workspaceId: 'W', ledgerId: 'TASK-L', ledgerPeriod: request.ledgerPeriod, ledgerVersion: '[]', status: 'running', requestSnapshot: request, batches: [], createdAt: new Date().toISOString() }];
+  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'TASK-L' });
+  await act(async () => Simulate.change(container.querySelector('[aria-label="测试查询范围"]'), { target: { value: 'SKC-B' } }));
+  await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
+  expect(mocks.register).not.toHaveBeenCalled();
+  expect(mocks.cancel).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('查看筛选不改变此任务');
+  expect(button('复制 1 个平台 SKC').disabled).toBe(false);
 });
 
 it('cancels the old scope immediately and registers only the final query after rapid typing', async () => {
@@ -89,7 +104,7 @@ it('cancels the old scope immediately and registers only the final query after r
   expect(mocks.cancel).toHaveBeenCalledOnce();
   await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
   expect(mocks.register).toHaveBeenCalledOnce();
-  expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({ platformSkcs: ['SKC-B'], expectedSkus: [{ platformSku: 'SKU-1', platformSkc: 'SKC-B' }] }), expect.any(Object));
+  expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({ platformSkcs: ['SKC-B'], expectedSkus: [{ platformSku: 'SKU-1', platformSkc: 'SKC-B', store: '甲' }] }), expect.any(Object));
   expect(button('复制 1 个平台 SKC').disabled).toBe(false);
   await act(async () => button('复制 1 个平台 SKC').click());
   expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-B');
@@ -121,7 +136,7 @@ it('ignores a late registration acknowledgement from the previous search range',
   expect(button('复制 1 个平台 SKC').disabled).toBe(true);
   await act(async () => new Promise(resolve => setTimeout(resolve, 350)));
   expect(button('复制 1 个平台 SKC').disabled).toBe(false);
-  expect(mocks.register.mock.calls.at(-1)[0].expectedSkus).toEqual([{ platformSku: 'SKU-1', platformSkc: 'SKC-B' }]);
+  expect(mocks.register.mock.calls.at(-1)[0].expectedSkus).toEqual([{ platformSku: 'SKU-1', platformSkc: 'SKC-B', store: '甲' }]);
 });
 it.each(['finalized', 'locked'])('allows read-only copy in %s while cost writes and registration remain blocked', async status => {
   await render(['SKC-1'], status);

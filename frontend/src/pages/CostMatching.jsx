@@ -1,4 +1,8 @@
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
+import { erpLedgerVersion } from '../domain/erpLedgerVersion';
+import { isActiveErpCollection } from '../domain/erpCollectionStatus';
+import { useErpCollectionTasks } from '../hooks/useErpCollectionTasks';
+import ErpCollectionProgress from '../components/ErpCollectionProgress';
 import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
@@ -28,7 +32,7 @@ import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { useLedgerIdentity } from "../hooks/useLedgerIdentity";
 import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
 import { groupImportedSales } from "../lib/profit";
-import { registerErpBridgeRequest } from "../lib/erpInboxTransport";
+import { registerErpBridgeRequest, controlErpCollectionTask } from "../lib/erpInboxTransport";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, saveProfitFilter } from "../lib/profitFilter";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, filterCostMatchGroups, groupAuxiliaryCostRows, groupCostMatchesBySkc, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "../lib/costMatching";
@@ -187,6 +191,14 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const latestRequest = useLiveQuery(() => getLatestErpCostRequest(ledgerId), [ledgerId], null);
   const allInboxRecords = useLiveQuery(() => listErpCostInbox({ statuses: ["pending", "loaded", "applied", "rejected", "voided"] }), [], []);
   const requestRecords = useLiveQuery(() => listErpCostRequests(), [], []);
+  const collection = useErpCollectionTasks(snapshot?.ledger?.workspaceId, snapshot?.ledger?.id);
+  const collectionTask = collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
+  const activeCollection = isActiveErpCollection(collectionTask) ? collectionTask : null;
+  const collectionRequest = activeCollection ? requestRecords.find(request => request.id === activeCollection.requestId) ?? null : null;
+  const ledgerVersion = useMemo(() => erpLedgerVersion(snapshot?.batches), [snapshot?.batches]);
+  const collectionScopeChanged = Boolean(activeCollection && (activeCollection.ledgerVersion !== ledgerVersion || activeCollection.ledgerPeriod !== snapshot?.ledger?.period));
+  const [collectionBusy, setCollectionBusy] = useState(false);
+  const [collectionError, setCollectionError] = useState('');
   const locked = ["finalized", "locked"].includes(snapshot?.ledger?.status);
   const ledgerLocked = snapshot?.ledger?.status === "locked";
   const [sourceText, setSourceText] = useState("");
@@ -340,7 +352,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     const unique = new Map();
     filteredSalesLines.forEach((row) => {
       const key = canonicalPlatformSku(row.platformSku);
-      if (!unique.has(key)) unique.set(key, { platformSku: row.platformSku, platformSkc: row.platformSkc });
+      if (!unique.has(key)) unique.set(key, { platformSku: row.platformSku, platformSkc: row.platformSkc, store: row.store });
     });
     return [...unique.values()];
   }, [filteredSalesLines]);
@@ -348,8 +360,10 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const { platformSkcs, missingCount: missingPlatformSkcCount } = erpQueryScope;
   const displayPlatformSkcs = platformSkcs;
   const displaySkuSet = useMemo(() => new Set(filteredSalesLines.map(row => row.canonicalPlatformSku)), [filteredSalesLines]);
-  const registrationScope = erpRequestScopeKey({ ledger: snapshot?.ledger, platformSkcs, expectedSkus });
-  currentRegistrationScopeRef.current = locked || scopeHasIdentityConflict ? null : registrationScope;
+  const registrationSkcs = collectionRequest?.platformSkcs ?? platformSkcs;
+  const registrationExpected = collectionRequest?.expectedSkus ?? expectedSkus;
+  const registrationScope = erpRequestScopeKey({ ledger: snapshot?.ledger, platformSkcs: registrationSkcs, expectedSkus: registrationExpected, ledgerVersion });
+  currentRegistrationScopeRef.current = locked || (!activeCollection && scopeHasIdentityConflict) ? null : registrationScope;
   const registrationReady = !scopeHasIdentityConflict && registrationState.status === "registered" && registrationState.scope === registrationScope;
   useEffect(() => {
     if (locked || scopeHasIdentityConflict || !snapshot?.ledger || !platformSkcs.length) return;
@@ -357,15 +371,31 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     return () => window.clearInterval(timer);
   }, [registrationScope, locked, scopeHasIdentityConflict]);
   useEffect(() => {
+    if (collection.loading || collection.error) return;
+    if (activeCollection && (collectionScopeChanged || locked)) {
+      void controlErpCollectionTask(activeCollection.taskId, { workspaceId: activeCollection.workspaceId, action: 'stop' })
+        .then(() => { setCollectionError(locked ? '账本已定稿，采集已停止。' : '台账已重新导入，旧任务已停止，请按当前范围重新采集。'); collection.refresh(); })
+        .catch(error => setCollectionError(error.message));
+      return;
+    }
+    if (activeCollection && !collectionRequest) return;
+    if (activeCollection) {
+      previousRegistrationRef.current = { ledger: snapshot.ledger, scope: registrationScope };
+      setRegistrationState({ status: 'registered', scope: registrationScope, message: '活动任务范围已固定；查看筛选不改变采集范围。' });
+      if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(activeCollection.requestId); setCostRequest(collectionRequest); }
+      return;
+    }
     const previous = previousRegistrationRef.current;
-    const cancelledLedger = previous && (previous.scope !== registrationScope || locked || scopeHasIdentityConflict || !platformSkcs.length)
+    const noScope = !registrationSkcs.length;
+    const conflict = !activeCollection && scopeHasIdentityConflict;
+    const cancelledLedger = previous && (previous.scope !== registrationScope || locked || conflict || noScope)
       ? previous.ledger
-      : snapshot?.ledger && (locked || scopeHasIdentityConflict || !platformSkcs.length) ? snapshot.ledger : null;
+      : snapshot?.ledger && (locked || conflict || noScope) ? snapshot.ledger : null;
     if (cancelledLedger) {
       previousRegistrationRef.current = null;
       void cancelAutoErpRequest(cancelledLedger, { latest: getLatestErpCostRequest, register: registerErpBridgeRequest }).catch((error) => setRegistrationState({ status: "failed", message: `旧回传关联取消失败：${error.message}` }));
     }
-    if (!snapshot?.ledger || locked || scopeHasIdentityConflict || !platformSkcs.length) {
+    if (!snapshot?.ledger || locked || conflict || noScope) {
       if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(null); setCostRequest(null); }
       setRegistrationState({ status: "idle", message: "" });
       return;
@@ -375,8 +405,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     const registerScope = () => {
       registrationStartedRef.current = true;
       previousRegistrationRef.current = { ledger: snapshot.ledger, scope: registrationScope };
-      void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs, expectedSkus }, {
+      void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs: registrationSkcs, expectedSkus: registrationExpected, ledgerVersion }, {
         latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest,
+        activeRequest: collectionRequest,
         isCurrent: () => !cancelled && currentRegistrationScopeRef.current === registrationScope,
       }).then((request) => {
         if (!request || cancelled || currentRegistrationScopeRef.current !== registrationScope) return;
@@ -388,7 +419,18 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     const timer = registrationStartedRef.current ? window.setTimeout(registerScope, 300) : null;
     if (timer === null) registerScope();
     return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
-  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict]);
+  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, activeCollection?.taskId, collectionScopeChanged]);
+  const controlCollection = async action => {
+    if (!collectionTask || collectionBusy) return;
+    setCollectionBusy(true); setCollectionError('');
+    try {
+      if (['resume', 'retry_failed'].includes(action) && (locked || collectionTask.ledgerVersion !== ledgerVersion || collectionTask.ledgerPeriod !== snapshot?.ledger?.period)) throw new Error('账本已定稿或导入范围已变化，请从当前账本重新准备采集。');
+      if (['resume', 'retry_failed'].includes(action) && !requestRecords.some(request => request.id === collectionTask.requestId)) throw new Error('本工作区缺少原任务请求，请停止此任务后从当前账本重新开始。');
+      await controlErpCollectionTask(collectionTask.taskId, { workspaceId: collectionTask.workspaceId, action, requestId: collectionTask.requestId, scopeHash: collectionTask.scopeHash, filters: collectionTask.filters });
+      collection.refresh();
+    } catch (error) { setCollectionError(error.message); }
+    finally { setCollectionBusy(false); }
+  };
   const inboxQueue = useMemo(() => buildErpInboxQueue({
     inboxes: inboxRecords,
     requests: requestRecords,
@@ -949,6 +991,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} onChange={changeScope} /> : null}
+      <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} />
       {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会自动确定父级关系，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 
       <div className="cost-flow-guide" aria-label="成本核对状态" role="status">

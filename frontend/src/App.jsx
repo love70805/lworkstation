@@ -19,6 +19,7 @@ import { receiveAndAcknowledgeInboxRecord } from "./lib/inboxDelivery";
 import { recoverCompleteErpCostDrafts } from "./lib/erpLegacyDraftRecovery";
 import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectionCaptureContext } from "./lib/selectionCaptureTransport";
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
+import { syncErpCollectionAdoptions } from './lib/erpCollectionAdoption';
 
 const CaptureQueue = lazy(() => import("./pages/CaptureQueue"));
 const DataSecurity = lazy(() => import("./pages/DataSecurity"));
@@ -45,6 +46,7 @@ export async function runErpInboxCycle({
   acknowledge = acknowledgeErpInbox,
   recover = recoverErpCostInboxAdoptions,
   recoverDrafts = recoverCompleteErpCostDrafts,
+  syncTaskAdoptions = null,
   emit = (envelope) => window.dispatchEvent(new CustomEvent("shopeers:erp-inbox-received", { detail: envelope })),
 } = {}) {
   const failures = [];
@@ -83,6 +85,10 @@ export async function runErpInboxCycle({
   catch (error) { failures.push(error); }
   try {
     const results = await recover({ workspaceId: context.workspaceId });
+    if (syncTaskAdoptions) {
+      try { await syncTaskAdoptions({ workspaceId: context.workspaceId }); }
+      catch (error) { failures.push(error); }
+    }
     const recoveryFailures = Array.isArray(results) ? results.filter(result => result.error) : [];
     failures.push(...recoveryFailures.map(result => new Error(result.error)));
     return { received, failures, recovered: recoveryFailures.length === 0 };
@@ -123,7 +129,7 @@ export async function runErpCatalogInboxCycle({ isDisposed = () => false, getCon
 function ErpInboxListener() {
   useEffect(() => {
     let disposed = false;
-    const poll = createErpInboxPoller({ isDisposed: () => disposed });
+    const poll = createErpInboxPoller({ isDisposed: () => disposed, syncTaskAdoptions: syncErpCollectionAdoptions });
     void poll();
     let catalogRunning = false;
     const pollCatalog = async () => {

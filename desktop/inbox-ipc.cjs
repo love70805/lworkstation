@@ -2,6 +2,7 @@ const ALLOWED_METHODS = new Set(["GET", "POST"]);
 const INBOX_ROUTE_METHODS = new Map([
   ["/erp/v1/status", new Set(["GET"])],
   ["/erp/v1/requests", new Set(["GET", "POST"])],
+  ["/erp/v1/collection-tasks", new Set(["GET", "POST"])],
   ["/erp/v1/cost-batches", new Set(["GET", "POST"])],
   ["/erp/v1/cost-results", new Set(["POST"])],
   ["/erp/v1/catalog-results", new Set(["POST"])],
@@ -80,7 +81,10 @@ function normalizeInboxRequest(input = {}) {
   if (!ALLOWED_METHODS.has(method)) throw ipcError("本机收件方法不受支持。", 405, "INVALID_INBOX_METHOD");
   const query = normalizeQuery(input.query);
   const body = normalizeBody(input.body, method);
-  if (!INBOX_ROUTE_METHODS.get(route)?.has(method)) {
+  const taskMethod = /^\/erp\/v1\/collection-tasks\/[A-Za-z0-9._:-]+$/.test(route) && method === 'GET'
+    || /^\/erp\/v1\/collection-tasks\/[A-Za-z0-9._:-]+\/(control|adoption)$/.test(route) && method === 'POST'
+    || /^\/erp\/v1\/collection-tasks\/[A-Za-z0-9._:-]+\/batches\/[A-Za-z0-9._:-]+$/.test(route) && method === 'POST';
+  if (!INBOX_ROUTE_METHODS.get(route)?.has(method) && !taskMethod) {
     throw ipcError("本机收件路由与方法组合不受支持。", 405, "INVALID_INBOX_OPERATION");
   }
   return { route, method, query, body };
@@ -109,6 +113,7 @@ function normalizeWorkspaceContext(body) {
 
 function enforceWorkspaceContext(request, committed) {
   const protectedRoute = request.route.includes("/requests")
+    || request.route.includes("/collection-tasks")
     || request.route.includes("/cost-batches")
     || request.route.includes("/cost-results")
     || request.route.includes("/catalog-results")

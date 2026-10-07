@@ -26,6 +26,10 @@
 
 当前公开稳定版为 [0.4.2](https://github.com/love70805/lworkstation/releases/tag/v0.4.2)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
+## v0.4.3 候选准备中（2026-10-07）
+
+分批 ERP 采集、重启后显式恢复与导入关键词选货号。候选将登记于 `candidates/0.4.3/`，证据 `archive/release-0.4.3/`。未公开、未自动安装，未改写真实数据，见 [候选记录](../docs/RELEASE_0.4.3.md)。
+
 ## v0.4.2 已公开稳定 Latest（2026-10-07）
 
 成本采集 60 分钟、资料 30 分钟、单请求 120 秒。候选 releases/candidates/0.4.2/，证据 archive/release-0.4.2/。取消及不完整证据保护保留，内置 ERP Assistant 8.0.34，旧有效任务兼容。本机不自动安装。1281 测试、候选及 PR/main CI、四资产与更新入口回读通过。安装包 118465788 字节，SHA256 `BED644AA9D5917F44E58BEEBAC47883FB7CF5F0BD2054796E546480F532A928F`。见 [发布记录](../docs/RELEASE_0.4.2.md)。

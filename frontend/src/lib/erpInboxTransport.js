@@ -54,3 +54,18 @@ export function getErpRequestHistory({ workspaceId } = {}) {
 export function getErpExtensionStatus() {
   return requestInbox({ route: "/erp/v1/extension-status" });
 }
+
+export function listErpCollectionTasks({ workspaceId, ledgerId, requestId, signal } = {}) {
+  return requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId, ledgerId, requestId } }, { signal });
+}
+
+export function controlErpCollectionTask(taskId, { workspaceId, action, requestId, filters, scopeHash } = {}) {
+  return requestInbox({ route: `/erp/v1/collection-tasks/${encodeURIComponent(taskId)}/control`, method: 'POST', body: { workspaceId, action, requestId, filters, scopeHash } });
+}
+
+export function reportErpCollectionAdoption(taskId, { workspaceId, deliveryId, adoption } = {}) {
+  if (!taskId || !deliveryId || !adoption) return Promise.resolve(null);
+  return requestInbox({ route: `/erp/v1/collection-tasks/${encodeURIComponent(taskId)}/adoption`, method: 'POST', body: {
+    workspaceId, deliveryId, ...adoption.summary, state: adoption.state, processedAt: adoption.processedAt,
+  } });
+}

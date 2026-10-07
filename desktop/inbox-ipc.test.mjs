@@ -31,6 +31,10 @@ assert.deepEqual(normalizeWorkspaceContext({ workspaceId: "workspace-1", memberI
 });
 assert.throws(() => normalizeWorkspaceContext({ workspaceId: "", memberId: "m", visibility: "workspace" }), /上下文/);
 const committed = { workspaceId: "workspace-a", memberId: "member-a", visibility: "workspace" };
+for (const [route, method] of [['/erp/v1/collection-tasks','GET'], ['/erp/v1/collection-tasks/TASK/control','POST'], ['/erp/v1/collection-tasks/TASK/adoption','POST'], ['/erp/v1/collection-tasks/TASK/batches/TASK:1','POST']]) {
+  const request = normalizeInboxRequest({ route, method, ...(method === 'POST' ? { body: { workspaceId: 'workspace-other' } } : { query: { workspaceId: 'workspace-other' } }) });
+  assert.throws(() => enforceWorkspaceContext(request, committed), /工作区/);
+}
 const batchRequest = normalizeInboxRequest({
   route: "/erp/v1/cost-batches",
   method: "POST",

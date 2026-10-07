@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
 
 const port = Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790);
 const bindHost = "127.0.0.1";
@@ -51,6 +52,7 @@ async function writeSpool(records) {
     owned = true;
     try {
       await handle.writeFile(JSON.stringify(records, null, 2), "utf8");
+      await handle.sync();
     } finally {
       await handle.close();
     }
@@ -129,7 +131,8 @@ function normalizedExpectedSkus(values, { strict = false } = {}) {
     if (previous && previous.canonicalPlatformSkc !== canonicalPlatformSkc) {
       throw Object.assign(new Error(`ERP 请求平台 SKU ${platformSku} 对应多个平台 SKC。`), { status: 400, code: "INVALID_ERP_REQUEST" });
     }
-    result.set(canonicalPlatformSku, { platformSku, platformSkc, canonicalPlatformSku, canonicalPlatformSkc });
+    const store = String(item?.store ?? item?.storeName ?? '').normalize('NFKC').trim();
+    result.set(canonicalPlatformSku, { platformSku, platformSkc, canonicalPlatformSku, canonicalPlatformSkc, ...(store ? { store } : {}) });
   }
   return result;
 }
@@ -179,6 +182,7 @@ function stripExtensionDecisions(value, depth = 0) {
 }
 
 function requestExpired(request, now = Date.now()) {
+  if (Date.parse(request?.leaseExpiresAt ?? '') > now) return false;
   const registeredAt = Date.parse(String(request?.registeredAt ?? ""));
   return !Number.isFinite(registeredAt) || now - registeredAt > requestTtlMs;
 }
@@ -221,6 +225,7 @@ function costResultInputHash(payload) {
     rows: stripExtensionDecisions(payload?.rows ?? []),
     sourceMeta: stripExtensionDecisions(payload?.sourceMeta ?? payload?.meta ?? {}),
     warehouseEvidence: stripExtensionDecisions(payload?.warehouseEvidence ?? {}),
+    ...(payload?.collectionTask ? { collectionTask: payload.collectionTask } : {}),
   };
   return crypto.createHash("sha256").update(stableJson(input)).digest("hex");
 }
@@ -932,18 +937,20 @@ function chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs })
   return null;
 }
 
-function requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, platformSkcs, expectedSkus }) {
+function requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledgerVersion, platformSkcs, expectedSkus }) {
   const normalizedExpectedScope = normalizedExpectedSkus(expectedSkus);
   const input = {
     requestId: String(requestId ?? "").trim(),
     workspaceId: String(workspaceId ?? "").trim(),
     ledgerId: String(ledgerId ?? "").trim(),
     ...(ledgerPeriod == null ? {} : { ledgerPeriod }),
+    ...(ledgerVersion == null ? {} : { ledgerVersion }),
     querySkcs: [...querySkcSet(platformSkcs)].sort(),
     expectedSkus: [...normalizedExpectedScope.values()]
       .map((item) => ({
         platformSku: item.canonicalPlatformSku,
         platformSkc: item.canonicalPlatformSkc,
+        ...(item.store ? { store: canonicalSku(item.store) } : {}),
       }))
       .sort((left, right) => left.platformSku.localeCompare(right.platformSku)
         || left.platformSkc.localeCompare(right.platformSkc)),
@@ -987,7 +994,13 @@ const server = http.createServer(async (req, res) => {
     // GET can expire requests too, so every read/modify/write shares this queue.
     const records = await readSpool();
     const expiredChanged = expireRegisteredRequests(records);
-    if (expiredChanged) await writeSpool(records);
+    const recoveredTasks = recoverCollectionTasks(records, inboxInstanceId);
+    if (expiredChanged || recoveredTasks) await writeSpool(records);
+    const taskResponse = handleCollectionTaskRequest(records, { method: req.method, url: new URL(req.url, `http://${bindHost}:${port}`), payload: payload ?? {}, instanceId: inboxInstanceId });
+    if (taskResponse) {
+      if (req.method === 'POST') await writeSpool(records);
+      return json(res, taskResponse.status, taskResponse.body);
+    }
     if (req.method === "GET") {
       const url = new URL(req.url, `http://${bindHost}:${port}`);
       if (url.pathname === "/erp/v1/status") return json(res, 200, runtimeStatus(records));
@@ -1187,12 +1200,23 @@ const server = http.createServer(async (req, res) => {
       const workspaceId = String(payload?.request?.workspaceId ?? payload?.workspaceId ?? "").trim();
       const ledgerId = payload?.request?.ledgerId ?? payload?.ledgerId ?? null;
       const ledgerPeriod = payload?.request?.ledgerPeriod ?? null;
+      const ledgerVersion = payload?.request?.ledgerVersion ?? null;
+      if (ledgerVersion != null && (typeof ledgerVersion !== 'string' || ledgerVersion.length > 100000)) return json(res, 400, { error: 'INVALID_ERP_REQUEST', message: '台账导入版本无效。' });
       if (ledgerPeriod != null && (typeof ledgerPeriod !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod))) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "ERP 请求核算月份必须为 YYYY-MM。" });
       const platformSkcs = Array.isArray(payload?.request?.platformSkcs) ? payload.request.platformSkcs : [];
       const expectedSkus = Array.isArray(payload?.expectedSkus) ? payload.expectedSkus : [];
       const replaceLedgerScope = payload?.request?.replaceLedgerScope === true;
       if (replaceLedgerScope && (!requestId || !workspaceId || !String(ledgerId ?? "").trim())) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "替换账本关联必须提供工作区、账本与请求标识。" });
+      const assertTaskNotActive = (targetRequestId) => {
+        if (records.some(item => item.kind === 'collection-task' && item.requestId === targetRequestId && item.status !== 'stopped'
+          && !(item.status === 'cost_complete' && item.batches.every(batch => batch.catalogStatus === 'completed')))) {
+          throw Object.assign(new Error('该请求有未完成的采集任务，请先停止任务；展示筛选不能更改采集范围。'), { status: 409, code: 'ERP_TASK_ACTIVE' });
+        }
+      };
       const supersedeLedgerRequests = (exceptRequestId = null) => {
+        for (const record of records) {
+          if (record.kind === 'request' && record.requestKind !== 'catalog' && ['registered','expired'].includes(record.status) && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) assertTaskNotActive(record.requestId);
+        }
         let changed = false;
         for (const record of records) {
           if (record.kind === "request" && record.requestKind !== "catalog" && record.status === "registered" && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) {
@@ -1209,6 +1233,7 @@ const server = http.createServer(async (req, res) => {
           return json(res, 200, { accepted: true, requestId, status: "superseded" });
         }
         if (!existing || existing.workspaceId !== workspaceId || existing.ledgerId !== ledgerId) return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "取消请求的工作区或账本不匹配。" });
+        assertTaskNotActive(existing.requestId);
         if (existing.status === "registered") { existing.status = "superseded"; await writeSpool(records); }
         return json(res, 200, { accepted: true, requestId, status: existing.status });
       }
@@ -1218,7 +1243,7 @@ const server = http.createServer(async (req, res) => {
       if ([...normalizedExpectedScope.values()].some((item) => !queryScope.has(item.canonicalPlatformSkc))) {
         return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "expectedSkus 包含不在完整平台 SKC 查询范围内的项目。" });
       }
-      const inputHash = requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, platformSkcs, expectedSkus: [...normalizedExpectedScope.values()] });
+      const inputHash = requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledgerVersion, platformSkcs, expectedSkus: [...normalizedExpectedScope.values()] });
       const existingRequest = records.find((item) => item.kind === "request" && item.requestId === requestId);
       if (existingRequest) {
         const existingInputHash = existingRequest.requestInputHash || requestInputHash(existingRequest);
@@ -1234,6 +1259,7 @@ const server = http.createServer(async (req, res) => {
       }
       const superseded = records.find((item) => item.kind === "request" && item.requestId === payload.request?.supersedesRequestId);
       if (superseded && superseded.requestKind === "catalog") return json(res, 409, { error: "ERP_REQUEST_CONFLICT", message: "成本请求不能替代资料请求。" });
+      if (superseded && superseded.workspaceId === workspaceId && superseded.ledgerId === ledgerId) assertTaskNotActive(superseded.requestId);
       if (superseded && superseded.workspaceId === workspaceId && superseded.ledgerId === ledgerId) superseded.status = "superseded";
       if (replaceLedgerScope) supersedeLedgerRequests(requestId);
       records.push({
@@ -1243,7 +1269,8 @@ const server = http.createServer(async (req, res) => {
         ledgerId,
         platformSkcs,
         ledgerPeriod,
-        expectedSkus: [...normalizedExpectedScope.values()].map(({ platformSku, platformSkc }) => ({ platformSku, platformSkc })),
+        ...(ledgerVersion == null ? {} : { ledgerVersion }),
+        expectedSkus: [...normalizedExpectedScope.values()].map(({ platformSku, platformSkc, store }) => ({ platformSku, platformSkc, ...(store ? { store } : {}) })),
         requestInputHash: inputHash,
         requestedAt: payload?.request?.requestedAt ?? new Date().toISOString(),
         registeredAt: new Date().toISOString(),
@@ -1306,6 +1333,7 @@ const server = http.createServer(async (req, res) => {
       ];
       if (rawRows.length === 0) return json(res, 400, { error: "EMPTY_COST_RESULTS", message: "成本结果和仓库 SKU 证据均为空。" });
       const resultInputHash = costResultInputHash(payload);
+      const collectionContext = validateCollectionDelivery(records, payload);
       const duplicate = records.find((item) => item.kind === "batch" && item.resultDeliveryId === resultDeliveryId);
       if (duplicate) {
         if (!duplicate.resultInputHash || duplicate.resultInputHash !== resultInputHash) {
@@ -1445,6 +1473,7 @@ const server = http.createServer(async (req, res) => {
       });
       const requestIndex = records.findIndex((item) => item.kind === "request" && item.requestId === request.requestId);
       recordCompletedQuery(records, requestIndex, querySkcSet(payload.querySkcs));
+      recordCollectionDelivery(collectionContext, { deliveryId: envelope.deliveryId, resultDeliveryId, evidenceComplete: sourceMeta.evidenceComplete === true });
       await writeSpool(records);
       latestTransportError = null;
       return json(res, 202, { accepted: true, idempotent: false, resultDeliveryId, deliveryId: envelope.deliveryId, batchId, requestId: request.requestId, envelope });
