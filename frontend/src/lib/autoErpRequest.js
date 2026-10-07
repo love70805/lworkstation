@@ -1,22 +1,22 @@
 import { buildLedgerErpCostRequest } from "./erpRequest";
 
-export function erpRequestScopeKey({ ledger, platformSkcs, expectedSkus }) {
+export function erpRequestScopeKey({ ledger, platformSkcs, expectedSkus, ledgerVersion = null }) {
   return JSON.stringify([ledger?.workspaceId, ledger?.id, ledger?.period ?? null,
     (platformSkcs ?? []).map((item) => String(item.platformSkc ?? item).normalize("NFKC").trim().toUpperCase()).sort(),
-    (expectedSkus ?? []).map((item) => [item.platformSku, item.platformSkc]).sort(),
+    (expectedSkus ?? []).map((item) => [item.platformSku, item.platformSkc, item.store ?? '']).sort(), ledgerVersion,
   ]);
 }
 
 const chains = new Map();
-export function ensureAutoErpRequest(input, { latest, save, register, isCurrent = () => true, now = () => Date.now() }) {
+export function ensureAutoErpRequest(input, { latest, save, register, isCurrent = () => true, now = () => Date.now(), activeRequest = null }) {
   const key = `${input.ledger.workspaceId}:${input.ledger.id}`;
   const previous = chains.get(key) ?? Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
     if (!isCurrent()) return null;
-    const existing = await latest(input.ledger.id);
+    const existing = activeRequest ?? await latest(input.ledger.id);
     if (!isCurrent()) return null;
     const sameScope = existing && erpRequestScopeKey({ ...existing, ledger: input.ledger }) === erpRequestScopeKey(input);
-    const reusable = sameScope && (existing.ledgerPeriod ?? null) === (input.ledger.period ?? null) && now() - Date.parse(existing.requestedAt) < 90 * 60 * 1000;
+    const reusable = sameScope && (existing.ledgerPeriod ?? null) === (input.ledger.period ?? null) && (activeRequest || now() - Date.parse(existing.requestedAt) < 90 * 60 * 1000);
     let request = { ...(reusable ? existing : { ...buildLedgerErpCostRequest(input), supersedesRequestId: existing?.id ?? null }), replaceLedgerScope: true };
     await save(request);
     if (!isCurrent()) return null;

@@ -276,6 +276,7 @@ export function buildErpCostRequest({
   requestedAt,
   ledgerId = null,
   ledgerPeriod = null,
+  ledgerVersion = null,
 }) {
   const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
   assertDomain(ledgerPeriod == null || (typeof ledgerPeriod === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod)), "erp_request_invalid_period", "ERP 请求核算月份必须为 YYYY-MM");
@@ -312,6 +313,7 @@ export function buildErpCostRequest({
       canonicalPlatformSku: canonicalSku,
       platformSkc,
       canonicalPlatformSkc: canonicalSkc,
+      ...(item?.store ? { store: String(item.store).normalize('NFKC').trim() } : {}),
     });
   });
 
@@ -321,6 +323,7 @@ export function buildErpCostRequest({
     workspaceId: normalizedWorkspaceId,
     ledgerId: optionalText(ledgerId),
     ledgerPeriod,
+    ...(ledgerVersion != null ? { ledgerVersion: String(ledgerVersion) } : {}),
     requestedBy: requiredText(requestedBy, "请求人"),
     requestedAt: validIsoTimestamp(requestedAt, "请求时间"),
     queryUnit: "platform_skc",

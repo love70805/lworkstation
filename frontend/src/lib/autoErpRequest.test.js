@@ -7,6 +7,14 @@ function dependencies() {
   return { latest: vi.fn(async () => saved), save: vi.fn(async (request) => { saved = request; }), register: vi.fn(async () => ({ accepted: true, status: "registered" })) };
 }
 describe("automatic ERP request lifecycle", () => {
+  it('keeps a long-running request identity but replaces it for a new import version', async () => {
+    const scope = { ...input(), ledgerVersion: 'import-A' }; const deps = dependencies();
+    const a = await ensureAutoErpRequest(scope, deps);
+    const b = await ensureAutoErpRequest(scope, { ...deps, activeRequest: a, now: () => Date.now() + 4 * 60 * 60 * 1000 });
+    expect(b.id).toBe(a.id);
+    const c = await ensureAutoErpRequest({ ...scope, ledgerVersion: 'import-B' }, deps);
+    expect(c.id).not.toBe(a.id);
+  });
   it("replaces a recent legacy request without a trusted ledger month", async () => {
     const scope = input(); const deps = dependencies();
     const old = await ensureAutoErpRequest(scope, deps);

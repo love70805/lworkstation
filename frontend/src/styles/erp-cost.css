@@ -418,3 +418,10 @@
   .cost-inbox-item, .cost-inbox-history-item { align-items: stretch; flex-wrap: wrap; }
   .cost-inbox-item-status { flex-wrap: wrap; justify-content: flex-start; }
 }
+.erp-collection-progress { margin-block: 16px; }
+.erp-collection-progress .panel-header { flex-wrap: wrap; gap: 12px; }
+.erp-collection-progress h2 { margin: 0; font-size: 16px; }
+.erp-collection-progress p { color: var(--text-muted); overflow-wrap: anywhere; }
+.erp-collection-progress progress { width: 100%; accent-color: var(--primary); }
+.erp-collection-counts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-block: 14px; }
+.erp-collection-counts strong { font-variant-numeric: tabular-nums; }

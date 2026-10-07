@@ -1,6 +1,7 @@
 const ERP_ADOPTION_REASON_LABELS = Object.freeze({
   request_or_ledger_missing: '关联 ERP 请求或账本缺失或不匹配',
   ledger_period_mismatch: 'ERP 请求月份与账本月份不一致',
+  ledger_import_changed: '台账已重新导入，请按当前商品范围重新采集',
   legacy_request_scope_missing: '旧请求无法从当前账本重建平台 SKU 范围',
   legacy_request_ambiguous_scope: '旧请求中同一平台 SKU 对应多个平台 SKC',
   legacy_evidence: '旧批次缺少正式核算所需的完整采购证据',
