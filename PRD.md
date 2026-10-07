@@ -1,6 +1,6 @@
 # 选品工作台与 ERP Assistant
 
-> **历史文档提示（2026-08-06）：** 本文记录前端原型阶段的产品假设，其中“仅本地、不做云端协作”“月度账本和统一工作区属于 P2”等内容已经失效。当前开发以 [`frontend/docs/integration/PRODUCT_SPEC.md`](frontend/docs/integration/PRODUCT_SPEC.md) 为主规格，以同目录下的基线、兼容契约、领域模型和云端架构文档为约束。
+> **历史文档提示（2026-10-07）：** 本文保留早期原型的产品假设、版本和规划，供追溯使用。当前交付为纯本机 Windows 桌面版；现行范围及业务口径以 [AGENTS.md](AGENTS.md)、[当前任务看板](docs/CODEX_TASK_BOARD.md)、最新用户要求和实现契约为准。正文中的云端、旧路由及旧版本规划不产生新的实施授权。
 
 ## 前端产品需求文档
 
