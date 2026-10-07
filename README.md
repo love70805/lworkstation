@@ -2,9 +2,9 @@
 
 面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、1688 参考采集、ERP 成本核对和利润核算放在同一个本机工作区。
 
-**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.6 更新说明](docs/RELEASE_0.4.6.md)
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.7 更新说明](docs/RELEASE_0.4.7.md)
 
-当前稳定版为 **v0.4.6**，已修复重复后缀应用后的导入禁用，以及内置 ERP 打开助手、刷新连接时的大队列超时。工作站、ERP 和 1688 在桌面应用内分别打开；首次使用时在相应标签完成登录。本机版无需配置云端数据库，下载和安装更新由用户操作。
+当前稳定版为 **v0.4.7**，修复大量历史采集记录下仍出现的 ERP 任务保存和回传超时，已在原工作区完成真实 110 SKC 的完整采集验收。工作站、ERP 和 1688 在桌面应用内分别打开；首次使用时在相应标签完成登录。本机版无需配置云端数据库，下载和安装更新由用户操作。
 
 ## 主要功能
 

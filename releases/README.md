@@ -28,7 +28,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.4](https://github.com/love70805/lworkstation/releases/tag/v0.4.4)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.7](https://github.com/love70805/lworkstation/releases/tag/v0.4.7)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 
@@ -130,7 +130,7 @@ pnpm --dir desktop release:check
 
 candidates/0.4.6/：导入/ERP 修复验收通过，1326 前端测试、构建、完整 ERP/桌面门禁、实际 CSV/XLSX、69 MB 并发队列、真实 ERP 隔离只读 1 SKC/5 SKU、原生候选扩展及隐藏 smoke、623 安装文件/576 输入一致性通过。PR #169 / 主线 CI 通过，稳定标签固定 93c8ba5；四公开资产匿名完整哈希与生产更新入口通过。SHA256：0755605D96C3C99C460806275EDBBC07FB1FF62C89B0D1F80AC20C934869319B。见 [发布记录](../docs/RELEASE_0.4.6.md)。已公开稳定 Latest，不自动安装。
 
-## 0.4.7 真实大队列持久回传（候选验收中）
+## 0.4.7 真实大队列持久回传（已公开并安装复核）
 
-候选 `candidates/0.4.7/`；软件提交 d365a56；证据 `archive/erp-real-timeout/`。1326 前端测试、构建、完整 ERP 门禁、16 组桌面 verify、隐藏 smoke、636 安装文件/589 生产输入及 PR #171 CI 通过。61.6 MB/110 SKC 真实副本复现并修复 4 秒业务保存超时，28 份原始证据哈希保持；真实 ERP 6 批成本/6 批资料持久回传与重启续读通过，映射缺失仍显式保留。安装包 118773220 字节，SHA256 `17C08A29042D62E67964D14F445E4B1879B3C6A5E66A081FDA7E248EB2C3912A`。按此次解除限制授权，原数据/会话/安装备份后已安装同一候选，正在执行原工作区完整新采集；代码合并与公开发布未完成，见 [记录](../docs/integration/ERP_DURABLE_TIMEOUT_0.4.7.md)。
+候选 `candidates/0.4.7/`；软件提交 d365a56；证据 `archive/erp-real-timeout/`。1326 前端测试、构建、完整 ERP 门禁、16 组桌面 verify、隐藏 smoke、636 安装文件/589 生产输入及 PR #171/main CI 通过。61.6 MB/110 SKC 真实副本复现并修复 4 秒业务保存超时，28 份原始证据哈希保持；真实 ERP 分批回传与重启续读通过。安装包 118773220 字节，SHA256 `17C08A29042D62E67964D14F445E4B1879B3C6A5E66A081FDA7E248EB2C3912A`。原数据/会话/安装备份后已安装同一候选，原工作区全新 110 SKC/6 批成本/6 批资料任务完成并自动采用 254 SKU；5 个 ERP 空映射仍显式保留。v0.4.7 固定 8ee4a5b，已公开稳定 Latest；四公开资产匿名完整哈希及生产更新入口通过，正常工作台已恢复，见 [记录](../docs/RELEASE_0.4.7.md)。
 
