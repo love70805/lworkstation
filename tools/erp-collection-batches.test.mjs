@@ -44,6 +44,7 @@ async function scenario(size, mode = '') {
   vm.runInContext(source['background.js'],context);
   async function open() {
     window = new Window({url:sender.url});
+    window.confirm=()=>true;
     const schedule=window.setTimeout.bind(window);
     if(mode==='lost-ack')window.setTimeout=(fn,ms,...args)=>schedule(fn,ms===15000?100:ms,...args);
     window.chrome={runtime:{sendMessage:(message,done)=>dispatch(message,sender,response=>{
@@ -109,18 +110,28 @@ async function scenario(size, mode = '') {
       assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,20,'shared orders are read once across batches');
       assert.equal(calls.filter(item=>item.endpoint==='product-info-sku').length,20,'shared warehouse mappings are read once across batches');
       assert.equal(new Set(deliveries.flatMap(item=>item.rows.map(row=>row.platformSku))).size,size);
+      const sharedTitle=window.document.querySelector('.erpa-cell-platform').getAttribute('title');
+      assert.match(sharedTitle,/SKU-0 · SKC-0/);assert.match(sharedTitle,/SKU-80 · SKC-80/,'preview preserves mappings across all five batches');
+    }
+    if(mode==='recalculate'){
+      listTimes.clear();const oldId=records[1].taskId;window.document.getElementById('erpa-recalculate').click();
+      await until(()=>deliveries.length===Math.ceil(size/20)*2&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(records[1].status,'stopped');assert.notEqual(records[2].taskId,oldId);
+      assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,size*2,'explicit new task rereads authoritative history');
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
-    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size+40:size*3),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
+    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size+40:mode==='recalculate'?size*6:size*3),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
     return listMs;
   } finally {await window.happyDOM.close();}
 }
+if(process.env.ERP_BATCH_SCENARIO){await scenario(100,process.env.ERP_BATCH_SCENARIO);} else {
 for(const size of [100,500,2000])await scenario(size);
 await scenario(40,'pause');
 await scenario(40,'lost-ack');
 await scenario(40,'remote-stop');
 await scenario(40,'throttle');
 await scenario(100,'shared-orders');
+await scenario(40,'recalculate');
 
 const serialMs=await scenario(100,'benchmark-serial');
 const parallelMs=await scenario(100,'benchmark-parallel');
@@ -144,4 +155,6 @@ console.log(JSON.stringify({listImprovementPercent:Math.round((1-parallelMs/seri
   await assert.rejects(()=>pauseCollector.collect(['SKC-A'],{controller:new AbortController()}),error=>error.code==='ERP_COLLECTION_PAUSED');
   console.log(JSON.stringify({catalogRequests:calls,catalogWarehouses:result.results.length,pausePropagated:true}));
  } finally {await window.happyDOM.close();}
+}
+
 }

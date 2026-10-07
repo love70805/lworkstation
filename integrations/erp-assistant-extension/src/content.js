@@ -1413,7 +1413,12 @@
                     const saved = await taskOperation({ action: 'batch', ...identity, state: 'collected', resultDeliveryId: run.resultDeliveryId, evidenceComplete });
                     task = saved.task;
                     const deliveryState = { createdAt: new Date().toISOString(), queryCapturedAt: run.queryCapturedAt };
-                    lastResults = [...new Map([...lastResults, ...state.results].map(row => [resultPolicy.canonical(row.warehouseSku), row])).values()];
+                    const combined = new Map(lastResults.map(row => [resultPolicy.canonical(row.warehouseSku), row]));
+                    for (const row of state.results) {
+                        const key = resultPolicy.canonical(row.warehouseSku), previous = combined.get(key);
+                        combined.set(key, { ...row, mappings: [...new Map([...(previous?.mappings || []), ...row.mappings].map(mapping => [resultPolicy.canonical(mapping.platformSku), mapping])).values()] });
+                    }
+                    lastResults = [...combined.values()];
                     lastMeta = { ...state.meta, querySkcs: [...new Set([...(lastMeta?.querySkcs || []), ...state.meta.querySkcs])], warehouseSkuCount: lastResults.length, platformSkuCount: lastResults.reduce((sum,row) => sum + row.mappings.length, 0) };
                     lastWarehouseEvidence = { ...state.warehouseEvidence, warehouses: [...new Map([...(lastWarehouseEvidence?.warehouses || []), ...state.warehouseEvidence.warehouses].map(row => [resultPolicy.canonical(row.warehouseSku), row])).values()] };
                     setResultCache(state.results, state.meta, state.warehouseEvidence, capturedListUrl, run.resultDeliveryId, deliveryState);
