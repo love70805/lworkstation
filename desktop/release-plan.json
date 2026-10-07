@@ -5,6 +5,10 @@
   "integrationBranch": "codex/v041-import-scope",
   "requiredCommits": [
     {
+      "module": "erp-setup-lifecycle",
+      "commit": "90facb0d757f0bfc889356c24929f626342041bf"
+    },
+    {
       "module": "v0.4.1-import-scope-and-skc-composition",
       "commit": "ea7b230"
     },
