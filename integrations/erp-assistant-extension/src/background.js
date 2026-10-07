@@ -586,6 +586,7 @@
           querySkcs: retryRecord.querySkcs,
           rows: retryRecord.rows,
           sourceMeta: retryRecord.sourceMeta,
+          ...(retryRecord.collectionTask ? { collectionTask: retryRecord.collectionTask } : {}),
           ...(retryRecord.requestKind === 'catalog' ? { catalogCoverage: retryRecord.catalogCoverage } : {}),
           warehouseEvidence: retryRecord.warehouseEvidence,
         },
@@ -649,12 +650,50 @@
     return `ERP-RESULT-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
   }
 
+  async function collectionTask(input = {}, sender) {
+    if (!senderAllowed(sender)) throw loopbackError('ERP_UNTRUSTED_SENDER', '只允许 ERP 采购管理页操作采集任务。', 403);
+    const config = await runtimeConfig();
+    const base = '/erp/v1/collection-tasks';
+    const id = encodeURIComponent(String(input.taskId || ''));
+    const action = input.action || 'list';
+    const paths = { list: base, create: base, get: base + '/' + id, control: base + '/' + id + '/control', batch: base + '/' + id + '/batches/' + encodeURIComponent(String(input.batchId || '')) };
+    if (!paths[action]) throw loopbackError('ERP_TASK_ACTION_INVALID', '未知任务操作。', 400);
+    const body = { ...input, workspaceId: config.workspaceId };
+    delete body.action; delete body.taskId; delete body.batchId;
+    if (input.filters) body.filters = checkpointFilters(input.filters);
+    if (action === 'control') body.action = input.control;
+    const result = await fetchLoopbackJson(paths[action], { config, method: ['list','get'].includes(action) ? 'GET' : 'POST', ...(['list','get'].includes(action) ? { query: { workspaceId: config.workspaceId, ...(input.requestId ? { requestId: input.requestId } : {}) } } : { body }) });
+    assertRecordWorkspace({ workspaceId: config.workspaceId }, await runtimeConfig());
+    return { ...result, ok: true };
+  }
+
+  async function prepareTaskCostResult(input) {
+    const config = await runtimeConfig();
+    const identity = input.collectionTask;
+    const { task } = await fetchLoopbackJson('/erp/v1/collection-tasks/' + encodeURIComponent(identity.taskId), { config, query: { workspaceId: config.workspaceId } });
+    assertRecordWorkspace(task, config);
+    const batch = task.batches.find(item => item.batchId === identity.batchId);
+    if (!batch || batch.attemptId !== identity.attemptId || !sameSkcs(batch.platformSkcs, input.querySkcs)) throw loopbackError('ERP_TASK_ATTEMPT_STALE', '批次尝试或商品范围已变化。', 409);
+    const request = task.requestSnapshot;
+    const evidence = stripUntrustedControl(input.warehouseEvidence || { warehouses: [] });
+    const expectedSkus = normalizedExpectedSkus(request.expectedSkus);
+    const record = { resultDeliveryId: input.resultDeliveryId, createdAt: input.createdAt || new Date().toISOString(), queryCapturedAt: task.queryCapturedAt,
+      attemptsTotal: 0, workspaceId: config.workspaceId, requestId: task.requestId, ledgerId: request.ledgerId, expectedSkus,
+      collectionTask: { taskId: task.taskId, batchId: batch.batchId, attemptId: batch.attemptId }, collectionBinding: checkpointBinding(request),
+      querySkcs: batch.platformSkcs, rows: assignLedgerScopeRoles(buildRows(stripUntrustedControl(input.results), evidence), expectedSkus, batch.platformSkcs),
+      sourceMeta: stripUntrustedControl(input.meta), warehouseEvidence: evidence };
+    if (!record.rows.length) throw loopbackError('EMPTY_COST_RESULTS', '没有可识别仓库 SKU 的成本或排除证据。', 400);
+    await savePending(record);
+    return { record };
+  }
+
   async function prepareCostResult(input) {
     const resultDeliveryId = String(input?.resultDeliveryId || '').trim();
     const existing = (await readPending()).find(item => item.resultDeliveryId === resultDeliveryId);
     // Once retained, only this exact original payload may be retried. It must
     // never be rebuilt from a newly active page, workspace or request.
     if (existing) return { record: existing };
+    if (input.collectionTask?.taskId) return prepareTaskCostResult(input);
     const checkpoints = await cleanCheckpoints();
     const checkpoint = checkpoints.find(item => item.resultDeliveryId === resultDeliveryId);
     if (!checkpoint) throw loopbackError('ERP_CHECKPOINT_MISSING', '采集检查点未保存或已过期，请重新查询；旧结果不会自动回传。', 409);
@@ -764,7 +803,7 @@
 
   async function submitCatalogResult(input, sender) {
     const { request, config } = await catalogRequest({ requestId: String(input?.requestId || '').trim() }, sender);
-    if (!input?.requestId || input.requestId !== request.requestId || !sameSkcs(input?.querySkcs, request.platformSkcs)) throw loopbackError('ERP_REQUEST_CONTEXT_MISSING', '资料请求或完整平台 SKC 范围不匹配。', 409);
+    if (!input?.requestId || input.requestId !== request.requestId || !normalizedSkcs(input?.querySkcs).length || !normalizedSkcs(input?.querySkcs).every(skc => normalizedSkcs(request.platformSkcs).includes(skc))) throw loopbackError('ERP_REQUEST_CONTEXT_MISSING', '资料请求或完整平台 SKC 范围不匹配。', 409);
     const rows = buildCatalogRows(stripUntrustedControl(input?.results), request.platformSkcs);
     const warehouseScope = new Set(rows.map(row => canonical(row.warehouseSku)));
     const rawEvidence = stripUntrustedControl(input?.warehouseEvidence || { warehouses: [] });
@@ -772,7 +811,7 @@
     const resultDeliveryId = /^ERP-RESULT-[A-Za-z0-9._:-]+$/.test(String(input?.resultDeliveryId || '').trim()) ? input.resultDeliveryId.trim() : makeResultDeliveryId();
     const existing = (await readPending()).find(record => record.resultDeliveryId === resultDeliveryId);
     if (existing && (existing.requestKind !== 'catalog' || existing.requestId !== request.requestId || existing.workspaceId !== config.workspaceId)) throw loopbackError('ERP_RESULT_DELIVERY_CONFLICT', '投递标识已绑定其他请求。', 409);
-    const record = existing || { requestKind: 'catalog', requestId: request.requestId, ledgerId: request.ledgerId || null, workspaceId: config.workspaceId, querySkcs: request.platformSkcs, resultDeliveryId, createdAt: String(input?.createdAt || '').trim() || new Date().toISOString(), attemptsTotal: 0, rows, warehouseEvidence, catalogCoverage: stripUntrustedControl(input?.catalogCoverage) };
+    const record = existing || { requestKind: 'catalog', requestId: request.requestId, ledgerId: request.ledgerId || null, workspaceId: config.workspaceId, querySkcs: input.querySkcs, resultDeliveryId, createdAt: String(input?.createdAt || '').trim() || new Date().toISOString(), attemptsTotal: 0, rows, warehouseEvidence, catalogCoverage: stripUntrustedControl(input?.catalogCoverage) };
     await savePending(record);
     return { ...await startDelivery(record), retained: (await readPending()).some(item => item.resultDeliveryId === resultDeliveryId) };
   }
@@ -834,6 +873,8 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const operation = message?.type === 'shopeers.erp.submitCostResult'
       ? submitCostResult(message.payload, sender)
+      : message?.type === 'shopeers.erp.collectionTask'
+        ? collectionTask(message.payload, sender)
       : message?.type === 'shopeers.erp.collectionCheckpoint'
         ? collectionCheckpoint(message.payload, sender)
       : message?.type === 'shopeers.erp.catalogContext'
@@ -891,6 +932,7 @@
   if (globalThis.__SHOPEERS_ERP_BACKGROUND_TEST__) {
     globalThis.__SHOPEERS_ERP_BACKGROUND_TEST_API__ = {
       buildCatalogRows,
+      collectionTask,
       collectionCheckpoint,
       acknowledgeCheckpointDelivery,
       cleanCheckpoints,

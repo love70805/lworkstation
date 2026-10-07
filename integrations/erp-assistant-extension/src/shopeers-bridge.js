@@ -16,6 +16,7 @@
 
   async function submit(input = {}) {
     const payload = {
+      collectionTask: input.collectionTask,
       results: Array.isArray(input.results) ? input.results : [],
       meta: input.meta && typeof input.meta === 'object' ? input.meta : {},
       warehouseEvidence: input.warehouseEvidence && typeof input.warehouseEvidence === 'object'
@@ -89,5 +90,6 @@
 
   const retry = (resultDeliveryId) => sendMessage({ type: 'shopeers.erp.retryPending', payload: { resultDeliveryId } });
   const collectionCheckpoint = (input) => sendMessage({ type: 'shopeers.erp.collectionCheckpoint', payload: input });
-  window.ShopeersErpDeliveryBridge = Object.freeze({ submit, submitCatalog, catalogContext, previewContext, reportStatus, retry, collectionCheckpoint });
+  const collectionTask = (input) => sendMessage({ type: 'shopeers.erp.collectionTask', payload: input });
+  window.ShopeersErpDeliveryBridge = Object.freeze({ collectionTask, submit, submitCatalog, catalogContext, previewContext, reportStatus, retry, collectionCheckpoint });
 })();

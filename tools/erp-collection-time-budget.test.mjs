@@ -33,7 +33,7 @@ async function slowCollection(cancel) {
     }
     elapsed = target; await pause();
   };
-  const scope = ['SKC-A', 'SKC-B', 'SKC-C', 'SKC-D'];
+  const scope = ['SKC-A', 'SKC-B', 'SKC-C', 'SKC-D', 'SKC-E', 'SKC-F'];
   window.chrome = { runtime: { sendMessage(message, callback) {
     messages.push({ ...structuredClone(message), elapsed });
     callback(collectionReply(message, { platformSkcs: scope }) || (message.type === 'shopeers.erp.catalogContext'
@@ -72,7 +72,7 @@ async function slowCollection(cancel) {
       const cost = messages.find(message => message.type === 'shopeers.erp.submitCostResult');
       const catalog = messages.find(message => message.type === 'shopeers.erp.submitCatalogResult');
       assert.ok(cost?.elapsed > 300000, 'costs complete after five minutes');
-      assert.equal(cost.payload.results.length, 4);
+      assert.equal(cost.payload.results.length, 6);
       assert.ok(catalog?.elapsed - cost.elapsed > 60000, 'catalog continues beyond one minute');
       assert.equal(catalog.payload.catalogCoverage.directory.state, 'complete');
       assert.ok(armed.includes(60 * 60 * 1000) && armed.includes(30 * 60 * 1000) && armed.includes(120000));

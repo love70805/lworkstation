@@ -122,7 +122,7 @@ async function resumeAcrossTargets() {
       assert.equal(typeof expireStageBudget, 'function', 'the production stage deadline is armed');
       expireStageBudget();
       await waitFor(() => !window.document.getElementById('erpa-loading').classList.contains('erpa-visible') && window.document.getElementById('erpa-error').classList.contains('erpa-visible') && !window.document.getElementById('erpa-recalculate').disabled && window.document.getElementById('erpa-error-title').textContent === '本次成本读取时间已到', 'deadline must abort and restore the retry action');
-      assert.deepEqual(requests.slice(before).map(item => item.sku), scope.slice(0, 2), 'each interrupted attempt starts over at the previously completed target');
+      assert.deepEqual(requests.slice(before, before + 2).map(item => item.sku), scope.slice(0, 2), 'each interrupted attempt starts over at the previously completed target');
       assert.equal(messages.some(message => message.type === 'shopeers.erp.submitCostResult'), false, 'a partial/deadline attempt cannot submit complete costs');
     }
     stallSecondTarget = false;

@@ -1,0 +1,111 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { webcrypto } from 'node:crypto';
+import path from 'node:path';
+import vm from 'node:vm';
+import { handleCollectionTaskRequest, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const require = createRequire(path.join(root, 'frontend/package.json'));
+const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
+const sourceDir = path.join(root, 'integrations/erp-assistant-extension/src');
+const source = Object.fromEntries(await Promise.all(['background.js','result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'].map(async name => [name, await readFile(path.join(sourceDir,name),'utf8')])));
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function scenario(size, mode = '') {
+  const skcs = Array.from({length:size},(_,i) => `SKC-${i}`);
+  const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
+  const records = [request], deliveries = [], calls = [], listTimes = new Map();
+  const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
+  let dispatch, window, inflight = 0, maxInflight = 0, lists = 0, maxLists = 0, paused = false;
+  const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
+  const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:'8.0.34'}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
+  const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
+    const url = new URL(raw), payload = init.body ? JSON.parse(init.body) : {};
+    let body;
+    try {
+      const result = handleCollectionTaskRequest(records,{method:init.method||'GET',url,payload,instanceId:'test'});
+      if (result) body=result.body;
+      else if(url.pathname==='/erp/v1/requests') body={records:[request]};
+      else if(url.pathname==='/erp/v1/extension-status') body={ok:true};
+      else if(url.pathname==='/erp/v1/cost-results') {
+        const task = validateCollectionDelivery(records,payload);
+        body={deliveryId:`DEL-${deliveries.length}`,batchId:`IMPORT-${deliveries.length}`,resultDeliveryId:payload.resultDeliveryId};
+        recordCollectionDelivery(task,body); deliveries.push({...payload,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
+      } else throw Error(url.pathname);
+      return {ok:true,status:200,json:async()=>structuredClone(body)};
+    } catch(error) {return {ok:false,status:error.status||400,json:async()=>({code:error.code,message:error.message})};}
+  }});
+  vm.runInContext(source['background.js'],context);
+  async function open() {
+    window = new Window({url:sender.url});
+    window.chrome={runtime:{sendMessage:(message,done)=>dispatch(message,sender,done)}};
+    window.fetch=async raw=>{
+      const url=new URL(raw),endpoint=url.pathname.split('/').at(-1),target=url.searchParams.get('sku')||url.searchParams.get('purchaseOrderId')||url.searchParams.get('productId');
+      assert.notEqual(target,'[object Object]'); calls.push({endpoint,target});
+      const timeKey = Math.floor(Number(target.split('-').at(-1)) / 20);
+      if(endpoint==='purchase-order-page'&&!listTimes.has(timeKey))listTimes.set(timeKey,{start:performance.now()});
+      inflight++; maxInflight=Math.max(maxInflight,inflight);
+      if(endpoint==='purchase-order-page'){lists++;maxLists=Math.max(maxLists,lists);}
+      if(mode==='pause' && !paused && deliveries.length===1 && endpoint==='purchase-order-page'){paused=true;window.document.getElementById('erpa-pause').click();}
+      await delay(mode.startsWith('benchmark') ? 8 : 1);
+      inflight--; if(endpoint==='purchase-order-page'){lists--;listTimes.get(timeKey).end=performance.now();}
+      const id=target.split('-').at(-1);
+      const data=endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:[{associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${id}`,barcodeSkcid:`SKC-${id}`}];
+      return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
+    };
+    for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(mode==='benchmark-serial'&&name==='content.js'?source[name].replace('mapConcurrent(querySkcs, 2,','mapConcurrent(querySkcs, 1,'):source[name]);
+    window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0'}}));
+  }
+  const until=async predicate=>{const end=Date.now()+60000;while(!predicate()){if(Date.now()>end)throw Error(window.document.body.textContent.slice(0,2500));await delay(5);}};
+  const began=Date.now();
+  try {
+    await open(); window.document.getElementById('erpa-cost-trigger').click();
+    if(mode==='pause'){
+      await until(()=>paused&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(deliveries.length,1);assert.equal(records[1].status,'paused');
+      const before=calls.length;await window.happyDOM.close(); await open();
+      window.document.getElementById('erpa-cost-trigger').click();await delay(40);
+      assert.equal(calls.length,before,'restart never automatically resumes ERP reads');
+      window.document.getElementById('erpa-resume').click();
+    }
+    await until(()=>deliveries.length===Math.ceil(size/20)&&!window.document.getElementById('erpa-recalculate').disabled);
+    assert.equal(records[1].summary.delivered,size);
+    assert.equal(new Set(deliveries.map(item=>item.resultDeliveryId)).size,deliveries.length);
+    assert.ok(deliveries[0].listCount<=20,'first batch delivered before all targets');
+    assert.equal(maxLists,mode==='benchmark-serial'?1:2);assert.ok(maxInflight<=8);
+    assert.ok(deliveries.every(item=>item.querySkcs.length<=20&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
+    if(mode==='pause')assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'delivered batch not reread after restart');
+    const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
+    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
+    return listMs;
+  } finally {await window.happyDOM.close();}
+}
+for(const size of [100,500,2000])await scenario(size);
+await scenario(40,'pause');
+
+const serialMs=await scenario(100,'benchmark-serial');
+const parallelMs=await scenario(100,'benchmark-parallel');
+assert.ok(parallelMs/serialMs<=0.7,`two-worker list phase must improve >=30% (${serialMs}→${parallelMs} ms)`);
+console.log(JSON.stringify({listImprovementPercent:Math.round((1-parallelMs/serialMs)*100)}));
+
+// Use the real optional collector with enough valid warehouse mappings to cross
+// the previous 500-request cap; retain bounded paging and evidence validation.
+{
+ const window=new Window(); let calls=0;
+ try {
+  window.eval(source['result-policy.js']);window.eval(source['catalog-collector.js']);
+  const collector=window.ShopeersErpCatalogCollector.create({policy:window.ShopeersErpResultPolicy,apiGet:async(path,params)=>{
+   calls++;
+   const data=path.endsWith('product-page')?Array.from({length:Math.max(0,Math.min(100,601-(params.page-1)*100))},(_,i)=>({itemId:`WH-${(params.page-1)*100+i}`})):[{associatedProductId:params.productId,barcodeSkuid:`SKU-${params.productId}`,barcodeSkcid:'SKC-A'}];
+   return {code:0,count:path.endsWith('product-page')?601:data.length,data};
+  },readWarehouseEvidence:async warehouseSku=>({warehouseSku,evidenceComplete:true,purchaseRecords:[],excludedRecords:[]})});
+  const result=await collector.collect(['SKC-A'],{controller:new AbortController()});
+  assert.equal(result.results.length,601);assert.ok(calls>500);assert.equal(result.coverage.mappings.state,'complete');
+  const pauseCollector=window.ShopeersErpCatalogCollector.create({policy:window.ShopeersErpResultPolicy,apiGet:async()=>{throw Object.assign(new Error('paused'),{code:'ERP_COLLECTION_PAUSED'});},readWarehouseEvidence:async()=>{}});
+  await assert.rejects(()=>pauseCollector.collect(['SKC-A'],{controller:new AbortController()}),error=>error.code==='ERP_COLLECTION_PAUSED');
+  console.log(JSON.stringify({catalogRequests:calls,catalogWarehouses:result.results.length,pausePropagated:true}));
+ } finally {await window.happyDOM.close();}
+}

@@ -8,9 +8,10 @@
     const key = value => String(value ?? '').normalize('NFKC').trim().toUpperCase();
     const unique = values => [...new Set(values.filter(Boolean))];
 
-    function create({ apiGet: requestApi, readWarehouseEvidence: requestEvidence, policy, budgetMs = 30 * 60 * 1000, maxRequests = 500, getCache = () => null, setCache = () => {}, onProgress = () => {} }) {
+    function create({ apiGet: requestApi, readWarehouseEvidence: requestEvidence, policy, budgetMs = 30 * 60 * 1000, maxRequests = Infinity, getCache = () => null, setCache = () => {}, onProgress = () => {} }) {
         async function bounded(operation, run) {
             const signal = run.controller.signal;
+            if (run.deadlineAt && Date.now() >= run.deadlineAt) { run.budgetExpired = true; run.controller.abort(new Error('catalog_stage_timeout')); }
             if (signal.aborted) throw signal.reason || new Error('collection_cancelled');
             if (run.requestBudget != null && --run.requestBudget < 0) { run.budgetExpired = true; throw new Error('catalog_request_budget'); }
             let listener;
@@ -66,7 +67,7 @@
                 }
                 throw new Error('product_page_limit');
             } catch (error) {
-                if ((run.controller.signal.aborted && !run.budgetExpired) || error.code === 'ERP_LOGIN_REQUIRED') throw error;
+                if ((run.controller.signal.aborted && !run.budgetExpired) || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED'].includes(error.code)) throw error;
                 reasons.push(String(error?.message || error));
                 return { records: [...records.values()], pageCount, complete: false, reasons };
             }
@@ -87,7 +88,7 @@
                 setCache(cacheKey, result);
                 return result;
             } catch (error) {
-                if ((run.controller.signal.aborted && !run.budgetExpired) || error.code === 'ERP_LOGIN_REQUIRED') throw error;
+                if ((run.controller.signal.aborted && !run.budgetExpired) || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED'].includes(error.code)) throw error;
                 const safe = data.filter(item => key(item?.associatedProductId) === key(warehouseSku));
                 const catalogMappings = policy.normalizeCatalogMappings(safe, warehouseSku);
                 return { catalogMappings, mappings: policy.normalizeMappings(catalogMappings), complete: false, reasons: [String(error?.message || error)], recordCount: safe.length };
@@ -133,7 +134,7 @@
                     if (warehouse.evidenceComplete === true || previousEvidence?.evidenceComplete !== true) evidence.set(key(result.warehouseSku), warehouse);
                     if (warehouse.evidenceComplete !== true) mark('purchaseEvidence', result.warehouseSku + ':incomplete_purchase_evidence');
                 } catch (error) {
-                    if ((run.controller.signal.aborted && !run.budgetExpired) || error.code === 'ERP_LOGIN_REQUIRED') throw error;
+                    if ((run.controller.signal.aborted && !run.budgetExpired) || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED'].includes(error.code)) throw error;
                     mark('purchaseEvidence', result.warehouseSku + ':' + String(error?.message || error));
                     if (!evidence.has(key(result.warehouseSku))) evidence.set(key(result.warehouseSku), { warehouseSku: result.warehouseSku, purchaseRecords: [], excludedRecords: [], sourceWarnings: ['purchase_read_failed'], evidenceComplete: false });
                 }
@@ -166,7 +167,8 @@
         async function collect(querySkcs, parent, initial) {
             if (parent.controller.signal.aborted) throw parent.controller.signal.reason || new Error('collection_cancelled');
             const controller = new AbortController();
-            const run = { ...parent, controller, requestBudget: maxRequests };
+            const run = { ...parent, controller, requestBudget: maxRequests, deadlineAt: Date.now() + budgetMs };
+            controller.signal.deadlineAt = run.deadlineAt;
             controller.signal.requestBudget = maxRequests;
             const relay = () => controller.abort(parent.controller.signal.reason);
             parent.controller.signal.addEventListener('abort', relay, { once: true });
