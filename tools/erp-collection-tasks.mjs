@@ -22,12 +22,18 @@ function requestFor(records, requestId) {
   return request;
 }
 
-function renew(task, request, now) {
+function renew(task, request, records, now) {
   const expires = timestamp(now + LEASE_MS);
   task.leaseExpiresAt = expires;
   task.updatedAt = timestamp(now);
   request.leaseExpiresAt = expires;
   request.status = 'registered';
+  for (const companion of records) {
+    if (companion.kind === 'request' && companion.requestKind === 'catalog' && companion.requestId === `${request.requestId}-CATALOG`
+      && companion.sourceRequestId === request.requestId && companion.workspaceId === request.workspaceId && ['registered','expired'].includes(companion.status)) {
+      companion.leaseExpiresAt = expires; companion.status = 'registered';
+    }
+  }
 }
 
 function refresh(task) {
@@ -103,7 +109,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         }
         task.status = 'running'; task.recoveryRequired = false;
       }
-      renew(task, request, now);
+      renew(task, request, records, now);
     } else if (action === 'pause' || action === 'stop') {
       task.status = action === 'pause' ? 'paused' : 'stopped'; task.updatedAt = timestamp(now);
     } else fail('ERP_TASK_ACTION_INVALID', '未知任务操作。', 400);
@@ -149,7 +155,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       if (!Number.isSafeInteger(value) || value < 0) fail('ERP_TASK_ADOPTION_INVALID', '采用报告数量无效。', 400);
       adoption[key] = value;
     }
-    if (adoption.adoptedCount > task.expectedSkus.filter(item => batch.platformSkcs.some(skc => canonical(skc) === canonical(item.platformSkc))).length) fail('ERP_TASK_ADOPTION_INVALID', '采用数量超出批次账本范围。',400);
+    if (adoption.adoptedCount + adoption.manualEffectiveCount > task.expectedSkus.filter(item => batch.platformSkcs.some(skc => canonical(skc) === canonical(item.platformSkc))).length) fail('ERP_TASK_ADOPTION_INVALID', '采用数量超出批次账本范围。',400);
     batch.adoption = adoption; batch.adoptionReportedAt = timestamp(now); task.updatedAt = timestamp(now);
     return { status: 200, body: { task: refresh(task) } };
   }

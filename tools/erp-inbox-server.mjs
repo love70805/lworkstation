@@ -1208,13 +1208,14 @@ const server = http.createServer(async (req, res) => {
       const replaceLedgerScope = payload?.request?.replaceLedgerScope === true;
       if (replaceLedgerScope && (!requestId || !workspaceId || !String(ledgerId ?? "").trim())) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "替换账本关联必须提供工作区、账本与请求标识。" });
       const assertTaskNotActive = (targetRequestId) => {
-        if (records.some(item => item.kind === 'collection-task' && item.requestId === targetRequestId && !['stopped', 'cost_complete'].includes(item.status))) {
+        if (records.some(item => item.kind === 'collection-task' && item.requestId === targetRequestId && item.status !== 'stopped'
+          && !(item.status === 'cost_complete' && item.batches.every(batch => batch.catalogStatus === 'completed')))) {
           throw Object.assign(new Error('该请求有未完成的采集任务，请先停止任务；展示筛选不能更改采集范围。'), { status: 409, code: 'ERP_TASK_ACTIVE' });
         }
       };
       const supersedeLedgerRequests = (exceptRequestId = null) => {
         for (const record of records) {
-          if (record.kind === 'request' && record.requestKind !== 'catalog' && record.status === 'registered' && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) assertTaskNotActive(record.requestId);
+          if (record.kind === 'request' && record.requestKind !== 'catalog' && ['registered','expired'].includes(record.status) && record.workspaceId === workspaceId && record.ledgerId === ledgerId && record.requestId !== exceptRequestId) assertTaskNotActive(record.requestId);
         }
         let changed = false;
         for (const record of records) {

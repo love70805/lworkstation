@@ -81,15 +81,23 @@ try {
   ({task}=await request(taskUrl));
   assert.equal(task.summary.delivered,1); assert.equal(task.summary.adopted,0); assert.equal(task.status,'cost_complete');
   assert.equal(task.batches[0].deliveryId,receipt.deliveryId);
+  await request('requests',{request:{...scope,id:'R-must-wait-catalog',replaceLedgerScope:true},expectedSkus:[]},409);
   assert.equal((await request('cost-results',payload)).idempotent,true);
   await request('cost-batches',{status:'acknowledged',deliveryId:receipt.deliveryId,workspaceId:scope.workspaceId});
   assert.equal((await request(taskUrl)).task.summary.adopted,0,'receipt ACK cannot claim adopted');
+  await request(`${taskUrl}/adoption`,{deliveryId:receipt.deliveryId,adoptedCount:0,manualEffectiveCount:1,expectedCount:1});
+  assert.equal((await request(taskUrl)).task.summary.adopted,0,'manual effective is distinct from actual ERP adoption');
+  assert.equal((await request(taskUrl)).task.summary.manualEffective,1);
+  await request(`${taskUrl}/adoption`,{deliveryId:receipt.deliveryId,adoptedCount:1,manualEffectiveCount:1,expectedCount:1},400);
   await request(`${taskUrl}/adoption`,{deliveryId:receipt.deliveryId,adoptedCount:1,expectedCount:1});
+  await request(batchUrl,{state:'catalog_running',attemptId:originalAttempt});
+  await request(batchUrl,{state:'catalog_completed',attemptId:originalAttempt});
   await stop(); await start();
   ({task}=await request(taskUrl)); assert.equal(task.summary.adopted,1); assert.equal(task.batches[0].attemptId,originalAttempt);
 
   // A pending second task survives restart; old attempt cannot submit after explicit resume.
   await request('requests',{request:{...scope,id:'R-two',platformSkcs:['SKC-B']},expectedSkus:[{platformSku:'SKU-B',platformSkc:'SKC-B'}]},202);
+  await request('requests',{request:{kind:'catalog',id:'R-two-CATALOG',workspaceId:scope.workspaceId,ledgerId:scope.ledgerId,ledgerPeriod:scope.ledgerPeriod,platformSkcs:['SKC-B'],confirmedSkus:[{platformSku:'SKU-B',platformSkc:'SKC-B'}],sourceRequestId:'R-two',idempotencyKey:'R-two-CATALOG',requestedAt:new Date().toISOString()}},202);
   const second=(await request('collection-tasks',{requestId:'R-two',filters:{}},201)).task;
   const secondUrl=`collection-tasks/${second.taskId}`;
   const secondBatchUrl=`${secondUrl}/batches/${encodeURIComponent(second.batches[0].batchId)}`;
@@ -113,9 +121,23 @@ try {
   const persisted=JSON.parse(await fs.readFile(spool,'utf8'));
   const longRequest=persisted.find(item=>item.kind==='request'&&item.requestId==='R-two');
   longRequest.registeredAt=new Date(Date.now()-3*60*60*1000).toISOString();
+  const longCatalog=persisted.find(item=>item.kind==='request'&&item.requestId==='R-two-CATALOG');
+  longCatalog.registeredAt=longRequest.registeredAt;
   await fs.writeFile(spool,JSON.stringify(persisted));
   await start();
   assert.equal((await request('requests?workspaceId=W-http')).records.find(item=>item.requestId==='R-two').status,'registered','independent lease survives original two hour deadline');
+  assert.equal((await request('requests?workspaceId=W-http')).records.find(item=>item.requestId==='R-two-CATALOG').status,'registered','companion catalog lease survives long cost stage');
+  await stop();
+  const expiredRecords=JSON.parse(await fs.readFile(spool,'utf8'));
+  const expired=expiredRecords.find(item=>item.kind==='request'&&item.requestId==='R-two');
+  expired.leaseExpiresAt=new Date(Date.now()-1000).toISOString();
+  await fs.writeFile(spool,JSON.stringify(expiredRecords));
+  await start();
+  assert.equal((await request('requests?workspaceId=W-http&includeHistory=true')).records.find(item=>item.requestId==='R-two').status,'expired');
+  await request('requests',{request:{...scope,id:'R-cannot-bypass-expired-task',replaceLedgerScope:true},expectedSkus:[]},409);
+  await request(`${secondUrl}/control`,{action:'resume'},409);
+  const expiredTask=(await request(secondUrl)).task;
+  await request(`${secondUrl}/control`,{action:'resume',scopeHash:expiredTask.scopeHash});
   await request(`${secondUrl}/control`,{action:'stop'});
   await request(secondBatchUrl,{state:'running'},409);
   await request('requests',{request:{...scope,id:'R-four',replaceLedgerScope:true},expectedSkus:[]},202);
