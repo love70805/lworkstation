@@ -5,6 +5,10 @@
   "integrationBranch": "codex/v047-erp-real-timeout",
   "requiredCommits": [
     {
+      "module": "v0.4.7-durable-business-timeout",
+      "commit": "d365a56e89c13010cf74112d4500d5b526f6490d"
+    },
+    {
       "module": "v0.4.6-verified-main-baseline",
       "commit": "14ee56d"
     },
