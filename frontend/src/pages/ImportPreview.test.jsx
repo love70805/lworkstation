@@ -254,5 +254,39 @@ it('starts with no goods, preserves selected goods through search and remembers 
   expect(container.textContent).toContain('已选 1 / 1');
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   await click('导入');
-  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v1:W'))['甲店']).toEqual(['测试货号']);
+  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:['NOT-FOUND'],matched:[]});
+});
+it('keeps keyword edits local to matching and persists latest keywords only after confirmed import', async () => {
+  await upload(true,[new File(['source'],'甲店.csv')]); await settled();
+  const parseCount=mocks.parse.mock.calls.length, inspectCount=mocks.inspectPeriod.mock.calls.length, previewCount=mocks.preview.mock.calls.length;
+  await act(async()=>Simulate.change(container.querySelector('.import-supplier-picker > input'),{target:{value:'测试，new'}}));
+  await settled();
+  expect(mocks.parse).toHaveBeenCalledTimes(parseCount);
+  expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount);
+  expect(mocks.preview).toHaveBeenCalledTimes(previewCount);
+  expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();
+  await act(async()=>container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:['NEW','测试'],matched:['测试货号']});
+});
+it('does not save temporary keyword preferences when the atomic import fails', async()=>{
+  mocks.save.mockRejectedValueOnce(new Error('transaction failed'));
+  await upload(true,[new File(['source'],'甲店.csv')]); await settled();
+  await act(async()=>Simulate.change(container.querySelector('.import-supplier-picker > input'),{target:{value:'测试'}}));
+  await act(async()=>container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  expect(container.textContent).toContain('整批未写入：transaction failed');
+  expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();
+});
+it('reports preference storage failure after commit without offering a duplicate import', async()=>{
+  await upload(true,[new File(['source'],'甲店.csv')]); await settled();
+  const spy=vi.spyOn(localStorage,'setItem').mockImplementation(()=>{throw new Error('storage full');});
+  try {
+    await act(async()=>container.querySelector('.batch-overwrite input').click());
+    await click('导入');
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('数据已导入，但货号偏好未能保存');
+    expect(container.textContent).not.toContain('整批未写入');
+    expect(button('导入')).toBeUndefined();
+  } finally {spy.mockRestore();}
 });

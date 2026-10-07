@@ -312,8 +312,23 @@
 .import-supplier-picker > label, .import-supplier-picker details label { display: block; margin: 8px 0; }
 .import-supplier-actions { margin-top: 10px; }
 .import-supplier-options { max-height: 240px; overflow: auto; }
-.import-supplier-options label { display: flex; gap: 10px; align-items: center; min-height: 44px; cursor: pointer; padding: 4px 8px; }
-.import-supplier-options strong { overflow-wrap: anywhere; }
+.import-supplier-option { display: flex; gap: 10px; align-items: center; box-sizing: border-box; cursor: pointer; padding: 4px 8px; }
+.import-supplier-options strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .import-supplier-options small { margin-left: auto; white-space: nowrap; }
 .import-supplier-selection { overflow-wrap: anywhere; max-height: 80px; overflow: auto; }
 .import-supplier-picker summary { cursor: pointer; padding: 10px 0; }
+
+.import-supplier-options { max-height: 264px; border: 1px solid var(--border); border-radius: 6px; }
+.import-supplier-options:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.import-supplier-options:focus .import-supplier-option.is-active { outline: 2px solid var(--primary); outline-offset: -2px; }
+.import-supplier-option:hover, .import-supplier-option[aria-selected="true"] { background: var(--primary-soft); }
+.import-supplier-check { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 3px; color: var(--primary); }
+.import-supplier-keywords, .import-supplier-views { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.import-supplier-keywords button { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; overflow-wrap: anywhere; max-width: 100%; }
+.import-supplier-views [aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.import-supplier-new { padding: 10px; border: 1px solid var(--border); border-radius: 6px; margin: 10px 0; }
+.import-supplier-new p { margin: 0 0 8px; }
+.import-supplier-key-help, .import-supplier-picker > p { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+.import-supplier-picker > p.import-error { color: var(--danger); }
+fieldset:disabled .import-supplier-option { cursor: default; opacity: .6; }
+@media (max-width: 520px) { .import-supplier-picker { padding: 10px; } .import-supplier-actions .button { flex: 1 1 140px; } }
