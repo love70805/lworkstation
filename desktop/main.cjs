@@ -492,6 +492,9 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
   const view = new WebContentsView({
     webPreferences: {
       session: tabSession,
+      // ERP/1688 collection and connection heartbeats continue when another
+      // workspace tab is selected or the workstation is in the tray.
+      backgroundThrottling: false,
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,

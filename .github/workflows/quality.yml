@@ -71,3 +71,6 @@ jobs:
 
       - name: Verify desktop contracts and lifecycle
         run: pnpm --dir desktop verify
+
+      - name: Verify native ERP extension startup, refresh, collection and reconnect
+        run: pnpm --dir desktop smoke:erp-native

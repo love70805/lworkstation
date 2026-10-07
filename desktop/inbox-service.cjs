@@ -92,6 +92,7 @@ function createInboxServiceController({
   let restartTimer = null;
   let stopping = false;
   let restartCount = 0;
+  let refreshPromise = null;
   const intentionalChildren = new WeakSet();
   let state = {
     status: "stopped",
@@ -150,8 +151,15 @@ function createInboxServiceController({
     });
   }
 
-  async function refresh() {
+  function refresh() {
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = refreshNow().finally(() => { refreshPromise = null; });
+    return refreshPromise;
+  }
+
+  async function refreshNow() {
     const result = await identifyAndProbe({ authenticate: Boolean(child) });
+    if (stopping) return result;
     if (result.kind === "shopeers") {
       applyHealth(result.payload);
       return result;

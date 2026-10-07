@@ -99,6 +99,9 @@ fs.rename=async function(from,to) {
 
   // A blocked disk read must retain transaction ownership until it completes.
   await configure({ mode: "blocked-read", blockRead: true });
+  // A real on-disk revision invalidates the committed snapshot cache.
+  const changedTime = new Date(Date.now()+1000);
+  await fs.utimes(spool, changedTime, changedTime);
   const beforeRead = (await events()).length;
   const blocked = request("/erp/v1/status");
   await until(async () => (await events()).length > beforeRead);

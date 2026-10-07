@@ -312,6 +312,36 @@ it('applies strict suffix selection across stores only on request, with a local 
   expect(container.querySelectorAll('.batch-store-suppliers')[1].open).toBe(false);
 });
 
+it('rebuilds the preview after applying the same suffix twice and imports only after fresh overwrite approval', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-HHHX','OTHER']}});
+  await upload(); await settled();
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'HHHX'}}));
+  await click('应用到本批文件'); await settled();
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  expect(button('导入').disabled).toBe(false);
+  const count = mocks.preview.mock.calls.length;
+  await click('应用到本批文件'); await settled();
+  expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
+  expect(container.querySelector('.batch-preview')).not.toBeNull();
+  expect(button('导入').disabled).toBe(true);
+  expect(container.querySelector('.batch-action-summary').textContent).toContain('请确认替换范围');
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+  expect(mocks.save.mock.calls[0][0].items.map(item=>item.filterOptions.supplierNumbers)).toEqual([['A-HHHX'],['A-HHHX']]);
+});
+
+it('rebuilds a remembered identical supplier selection on its first batch suffix application', async () => {
+  localStorage.setItem('lworkstation:import-suppliers:v2:W', JSON.stringify({'甲店':{selected:['A-HHHX'],keywords:[]}}));
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-HHHX']}});
+  await upload(true,[new File(['first'],'甲店.csv')]); await settled();
+  const count=mocks.preview.mock.calls.length;
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'hhhx'}}));
+  await click('应用到本批文件'); await settled();
+  expect(mocks.preview).toHaveBeenCalledTimes(count+1);
+  expect(container.querySelector('.batch-preview')).not.toBeNull();
+});
+
 it('keeps zero suffix matches unselected and invalidates an earlier overwrite approval', async () => {
   await upload(); await settled();
   await act(async () => container.querySelector('.batch-overwrite input').click());

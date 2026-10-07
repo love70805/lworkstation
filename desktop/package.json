@@ -1,6 +1,6 @@
 {
   "name": "shopeers-desktop",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
   "author": "Lworkstation Team",
@@ -18,6 +18,7 @@
     "smoke:experience": "node experience-smoke.cjs",
     "smoke:theme": "node theme-smoke.cjs",
     "smoke:packaged": "node smoke.mjs",
+    "smoke:erp-native": "node erp-native-smoke.mjs",
     "smoke:update": "node update-smoke.mjs",
     "build": "pnpm --dir ../frontend build && pnpm brand:icons && electron-builder --publish never --config.electronDist=./node_modules/electron/dist",
     "smoke:workspace-recovery": "node workspace-recovery-smoke.cjs"
@@ -79,6 +80,14 @@
       {
         "from": "../tools/erp-inbox-server.mjs",
         "to": "runtime/erp-inbox-server.mjs"
+      },
+      {
+        "from": "../tools/erp-inbox-storage.mjs",
+        "to": "runtime/erp-inbox-storage.mjs"
+      },
+      {
+        "from": "../tools/erp-inbox-storage-worker.mjs",
+        "to": "runtime/erp-inbox-storage-worker.mjs"
       },
       {
         "from": "../tools/erp-collection-tasks.mjs",
