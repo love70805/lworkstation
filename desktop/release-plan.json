@@ -4,6 +4,7 @@
   "candidateOnly": true,
   "integrationBranch": "codex/v046-import-erp-reliability",
   "requiredCommits": [
+    { "module": "v0.4.6-import-and-erp-reliability", "commit": "2c7eb95574139e32e914d38df7ad76acbafae572" },
     { "module": "v0.4.5-prestorage-flow", "commit": "4bec063c1911e25a0cce4255a08304a1d6f95271" },
     { "module": "v0.4.4-verified-main-baseline", "commit": "a420fe7b67da7deda1682baa0472d425662ee011" },
     {
