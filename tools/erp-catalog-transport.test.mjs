@@ -94,7 +94,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: "8.0.34" }),
+        getManifest: () => ({ version: "8.0.35" }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },

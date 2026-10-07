@@ -5,6 +5,18 @@
   "integrationBranch": "codex/v043-batch-keywords",
   "requiredCommits": [
     {
+      "module": "v0.4.2-verified-main-baseline",
+      "commit": "4cba7b6835b3e528984d9a0893f2e72ed0784703"
+    },
+    {
+      "module": "v0.4.3-batched-collection",
+      "commit": "920094b"
+    },
+    {
+      "module": "v0.4.3-import-keywords",
+      "commit": "8b0b5f5"
+    },
+    {
       "module": "v0.4.1-verified-baseline",
       "commit": "e65b4ea21df40aa2d753b37fcd7d7c1b13289bd2"
     },
