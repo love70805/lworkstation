@@ -8,7 +8,7 @@ export function createContinuousCatalogQueue(workspaceId, groups) {
   const seen = new Set();
   const items = [];
   for (const group of groups) {
-    if (group.productId || group.variants?.some(row => row.productId)) continue;
+    if (group.productId && group.productStatus !== "draft" || group.variants?.some(row => row.productId && row.productStatus !== "draft")) continue;
     const row = group.variants?.[0];
     if (!row) continue;
     const platformSkc = row.platformSkcConflict ? "" : skcKey(row.platformSkc);
@@ -16,7 +16,7 @@ export function createContinuousCatalogQueue(workspaceId, groups) {
     const identity = platformSkc ? `SKC:${platformSkc}` : platformSku ? `SKU:${platformSku}` : "";
     if (!identity || seen.has(identity)) continue;
     seen.add(identity);
-    items.push({ identity, platformSkc, platformSku });
+    items.push({ identity, platformSkc, platformSku, ...(group.productId ? { productId: group.productId } : {}) });
   }
   const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   const queue = { id, workspaceId, items };
@@ -28,7 +28,7 @@ export function createContinuousCatalogQueue(workspaceId, groups) {
 export const readContinuousCatalogQueue = id => queues.get(id);
 export function continuousCatalogPath(queue, index) {
   const item = queue.items[index];
-  return `/products/edit?${new URLSearchParams({ skc: item.platformSkc, sku: item.platformSku, queue: queue.id, position: String(index) })}`;
+  return `/products/edit?${new URLSearchParams({ skc: item.platformSkc, sku: item.platformSku, queue: queue.id, position: String(index), ...(item.productId ? { product: item.productId } : {}) })}`;
 }
 
 export function checkContinuousCatalogIdentity(item, snapshot) {

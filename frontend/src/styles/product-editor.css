@@ -262,3 +262,8 @@
 .continuous-catalog-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; color: var(--text-muted); font-size: 13px; }
 .continuous-catalog-progress > span:first-child { color: var(--text); font-weight: 600; }
 .continuous-catalog-progress .button { margin-left: auto; }
+
+.prestorage-editor-status { margin-bottom: 16px; }
+.prestorage-editor-status p { color: var(--text-muted); margin: 8px 0; }
+.prestorage-editor-status summary { cursor: pointer; }
+.prestorage-editor-status ul { padding-left: 20px; }

@@ -14,7 +14,7 @@ const shortDate = value => {
 };
 
 export function ReferenceTableHeader() {
-  return <><span className="visually-hidden">按平台 SKC 分组的成本与利润参考</span><div className="reference-column-headings" aria-hidden="true">{columnLabels.map(label => <span key={label}>{label}</span>)}</div></>;
+  return <><span className="visually-hidden">按平台 SKC 分组的预存资料与经营参考</span><div className="reference-column-headings" aria-hidden="true">{columnLabels.map(label => <span key={label}>{label}</span>)}</div></>;
 }
 
 function ReferenceCost({ variant }) {
@@ -38,7 +38,9 @@ function ReferenceStatus({ variant }) {
 export default function ReferenceGroupRows({ group, onEdit, onOpenLedger }) {
   const openLedger = variant => variant.latestLedgerId && onOpenLedger(variant.latestLedgerId);
   return <table className="reference-group-table" aria-label={`平台 SKC ${group.platformSkc} 经营参考`}>
-    <caption><div className="reference-group-heading"><strong className="mono">{group.platformSkc}</strong><span>{group.skuCount} 个 SKU · {group.productName}</span><SelectionSalesTag item={group.automaticSalesTag} /><Button variant="ghost" icon={Pencil} onClick={event => { event.stopPropagation(); onEdit(); }}>{group.productId ? "查看档案" : "建立档案"}</Button></div></caption>
+    <caption><div className="reference-group-heading"><strong className="mono">{group.platformSkc}</strong><span>{group.skuCount} 个 SKU · {group.productName}</span><SelectionSalesTag item={group.automaticSalesTag} /><Button variant="ghost" icon={Pencil} onClick={event => { event.stopPropagation(); onEdit(); }}>{group.productStatus === 'draft' || !group.productId ? "补充资料" : "查看档案"}</Button></div>
+      {group.prestorageReadiness ? <div className="prestorage-readiness" role="status">{group.prestorageReadiness.ready ? <Badge tone="success">{group.autoPromote ? "资料齐全 · 等待流转" : "资料齐全 · 待保存"}</Badge> : <details><summary>待补齐：{group.prestorageReadiness.labels.join('、')}</summary><ul>{group.prestorageReadiness.missing.map(item => <li key={item.key}>{item.platformSku ? `${item.platformSku}：` : ''}{item.label}</li>)}</ul></details>}</div> : null}
+    </caption>
     <colgroup>{columnLabels.map((label, index) => <col key={label} className={`reference-column-${index}`} />)}</colgroup>
     <thead className="visually-hidden"><tr>{columnLabels.map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
     <tbody>{group.variants.map(variant => <tr key={variant.canonicalPlatformSku} data-platform-sku={variant.platformSku}

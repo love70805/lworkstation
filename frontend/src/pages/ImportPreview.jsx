@@ -36,11 +36,11 @@ function CatalogImportResult({ catalog, onOpen }) {
   const labels = { missing_skc: '缺少平台 SKC', skc_conflict: '同一 SKU 对应多个 SKC', store_conflict: '店铺归属有冲突',
     attribute_conflict: '属性描述有冲突', duplicate_skc: '已有多份相同 SKC 档案', duplicate_sku: 'SKU 已有多份归属', owned_other_skc: 'SKU 已属于其他 SKC',
     unavailable_owner: '已有归属不可用或无权访问', unavailable_parent: '已有父级归属需核对', workspace_mismatch: '工作区归属需核对' };
-  return <section className="batch-catalog-result" aria-label="自动建档结果"><h3>商品基础档案</h3>
-    <p>新建 {catalog.createdProductCount} 份待补全档案 · 新增 {catalog.addedSkuCount} 个 SKU · 关联已有 {catalog.linkedSkuCount} 个 SKU。</p>
+  return <section className="batch-catalog-result" aria-label="自动建档结果"><h3>商品预存资料</h3>
+    <p>新建 {catalog.createdProductCount} 份预存资料 · 新增 {catalog.addedSkuCount} 个 SKU · 关联已有 {catalog.linkedSkuCount} 个 SKU。</p>
     <p>基础档案保留商品标识和台账属性；名称、图片、供应商等资料可在商品库补齐。</p>
     {catalog.issues.length > 0 && <details><summary>待核对建档项目 · {catalog.issues.length} 个（台账已成功导入）</summary><div className="batch-catalog-issues">{catalog.issues.map((issue, index) => <p key={`${issue.platformSku}:${index}`}><strong>{issue.platformSku}</strong>：{labels[issue.reason] ?? '归属需核对'}</p>)}</div></details>}
-    <Button onClick={onOpen}>打开商品库</Button>
+    <Button onClick={onOpen}>打开预存区</Button>
   </section>;
 }
 
@@ -504,7 +504,7 @@ export default function ImportPreview() {
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
           <p>核对文件、店铺及 {period} 月份后，可在上方操作区导入。修改配置后会自动重新校验。</p>
         </section>}
-      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2><CatalogImportResult catalog={result.catalog} onOpen={() => navigate('/products')} />{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}
+      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2><CatalogImportResult catalog={result.catalog} onOpen={() => navigate('/products?view=reference')} />{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}
     </section>
   </main>;
 }

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { createBrowserRouter, RouterProvider, Navigate, Route, Routes } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
+import SelectionPrestorageAutomation from "./components/SelectionPrestorageAutomation";
 import LegacyCostRedirect from './components/LegacyCostRedirect';
 import AppRouteError from './components/AppRouteError';
 import { ToastProvider } from "./components/UI";
@@ -237,6 +238,7 @@ function AppContent() {
           <CloudAuthenticationGate>
             <MemberContextGate>
               <ErpInboxListener />
+              <SelectionPrestorageAutomation />
               <SelectionCaptureListener />
               <CloudSyncListener />
               <Suspense fallback={<RouteLoader />}>
