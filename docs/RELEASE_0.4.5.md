@@ -1,6 +1,6 @@
 # v0.4.5 预存区分阶段建档
 
-2026-10-07。状态：候选验收通过，等待 PR / 主线 CI 与稳定发布、公开资产回读。本机不自动安装，真实业务数据未改写。
+2026-10-07。状态：候选验收、代码集成和公开稳定发布已完成，四公开资产及生产更新入口回读通过。本机不自动安装，真实业务数据未改写。
 
 导入资料先进入预存区，逐步保存和补齐，资料齐全后自动进入选品库。成本与利润参考改为预存区，并继续提供经营参考和来源历史。上一版自动建立的基础草稿自然显示在预存区，无需迁移；正式档案、人工字段和业务销售状态保留。
 
@@ -19,4 +19,8 @@
 
 ## 集成与公开发布
 
-通过必需检查后按用户既有授权统一发布；上传与匿名完整回读四资产、验证生产更新入口后再记录为已公开。
+[PR #161](https://github.com/love70805/lworkstation/pull/161) 的必需检查与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37589018310) 均通过。软件标签 v0.4.5 固定合并提交 764a08a106aefc3b6863ba8e3cd3e4768251c4ac；合并树与通过检查的候选树一致，574 个生产输入哈希保持。
+
+[v0.4.5](https://github.com/love70805/lworkstation/releases/tag/v0.4.5) 于 2026-10-07 15:53（北京时间）公开为稳定 Latest，非草稿、非预发布。安装包、blockmap、latest.yml、SHA256.txt 四资产匿名完整下载并与候选逐一核对大小、SHA256 和 GitHub digest；更新元数据的 SHA512 与安装包一致。实际生产 ChannelGitHubProvider 解析出的安装包 URL 再次完整下载验证：稳定 0.3.13 / 0.4.4 可升级，0.4.5 不重复更新，Beta / RC 不跨入稳定通道。
+
+候选安装包保存在本机 releases/candidates/0.4.5/，源码标签归档及原始证据保存在 archive/release-0.4.5/，包括 anonymous-verification.json、public-update-channels.json 与 tag-provenance.json。发布记录通过独立文档 PR 合入，不创建额外软件版本；未自动安装、未改真实业务数据。
