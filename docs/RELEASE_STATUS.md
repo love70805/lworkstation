@@ -2,7 +2,11 @@
 
 更新时间：2026-10-07
 
-## 当前公开稳定 Latest：0.4.2
+## 当前公开稳定 Latest：0.4.3
+
+[0.4.3](https://github.com/love70805/lworkstation/releases/tag/v0.4.3) 固定 `9d10073`，ERP Assistant 8.0.35。20 SKC 分批采集、成本优先、持久任务与显式恢复；导入多关键词显式选货号与成功记忆。1298 测试、规模/恢复/隔离用户路径、隐藏候选、621 文件 / 574 输入、PR #157/main CI、四资产匿名完整哈希及生产更新入口回读通过。未安装、未改真实数据，见 [记录](RELEASE_0.4.3.md)。
+
+## 历史公开稳定版：0.4.2
 
 [0.4.2](https://github.com/love70805/lworkstation/releases/tag/v0.4.2) 固定 ade5b2f，ERP Assistant 8.0.34。应急延长成本采集至 60 分钟、补充资料至 30 分钟、单请求至 120 秒。1281 测试、超旧时限/取消/恢复回归、headless UI、构建、desktop verify、隐藏候选 smoke、607 文件 / 560 输入一致性及 PR #155/main CI 通过；四公开资产匿名哈希及生产更新入口通过。未安装、未改真实数据，见 [记录](RELEASE_0.4.2.md)。
 
