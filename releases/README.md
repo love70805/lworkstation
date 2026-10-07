@@ -24,11 +24,11 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.2](https://github.com/love70805/lworkstation/releases/tag/v0.4.2)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.3](https://github.com/love70805/lworkstation/releases/tag/v0.4.3)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
-## v0.4.3 候选准备中（2026-10-07）
+## v0.4.3 已公开稳定 Latest（2026-10-07）
 
-分批 ERP 采集、重启后显式恢复与导入关键词选货号。候选将登记于 `candidates/0.4.3/`，证据 `archive/release-0.4.3/`。未公开、未自动安装，未改写真实数据，见 [候选记录](../docs/RELEASE_0.4.3.md)。
+分批 ERP 采集、重启后显式恢复与导入关键词选货号。候选 `candidates/0.4.3/`，证据 `archive/release-0.4.3/`。1298 测试、隐藏候选、621 文件 / 574 输入、PR/main CI、四资产和更新入口回读通过。安装包 118620223 字节，SHA256 `85818178ED36E0B4893AAC8BEC7F6B889FB0CA6A6C075CB2C0E95C817FD19875`。未自动安装、未改写真实数据，见 [发布记录](../docs/RELEASE_0.4.3.md)。
 
 ## v0.4.2 已公开稳定 Latest（2026-10-07）
 
