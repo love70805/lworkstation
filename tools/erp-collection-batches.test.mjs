@@ -46,7 +46,7 @@ async function scenario(size, mode = '') {
     window = new Window({url:sender.url});
     window.confirm=()=>true;
     const schedule=window.setTimeout.bind(window);
-    if(mode==='lost-ack')window.setTimeout=(fn,ms,...args)=>schedule(fn,ms===15000?100:ms,...args);
+    if(mode==='lost-ack')window.setTimeout=(fn,ms,...args)=>schedule(fn,[15000,210000].includes(ms)?100:ms,...args);
     window.chrome={runtime:{sendMessage:(message,done)=>dispatch(message,sender,response=>{
       if(mode==='lost-ack'&&!lostAck&&message.type==='shopeers.erp.submitCostResult'){lostAck=true;return;}
       done(response);

@@ -237,6 +237,10 @@ try {
   assert.equal(response.status, 202);
   response = await fetch(`${base}/selection/v1/context`);
   assert.equal((await response.json()).context.memberId, "sales-a");
+  const contextFileBefore = await fs.stat(spoolPath);
+  response = await post("/selection/v1/context", { workspaceId: "workspace-sales-a", memberId: "sales-a", visibility: "private" });
+  assert.equal(response.status, 202);
+  assert.equal((await fs.stat(spoolPath)).mtimeMs, contextFileBefore.mtimeMs, 'unchanged four-second workspace poll must not rewrite historical evidence');
 
   const selectionCapture = {
     schemaVersion: 1,

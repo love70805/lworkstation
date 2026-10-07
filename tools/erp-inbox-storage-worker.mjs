@@ -45,10 +45,31 @@ async function write(file, records) {
   }
 }
 
-try {
-  const result = workerData.operation === 'read' ? await read(workerData.file)
-    : workerData.operation === 'write' ? await write(workerData.file, workerData.records)
-    : (()=>{throw new Error('Unsupported inbox storage operation');})();
-  parentPort.postMessage({ok:true, ...result});
-} catch(error) { parentPort.postMessage({ok:false,error:{message:error.message,code:error.code}}); }
-finally { parentPort.close(); }
+let evidence=new Map(),readSequence=0,operations=Promise.resolve();
+parentPort.on('message',message=>{
+  operations=operations.catch(()=>{}).then(async()=>{
+    try {
+      let result;
+      if(message.action==='read') {
+        result=await read(workerData.file);
+        evidence=new Map();
+        result.envelopeIds=result.records.map((record,index)=>{
+          if(record.envelope===undefined)return null;
+          const id=`read-${++readSequence}-${index}`;evidence.set(id,record.envelope);return id;
+        });
+      } else if(message.action==='write') {
+        const next=new Map(evidence);
+        for(const item of message.additions)next.set(item.envelopeId,item.envelope);
+        const records=message.entries.map(({metadata,envelopeId})=>{
+          if(envelopeId===undefined)return metadata;
+          if(!next.has(envelopeId))throw Object.assign(new Error('ERP 原始证据缓存已失效，请重新读取。'),{code:'ERP_INBOX_EVIDENCE_MISSING'});
+          return {...metadata,envelope:next.get(envelopeId)};
+        });
+        result=await write(workerData.file,records);
+        // Publish only after fsync and atomic replacement have completed.
+        evidence=new Map(message.entries.filter(item=>item.envelopeId!==undefined).map(item=>[item.envelopeId,next.get(item.envelopeId)]));
+      } else throw new Error('Unsupported inbox storage operation');
+      parentPort.postMessage({id:message.id,ok:true,...result});
+    } catch(error){parentPort.postMessage({id:message.id,ok:false,error:{message:error.message,code:error.code}});}
+  });
+});

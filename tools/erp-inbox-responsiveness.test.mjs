@@ -37,7 +37,7 @@ try {
   while (!output.includes('listening')) { assert.ok(Date.now() < deadline && child.exitCode === null, output); await pause(25); }
   await call('status');
   const beforeHeartbeat = await fs.stat(spool);
-  const heartbeat = i => call('extension-status', { extensionId: `erp-assistant-frame-${i}`, version: '8.0.35', ready: true, context: 'extension-isolated', handshakeVersion: 1, workspaceId: 'qa', sessionState: 'authenticated', pageState: 'query_ready', queryAvailable: true });
+  const heartbeat = i => call('extension-status', { extensionId: `erp-assistant-frame-${i}`, version: '8.0.36', ready: true, context: 'extension-isolated', handshakeVersion: 1, workspaceId: 'qa', sessionState: 'authenticated', pageState: 'query_ready', queryAvailable: true });
   const warmStart = measurements.length;
   await Promise.all(Array.from({ length: 12 }, (_, i) => i % 4 === 0 ? heartbeat(i) : call('status')));
   assert.equal((await fs.stat(spool)).mtimeMs, beforeHeartbeat.mtimeMs, 'connection heartbeats do not rewrite evidence');
