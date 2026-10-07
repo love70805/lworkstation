@@ -4,6 +4,7 @@
   "candidateOnly": true,
   "integrationBranch": "codex/v045-prestorage",
   "requiredCommits": [
+    { "module": "v0.4.5-prestorage-flow", "commit": "4bec063c1911e25a0cce4255a08304a1d6f95271" },
     { "module": "v0.4.4-verified-main-baseline", "commit": "a420fe7b67da7deda1682baa0472d425662ee011" },
     {
       "module": "v0.4.3-verified-main-baseline",
