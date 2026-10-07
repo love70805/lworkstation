@@ -9,16 +9,24 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'C:/Users/Administra
 const sourceRoot = path.join(root, 'integrations/erp-assistant-extension/src');
 const source = (await Promise.all(['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js'].map(file => readFile(path.join(sourceRoot, file), 'utf8')))).join('\n');
 const css = await readFile(path.join(sourceRoot, 'content.css'), 'utf8');
-const output = path.join(root, 'archive/release-0.3.7/erp-recovery'); await mkdir(output, { recursive: true });
+const output = path.join(root, 'archive/release-0.4.3/erp-recovery'); await mkdir(output, { recursive: true });
 const checkpoint = { requestId: 'SYN-RECOVERY', workspaceId: 'SYN-WORKSPACE', ledgerPeriod: '2026-08', platformSkcs: ['SKC-A', 'SKC-B'], completedTargets: ['SKC-A'], filters: { sku: 'SKC-A' }, queryCapturedAt: '2026-09-01T00:00:00.000Z', resultDeliveryId: 'ERP-RESULT-SYN-RECOVERY' };
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
 const requests = [], messages = [], errors = [], checks = [];
 await context.exposeBinding('recoveryMessage', (_, message) => {
   messages.push(message);
+  // This browser case exercises a pre-batch checkpoint. Modern task persistence
+  // is covered by erp-collection-batches.test.mjs; retain the legacy controller
+  // branch here rather than implicitly acknowledging every unknown message.
+  if (message.type === 'shopeers.erp.collectionTask') {
+    assert.ok(['list', 'create'].includes(message.payload.action));
+    return { ok: true, tasks: [] };
+  }
   if (message.type === 'shopeers.erp.collectionCheckpoint') return message.payload.action === 'list' ? { ok: true, records: [checkpoint] } : { ok: true, checkpoint, reuseEvidence: false };
-  if (message.type === 'shopeers.erp.previewContext') return { ok: true, ...checkpoint };
-  return { ok: true };
+  if (message.type === 'shopeers.erp.previewContext') return { ok: true, ...checkpoint, requestSnapshot: 'SYN-LEGACY-REQUEST-SNAPSHOT' };
+  if (message.type === 'shopeers.erp.reportStatus') return { ok: true };
+  throw new Error(`Unexpected recovery message: ${message.type}`);
 });
 await context.addInitScript({ content: `window.chrome={runtime:{sendMessage(message,done){window.recoveryMessage(message).then(done)}}};\n${source}` });
 await context.route('https://www.zhuolinkeji.cn/**', async route => {
@@ -52,15 +60,20 @@ try {
     checks.push({ scheme, width, readableButtons: layout.buttons.length });
   }
   const resume = page.getByRole('button', { name: '继续未完成采集', exact: true });
+  const firstRead = page.waitForRequest(request => new URL(request.url()).pathname.startsWith('/purchase/'));
   await resume.focus(); await page.keyboard.press('Enter');
+  const read = await firstRead;
+  assert.equal(new URL(read.url()).searchParams.get('sku'), 'SKC-A');
   await page.locator('#erpa-loading').waitFor({ state: 'visible' });
   assert.ok(messages.some(message => message.type === 'shopeers.erp.collectionCheckpoint' && message.payload.action === 'restore'));
-  const started = performance.now(); await page.getByRole('button', { name: '取消核算', exact: true }).click();
+  assert.ok(messages.some(message => message.type === 'shopeers.erp.collectionCheckpoint' && message.payload.action === 'save' && message.payload.requestSnapshot === 'SYN-LEGACY-REQUEST-SNAPSHOT'), 'restored legacy reads first save the trusted request snapshot');
+  assert.equal(await page.locator('#erpa-error').isVisible(), false);
+  const started = performance.now(); await page.getByRole('button', { name: '停止', exact: true }).click();
   await page.locator('#erpa-loading').waitFor({ state: 'hidden' });
   const cancelMs = Math.round(performance.now() - started); assert.ok(cancelMs < 1000);
   assert.match(await page.locator('#erpa-task-status').innerText(), /待继续/);
   assert.equal(messages.some(message => message.type === 'shopeers.erp.submitCostResult'), false);
   assert.deepEqual(errors, []);
-  await writeFile(path.join(output, 'summary.json'), JSON.stringify({ checks, cancelMs, keyboardResume: true, businessNetwork: false, realAccountCollection: false }, null, 2));
-  console.log(JSON.stringify({ checks, cancelMs, keyboardResume: true, realAccountCollection: false }));
+  await writeFile(path.join(output, 'summary.json'), JSON.stringify({ checks, cancelMs, keyboardResume: true, legacyCheckpointProtocol: true, restoredRequestSnapshot: true, businessNetwork: false, realAccountCollection: false }, null, 2));
+  console.log(JSON.stringify({ checks, cancelMs, keyboardResume: true, legacyCheckpointProtocol: true, restoredRequestSnapshot: true, realAccountCollection: false }));
 } finally { await browser.close(); }
