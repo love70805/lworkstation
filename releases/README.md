@@ -26,6 +26,10 @@
 
 当前公开稳定版为 [0.4.3](https://github.com/love70805/lworkstation/releases/tag/v0.4.3)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
+## v0.4.4 候选已验收，待集成与公开回读（2026-10-07）
+
+整批后缀选择、前置导入按钮与折叠明细、原子基础建档与参考列表默认隐藏已建档分支。候选 candidates/0.4.4/，证据 archive/release-0.4.4/。1310 测试、构建、桌面 verify、实际隔离 CSV 路径与窄屏浅深色、隐藏 packaged smoke、621 文件 / 574 生产输入一致性通过。安装包 118622928 字节，SHA256 9BBFC177952D47BA8C60412A8E9DD628A25D2D2ADE77BABF92091C05E4E86CF4。PR #159 待最终 CI 与集成；公开回读前不标记发布。见 [记录](../docs/RELEASE_0.4.4.md)。
+
 ## v0.4.3 已公开稳定 Latest（2026-10-07）
 
 分批 ERP 采集、重启后显式恢复与导入关键词选货号。候选 `candidates/0.4.3/`，证据 `archive/release-0.4.3/`。1298 测试、隐藏候选、621 文件 / 574 输入、PR/main CI、四资产和更新入口回读通过。安装包 118620223 字节，SHA256 `85818178ED36E0B4893AAC8BEC7F6B889FB0CA6A6C075CB2C0E95C817FD19875`。未自动安装、未改写真实数据，见 [发布记录](../docs/RELEASE_0.4.3.md)。

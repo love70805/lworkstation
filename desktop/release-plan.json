@@ -13,12 +13,12 @@
       "commit": "4cba7b6835b3e528984d9a0893f2e72ed0784703"
     },
     {
-      "module": "v0.4.3-batched-collection",
-      "commit": "920094b"
+      "module": "v0.4.3-integrated-collection-keywords",
+      "commit": "9d1007394da9377632f5e36b680e9f3930650279"
     },
     {
-      "module": "v0.4.3-import-keywords",
-      "commit": "8b0b5f5"
+      "module": "v0.4.4-import-catalog",
+      "commit": "1e32e671528ca69a4306c0f2864052533a5457a1"
     },
     {
       "module": "v0.4.1-verified-baseline",
