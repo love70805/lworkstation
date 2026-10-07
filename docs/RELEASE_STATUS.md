@@ -2,7 +2,11 @@
 
 更新时间：2026-10-07
 
-## 当前公开稳定 Latest：0.4.1
+## 当前公开稳定 Latest：0.4.2
+
+[0.4.2](https://github.com/love70805/lworkstation/releases/tag/v0.4.2) 固定 ade5b2f，ERP Assistant 8.0.34。应急延长成本采集至 60 分钟、补充资料至 30 分钟、单请求至 120 秒。1281 测试、超旧时限/取消/恢复回归、headless UI、构建、desktop verify、隐藏候选 smoke、607 文件 / 560 输入一致性及 PR #155/main CI 通过；四公开资产匿名哈希及生产更新入口通过。未安装、未改真实数据，见 [记录](RELEASE_0.4.2.md)。
+
+## 历史公开稳定版：0.4.1
 
 [0.4.1](https://github.com/love70805/lworkstation/releases/tag/v0.4.1) 固定 `5dcb4c6`。恢复导入前货号筛选和记忆、完整月改选原子替换、全局按实际入库数据展示、待办同步及首页/利润 SKC 构成。1281 测试、构建、desktop verify、隔离 UI、隐藏 smoke、594 文件 / 547 输入和 PR #152/#153/main CI 通过；四公开资产匿名完整哈希及生产更新入口通过。本机未安装、真实数据未改、ERP 8.0.33 保留。见 [记录](RELEASE_0.4.1.md)。
 
