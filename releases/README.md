@@ -126,7 +126,7 @@ pnpm --dir desktop release:check
 ## 0.2.18 堆叠销售
 位置：releases/candidates/0.2.18-stacked-sales/。Windows候选已通过并公开发布，本机未安装。详见 docs/RELEASE_0.2.18.md。
 
-## 0.4.6 导入与内置 ERP 可用性修复（候选验收）
+## 0.4.6 导入与内置 ERP 可用性修复（已公开）
 
-candidates/0.4.6/：修复重复后缀应用后预览失效、ERP 大队列状态/心跳阻塞，补充轻量原子租约、并发刷新合并和后台运行。1326 前端测试、构建、完整 ERP 门禁、desktop verify、实际 CSV/XLSX 与真实 ERP 只读 1 SKC/5 SKU 采集回传通过；隐藏候选 smoke 通过，完整原生候选与包内一致性验收继续。SHA256：0755605D96C3C99C460806275EDBBC07FB1FF62C89B0D1F80AC20C934869319B。见 [修复记录](../docs/integration/IMPORT_ERP_RELIABILITY_0.4.6.md)。尚未公开发布，不自动安装。
+candidates/0.4.6/：导入/ERP 修复验收通过，1326 前端测试、构建、完整 ERP/桌面门禁、实际 CSV/XLSX、69 MB 并发队列、真实 ERP 隔离只读 1 SKC/5 SKU、原生候选扩展及隐藏 smoke、623 安装文件/576 输入一致性通过。PR #169 / 主线 CI 通过，稳定标签固定 93c8ba5；四公开资产匿名完整哈希与生产更新入口通过。SHA256：0755605D96C3C99C460806275EDBBC07FB1FF62C89B0D1F80AC20C934869319B。见 [发布记录](../docs/RELEASE_0.4.6.md)。已公开稳定 Latest，不自动安装。
 
