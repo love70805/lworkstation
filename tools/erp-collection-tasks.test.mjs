@@ -97,9 +97,18 @@ try {
   await request(`${taskUrl}/adoption`,{deliveryId:receipt.deliveryId,adoptedCount:1,manualEffectiveCount:1,expectedCount:1},400);
   await request(`${taskUrl}/adoption`,{deliveryId:receipt.deliveryId,adoptedCount:1,expectedCount:1});
   await request(batchUrl,{state:'catalog_running',attemptId:originalAttempt});
+  await stop(); await start();
+  const catalogRecovery=(await request(taskUrl)).task;
+  assert.equal(catalogRecovery.status,'paused');
+  assert.equal(catalogRecovery.recoveryRequired,true);
+  assert.equal(catalogRecovery.batches[0].deliveryId,receipt.deliveryId);
+  assert.equal(catalogRecovery.summary.adopted,1);
+  await request(`${taskUrl}/control`,{action:'heartbeat'},409);
+  await request(`${taskUrl}/control`,{action:'resume'});
   await request(batchUrl,{state:'catalog_completed',attemptId:originalAttempt});
   await stop(); await start();
   ({task}=await request(taskUrl)); assert.equal(task.summary.adopted,1); assert.equal(task.batches[0].attemptId,originalAttempt);
+  assert.equal(task.status,'cost_complete','fully completed catalog does not need restart recovery');
 
   // A pending second task survives restart; old attempt cannot submit after explicit resume.
   await request('requests',{request:{...scope,id:'R-two',platformSkcs:['SKC-B']},expectedSkus:[{platformSku:'SKU-B',platformSkc:'SKC-B'}]},202);

@@ -52,7 +52,9 @@ function refresh(task) {
 export function recoverCollectionTasks(records, instanceId, now = Date.now()) {
   let changed = false;
   for (const task of records.filter(item => item.kind === 'collection-task')) {
-    if (task.status === 'running' && (task.instanceId !== instanceId || Date.parse(task.leaseExpiresAt) <= now)) {
+    const unfinishedCatalog = ['cost_complete','partial'].includes(task.status)
+      && task.batches.some(batch => batch.deliveryId && batch.catalogStatus !== 'completed');
+    if ((task.status === 'running' || unfinishedCatalog) && (task.instanceId !== instanceId || Date.parse(task.leaseExpiresAt) <= now)) {
       task.status = 'paused'; task.recoveryRequired = true; task.updatedAt = timestamp(now); changed = true;
     }
   }
@@ -66,7 +68,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   const parts = url.pathname.slice(PREFIX.length).split('/').filter(Boolean).map(decodeURIComponent);
   if (!parts.length && method === 'GET') {
     const tasks = records.filter(item => item.kind === 'collection-task' && ['workspaceId','ledgerId','requestId'].every(key => !url.searchParams.get(key) || item[key] === url.searchParams.get(key)));
-    return { status: 200, body: { tasks: tasks.toSorted((left,right) => String(right.createdAt).localeCompare(String(left.createdAt))).map(refresh) } };
+    return { status: 200, body: { tasks: tasks.toSorted((left,right) => String(right.createdAt).localeCompare(String(left.createdAt))).map(task => refresh(structuredClone(task))) } };
   }
   if (!parts.length && method === 'POST') {
     const request = requestFor(records, payload.requestId);
@@ -92,7 +94,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   const task = records.find(item => item.kind === 'collection-task' && item.taskId === parts[0]);
   if (!task) fail('ERP_TASK_NOT_FOUND', '采集任务不存在。', 404);
   if (requestedWorkspace !== task.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
-  if (method === 'GET' && parts.length === 1) return { status: 200, body: { task: refresh(task) } };
+  if (method === 'GET' && parts.length === 1) return { status: 200, body: { task: refresh(structuredClone(task)) } };
   if (method !== 'POST') fail('METHOD_NOT_ALLOWED', '不支持的任务操作。', 405);
   if (parts[1] === 'control') {
     const action = payload.action;
