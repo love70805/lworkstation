@@ -61,6 +61,8 @@ export function recoverCollectionTasks(records, instanceId, now = Date.now()) {
 
 export function handleCollectionTaskRequest(records, { method, url, payload = {}, instanceId, now = Date.now() }) {
   if (!url.pathname.startsWith(PREFIX)) return null;
+  const requestedWorkspace = String(payload.workspaceId ?? url.searchParams.get('workspaceId') ?? '').trim();
+  if (!requestedWorkspace) fail('ERP_TASK_WORKSPACE_REQUIRED', '任务操作缺少工作区。', 400);
   const parts = url.pathname.slice(PREFIX.length).split('/').filter(Boolean).map(decodeURIComponent);
   if (!parts.length && method === 'GET') {
     const tasks = records.filter(item => item.kind === 'collection-task' && ['workspaceId','ledgerId','requestId'].every(key => !url.searchParams.get(key) || item[key] === url.searchParams.get(key)));
@@ -68,7 +70,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   }
   if (!parts.length && method === 'POST') {
     const request = requestFor(records, payload.requestId);
-    if (payload.workspaceId && payload.workspaceId !== request.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
+    if (requestedWorkspace !== request.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
     if (request.status !== 'registered') fail('ERP_TASK_REQUEST_EXPIRED', '请求已过期，请在工作台重新核对范围后继续。');
     const filters = payload.filters && typeof payload.filters === 'object' && !Array.isArray(payload.filters) ? payload.filters : {};
     if (JSON.stringify(filters).length > 20000) fail('ERP_TASK_FILTERS_INVALID', '查询条件过大。', 400);
@@ -89,8 +91,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   }
   const task = records.find(item => item.kind === 'collection-task' && item.taskId === parts[0]);
   if (!task) fail('ERP_TASK_NOT_FOUND', '采集任务不存在。', 404);
-  const workspaceId = payload.workspaceId ?? url.searchParams.get('workspaceId');
-  if (workspaceId && workspaceId !== task.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
+  if (requestedWorkspace !== task.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
   if (method === 'GET' && parts.length === 1) return { status: 200, body: { task: refresh(task) } };
   if (method !== 'POST') fail('METHOD_NOT_ALLOWED', '不支持的任务操作。', 405);
   if (parts[1] === 'control') {

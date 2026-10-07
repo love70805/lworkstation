@@ -10,7 +10,7 @@ import { handleCollectionTaskRequest, collectionScopeHash, recoverCollectionTask
 for (const size of [100, 500, 2000]) {
   const records = [{ kind:'request', status:'registered', requestId:'R', workspaceId:'W', ledgerId:'L', ledgerVersion:'v1', ledgerPeriod:'2026-09',
     platformSkcs:Array.from({length:size},(_,i)=>({platformSkc:`skc-${i}`})), expectedSkus:[] }];
-  const call = (suffix, payload, now=100000) => handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks${suffix}`),payload,instanceId:'I',now}).body;
+  const call = (suffix, payload, now=100000) => handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks${suffix}`),payload:{workspaceId:'W',...payload},instanceId:'I',now}).body;
   const {task} = call('',{requestId:'R',filters:{status:'all'}});
   assert.equal(task.batches.length,size/20); assert.equal(task.summary.total,size); assert.equal(task.status,'paused');
   call(`/${task.taskId}/control`,{action:'resume'});
@@ -55,12 +55,18 @@ async function start() {
 }
 async function stop() { const exited=once(child,'exit'); child.kill(); await exited; }
 async function request(suffix,payload,expected=200) {
+  if(suffix.startsWith('collection-tasks')) {
+    if(payload!==undefined) payload={workspaceId:'W-http',...payload};
+    else if(!suffix.includes('workspaceId=')) suffix+=`${suffix.includes('?')?'&':'?'}workspaceId=W-http`;
+  }
   const response=await fetch(`http://127.0.0.1:${port}/erp/v1/${suffix}`,{method:payload===undefined?'GET':'POST',headers:{authorization:`Bearer ${capability}`,'content-type':'application/json'},...(payload===undefined?{}:{body:JSON.stringify(payload)})});
   const body=await response.json(); assert.equal(response.status,expected,JSON.stringify(body)); return body;
 }
 const scope={id:'R-http',workspaceId:'W-http',ledgerId:'L-http',ledgerPeriod:'2026-09',ledgerVersion:'import-v1',platformSkcs:[{platformSkc:'SKC-A'}]};
 try {
   await start();
+  const missingWorkspace=await fetch(`http://127.0.0.1:${port}/erp/v1/collection-tasks`,{headers:{authorization:`Bearer ${capability}`}});
+  assert.equal(missingWorkspace.status,400);
   await request('requests',{request:scope,expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A',store:'680店'}]},202);
   let {task}=await request('collection-tasks',{requestId:scope.id,filters:{createTimePeriod:[]}},201);
   const taskUrl=`collection-tasks/${task.taskId}`;
