@@ -24,11 +24,11 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.3](https://github.com/love70805/lworkstation/releases/tag/v0.4.3)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.4](https://github.com/love70805/lworkstation/releases/tag/v0.4.4)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
-## v0.4.4 候选已验收，待集成与公开回读（2026-10-07）
+## v0.4.4 已公开稳定 Latest（2026-10-07）
 
-整批后缀选择、前置导入按钮与折叠明细、原子基础建档与参考列表默认隐藏已建档分支。候选 candidates/0.4.4/，证据 archive/release-0.4.4/。1310 测试、构建、桌面 verify、实际隔离 CSV 路径与窄屏浅深色、隐藏 packaged smoke、621 文件 / 574 生产输入一致性通过。安装包 118622928 字节，SHA256 9BBFC177952D47BA8C60412A8E9DD628A25D2D2ADE77BABF92091C05E4E86CF4。PR #159 待最终 CI 与集成；公开回读前不标记发布。见 [记录](../docs/RELEASE_0.4.4.md)。
+整批后缀选择、前置导入按钮与折叠明细、原子基础建档与参考列表默认隐藏已建档分支。候选 candidates/0.4.4/，证据 archive/release-0.4.4/。1310 测试、构建、桌面 verify、开发/生产实际隔离 CSV、6000 SKU 规模样本与窄屏浅深色、隐藏 packaged smoke、621 文件 / 574 生产输入一致性通过。安装包 118622928 字节，SHA256 9BBFC177952D47BA8C60412A8E9DD628A25D2D2ADE77BABF92091C05E4E86CF4。PR #159/main CI、四公开资产及生产更新入口匿名完整回读通过，标签固定 f2a53c9；未自动安装、未改真实数据。见 [记录](../docs/RELEASE_0.4.4.md)。
 
 ## v0.4.3 已公开稳定 Latest（2026-10-07）
 
