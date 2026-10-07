@@ -24,13 +24,13 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.0](https://github.com/love70805/lworkstation/releases/tag/v0.4.0)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.1](https://github.com/love70805/lworkstation/releases/tag/v0.4.1)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
-## v0.4.1 候选验收（2026-10-07）
+## v0.4.1 已公开稳定 Latest（2026-10-07）
 
-导入前货号筛选与 SKC 图表明细，候选登记目录 `releases/candidates/0.4.1/`，证据 `archive/release-0.4.1/`。实现 ea7b230；前端 1278 测试及利润页补验通过，隔离导入、导出、ERP 请求和浅深色/窄屏通过。打包、隐藏 smoke、安装资源一致性与 CI 进行中，尚未发布。本机不自动安装。见 [记录](../docs/RELEASE_0.4.1.md)。
+导入前货号筛选与 SKC 图表明细。候选 `releases/candidates/0.4.1/`，证据 `archive/release-0.4.1/`；标签 `5dcb4c6`。1281 测试、完整门禁、隔离实际路径、594 文件 / 547 输入一致性、隐藏 smoke、PR/main CI、四资产匿名完整哈希及生产更新入口通过。EXE 118334266 字节，SHA256 `6E63AD0D36B9EE781E7CC0A070FE32C70C065E6FB5E0C3B89A43BBA1270445D8`。本机不自动安装。见 [发布记录](../docs/RELEASE_0.4.1.md)。
 
-## v0.4.0 已公开稳定 Latest（2026-10-07）
+## v0.4.0 历史公开稳定版（2026-10-07）
 
 本地运营负责范围：候选目录 `releases/candidates/0.4.0/`，证据 `archive/release-0.4.0/`。1281 测试、候选、593 文件/546 输入一致性、隐藏 smoke、PR/main CI、四公开资产匿名完整哈希及生产更新通道真实下载通过。固定 eb37f7f；本机不安装。见 [验收与发布](../docs/RELEASE_0.4.0.md)。
 
