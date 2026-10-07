@@ -130,7 +130,12 @@ try {
   await request(`${secondUrl}/control`,{action:'retry_failed'});
   assert.equal((await request(secondUrl)).task.batches[0].status,'pending');
   const before=(await request('requests?workspaceId=W-http&includeHistory=true')).records.find(item=>item.requestId==='R-two').registeredAt;
+  const evidenceBeforeHeartbeat = await fs.readFile(spool, 'utf8');
   await request(`${secondUrl}/control`,{action:'heartbeat'});
+  assert.equal(await fs.readFile(spool, 'utf8'), evidenceBeforeHeartbeat, 'heartbeat must not rewrite historical evidence');
+  const leases = JSON.parse(await fs.readFile(`${spool}.leases.json`, 'utf8'));
+  assert.equal(leases.find(item => item.taskId === second.taskId).scopeHash, second.scopeHash);
+  assert.ok((await fs.stat(`${spool}.leases.json`)).size < 5000, 'lease durability uses bounded metadata');
   assert.equal((await request('requests?workspaceId=W-http&includeHistory=true')).records.find(item=>item.requestId==='R-two').registeredAt,before);
   await stop();
   const persisted=JSON.parse(await fs.readFile(spool,'utf8'));
@@ -147,6 +152,11 @@ try {
   const expired=expiredRecords.find(item=>item.kind==='request'&&item.requestId==='R-two');
   expired.leaseExpiresAt=new Date(Date.now()-1000).toISOString();
   await fs.writeFile(spool,JSON.stringify(expiredRecords));
+  // Expiry includes the latest durable heartbeat, rather than the older lease
+  // in the evidence snapshot. Restart still requires explicit task recovery.
+  const expiredLeases = JSON.parse(await fs.readFile(`${spool}.leases.json`, 'utf8'));
+  expiredLeases.find(item => item.taskId === second.taskId).leaseExpiresAt = expired.leaseExpiresAt;
+  await fs.writeFile(`${spool}.leases.json`, JSON.stringify(expiredLeases));
   await start();
   assert.equal((await request('requests?workspaceId=W-http&includeHistory=true')).records.find(item=>item.requestId==='R-two').status,'expired');
   await request('requests',{request:{...scope,id:'R-cannot-bypass-expired-task',replaceLedgerScope:true},expectedSkus:[]},409);

@@ -1,0 +1,17 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+const root = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const output = path.resolve(process.env.ERP_NATIVE_OUTPUT || path.join(root, '../archive/import-erp-reliability/native'));
+await mkdir(output, { recursive: true });
+const child = spawn(require('electron'), [path.join(root, 'erp-native-smoke-app.cjs')], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ERP_NATIVE_OUTPUT: output } });
+let stdout = '', stderr = '';
+child.stdout.on('data', chunk => stdout += chunk); child.stderr.on('data', chunk => stderr += chunk);
+const code = await new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
+await Promise.all([writeFile(path.join(output, 'stdout.log'), stdout), writeFile(path.join(output, 'stderr.log'), stderr)]);
+const result = JSON.parse(await readFile(path.join(output, 'erp-native-checks.json'), 'utf8'));
+console.log(JSON.stringify(result, null, 2));
+if (code !== 0 || !result.ok) process.exitCode = 1;

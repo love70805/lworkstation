@@ -126,4 +126,26 @@ try {
   await new Promise((resolve) => spoofServer.close(resolve));
 }
 
+// Repeated toolbar refreshes and polling share one probe. An older timeout
+// must not overwrite a newer response or flood the already busy service.
+let refreshCount = 0;
+const refreshServer = http.createServer((_request, response) => {
+  refreshCount++;
+  setTimeout(() => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ application: 'shopeers-erp-inbox', apiVersion: 2 }));
+  }, 100);
+});
+await new Promise(resolve => refreshServer.listen(0, '127.0.0.1', resolve));
+const concurrentRefresh = createInboxServiceController({ port: refreshServer.address().port, capability });
+try {
+  const results = await Promise.all(Array.from({ length: 20 }, () => concurrentRefresh.refresh()));
+  assert.equal(refreshCount, 1);
+  assert.ok(results.every(result => result.kind === 'shopeers'));
+  assert.equal(concurrentRefresh.getState().status, 'online');
+} finally {
+  await concurrentRefresh.stop({ wait: true });
+  await new Promise(resolve => refreshServer.close(resolve));
+}
+
 console.log("desktop inbox service lifecycle tests passed");

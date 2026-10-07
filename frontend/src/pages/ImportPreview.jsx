@@ -250,6 +250,9 @@ export default function ImportPreview() {
     }
   };
   const update = async (itemId, patch) => {
+    // Explicitly applying the same selection invalidates its sealed rows too.
+    // Rebuild the preview even when the resulting configuration key is equal.
+    attemptedRef.current = "";
     invalidate();
     const current = files.find((item) => item.itemId === itemId);
     if (!current) return;
@@ -423,6 +426,11 @@ export default function ImportPreview() {
     return item.status === "parsed" && item.filterOptions?.supplierNumbers?.length > 0 && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
   });
   const configurationKey = JSON.stringify([period, files.map(item => [item.itemId, item.status, item.storeName, item.mapping, item.filterOptions, item.sourceScope, item.importMode, item.periodEvidence]), contextBlocked]);
+  const storesWithoutNumbers = files.filter(item => item.status === 'parsed' && !item.filterOptions?.supplierNumbers?.length).map(item => item.storeName || item.fileName);
+  const importPreparation = periodEvidence.awaitingEvidence ? '正在按本次选择重新校验…'
+    : storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，请调整后缀或展开本店货号选择`
+    : !period ? '请选择账本月份'
+    : error || '选择货号并核对店铺后自动校验';
   validateRef.current = validate;
   useEffect(() => {
     if (!ready || busy || result || attemptedRef.current === configurationKey) return;
@@ -445,9 +453,9 @@ export default function ImportPreview() {
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
         {!!files.length && <section className="batch-action-bar" aria-label="本次导入操作">
-          <div className="batch-action-summary"><strong>{period || '月份待确认'} · {files.length} 个文件</strong><span role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组` : '选择货号并核对店铺后自动校验'}</span></div>
+          <div className="batch-action-summary"><strong>{period || '月份待确认'} · {files.length} 个文件</strong><span id="batch-import-status" role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组${preview.requiresOverwrite && overwriteSignature !== preview.targetSignature ? ' · 请确认替换范围后导入' : ''}` : importPreparation}</span></div>
           {preview?.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={event => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />确认本次全部替换范围（含分页内容）与移除旧分组；可展开下方 SKC 明细核对。</label>}
-          <Button variant="primary" disabled={busy || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
+          <Button variant="primary" aria-describedby="batch-import-status" disabled={busy || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
         </section>}
         <section className="wizard-card">
           <fieldset disabled={busy || contextBlocked} className="batch-fieldset">

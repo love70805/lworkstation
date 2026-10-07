@@ -1,11 +1,11 @@
 import { validateErpCatalogRequest, buildErpCatalogInboxEnvelope, normalizeErpCatalogPurchaseEvidence } from './erp-inbox-server-catalog-contract.mjs';
 import { normalizeErpCatalogCoverage, normalizeErpUnitConversion } from './erp-inbox-server-catalog-contract.mjs';
-import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
+import {createInboxStorage, cloneInboxMetadata} from './erp-inbox-storage.mjs';
 
 const port = Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790);
 const bindHost = "127.0.0.1";
@@ -27,6 +27,36 @@ const LEDGER_SCOPE_EXPECTED = "expected";
 const LEDGER_SCOPE_AUXILIARY = "auxiliary";
 let spoolWriteChain = Promise.resolve();
 let latestTransportError = null;
+const spoolStorage = createInboxStorage(spoolPath);
+const leaseStorage = createInboxStorage(`${spoolPath}.leases.json`);
+const extensionHeartbeats = new Map();
+let taskHeartbeats = new Map();
+let leaseLoading;
+let leaseWriteChain = Promise.resolve();
+
+function loadTaskHeartbeats() {
+  return leaseLoading ??= leaseStorage.read().then(records => {
+    taskHeartbeats = new Map(records.filter(record => record.kind === 'task-heartbeat').map(record => [record.taskId, record]));
+  }).catch(error => { leaseLoading = undefined; throw error; });
+}
+
+async function persistTaskHeartbeat(task) {
+  const heartbeat = {
+    kind: 'task-heartbeat', taskId: task.taskId, instanceId: task.instanceId,
+    workspaceId: task.workspaceId, requestId: task.requestId, scopeHash: task.scopeHash,
+    status: task.status, leaseExpiresAt: task.leaseExpiresAt, updatedAt: task.updatedAt,
+  };
+  const operation = leaseWriteChain.catch(() => {}).then(async () => {
+    const next = new Map(taskHeartbeats);
+    next.set(task.taskId, heartbeat);
+    // A tiny atomic journal preserves renewed leases across crashes without
+    // serializing the historical purchase evidence on every three-second tick.
+    await leaseStorage.write([...next.values()]);
+    taskHeartbeats = next;
+  });
+  leaseWriteChain = operation;
+  await operation;
+}
 
 if (inboxCapability.length < 32) {
   console.error("Lworkstation ERP inbox requires SHOPEERS_ERP_INBOX_CAPABILITY with at least 32 characters.");
@@ -34,41 +64,35 @@ if (inboxCapability.length < 32) {
 }
 
 async function readSpool() {
-  try {
-    const value = JSON.parse(await fs.readFile(spoolPath, "utf8"));
-    return Array.isArray(value) ? value : [];
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
+  await loadTaskHeartbeats();
+  const records = cloneInboxMetadata(await spoolStorage.read());
+  for(const heartbeat of extensionHeartbeats.values()) {
+    const index=records.findIndex(record=>record.kind===heartbeat.kind && record.extensionId===heartbeat.extensionId);
+    if(index<0)records.push({...heartbeat});else records[index]={...heartbeat};
   }
+  for(const heartbeat of taskHeartbeats.values()) {
+    const task=records.find(record=>record.kind==='collection-task' && record.taskId===heartbeat.taskId);
+    if(!task || task.instanceId!==heartbeat.instanceId || task.workspaceId!==heartbeat.workspaceId || task.requestId!==heartbeat.requestId || task.scopeHash!==heartbeat.scopeHash || task.status!==heartbeat.status || task.recoveryRequired) continue;
+    // A later durable task mutation already contains a newer renewal. Never
+    // shorten it using an older journal entry left by the preceding heartbeat.
+    if(Date.parse(heartbeat.updatedAt)<Date.parse(task.updatedAt||''))continue;
+    task.leaseExpiresAt=heartbeat.leaseExpiresAt;
+    if(Date.parse(task.updatedAt||'')<Date.parse(heartbeat.updatedAt))task.updatedAt=heartbeat.updatedAt;
+    for(const request of records) {
+      if(request.kind!=='request' || request.workspaceId!==task.workspaceId || !['registered','expired'].includes(request.status))continue;
+      if(request.requestId===task.requestId || (request.requestKind==='catalog' && request.sourceRequestId===task.requestId && request.requestId===`${task.requestId}-CATALOG`)) {
+        request.leaseExpiresAt=heartbeat.leaseExpiresAt;request.status='registered';
+      }
+    }
+  }
+  return records;
 }
 
 async function writeSpool(records) {
-  await fs.mkdir(path.dirname(spoolPath), { recursive: true });
-  const temporaryPath = `${spoolPath}.${crypto.randomUUID()}.tmp`;
-  let owned = false;
-  try {
-    const handle = await fs.open(temporaryPath, "wx");
-    owned = true;
-    try {
-      await handle.writeFile(JSON.stringify(records, null, 2), "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    // Windows may briefly deny replacement while a scanner holds the target.
-    // Never delete the committed file: an exhausted retry leaves it intact.
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        await fs.rename(temporaryPath, spoolPath);
-        break;
-      } catch (error) {
-        if (!["EPERM", "EACCES", "EBUSY"].includes(error.code) || attempt >= 5) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 20 * 2 ** attempt));
-      }
-    }
-  } finally {
-    if (owned) await fs.rm(temporaryPath, { force: true }).catch(() => {});
+  await spoolStorage.write(records);
+  for(const [id, heartbeat] of taskHeartbeats) {
+    const task=records.find(record=>record.kind==='collection-task' && record.taskId===id);
+    if(!task || task.status!==heartbeat.status || task.scopeHash!==heartbeat.scopeHash || task.recoveryRequired)taskHeartbeats.delete(id);
   }
 }
 
@@ -988,17 +1012,27 @@ const server = http.createServer(async (req, res) => {
     // Receive the bounded body before reserving the spool; a slow sender must
     // not block status polling or other completed requests.
     const payload = req.method === "POST" ? JSON.parse(await readBody(req)) : null;
-    const previousWrite = spoolWriteChain;
-    spoolWriteChain = new Promise((resolve) => { releaseSpool = resolve; });
-    await previousWrite;
-    // GET can expire requests too, so every read/modify/write shares this queue.
+    const route = new URL(req.url, `http://${bindHost}:${port}`).pathname;
+    const extensionHeartbeat = req.method==='POST' && ['/erp/v1/extension-status','/selection/v1/extension-status'].includes(route);
+    const taskHeartbeat = req.method==='POST' && /^\/erp\/v1\/collection-tasks\/[^/]+\/control$/.test(route) && payload?.action==='heartbeat';
+    const runtimeOnly = req.method==='GET' || extensionHeartbeat || taskHeartbeat;
+    if(!runtimeOnly) {
+      const previousWrite = spoolWriteChain;
+      spoolWriteChain = new Promise((resolve) => { releaseSpool = resolve; });
+      await previousWrite;
+    }
+    // Status reads and validated leases use a committed snapshot. Historical
+    // evidence is serialized/fsynced in a worker; it cannot block heartbeats.
     const records = await readSpool();
     const expiredChanged = expireRegisteredRequests(records);
     const recoveredTasks = recoverCollectionTasks(records, inboxInstanceId);
-    if (expiredChanged || recoveredTasks) await writeSpool(records);
+    if (!runtimeOnly && (expiredChanged || recoveredTasks)) await writeSpool(records);
     const taskResponse = handleCollectionTaskRequest(records, { method: req.method, url: new URL(req.url, `http://${bindHost}:${port}`), payload: payload ?? {}, instanceId: inboxInstanceId });
     if (taskResponse) {
-      if (req.method === 'POST') await writeSpool(records);
+      if(taskHeartbeat) {
+        const task=taskResponse.body.task;
+        await persistTaskHeartbeat(task);
+      } else if (req.method === 'POST') await writeSpool(records);
       return json(res, taskResponse.status, taskResponse.body);
     }
     if (req.method === "GET") {
@@ -1088,7 +1122,7 @@ const server = http.createServer(async (req, res) => {
       const existingIndex = records.findIndex((item) => item.kind === "selection-extension-status" && item.extensionId === extensionId);
       if (existingIndex >= 0) records[existingIndex] = record;
       else records.push(record);
-      await writeSpool(records);
+      extensionHeartbeats.set(`selection:${extensionId}`,record);
       return json(res, 202, { ok: true, accepted: true, extensionId, version, lastSeenAt: record.lastSeenAt });
     }
     if (requestUrl.pathname === "/selection/v1/context") {
@@ -1303,7 +1337,7 @@ const server = http.createServer(async (req, res) => {
       const existingIndex = records.findIndex((item) => item.kind === "extension-status" && item.extensionId === extensionId);
       if (existingIndex >= 0) records[existingIndex] = record;
       else records.push(record);
-      await writeSpool(records);
+      extensionHeartbeats.set(`erp:${extensionId}`,record);
       return json(res, 202, { accepted: true, extensionId, version, lastSeenAt: record.lastSeenAt });
     }
     if (requestUrl.pathname === "/erp/v1/cost-results") {

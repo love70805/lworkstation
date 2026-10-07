@@ -17,6 +17,7 @@ const commands = [
   ["ERP 首次发送请求绑定", "node", ["../tools/erp-collection-binding.test.mjs"]],
   ["ERP 请求快照竞态回归", "node", ["../tools/erp-request-binding.regression.test.mjs"]],
   ["ERP 收件协议", "pnpm", ["erp:inbox:test"]],
+  ["ERP 大队列并发响应与证据持久化", "node", ["../tools/erp-inbox-responsiveness.test.mjs"]],
   ["同步服务冒烟", "pnpm", ["sync:check"]],
   ["云端种子合同", "pnpm", ["seed:check"]],
   ["PostgreSQL Schema 合同", "pnpm", ["schema:check"]],
