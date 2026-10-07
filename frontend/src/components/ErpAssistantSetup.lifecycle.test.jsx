@@ -9,7 +9,7 @@ vi.mock('../lib/erpInboxTransport', () => ({ getErpRequestHistory: mocks.history
 vi.mock('../data/database', () => ({ getActiveMemberContext: async () => ({ workspaceId: 'W' }) }));
 vi.mock('./UI', async original => ({ ...await original(), useToast: () => ({ notify: mocks.notify }) }));
 let root, host;
-beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; mocks.notify.mockClear(); mocks.extension.mockResolvedValue({ records: [{ extensionId:'erp-assistant',online:true,ready:true,version:'8.0.33' }] });host=document.createElement('div');document.body.append(host);root=createRoot(host); });
+beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; mocks.notify.mockClear(); mocks.extension.mockResolvedValue({ records: [{ extensionId:'erp-assistant',online:true,ready:true,version:'8.0.34' }] });host=document.createElement('div');document.body.append(host);root=createRoot(host); });
 afterEach(async () => { if(root) await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();delete globalThis.IS_REACT_ACT_ENVIRONMENT; });
 it.each(['resolve','reject'])('ignores a late %s after the ERP setup is closed',async outcome=>{
   let resolve,reject;mocks.history.mockReturnValue(new Promise((yes,no)=>{resolve=yes;reject=no;}));

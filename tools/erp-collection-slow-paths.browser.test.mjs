@@ -3,6 +3,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { collectionReply } from './fixtures/erp-content-checkpoint.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'C:/Users/Administrator/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
@@ -16,7 +17,7 @@ const context = await browser.newContext({viewport:{width:1440,height:1000},redu
 const messages = [], requests = [], errors = []; let releaseDirectory;
 await context.exposeBinding('recordExtensionMessage',(_,message) => {
  messages.push(message);
- return message.type==='shopeers.erp.previewContext' ? {ok:true,ledgerPeriod:'2026-08'} : message.type==='shopeers.erp.catalogContext' ? {ok:true,request:{requestId:'CAT-UI',platformSkcs:['SKC-A']}} : {ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId};
+ return collectionReply(message, { platformSkcs: ['SKC-A'] }) || (message.type==='shopeers.erp.catalogContext' ? {ok:true,request:{requestId:'CAT-UI',platformSkcs:['SKC-A']}} : {ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId});
 });
 await context.addInitScript({content:`window.chrome={runtime:{lastError:null,sendMessage(message,callback){window.recordExtensionMessage(message).then(callback)}}};\n${source}`});
 await context.route('https://www.zhuolinkeji.cn/**',async route=>{
@@ -35,6 +36,7 @@ try {
  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-A&storeId=STORE-A'}})));
  await page.locator('#erpa-cost-trigger').click();
  await page.locator('#erpa-catalog-progress').waitFor({state:'visible'});
+ assert.match(await page.locator('#erpa-catalog-progress').innerText(), /最多30分钟/);
  assert.equal(messages.filter(m=>m.type==='shopeers.erp.submitCostResult').length,1);
  assert.equal(messages.filter(m=>m.type==='shopeers.erp.submitCatalogResult').length,0);
  await page.getByText('4.0000',{exact:true}).waitFor({state:'visible'});
