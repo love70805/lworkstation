@@ -1,3 +1,4 @@
+import { createSalesSourceCoverage } from '../domain/selectionSalesLabels';
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db, DEFAULT_WORKSPACE_ID, previewSalesImports, saveSalesImports, saveSalesImport, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload, restoreWorkspaceSyncRecoveryPayload } from "./database";
@@ -287,4 +288,38 @@ it('rejects a known different source month even if the caller bypasses the UI', 
   item.rows[0].sourceAddedDate = '2026-07-31';
   await expect(previewSalesImports({period,items:[item]})).rejects.toThrow('来源月份与账本');
   expect(await db.salesRows.count()).toBe(0);
+});
+
+function selectedFile(storeName, selected, scope = 'full_month') {
+  const scopedMapping = { ...mapping, supplierNumber: '货号', sourceAddedAt: '日期' };
+  const raw = ['A','B','C','D'].map((number,index)=>({SKU:storeName+'-'+number,SKC:storeName+'-SKC-'+number,货号:number,数量:1,金额:index+1,日期:'2026-08-30'}));
+  const filterOptions = { supplierNumbers:selected };
+  const validated = validateSalesRows(raw,scopedMapping,{defaultStore:storeName,...filterOptions});
+  return {itemId:storeName,fileName:storeName+'.csv',fileHash:storeName+'-same-content',storeName,mapping:scopedMapping,filterOptions,
+    sourceCoverage:createSalesSourceCoverage({period,storeName,scope,supplierNumbers:selected}),importMode:scope==='full_month'?'replace_store_month':'append',
+    rows:validated.rows,summary:{errorCount:validated.errors.length,ignoredCount:validated.ignored.length}};
+}
+it('reimports the same complete file with changed numbers and removes only that store/month old scope', async()=>{
+  await commit([selectedFile('甲',['A','B','C']),selectedFile('乙',['A'])]);
+  const items=[selectedFile('甲',['B','D'])], preview=await previewSalesImports({period,items});
+  expect(preview.items[0]).toMatchObject({replacementScope:'store_month',removedGroupCount:2,status:'ready',additions:[expect.objectContaining({supplierNumber:'D',added:true})]});
+  await saveSalesImports({period,items,preview,overwriteSignature:preview.targetSignature});
+  expect((await db.salesRows.toArray()).filter(row=>row.store==='甲').map(row=>row.supplierNumber).sort()).toEqual(['B','D']);
+  expect((await db.salesRows.toArray()).filter(row=>row.store==='乙')).toHaveLength(1);
+  expect((await previewSalesImports({period,items})).items[0].status).toBe('skipped_duplicate');
+});
+it('partial source preserves prior numbers and cannot claim a complete store replacement', async()=>{
+  await commit([selectedFile('甲',['A','B'])]);
+  await commit([selectedFile('甲',['C'],'partial')]);
+  expect((await db.salesRows.toArray()).map(row=>row.supplierNumber).sort()).toEqual(['A','B','C']);
+  await expect(previewSalesImports({period,items:[{...selectedFile('甲',['D'],'partial'),importMode:'replace_store_month'}]})).rejects.toThrow('完整替换本店本月');
+});
+it('rejects mismatched selection metadata and rolls back scoped replacements on cancellation',async()=>{
+  await commit([selectedFile('甲',['A','B'])]);
+  const before=await facts();
+  const forged=selectedFile('甲',['C']); forged.rows[0].supplierNumber='UNSELECTED';
+  await expect(previewSalesImports({period,items:[forged]})).rejects.toThrow('未选择货号');
+  const items=[selectedFile('甲',['C'])],preview=await previewSalesImports({period,items}),controller=new AbortController();
+  await expect(saveSalesImports({period,items,preview,overwriteSignature:preview.targetSignature,signal:controller.signal,onProgress:()=>controller.abort()})).rejects.toThrow('已回滚');
+  expect(await facts()).toEqual(before);
 });

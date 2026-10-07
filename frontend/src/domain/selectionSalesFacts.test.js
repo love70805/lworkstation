@@ -79,3 +79,10 @@ it('has bounded per-identity/month facts rather than daily source arrays', () =>
   const packed = packSelectionSalesFacts(facts, input.ledgers[0]);
   expect(derivedValueBytes(packed)).toBeLessThan(derivedValueBytes(facts) * 0.5);
 });
+
+it('preserves product-scoped month evidence through compact cache serialization', () => {
+  const input=fixture([{supplierNumber:'A'}]);
+  input.importBatches[0].sourceCoverage={...input.importBatches[0].sourceCoverage,version:2,supplierNumbers:['A']};
+  const {rows}=compare(input);
+  expect(rows[0].automaticSalesTag.status).toBe('ready');
+});

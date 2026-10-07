@@ -53,11 +53,15 @@ export function prepareSelectionSalesFacts({ salesRows = [], ledgers = [], impor
 // Per-ledger partitions stay below the entry limit and can survive restart.
 // These arrays/maps are new; consuming a projection never mutates cached facts.
 export function combineSelectionSalesFacts(parts, workspaceId) {
-  const ledgerPriceIndex = new Map(), completeMonths = new Map();
+  const ledgerPriceIndex = new Map(), completeMonths = new Map(), completeProductMonths = new Map();
   for (const part of parts) {
     for (const [sku, scopes] of part.ledgerPriceIndex) {
       if (!ledgerPriceIndex.has(sku)) ledgerPriceIndex.set(sku, new Map());
       for (const [scope, value] of scopes) ledgerPriceIndex.get(sku).set(scope, value);
+    }
+    for (const [identity, months] of part.labelFacts.completeProductMonths ?? []) {
+      if (!completeProductMonths.has(identity)) completeProductMonths.set(identity, new Set());
+      for (const month of months) completeProductMonths.get(identity).add(month);
     }
     for (const [store, months] of part.labelFacts.completeMonths) {
       if (!completeMonths.has(store)) completeMonths.set(store, new Set());
@@ -65,5 +69,5 @@ export function combineSelectionSalesFacts(parts, workspaceId) {
     }
   }
   return { workspaceId, sourceRowCount: parts.reduce((sum, part) => sum + part.sourceRowCount, 0), ledgerIdentityRows: parts.flatMap(part => part.ledgerIdentityRows).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)), ledgerPriceIndex,
-    coverRows: parts.flatMap(part => part.coverRows), labelFacts: { rows: parts.flatMap(part => part.labelFacts.rows), conflicts: parts.flatMap(part => part.labelFacts.conflicts), completeMonths, completeStoreNames: parts.flatMap(part => part.labelFacts.completeStoreNames) } };
+    coverRows: parts.flatMap(part => part.coverRows), labelFacts: { rows: parts.flatMap(part => part.labelFacts.rows), conflicts: parts.flatMap(part => part.labelFacts.conflicts), completeMonths, completeProductMonths, completeStoreNames: parts.flatMap(part => part.labelFacts.completeStoreNames) } };
 }

@@ -54,12 +54,12 @@ const monthBar = period => [...container.querySelectorAll('.sales-month-group')]
 it('defaults to twelve calendar slots and one total column, preserving missing months', async () => {
   expect(mocks.months).not.toHaveBeenCalled();
   await click(button('月度'));
-  expect(mocks.months).toHaveBeenCalledWith({ workspaceId: 'W', store: 'all', operatorScope: { mode: 'all', pairs: [] } });
+  expect(mocks.months).toHaveBeenCalledWith({ workspaceId: 'W', store: 'all' });
   expect(container.querySelectorAll('.sales-month-group')).toHaveLength(12);
   expect(monthBar('2026-08').querySelectorAll('.sales-grouped-segment')).toHaveLength(1);
   expect(monthBar('2026-06').getAttribute('aria-label')).toContain('数据待查');
   await click(monthBar('2026-08'));
-  expect(mocks.detail).toHaveBeenLastCalledWith({ workspaceId: 'W', ledgerId: 'L', store: 'all', operatorScope: { mode: 'all', pairs: [] } });
+  expect(mocks.detail).toHaveBeenLastCalledWith({ workspaceId: 'W', ledgerId: 'L', store: 'all' });
   expect(container.querySelector('.sales-details-heading h3').textContent).toBe('2026-08 店铺明细');
   expect(container.querySelector('.sales-store-pie')).not.toBeNull();
   expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(2);
@@ -72,7 +72,7 @@ it('shows all products in five-row pages and searches beyond the old top five in
   const total = container.querySelector('.sales-details-heading p').textContent;
   await act(async () => Simulate.keyDown(container.querySelector('.sales-store-pie [role="button"]'), { key: 'Enter' }));
   expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
-  expect(container.querySelector('.sales-store-pie')).toBeNull();
+  expect(container.querySelector('[aria-label="SKC 构成"] .sales-store-pie')).not.toBeNull();
   expect(container.querySelector('.sales-selected-store-totals').textContent).toContain('销量 2145 件');
   expect(container.querySelector('.sales-details-heading p').textContent).toBe(total);
   expect(container.textContent).not.toContain('Top 5');
@@ -229,4 +229,16 @@ it('applies the selected comparison stores to month details and never treats emp
   expect(container.querySelector('.sales-store-entry').textContent).toContain('乙');
   await click(byLabel('上一月'));
   expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(1);
+});
+
+it('keeps full SKC composition while searching and jumps to the chosen product page', async () => {
+  await openDay(); await openStore();
+  const before = container.querySelector('[aria-label="销售额SKC构成"]').innerHTML;
+  await change(container.querySelector('.sales-details-controls input'), 'SKC-00');
+  expect(container.querySelector('[aria-label="销售额SKC构成"]').innerHTML).toBe(before);
+  const slice = [...container.querySelectorAll('.sales-store-pie [role="button"]')].find(node => node.getAttribute('aria-label').startsWith('SKC-12 '));
+  await act(async()=>Simulate.click(slice));
+  expect(container.querySelector('.sales-details-controls input').value).toBe('');
+  expect(container.querySelector('[data-highlighted="true"]').textContent).toContain('SKC-12');
+  expect(container.querySelector('.sales-pagination').textContent).toContain('第 3/4 页');
 });

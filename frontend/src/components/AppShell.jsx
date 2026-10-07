@@ -1,5 +1,3 @@
-import { useOperatorScope } from '../hooks/useOperatorScope';
-import OperatorScopeDialog from './OperatorScopeDialog';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -79,7 +77,6 @@ function formatCheckTime(value) {
 }
 
 export default function AppShell({ children, pageClass = "" }) {
-  const operator = useOperatorScope();
   const location = useLocation();
   const { pathname } = location;
   const navigate = useNavigate();
@@ -370,13 +367,13 @@ export default function AppShell({ children, pageClass = "" }) {
           </div>
           <div className="topbar-control account-control">
             <button className={`avatar-button ${openMenu === "account" ? "active" : ""}`} aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded={openMenu === "account"} onClick={() => toggleMenu("account")}><span className="avatar" aria-hidden="true">L</span></button>
-            {openMenu === "account" ? <div className="topbar-popover account-popover" role="menu"><div className="account-summary"><span className="avatar avatar-large" aria-hidden="true">L</span><span><strong>{cloudAuth.user?.email ?? "Lworkstation 用户"}</strong><small>{cloudAuth.user ? "云端工作区成员" : runtimeConfig.syncProvider === "supabase" ? "尚未登录云端" : "本机工作区管理员"}</small></span></div>{runtimeConfig.cloudConfigured ? <button onClick={() => showDialog("cloud-auth")}><ShieldCheck size={17} />{cloudAuth.user ? "云端账户" : "登录云端工作区"}<ChevronRight size={15} /></button> : null}<button onClick={() => showDialog("operator-scope")}><Archive size={17} />我的负责商品<ChevronRight size={15} /></button><label className="account-scope-mode">查看范围<select aria-label="商品负责范围" className="select-input" value={operator.config.mode} onChange={event => { try { operator.save({ ...operator.config, mode: event.target.value }); } catch { notify("本机保存失败，请重试。", "error"); } }}><option value="mine">我的商品</option><option value="all">全部商品</option></select></label><label className="account-scope-mode">运营方案<select aria-label="当前运营方案" className="select-input" value={operator.config.activeProfileId} onChange={event => { try { operator.save({ ...operator.config, activeProfileId: event.target.value }); } catch { notify("本机保存失败，请重试。", "error"); } }}><option value="">未选择方案</option>{operator.config.profiles.map(profile => <option value={profile.id} key={profile.id}>{profile.name}</option>)}</select></label><button onClick={() => showDialog("settings")}><Settings size={17} />工作区偏好<ChevronRight size={15} /></button><button onClick={() => showDialog("support")}><ShieldCheck size={17} />产品支持摘要<ChevronRight size={15} /></button></div> : null}
+            {openMenu === "account" ? <div className="topbar-popover account-popover" role="menu"><div className="account-summary"><span className="avatar avatar-large" aria-hidden="true">L</span><span><strong>{cloudAuth.user?.email ?? "Lworkstation 用户"}</strong><small>{cloudAuth.user ? "云端工作区成员" : runtimeConfig.syncProvider === "supabase" ? "尚未登录云端" : "本机工作区管理员"}</small></span></div>{runtimeConfig.cloudConfigured ? <button onClick={() => showDialog("cloud-auth")}><ShieldCheck size={17} />{cloudAuth.user ? "云端账户" : "登录云端工作区"}<ChevronRight size={15} /></button> : null}<button onClick={() => showDialog("settings")}><Settings size={17} />工作区偏好<ChevronRight size={15} /></button><button onClick={() => showDialog("support")}><ShieldCheck size={17} />产品支持摘要<ChevronRight size={15} /></button></div> : null}
           </div>
         </div>
       </header>
 
       <main className={`main-canvas ${pageClass}`}>
-        <div className="page-container">{operator.restricted ? <div className="operator-scope-banner" role="status"><strong>我的商品 · {operator.config.profiles.find(p => p.id === operator.config.activeProfileId)?.name || "未选择运营方案"}</strong><span>按负责范围展示 · 整月数据保留</span><button onClick={() => showDialog("operator-scope")}>设置负责商品</button></div> : null}{children}</div>
+        <div className="page-container">{children}</div>
       </main>
 
       <Modal
@@ -411,7 +408,6 @@ export default function AppShell({ children, pageClass = "" }) {
         </div>
       </Modal>
 
-      {openDialog === "operator-scope" ? <OperatorScopeDialog key={operator.workspaceId} operator={operator} onClose={() => setOpenDialog("")} /> : null}
       <CloudAuthDialog open={openDialog === "cloud-auth"} onClose={() => setOpenDialog("")} />
     </div>
   );
