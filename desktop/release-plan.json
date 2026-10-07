@@ -1,9 +1,10 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "candidateOnly": true,
-  "integrationBranch": "codex/v044-import-catalog",
+  "integrationBranch": "codex/v045-prestorage",
   "requiredCommits": [
+    { "module": "v0.4.4-verified-main-baseline", "commit": "a420fe7b67da7deda1682baa0472d425662ee011" },
     {
       "module": "v0.4.3-verified-main-baseline",
       "commit": "be8ad17"

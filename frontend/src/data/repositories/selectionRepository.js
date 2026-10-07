@@ -10,6 +10,7 @@ import {
 import { calculateSupplierLandedUnitCost, validateProductDraft } from "../../domain/productCatalog";
 import { normalizeProductTags, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../../domain/productSelectionDraft";
 import { buildSelectionReferenceRows } from "../../lib/selectionReferences";
+import { productPrestorageReadiness, canAutoPromotePrestorage, isPrestorageProduct } from "../../domain/productPrestorage";
 import { catalogProductName, prefillErpProductDraft } from "../../domain/erpProductCatalog";
 import { productFieldEdits, supplierQuoteEdited } from "../../domain/productMetadata";
 import { erpCatalogReferenceCosts } from "../../domain/erpCatalogReference";
@@ -482,32 +483,7 @@ export async function getProductEditorSnapshot(options = {}) {
   });
 }
 
-async function readProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "" } = {}) {
-  const memberContext = await getActiveMemberContext();
-  const statusDefinitions = await getSelectionStatusDefinitions();
-  if (captureId) {
-    const capture = await db.captures.get(captureId);
-    if (!capture || !selectionRecordVisible(capture, memberContext)) return null;
-    return {
-      context: memberContext,
-      mode: "capture",
-      capture,
-      product: null,
-      draft: defaultProductDraft({
-        ...capture.draft,
-        salesStatus: resolveSelectionStatusId(capture.draft?.salesStatus ?? "pending_review", statusDefinitions),
-      }),
-      validation: capture.validation ?? validateProductDraft(capture.draft),
-    };
-  }
-
-  if (productId) {
-    const product = await db.products.get(productId);
-    if (!product || !selectionRecordVisible(product, memberContext)) return null;
-    const [skuRows, storedOffers] = await Promise.all([
-      db.platformSkus.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
-      db.supplierOffers.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
-    ]);
+function storedProductEditorDraft({ product, skuRows, storedOffers, statusDefinitions }) {
     const offers = storedOffers.filter(activeSupplierOffer);
     const offerBySku = new Map();
     offers.forEach((offer) => {
@@ -613,7 +589,7 @@ async function readProductEditorSnapshot({ captureId = null, productId = null, p
         landedUnitCost: primaryOffer?.landedUnitCost ?? null,
       };
     }) : savedVariants;
-    const draft = defaultProductDraft({
+    return defaultProductDraft({
       name: product.name,
       englishTitle: product.englishTitle,
       salesPlatform: product.salesPlatform ?? "",
@@ -646,6 +622,35 @@ async function readProductEditorSnapshot({ captureId = null, productId = null, p
       suppliers,
       variants: editorVariants,
     });
+}
+
+async function readProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "" } = {}) {
+  const memberContext = await getActiveMemberContext();
+  const statusDefinitions = await getSelectionStatusDefinitions();
+  if (captureId) {
+    const capture = await db.captures.get(captureId);
+    if (!capture || !selectionRecordVisible(capture, memberContext)) return null;
+    return {
+      context: memberContext,
+      mode: "capture",
+      capture,
+      product: null,
+      draft: defaultProductDraft({
+        ...capture.draft,
+        salesStatus: resolveSelectionStatusId(capture.draft?.salesStatus ?? "pending_review", statusDefinitions),
+      }),
+      validation: capture.validation ?? validateProductDraft(capture.draft),
+    };
+  }
+
+  if (productId) {
+    const product = await db.products.get(productId);
+    if (!product || !selectionRecordVisible(product, memberContext)) return null;
+    const [skuRows, storedOffers] = await Promise.all([
+      db.platformSkus.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
+      db.supplierOffers.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
+    ]);
+    const draft = storedProductEditorDraft({ product, skuRows, storedOffers, statusDefinitions });
     const projection = await productEditorErpPrefill({ draft, productId });
     return { context: memberContext, mode: "product", product, capture: null, ...projection, validation: validateProductDraft(projection.draft) };
   }
@@ -1205,6 +1210,8 @@ export async function ensureLedgerCatalogDrafts({ workspaceId, ledgerId, period,
   return result;
 }
 
+const AUTO_PRESTORAGE_SAVE = Symbol("prestorage-auto-save");
+
 export async function saveProductCatalogRecord({
   productId = null,
   captureId = null,
@@ -1214,7 +1221,9 @@ export async function saveProductCatalogRecord({
   workspaceId = null,
   expectedWorkspaceId = null,
   quoteEditIntent = draft?.quoteEditIntent ?? null,
+  automaticPrestorage = false,
 }) {
+  automaticPrestorage = automaticPrestorage === AUTO_PRESTORAGE_SAVE && Boolean(Dexie.currentTransaction);
   await ensureDefaultWorkspace();
   const memberContext = await getActiveMemberContext();
   workspaceId = workspaceId || memberContext.workspaceId;
@@ -1223,7 +1232,7 @@ export async function saveProductCatalogRecord({
   const statusDefinitions = await getSelectionStatusDefinitions();
   const normalizedDraft = defaultProductDraft(draft);
   const validation = validateProductDraft(normalizedDraft);
-  if (!catalogProductName(normalizedDraft.name)) throw new Error("商品名称不能为空，也不能使用未建立商品档案等占位文字。");
+  if (!catalogProductName(normalizedDraft.name) && !(status === "draft" && normalizedDraft.prestorage)) throw new Error("商品名称不能为空，也不能使用未建立商品档案等占位文字。");
 
   const normalizedVariants = normalizedDraft.variants
     .filter((variant) => catalogText(variant.platformSku))
@@ -1305,6 +1314,13 @@ export async function saveProductCatalogRecord({
       if (normalizedDraft.legacyStatusConflict && !normalizedDraft.statusEdited) throw new Error("旧状态含有矛盾信息，请选择本次商品状态后保存。");
       // A draft-save call must not silently downgrade an existing formal record.
       if (existingProduct?.status === "active") status = "active";
+      if (automaticPrestorage && !canAutoPromotePrestorage(existingProduct)) throw new Error("预存资料状态已变化，请重新读取。");
+      const prestorageFlow = Boolean(normalizedDraft.prestorage || isPrestorageProduct(existingProduct));
+      if (status === "active" && prestorageFlow && existingProduct?.status !== "active" && !automaticPrestorage) {
+        const historicalRows = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+        const readiness = productPrestorageReadiness({ draft: normalizedDraft, historicalRows });
+        if (!readiness.ready) throw new Error(`预存资料尚未齐全：${readiness.labels.join("、")}。`);
+      }
       if (status === "active") {
         const statusDefinition = selectionStatusById(statusDefinitions, normalizedDraft.productStatus ?? normalizedDraft.salesStatus);
         const historicalRows = statusDefinition?.requiresReadiness ? buildSelectionReferenceRows(await getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction })) : [];
@@ -1336,7 +1352,8 @@ export async function saveProductCatalogRecord({
         if (!Object.hasOwn(original, "handlingFee") || quoteEditIntent != null && !(quoteEditIntent.supplierIds ?? []).includes(supplier.supplierId)) supplier.handlingFee = old.handlingFee;
       });
       supplierProfiles = catalogSupplierProfiles(normalizedSuppliers);
-      const fieldEdits = productFieldEdits({ draft, existingProduct, existingSkus });
+      const fieldEdits = automaticPrestorage ? existingProduct?.attributes?.fieldEdits ?? {} : productFieldEdits({ draft, existingProduct, existingSkus });
+      if (!catalogProductName(existingProduct?.name) && !catalogProductName(normalizedDraft.name) && !normalizedDraft.fieldEdits?.name) delete fieldEdits.name;
       if (existingProduct && normalizedSkc && existingSkus.some(sku => sku.platformSkc && canonicalPlatformSkc(sku.platformSkc) !== canonicalSkc && normalizedVariants.some(variant => variant.canonicalPlatformSku === sku.canonicalPlatformSku))) throw new Error("已有平台 SKU 的 SKC 关系发生冲突，不能静默改绑，请定位对应分支。");
       const skuByCanonical = new Map(existingSkus.map((sku) => [sku.canonicalPlatformSku, sku]));
       const skuRows = normalizedVariants.map((variant) => ({
@@ -1499,6 +1516,7 @@ export async function saveProductCatalogRecord({
           supplierProfiles,
           pendingVariants,
           fieldEdits,
+          ...(prestorageFlow ? { prestorage: { ...(existingProduct?.attributes?.prestorage ?? {}), autoPromote: true, ...(status === "active" ? { promotedAt: now } : {}) } } : {}),
           catalogOrigin: existingProduct?.attributes?.catalogOrigin ?? normalizedDraft.catalogOrigin ?? null,
           excludedIdentitySkus: normalizedDraft.excludedIdentitySkus ?? existingProduct?.attributes?.excludedIdentitySkus ?? [],
           variantChoices: normalizedDraft.variantChoices ?? existingProduct?.attributes?.variantChoices ?? {},
@@ -1540,6 +1558,7 @@ export async function saveProductCatalogRecord({
         platformSkc: normalizedSkc,
         platformSkuCount: skuRows.length,
         captureId,
+        ...(automaticPrestorage ? { systemSource: "prestorage-auto-promotion", completenessVersion: 1 } : {}),
         snapshot: {
           product: savedProduct,
           platformSkus: skuRows,
@@ -1565,7 +1584,89 @@ export async function saveProductCatalogRecord({
     },
   );
 
+  if (status === "draft" && canAutoPromotePrestorage(savedProduct)) {
+    try {
+      const promoted = await promoteSelectionPrestorageRecord({ productId: savedProduct.id, expectedWorkspaceId: workspaceId });
+      if (promoted.product) savedProduct = promoted.product;
+    } catch (error) { return { product: savedProduct, validation, promotionError: error.message }; }
+  }
   return { product: savedProduct, validation };
+}
+
+// A single source projection supplies both the staging UI and the automation.
+// Group once so a large import does not rebuild the reference index per product.
+export async function getSelectionPrestorageSnapshot({ store = "all", productIds = null } = {}) {
+  const [snapshot, context, statusDefinitions, storedProducts, storedSkus, storedOffers] = await Promise.all([
+    getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction, store }), getActiveMemberContext(), getSelectionStatusDefinitions(),
+    db.products.toArray(), db.platformSkus.toArray(), db.supplierOffers.toArray(),
+  ]);
+  const visibleProducts = storedProducts.filter(product => selectionRecordVisible(product, context));
+  const visibleIds = new Set(visibleProducts.map(product => product.id));
+  const platformSkus = storedSkus.filter(row => (row.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId && visibleIds.has(row.productId));
+  const supplierOffers = storedOffers.filter(row => (row.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId && visibleIds.has(row.productId));
+  if (snapshot.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取预存资料。");
+  const rows = buildSelectionReferenceRows(snapshot);
+  const byProduct = new Map(), offersByProduct = new Map(), bySkc = new Map(), bySku = new Map();
+  const append = (map, key, row) => { const items = map.get(key) ?? []; items.push(row); map.set(key, items); };
+  platformSkus.forEach(row => append(byProduct, row.productId, row));
+  supplierOffers.forEach(row => append(offersByProduct, row.productId, row));
+  rows.forEach(row => { bySku.set(row.canonicalPlatformSku, row); if (row.platformSkc) append(bySkc, canonicalPlatformSkc(row.platformSkc), row); });
+  const ownershipBySku = new Map(platformSkus.map(row => [row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku), row]));
+  const allWorkspaceProducts = storedProducts.filter(product => (product.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId && product.status !== "deleted");
+  const fullOwnership = storedSkus.filter(row => (row.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId);
+  const ownerCounts = new Map(), parentCounts = new Map();
+  fullOwnership.forEach(row => { const key = row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku); ownerCounts.set(key, (ownerCounts.get(key) ?? 0) + 1); });
+  allWorkspaceProducts.filter(product => product.platformSkc).forEach(product => { const key = canonicalPlatformSkc(product.platformSkc); parentCounts.set(key, (parentCounts.get(key) ?? 0) + 1); });
+  const targetIds = productIds ? new Set(productIds) : null;
+  const products = visibleProducts.filter(product => isPrestorageProduct(product) && (!targetIds || targetIds.has(product.id))).map(product => {
+    const skuRows = byProduct.get(product.id) ?? [];
+    const draft = storedProductEditorDraft({ product, skuRows, storedOffers: offersByProduct.get(product.id) ?? [], statusDefinitions });
+    const related = [...new Map([...(product.platformSkc ? bySkc.get(canonicalPlatformSkc(product.platformSkc)) ?? [] : []), ...skuRows.map(sku => bySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))).filter(Boolean)].map(row => [row.canonicalPlatformSku, row])).values()];
+    const projection = prefillErpProductDraft({ draft, productId: product.id, rows: related, ownership: related.map(row => ownershipBySku.get(row.canonicalPlatformSku)).filter(Boolean) });
+    const readiness = productPrestorageReadiness({ ...projection, historicalRows: related });
+    if (skuRows.some(row => ownerCounts.get(row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku)) > 1) || product.platformSkc && parentCounts.get(canonicalPlatformSkc(product.platformSkc)) > 1) {
+      readiness.ready = false; readiness.labels.push("商品归属待核对"); readiness.missing.push({ key: "ownership_conflict", label: "商品归属待核对" });
+    }
+    return { ...product, name: projection.draft.name, imageUrl: projection.draft.imageUrl, draft: projection.draft, prefill: projection.prefill, readiness, autoPromote: canAutoPromotePrestorage(product) };
+  });
+  const unlinkedReadiness = new Map();
+  for (const row of (targetIds ? [] : rows.filter(row => !row.productId))) {
+    const key = row.platformSkc ? canonicalPlatformSkc(row.platformSkc) : `SKU:${row.canonicalPlatformSku}`;
+    if (unlinkedReadiness.has(key)) continue;
+    const related = row.platformSkc ? bySkc.get(key) ?? [row] : [row];
+    const projection = prefillErpProductDraft({ draft: defaultProductDraft({ platformSkc: row.platformSkc, variants: [] }), rows: related, platformSku: row.platformSku, ownership: related.map(row => ownershipBySku.get(row.canonicalPlatformSku)).filter(Boolean) });
+    unlinkedReadiness.set(key, productPrestorageReadiness({ ...projection, historicalRows: related }));
+  }
+  return { workspaceId: context.workspaceId, revision: sourceRevision(), products, rows, unlinkedReadiness: Object.fromEntries(unlinkedReadiness), sourceSnapshot: snapshot };
+}
+
+export async function promoteSelectionPrestorageRecord({ productId, expectedWorkspaceId } = {}) {
+  const results = await promoteSelectionPrestorageRecords({ productIds: [productId], expectedWorkspaceId });
+  return results[0];
+}
+
+// Bounded atomic groups keep a large ERP return from rebuilding the entire
+// source projection for every SKU. All candidates are re-read under this lock.
+export async function promoteSelectionPrestorageRecords({ productIds = [], expectedWorkspaceId } = {}) {
+  const ids = [...new Set(productIds.filter(Boolean))].slice(0, 20);
+  if (!ids.length) return [];
+  return db.transaction('rw', db.products, db.platformSkus, db.supplierOffers, db.captures, db.auditEvents,
+    db.catalogManualCosts, db.erpCostRows, db.erpCostBatches, db.erpCostRequests, db.erpCostInbox,
+    db.profitLines, db.salesRows, db.ledgers, db.importBatches, db.settings, db.workspaces, async () => {
+      const context = await getActiveMemberContext();
+      if (context.workspaceId !== expectedWorkspaceId) return ids.map(() => ({ skipped: 'workspace_changed' }));
+      const snapshot = await getSelectionPrestorageSnapshot({ productIds: ids });
+      const byId = new Map(snapshot.products.map(product => [product.id, product]));
+      const results = [];
+      for (const id of ids) {
+        const product = byId.get(id);
+        if (!product?.autoPromote) { results.push({ skipped: 'unavailable' }); continue; }
+        if (!product.readiness.ready) { results.push({ skipped: product.readiness.missing.some(item => item.key === 'ownership_conflict') ? 'identity_conflict' : 'incomplete', readiness: product.readiness }); continue; }
+        results.push(await saveProductCatalogRecord({ productId: id, draft: { ...product.draft, prestorage: true }, status: 'active',
+          savedBy: context.memberId, expectedWorkspaceId, automaticPrestorage: AUTO_PRESTORAGE_SAVE }));
+      }
+      return results;
+    });
 }
 
 export async function saveCatalogManualCost({

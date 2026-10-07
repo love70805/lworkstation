@@ -63,7 +63,7 @@ Lworkstation 是组内使用的中文经营管理工作台，整合选品商品�
 
 - `/workspace`：经营概览
 - `/products`：选品商品库
-- `/products?view=reference`：成本与利润参考
+- `/products?view=reference`：预存区（资料补齐与成本/利润参考）
 - `/products?view=pending`：待确认采集
 - `/profit`：月度利润核算
 - `/ledger`：月度账本

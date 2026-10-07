@@ -8,6 +8,7 @@ import ProductEditorLeaveGuard from "../components/ProductEditorLeaveGuard";
 import { productLibraryReturnPath } from "../components/productLibraryViewState";
 import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
 import { getActiveMemberContext, getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
+import { productPrestorageReadiness } from "../domain/productPrestorage";
 import { normalizeProductTags, productDraftReferences, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
 import { requestErpProductCatalog } from "../data/repositories/erpCatalogRepository";
 import { ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
@@ -99,6 +100,15 @@ function syncSupplierVariantRenamed(suppliers, previousSku, nextSku, variantInde
   }));
 }
 
+function editableSuppliers(draft) {
+  return draft.suppliers?.length ? draft.suppliers : [{
+    id: "primary", supplierCode: draft.supplierCode, supplierName: draft.supplierName,
+    sourceProductId: draft.sourceProductId, sourceUrl: draft.sourceUrl,
+    shippingAmount: draft.shippingAmount, handlingFee: draft.handlingFee,
+    variants: draft.variants.map(variant => ({ ...variant })),
+  }];
+}
+
 const visibilityOptions = [
   ["private", "仅自己可见"],
   ["workspace", "工作区共享"],
@@ -106,7 +116,7 @@ const visibilityOptions = [
 
 function modeLabel(snapshot) {
   if (snapshot?.mode === "capture") return "待确认采集";
-  if (snapshot?.mode === "product") return "正式商品";
+  if (snapshot?.mode === "product") return snapshot.product?.status === "draft" ? "预存资料" : "正式商品";
   return "新建商品";
 }
 
@@ -167,7 +177,7 @@ function ProductEditor() {
   const [saveFieldErrors, setSaveFieldErrors] = useState({});
   const [queueError, setQueueError] = useState("");
   const [advancing, setAdvancing] = useState(false);
-  const queueOwnedProductRef = useRef(null);
+  const queueOwnedProductRef = useRef(queueItem?.productId ?? null);
   const queueAdvanceRef = useRef(false);
   const queueScopeError = queueId && (!queueItem ? "连续建档队列已失效，请返回参考列表重新开始。" : snapshot?.context?.workspaceId && snapshot.context.workspaceId !== catalogQueue.workspaceId ? "工作区已改变，请返回参考列表重新开始。" : "");
 
@@ -183,7 +193,7 @@ function ProductEditor() {
         const candidate = catalogQueue.items[next];
         const fresh = await getProductEditorSnapshot(candidate);
         if (fresh?.context?.workspaceId && fresh.context.workspaceId !== catalogQueue.workspaceId) throw new Error("工作区已改变，请返回参考列表重新开始。");
-        if (!fresh?.product || checkContinuousCatalogIdentity(candidate, fresh)) break;
+        if (!fresh?.product || fresh.product.status === "draft" && fresh.product.id === candidate.productId || checkContinuousCatalogIdentity(candidate, fresh)) break;
       }
       const target = next < catalogQueue.items.length ? continuousCatalogPath(catalogQueue, next) : returnTo;
       if (saved && currentDraftRef.current.fingerprint !== submittedFingerprint) {
@@ -297,7 +307,11 @@ function ProductEditor() {
   const validation = saveReadiness.validation;
   const unresolvedConflicts = (snapshot?.prefill?.identityConflicts ?? []).filter(conflict => !(draft?.excludedIdentitySkus ?? []).some(sku => canonicalPlatformSku(sku) === canonicalPlatformSku(conflict.platformSku)));
   const statusChoiceRequired = Boolean(draft?.legacyStatusConflict || userStatus.legacyConflict) && !draft?.statusEdited;
-  const canSave = saveReadiness.valid && !statusChoiceRequired && !unresolvedConflicts.length;
+  const isPrestorageFlow = snapshot?.mode !== "capture" && (persistedProduct ?? snapshot?.product)?.status !== "active"
+    && Boolean(snapshot?.product?.status === "draft" || referenceSkc || referenceSku || returnTo === "/products?view=reference");
+  const prestorageReadiness = useMemo(() => productPrestorageReadiness({ draft: draft ?? {}, prefill: snapshot?.prefill, historicalRows }), [draft, snapshot?.prefill, historicalRows]);
+  const canSavePrestorage = !saveReadiness.validation.blockingIssues.some(issue => issue !== "product_name_required") && !statusChoiceRequired && !unresolvedConflicts.length;
+  const canSave = saveReadiness.valid && !statusChoiceRequired && !unresolvedConflicts.length && (!isPrestorageFlow || prestorageReadiness.ready);
 
   if (snapshot === undefined) {
     return <AppShell pageClass="editor-page"><Panel className="route-loader">正在读取商品资料...</Panel></AppShell>;
@@ -378,8 +392,8 @@ function ProductEditor() {
     setSaved(false);
     setDraft((current) => ({
       ...current,
-      suppliers: current.suppliers.map((supplier, index) => index === supplierIndex ? { ...supplier, [field]: value } : supplier),
-      fieldEdits: { ...current.fieldEdits, suppliers: { ...current.fieldEdits?.suppliers, [current.suppliers[supplierIndex].id ?? `supplier-${supplierIndex}`]: { ...current.fieldEdits?.suppliers?.[current.suppliers[supplierIndex].id ?? `supplier-${supplierIndex}`], [field]: true } } },
+      suppliers: editableSuppliers(current).map((supplier, index) => index === supplierIndex ? { ...supplier, [field]: value } : supplier),
+      fieldEdits: { ...current.fieldEdits, suppliers: { ...current.fieldEdits?.suppliers, [editableSuppliers(current)[supplierIndex].id ?? `supplier-${supplierIndex}`]: { ...current.fieldEdits?.suppliers?.[editableSuppliers(current)[supplierIndex].id ?? `supplier-${supplierIndex}`], [field]: true } } },
     }));
   };
 
@@ -387,8 +401,8 @@ function ProductEditor() {
     setSaved(false);
     setDraft((current) => ({
       ...current,
-      quoteEditIntent: { supplierIds: [...new Set([...(current.quoteEditIntent?.supplierIds ?? []), current.suppliers[supplierIndex].id ?? (supplierIndex === 0 ? "primary" : `supplier-${supplierIndex}`)])] },
-      suppliers: current.suppliers.map((supplier, index) => {
+      quoteEditIntent: { supplierIds: [...new Set([...(current.quoteEditIntent?.supplierIds ?? []), editableSuppliers(current)[supplierIndex].id ?? (supplierIndex === 0 ? "primary" : `supplier-${supplierIndex}`)])] },
+      suppliers: editableSuppliers(current).map((supplier, index) => {
         if (index !== supplierIndex) return supplier;
         const key = String(platformSku).trim().toUpperCase();
         const existing = supplier.variants.find(variant => String(variant.platformSku).trim().toUpperCase() === key);
@@ -452,7 +466,7 @@ function ProductEditor() {
     navigate(target, options);
     window.setTimeout(() => { allowNavigationRef.current = false; }, 0);
   };
-  const isFormalProduct = (persistedProduct ?? snapshot.product)?.status === "active";
+  const isFormalProduct = persistedProduct?.status === "active" || snapshot.product?.status === "active";
   const locateSaveError = error => {
     const variantIndex = draft.variants.findIndex(variant => variant.platformSku && (error.message.includes(variant.platformSku) || error.message.toUpperCase().includes(canonicalPlatformSku(variant.platformSku))));
     if (variantIndex < 0 || !/SKU|SKC|身份|重复/i.test(error.message)) {
@@ -473,13 +487,13 @@ function ProductEditor() {
     if (issue) throw new Error(issue);
     if (latest.product && latest.product.id !== queueOwnedProductRef.current) throw new Error("此商品已由其他操作建档，请跳过或返回列表查看；当前输入仍保留。");
   };
-  const saveDraft = async ({ stay = false } = {}) => {
+  const saveDraft = async ({ stay = false, next = false } = {}) => {
     if (saving) return false;
-    if (!canSave && (snapshot.prefill?.source === "erp" || isFormalProduct)) {
+    if (isPrestorageFlow ? !canSavePrestorage : !canSave && (snapshot.prefill?.source === "erp" || isFormalProduct)) {
       notify("请先处理商品名称、身份或状态选择。", "error"); return false;
     }
     const submitted = currentDraftRef.current;
-    const submittedDraft = { ...submitted.draft, tags: normalizeProductTags(submitted.tagsText) };
+    const submittedDraft = { ...submitted.draft, tags: normalizeProductTags(submitted.tagsText), ...(isPrestorageFlow ? { prestorage: true } : {}) };
     setSaving(true);
     try {
       await verifyQueueBeforeSave();
@@ -491,13 +505,15 @@ function ProductEditor() {
         const result = await saveProductCatalogRecord({ productId: persistedProduct?.id ?? snapshot.product?.id, draft: submittedDraft, status, expectedWorkspaceId: catalogQueue?.workspaceId ?? snapshot.context?.workspaceId });
         if (queueItem) queueOwnedProductRef.current = result.product.id;
         setPersistedProduct(result.product);
-        notify(status === "active" ? "商品修改已保存。" : "商品草稿已保存到本机。", "success");
-        if (snapshot.mode === "new" && !stay && currentDraftRef.current.fingerprint === submitted.fingerprint) {
+        notify(result.product.status === "active" ? (isPrestorageFlow ? "资料齐全，已自动进入选品库。" : "商品修改已保存。") : isPrestorageFlow ? "预存资料已保存，补齐缺项后会自动进入选品库。" : "商品草稿已保存到本机。", "success");
+        if (result.promotionError) notify(`资料已预存，自动流转失败：${result.promotionError}。可在预存区重试。`, "error");
+        if (snapshot.mode === "new" && !stay && !next && currentDraftRef.current.fingerprint === submitted.fingerprint) {
           navigateSaved(`/products/edit?product=${encodeURIComponent(result.product.id)}`, { replace: true, state: { productLibraryReturnTo: returnTo } });
         }
       }
       setSavedFingerprint(submitted.fingerprint);
       setSaved(true);
+      if (next) await advanceCatalog({ saved: true, submittedFingerprint: submitted.fingerprint });
       return currentDraftRef.current.fingerprint === submitted.fingerprint;
     } catch (error) {
       locateSaveError(error);
@@ -551,7 +567,7 @@ function ProductEditor() {
   const excludeConflict = conflict => {
     setDraft(current => ({ ...current, excludedIdentitySkus: [...new Set([...(current.excludedIdentitySkus ?? []), conflict.platformSku])], variants: current.variants.filter(variant => canonicalPlatformSku(variant.platformSku) !== canonicalPlatformSku(conflict.platformSku)) }));
   };
-  const supplierRows = draft.suppliers.length ? draft.suppliers : [{ id: "primary", supplierName: draft.supplierName, sourceUrl: draft.sourceUrl, variants: draft.variants }];
+  const supplierRows = editableSuppliers(draft);
   const prefill = snapshot.prefill;
   const pendingNewVariants = (snapshot.draft.variants ?? []).filter(candidate => candidate.platformSku && !draft.variants.some(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(candidate.platformSku)) && !(draft.excludedIdentitySkus ?? []).some(sku => canonicalPlatformSku(sku) === canonicalPlatformSku(candidate.platformSku)) && draft.variantChoices?.[canonicalPlatformSku(candidate.platformSku)]?.state !== "excluded");
   const addNewCatalogData = () => {
@@ -583,14 +599,15 @@ function ProductEditor() {
 
   return (
     <AppShell searchPlaceholder="搜索商品、SKU 或供应商..." pageClass="editor-page">
-      <ProductEditorLeaveGuard dirty={dirty} saving={saving || advancing} allowNavigationRef={allowNavigationRef} onSave={() => queueItem ? confirmEntry({ stay: true }) : saveDraft({ stay: true })} />
+      <ProductEditorLeaveGuard dirty={dirty} saving={saving || advancing} allowNavigationRef={allowNavigationRef} onSave={() => queueItem && !isPrestorageFlow ? confirmEntry({ stay: true }) : saveDraft({ stay: true })} />
       <div className="editor-breadcrumb"><button onClick={() => navigate(breadcrumbTarget)}>商品管理</button><ChevronRight size={15} /><span>{modeLabel(snapshot)}</span></div>
-      {queueId ? <div className="continuous-catalog-progress" role="status"><span>{queueItem ? `第 ${queuePosition + 1} 个 / 共 ${catalogQueue.items.length} 个` : "连续建档"}</span><span>{queueScopeError || queueError || "沿参考列表顺序建档"}</span>{queueItem ? <Button variant="ghost" disabled={saving || advancing || Boolean(queueScopeError)} onClick={() => advanceCatalog()}>跳过</Button> : null}</div> : null}
+      {queueId ? <div className="continuous-catalog-progress" role="status"><span>{queueItem ? `第 ${queuePosition + 1} 个 / 共 ${catalogQueue.items.length} 个` : "连续建档"}</span><span>{queueScopeError || queueError || "沿预存列表顺序补齐"}</span>{queueItem ? <Button variant="ghost" disabled={saving || advancing || Boolean(queueScopeError)} onClick={() => advanceCatalog()}>跳过</Button> : null}</div> : null}
       <div className="editor-titlebar">
         <div className="editor-heading"><h1>{draft.name || "新建商品档案"}</h1>{dirty ? <Badge tone="warning">未保存修改</Badge> : saved ? <Badge tone="success">已保存</Badge> : null}</div>
-        <div className="page-actions"><Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>取消</Button>{queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
+        <div className="page-actions"><Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>取消</Button>{isPrestorageFlow ? <><Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ stay: Boolean(queueItem) })}>保存预存资料</Button>{queueItem ? <Button loading={saving || advancing} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ next: true })}>保存并下一个</Button> : null}</> : queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
       </div>
 
+      {isPrestorageFlow ? <Panel className="prestorage-editor-status" role="status"><strong>{prestorageReadiness.ready ? "资料已齐全，保存后自动进入选品库" : "资料仍在预存区，可分次补齐并保存"}</strong>{prestorageReadiness.ready ? null : <><p>待补齐：{prestorageReadiness.labels.join("、")}</p><details><summary>查看各 SKU 缺项</summary><ul>{prestorageReadiness.missing.map(item => <li key={item.key}>{item.platformSku ? `${item.platformSku}：` : ""}{item.label}</li>)}</ul></details></>}</Panel> : null}
       <div className="editor-grid">
         <Panel className="editor-basic-panel">
           <div className="section-heading"><h2>基本信息</h2>{prefill?.source === "erp" ? <Badge tone="info">ERP 来源 · {prefill.skuCount ?? draft.variants.length} 个 SKU</Badge> : null}</div>
@@ -618,7 +635,7 @@ function ProductEditor() {
         </Panel>
 
         <Panel className="variants-panel catalog-variants-panel">
-          <div className="panel-header"><div className="panel-title"><h2>SKU 规格与成本</h2><span className="panel-subtitle">名称和明确的 SKC—SKU 关系即可保存；图片、售价及参考成本可后续补充。</span></div><Button variant="ghost" icon={Plus} onClick={() => setDraft(current => { const variant = createVariant(); return { ...current, variants: [...current.variants, variant], suppliers: syncSupplierVariantAdded(current.suppliers, variant) }; })}>添加规格</Button></div>
+          <div className="panel-header"><div className="panel-title"><h2>SKU 规格与成本</h2><span className="panel-subtitle">{isPrestorageFlow ? "资料可以逐步保存；全部缺项补齐后自动进入选品库。" : "名称和明确的 SKC—SKU 关系即可保存；图片、售价及参考成本可后续补充。"}</span></div><Button variant="ghost" icon={Plus} onClick={() => setDraft(current => { const variant = createVariant(); return { ...current, variants: [...current.variants, variant], suppliers: syncSupplierVariantAdded(current.suppliers, variant) }; })}>添加规格</Button></div>
           {showFieldIssue("product-sku-error", "platform_sku_required")}
           {pendingNewVariants.length ? <div className="catalog-new-data"><span>新资料有 {pendingNewVariants.length} 个明确 SKU，可带入当前草稿。</span><Button variant="ghost" onClick={addNewCatalogData}>带入新增资料</Button></div> : null}
           {unresolvedConflicts.length ? <div className="identity-conflicts" role="alert">{unresolvedConflicts.map((conflict, index) => <div key={`${conflict.platformSku}-${index}`}><span><strong className="mono">{conflict.platformSku}</strong> · {({ relationship_conflict: "SKC 与仓库映射存在冲突", owned_elsewhere: "已属于其他商品档案" })[conflict.reason] || conflict.reason || "身份关系存在冲突"}{conflict.productId ? <a href={`/products/edit?product=${encodeURIComponent(conflict.productId)}`}>查看对应档案</a> : null}</span><Button variant="ghost" onClick={() => excludeConflict(conflict)}>排除此冲突分支</Button></div>)}</div> : null}

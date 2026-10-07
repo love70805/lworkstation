@@ -18,7 +18,7 @@ vi.mock("../data/database", async (importOriginal) => {
     if (faults[key]) throw Error(`合成 ${key} 读取失败`);
     return fn(...args);
   };
-  return { ...actual, listProductCatalogRecords: read("catalog", actual.listProductCatalogRecords), getSelectionReferenceSnapshot: read("reference", actual.getSelectionReferenceSnapshot), listPendingCaptureRecords: read("capture", actual.listPendingCaptureRecords), getActiveMemberContext: read("context", actual.getActiveMemberContext) };
+  return { ...actual, listProductCatalogRecords: read("catalog", actual.listProductCatalogRecords), getSelectionReferenceSnapshot: read("reference", actual.getSelectionReferenceSnapshot), getSelectionPrestorageSnapshot: read("reference", actual.getSelectionPrestorageSnapshot), listPendingCaptureRecords: read("capture", actual.listPendingCaptureRecords), getActiveMemberContext: read("context", actual.getActiveMemberContext) };
 });
 
 let container, root, router;
@@ -89,11 +89,11 @@ describe("selection read recovery", () => {
 
   it("does not render an empty reference view when reference loading fails", async () => {
     await saveProductCatalogRecord({ draft }); faults.reference = true;
-    await mount("/products?view=reference"); await waitFor(() => container.textContent.includes("成本与利润参考读取失败"));
+    await mount("/products?view=reference"); await waitFor(() => container.textContent.includes("预存区读取失败"));
     expect(container.textContent).not.toContain("还没有选品经营参考");
-    await change("搜索选品参考", "RECOVERY-SKU");
+    await change("搜索预存资料", "RECOVERY-SKU");
     faults.reference = false; await retry(); await waitFor(() => container.querySelector(".selection-reference-table"));
-    expect(field("搜索选品参考").value).toBe("RECOVERY-SKU");
+    expect(field("搜索预存资料").value).toBe("RECOVERY-SKU");
   });
 
   it("retries member context before opening the product page", async () => {
@@ -124,11 +124,11 @@ it("searches all reference identities by supplier number and store, then clears 
   await change("按供方货号筛选", "货号14");
   await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
   expect(container.querySelector(".selection-reference-table").textContent).toContain("SEARCH-SKC14");
-  await change("搜索选品参考", "SEARCH-SKU14");
+  await change("搜索预存资料", "SEARCH-SKU14");
   await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
-  await change("搜索选品参考", "SEARCH-SKU13");
+  await change("搜索预存资料", "SEARCH-SKU13");
   await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
-  await change("搜索选品参考", "SEARCH-SKU14");
+  await change("搜索预存资料", "SEARCH-SKU14");
   await change("参考来源店铺", "甲店");
   await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
   await act(async () => button("清空筛选").click());
@@ -183,4 +183,19 @@ it("defaults to unlinked branches while keeping linked reference history and exp
   expect(container.querySelector(".selection-reference-table").textContent).toContain("RECOVERY-SKU");
   expect(await db.salesRows.count()).toBe(2);
   expect(await db.products.count()).toBe(1);
+});
+
+
+it("keeps imported basic drafts in prestorage, shows complete missing fields and includes them in continuous completion", async () => {
+  const first = await saveProductCatalogRecord({ status: "draft", draft: { name: "", platformSkc: "STAGED", store: "甲店", prestorage: true, variants: [{ platformSku: "STAGED-A" }] } });
+  await mount();
+  await waitFor(() => container.querySelector(".product-table"));
+  expect(container.querySelector(".product-table").textContent).not.toContain("STAGED-A");
+  await act(async () => [...container.querySelectorAll("[role=tab]")].find(tab => tab.textContent.includes("预存区")).click());
+  await waitFor(() => container.querySelector(".prestorage-readiness")?.textContent.includes("商品图片"));
+  expect(container.querySelector(".selection-reference-table").textContent).toContain("STAGED-A");
+  expect(container.querySelector(".prestorage-readiness").textContent).toContain("参考成本");
+  await act(async () => button("连续补齐").click());
+  await waitFor(() => router.state.location.pathname === "/products/edit");
+  expect(new URLSearchParams(router.state.location.search).get("product")).toBe(first.product.id);
 });
