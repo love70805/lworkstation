@@ -60,7 +60,7 @@ function eventTarget() {
   };
 }
 
-async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, maxAttempts = 1 } = {}) {
+async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, commitTimeoutMs = timeoutMs, maxAttempts = 1 } = {}) {
   const storage = { ...jsonClone(storageSeed) };
   const runtimeListeners = [];
   const logs = [];
@@ -80,7 +80,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.35" }),
+      getManifest: () => ({ version: "8.0.36" }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -113,7 +113,8 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, max
   source = source
     .replace("const MAX_ATTEMPTS = 3;", `const MAX_ATTEMPTS = ${maxAttempts};`)
     .replace("const RETRY_DELAYS_MS = [500, 1500];", "const RETRY_DELAYS_MS = [0, 0];")
-    .replace("const LOOPBACK_REQUEST_TIMEOUT_MS = 4000;", `const LOOPBACK_REQUEST_TIMEOUT_MS = ${timeoutMs};`);
+    .replace("const LOOPBACK_REQUEST_TIMEOUT_MS = 4000;", `const LOOPBACK_REQUEST_TIMEOUT_MS = ${timeoutMs};`)
+    .replace("const LOOPBACK_COMMIT_TIMEOUT_MS = 60000;", `const LOOPBACK_COMMIT_TIMEOUT_MS = ${commitTimeoutMs};`);
   vm.runInContext(source, context);
   return {
     api: context.__SHOPEERS_ERP_BACKGROUND_TEST_API__,
@@ -199,9 +200,9 @@ async function startCollection(background, input = resultInput()) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.35");
+  assert.equal(manifest.version, "8.0.36");
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.35";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.36";/, "the download action must recommend the patched package");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
@@ -252,13 +253,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.35-shopeers-bridge";
+  const packageName = "ERP-Assistant-v8.0.36-shopeers-bridge";
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
   const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.35");
+    assert.equal(manifest.version, "8.0.36");
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -270,7 +271,7 @@ async function verifyPublishedPackage() {
     const canonicalContent = await readFile(sourcePath("content.js"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
     assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v7';/);
-    assert.match(content, /const EXTENSION_VERSION = '8\.0\.35';/);
+    assert.match(content, /const EXTENSION_VERSION = '8\.0\.36';/);
     for (const file of ["background.js", "catalog-collector.js", "content.css", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
       assert.equal(
         (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
@@ -821,6 +822,26 @@ async function verifyTimeoutAndInvalidJsonReleaseOwner() {
   assert.ok(posts >= 4);
 }
 
+async function verifyDurableDeadlines() {
+  const background = await loadBackground({ timeoutMs: 10, commitTimeoutMs: 80,
+    storageSeed: { shopeersErpInboxBaseUrl: 'http://127.0.0.1:8790', shopeersErpInboxCapability: capability, shopeersErpWorkspaceId: 'workspace-secure' },
+    fetchImpl: async () => { await new Promise(resolve => setTimeout(resolve, 30)); return response(200, { task: { taskId: 'durable' } }); },
+  });
+  const created = await background.api.collectionTask({ action: 'create', requestId: 'R' }, sender);
+  assert.equal(created.task.taskId, 'durable', 'durable save may exceed the connection deadline');
+  await assert.rejects(() => background.api.collectionTask({ action: 'list' }, sender), { code: 'ERP_LOOPBACK_TIMEOUT' });
+  await assert.rejects(() => background.api.collectionTask({ action: 'control', taskId: 'durable', control: 'heartbeat' }, sender), { code: 'ERP_LOOPBACK_TIMEOUT' });
+  const deadlines = [], target = { setTimeout(_fn, ms) { deadlines.push(ms); return deadlines.length; }, clearTimeout() {} };
+  vm.runInNewContext(await readFile(sourcePath('shopeers-bridge.js'), 'utf8'), { window: target, chrome: { runtime: { sendMessage(_message, callback) { callback({ ok: true }); } } } });
+  const bridge = target.ShopeersErpDeliveryBridge;
+  await bridge.collectionTask({ action: 'create' });
+  await bridge.collectionTask({ action: 'list' });
+  await bridge.collectionTask({ action: 'control', control: 'heartbeat' });
+  await bridge.submit({}); await bridge.submitCatalog({}); await bridge.retry('delivery');
+  assert.deepEqual(deadlines, [70000, 15000, 15000, 210000, 210000, 210000], 'page deadlines cover durable background work and all delivery attempts');
+}
+
+await verifyDurableDeadlines();
 await verifyErpCatalogCollection();
 await verifyErpCatalogButtonAndCostPipeline();
 await verifyErpCatalogBackgroundBinding();

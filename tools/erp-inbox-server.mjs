@@ -1130,6 +1130,12 @@ const server = http.createServer(async (req, res) => {
       const memberId = String(payload?.memberId ?? "").trim();
       const visibility = payload?.visibility === "private" ? "private" : "workspace";
       if (!workspaceId || !memberId) return json(res, 400, { ok: false, code: "INVALID_SELECTION_CONTEXT", error: "工作区上下文缺少 workspaceId 或 memberId。" });
+      const existing = records.find(item => item.kind === 'selection-active-context');
+      // The workspace publishes this context every four seconds. Its identity
+      // has no lease: an unchanged poll must not rewrite all purchase evidence.
+      if (existing && existing.workspaceId === workspaceId && existing.memberId === memberId && existing.visibility === visibility) {
+        return json(res, 202, { ok: true, context: existing });
+      }
       const record = { kind: "selection-active-context", workspaceId, memberId, visibility, updatedAt: new Date().toISOString() };
       const index = records.findIndex((item) => item.kind === "selection-active-context");
       if (index >= 0) records[index] = record;

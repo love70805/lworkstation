@@ -21,7 +21,7 @@ function fixture() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(k => Object.hasOwn(state.storage, k)).map(k => [k, structuredClone(state.storage[k])])); },
     async set(values) { if (state.failSave && values[key]?.length) throw Error('synthetic storage unavailable'); Object.assign(state.storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.35' }), onMessage: { addListener(fn) { state.dispatch = fn; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.36' }), onMessage: { addListener(fn) { state.dispatch = fn; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async (raw, init) => {
     const url = new URL(raw);
     // This suite deliberately exercises the legacy checkpoint protocol.
