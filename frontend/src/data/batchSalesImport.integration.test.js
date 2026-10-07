@@ -1,7 +1,7 @@
 import { createSalesSourceCoverage } from '../domain/selectionSalesLabels';
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { db, DEFAULT_WORKSPACE_ID, previewSalesImports, saveSalesImports, saveSalesImport, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload, restoreWorkspaceSyncRecoveryPayload } from "./database";
+import { db, DEFAULT_WORKSPACE_ID, getWorkspaceOperationalSummary, saveManualCostOverride, previewSalesImports, saveSalesImports, saveSalesImport, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload, restoreWorkspaceSyncRecoveryPayload } from "./database";
 import { validateSalesRows } from "../lib/salesImport";
 import { summarizeLedgerRows } from "../domain/ledgerImport";
 import { buildSyncRecoveryPayload, replaySyncRecoveryPayload } from "../domain/syncRecovery";
@@ -322,4 +322,17 @@ it('rejects mismatched selection metadata and rolls back scoped replacements on 
   const items=[selectedFile('甲',['C'])],preview=await previewSalesImports({period,items}),controller=new AbortController();
   await expect(saveSalesImports({period,items,preview,overwriteSignature:preview.targetSignature,signal:controller.signal,onProgress:()=>controller.abort()})).rejects.toThrow('已回滚');
   expect(await facts()).toEqual(before);
+});
+
+it('atomically refreshes homepage cost tasks from selected store SKUs and retains scoped manual costs', async () => {
+  const initial = await commit([selectedFile('甲',['A','B','C']), selectedFile('乙',['A'])]);
+  expect((await getWorkspaceOperationalSummary()).latestMissingCostLedger.costSummary).toMatchObject({expectedCount:4,missingCount:4});
+  await saveManualCostOverride({ledgerId:initial.ledgerId,store:'甲',platformSku:'甲-B',unitCost:0,reason:'真实零成本'});
+  await commit([selectedFile('甲',['B','D'])]);
+  const ledger = await db.ledgers.get(initial.ledgerId);
+  expect(ledger.costSummary).toMatchObject({expectedCount:3,manualOverrideCount:1,missingCount:2});
+  expect(ledger.costSummary.unresolvedSkus.sort()).toEqual(['乙-A','甲-D'].sort());
+  expect((await getWorkspaceOperationalSummary()).missingCostCount).toBe(2);
+  const audits = (await db.auditEvents.toArray()).filter(e=>e.action==='imported');
+  expect(audits.at(-1).after.snapshot.ledger.costSummary).toEqual(ledger.costSummary);
 });

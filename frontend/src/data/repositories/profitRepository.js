@@ -228,7 +228,7 @@ export async function saveSalesImports({
   // Clone the payload before any asynchronous work, so caller edits cannot change a pending write.
   const prepared = await prepareSalesImportSnapshot(items, { period: normalizedPeriod, signal });
   const auditActor = await resolveProfitAuditActor(importedBy);
-  return db.transaction("rw", db.workspaces, db.ledgers, db.importBatches, db.salesRows, db.auditEvents, async () => {
+  return db.transaction("rw", db.workspaces, db.ledgers, db.importBatches, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     checkCancelled();
     const { ledger, plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared, signal);
     if (!preview || preview.ledgerId !== plan.ledgerId || preview.inputSignature !== plan.inputSignature) {
@@ -245,9 +245,11 @@ export async function saveSalesImports({
     let completed = 0;
     const replacementIds = plan.replacementRowIds;
     if (replacementIds.length) await db.salesRows.bulkDelete(replacementIds);
+    const [erpCosts, approvals] = await Promise.all([getLatestLedgerCosts(plan.ledgerId), db.costApprovals.where('ledgerId').equals(plan.ledgerId).toArray()]);
+    const coverage = calculateLedgerCostCoverage({ salesRows: plan.costTargets, erpCosts, approvals, workspaceId, ledgerId: plan.ledgerId, period: normalizedPeriod });
     const savedLedger = {
       ...(ledger ?? { id: plan.ledgerId, workspaceId, period: normalizedPeriod, type: "monthly_profit", currency: "CNY", warehouseRate: 0.7, createdBy: auditActor, createdAt }),
-      status: "cost_pending", updatedAt: createdAt, summary: plan.finalSummary,
+      ...buildLedgerCoveragePatch(ledger ?? {}, coverage, createdAt), summary: plan.finalSummary,
     };
     await db.ledgers.put(savedLedger);
     for (const item of pending) {
