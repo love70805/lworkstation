@@ -1346,10 +1346,13 @@
         const delivered = batches.filter(batch => batch.deliveryId || batch.status === 'delivered').reduce((n, batch) => n + batch.platformSkcs.length, 0);
         const total = batches.reduce((n, batch) => n + batch.platformSkcs.length, 0);
         const failed = batches.filter(batch => ['failed','incomplete'].includes(batch.status));
+        const stores = [...new Set((task.expectedSkus || task.requestSnapshot?.expectedSkus || []).map(item => item.store).filter(Boolean))];
         const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(task.createdAt || new Date().toISOString())) / 1000));
         taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : activeRun?.catalogPhase ? '补充资料' : task.status === 'paused' ? '待继续' : delivered === total && total ? '成本全部送达' : '分批采集')
             + ' · 已采集 ' + collected + '/' + total + ' SKC · 已送达 ' + delivered + '/' + total
             + ' SKC · 已采用 ' + (task.summary?.adopted ?? 0) + ' SKU'
+            + ' · 原范围 ' + (task.ledgerPeriod || '月份待关联') + (stores.length ? ' / ' + stores.join('、') : '')
+            + ' · 已送达 ' + batches.filter(batch => batch.deliveryId).length + '/' + batches.length + ' 批'
             + ' · ' + elapsed + ' 秒'
             + (failed.length ? ' · ' + failed.length + ' 批待核对：' + (failed[0].error?.message || failed[0].error || '证据不完整') : '');
         renderPageContext();

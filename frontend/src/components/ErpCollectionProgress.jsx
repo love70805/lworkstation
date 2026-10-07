@@ -5,6 +5,7 @@ const labels = { ready: '等待开始', running: '采集中', paused: '已暂停
 export default function ErpCollectionProgress({ task, inboxes = [], onControl, busy = false, locked = false, error = '' }) {
   if (!task) return error ? <p className="cost-registration-status" role="status">采集任务状态暂不可用：{error}</p> : null;
   const batches = task.batches ?? [];
+  const stores = [...new Set((task.expectedSkus ?? task.requestSnapshot?.expectedSkus ?? []).map(item => item.store).filter(Boolean))];
   const delivered = batches.filter(batch => batch.deliveryId);
   const collected = batches.filter(batch => batch.collectedAt || batch.deliveryId);
   const received = new Set(delivered.map(batch => batch.deliveryId));
@@ -28,6 +29,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
       </div>
     </div>
     <div className="erp-collection-counts" role="status"><span>已采集 <strong>{count(collected)} / {total}</strong> SKC</span><span>已送达 <strong>{count(delivered)} / {total}</strong> SKC</span><span>已采用 <strong>{adopted.size}</strong> SKU{manual.size ? ` · 人工有效 ${manual.size}` : ''}</span></div>
+    {stores.length ? <p>原任务店铺：{stores.join('、')} · 剩余 {batches.length - delivered.length} 批成本待读取或送达</p> : null}
     <progress max={Math.max(1, batches.length)} value={delivered.length} aria-label="ERP 批次送达进度" />
     <p>已送达 {delivered.length} / {batches.length} 批 · 耗时 {elapsed} 分钟 · 最近进展 {task.updatedAt ? new Date(task.updatedAt).toLocaleTimeString('zh-CN') : '等待采集'}</p>
     <p>查看筛选不改变此任务；已送达结果按证据核验后采用。恢复后请在 ERP 助手点击继续采集。</p>
