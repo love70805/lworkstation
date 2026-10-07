@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, it } from 'vitest';
-import { matchImportNumbers, parseImportKeywords, parseImportNumbers, readImportNumbers, readImportPreference, restoreImportPreference, saveImportNumbers } from './importSupplierPreferences';
+import { matchImportNumbers, matchImportNumberSuffixes, parseImportKeywords, parseImportNumbers, readImportNumbers, readImportPreference, restoreImportPreference, saveImportNumbers } from './importSupplierPreferences';
 beforeEach(() => localStorage.clear());
+it('selects normalized suffixes only at the end without changing goods identities or falling back on zero matches', () => {
+  expect(matchImportNumberSuffixes(['Ｓ－ｈｈｈｘ', 'A-LYYY', 'HHHX-MID', 'none'], ['hhHx', 'ＬＹＹＹ'])).toEqual(['Ｓ－ｈｈｈｘ', 'A-LYYY']);
+  expect(matchImportNumberSuffixes(['A'], ['ZZ'])).toEqual([]);
+  expect(matchImportNumberSuffixes(['A'], [])).toEqual([]);
+});
 it('persists only explicit successful choices, isolated by workspace and store', () => {
   expect(readImportNumbers('W', '甲')).toEqual([]);
   saveImportNumbers('W', [{ storeName: '甲', filterOptions: { supplierNumbers: ['A','B','A'] } }, { storeName: '乙', filterOptions: { supplierNumbers: ['A'] } }]);

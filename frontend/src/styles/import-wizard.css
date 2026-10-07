@@ -331,4 +331,26 @@
 .import-supplier-key-help, .import-supplier-picker > p { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
 .import-supplier-picker > p.import-error { color: var(--danger); }
 fieldset:disabled .import-supplier-option { cursor: default; opacity: .6; }
+.batch-import .batch-action-bar { position: sticky; top: 12px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.batch-import .batch-action-summary { display: grid; gap: 4px; flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+.batch-import .batch-action-summary span { font-size: 13px; color: var(--text-muted); }
+.batch-import .batch-action-bar .batch-overwrite { flex: 1 1 320px; margin: 0; min-height: 44px; padding: 8px 10px; font-size: 13px; }
+.batch-import .batch-action-bar > .button { min-width: 120px; }
+.batch-import .batch-suffix-picker { margin: 16px 24px 20px; padding: 16px; background: var(--primary-soft); border: 1px solid var(--border); border-radius: 8px; }
+.batch-import .batch-suffix-picker > label { display: block; margin-bottom: 8px; font-weight: 600; }
+.batch-import .batch-suffix-picker > div { display: flex; gap: 10px; align-items: center; }
+.batch-import .batch-suffix-picker > div > input { flex: 1; }
+.batch-import .batch-suffix-picker p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.batch-import .batch-store-suppliers > summary { color: var(--primary); }
+.batch-import .batch-impact-details > summary { color: var(--text-muted); }
+.batch-import .batch-catalog-result { margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-bg); }
+.batch-import .batch-catalog-issues { max-height: 240px; overflow: auto; }
+@media (max-width: 760px) {
+  .batch-import .batch-action-bar { top: 8px; padding: 12px; gap: 8px; }
+  .batch-import .batch-action-bar .batch-overwrite { flex-basis: 100%; order: 2; }
+  .batch-import .batch-suffix-picker { margin: 16px; padding: 12px; }
+  .batch-import .batch-suffix-picker > div { flex-wrap: wrap; }
+  .batch-import .batch-suffix-picker > div > input { flex-basis: 100%; }
+  .batch-import .batch-suffix-picker > div > .button { width: 100%; }
+}
 @media (max-width: 520px) { .import-supplier-picker { padding: 10px; } .import-supplier-actions .button { flex: 1 1 140px; } }

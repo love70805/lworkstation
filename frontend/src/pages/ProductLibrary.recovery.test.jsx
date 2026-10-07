@@ -156,3 +156,31 @@ it("searches catalog SKUs inside the selected store and supplier range without l
   expect(await db.salesRows.count()).toBe(2);
   expect(await db.products.count()).toBe(2);
 });
+
+it("defaults to unlinked branches while keeping linked reference history and explicit filter choices", async () => {
+  await saveProductCatalogRecord({ draft });
+  const workspaceId = "workspace-default";
+  await db.ledgers.add({id:"REF-L",workspaceId,period:"2026-08"});
+  await db.importBatches.add({id:"REF-B",workspaceId,ledgerId:"REF-L",store:"甲店",status:"completed"});
+  await db.salesRows.bulkAdd(["RECOVERY-SKU","UNLINKED-SKU"].map((platformSku,index)=>({
+    id:`REF-R${index}`,workspaceId,ledgerId:"REF-L",batchId:"REF-B",store:"甲店",platformSku,platformSkc:"RECOVERY-SKC",supplierNumber:"共同货号",quantity:1,amount:30,sourceRow:index+2,
+  })));
+  // A previous release saved its old default automatically.
+  const key = `shopeers-product-library-filters-v1:${JSON.stringify([workspaceId,"reference"])}`;
+  localStorage.setItem(key, JSON.stringify({catalogFilter:"all"}));
+  await mount("/products?view=reference");
+  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("UNLINKED-SKU"));
+  expect(field("按建档情况筛选").value).toBe("unlinked");
+  expect(container.querySelector(".selection-reference-table").textContent).not.toContain("RECOVERY-SKU");
+  await change("按建档情况筛选","all");
+  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("RECOVERY-SKU"));
+  expect(container.querySelector(".selection-reference-table").textContent).toContain("UNLINKED-SKU");
+  await act(async () => root.unmount()); router.dispose(); root=createRoot(container);
+  await mount("/products?view=reference");
+  await waitFor(() => field("按建档情况筛选")?.value === "all");
+  await change("按建档情况筛选","linked");
+  await waitFor(() => !container.querySelector(".selection-reference-table")?.textContent.includes("UNLINKED-SKU"));
+  expect(container.querySelector(".selection-reference-table").textContent).toContain("RECOVERY-SKU");
+  expect(await db.salesRows.count()).toBe(2);
+  expect(await db.products.count()).toBe(1);
+});

@@ -1115,6 +1115,96 @@ function assertProductSaveReadiness(draft, statusDefinition, historicalRows) {
   if (!result.valid) throw new Error(`${draft.name || "未命名商品"}：${result.issues.map(productReadinessIssueLabel).join("；")}。`);
 }
 
+// Called inside the importer's transaction; no form save, quotations or status
+// promotion is involved. Audit snapshots remain compatible with sync recovery.
+export async function ensureLedgerCatalogDrafts({ workspaceId, ledgerId, period, candidates, issues = [], actorId, now }) {
+  const context = await getActiveMemberContext();
+  const result = { createdProductCount: 0, addedSkuCount: 0, linkedSkuCount: 0, issues: [...issues] };
+  if (context.workspaceId !== workspaceId) {
+    result.issues.push(...candidates.map(row => ({ platformSku: row.platformSku, reason: 'workspace_mismatch' })));
+    return result;
+  }
+  const [products, skus] = await Promise.all([
+    db.products.where('workspaceId').equals(workspaceId).toArray(),
+    db.platformSkus.where('workspaceId').equals(workspaceId).toArray(),
+  ]);
+  const bySku = new Map();
+  for (const sku of skus) {
+    const key = sku.canonicalPlatformSku || canonicalPlatformSku(sku.platformSku);
+    if (!bySku.has(key)) bySku.set(key, []);
+    bySku.get(key).push(sku);
+  }
+  const bySkc = new Map();
+  for (const product of products) {
+    if (!product.platformSkc) continue;
+    const key = product.canonicalPlatformSkc ?? canonicalPlatformSkc(product.platformSkc);
+    if (!bySkc.has(key)) bySkc.set(key, []);
+    bySkc.get(key).push(product);
+  }
+  const byProduct = new Map(products.map(product => [product.id, product]));
+  const changed = new Map();
+  const conflict = (row, reason) => result.issues.push({ platformSku: row.platformSku, reason });
+  for (const row of candidates) {
+    const owners = bySku.get(row.canonicalPlatformSku) ?? [];
+    if (owners.length > 1) { conflict(row, 'duplicate_sku'); continue; }
+    const owned = owners[0];
+    if (owned) {
+      const parent = byProduct.get(owned.productId);
+      const ownerSkc = parent?.platformSkc || owned.platformSkc;
+      if (!parent || !selectionRecordVisible(parent, context) || parent.status === 'inactive'
+        || (parent.store && parent.store.normalize('NFKC').trim().toUpperCase() !== row.store.toUpperCase())) conflict(row, 'unavailable_owner');
+      else if (!ownerSkc || canonicalPlatformSkc(ownerSkc) !== row.canonicalPlatformSkc) conflict(row, 'owned_other_skc');
+      else result.linkedSkuCount += 1;
+      continue;
+    }
+    const parents = bySkc.get(row.canonicalPlatformSkc) ?? [];
+    if (parents.length > 1) { conflict(row, 'duplicate_skc'); continue; }
+    let product = parents[0];
+    if (product && (!selectionRecordVisible(product, context) || product.status === 'inactive'
+      || (product.store && product.store.normalize('NFKC').trim().toUpperCase() !== row.store.toUpperCase()))) {
+      conflict(row, 'unavailable_parent'); continue;
+    }
+    if (!product) {
+      product = {
+        id: makeId('PROD'), workspaceId, platformSkc: row.platformSkc,
+        canonicalPlatformSkc: row.canonicalPlatformSkc, store: row.store,
+        name: '未命名商品', status: 'draft', productStatus: 'pending_review',
+        ownerId: context.memberId, visibility: context.canSeeAllSelection ? 'workspace' : 'private',
+        currency: 'CNY', skuCount: 0, referenceCost: null,
+        attributes: { catalogOrigin: 'ledger_import', ledgerImport: { ledgerId, period, batchIds: row.batchIds } },
+        createdAt: now, updatedAt: now,
+      };
+      byProduct.set(product.id, product); bySkc.set(row.canonicalPlatformSkc, [product]);
+      result.createdProductCount += 1;
+      changed.set(product.id, { product, created: true });
+    } else if (!changed.has(product.id)) changed.set(product.id, { product, created: false });
+    const sku = {
+      id: makeId('SKU'), workspaceId, productId: product.id,
+      platformSku: row.platformSku, canonicalPlatformSku: row.canonicalPlatformSku,
+      platformSkc: product.platformSkc, canonicalPlatformSkc: row.canonicalPlatformSkc,
+      attribute: row.attribute, warehouseSku: '', canonicalWarehouseSku: '',
+      salePrice: null, status: product.status === 'active' ? 'active' : 'draft',
+      createdAt: now, updatedAt: now,
+    };
+    await db.platformSkus.add(sku);
+    bySku.set(row.canonicalPlatformSku, [sku]);
+    result.addedSkuCount += 1;
+  }
+  for (const { product, created } of changed.values()) {
+    const platformSkus = await db.platformSkus.where('productId').equals(product.id).toArray();
+    const saved = { ...product, skuCount: platformSkus.length, updatedAt: now };
+    await db.products.put(saved);
+    const supplierOffers = await db.supplierOffers.where('productId').equals(product.id).toArray();
+    await db.auditEvents.add({
+      workspaceId, objectType: 'product', objectId: saved.id,
+      action: created ? 'product_created' : 'product_updated', actorId, createdAt: now,
+      after: { systemSource: 'ledger-import-catalog', ledgerId, period,
+        snapshot: { product: saved, platformSkus, supplierOffers } },
+    });
+  }
+  return result;
+}
+
 export async function saveProductCatalogRecord({
   productId = null,
   captureId = null,

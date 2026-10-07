@@ -290,3 +290,55 @@ it('reports preference storage failure after commit without offering a duplicate
     expect(button('导入')).toBeUndefined();
   } finally {spy.mockRestore();}
 });
+
+it('applies strict suffix selection across stores only on request, with a local store override', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',
+    facets:{supplierNumbers:['A-HHHX','BhhHx','HHHX-MID','其他'],supplierCounts:{'A-HHHX':1,BhhHx:1,'HHHX-MID':1,其他:1}}});
+  await upload(); await settled();
+  const count = mocks.preview.mock.calls.length;
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target: { value:'ｈｈｈｘ' } }));
+  await settled();
+  expect(mocks.preview).toHaveBeenCalledTimes(count);
+  await click('应用到本批文件'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx'],['A-HHHX','BhhHx']]);
+  expect([...container.querySelectorAll('.batch-store-suppliers')].every(details => !details.open)).toBe(true);
+  expect([...container.querySelectorAll('.batch-impact-details')].every(details => !details.open)).toBe(true);
+  expect(container.querySelector('.batch-action-bar').compareDocumentPosition(container.querySelector('.batch-files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const first = container.querySelector('.batch-store-suppliers');
+  first.open = true;
+  await act(async () => [...first.querySelectorAll('button')].find(node => node.textContent === '全部货号').click());
+  await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID','其他'],['A-HHHX','BhhHx']]);
+  expect(container.querySelectorAll('.batch-store-suppliers')[1].open).toBe(false);
+});
+
+it('keeps zero suffix matches unselected and invalidates an earlier overwrite approval', async () => {
+  await upload(); await settled();
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  expect(button('导入').disabled).toBe(false);
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{ value:'NOT-FOUND' } }));
+  expect(button('导入').disabled).toBe(false);
+  await click('应用到本批文件'); await settled();
+  expect(container.querySelector('.batch-preview')).toBeNull();
+  expect(button('导入').disabled).toBe(true);
+  expect(container.textContent).toContain('本店没有命中所选后缀');
+  expect([...container.querySelectorAll('.import-supplier-picker')].every(node => node.textContent.includes('已选 0 / 1'))).toBe(true);
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+
+it('uses an applied batch suffix for newly added files without selecting middle matches', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',
+    facets:{supplierNumbers:['A-HHHX','HHHX-MID']}});
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{value:'HHHX'} }));
+  await click('应用到本批文件');
+  const choose = async files => {
+    const input = container.querySelector('input[type=file]');
+    Object.defineProperty(input, 'files', {configurable:true, value:files});
+    await act(async () => input.dispatchEvent(new Event('change', {bubbles:true})));
+  };
+  await choose([new File(['first'], '甲店.csv')]); await settled();
+  await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
+  await settled();
+  await choose([new File(['second'], '乙店.csv')]); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX'],['A-HHHX']]);
+});
