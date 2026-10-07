@@ -67,7 +67,7 @@ for (const fault of ['', 'repeat', 'drift', 'cancel', 'login', 'zero_count']) aw
 // Exercise the production deadline callback after a known complete target and
 // an in-flight partial target. Advance that one clock explicitly instead of
 // racing a 110ms deadline against scheduler/CI load. Successful attempts retain
-// the real five-minute budget and await observable completion, not a fixed nap.
+// the real sixty-minute budget and await observable completion, not a fixed nap.
 async function resumeAcrossTargets() {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const scope = Array.from({ length: 8 }, (_, index) => `SKC-${index}`), requests = [], messages = [];
@@ -75,7 +75,7 @@ async function resumeAcrossTargets() {
   let stallSecondTarget = true, currentAccountPrice = 4, expireStageBudget;
   const nativeSetTimeout = window.setTimeout.bind(window);
   window.setTimeout = (callback, ms, ...args) => {
-    if (ms === 5 * 60 * 1000) expireStageBudget = () => callback(...args);
+    if (ms === 60 * 60 * 1000) expireStageBudget = () => callback(...args);
     return nativeSetTimeout(callback, ms, ...args);
   };
   const waitFor = async (predicate, message) => {
@@ -110,7 +110,7 @@ async function resumeAcrossTargets() {
   try {
     for (const name of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) {
       const source = await readFile(path.join(root, 'integrations/erp-assistant-extension/src', name), 'utf8');
-      if (name === 'content.js') assert.ok(source.includes('const COST_STAGE_BUDGET_MS = 5 * 60 * 1000;'));
+      if (name === 'content.js') assert.ok(source.includes('const COST_STAGE_BUDGET_MS = 60 * 60 * 1000;'));
       window.eval(source);
     }
     window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0' } }));

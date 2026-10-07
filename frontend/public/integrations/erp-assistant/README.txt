@@ -1,7 +1,7 @@
-Lworkstation ERP Assistant v8.0.33 桥接扩展
+Lworkstation ERP Assistant v8.0.34 桥接扩展
 
 安装步骤：
-1. 解压 ERP-Assistant-v8.0.33-shopeers-bridge.zip。
+1. 解压 ERP-Assistant-v8.0.34-shopeers-bridge.zip。
 2. 在 Chrome 打开 chrome://extensions/。
 3. 开启开发者模式。
 4. 点击“加载已解压的扩展程序”，选择解压后能看到 manifest.json 的文件夹。
@@ -20,4 +20,4 @@ Lworkstation ERP Assistant v8.0.33 桥接扩展
 10. 8.0.29 支持当前采购表单的完整查询条件，恢复时保留默认空条件并重新核验采购；恢复检查点只在本机保留，原工作区、账本月份与请求范围不得变化。
 11. 已在 Chrome 手动加载旧版的用户须重新加载新版目录并刷新 ERP 页面。工作台升级不自动覆盖外部 Chrome 扩展。
 
-12. 8.0.33 修复本机存储字段重排导致相同查询误报变化；升级保留 8.0.29–8.0.31 有效任务。
+12. 8.0.34 将成本采集上限延长到 60 分钟、资料补充到 30 分钟、单次请求到 120 秒；可取消，升级保留 8.0.29–8.0.33 有效任务。

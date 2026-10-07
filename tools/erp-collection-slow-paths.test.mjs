@@ -18,7 +18,7 @@ async function fixture(mode, realClock = false) {
  const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
  const messages = [], calls = []; let optional = false, fail = true;
  const started = Date.now();
- if (!realClock) { const schedule = window.setTimeout.bind(window); window.setTimeout = (fn, ms, ...args) => schedule(fn, ms === 60000 ? 160 : ms === 20000 ? 40 : ms === 8000 ? 15 : ms === 5000 ? 100 : ms === 500 ? 5 : ms === 1000 ? 10 : ms, ...args); }
+ if (!realClock) { const schedule = window.setTimeout.bind(window); window.setTimeout = (fn, ms, ...args) => schedule(fn, ms === 30 * 60 * 1000 ? 160 : ms === 120000 ? 40 : ms === 8000 ? 15 : ms === 5000 ? 100 : ms === 500 ? 5 : ms === 1000 ? 10 : ms, ...args); }
  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
    if (mode === 'context-hang' && message.type === 'shopeers.erp.previewContext') return;
@@ -108,7 +108,7 @@ for (const mode of ['first-hang', 'cancel-optional']) {
 }
 if (process.env.ERP_REAL_DEADLINE_QA === '1') {
  const f = await fixture('directory-hang', true);
- try { await until(() => cost(f)); await until(() => catalog(f), 65000); assert.ok(catalog(f).at >= 59000 && catalog(f).at < 65000); checks.push({ mode: 'directory-hang', clock: 'real production 60-second budget', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length }); }
+ try { await until(() => cost(f)); await until(() => catalog(f), 365000); assert.ok(catalog(f).at >= 359000 && catalog(f).at < 365000); checks.push({ mode: 'directory-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length }); }
  finally { await f.close(); }
 }
 await mkdir(path.join(root, 'archive/release-0.3.4'), { recursive: true });

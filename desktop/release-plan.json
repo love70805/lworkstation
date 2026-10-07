@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "candidateOnly": true,
-  "integrationBranch": "codex/v041-import-todos",
+  "integrationBranch": "codex/v042-erp-time-budget",
   "requiredCommits": [
+    {
+      "module": "v0.4.1-verified-baseline",
+      "commit": "e65b4ea21df40aa2d753b37fcd7d7c1b13289bd2"
+    },
     {
       "module": "import-cost-readiness",
       "commit": "8b3fdace47194edac4c8a08c3f6d156aae731016"
