@@ -8,6 +8,10 @@ export function matchImportNumbers(choices, keywords) {
   const keys = normalizeImportKeywords(keywords);
   return keys.length ? choices.filter(value => keys.some(key => matchKey(value).includes(key))) : [];
 }
+export function matchImportNumberSuffixes(choices, suffixes) {
+  const keys = normalizeImportKeywords(suffixes);
+  return keys.length ? choices.filter(value => keys.some(key => matchKey(value).endsWith(key))) : [];
+}
 const storageKey = (workspaceId, version = 2) => `lworkstation:import-suppliers:v${version}:${workspaceId}`;
 const empty = () => ({ selected: [], keywords: [], matched: [], hasSaved: false });
 function readObject(storage, key) {

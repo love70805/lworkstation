@@ -10,6 +10,7 @@ import {
 } from "../../domain/identifiers";
 import { summarizeLedgerRows } from "../../domain/ledgerImport";
 import { prepareSalesImportItems } from "../../domain/batchSalesImport";
+import { createLedgerCatalogDraftBuilder } from "../../domain/ledgerCatalogDraft";
 import { createSalesRowsAuditSnapshotBuilder, encodeSalesRowsAuditSnapshot } from "../../domain/salesRowsAuditSnapshot";
 import { readImportStageChunk } from "../../lib/salesImportStage";
 import { computeSalesImportPlan, prepareSalesImportSnapshot } from "../../lib/salesImportPlanner";
@@ -34,7 +35,7 @@ import {
   normalizeLedgerPeriod,
 } from "../db/constants";
 import { makeId } from "../db/utils";
-import { ensureDefaultWorkspace, getActiveMemberContext } from "./selectionRepository";
+import { ensureDefaultWorkspace, getActiveMemberContext, ensureLedgerCatalogDrafts } from "./selectionRepository";
 import { manualSnapshot, selectManualOverride, storeIdentity } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
 import { summarizeProfitRows } from "../../lib/profitPrecision";
@@ -229,7 +230,7 @@ export async function saveSalesImports({
   // Clone the payload before any asynchronous work, so caller edits cannot change a pending write.
   const prepared = await prepareSalesImportSnapshot(items, { period: normalizedPeriod, signal });
   const auditActor = await resolveProfitAuditActor(importedBy);
-  return db.transaction("rw", db.workspaces, db.ledgers, db.importBatches, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+  return db.transaction("rw", db.workspaces, db.settings, db.products, db.platformSkus, db.supplierOffers, db.ledgers, db.importBatches, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     checkCancelled();
     const { ledger, plan } = await readSalesImportPlan(workspaceId, normalizedPeriod, prepared, signal);
     if (!preview || preview.ledgerId !== plan.ledgerId || preview.inputSignature !== plan.inputSignature) {
@@ -244,6 +245,7 @@ export async function saveSalesImports({
     const pending = prepared.filter((item, index) => plan.items[index].status !== "skipped_duplicate");
     const total = pending.reduce((count, item) => count + (item.rowSource?.rowCount ?? item.rows.length), 0);
     let completed = 0;
+    const catalog = createLedgerCatalogDraftBuilder();
     const replacementIds = plan.replacementRowIds;
     if (replacementIds.length) await db.salesRows.bulkDelete(replacementIds);
     const [erpCosts, approvals] = await Promise.all([getLatestLedgerCosts(plan.ledgerId), db.costApprovals.where('ledgerId').equals(plan.ledgerId).toArray()]);
@@ -278,6 +280,7 @@ export async function saveSalesImports({
         const keys = await db.salesRows.bulkAdd(storedRows, { allKeys: true });
         storedRows.forEach((row, index) => { row.id = keys[index]; });
         auditSnapshot.addRows(storedRows);
+        catalog.addRows(storedRows, batchId);
         completed += chunk.length;
         onProgress?.({ completed, total });
       }
@@ -291,6 +294,8 @@ export async function saveSalesImports({
       result.status = "imported";
       result.batchId = batchId;
     }
+    plan.catalog = await ensureLedgerCatalogDrafts({ workspaceId, ledgerId: plan.ledgerId, period: normalizedPeriod,
+      ...catalog.finish(), actorId: auditActor, now: createdAt });
     checkCancelled();
     return plan;
   });

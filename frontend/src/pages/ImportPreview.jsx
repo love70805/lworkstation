@@ -1,5 +1,5 @@
 import ImportSupplierPicker from '../components/ImportSupplierPicker';
-import { readImportPreference, restoreImportPreference, saveImportNumbers } from '../lib/importSupplierPreferences';
+import { readImportPreference, restoreImportPreference, saveImportNumbers, parseImportKeywords, matchImportNumberSuffixes } from '../lib/importSupplierPreferences';
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
@@ -30,6 +30,18 @@ function sourceIsFiltered(item) {
 const sourceScope = item => sourceIsFiltered(item) || item.sourceScope === "partial" ? "partial" : "full_month";
 function Totals({ summary }) {
   return <span>数量 {summary.quantity} · 销售原额 ¥{money(summary.revenue)} · 扣款 ¥{money(summary.penalty)}</span>;
+}
+function CatalogImportResult({ catalog, onOpen }) {
+  if (!catalog) return null;
+  const labels = { missing_skc: '缺少平台 SKC', skc_conflict: '同一 SKU 对应多个 SKC', store_conflict: '店铺归属有冲突',
+    attribute_conflict: '属性描述有冲突', duplicate_skc: '已有多份相同 SKC 档案', duplicate_sku: 'SKU 已有多份归属', owned_other_skc: 'SKU 已属于其他 SKC',
+    unavailable_owner: '已有归属不可用或无权访问', unavailable_parent: '已有父级归属需核对', workspace_mismatch: '工作区归属需核对' };
+  return <section className="batch-catalog-result" aria-label="自动建档结果"><h3>商品基础档案</h3>
+    <p>新建 {catalog.createdProductCount} 份待补全档案 · 新增 {catalog.addedSkuCount} 个 SKU · 关联已有 {catalog.linkedSkuCount} 个 SKU。</p>
+    <p>基础档案保留商品标识和台账属性；名称、图片、供应商等资料可在商品库补齐。</p>
+    {catalog.issues.length > 0 && <details><summary>待核对建档项目 · {catalog.issues.length} 个（台账已成功导入）</summary><div className="batch-catalog-issues">{catalog.issues.map((issue, index) => <p key={`${issue.platformSku}:${index}`}><strong>{issue.platformSku}</strong>：{labels[issue.reason] ?? '归属需核对'}</p>)}</div></details>}
+    <Button onClick={onOpen}>打开商品库</Button>
+  </section>;
 }
 
 const PRIMARY_MAPPING_KEYS = ["platformSku", "platformSkc", "supplierNumber", "quantity", "unitPrice", "amount", "store", "sourceAddedAt"];
@@ -103,11 +115,11 @@ function OverlapPreview({ item }) {
   const changes = [...item.overlaps, ...(item.additions ?? [])];
   const pageCount = Math.ceil(changes.length / 30);
   if (!changes.length) return null;
-  return <div>
+  return <details className="batch-impact-details"><summary>查看 SKC 影响明细 · {changes.length} 组</summary>
     <p>影响范围共 {changes.length} 组{item.replacementScope === "store_month" ? "；将完整替换本店本月，移除本次未选入的旧分组。" : "；仅替换本文件涉及的重叠分组。"}</p>
     {changes.slice((page - 1) * 30, page * 30).map(overlap => <div className="batch-overlap" key={overlap.groupKey}><strong>{overlap.added ? "新增货号：" : overlap.removed ? "移除旧分组：" : "覆盖："}{overlap.store} / {overlap.platformSkc || "无 SKC"} / {overlap.supplierNumber || "无供方货号"}</strong><p>原数据 {overlap.before.rowCount} 行：<Totals summary={overlap.before} /></p><p>新数据 {overlap.after.rowCount} 行：<Totals summary={overlap.after} /></p></div>)}
     {pageCount > 1 && <nav className="batch-submit" aria-label={`${item.fileName} 覆盖范围分页`}><Button variant="ghost" disabled={page === 1} aria-label={`${item.fileName} 上一页覆盖范围`} onClick={() => setPage(value => value - 1)}>上一页</Button><span>第 {page} / {pageCount} 页 · 共 {changes.length} 组均受影响</span><Button variant="ghost" disabled={page === pageCount} aria-label={`${item.fileName} 下一页覆盖范围`} onClick={() => setPage(value => value + 1)}>下一页</Button></nav>}
-  </div>;
+  </details>;
 }
 
 export default function ImportPreview() {
@@ -140,6 +152,9 @@ export default function ImportPreview() {
   const [payload, setPayload] = useState(null);
   const [overwriteSignature, setOverwriteSignature] = useState(null);
   const [result, setResult] = useState(null);
+  const [batchSuffixText, setBatchSuffixText] = useState('');
+  const [appliedSuffixes, setAppliedSuffixes] = useState([]);
+  const batchSuffixesRef = useRef([]);
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
   const periodEvidence = summarizeImportPeriod(files, requestedLedgerId ? period : null);
@@ -252,7 +267,8 @@ export default function ImportPreview() {
         if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
         const choices = refreshed.facets?.supplierNumbers ?? next.facets?.supplierNumbers ?? [];
         const preference = patch.storeName !== undefined ? readImportPreference(importWorkspaceRef.current, next.storeName) : next.supplierPreference;
-        const saved = patch.storeName !== undefined ? preference.selected : next.filterOptions?.supplierNumbers ?? [];
+        const saved = next.usesBatchSuffix ? matchImportNumberSuffixes(choices, batchSuffixesRef.current)
+          : patch.storeName !== undefined ? preference.selected : next.filterOptions?.supplierNumbers ?? [];
         next = { ...next, supplierPreference: preference, supplierKeywords: patch.storeName !== undefined ? preference.keywords : next.supplierKeywords, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
         setFiles(entries => entries.map(item => item.itemId === itemId ? next : item));
       } catch (error) { setError(error.message); return; }
@@ -287,7 +303,8 @@ export default function ImportPreview() {
           const supplierPreference = readImportPreference(importWorkspaceRef.current, item.storeName);
           const choices = parsed.facets?.supplierNumbers ?? [];
           const restored = restoreImportPreference(supplierPreference, choices);
-          const filterOptions = { supplierNumbers: restored.selected, ...(parsed.preset === "ledger_report" ? {
+          const suffixes = batchSuffixesRef.current;
+          const filterOptions = { supplierNumbers: suffixes.length ? matchImportNumberSuffixes(choices, suffixes) : restored.selected, ...(parsed.preset === "ledger_report" ? {
             movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
             deriveAmountFromUnitPrice: true,
           } : {}) };
@@ -297,7 +314,7 @@ export default function ImportPreview() {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, usesBatchSuffix: Boolean(suffixes.length), supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: suffixes.length ? [] : restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before
@@ -322,6 +339,17 @@ export default function ImportPreview() {
   const applyMapping = (source) => {
     const columns = Object.values(source.mapping).filter(Boolean);
     for (const item of files) if (item.itemId !== source.itemId && item.status === 'parsed' && columns.every(column => item.headers.includes(column))) void update(item.itemId, { mapping: { ...source.mapping } });
+  };
+  const applyBatchSuffixes = () => {
+    if (busy || contextBlocked) return;
+    const suffixes = parseImportKeywords(batchSuffixText);
+    if (!suffixes.length) return;
+    batchSuffixesRef.current = suffixes;
+    setAppliedSuffixes(suffixes);
+    for (const item of files) if (item.status === 'parsed') void update(item.itemId, {
+      usesBatchSuffix: true, missingNumbers: [],
+      filterOptions: { ...item.filterOptions, supplierNumbers: matchImportNumberSuffixes(item.facets?.supplierNumbers ?? [], suffixes) },
+    });
   };
   const validate = async () => {
     if (operationRef.current || !ready || result) return;
@@ -416,6 +444,11 @@ export default function ImportPreview() {
       </section>
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
+        {!!files.length && <section className="batch-action-bar" aria-label="本次导入操作">
+          <div className="batch-action-summary"><strong>{period || '月份待确认'} · {files.length} 个文件</strong><span role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组` : '选择货号并核对店铺后自动校验'}</span></div>
+          {preview?.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={event => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />确认本次全部替换范围（含分页内容）与移除旧分组；可展开下方 SKC 明细核对。</label>}
+          <Button variant="primary" disabled={busy || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
+        </section>}
         <section className="wizard-card">
           <fieldset disabled={busy || contextBlocked} className="batch-fieldset">
             <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">{requestedLedgerId ? '沿用当前账本月份' : suggestedPeriod && !periodChoiceRef.current ? `按销售台账“添加时间”识别：${suggestedPeriod}` : '请依据销售台账日期明确选择月份'}</p></div><input id="ledger-period" disabled={Boolean(requestedLedgerId)} aria-describedby="batch-period-note batch-period-evidence" className="text-input" type="month" value={period} onChange={(event) => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} /></div>
@@ -427,6 +460,13 @@ export default function ImportPreview() {
               <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；自动识别实际明细页；多个候选时仅需为该文件选择。</p></div>
               <Button onClick={() => inputRef.current?.click()}>添加文件</Button>{!files.length && <Button variant="ghost" onClick={() => loadFiles([sampleFile()])}>使用示例</Button>}
             </div>
+            <section className="batch-suffix-picker" aria-label="整批货号后缀选择">
+              <label htmlFor="batch-supplier-suffix">整批按货号后缀选择</label>
+              <div><input id="batch-supplier-suffix" className="text-input" value={batchSuffixText} placeholder="例如 HHHX；多个后缀用逗号分隔" aria-describedby="batch-suffix-help" onChange={event => setBatchSuffixText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); applyBatchSuffixes(); } }} /><Button disabled={!parseImportKeywords(batchSuffixText).length} onClick={applyBatchSuffixes}>应用到本批文件</Button></div>
+              <p id="batch-suffix-help">只匹配货号末尾，忽略英文大小写与全半角差异。应用后替换本批选择；新增文件沿用，仍可逐店调整。</p>
+              {!!parseImportKeywords(batchSuffixText).length && <p role="status">{files.filter(item => item.status === 'parsed').map(item => `${item.storeName}：命中 ${matchImportNumberSuffixes(item.facets?.supplierNumbers ?? [], parseImportKeywords(batchSuffixText)).length} / ${item.facets?.supplierNumbers?.length ?? 0} 个`).join('；') || '添加文件后显示各店命中数量。'}</p>}
+              {!!appliedSuffixes.length && <p role="status">已应用后缀：{appliedSuffixes.join('、')}。零命中的店铺请单独调整或移除文件。</p>}
+            </section>
           </fieldset>
           {busy && <div className="import-progress" role="status">{progress.value == null ? <span>{progress.label}</span> : <ProgressBar value={progress.value} label={progress.label} />}<Button onClick={cancel}>取消当前处理</Button></div>}
           <div className="batch-files">{files.map((item, index) => <section className="batch-file" key={item.itemId}>
@@ -437,7 +477,10 @@ export default function ImportPreview() {
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
-              <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} keywords={item.supplierKeywords ?? []} previousMatches={item.supplierPreference?.matched ?? []} hasSaved={item.supplierPreference?.hasSaved ?? false} onKeywordsChange={supplierKeywords => setFiles(entries => entries.map(entry => entry.itemId === item.itemId ? { ...entry, supplierKeywords } : entry))} onChange={supplierNumbers => update(item.itemId, { filterOptions: { ...item.filterOptions, supplierNumbers } })} />
+              <details className="batch-store-suppliers" open={!item.usesBatchSuffix}><summary>本店货号 · 已选 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个{item.usesBatchSuffix ? ' · 沿用整批后缀' : ' · 可单独调整'}</summary>
+              <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} keywords={item.supplierKeywords ?? []} previousMatches={item.supplierPreference?.matched ?? []} hasSaved={item.supplierPreference?.hasSaved ?? false} onKeywordsChange={supplierKeywords => setFiles(entries => entries.map(entry => entry.itemId === item.itemId ? { ...entry, supplierKeywords } : entry))} onChange={supplierNumbers => update(item.itemId, { usesBatchSuffix: false, filterOptions: { ...item.filterOptions, supplierNumbers } })} />
+              </details>
+              {item.usesBatchSuffix && !item.filterOptions?.supplierNumbers?.length && <p role="alert" className="import-error">本店没有命中所选后缀，请展开本店货号调整，或移除此文件。</p>}
               <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `所选货号完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
               <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions?.movementTypes ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
               <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : "replace_store_month" })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期来源</option></select>{sourceIsFiltered(item) && <small>已缩小销售变动类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
@@ -459,10 +502,9 @@ export default function ImportPreview() {
             <OverlapPreview item={item} />
           </article>)}
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
-          {preview.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={(event) => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />我确认以上文件的全部替换范围（含分页内容）；本店本月完整替换会同时移除本次未选入的旧分组。</label>}
-          <div className="batch-submit"><p>核对以上文件、店铺及 {period} 月份后确认。修改配置后会自动重新校验。</p><Button variant="primary" disabled={busy || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button></div>
+          <p>核对文件、店铺及 {period} 月份后，可在上方操作区导入。修改配置后会自动重新校验。</p>
         </section>}
-      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}
+      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2><CatalogImportResult catalog={result.catalog} onOpen={() => navigate('/products')} />{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}
     </section>
   </main>;
 }

@@ -59,6 +59,13 @@ const matchesReferenceSupplier = createSelectionSearchIndex((row) => row.supplie
 
 const productFiltersKey = (workspaceId, view) => `${PRODUCT_FILTERS_KEY}:${JSON.stringify([workspaceId, view])}`;
 
+// Older versions persisted "all" even when no explicit choice was made.
+// Adopt the new default once, then preserve every explicit choice in v2.
+function referenceCatalogFilter(filters) {
+  if (['linked', 'unlinked'].includes(filters?.catalogFilter)) return filters.catalogFilter;
+  return filters?.catalogFilterVersion === 2 && filters.catalogFilter === 'all' ? 'all' : 'unlinked';
+}
+
 function readProductFilters(workspaceId, view) {
   try {
     const saved = JSON.parse(localStorage.getItem(productFiltersKey(workspaceId, view)) ?? "{}");
@@ -75,7 +82,7 @@ function readProductFilters(workspaceId, view) {
       negativeOnly: Boolean(saved.negativeOnly),
       salesLabel: saved.salesLabel ?? "all",
       supplierNumber: saved.supplierNumber ?? "",
-      catalogFilter: saved.catalogFilter ?? "all",
+      catalogFilter: referenceCatalogFilter(saved),
     };
   } catch {
     return { store: "all", status: "all", publicationStatus: "all", dataStatus: "all", missingOnly: false, duplicatesOnly: false, productSort: "updated", referenceSource: "all", negativeOnly: false };
@@ -143,7 +150,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const [negativeOnly, setNegativeOnly] = useState(initialFilters.negativeOnly);
   const [salesLabel, setSalesLabel] = useState(initialFilters.salesLabel ?? "all");
   const [supplierNumber, setSupplierNumber] = useState(initialFilters.supplierNumber ?? "");
-  const [catalogFilter, setCatalogFilter] = useState(initialFilters.catalogFilter ?? "all");
+  const [catalogFilter, setCatalogFilter] = useState(savedView?.filters ? referenceCatalogFilter(savedView.filters) : initialFilters.catalogFilter ?? "unlinked");
   const [exporting, setExporting] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState("");
@@ -197,7 +204,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel, supplierNumber, catalogFilter } };
+  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 2 } };
 
   useEffect(() => {
     localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
@@ -210,7 +217,7 @@ function ProductLibraryView({ workspaceId, view }) {
       productSort,
       referenceSource,
       negativeOnly,
-      salesLabel, supplierNumber, catalogFilter,
+      salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 2,
     }));
   }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, recordStatus, referenceSource, status, store, supplierNumber, catalogFilter, workspaceId, view]);
 
@@ -321,6 +328,7 @@ function ProductLibraryView({ workspaceId, view }) {
       header: "SKC 商品档案",
       cell: ({ row }) => <div className="product-name-cell product-skc-cell">
         <strong className="truncate-name">{row.original.name || "未命名商品"}</strong>
+        {row.original.status === 'draft' && row.original.attributes?.catalogOrigin === 'ledger_import' ? <Badge tone="warning">基础档案 · 待补全</Badge> : null}
         <span className="product-skc-identity"><strong className="mono">{row.original.platformSkc || "未填写 SKC"}</strong><button type="button" title="复制 SKC 与平台 SKU" aria-label={`复制 ${row.original.name} 的 SKC 与平台 SKU`} onClick={(event) => { event.stopPropagation(); copyProductIdentity(row.original); }}><Copy size={13} /></button></span>
         {row.original.tags?.length || duplicateSkcCountByProductId.has(row.original.id) ? <span className="product-tag-list">{duplicateSkcCountByProductId.has(row.original.id) ? <small className="product-conflict-tag">重复 SKC · {duplicateSkcCountByProductId.get(row.original.id)} 份档案</small> : null}{(row.original.tags ?? []).slice(0, 3).map((tag) => <small key={tag}>{tag}</small>)}</span> : null}
         {row.original.skuCount === 0 ? <span className="missing-sku"><AlertCircle size={12} />{row.original.pendingVariantCount ? `待分配平台 SKU · ${row.original.pendingVariantCount} 个属性分支` : "缺少平台 SKU"}</span> : <span className="product-sku-branches">{row.original.skuReferences.map((sku) => <span className="product-sku-branch" key={sku.id ?? sku.platformSku}><strong className="mono">{sku.platformSku}</strong><small>{sku.attribute || "未填写属性"}</small></span>)}</span>}
@@ -565,7 +573,7 @@ function ProductLibraryView({ workspaceId, view }) {
 
       <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
         <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
-        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>成本与利润参考</span><small>{referenceRead.status === "ready" ? referenceRows.length : "—"}</small></button>
+        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>成本与利润参考</span><small>{referenceRead.status === "ready" ? referenceRows.filter(row => !row.productId).length : "—"}</small></button>
         <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>待确认采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button>
       </div>
 
@@ -604,7 +612,9 @@ function ProductLibraryView({ workspaceId, view }) {
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
-                emptyState="没有符合当前筛选条件的选品参考记录。"
+                emptyState={catalogFilter === 'unlinked' && referenceRows.every(row => row.productId)
+                  ? "这些商品均已建档，可在商品库查看；切换到已建档或全部建档情况可查阅参考历史。"
+                  : "没有符合当前筛选条件的选品参考记录。"}
               />
             ) : <EmptyState icon={BarChart3} title="还没有选品经营参考" description="导入台账或接收 ERP 资料后，可按店铺、货号和商品身份查找并建立档案。" action={<Button variant="primary" icon={WalletCards} onClick={() => navigate("/ledger")}>打开月度账本</Button>} />}
           </Panel>
