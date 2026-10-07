@@ -5,6 +5,10 @@
   "integrationBranch": "codex/v041-import-scope",
   "requiredCommits": [
     {
+      "module": "v0.4.1-import-scope-and-skc-composition",
+      "commit": "ea7b230"
+    },
+    {
       "module": "v0.4.1-main-baseline",
       "commit": "e212d30"
     },

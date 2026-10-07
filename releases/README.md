@@ -24,7 +24,11 @@
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.3.12](https://github.com/love70805/lworkstation/releases/tag/v0.3.12)，公开 Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。Beta 不替代稳定 Latest。0.3.12 本机未安装；以下版本清单保留历史日期快照，不作为当前状态依据。
+当前公开稳定版为 [0.4.0](https://github.com/love70805/lworkstation/releases/tag/v0.4.0)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+
+## v0.4.1 候选验收（2026-10-07）
+
+导入前货号筛选与 SKC 图表明细，候选登记目录 `releases/candidates/0.4.1/`，证据 `archive/release-0.4.1/`。实现 ea7b230；前端 1278 测试及利润页补验通过，隔离导入、导出、ERP 请求和浅深色/窄屏通过。打包、隐藏 smoke、安装资源一致性与 CI 进行中，尚未发布。本机不自动安装。见 [记录](../docs/RELEASE_0.4.1.md)。
 
 ## v0.4.0 已公开稳定 Latest（2026-10-07）
 
