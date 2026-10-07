@@ -196,10 +196,13 @@ async function planSalesImportsCore({ ledger, existingRows, batches, items, ledg
   }
   const pending = items.filter((item, index) => results[index].status !== "skipped_duplicate");
   const replacementRows = new Set(getSalesImportReplacementRows(existingRows, pending));
+  const finalRows = [...existingRows.filter(row => !replacementRows.has(row)), ...pending.flatMap(item => item.rows)];
+  // Only store/SKU identities cross back to the transaction for cost readiness.
+  const costTargets = [...new Map(finalRows.map(row => [JSON.stringify([canonicalStore(row.store), String(row.platformSku ?? row.sku).normalize('NFKC').trim().toUpperCase()]), { store: row.store, platformSku: row.platformSku ?? row.sku }])).values()];
   return { ledgerId, items: results, replacementRowIds: [...replacementRows].map(row => row.id),
     inputSignature: snapshot ? snapshot.input : await inputSignature(items),
     targetSignature: snapshot ? snapshot.target : await digest({ ledger: ledger ?? null, rowsDigest: await rowsSignature(existingRows), batches }),
     summary: summarizeLedgerRows(pending.flatMap((item) => item.rows)),
-    finalSummary: summarizeLedgerRows([...existingRows.filter(row => !replacementRows.has(row)), ...pending.flatMap((item) => item.rows)]),
+    finalSummary: summarizeLedgerRows(finalRows), costTargets,
     requiresOverwrite: results.some((item) => item.overlaps.length > 0) };
 }

@@ -2,8 +2,12 @@
   "product": "Lworkstation",
   "version": "0.4.1",
   "candidateOnly": true,
-  "integrationBranch": "codex/v041-import-scope",
+  "integrationBranch": "codex/v041-import-todos",
   "requiredCommits": [
+    {
+      "module": "import-cost-readiness",
+      "commit": "8b3fdace47194edac4c8a08c3f6d156aae731016"
+    },
     {
       "module": "erp-setup-lifecycle",
       "commit": "90facb0d757f0bfc889356c24929f626342041bf"
