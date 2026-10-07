@@ -12,6 +12,7 @@ const require = createRequire(path.join(root, 'frontend/package.json'));
 const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
 const sourceDir = path.join(root, 'integrations/erp-assistant-extension/src');
 const source = Object.fromEntries(await Promise.all(['background.js','result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'].map(async name => [name, await readFile(path.join(sourceDir,name),'utf8')])));
+const extensionVersion=JSON.parse(await readFile(path.join(root,'integrations/erp-assistant-extension/manifest.json'),'utf8')).version;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function scenario(size, mode = '') {
@@ -19,9 +20,9 @@ async function scenario(size, mode = '') {
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
   const records = [request], deliveries = [], calls = [], listTimes = new Map();
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
-  let dispatch, window, inflight = 0, maxInflight = 0, lists = 0, maxLists = 0, paused = false;
+  let dispatch, window, inflight = 0, maxInflight = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
-  const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:'8.0.34'}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
+  const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
     const url = new URL(raw), payload = init.body ? JSON.parse(init.body) : {};
     let body;
@@ -32,8 +33,10 @@ async function scenario(size, mode = '') {
       else if(url.pathname==='/erp/v1/extension-status') body={ok:true};
       else if(url.pathname==='/erp/v1/cost-results') {
         const task = validateCollectionDelivery(records,payload);
+        const existing = deliveries.find(item=>item.resultDeliveryId===payload.resultDeliveryId);
+        if(existing) return {ok:true,status:200,json:async()=>({deliveryId:existing.deliveryId,batchId:existing.batchId,resultDeliveryId:payload.resultDeliveryId})};
         body={deliveryId:`DEL-${deliveries.length}`,batchId:`IMPORT-${deliveries.length}`,resultDeliveryId:payload.resultDeliveryId};
-        recordCollectionDelivery(task,body); deliveries.push({...payload,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
+        recordCollectionDelivery(task,body); deliveries.push({...payload,...body,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
       } else throw Error(url.pathname);
       return {ok:true,status:200,json:async()=>structuredClone(body)};
     } catch(error) {return {ok:false,status:error.status||400,json:async()=>({code:error.code,message:error.message})};}
@@ -41,19 +44,28 @@ async function scenario(size, mode = '') {
   vm.runInContext(source['background.js'],context);
   async function open() {
     window = new Window({url:sender.url});
-    window.chrome={runtime:{sendMessage:(message,done)=>dispatch(message,sender,done)}};
+    const schedule=window.setTimeout.bind(window);
+    if(mode==='lost-ack')window.setTimeout=(fn,ms,...args)=>schedule(fn,ms===15000?100:ms,...args);
+    window.chrome={runtime:{sendMessage:(message,done)=>dispatch(message,sender,response=>{
+      if(mode==='lost-ack'&&!lostAck&&message.type==='shopeers.erp.submitCostResult'){lostAck=true;return;}
+      done(response);
+    })}};
     window.fetch=async raw=>{
       const url=new URL(raw),endpoint=url.pathname.split('/').at(-1),target=url.searchParams.get('sku')||url.searchParams.get('purchaseOrderId')||url.searchParams.get('productId');
-      assert.notEqual(target,'[object Object]'); calls.push({endpoint,target});
+      assert.notEqual(target,'[object Object]'); calls.push({endpoint,target,at:Date.now()});
       const timeKey = Math.floor(Number(target.split('-').at(-1)) / 20);
       if(endpoint==='purchase-order-page'&&!listTimes.has(timeKey))listTimes.set(timeKey,{start:performance.now()});
       inflight++; maxInflight=Math.max(maxInflight,inflight);
       if(endpoint==='purchase-order-page'){lists++;maxLists=Math.max(maxLists,lists);}
       if(mode==='pause' && !paused && deliveries.length===1 && endpoint==='purchase-order-page'){paused=true;window.document.getElementById('erpa-pause').click();}
-      await delay(mode.startsWith('benchmark') ? 8 : 1);
+      if(mode==='remote-stop'&&!remoteStopped&&endpoint==='purchase-order-page'){
+        remoteStopped=true;schedule(()=>{records[1].status='stopped';},10);
+      }
+      await delay(mode==='remote-stop'?4000:mode.startsWith('benchmark') ? 8 : 1);
       inflight--; if(endpoint==='purchase-order-page'){lists--;listTimes.get(timeKey).end=performance.now();}
+      if(mode==='throttle'&&!limited&&endpoint==='purchase-order-page'){limited=true;return {ok:false,status:429,statusText:'Limited',headers:{get:()=> '1'}};}
       const id=target.split('-').at(-1);
-      const data=endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:[{associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${id}`,barcodeSkcid:`SKC-${id}`}];
+      const data=endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
       return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
     };
     for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(mode==='benchmark-serial'&&name==='content.js'?source[name].replace('mapConcurrent(querySkcs, 2,','mapConcurrent(querySkcs, 1,'):source[name]);
@@ -63,6 +75,16 @@ async function scenario(size, mode = '') {
   const began=Date.now();
   try {
     await open(); window.document.getElementById('erpa-cost-trigger').click();
+    if(mode==='remote-stop'){
+      await until(()=>remoteStopped&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(records[1].status,'stopped');assert.equal(deliveries.length,0);assert.equal(calls.length,2,'remote stop aborts active requests and prevents new work');
+      console.log(JSON.stringify({mode,elapsedMs:Date.now()-began,requests:calls.length,delivered:0}));return;
+    }
+    if(mode==='lost-ack'){
+      await until(()=>lostAck&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(deliveries.length,1);assert.equal(records[1].batches[0].status,'delivered','lost page ACK does not demote service receipt');
+      window.document.getElementById('erpa-resume').click();
+    }
     if(mode==='pause'){
       await until(()=>paused&&!window.document.getElementById('erpa-recalculate').disabled);
       assert.equal(deliveries.length,1);assert.equal(records[1].status,'paused');
@@ -74,17 +96,31 @@ async function scenario(size, mode = '') {
     await until(()=>deliveries.length===Math.ceil(size/20)&&!window.document.getElementById('erpa-recalculate').disabled);
     assert.equal(records[1].summary.delivered,size);
     assert.equal(new Set(deliveries.map(item=>item.resultDeliveryId)).size,deliveries.length);
-    assert.ok(deliveries[0].listCount<=20,'first batch delivered before all targets');
+    assert.ok(deliveries[0].listCount<=(mode==='throttle'?21:20),'first batch delivered before all targets');
     assert.equal(maxLists,mode==='benchmark-serial'?1:2);assert.ok(maxInflight<=8);
     assert.ok(deliveries.every(item=>item.querySkcs.length<=20&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
+    if(mode==='throttle'){
+      const target=calls[0].target,attempts=calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target===target);
+      assert.equal(attempts.length,2);assert.ok(attempts[1].at-attempts[0].at>=1000,'Retry-After is honored');assert.ok(maxInflight<=2,'rate limiting reduces global concurrency');
+    }
+    if(mode==='lost-ack')assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'lost ACK recovery does not reread delivered first batch');
     if(mode==='pause')assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'delivered batch not reread after restart');
+    if(mode==='shared-orders'){
+      assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,20,'shared orders are read once across batches');
+      assert.equal(calls.filter(item=>item.endpoint==='product-info-sku').length,20,'shared warehouse mappings are read once across batches');
+      assert.equal(new Set(deliveries.flatMap(item=>item.rows.map(row=>row.platformSku))).size,size);
+    }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
-    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
+    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size+40:size*3),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
     return listMs;
   } finally {await window.happyDOM.close();}
 }
 for(const size of [100,500,2000])await scenario(size);
 await scenario(40,'pause');
+await scenario(40,'lost-ack');
+await scenario(40,'remote-stop');
+await scenario(40,'throttle');
+await scenario(100,'shared-orders');
 
 const serialMs=await scenario(100,'benchmark-serial');
 const parallelMs=await scenario(100,'benchmark-parallel');

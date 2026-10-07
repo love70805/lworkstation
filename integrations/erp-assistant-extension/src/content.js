@@ -20,7 +20,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.34';
+    const EXTENSION_VERSION = '8.0.35';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1347,7 +1347,7 @@
         const total = batches.reduce((n, batch) => n + batch.platformSkcs.length, 0);
         const failed = batches.filter(batch => ['failed','incomplete'].includes(batch.status));
         const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(task.createdAt || new Date().toISOString())) / 1000));
-        taskStage = (activeRun?.catalogPhase ? '补充资料' : task.status === 'paused' ? '待继续' : delivered === total && total ? '成本全部送达' : '分批采集')
+        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : activeRun?.catalogPhase ? '补充资料' : task.status === 'paused' ? '待继续' : delivered === total && total ? '成本全部送达' : '分批采集')
             + ' · 已采集 ' + collected + '/' + total + ' SKC · 已送达 ' + delivered + '/' + total
             + ' SKC · 已采用 ' + (task.summary?.adopted ?? 0) + ' SKU'
             + ' · ' + elapsed + ' 秒'
@@ -2016,8 +2016,14 @@
             const response = context.requestId ? await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'list', includeCompleted: true }) : null;
             if (context.requestId && !response?.ok) throw new CostError('原任务状态读取失败', '请稍后重试。');
             const old = response?.records?.find(item => item.requestId === context.requestId);
-            if ((old || lastResults.length > 0) && !window.confirm('按当前查询重新采集将从零读取 ERP 采购列表、明细和平台 SKU 映射，并开始新的采集尝试。旧待送达结果会保留；旧任务不能覆盖新任务。确定继续吗？')) return;
+            const tasks = context.requestId && window.ShopeersErpDeliveryBridge.collectionTask ? await taskOperation({ action: 'list', requestId: context.requestId }) : null;
+            const previousTask = tasks?.tasks?.find(task => task.status !== 'stopped');
+            if ((old || previousTask || lastResults.length > 0) && !window.confirm('按当前查询重新采集将从零读取 ERP 采购列表、明细和平台 SKU 映射，并开始新的采集尝试。旧待送达结果会保留；旧任务不能覆盖新任务。确定继续吗？')) return;
             if (activeRun) return;
+            if (previousTask) {
+                await taskOperation({ action: 'control', taskId: previousTask.taskId, control: 'stop' });
+                collectionTaskState = null;
+            }
             await calculate(context.requestId || null, Boolean(context.requestId), old?.resultDeliveryId || null, context);
         } catch (error) { showError(error); }
     }

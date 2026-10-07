@@ -55,7 +55,7 @@
   }
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
-    const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === chrome.runtime.getManifest().version || chrome.runtime.getManifest().version === '8.0.34' && ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33'].includes(item.extensionVersion)) && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+    const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === chrome.runtime.getManifest().version || chrome.runtime.getManifest().version === '8.0.35' && ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34'].includes(item.extensionVersion)) && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
     await chrome.storage.local.set({ [CHECKPOINT_KEY]: records });
     return records;
@@ -804,7 +804,7 @@
   async function submitCatalogResult(input, sender) {
     const { request, config } = await catalogRequest({ requestId: String(input?.requestId || '').trim() }, sender);
     if (!input?.requestId || input.requestId !== request.requestId || !normalizedSkcs(input?.querySkcs).length || !normalizedSkcs(input?.querySkcs).every(skc => normalizedSkcs(request.platformSkcs).includes(skc))) throw loopbackError('ERP_REQUEST_CONTEXT_MISSING', '资料请求或完整平台 SKC 范围不匹配。', 409);
-    const rows = buildCatalogRows(stripUntrustedControl(input?.results), request.platformSkcs);
+    const rows = buildCatalogRows(stripUntrustedControl(input?.results), input.querySkcs);
     const warehouseScope = new Set(rows.map(row => canonical(row.warehouseSku)));
     const rawEvidence = stripUntrustedControl(input?.warehouseEvidence || { warehouses: [] });
     const warehouseEvidence = { warehouses: (rawEvidence.warehouses || []).filter(entry => warehouseScope.has(canonical(entry.warehouseSku))) };
