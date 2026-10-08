@@ -1408,7 +1408,11 @@ async function createWindow() {
 }
 
 registerWorkspaceSystemIpc({ ipcMain, getContents: () => views.get('workspace')?.webContents,
-  getWindow: () => mainWindow, getLifecycle: () => desktopLifecycle, dialog, devUrl: DEV_URL });
+  getWindow: () => mainWindow, getLifecycle: () => desktopLifecycle, dialog, devUrl: DEV_URL,
+  clearInboxData: async () => {
+    if (!inboxService) throw new Error('本机收件服务尚未就绪，请重试。');
+    return inboxService.clearBusinessData();
+  } });
 ipcMain.handle("desktop:get-state", () => publicState());
 ipcMain.handle('desktop:startup-action', (event, action) => {
   if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };

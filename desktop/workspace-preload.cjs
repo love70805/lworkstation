@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("shopeersDesktopRuntime", Object.freeze({
   version,
   appearance: savedAppearance,
   saveBackup: ({ fileName, json } = {}) => ipcRenderer.invoke('workspace:save-backup', { fileName, json }),
+  clearInboxData: () => ipcRenderer.invoke('workspace:clear-inbox-data'),
   getCloseBehavior: () => ipcRenderer.invoke('workspace:get-close-behavior'),
   setCloseBehavior: behavior => ipcRenderer.invoke('workspace:set-close-behavior', behavior),
   onCloseBehavior: callback => {
