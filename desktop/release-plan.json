@@ -5,6 +5,10 @@
   "integrationBranch": "codex/v0412-memory-performance",
   "requiredCommits": [
     {
+      "module": "v0.4.12-lazy-remote-and-empty-queue-memory",
+      "commit": "9e52198"
+    },
+    {
       "module": "v0.4.12-verified-main-baseline",
       "commit": "9a1131e"
     },
