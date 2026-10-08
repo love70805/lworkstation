@@ -1,10 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { collectSalesImportFacets, detectLedgerReport, suggestLedgerReportMapping, suggestMappings, validateSalesMapping, validateSalesRows } from "./salesImport";
+import { LEDGER_REPORT_MOVEMENT_TYPES, collectSalesImportFacets, detectLedgerReport, suggestLedgerReportMapping, suggestMappings, validateSalesMapping, validateSalesRows } from "./salesImport";
 import { summarizeLedgerRows } from "../domain/ledgerImport";
 
 const standardHeaders = ["变动类型", "结算类型", "供方货号", "SKC", "平台SKU", "商家SKU", "属性集", "数量", "单价", "金额", "币种", "业务单号", "单据号", "添加时间", "商家ID", "商家名称", "销售商家ID", "销售商家名称", "备注", "活动信息"];
 
 describe("sales import mapping", () => {
+  it("keeps mapped blank movement rows selectable without inventing a type for templates without that column", () => {
+    const rows = [{ 类型: '客单发货' }, { 类型: '' }];
+    const facets = collectSalesImportFacets(rows, { movementType: '类型' });
+    expect(facets.movementTypes).toEqual(['', '客单发货']);
+    expect(facets.movementTypeCounts).toEqual({ '': 1, 客单发货: 1 });
+    expect(collectSalesImportFacets(rows, {}).movementTypes).toEqual([]);
+  });
+
+  it("includes POP sign-off with either parenthesis width in the default ledger scope", () => {
+    const mapping = suggestLedgerReportMapping(standardHeaders);
+    const rows = [
+      { 变动类型: '客单发货', 数量: '1', 单价: '2.5' },
+      { 变动类型: '平台客单发货', 数量: '2', 单价: '3' },
+      { 变动类型: '客单签收（POP）', 数量: '3', 单价: '4.125' },
+      { 变动类型: '客单签收(POP)', 数量: '1', 单价: '5' },
+      { 变动类型: '盘亏', 数量: '1', 单价: '6' },
+      { 变动类型: '平台扣款', 数量: '1', 单价: '7' },
+    ].map((row, index) => ({ ...row, 供方货号: 'SUP', SKC: 'SKC', 平台SKU: `SKU-${index}`, 属性集: '红', 金额: '999' }));
+    const facets = collectSalesImportFacets(rows, mapping);
+    expect(facets.movementTypeCounts['客单签收(POP)']).toBe(2);
+    const options = { defaultStore: '27店', movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter(type => facets.movementTypes.includes(type)), deriveAmountFromUnitPrice: true };
+    const result = validateSalesRows(rows, mapping, options);
+    expect(result.errors).toEqual([]);
+    expect(result.rows).toHaveLength(4);
+    expect(result.rows.map(row => row.amountExact)).toEqual(['2.5', '6', '12.375', '5']);
+    expect(result.ignored).toHaveLength(2);
+    const popOnly = validateSalesRows(rows, mapping, { ...options, movementTypes: ['客单签收(POP)'] });
+    expect(popOnly.rows.map(row => row.platformSku)).toEqual(['SKU-2', 'SKU-3']);
+    expect(validateSalesRows(rows, mapping, { ...options, movementTypes: [] }).rows).toEqual([]);
+  });
+
   it("suggests legacy and modern field mappings", () => {
     expect(suggestMappings(["店铺", "供方货号", "商品SKC", "商家SKU", "属性集", "变动类型", "客单发货", "平台客单", "客单金额", "平台金额"])).toMatchObject({
       store: "店铺",

@@ -27,7 +27,8 @@ export const salesFields = [
   { key: "directPenalty", label: "客退罚款", description: "存在时按旧程序行为覆盖同一 SKU 已累计的扣款。", required: false, aliases: ["客退罚款", "penalty", "deduction", "罚款"] },
 ];
 
-export const LEDGER_REPORT_MOVEMENT_TYPES = ["平台客单发货", "客单发货"];
+// Match the normalized source values (NFKC folds full-width POP parentheses).
+export const LEDGER_REPORT_MOVEMENT_TYPES = ["平台客单发货", "客单发货", "客单签收(POP)"];
 const ledgerReportHeaderAliases = {
   movementType: ["变动类型"],
   supplierNumber: ["供方货号"],
@@ -101,7 +102,7 @@ export function collectSalesImportFacets(rawRows = [], mapping = {}) {
     const supplier = normalizedText(mappedValue(row, mapping, "supplierNumber"));
     const movementType = normalizedText(mappedValue(row, mapping, "movementType"));
     if (supplier) supplierCounts.set(supplier, (supplierCounts.get(supplier) ?? 0) + 1);
-    if (movementType) movementTypeCounts.set(movementType, (movementTypeCounts.get(movementType) ?? 0) + 1);
+    if (mapping.movementType) movementTypeCounts.set(movementType, (movementTypeCounts.get(movementType) ?? 0) + 1);
   });
   return {
     supplierNumbers: [...supplierCounts.keys()].toSorted(),

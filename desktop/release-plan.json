@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "candidateOnly": true,
-  "integrationBranch": "codex/v047-erp-real-timeout",
+  "integrationBranch": "codex/v048-ledger-movement-filter",
   "requiredCommits": [
+    {
+      "module": "v0.4.8-ledger-movement-and-profit-flow",
+      "commit": "81af59d788d6ab094309858e4662971fae4332c2"
+    },
+    {
+      "module": "v0.4.7-verified-main-baseline",
+      "commit": "fa7971c"
+    },
     {
       "module": "v0.4.7-durable-business-timeout",
       "commit": "d365a56e89c13010cf74112d4500d5b526f6490d"
