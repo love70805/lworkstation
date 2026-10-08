@@ -3,6 +3,9 @@ import { CLOUD_SEED_TABLES } from "../../domain/cloudSeed";
 import { REPORT_TABLES } from "../../domain/profitReports";
 import { validateReportBackup } from "../../domain/profitReportBackup";
 import { replaySyncRecoveryPayload } from "../../domain/syncRecovery";
+import { clearDesktopInboxData } from "../../lib/clearDesktopInboxData";
+import { clearAllCostDrafts } from "../../lib/costMatchingDraft";
+import { withWorkspaceReset } from "../../lib/workspaceBackgroundTasks";
 import {
   validateWorkspaceBackupPayload,
   WORKSPACE_BACKUP_FORMAT,
@@ -298,6 +301,16 @@ export async function restoreWorkspaceSyncRecoveryPayload(payload, restoredBy = 
 }
 
 export async function clearLocalWorkspaceData(clearedBy = "local-user") {
+  return withWorkspaceReset(async () => {
+    // Desktop requests/tasks live outside IndexedDB. Do not report an empty
+    // workspace while those histories can still be matched to a new ledger.
+    await clearDesktopInboxData();
+    clearAllCostDrafts();
+    await clearWorkspaceTables(clearedBy);
+  });
+}
+
+async function clearWorkspaceTables(clearedBy) {
   const clearedAt = new Date().toISOString();
   await db.transaction("rw", db.tables, async () => {
     for (const table of db.tables) await table.clear();

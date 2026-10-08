@@ -21,6 +21,7 @@ import { recoverCompleteErpCostDrafts } from "./lib/erpLegacyDraftRecovery";
 import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectionCaptureContext } from "./lib/selectionCaptureTransport";
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 import { syncErpCollectionAdoptions } from './lib/erpCollectionAdoption';
+import { runWorkspaceBackgroundTask } from './lib/workspaceBackgroundTasks';
 
 const CaptureQueue = lazy(() => import("./pages/CaptureQueue"));
 const DataSecurity = lazy(() => import("./pages/DataSecurity"));
@@ -104,7 +105,7 @@ export function createErpInboxPoller(options = {}) {
   return async () => {
     if (running || options.isDisposed?.()) return null;
     running = true;
-    try { return await runErpInboxCycle(options); }
+    try { return await runWorkspaceBackgroundTask(() => runErpInboxCycle(options)); }
     finally { running = false; }
   };
 }
@@ -136,7 +137,7 @@ function ErpInboxListener() {
     const pollCatalog = async () => {
       if (disposed || catalogRunning) return;
       catalogRunning = true;
-      try { await runErpCatalogInboxCycle({ isDisposed: () => disposed }); }
+      try { await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ isDisposed: () => disposed })); }
       finally { catalogRunning = false; }
     };
     void pollCatalog();
@@ -157,31 +158,33 @@ function SelectionCaptureListener() {
       if (disposed || running) return;
       running = true;
       try {
-        const context = await getActiveMemberContext();
-        await publishSelectionCaptureContext({
-          workspaceId: context.workspaceId,
-          memberId: context.memberId,
-          visibility: context.canSeeAllSelection ? "workspace" : "private",
-        });
-        const records = await pollSelectionCaptureInbox({
-          workspaceId: context.workspaceId,
-          memberId: context.memberId,
-          includeAll: context.canSeeAllSelection,
-          limit: 50,
-        });
-        for (const record of records) {
-          if (disposed) break;
-          const result = await receiveAndAcknowledgeInboxRecord({
-            record,
-            receive: () => receiveSelectionCaptureEnvelope({
-              envelope: record.envelope,
-              inboxRecord: record,
-              receivedVia: "local-http",
-            }),
-            acknowledge: () => acknowledgeSelectionCapture(record.deliveryId, { workspaceId: context.workspaceId }),
+        await runWorkspaceBackgroundTask(async () => {
+          const context = await getActiveMemberContext();
+          await publishSelectionCaptureContext({
+            workspaceId: context.workspaceId,
+            memberId: context.memberId,
+            visibility: context.canSeeAllSelection ? "workspace" : "private",
           });
-          window.dispatchEvent(new CustomEvent("shopeers:selection-capture-received", { detail: { ...result, deliveryId: record.deliveryId } }));
-        }
+          const records = await pollSelectionCaptureInbox({
+            workspaceId: context.workspaceId,
+            memberId: context.memberId,
+            includeAll: context.canSeeAllSelection,
+            limit: 50,
+          });
+          for (const record of records) {
+            if (disposed) break;
+            const result = await receiveAndAcknowledgeInboxRecord({
+              record,
+              receive: () => receiveSelectionCaptureEnvelope({
+                envelope: record.envelope,
+                inboxRecord: record,
+                receivedVia: "local-http",
+              }),
+              acknowledge: () => acknowledgeSelectionCapture(record.deliveryId, { workspaceId: context.workspaceId }),
+            });
+            window.dispatchEvent(new CustomEvent("shopeers:selection-capture-received", { detail: { ...result, deliveryId: record.deliveryId } }));
+          }
+        });
       } catch {
         // 本地采集服务未启动时保持静默，手工登记仍可继续使用。
       } finally {
@@ -211,11 +214,13 @@ function CloudSyncListener() {
       if (disposed || running) return;
       running = true;
       try {
-        const context = await getActiveMemberContext();
-        const result = await runSyncOnce({ workspaceId: context.workspaceId || DEFAULT_WORKSPACE_ID });
-        if (!disposed && result.status !== "idle") {
-          window.dispatchEvent(new CustomEvent("shopeers:sync-result", { detail: result }));
-        }
+        await runWorkspaceBackgroundTask(async () => {
+          const context = await getActiveMemberContext();
+          const result = await runSyncOnce({ workspaceId: context.workspaceId || DEFAULT_WORKSPACE_ID });
+          if (!disposed && result.status !== "idle") {
+            window.dispatchEvent(new CustomEvent("shopeers:sync-result", { detail: result }));
+          }
+        });
       } finally {
         running = false;
       }

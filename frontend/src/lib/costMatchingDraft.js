@@ -62,3 +62,11 @@ export function clearCostDraft(ledgerId, storage = browserStorage()) {
   if (!ledgerId || !storage) return;
   try { storage.removeItem(costDraftKey(ledgerId)); } catch { /* ignore storage errors */ }
 }
+
+export function clearAllCostDrafts(storage = browserStorage()) {
+  if (!storage) return;
+  const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
+  for (const key of keys) {
+    if (key?.startsWith(LEGACY_COST_DRAFT_PREFIX)) storage.removeItem(key);
+  }
+}

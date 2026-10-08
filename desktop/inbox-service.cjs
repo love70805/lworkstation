@@ -1,5 +1,6 @@
 const { spawn } = require("node:child_process");
 const http = require("node:http");
+const crypto = require("node:crypto");
 
 const DEFAULT_PORT = 8790;
 const MAX_RESTARTS = 3;
@@ -8,10 +9,11 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function requestJson({ port, path = "/erp/v1/status", timeoutMs = 1200, capability = "" }) {
+function requestJson({ port, path = "/erp/v1/status", timeoutMs = 1200, capability = "", method = "GET", body = null, extraHeaders = {} }) {
   return new Promise((resolve) => {
-    const headers = capability ? { authorization: `Bearer ${capability}` } : undefined;
-    const request = http.get({ host: "127.0.0.1", port, path, timeout: timeoutMs, headers }, (response) => {
+    const headers = { ...extraHeaders, ...(capability ? { authorization: `Bearer ${capability}` } : {}),
+      ...(body == null ? {} : { "content-type": "application/json" }) };
+    const request = http.request({ host: "127.0.0.1", port, path, method, timeout: timeoutMs, headers }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(chunk));
       response.on("end", () => {
@@ -22,6 +24,7 @@ function requestJson({ port, path = "/erp/v1/status", timeoutMs = 1200, capabili
     });
     request.on("timeout", () => request.destroy(new Error("timeout")));
     request.on("error", (error) => resolve({ reachable: false, error }));
+    request.end(body == null ? undefined : JSON.stringify(body));
   });
 }
 
@@ -93,6 +96,8 @@ function createInboxServiceController({
   let stopping = false;
   let restartCount = 0;
   let refreshPromise = null;
+  // This capability never enters the renderer or either extension's storage.
+  const resetCapability = crypto.randomBytes(32).toString("base64url");
   const intentionalChildren = new WeakSet();
   let state = {
     status: "stopped",
@@ -200,6 +205,7 @@ function createInboxServiceController({
         SHOPEERS_ERP_INBOX_PORT: String(port),
         SHOPEERS_ERP_INBOX_FILE: spoolPath,
         SHOPEERS_ERP_INBOX_CAPABILITY: capability,
+        SHOPEERS_INBOX_RESET_CAPABILITY: resetCapability,
       },
       stdio: "ignore",
       windowsHide: true,
@@ -304,11 +310,25 @@ function createInboxServiceController({
     if (wait) await Promise.race([exited, delay(timeoutMs)]);
   }
 
+  async function clearBusinessData() {
+    if (!child || child.exitCode !== null || state.ownership !== "managed" || state.status !== "online") {
+      throw new Error("本机收件服务尚未就绪，ERP 历史任务未清空，请重试。");
+    }
+    const result = await requestJson({ port, path: "/erp/v1/workspace-reset", method: "POST", body: {},
+      capability, timeoutMs: 60_000, extraHeaders: { "x-shopeers-reset-capability": resetCapability } });
+    if (!result.reachable || result.statusCode !== 200 || result.payload?.ok !== true) {
+      throw new Error(result.payload?.message || "ERP 历史任务及回传记录清理失败，请重试。");
+    }
+    await refresh();
+    return result.payload;
+  }
+
   return {
     start,
     stop,
     retry,
     refresh,
+    clearBusinessData,
     getState: () => ({ ...state }),
     getOwnedPid: () => child?.pid ?? null,
   };

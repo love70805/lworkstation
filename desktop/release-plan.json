@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "candidateOnly": true,
-  "integrationBranch": "codex/v048-ledger-movement-filter",
+  "integrationBranch": "codex/v049-local-reset-history",
   "requiredCommits": [
+    {
+      "module": "v0.4.9-local-workspace-and-desktop-history-reset",
+      "commit": "3260a0c291ac9e8d819c97707ff6c82bfdfa7c9e"
+    },
+    {
+      "module": "v0.4.8-verified-main-baseline",
+      "commit": "0f7c4d1"
+    },
     {
       "module": "v0.4.8-ledger-movement-and-profit-flow",
       "commit": "81af59d788d6ab094309858e4662971fae4332c2"

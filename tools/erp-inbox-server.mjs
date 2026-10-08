@@ -11,6 +11,7 @@ const port = Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790);
 const bindHost = "127.0.0.1";
 const spoolPath = process.env.SHOPEERS_ERP_INBOX_FILE || path.join(os.tmpdir(), "shopeers-erp-inbox.json");
 const inboxCapability = String(process.env.SHOPEERS_ERP_INBOX_CAPABILITY || "").trim();
+const resetCapability = String(process.env.SHOPEERS_INBOX_RESET_CAPABILITY || "").trim();
 const maxBytes = 25 * 1024 * 1024;
 const requestTtlMs = Math.max(Number(process.env.SHOPEERS_ERP_REQUEST_TTL_MS || 2 * 60 * 60 * 1000), 60_000);
 const extensionTtlMs = Math.max(Number(process.env.SHOPEERS_ERP_EXTENSION_TTL_MS || 90_000), 30_000);
@@ -33,6 +34,8 @@ const extensionHeartbeats = new Map();
 let taskHeartbeats = new Map();
 let leaseLoading;
 let leaseWriteChain = Promise.resolve();
+let workspaceResetRevision = 0;
+let resettingBusinessData = false;
 
 function loadTaskHeartbeats() {
   return leaseLoading ??= leaseStorage.read().then(records => {
@@ -40,13 +43,18 @@ function loadTaskHeartbeats() {
   }).catch(error => { leaseLoading = undefined; throw error; });
 }
 
-async function persistTaskHeartbeat(task) {
+async function persistTaskHeartbeat(task, revision) {
   const heartbeat = {
     kind: 'task-heartbeat', taskId: task.taskId, instanceId: task.instanceId,
     workspaceId: task.workspaceId, requestId: task.requestId, scopeHash: task.scopeHash,
     status: task.status, leaseExpiresAt: task.leaseExpiresAt, updatedAt: task.updatedAt,
   };
   const operation = leaseWriteChain.catch(() => {}).then(async () => {
+    const committed = await spoolStorage.read();
+    if (resettingBusinessData || revision !== workspaceResetRevision
+      || !committed.some(record => record.kind === 'collection-task' && record.taskId === task.taskId)) {
+      throw Object.assign(new Error('采集任务已清空，请新建任务。'), { code: 'ERP_TASK_NOT_FOUND', status: 404 });
+    }
     const next = new Map(taskHeartbeats);
     next.set(task.taskId, heartbeat);
     // A tiny atomic journal preserves renewed leases across crashes without
@@ -116,6 +124,33 @@ function authorized(req) {
 
 function unauthorized(res) {
   return json(res, 401, { error: "UNAUTHORIZED", message: "本机收件服务鉴权失败。" });
+}
+
+function authorizedReset(req) {
+  if (resetCapability.length < 32) return false;
+  const supplied = crypto.createHash("sha256").update(String(req.headers["x-shopeers-reset-capability"] || "")).digest();
+  const expected = crypto.createHash("sha256").update(resetCapability).digest();
+  return crypto.timingSafeEqual(supplied, expected);
+}
+
+async function clearBusinessRecords(records) {
+  resettingBusinessData = true;
+  workspaceResetRevision++;
+  try {
+    const runtimeKinds = new Set(['extension-status', 'selection-extension-status', 'selection-active-context']);
+    const retained = records.filter(record => runtimeKinds.has(record.kind));
+    await writeSpool(retained);
+    const clearLeases = leaseWriteChain.catch(() => {}).then(async () => {
+      await leaseStorage.write([]);
+      taskHeartbeats.clear();
+    });
+    leaseWriteChain = clearLeases;
+    await clearLeases;
+    latestTransportError = null;
+    return { ok: true, clearedCount: records.length - retained.length, clearedAt: new Date().toISOString() };
+  } finally {
+    resettingBusinessData = false;
+  }
 }
 
 function readBody(req) {
@@ -1013,6 +1048,10 @@ const server = http.createServer(async (req, res) => {
     // not block status polling or other completed requests.
     const payload = req.method === "POST" ? JSON.parse(await readBody(req)) : null;
     const route = new URL(req.url, `http://${bindHost}:${port}`).pathname;
+    if (route === '/erp/v1/workspace-reset' && !authorizedReset(req)) {
+      return json(res, 403, { error: 'WORKSPACE_RESET_FORBIDDEN', message: '仅允许桌面工作站清理本机收件数据。' });
+    }
+    const resetRevision = workspaceResetRevision;
     const extensionHeartbeat = req.method==='POST' && ['/erp/v1/extension-status','/selection/v1/extension-status'].includes(route);
     const taskHeartbeat = req.method==='POST' && /^\/erp\/v1\/collection-tasks\/[^/]+\/control$/.test(route) && payload?.action==='heartbeat';
     const runtimeOnly = req.method==='GET' || extensionHeartbeat || taskHeartbeat;
@@ -1027,11 +1066,14 @@ const server = http.createServer(async (req, res) => {
     const expiredChanged = expireRegisteredRequests(records);
     const recoveredTasks = recoverCollectionTasks(records, inboxInstanceId);
     if (!runtimeOnly && (expiredChanged || recoveredTasks)) await writeSpool(records);
+    if (route === '/erp/v1/workspace-reset' && req.method === 'POST') {
+      return json(res, 200, await clearBusinessRecords(records));
+    }
     const taskResponse = handleCollectionTaskRequest(records, { method: req.method, url: new URL(req.url, `http://${bindHost}:${port}`), payload: payload ?? {}, instanceId: inboxInstanceId });
     if (taskResponse) {
       if(taskHeartbeat) {
         const task=taskResponse.body.task;
-        await persistTaskHeartbeat(task);
+        await persistTaskHeartbeat(task, resetRevision);
       } else if (req.method === 'POST') await writeSpool(records);
       return json(res, taskResponse.status, taskResponse.body);
     }

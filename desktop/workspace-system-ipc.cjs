@@ -7,9 +7,18 @@ function isTrustedWorkspaceSender(event, contents, devUrl) {
     && isAllowedWorkspaceUrl(event.senderFrame?.url, devUrl));
 }
 
-function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecycle, dialog, devUrl, operations }) {
+function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecycle, dialog, devUrl, operations, clearInboxData }) {
   let activeEvent;
   const trusted = event => isTrustedWorkspaceSender(event, getContents(), devUrl);
+  ipcMain.handle('workspace:clear-inbox-data', async event => {
+    if (!trusted(event)) return { ok: false, error: '无效的工作站请求。' };
+    try {
+      if (!clearInboxData) throw new Error('桌面收件清理接口尚未就绪。');
+      return await clearInboxData();
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
   const save = createBackupSaver({
     showSaveDialog: options => dialog.showSaveDialog(getWindow(), options),
     isTrusted: () => trusted(activeEvent || {}), operations,

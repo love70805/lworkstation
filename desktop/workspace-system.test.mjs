@@ -37,10 +37,16 @@ try {
   const handlers = new Map();
   let dialogCalls = 0;
   let closeBehavior = 'tray';
+  let resetCalls = 0, resetFailure = false;
   const contents = { isDestroyed: () => false, mainFrame: { url: 'shopeers://workstation/data-security' } };
   registerWorkspaceSystemIpc({
     ipcMain: { handle: (name, callback) => handlers.set(name, callback) },
     getContents: () => contents, getWindow: () => ({}),
+    clearInboxData: async () => {
+      resetCalls++;
+      if (resetFailure) throw new Error('fixture inbox disk full');
+      return { ok: true, clearedCount: 4 };
+    },
     dialog: { showSaveDialog: async () => { dialogCalls++; return { canceled: true }; } },
     getLifecycle: () => ({ getState: () => ({ closeBehavior, trayAvailable: true }), setCloseBehavior: value => {
       if (!['tray', 'quit'].includes(value)) throw Error('invalid behavior');
@@ -51,16 +57,22 @@ try {
   for (const untrusted of [{ sender: {}, senderFrame: contents.mainFrame }, { sender: contents, senderFrame: { url: contents.mainFrame.url } }]) {
     assert.equal((await handlers.get('workspace:save-backup')(untrusted, input)).status, 'failed');
     assert.equal(handlers.get('workspace:set-close-behavior')(untrusted, 'quit').ok, false);
+    assert.equal((await handlers.get('workspace:clear-inbox-data')(untrusted)).ok, false);
   }
   contents.mainFrame.url = 'https://www.1688.com/';
   assert.equal((await handlers.get('workspace:save-backup')(event, input)).status, 'failed');
   assert.equal(dialogCalls, 0, 'untrusted senders never open a native dialog');
+  assert.equal((await handlers.get('workspace:clear-inbox-data')(event)).ok, false);
+  assert.equal(resetCalls, 0, 'remote origins and child frames cannot clear business data');
   contents.mainFrame.url = 'shopeers://workstation/diagnostics';
   assert.equal((await handlers.get('workspace:save-backup')(event, input)).status, 'canceled');
   assert.equal(handlers.get('workspace:get-close-behavior')(event).closeBehavior, 'tray');
   assert.equal(handlers.get('workspace:set-close-behavior')(event, 'quit').closeBehavior, 'quit');
   assert.equal(handlers.get('workspace:set-close-behavior')(event, 'invalid').ok, false);
   assert.equal(closeBehavior, 'quit');
+  assert.deepEqual(await handlers.get('workspace:clear-inbox-data')(event), { ok: true, clearedCount: 4 });
+  resetFailure = true;
+  assert.deepEqual(await handlers.get('workspace:clear-inbox-data')(event), { ok: false, error: 'fixture inbox disk full' });
 
   let trusted = true;
   const navigated = createBackupSaver({ isTrusted: () => trusted, showSaveDialog: async () => {

@@ -1,3 +1,7 @@
+## 0.4.9 清空本机核算历史（候选已验收）
+
+候选 `candidates/0.4.9/`，证据 `archive/local-reset-history/`。1340 测试、完整前端/ERP 与桌面门禁、开发/生产实际清空及重启/同月 CSV 重导入、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 f1ec19c；安装包 118775892 字节，SHA256 `0EA5F2632116A2D1B9F56994DB1F394F9768EB1F4547A36E31DCB53BBBC450CE`。PR #175 最终集成、稳定发布和公开回读另记；不自动安装或操作真实数据，见 [验收记录](../docs/RELEASE_0.4.9.md)。
+
 ## 0.4.8 自主筛选与利润引导（已公开）
 
 候选 `candidates/0.4.8/`，证据 `archive/ledger-movement-flow/`。1333 测试、完整前端/ERP 与桌面门禁、实际隔离台账/自主筛选/成本导航、生产 UI、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 373cdf0；安装包 118774638 字节，SHA256 `12BA2191E39CA19EAB813A5BA55ABC34C075EBF48D7ECCCDFDDB9D46C75D6E76`。[PR #173](https://github.com/love70805/lworkstation/pull/173) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37719306291) 通过，稳定标签固定 f534e9a，四公开资产匿名完整哈希及生产更新入口通过，已公开稳定 Latest。本机未安装，见 [发布记录](../docs/RELEASE_0.4.8.md)。
