@@ -1,3 +1,7 @@
+## 0.4.8 自主筛选与利润引导（候选验收通过）
+
+候选 `candidates/0.4.8/`，证据 `archive/ledger-movement-flow/`。1333 测试、完整前端/ERP 与桌面门禁、实际隔离台账/自主筛选/成本导航、生产 UI、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 373cdf0；安装包 118774638 字节，SHA256 `12BA2191E39CA19EAB813A5BA55ABC34C075EBF48D7ECCCDFDDB9D46C75D6E76`。尚待 CI/合并及公开回读，未安装，见 [候选记录](../docs/RELEASE_0.4.8.md)。
+
 ## 0.4.5 预存区分阶段建档（已公开）
 
 candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 verify、实际隔离导入/补齐/后台回传、6000 SKU 规模样本、隐藏 smoke 与 621 文件 / 574 输入一致性通过。软件源码 4bec063，稳定标签固定 764a08a；安装包 SHA256 6A76DA8E58A80289FCC864C43F8E9EB827B50E148880FD87AA494230B3DA00EE。PR #161 / 主线 CI、四公开资产匿名完整回读与生产更新入口通过，已公开稳定 Latest，见 [记录](../docs/RELEASE_0.4.5.md)。候选原件、源码标签与证据保存在本机 releases/candidates/0.4.5/、archive/release-0.4.5/；不自动安装或操作真实业务库。
