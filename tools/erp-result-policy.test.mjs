@@ -288,7 +288,7 @@ async function verifyLedgerScopedEvidenceDelivery() {
         lastError: null,
         sendMessage(message, callback) {
           sent.push(JSON.parse(JSON.stringify(message)));
-          callback(collectionReply(message, { ledgerPeriod }) || { ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
+          callback(collectionReply(message, { ledgerPeriod, expectedSkus: [{ platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }] }) || { ok: true, status: "success", resultDeliveryId: message.payload?.resultDeliveryId });
         },
       },
     };
@@ -306,7 +306,7 @@ async function verifyLedgerScopedEvidenceDelivery() {
           ? [...validDetails, ...invalid]
           : [detail("REGULAR-NEWEST", "2026-08-01 00:00:00")];
       } else if (url.pathname === "/purchase/product/v1/product-page") {
-        data = [];
+        data = [{ itemId: 'WH-MONTH' }];
       } else {
         assert.equal(url.pathname, "/purchase/product/v1/product-info-sku", "only fixture ERP endpoints are allowed");
         data = [{ associatedProductId: url.searchParams.get("productId"), platformSku: "SKU-MONTH", platformSkc: "SKC-MONTH" }];
@@ -326,6 +326,11 @@ async function verifyLedgerScopedEvidenceDelivery() {
       }
       const deliveries = sent.filter((message) => message.type === "shopeers.erp.submitCostResult");
       assert.equal(deliveries.length, ledgerPeriod ? 1 : 0, "only a bound collection reaches transport; unknown context remains a local preview");
+      if (!ledgerPeriod) {
+        assert.equal(fetchedOrders.length, 0, 'an unbound scope cannot read purchase evidence');
+        assert.equal(window.document.getElementById('erpa-export').disabled, true);
+        continue;
+      }
       assert.equal(fetchedOrders.length, mixedMonths ? 2 : 1);
       const payload = deliveries[0]?.payload || JSON.parse(window.localStorage.getItem('erpAssistantV8_latest_cost_result_v7'));
       assert.equal(payload.warehouseEvidence.warehouses.length, 1);

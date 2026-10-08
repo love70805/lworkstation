@@ -6,7 +6,7 @@ import { isDesktopRuntime } from "../lib/desktopRuntime";
 import { getErpExtensionStatus, getErpRequestHistory } from "../lib/erpInboxTransport";
 import { getActiveMemberContext } from "../data/database";
 
-export const ERP_ASSISTANT_VERSION = "8.0.37";
+export const ERP_ASSISTANT_VERSION = "8.0.38";
 export const extensionDownload = `/integrations/erp-assistant/ERP-Assistant-v${ERP_ASSISTANT_VERSION}-shopeers-bridge.zip`;
 export const extensionManagerUrl = "chrome://extensions/";
 
@@ -171,7 +171,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
         <Badge tone="neutral">仅限 Chrome</Badge>
       </div>
       <div className="erp-install-intro">
-        <p>{extensionStatus === "outdated" ? `检测到旧版 v${extension?.version}。请更新到 v${ERP_ASSISTANT_VERSION}，以使用当前的分页、进度和自动回传逻辑。` : "安装一次即可。以后从卓麟 ERP 的“采购管理”页执行查询，扩展会按平台 SKC 抓取采购记录、计算单件平均成本，并自动回传到利润核算。"}</p>
+        <p>{extensionStatus === "outdated" ? `检测到旧版 v${extension?.version}。请更新到 v${ERP_ASSISTANT_VERSION}，以使用当前的分页、进度和自动回传逻辑。` : "安装一次即可。以后从卓麟 ERP 的“采购管理”页执行查询，扩展会按台账已使用的平台 SKC 与 SKU 采集采购证据、计算单件平均成本，并自动回传到利润核算。"}</p>
         <div className="erp-install-actions">
           <a className="button button-primary" href={extensionDownload} download={`ERP-Assistant-v${ERP_ASSISTANT_VERSION}-shopeers-bridge.zip`}><Download size={17} /><span>{extensionStatus === "outdated" ? `下载 v${ERP_ASSISTANT_VERSION} 更新包` : "下载扩展包"}</span></a>
           <Button icon={Clipboard} onClick={copyManagerUrl}>复制扩展管理页地址</Button>

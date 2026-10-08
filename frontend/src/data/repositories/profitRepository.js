@@ -693,6 +693,12 @@ async function publishVerifiedErpCostBatch({
     deliveryId: manualDeliveryId,
     sentAt: publishedAt,
     transport: "manual-v2-import",
+  }, {
+    expectedWorkspaceId: workspaceId,
+    expectedLedgerId: ledgerId,
+    expectedRequestId: effectiveRequestId,
+    expectedPlatformSkcs: recordedRequest.platformSkcs,
+    expectedSkus: verifiedExpectedSkus,
   });
   let appliedInboxId = null;
   let adoptionSummary = null;

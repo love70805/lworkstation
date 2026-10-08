@@ -99,8 +99,10 @@ export function validateErpCatalogInboxEnvelope(value, { request = null, expecte
     const fields = normalizeErpCatalogFields(source);
     const sourceWarnings = unique(source?.sourceWarnings);
     const confirmed = trustedRequest?.confirmedSkus.find(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(platformSku));
+    if (input.platformScopePolicy === 'ledger_platform_pair' && trustedRequest && (!confirmed || canonicalPlatformSkc(confirmed.platformSkc) !== canonicalPlatformSkc(platformSkc))) throw new Error('ERP 精确资料采集超出已确认的平台 SKU/SKC 范围。');
     if (confirmed && canonicalPlatformSkc(confirmed.platformSkc) !== canonicalPlatformSkc(platformSkc)) sourceWarnings.push('catalog_identity_conflict:confirmed_skc');
     const mappings = normalizeErpCatalogMappings(fields.catalogMappings ?? [{ platformSku, platformSkc, warehouseSku }]);
+    if (input.platformScopePolicy === 'ledger_platform_pair' && trustedRequest && mappings.some(mapping => !trustedRequest.confirmedSkus.some(target => canonicalPlatformSku(target.platformSku) === canonicalPlatformSku(mapping.platformSku) && canonicalPlatformSkc(target.platformSkc) === canonicalPlatformSkc(mapping.platformSkc)))) throw new Error('ERP 精确资料档案包含范围外平台映射。');
     if (!mappings.some(mapping => mapping.platformSku && mapping.platformSkc && mapping.warehouseSku && canonicalPlatformSku(mapping.platformSku) === canonicalPlatformSku(platformSku) && canonicalPlatformSkc(mapping.platformSkc) === canonicalPlatformSkc(platformSkc) && canonicalWarehouseSku(mapping.warehouseSku) === canonicalWarehouseSku(warehouseSku))) throw new Error('ERP 资料行缺少准确对应的 SKC—SKU—仓库映射。');
     const row = { platformSku, platformSkc, warehouseSku, canonicalPlatformSku: canonicalPlatformSku(platformSku), canonicalPlatformSkc: canonicalPlatformSkc(platformSkc), canonicalWarehouseSku: canonicalWarehouseSku(warehouseSku), productName: optional(source?.productName ?? source?.name), supplierName: optional(source?.supplierName), supplier1688Url: normalizeErpCatalogUrl(source?.supplier1688Url), evidenceRef: evidenceRef(warehouseSku), ...fields, catalogMappings: mappings, sourceWarnings: unique(sourceWarnings) };
     const key = JSON.stringify(row);
@@ -112,6 +114,7 @@ export function validateErpCatalogInboxEnvelope(value, { request = null, expecte
   const coverage = normalizeErpCatalogCoverage(input.coverage);
   const catalog = { format: ERP_CATALOG_BATCH_FORMAT, formatVersion: ERP_CATALOG_VERSION, catalogVersion: ERP_CATALOG_VERSION, batchId: required(input.batchId, 'ERP 资料批次 ID'), workspaceId, ledgerId: optional(input.ledgerId), ledgerPeriod, requestId, generatedAt: timestamp(input.generatedAt, 'ERP 资料采集时间'), query: { unit: 'platform_skc', platformSkcs }, coverage, rows, warehouseEvidence, status: Object.values(coverage).every(group => group.state === 'complete') ? 'completed' : rows.length ? 'partial' : 'retry_required' };
   const deliveryId = required(value.deliveryId, 'ERP 资料投递 ID');
+  if (input.platformScopePolicy === 'ledger_platform_pair') catalog.platformScopePolicy = input.platformScopePolicy;
   return { envelope: { type: ERP_CATALOG_MESSAGE_TYPE, source: 'erp-assistant-v8', format: ERP_CATALOG_INBOX_FORMAT, formatVersion: ERP_CATALOG_VERSION, deliveryId, sentAt: timestamp(value.sentAt, 'ERP 资料投递时间'), transport: required(value.transport ?? 'local-http', 'ERP 资料传输方式'), catalog }, catalog, rows, warehouseEvidence, deliveryId, workspaceId, requestId };
 }
 

@@ -30,11 +30,14 @@ export async function verifyErpCatalogTransport({
   workspaceId = "workspace-catalog",
   ledgerId = "LEDGER-CATALOG",
   requestId = "REQ-CATALOG",
+  // Historical wide deliveries stay readable; strict collectors are tested explicitly.
+  legacyScope = true,
   includeConflict = true,
   includeCancelled = false,
   syntheticSpoolBytes = 0,
   expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }],
 } = {}) {
+  const sourceRoot = legacyScope ? path.join(workspaceRoot, 'frontend/public/integrations/erp-assistant/ERP-Assistant-v8.0.37-shopeers-bridge/src') : extensionRoot;
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lworkstation-erp-catalog-"));
   const spoolPath = path.join(temporaryRoot, "isolated-inbox.json");
   if (syntheticSpoolBytes > 0) {
@@ -94,7 +97,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: "8.0.37" }),
+        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.38' }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -106,7 +109,7 @@ export async function verifyErpCatalogTransport({
       crypto: { randomUUID, subtle: webcrypto.subtle }, fetch, setTimeout, clearTimeout,
       console: { error() {}, warn() {}, info() {} }, Date, Math, Promise,
     });
-    vm.runInContext(await fs.readFile(path.join(extensionRoot, "background.js"), "utf8"), worker);
+    vm.runInContext(await fs.readFile(path.join(sourceRoot, "background.js"), "utf8"), worker);
     const submitted = [], catalogSubmitted = [], submissionOrder = [];
     window = new Window({ url: erpUrl });
     window.document.body.innerHTML = '<table><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/999999999999.html">供应商甲</a></td></tr><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/888888888888.html">供应商甲</a></td></tr></table>';
@@ -170,7 +173,7 @@ export async function verifyErpCatalogTransport({
           purchasingLink1688: "https://detail.1688.com/offer/333333333333.html",
         })];
       } else if (url.pathname === "/purchase/product/v1/product-page") {
-        data = [];
+        data = [{ itemId: 'WH-CATALOG' }, { itemId: 'WH-BLUE' }];
       } else {
         assert.equal(url.pathname, "/purchase/product/v1/product-info-sku", "only observed read-only ERP endpoints can be queried");
         const warehouseSku = url.searchParams.get("productId");
@@ -183,7 +186,7 @@ export async function verifyErpCatalogTransport({
       if (url.pathname === "/purchase/product/v1/product-info-sku") data = data.map(item => ({ ...item, associatedProductId: url.searchParams.get("productId") }));
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     };
-    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) window.eval(await fs.readFile(path.join(extensionRoot, file), "utf8"));
+    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) window.eval(await fs.readFile(path.join(sourceRoot, file), "utf8"));
     window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", { detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-CATALOG" } }));
     window.document.getElementById("erpa-cost-trigger").click();
     for (let attempt = 0; attempt < 200 && !submitted.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -212,8 +215,8 @@ export async function verifyErpCatalogTransport({
     assert.equal(blue.imageUrl, "https://images.example.invalid/1688-blue.jpg", "the sole reliable warehouse mapping allows the 1688 picture fallback");
     assert.equal(red.attribute, "", "procurement specifications must never be turned into platform attributes");
     assert.equal(blue.attribute, "");
-    assert.equal(red.catalogMappings.length, includeConflict ? 2 : 1);
-    assert.equal(red.catalogMappings.some((mapping) => mapping.platformSkc === "SKC-CONFLICT"), includeConflict);
+    assert.equal(red.catalogMappings.length, legacyScope && includeConflict ? 2 : 1);
+    assert.equal(red.catalogMappings.some((mapping) => mapping.platformSkc === "SKC-CONFLICT"), legacyScope && includeConflict);
     assert.equal(red.catalogMappings[0].warehouseSku, "WH-CATALOG");
     assert.equal(red.catalogMappings[0].storeName, "店铺甲");
     assert.equal(red.catalogMappings[0].articleNumber, "GOODS-1");

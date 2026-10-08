@@ -14,7 +14,7 @@ const backgroundSource = await readFile(path.join(src, 'background.js'), 'utf8')
 const checkpointKey = 'shopeersErpCollectionCheckpointsV1';
 const sender = { url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId: 0 };
 sender.tab = { url: sender.url };
-const fresh = () => ({ requestId: 'ERP-REQ-RECOVERY', workspaceId: 'isolated-recovery', ledgerId: 'LEDGER-A', ledgerPeriod: '2026-08', registeredAt: '2026-08-01T00:00:00.000Z', status: 'registered', platformSkcs: ['SKC-A', 'SKC-B'], expectedSkus: [{ platformSkc: 'SKC-A', platformSku: 'SKU-A' }] });
+const fresh = () => ({ requestId: 'ERP-REQ-RECOVERY', workspaceId: 'isolated-recovery', ledgerId: 'LEDGER-A', ledgerPeriod: '2026-08', registeredAt: '2026-08-01T00:00:00.000Z', status: 'registered', platformSkcs: ['SKC-A', 'SKC-B'], expectedSkus: [{ platformSkc: 'SKC-A', platformSku: 'SKU-A' }, { platformSkc: 'SKC-B', platformSku: 'SKU-B' }] });
 const storage = { shopeersErpInboxBaseUrl: 'http://127.0.0.1:5397', shopeersErpInboxCapability: 'isolated-synthetic-capability-at-least-32-characters', shopeersErpWorkspaceId: 'isolated-recovery' };
 let request = fresh();
 // Chromium's extension storage serializes dictionaries in code-point key order,
@@ -29,7 +29,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, storageRoundTrip(structuredClone(values))); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.37' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.38' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -158,7 +158,7 @@ async function page({ cancel = false, mappingIncomplete = false, checkpointListD
       window.document.getElementById('erpa-cancel').click();
       return new Promise(() => {});
     }
-    const data = name === 'purchase-order-page' ? [{ purchaseOrderId: sku + '-ORDER' }] : name === 'purchase-order-details' ? [{ purchaseOrderDetailId: url.searchParams.get('purchaseOrderId'), itemId: url.searchParams.get('purchaseOrderId').toUpperCase().startsWith('SKC-A') ? 'WH-A' : 'WH-B', creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: 4 }] : [{ associatedProductId: url.searchParams.get('productId'), barcodeSkuid: url.searchParams.get('productId') === 'WH-A' ? 'SKU-A' : 'SKU-B', barcodeSkcid: url.searchParams.get('productId') === 'WH-A' ? 'SKC-A' : 'SKC-B' }];
+    const data = name === 'product-page' ? [{ itemId: url.searchParams.get('skuGroup').toUpperCase() === 'SKC-A' ? 'WH-A' : 'WH-B' }] : name === 'purchase-order-page' ? [{ purchaseOrderId: sku + '-ORDER' }] : name === 'purchase-order-details' ? [{ purchaseOrderDetailId: url.searchParams.get('purchaseOrderId'), itemId: url.searchParams.get('purchaseOrderId').toUpperCase().startsWith('SKC-A') ? 'WH-A' : 'WH-B', creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: 4 }] : [{ associatedProductId: url.searchParams.get('productId'), barcodeSkuid: url.searchParams.get('productId') === 'WH-A' ? 'SKU-A' : 'SKU-B', barcodeSkcid: url.searchParams.get('productId') === 'WH-A' ? 'SKC-A' : 'SKC-B' }];
     return { ok: true, status: 200, json: async () => ({ code: 0, count: mappingIncomplete && name === 'product-info-sku' ? data.length + 1 : data.length, data }) };
   };
   for (const file of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) window.eval(await readFile(path.join(src, file), 'utf8'));
@@ -284,10 +284,10 @@ request = fresh(); storage[checkpointKey] = []; api = background();
 const old30 = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
 storage[checkpointKey][0].extensionVersion = '8.0.30';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.30 checkpoint retained under 8.0.37');
+console.log('8.0.30 checkpoint retained under 8.0.38');
 storage[checkpointKey][0].extensionVersion = '8.0.31';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.31 checkpoint retained under 8.0.37 with current query validation');
+console.log('8.0.31 checkpoint retained under 8.0.38 with current query validation');
 
 // The production inbox contract returns identity objects, unlike legacy strings.
 request = { ...fresh(), platformSkcs: ['skc-a', 'SKC-B'].map(platformSkc => ({ platformSkc, canonicalPlatformSkc: platformSkc.toUpperCase() })) };
@@ -304,17 +304,21 @@ await objectTargets.window.happyDOM.close();
 console.log('Production identity-object request targets: exact ERP query values and nonempty cost delivery passed');
 storage[checkpointKey][0].extensionVersion = '8.0.32';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.32 object-target checkpoint remains recoverable under 8.0.37');
+console.log('8.0.32 object-target checkpoint remains recoverable under 8.0.38');
 
 storage[checkpointKey][0].extensionVersion = '8.0.33';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.33 checkpoint retained under 8.0.37 time-budget hotfix');
+console.log('8.0.33 checkpoint retained under 8.0.38 time-budget hotfix');
 storage[checkpointKey][0].extensionVersion = '8.0.34';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.34 checkpoint retained under 8.0.37 without assuming completed batches');
+console.log('8.0.34 checkpoint retained under 8.0.38 without assuming completed batches');
 storage[checkpointKey][0].extensionVersion = '8.0.35';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.35 checkpoint retained under 8.0.37 durable transport fix');
+console.log('8.0.35 checkpoint retained under 8.0.38 durable transport fix');
 storage[checkpointKey][0].extensionVersion = '8.0.36';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.36 checkpoint retained under 8.0.37 response-driven progress update');
+console.log('8.0.36 checkpoint retained under 8.0.38 response-driven progress update');
+
+storage[checkpointKey][0].extensionVersion = '8.0.37';
+assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
+console.log('8.0.37 checkpoint retained under 8.0.38 exact platform scope');

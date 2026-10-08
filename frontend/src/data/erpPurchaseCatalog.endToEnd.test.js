@@ -10,16 +10,18 @@ afterEach(async () => { db.close(); await db.delete(); });
 
 async function nativeCatalogDelivery(options = {}) {
   const ledger = await createOrGetMonthlyLedger({ period: "2026-09" });
-  const expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }];
+  const expectedSkus = options.expectedSkus || [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }];
   const request = buildErpCostRequest({ id: "REQ-NATIVE-CATALOG", workspaceId: ledger.workspaceId, ledgerId: ledger.id, platformSkcs: ["SKC-CATALOG"], expectedSkus, requestedAt: "2026-09-20T10:00:00.000Z", requestedBy: "catalog-test" });
   await saveErpCostRequest(request);
   // The ledger supplies only cost scope, with no product name, image or attribute.
   await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-RED", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 1, amount: 30 });
+  if (expectedSkus.some(item => item.platformSku === 'SKU-BLUE')) await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-BLUE", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 2, amount: 40 });
+  if (expectedSkus.some(item => item.platformSku === 'SKU-MISSING')) await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-MISSING", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 1, amount: 50 });
   const { batch, envelope } = await verifyErpCatalogTransport({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, expectedSkus, includeConflict: false, ...options });
   return { ledger, request, batch, envelope };
 }
 
-it('retains observed cancellation and normal status through actual extension, inbox, persisted reopen and formal/reference selection', async () => {
+it('preserves historical broad-scope deliveries through cancellation, persisted reopen and formal/reference selection', async () => {
   const { envelope } = await nativeCatalogDelivery({ includeCancelled: true });
   const receipt = await receiveErpCostInboxEnvelope({ envelope, receivedVia: 'isolated-cancelled-status-test' });
   expect(receipt.status, receipt.adoptionError).toBe('applied');
@@ -170,4 +172,26 @@ it("preserves auxiliary warehouse mapping failures without blocking the healthy 
   expect(editor.prefill.purchases).toHaveLength(3);
   expect(editor.prefill.purchases.every(row => row.warehouseSku === "WH-CATALOG")).toBe(true);
   expect(await db.products.count()).toBe(0);
+}, 20000);
+
+it('persists exact platform scope through the current extension, inbox, adoption and reopening', async () => {
+  const expectedSkus = ['RED', 'BLUE'].map(id => ({ platformSku: 'SKU-' + id, platformSkc: 'SKC-CATALOG' }));
+  const { envelope } = await nativeCatalogDelivery({ legacyScope: false, expectedSkus });
+  expect(envelope.batch.sourceMeta.platformScopePolicy).toBe('ledger_platform_pair');
+  expect(envelope.batch.rows.map(row => row.platformSku).sort()).toEqual(['SKU-BLUE', 'SKU-RED']);
+  const receipt = await receiveErpCostInboxEnvelope({ envelope, receivedVia: 'isolated-exact-platform-test' });
+  expect(receipt.status, receipt.adoptionError).toBe('applied');
+  db.close(); await db.open();
+  expect((await db.erpCostBatches.toArray())[0].sourceContract.sourceMeta.platformScopePolicy).toBe('ledger_platform_pair');
+  expect((await db.erpCostRows.toArray()).map(row => [row.platformSku, row.unitCost]).sort()).toEqual([['SKU-BLUE', 5], ['SKU-RED', 5]]);
+}, 20000);
+
+it('keeps a missing used pair unresolved while adopting other complete exact targets', async () => {
+  const expectedSkus = ['RED', 'BLUE', 'MISSING'].map(id => ({ platformSku: 'SKU-' + id, platformSkc: 'SKC-CATALOG' }));
+  const { envelope } = await nativeCatalogDelivery({ legacyScope: false, expectedSkus });
+  expect(envelope.batch.sourceMeta.mappingFailures).toContainEqual(expect.objectContaining({ platformSku: 'SKU-MISSING', platformSkc: 'SKC-CATALOG' }));
+  const receipt = await receiveErpCostInboxEnvelope({ envelope, receivedVia: 'isolated-exact-missing-test' });
+  expect(receipt.adoptionError).toBeUndefined();
+  expect(receipt.adoption.summary).toMatchObject({ adoptedCount: 2, evidenceIncompleteCount: 1, remainingCount: 1 });
+  expect((await db.erpCostRows.toArray()).map(row => row.platformSku).sort()).toEqual(['SKU-BLUE', 'SKU-RED']);
 }, 20000);

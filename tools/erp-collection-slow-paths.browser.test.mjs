@@ -17,16 +17,18 @@ const context = await browser.newContext({viewport:{width:1440,height:1000},redu
 const messages = [], requests = [], errors = []; let releaseDirectory;
 await context.exposeBinding('recordExtensionMessage',(_,message) => {
  messages.push(message);
- return collectionReply(message, { platformSkcs: ['SKC-A'] }) || (message.type==='shopeers.erp.catalogContext' ? {ok:true,request:{requestId:'CAT-UI',platformSkcs:['SKC-A']}} : {ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId});
+ return collectionReply(message, { platformSkcs: ['SKC-A'], expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] }) || (message.type==='shopeers.erp.catalogContext' ? {ok:true,request:{requestId:'CAT-UI',platformSkcs:['SKC-A'],expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A'},{platformSku:'SKU-B',platformSkc:'SKC-A'}]}} : {ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId});
 });
 await context.addInitScript({content:`window.chrome={runtime:{lastError:null,sendMessage(message,callback){window.recordExtensionMessage(message).then(callback)}}};\n${source}`});
 await context.route('https://www.zhuolinkeji.cn/**',async route=>{
  const url=new URL(route.request().url());
  if(!url.pathname.startsWith('/purchase/')) {await route.fulfill({contentType:'text/html',body:`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>${css}</style><body><h1>隔离 ERP 采购管理</h1></body></html>`});return;}
  requests.push(url.pathname); let data;
- if(url.pathname.endsWith('purchase-order-page'))data=[{purchaseOrderId:'PO-A'}];
+ if(url.pathname.endsWith('purchase-order-page')&&url.searchParams.get('sku')==='WH-B'){await new Promise(resolve=>{releaseDirectory=resolve});data=[];}
+ else if(url.pathname.endsWith('purchase-order-page'))data=[{purchaseOrderId:'PO-A'}];
  else if(url.pathname.endsWith('purchase-order-details'))data=[{purchaseOrderDetailId:'D-A',itemId:'WH-A',tradeName:'合成中文商品',creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}];
- else if(url.pathname.endsWith('product-info-sku'))data=[{associatedProductId:'WH-A',barcodeSkcid:'SKC-A',barcodeSkuid:'SKU-A'}];
+ else if(url.pathname.endsWith('product-info-sku'))data=[{associatedProductId:url.searchParams.get('productId'),barcodeSkcid:'SKC-A',barcodeSkuid:url.searchParams.get('productId')==='WH-A'?'SKU-A':'SKU-B'}];
+ else if(url.searchParams.get('skuGroup')==='SKC-A')data=[{itemId:'WH-A'},{itemId:'WH-B'}];
  else {await new Promise(resolve=>{releaseDirectory=resolve});data=[];}
  await route.fulfill({contentType:'application/json',body:JSON.stringify({code:0,count:data.length,data})});
 });

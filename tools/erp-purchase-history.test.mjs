@@ -38,7 +38,7 @@ const mappings = ['ORANGE','WHITE','HOOK'].map(key=>({associatedProductId:'WH-'+
 async function replay(period, queryRange, { status = '4', paged = false, incomplete = false, emptyScope = false } = {}) {
  const window = new Window({url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html'});
  const messages=[],requests=[];
- window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(structuredClone(message));callback(collectionReply(message,{ledgerPeriod:period}) || (message.type==='shopeers.erp.catalogContext'?{ok:false,message:'isolated observation'}:{ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId}));}}};
+ window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(structuredClone(message));callback(collectionReply(message,{ledgerPeriod:period, expectedSkus: mappings.map(m => ({ platformSku: m.barcodeSkuid, platformSkc: m.barcodeSkcid }))}) || (message.type==='shopeers.erp.catalogContext'?{ok:false,message:'isolated observation'}:{ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId}));}}};
  window.fetch=async raw=>{
   const url=new URL(raw), endpoint=url.pathname.split('/').at(-1);requests.push({endpoint,params:Object.fromEntries(url.searchParams)});
   let data, count;
@@ -62,7 +62,7 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
   for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(await readFile(path.join(process.env.ERP_TEST_SOURCE_ROOT || path.join(root,'integrations/erp-assistant-extension/src'),name),'utf8'));
   window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku='+ (emptyScope ? '' : 'SKC-TARGET') +'&storeId=STORE-TARGET&createTimePeriod=2026-09&supplierName=display-filter&orderNo=display-filter&purchaseStatus=7&queryRange='+queryRange}}));
   window.document.getElementById('erpa-cost-trigger').click();
-  const until=Date.now()+8000;while(!messages.some(m=>m.type==='shopeers.erp.submitCostResult')){if(emptyScope && window.document.body.textContent.includes('采购历史缺少商品范围')) { assert.equal(requests.length,0);return { emptyScopeRejected: true }; } if(Date.now()>until)throw new Error(window.document.body.textContent);await new Promise(r=>setTimeout(r,10));}
+  const until=Date.now()+8000;while(!messages.some(m=>m.type==='shopeers.erp.submitCostResult')){if(emptyScope && window.document.getElementById('erpa-error').classList.contains('erpa-visible')) { assert.equal(requests.length,0);return { emptyScopeRejected: true }; } if(Date.now()>until)throw new Error(window.document.body.textContent);await new Promise(r=>setTimeout(r,10));}
   const payload=messages.find(m=>m.type==='shopeers.erp.submitCostResult').payload;
   return {period,queryRange,meta:payload.meta,rows:payload.results.map(r=>({warehouseSku:r.warehouseSku,unitCost:r.unitCost,previewStatus:r.previewStatus,selectedRecordIds:r.selectedRecordIds,totalQuantity:r.totalQuantity,totalPrice:r.totalPrice})),warehouseEvidence:payload.warehouseEvidence,requests};
  }finally{await window.happyDOM.close();}

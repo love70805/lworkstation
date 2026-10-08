@@ -32,7 +32,7 @@ function cachedResult(text) {
   };
 }
 
-async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion = 5, fetchImpl, ledgerPeriod = "2026-08" } = {}) {
+async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion = 5, fetchImpl, ledgerPeriod = "2026-08", expectedSkus = [] } = {}) {
   const window = new Window({ url: erpUrl });
   const downloads = [];
   const deliveries = [];
@@ -49,7 +49,7 @@ async function loadExtension(extensionRoot, { cache, legacyCache, legacyVersion 
   };
   window.ShopeersErpDeliveryBridge = {
     reportStatus: async () => {},
-    previewContext: async () => collectionReply({ type: 'shopeers.erp.previewContext' }, { ledgerPeriod }),
+    previewContext: async () => collectionReply({ type: 'shopeers.erp.previewContext' }, { ledgerPeriod, expectedSkus }),
     collectionCheckpoint: async payload => collectionReply({ type: 'shopeers.erp.collectionCheckpoint', payload }, { ledgerPeriod }),
     submit: async (payload) => { deliveries.push(payload); return { status: "success" }; },
   };
@@ -202,6 +202,7 @@ async function verifyCalculatedCsv(extensionRoot) {
   const originalDetailJson = JSON.stringify(originalDetail);
   const requests = [];
   const extension = await loadExtension(extensionRoot, {
+    expectedSkus: [{ platformSku: 'SKU-CSV', platformSkc: 'SKC-CSV' }],
     fetchImpl: async (url) => {
       const endpoint = new URL(url).pathname;
       requests.push(endpoint);
@@ -209,7 +210,7 @@ async function verifyCalculatedCsv(extensionRoot) {
         "/purchase/purchase/v1/purchase-order-page": [{ purchaseOrderId: "PO-CSV", purchaseOrderNo: "=1+1", supplierName: "+供应商" }],
         "/purchase/purchase/v1/purchase-order-details": [originalDetail],
         "/purchase/product/v1/product-info-sku": [{ associatedProductId: new URL(url).searchParams.get("productId"), platformSku: "SKU-CSV", platformSkc: "SKC-CSV" }],
-        "/purchase/product/v1/product-page": [],
+        "/purchase/product/v1/product-page": [{ itemId: 'WH-CSV' }],
       }[endpoint];
       assert.ok(data, `only fixture ERP endpoints are allowed: ${endpoint}`);
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
@@ -225,9 +226,9 @@ async function verifyCalculatedCsv(extensionRoot) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
-    assert.equal(requests.length, 3, "cost completion needs only list, details and mapping; optional catalog is independent");
+    assert.equal(requests.length, 4, "cost verifies directory and mapping before reading scoped purchase evidence");
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.37");
+    assert.equal(delivery.meta.extensionVersion, "8.0.38");
     assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
@@ -278,6 +279,7 @@ async function verifyChronologicalPreview(extensionRoot) {
     }));
     const originalFixtures = JSON.stringify(fixtures);
     const extension = await loadExtension(extensionRoot, {
+      expectedSkus: [{ platformSku: 'SKU-CHRONO', platformSkc: 'SKC-CHRONO' }],
       fetchImpl: async (rawUrl) => {
         const url = new URL(rawUrl);
         let data;
@@ -288,7 +290,7 @@ async function verifyChronologicalPreview(extensionRoot) {
           assert.ok(fixture, "only synthetic purchase orders may be fetched");
           data = [fixture.detail];
         } else if (url.pathname === "/purchase/product/v1/product-page") {
-          data = [];
+          data = [{ itemId: 'WH-CHRONO' }];
         } else {
           assert.equal(url.pathname, "/purchase/product/v1/product-info-sku");
           data = [{ associatedProductId: url.searchParams.get("productId"), platformSku: "SKU-CHRONO", platformSkc: "SKC-CHRONO" }];
@@ -365,11 +367,11 @@ async function verifyLedgerPreview(extensionRoot) {
     { detailId: 'JUNE', creationTime: '2026-06-21 10:00:00', purchaseQuantity: '500', purchaseUnitPrice: '.106' },
   ].map(record => ({ ...record, itemId: 'WH-MONTH', tradeName: '月份测试' }));
   let savedCache;
-  for (const ledgerPeriod of ['2026-08', '2026-05', null]) {
-    const extension = await loadExtension(extensionRoot, { ledgerPeriod, fetchImpl: async rawUrl => {
+  for (const ledgerPeriod of ['2026-08', '2026-05']) {
+    const extension = await loadExtension(extensionRoot, { ledgerPeriod, expectedSkus: [{ platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }], fetchImpl: async rawUrl => {
       const url = new URL(rawUrl);
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-MONTH', purchaseOrderNo: 'PO-MONTH' }]
-        : url.pathname.endsWith('purchase-order-details') ? records : url.pathname.endsWith('product-page') ? [] : [{ associatedProductId: url.searchParams.get('productId'), platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }];
+        : url.pathname.endsWith('purchase-order-details') ? records : url.pathname.endsWith('product-page') ? [{ itemId: 'WH-MONTH' }] : [{ associatedProductId: url.searchParams.get('productId'), platformSku: 'SKU-MONTH', platformSkc: 'SKC-MONTH' }];
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     } });
     try {

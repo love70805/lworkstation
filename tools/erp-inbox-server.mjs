@@ -196,6 +196,18 @@ function normalizedExpectedSkus(values, { strict = false } = {}) {
   return result;
 }
 
+function assertExactPlatformScope(rows, request, querySkcs, policy) {
+  if (policy !== "ledger_platform_pair") return;
+  const expected = normalizedExpectedSkus(request?.expectedSkus);
+  const skcs = querySkcSet(querySkcs);
+  if (!expected.size) throw invalidInbox("ERP 精确采集缺少已登记的平台 SKU/SKC 范围。");
+  const matches = row => expected.get(canonicalSku(row?.platformSku))?.canonicalPlatformSkc === canonicalSku(row?.platformSkc) && skcs.has(canonicalSku(row?.platformSkc));
+  for (const row of rows) {
+    if (row.catalogMappings != null && !Array.isArray(row.catalogMappings)) throw invalidInbox("ERP 精确采集的档案映射必须为数组。");
+    if (!matches(row) || (row.catalogMappings || []).some(mapping => !matches(mapping))) throw invalidInbox("ERP 精确采集包含范围外平台 SKU/SKC 或档案映射。");
+  }
+}
+
 function classifyLedgerScopeRow(row, request, queriedSkcs) {
   const platformSku = String(row?.platformSku ?? "").trim();
   const platformSkc = String(row?.platformSkc ?? "").trim();
@@ -459,7 +471,7 @@ function sanitizeWarehouseEvidence(value, warehouseSkus = [], rowWarningsBySku =
   const globalWarnings = [
     ...(Array.isArray(value?.detailFailures) ? value.detailFailures : []).map((item) => `detail_failure:${item?.purchaseOrderId ?? item?.message ?? "unknown"}`),
     ...(Array.isArray(value?.mappingFailures) ? value.mappingFailures : [])
-      .filter((item) => !item?.warehouseSku)
+      .filter((item) => !item?.warehouseSku && !item?.platformSku)
       .map((item) => `mapping_failure:${item?.message ?? "unknown"}`),
   ];
   const bySku = new Map(source.map((entry) => [canonicalSku(entry?.warehouseSku), entry]));
@@ -517,7 +529,7 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
   expectedRows = null,
   expectedSkus = null,
 } = {}) {
-  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount"];
+  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount"];
   const topLevelWarnings = sourceWarningsContract(meta, { strict: strictSourceWarnings });
   const evidenceByRef = new Map(warehouseEvidence.map((entry) => [entry.evidenceRef, entry]));
   const expectedScope = normalizedExpectedSkus(expectedSkus);
@@ -540,7 +552,7 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
     const value = optionalNumber(meta?.[field]);
     if (value != null && value >= 0) result[field] = value;
   }
-  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku"]) {
+  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "platformScopePolicy", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku"]) {
     const value = String(meta?.[field] ?? "").trim();
     if (value) result[field] = value;
   }
@@ -582,6 +594,7 @@ function sanitizeDirectBatch(batch, {
         sourceWarnings: ["evidence_only_warehouse_sku"],
       })),
   ];
+  assertExactPlatformScope(inputRows, request, querySkcs, strippedBatch.sourceMeta?.platformScopePolicy);
   const rows = inputRows.map((row, index) => {
     const warehouseSku = String(row?.warehouseSku ?? "").trim();
     const scope = classifyLedgerScopeRow(row, request, queriedSkcs);
@@ -636,7 +649,10 @@ function sanitizeDirectBatch(batch, {
     .filter((item) => !matchedExpectedSkus.has(item.canonicalPlatformSku))
     .map((item) => `mapping_failure:missing_expected_platform_sku:${item.platformSku}`);
   if (missingExpectedWarnings.length > 0) {
-    sourceMeta.sourceWarnings = uniqueStrings([...(sourceMeta.sourceWarnings ?? []), ...missingExpectedWarnings]);
+    if (sourceMeta.platformScopePolicy === 'ledger_platform_pair') {
+      const failures = sourceMeta.mappingFailures || [];
+      sourceMeta.mappingFailures = [...failures, ...[...expectedBySku.values()].filter(item => !matchedExpectedSkus.has(item.canonicalPlatformSku) && !failures.some(failure => canonicalSku(failure.platformSku) === item.canonicalPlatformSku)).map(item => ({ platformSku: item.platformSku, platformSkc: item.platformSkc, message: '目标平台 SKU/SKC 映射未确认' }))];
+    } else sourceMeta.sourceWarnings = uniqueStrings([...(sourceMeta.sourceWarnings ?? []), ...missingExpectedWarnings]);
     sourceMeta.evidenceComplete = false;
   }
   return {
@@ -1247,7 +1263,7 @@ const server = http.createServer(async (req, res) => {
       const warehouseScope = new Set((payload?.rows ?? []).map(row => canonicalSku(row?.warehouseSku)).filter(Boolean));
       if (rawEvidence.some(entry => !warehouseScope.has(entry.canonicalWarehouseSku))) return json(res, 400, { error: 'INVALID_ERP_EVIDENCE', message: '资料采购证据超出已确认仓库映射。' });
       const now = new Date().toISOString();
-      const envelope = buildErpCatalogInboxEnvelope({ deliveryId: 'ERP-CATALOG-DELIVERY-' + crypto.randomUUID(), sentAt: now, catalog: { batchId: 'ERP-CATALOG-BATCH-' + crypto.randomUUID(), workspaceId: request.workspaceId, requestId: request.requestId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, generatedAt: now, query: { unit: 'platform_skc', platformSkcs: payload?.querySkcs }, rows: stripExtensionDecisions(payload?.rows ?? []), warehouseEvidence: sanitizeWarehouseEvidence(stripExtensionDecisions(payload?.warehouseEvidence ?? []), (payload?.rows ?? []).map(row => row?.warehouseSku).filter(Boolean)), coverage: payload?.catalogCoverage } }, { request: request.catalogRequest });
+      const envelope = buildErpCatalogInboxEnvelope({ deliveryId: 'ERP-CATALOG-DELIVERY-' + crypto.randomUUID(), sentAt: now, catalog: { batchId: 'ERP-CATALOG-BATCH-' + crypto.randomUUID(), workspaceId: request.workspaceId, requestId: request.requestId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, generatedAt: now, platformScopePolicy: payload?.platformScopePolicy, query: { unit: 'platform_skc', platformSkcs: payload?.querySkcs }, rows: stripExtensionDecisions(payload?.rows ?? []), warehouseEvidence: sanitizeWarehouseEvidence(stripExtensionDecisions(payload?.warehouseEvidence ?? []), (payload?.rows ?? []).map(row => row?.warehouseSku).filter(Boolean)), coverage: payload?.catalogCoverage } }, { request: request.catalogRequest });
       records.push({ kind: 'catalog-batch', resultDeliveryId, resultInputHash: inputHash, deliveryId: envelope.deliveryId, batchId: envelope.catalog.batchId, workspaceId: request.workspaceId, requestId: request.requestId, receivedAt: now, status: 'pending', envelope });
       await writeSpool(records);
       return json(res, 202, { accepted: true, idempotent: false, deliveryId: envelope.deliveryId, batchId: envelope.catalog.batchId, envelope });
@@ -1439,6 +1455,7 @@ const server = http.createServer(async (req, res) => {
       if (!request) return json(res, 409, { error: "ERP_REQUEST_NOT_FOUND", message: "没有可关联的 Lworkstation ERP 成本请求。" });
       const queriedSkcs = requestSkcSet(request);
       const expectedBySku = normalizedExpectedSkus(request.expectedSkus);
+      assertExactPlatformScope(rawRows, request, querySkcs, (payload.sourceMeta ?? payload.meta)?.platformScopePolicy);
       const rows = rawRows.map((rawRow, index) => {
         const row = stripExtensionDecisions(rawRow);
         const platformSku = String(row?.platformSku ?? "").trim();
@@ -1496,7 +1513,10 @@ const server = http.createServer(async (req, res) => {
         .filter((item) => !matchedExpectedSkus.has(item.canonicalPlatformSku))
         .map((item) => `mapping_failure:missing_expected_platform_sku:${item.platformSku}`);
       if (missingExpectedWarnings.length > 0) {
-        sourceMeta.sourceWarnings = uniqueStrings([...(sourceMeta.sourceWarnings ?? []), ...missingExpectedWarnings]);
+        if (sourceMeta.platformScopePolicy === 'ledger_platform_pair') {
+      const failures = sourceMeta.mappingFailures || [];
+      sourceMeta.mappingFailures = [...failures, ...[...expectedBySku.values()].filter(item => !matchedExpectedSkus.has(item.canonicalPlatformSku) && !failures.some(failure => canonicalSku(failure.platformSku) === item.canonicalPlatformSku)).map(item => ({ platformSku: item.platformSku, platformSkc: item.platformSkc, message: '目标平台 SKU/SKC 映射未确认' }))];
+    } else sourceMeta.sourceWarnings = uniqueStrings([...(sourceMeta.sourceWarnings ?? []), ...missingExpectedWarnings]);
         sourceMeta.evidenceComplete = false;
       }
       const batchId = `ERP-BATCH-${Date.now()}-${Math.random().toString(16).slice(2)}`;
