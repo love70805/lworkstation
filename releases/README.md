@@ -1,6 +1,6 @@
-## 0.4.9 清空本机核算历史（候选已验收）
+## 0.4.9 清空本机核算历史（已公开）
 
-候选 `candidates/0.4.9/`，证据 `archive/local-reset-history/`。1340 测试、完整前端/ERP 与桌面门禁、开发/生产实际清空及重启/同月 CSV 重导入、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 f1ec19c；安装包 118775892 字节，SHA256 `0EA5F2632116A2D1B9F56994DB1F394F9768EB1F4547A36E31DCB53BBBC450CE`。PR #175 最终集成、稳定发布和公开回读另记；不自动安装或操作真实数据，见 [验收记录](../docs/RELEASE_0.4.9.md)。
+候选 `candidates/0.4.9/`，证据 `archive/local-reset-history/`。1340 测试、完整前端/ERP 与桌面门禁、开发/生产实际清空及重启/同月 CSV 重导入、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 f1ec19c；安装包 118775892 字节，SHA256 `0EA5F2632116A2D1B9F56994DB1F394F9768EB1F4547A36E31DCB53BBBC450CE`。[PR #175](https://github.com/love70805/lworkstation/pull/175) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37724384103) 通过，稳定标签固定 ce5047a，四公开资产匿名完整哈希及生产更新入口通过，已公开稳定 Latest。本机未安装、真实数据未改写，见 [发布记录](../docs/RELEASE_0.4.9.md)。
 
 ## 0.4.8 自主筛选与利润引导（已公开）
 
@@ -36,7 +36,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.8](https://github.com/love70805/lworkstation/releases/tag/v0.4.8)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.9](https://github.com/love70805/lworkstation/releases/tag/v0.4.9)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 

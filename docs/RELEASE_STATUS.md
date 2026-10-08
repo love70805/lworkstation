@@ -2,7 +2,11 @@
 
 更新时间：2026-10-08
 
-## 当前公开稳定 Latest：0.4.8
+## 当前公开稳定 Latest：0.4.9
+
+[v0.4.9](https://github.com/love70805/lworkstation/releases/tag/v0.4.9) 固定 ce5047a，修复清空本机数据后旧 ERP 核算任务、回传、租约与成本草稿残留。1340 测试、完整门禁、开发/生产实际清空与重启/同月重导入、隐藏 smoke、636 文件/589 输入一致性通过；候选 SHA256 `0EA5F263…`，源码 f1ec19c。[PR #175](https://github.com/love70805/lworkstation/pull/175) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37724384103) 通过，四公开资产匿名完整哈希及生产更新入口通过。ERP Assistant 保持 8.0.36；本机未自动安装，真实数据未改写，见 [发布记录](RELEASE_0.4.9.md)。
+
+## 历史公开稳定版：0.4.8
 
 [v0.4.8](https://github.com/love70805/lworkstation/releases/tag/v0.4.8) 固定 f534e9a，恢复台账自主筛选、默认纳入 POP 签收，导入完成优先引导本月正式成本与利润，预存资料默认收起。1333 测试、完整门禁、隔离原表与开发/生产操作、隐藏 smoke、636 文件/589 输入一致性通过；候选 SHA256 `12BA2191…`，源码 373cdf0。[PR #173](https://github.com/love70805/lworkstation/pull/173) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37719306291) 通过，四公开资产匿名完整哈希及生产更新入口通过。ERP Assistant 保持 8.0.36；不自动安装或改写真实业务库，见 [发布记录](RELEASE_0.4.8.md)。
 

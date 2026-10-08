@@ -1,6 +1,6 @@
 # 0.4.9 清空本机数据与历史核算残留
 
-2026-10-08：候选验收通过，待完成主线集成、稳定公开发布和四资产回读。本机不自动安装，不操作真实业务数据。
+2026-10-08：[v0.4.9](https://github.com/love70805/lworkstation/releases/tag/v0.4.9) 已公开为稳定 Latest，标签固定 `ce5047ade12001239b2661e3dfe8d97dde7aa0fa`；[PR #175](https://github.com/love70805/lworkstation/pull/175) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37724384103) 通过，四公开资产匿名完整回读和生产更新入口验证通过。本机未自动安装，真实业务数据未改写。
 
 ## 修复
 
@@ -24,4 +24,12 @@ ERP/1688 登录会话、桌面偏好、更新设置和外部备份保持。没�
 
 安装包 118,775,892 字节；SHA256：`0EA5F2632116A2D1B9F56994DB1F394F9768EB1F4547A36E31DCB53BBBC450CE`。
 
-契约见 [本机清空修复](integration/LOCAL_WORKSPACE_RESET_0.4.9.md)。[PR #175](https://github.com/love70805/lworkstation/pull/175) 初始必需 CI 已通过；最终提交与主线 CI、标签及公开资产回读另记。
+契约见 [本机清空修复](integration/LOCAL_WORKSPACE_RESET_0.4.9.md)。ERP Assistant 保持 8.0.36；修复不依赖重新登录或重新安装扩展。
+
+## 公开发布
+
+公开时间：2026-10-08T03:53:08Z（北京时间 11:53）。公开资产为 `Lworkstation-Setup-0.4.9.exe`、同名 blockmap、`latest.yml` 和 `SHA256.txt`；匿名完整回读的 SHA256、长度及 GitHub digest 均与本机公开原件一致，安装包 SHA512 与更新元数据一致。生产 GitHub provider 返回 0.4.9，解析后的实际下载 URL 回读同一安装包；稳定 0.4.8 可升级，0.4.9 不重复升级，Beta/RC 通道保持隔离，检查更新不会自动下载或退出时安装。
+
+发布标签与候选构建源码 `f1ec19c` 仅有验收文档差异，589 项生产输入未变；没有重复构建候选。公开原件及回读证据位于 `archive/local-reset-history/public-assets/`、`public-readback.json`；候选原件及实际用户路径证据保留在当前托管工作树。
+
+升级本身不会清空已有数据。需要彻底清空时，先备份需要保留的资料，再在新版本的数据安全入口明确确认“清空本机数据”；这会清空本应用的所有本机工作区业务记录。
