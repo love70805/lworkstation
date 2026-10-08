@@ -1,6 +1,6 @@
 # 0.4.10 ERP 实际进度与批次原因
 
-2026-10-08：候选验收通过，等待 PR、主线 CI 和公开发布；当前稳定 Latest 仍为 0.4.9。本机未安装、真实业务数据未改写。
+2026-10-08 14:51:38（UTC+8）：[v0.4.10](https://github.com/love70805/lworkstation/releases/tag/v0.4.10) 已公开为稳定 Latest，四公开资产及生产更新入口回读通过。本机未安装、真实业务数据未改写。
 
 ## 改动
 
@@ -23,4 +23,17 @@
 
 候选 `releases/candidates/0.4.10/`，原始证据 `archive/erp-progress/`。安装包 118924372 字节，SHA256 `5D3FCF3989077C7DEB868876D1E3E7380834911135B192284EDFC33986C555AF`。
 
-契约见 [ERP 进度](integration/ERP_PROGRESS_0.4.10.md)。公开状态、标签和资产回读在完成后单独记录。
+契约与只读现场诊断见 [ERP 进度](integration/ERP_PROGRESS_0.4.10.md)。本次未重新触发真实 ERP 采集；最新现有任务的成本已全部送达，第 2/3 批分别有 4/1 项成本平台映射不完整，采购明细失败均为零，资料映射另有 6/1 项缺口。新界面显示原因，缺失 ERP 资料仍需补齐后重试。
+
+## 集成与公开发布
+
+[PR #177](https://github.com/love70805/lworkstation/pull/177) 两项必需检查及[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37739497593) 通过。稳定标签 `v0.4.10` 固定 `593197967aedf528787f386119bc6c849951608d`，合并树与通过候选验收的代码树一致；后续发布记录提交不改变安装包源码或标签。
+
+先以草稿上传安装包、blockmap、latest.yml 和 SHA256.txt，核对 GitHub 资产大小及 SHA256 后公开。公开时间 `2026-10-08T06:51:38Z`，非草稿、非预发布；随后匿名完整读取四项资产，其字节数与哈希均匹配候选。生产 electron-updater provider 从稳定 0.4.9 发现 0.4.10 并解析真实安装包地址；同版本不更新，Beta/RC 不跨入稳定通道。证据为 `archive/erp-progress/public-readback.json` 和对应日志。
+
+| 公开资产 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| Lworkstation-Setup-0.4.10.exe | 118924372 | `5D3FCF3989077C7DEB868876D1E3E7380834911135B192284EDFC33986C555AF` |
+| Lworkstation-Setup-0.4.10.exe.blockmap | 125275 | `999967974FB0C4BDFE750E50390377EBC30AD5FFA68ABAF7D1009814592FAFC2` |
+| latest.yml | 356 | `400C5A4D146BC1BFAC4487FAE3EEEAD5B4CF9074CDC852EC940A521FB32AF37A` |
+| SHA256.txt | 278 | `7B7B64E652BE8ECFA80818DA77B901695C2A6AC5279D87DE258221C34BD2921E` |

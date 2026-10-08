@@ -2,7 +2,11 @@
 
 更新时间：2026-10-08
 
-## 当前公开稳定 Latest：0.4.9
+## 当前公开稳定 Latest：0.4.10
+
+[v0.4.10](https://github.com/love70805/lworkstation/releases/tag/v0.4.10) 固定 5931979，内置 ERP Assistant 8.0.37。采集按实际完成量展示阶段汇总和各并发路，区分成本已送达、证据缺项与资料齐全，保留具体映射/采购缺项原因。1342 测试、完整门禁、隔离开发/候选用户路径、隐藏 smoke、649 文件/602 输入一致性通过；候选 SHA256 `5D3FCF39…`，源码 e46094e。[PR #177](https://github.com/love70805/lworkstation/pull/177) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37739497593) 通过，四公开资产匿名完整哈希及生产更新入口通过。只读确认现有任务 6/6 成本批次已送达、两批存在映射缺项；本机未安装、真实数据未改写，见 [发布记录](RELEASE_0.4.10.md)。
+
+## 历史公开稳定版：0.4.9
 
 [v0.4.9](https://github.com/love70805/lworkstation/releases/tag/v0.4.9) 固定 ce5047a，修复清空本机数据后旧 ERP 核算任务、回传、租约与成本草稿残留。1340 测试、完整门禁、开发/生产实际清空与重启/同月重导入、隐藏 smoke、636 文件/589 输入一致性通过；候选 SHA256 `0EA5F263…`，源码 f1ec19c。[PR #175](https://github.com/love70805/lworkstation/pull/175) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37724384103) 通过，四公开资产匿名完整哈希及生产更新入口通过。ERP Assistant 保持 8.0.36；本机未自动安装，真实数据未改写，见 [发布记录](RELEASE_0.4.9.md)。
 
