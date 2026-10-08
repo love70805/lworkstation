@@ -2,7 +2,7 @@
 import { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ImportPreview from "./ImportPreview";
 import { ToastProvider } from "../components/UI";
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({ parse:vi.fn(), inspectPeriod:vi.fn(), validate
 vi.mock('../lib/importWorkerClient', () => ({createImportWorkerClient:()=>mocks}));
 vi.mock('../data/database', () => ({getActiveMemberContext:async()=>({workspaceId:"W"}),previewSalesImports:mocks.preview,saveSalesImports:mocks.save}));
 let container, root;
+function LocationProbe() { const location = useLocation(); return <output data-location>{location.pathname}{location.search}</output>; }
 const mapping = {platformSku:'SKU',platformSkc:'SKC',quantity:'数量',amount:'金额'};
 const summary = {quantity:2,revenue:10,penalty:0};
 function button(text) { return [...container.querySelectorAll('button')].find((node)=>node.textContent === text); }
@@ -34,7 +35,7 @@ beforeEach(async()=>{
     items:input.items.map(item=>({...item,status:'ready',validRowCount:1,ignoredRowCount:0,errorCount:0,summary,addedGroupCount:0,replacedGroupCount:1,overlaps:[{groupKey:item.itemId,store:item.storeName,platformSkc:'父商品',before:{...summary,rowCount:1},after:{...summary,rowCount:1}}]}))}));
   mocks.save.mockResolvedValue({items:[],finalSummary:summary,ledgerId:'L'});
   container=document.createElement('div');document.body.append(container);root=createRoot(container);
-  await act(async()=>root.render(<MemoryRouter><ToastProvider><ImportPreview/></ToastProvider></MemoryRouter>));
+  await act(async()=>root.render(<MemoryRouter><ToastProvider><ImportPreview/><LocationProbe/></ToastProvider></MemoryRouter>));
 });
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 
@@ -135,6 +136,25 @@ it('imports a normal batch with one click and prevents double submits', async ()
   await act(async () => finish({items:[],finalSummary:summary,ledgerId:'L'}));
   expect(container.textContent).toContain('整批处理完成');
 });
+it('guides a completed import to this ledger cost step and keeps prestorage secondary', async () => {
+  mocks.save.mockResolvedValue({ items: [], finalSummary: summary, ledgerId: 'new-ledger',
+    catalog: { createdProductCount: 25, addedSkuCount: 80, linkedSkuCount: 0, issues: [] } });
+  await upload(); await settled();
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  const nextStep = container.querySelector('.batch-next-step'), catalog = container.querySelector('.batch-catalog-details');
+  expect(nextStep.textContent).toContain('下一步：取得正式成本');
+  expect(catalog.open).toBe(false);
+  expect(nextStep.compareDocumentPosition(catalog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const steps = container.querySelectorAll('.import-flow-guide-steps > span');
+  expect(steps[0].textContent).toContain('已完成');
+  expect(steps[1].getAttribute('aria-current')).toBe('step');
+  await click('下一步：取得正式成本');
+  const target = container.querySelector('[data-location]').textContent;
+  expect(target.split('?')[0]).toBe('/profit');
+  expect(new URLSearchParams(target.split('?')[1]).get('ledger')).toBe('new-ledger');
+  expect(new URLSearchParams(target.split('?')[1]).get('view')).toBe('cost');
+});
 it('invalidates overwrite approval and automatically rebuilds the preview after a file is removed', async () => {
   await upload(); await settled();
   await act(async () => container.querySelector('.batch-overwrite input').click());
@@ -161,6 +181,61 @@ it('uses all supplier numbers with the existing normal shipment business types',
   expect(mocks.validate.mock.calls[0][2].supplierNumbers).toEqual(['货号A','货号B']);
   expect(container.textContent).not.toContain('文件筛选');
   expect(mocks.preview.mock.calls[0][0].items[0].sourceCoverage.scope).toBe('full_month');
+});
+function movementFixture(preset = 'ledger_report') {
+  mocks.parse.mockResolvedValue({ headers: ['SKU','SKC','数量','金额','变动类型'], suggestedMapping: { ...mapping, movementType: '变动类型' },
+    rowCount: 8, previewRows: [{ SKU: '000123' }], preset,
+    facets: { supplierNumbers: ['测试货号'], movementTypes: ['平台客单发货','客单发货','客单签收(POP)','盘亏'],
+      movementTypeCounts: { 平台客单发货: 2, 客单发货: 3, '客单签收(POP)': 1, 盘亏: 2 } } });
+}
+function movementCheckbox(file, type) {
+  return [...file.querySelectorAll('.import-movement-options label')].find(label => label.querySelector('span').textContent === type).querySelector('input');
+}
+it('shows the actual movement choices and defaults POP into each standard ledger file', async () => {
+  movementFixture(); await upload(); await settled();
+  const files = [...container.querySelectorAll('.batch-file')];
+  for (const file of files) {
+    expect(movementCheckbox(file, '客单签收(POP)').checked).toBe(true);
+    expect(movementCheckbox(file, '盘亏').checked).toBe(false);
+    expect(file.querySelector('.import-movement-picker').textContent).toContain('已选 3 / 4 类 · 6 行来源');
+  }
+  expect(mocks.preview.mock.calls.at(-1)[0].items.every(item => item.filterOptions.movementTypes.includes('客单签收(POP)'))).toBe(true);
+});
+it('rebuilds the selected file as partial source and revokes overwrite approval when POP is unchecked', async () => {
+  movementFixture(); await upload(); await settled();
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  expect(button('导入').disabled).toBe(false);
+  const files = [...container.querySelectorAll('.batch-file')];
+  await act(async () => movementCheckbox(files[0], '客单签收(POP)').click());
+  expect(container.querySelector('.batch-preview')).toBeNull();
+  expect(button('导入').disabled).toBe(true);
+  await settled();
+  const items = mocks.preview.mock.calls.at(-1)[0].items;
+  expect(items[0]).toMatchObject({ filterOptions: { movementTypes: ['平台客单发货','客单发货'] }, sourceCoverage: { scope: 'partial' }, importMode: 'append' });
+  expect(items[1].filterOptions.movementTypes).toContain('客单签收(POP)');
+  expect(items[1].sourceCoverage.scope).toBe('full_month');
+  expect(container.querySelector('.batch-overwrite input').checked).toBe(false);
+  await click('恢复默认'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].sourceCoverage.scope).toBe('full_month');
+});
+it('supports select all, clear and restore while preventing an empty movement selection from importing', async () => {
+  movementFixture(); await upload(); await settled();
+  await click('全选'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.movementTypes).toEqual(['平台客单发货','客单发货','客单签收(POP)','盘亏']);
+  await click('清空'); await settled();
+  expect(button('导入').disabled).toBe(true);
+  expect(container.querySelector('.batch-preview')).toBeNull();
+  expect(container.textContent).toContain('请至少选择一种变动类型后再导入');
+  await click('恢复默认'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.movementTypes).toEqual(['平台客单发货','客单发货','客单签收(POP)']);
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+it('defaults nonstandard mapped movement types to all and marks a narrowed choice as partial', async () => {
+  movementFixture('generic'); await upload(); await settled();
+  const file = container.querySelector('.batch-file');
+  expect(movementCheckbox(file, '盘亏').checked).toBe(true);
+  await act(async () => movementCheckbox(file, '客单签收(POP)').click()); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ sourceCoverage: { scope: 'partial' }, importMode: 'append' });
 });
 it('keeps parse failure visible while the other file remains parsed', async () => {
   mocks.parse.mockRejectedValueOnce(new Error('无法读取文件'));

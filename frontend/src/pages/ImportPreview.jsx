@@ -1,4 +1,5 @@
 import ImportSupplierPicker from '../components/ImportSupplierPicker';
+import ImportMovementPicker from '../components/ImportMovementPicker';
 import { readImportPreference, restoreImportPreference, saveImportNumbers, parseImportKeywords, matchImportNumberSuffixes } from '../lib/importSupplierPreferences';
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -6,6 +7,7 @@ import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-reac
 import { Button, ProgressBar, useToast } from "../components/UI";
 import { getActiveMemberContext, listLedgerSummaries, previewSalesImports, saveSalesImports } from "../data/database";
 import { importReturnHref } from "../lib/importNavigation";
+import { buildProfitHref } from "../lib/profitFilter";
 import { summarizeImportPeriod } from "../lib/importPeriod";
 import { clearImportStages, removeImportStage } from "../lib/salesImportStage";
 import { createImportWorkerClient } from "../lib/importWorkerClient";
@@ -25,7 +27,9 @@ const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", { minimumFra
 function sourceIsFiltered(item) {
   if (!item.facets || !item.filterOptions) return false;
   const full = (key, expected) => !Array.isArray(item.filterOptions[key]) || expected.every(value => item.filterOptions[key].includes(value));
-  return !full("movementTypes", (item.facets.movementTypes ?? []).filter(type => LEDGER_REPORT_MOVEMENT_TYPES.includes(type)));
+  const types = item.facets.movementTypes ?? [];
+  const expected = item.preset === "ledger_report" ? types.filter(type => LEDGER_REPORT_MOVEMENT_TYPES.includes(type)) : types;
+  return !full("movementTypes", expected);
 }
 const sourceScope = item => sourceIsFiltered(item) || item.sourceScope === "partial" ? "partial" : "full_month";
 function Totals({ summary }) {
@@ -272,7 +276,10 @@ export default function ImportPreview() {
         const preference = patch.storeName !== undefined ? readImportPreference(importWorkspaceRef.current, next.storeName) : next.supplierPreference;
         const saved = next.usesBatchSuffix ? matchImportNumberSuffixes(choices, batchSuffixesRef.current)
           : patch.storeName !== undefined ? preference.selected : next.filterOptions?.supplierNumbers ?? [];
-        next = { ...next, supplierPreference: preference, supplierKeywords: patch.storeName !== undefined ? preference.keywords : next.supplierKeywords, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
+        const movementChoices = refreshed.facets?.movementTypes ?? next.facets?.movementTypes ?? [];
+        const movementTypes = next.mapping.movementType && Array.isArray(next.filterOptions.movementTypes)
+          ? next.filterOptions.movementTypes.filter(type => movementChoices.includes(type)) : undefined;
+        next = { ...next, supplierPreference: preference, supplierKeywords: patch.storeName !== undefined ? preference.keywords : next.supplierKeywords, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, movementTypes, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
         setFiles(entries => entries.map(item => item.itemId === itemId ? next : item));
       } catch (error) { setError(error.message); return; }
     }
@@ -423,11 +430,14 @@ export default function ImportPreview() {
   };
   const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && !periodEvidence.awaitingEvidence && files.every((item) => {
     const columns = Object.values(item.mapping ?? {}).filter(Boolean);
-    return item.status === "parsed" && item.filterOptions?.supplierNumbers?.length > 0 && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
+    const hasMovements = !Array.isArray(item.filterOptions?.movementTypes) || item.filterOptions.movementTypes.length > 0;
+    return item.status === "parsed" && hasMovements && item.filterOptions?.supplierNumbers?.length > 0 && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
   });
   const configurationKey = JSON.stringify([period, files.map(item => [item.itemId, item.status, item.storeName, item.mapping, item.filterOptions, item.sourceScope, item.importMode, item.periodEvidence]), contextBlocked]);
   const storesWithoutNumbers = files.filter(item => item.status === 'parsed' && !item.filterOptions?.supplierNumbers?.length).map(item => item.storeName || item.fileName);
+  const storesWithoutMovements = files.filter(item => item.status === 'parsed' && Array.isArray(item.filterOptions?.movementTypes) && !item.filterOptions.movementTypes.length).map(item => item.storeName || item.fileName);
   const importPreparation = periodEvidence.awaitingEvidence ? '正在按本次选择重新校验…'
+    : storesWithoutMovements.length ? `${storesWithoutMovements.join('、')}未选变动类型，请勾选后再导入`
     : storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，请调整后缀或展开本店货号选择`
     : !period ? '请选择账本月份'
     : error || '选择货号并核对店铺后自动校验';
@@ -444,8 +454,8 @@ export default function ImportPreview() {
       <section className="import-flow-guide" aria-label="月度核算流程">
         <div className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></div>
         <div className="import-flow-guide-steps">
-          <span className="active"><b>1</b><strong>导入销售台账</strong><small>当前步骤</small></span>
-          <span><b>2</b><strong>取得正式成本</strong><small>ERP 自动采用</small></span>
+          <span className={result ? "completed" : "active"} aria-current={!result ? "step" : undefined}><b>1</b><strong>导入销售台账</strong><small>{result ? "已完成" : "当前步骤"}</small></span>
+          <span className={result ? "active" : undefined} aria-current={result ? "step" : undefined}><b>2</b><strong>取得正式成本</strong><small>{result ? "下一步 · ERP 自动采用" : "ERP 自动采用"}</small></span>
           <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
           <span><b>4</b><strong>确认利润</strong><small>核对后再定稿</small></span>
         </div>
@@ -489,6 +499,10 @@ export default function ImportPreview() {
               <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} keywords={item.supplierKeywords ?? []} previousMatches={item.supplierPreference?.matched ?? []} hasSaved={item.supplierPreference?.hasSaved ?? false} onKeywordsChange={supplierKeywords => setFiles(entries => entries.map(entry => entry.itemId === item.itemId ? { ...entry, supplierKeywords } : entry))} onChange={supplierNumbers => update(item.itemId, { usesBatchSuffix: false, filterOptions: { ...item.filterOptions, supplierNumbers } })} />
               </details>
               {item.usesBatchSuffix && !item.filterOptions?.supplierNumbers?.length && <p role="alert" className="import-error">本店没有命中所选后缀，请展开本店货号调整，或移除此文件。</p>}
+              <ImportMovementPicker store={item.storeName} choices={item.facets?.movementTypes ?? []} counts={item.facets?.movementTypeCounts}
+                selected={item.filterOptions?.movementTypes ?? item.facets?.movementTypes ?? []}
+                defaults={item.preset === "ledger_report" ? LEDGER_REPORT_MOVEMENT_TYPES.filter(type => item.facets?.movementTypes?.includes(type)) : item.facets?.movementTypes ?? []}
+                onChange={movementTypes => update(item.itemId, { filterOptions: { ...item.filterOptions, movementTypes } })} />
               <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `所选货号完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
               <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions?.movementTypes ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
               <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : "replace_store_month" })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期来源</option></select>{sourceIsFiltered(item) && <small>已缩小销售变动类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
@@ -512,7 +526,17 @@ export default function ImportPreview() {
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
           <p>核对文件、店铺及 {period} 月份后，可在上方操作区导入。修改配置后会自动重新校验。</p>
         </section>}
-      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2><CatalogImportResult catalog={result.catalog} onOpen={() => navigate('/products?view=reference')} />{result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}<p>全月：<Totals summary={result.finalSummary} /></p><Button variant="primary" icon={ArrowRight} onClick={() => navigate(returnHref)}>{returnLabel}</Button></section>}
+      </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>
+        <section className="batch-next-step" aria-label="继续本月利润核算">
+          <h3>下一步：取得正式成本</h3>
+          <p>销售台账已导入。先取得 ERP 正式成本并核对缺失或异常，再核算与确认本月利润。</p>
+          <Button variant="primary" icon={ArrowRight} onClick={() => navigate(buildProfitHref({ ledgerId: result.ledgerId, view: 'cost' }))}>下一步：取得正式成本</Button>
+        </section>
+        {result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}
+        <p>全月：<Totals summary={result.finalSummary} /></p>
+        {result.catalog && <details className="batch-catalog-details"><summary>商品预存资料 · 新建 {result.catalog.createdProductCount} 份 · 可稍后补齐</summary><CatalogImportResult catalog={result.catalog} onOpen={() => navigate('/products?view=reference')} /></details>}
+        <Button variant="ghost" onClick={() => navigate(returnHref)}>{returnLabel}</Button>
+      </section>}
     </section>
   </main>;
 }

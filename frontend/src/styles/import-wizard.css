@@ -221,6 +221,8 @@
 .import-flow-guide-steps small { margin-top: 2px; font-size: 10px; }
 .import-flow-guide-steps span.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
 .import-flow-guide-steps span.active b { background: var(--primary); color: #fff; }
+.import-flow-guide-steps span.completed { border-color: var(--success); }
+.import-flow-guide-steps span.completed b { background: var(--success); color: #fff; }
 .batch-import .batch-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .batch-import .batch-period { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
 .batch-import .batch-period label { font-weight: 600; }
@@ -342,9 +344,25 @@ fieldset:disabled .import-supplier-option { cursor: default; opacity: .6; }
 .batch-import .batch-suffix-picker > div > input { flex: 1; }
 .batch-import .batch-suffix-picker p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .batch-import .batch-store-suppliers > summary { color: var(--primary); }
+.batch-import .import-movement-picker { margin: 16px 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.batch-import .import-movement-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.batch-import .import-movement-heading h3 { margin: 0; font-size: 14px; }
+.batch-import .import-movement-heading > span { color: var(--text-muted); font-size: 13px; }
+.batch-import .import-movement-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.batch-import .import-movement-options { display: flex; flex-wrap: wrap; gap: 8px; max-height: 240px; overflow: auto; margin-top: 10px; padding: 4px; }
+.batch-import .import-movement-options label { display: flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-bg); cursor: pointer; }
+.batch-import .import-movement-options label:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); }
+.batch-import .import-movement-options span { min-width: 0; overflow-wrap: anywhere; }
+.batch-import .import-movement-options small { color: var(--text-muted); white-space: nowrap; }
+.batch-import .import-movement-picker > p { margin: 10px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.batch-import .import-movement-picker > p.import-error { color: var(--danger); }
 .batch-import .batch-impact-details > summary { color: var(--text-muted); }
 .batch-import .batch-catalog-result { margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-bg); }
 .batch-import .batch-catalog-issues { max-height: 240px; overflow: auto; }
+.batch-import .batch-next-step { margin: 16px 0; padding: 16px; border: 1px solid var(--primary); border-radius: 8px; background: var(--primary-soft); }
+.batch-import .batch-next-step h3 { margin-top: 0; }
+.batch-import .batch-catalog-details { margin-bottom: 16px; border-top: 1px solid var(--border); }
+.batch-import .batch-catalog-details > summary { color: var(--text-muted); }
 @media (max-width: 760px) {
   .batch-import .batch-action-bar { top: 8px; padding: 12px; gap: 8px; }
   .batch-import .batch-action-bar .batch-overwrite { flex-basis: 100%; order: 2; }
