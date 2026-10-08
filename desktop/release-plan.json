@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0411-erp-exact-scope",
+  "integrationBranch": "codex/v0412-memory-performance",
   "requiredCommits": [
+    {
+      "module": "v0.4.12-verified-main-baseline",
+      "commit": "9a1131e"
+    },
     {
       "module": "v0.4.11-exact-platform-collection",
       "commit": "fdcbd6082cec91faaec28ada2a92480209deed07"

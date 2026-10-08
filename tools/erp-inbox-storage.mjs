@@ -77,6 +77,13 @@ export function createInboxStorage(file) {
     loading=(async()=>{
       const current=await fileRevision();
       if(snapshot && current===revision) return snapshot;
+      // Fresh profiles and unused lease queues have no file to parse. Do not
+      // keep a storage isolate alive just to cache an empty array. A later
+      // first write or externally created file still takes the worker path.
+      if(current==='missing' && !worker) {
+        snapshot=[];revision=current;committedSignature='[]';
+        return snapshot;
+      }
       const result=await operation('read');
       evidenceIds=new WeakMap();
       result.records.forEach((record,index)=>{

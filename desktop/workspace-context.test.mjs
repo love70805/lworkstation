@@ -115,3 +115,32 @@ assert.deepEqual(normalizeConfigurationResult({ ok: false, failures: [] }), {
   committedContext: null,
 });
 console.log("desktop workspace context coordination tests passed");
+
+const lazyCoordinator = createWorkspaceContextCoordinator();
+let lazyTargets = [{ tabId: 'erp', deferred: true }, { tabId: '1688', deferred: true }];
+const lazyCalls = [];
+const lazyConfigure = async (target, context) => { lazyCalls.push(`${target.tabId}:${context.workspaceId}`); };
+assert.equal((await lazyCoordinator.apply(contextA, () => lazyTargets, lazyConfigure)).ok, true);
+assert.deepEqual(lazyCoordinator.getCommittedContext(), contextA);
+assert.deepEqual(lazyCalls, [], 'context publication cannot start unopened extensions');
+assert.equal((await lazyCoordinator.apply(contextB, () => lazyTargets, lazyConfigure)).ok, true);
+lazyTargets = [targets[0], { tabId: '1688', deferred: true }];
+assert.equal((await lazyCoordinator.configureCurrent(() => lazyTargets, lazyConfigure)).ok, true);
+assert.deepEqual(lazyCalls, ['erp:workspace-b'], 'cold extension uses the latest committed context');
+let releaseTransition;
+const contextC = { ...contextA, workspaceId: 'workspace-c' };
+const transition = lazyCoordinator.apply(contextC, () => lazyTargets, async (target, context) => {
+  lazyCalls.push(`${target.tabId}:${context.workspaceId}`);
+  await new Promise(resolve => { releaseTransition = resolve; });
+});
+await new Promise(resolve => setTimeout(resolve, 0));
+lazyTargets = targets;
+const lateLoad = lazyCoordinator.configureCurrent(() => lazyTargets, lazyConfigure);
+releaseTransition();
+assert.equal((await transition).ok, true);
+assert.equal((await lateLoad).ok, true);
+assert.deepEqual(lazyCalls.slice(-2), ['erp:workspace-c', '1688:workspace-c'], 'late loads serialize behind workspace transitions');
+assert.equal(lazyCoordinator.getState(targets).storageConfigured, true);
+assert.equal((await lazyCoordinator.apply(contextA, [{ tabId: 'erp', deferred: true, session: {} }], lazyConfigure)).ok, false, 'an incomplete live target is never treated as deferred');
+assert.deepEqual(lazyCoordinator.getCommittedContext(), contextC);
+console.log('Deferred extension scope, cold configuration, transition ordering and fail-closed tests passed.');

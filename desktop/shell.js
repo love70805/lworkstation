@@ -13,20 +13,25 @@ const forwardAction = document.querySelector('[data-action="forward"]');
 const {
   classifyErpState,
   getAddressPresentation,
+  getSurfacePresentation,
 } = window.LworkstationShellState;
 let latestState;
 let lastErpAnnouncement = "";
 let actionFeedbackTimer;
 
 window.lucide?.createIcons();
-document.querySelector('#startup-retry').addEventListener('click', () => window.desktop.startupAction('retry'));
+document.querySelector('#startup-retry').addEventListener('click', () => {
+  void runDesktopAction(() => latestState?.activeTab === 'workspace' ? window.desktop.startupAction('retry') : window.desktop.refresh(), '重新加载失败');
+});
 document.querySelector('#startup-quit').addEventListener('click', () => window.desktop.startupAction('quit'));
 
 function render(state) {
   if (!state) return;
   latestState = state;
-  const boot = state.startup || { status: 'ready' };
-  document.querySelector('#startup').hidden = boot.status === 'ready' || state.activeTab !== 'workspace';
+  const boot = getSurfacePresentation(state);
+  document.querySelector('#startup').hidden = boot.status === 'ready';
+  document.querySelector('#startup h1').textContent = boot.title;
+  document.querySelector('#startup-retry').textContent = boot.retryLabel;
   document.querySelector('#startup').dataset.status = boot.status;
   document.querySelector('#startup-message').textContent = boot.message || '';
   document.querySelector('#startup-actions').hidden = boot.status !== 'error';
