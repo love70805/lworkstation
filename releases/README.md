@@ -1,6 +1,6 @@
-## 0.4.8 自主筛选与利润引导（候选验收通过）
+## 0.4.8 自主筛选与利润引导（已公开）
 
-候选 `candidates/0.4.8/`，证据 `archive/ledger-movement-flow/`。1333 测试、完整前端/ERP 与桌面门禁、实际隔离台账/自主筛选/成本导航、生产 UI、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 373cdf0；安装包 118774638 字节，SHA256 `12BA2191E39CA19EAB813A5BA55ABC34C075EBF48D7ECCCDFDDB9D46C75D6E76`。尚待 CI/合并及公开回读，未安装，见 [候选记录](../docs/RELEASE_0.4.8.md)。
+候选 `candidates/0.4.8/`，证据 `archive/ledger-movement-flow/`。1333 测试、完整前端/ERP 与桌面门禁、实际隔离台账/自主筛选/成本导航、生产 UI、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 373cdf0；安装包 118774638 字节，SHA256 `12BA2191E39CA19EAB813A5BA55ABC34C075EBF48D7ECCCDFDDB9D46C75D6E76`。[PR #173](https://github.com/love70805/lworkstation/pull/173) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37719306291) 通过，稳定标签固定 f534e9a，四公开资产匿名完整哈希及生产更新入口通过，已公开稳定 Latest。本机未安装，见 [发布记录](../docs/RELEASE_0.4.8.md)。
 
 ## 0.4.5 预存区分阶段建档（已公开）
 
@@ -32,7 +32,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.7](https://github.com/love70805/lworkstation/releases/tag/v0.4.7)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.8](https://github.com/love70805/lworkstation/releases/tag/v0.4.8)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 
