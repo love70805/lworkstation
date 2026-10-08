@@ -12,6 +12,18 @@ const original=Worker.prototype.postMessage,transfers=[];
 let worker;
 Worker.prototype.postMessage=function(message,...args){worker=this;transfers.push({action:message.action,bytes:JSON.stringify(message).length,additions:message.additions?.length});return original.call(this,message,...args);};
 try {
+  const emptyFile=path.join(directory,'not-created.json'),emptyStorage=createInboxStorage(emptyFile);
+  assert.deepEqual(await emptyStorage.read(),[]);
+  assert.deepEqual(await emptyStorage.read(),[]);
+  assert.equal(transfers.length,0,'a missing queue does not start a storage worker');
+  await emptyStorage.write([{kind:'batch',status:'pending',envelope:{zero:0}}]);
+  assert.deepEqual(JSON.parse(await fs.readFile(emptyFile,'utf8')),[{kind:'batch',status:'pending',envelope:{zero:0}}],'first delivery after empty startup is durable');
+  await worker.terminate();
+  const appearedFile=path.join(directory,'appeared.json'),appearedStorage=createInboxStorage(appearedFile);
+  assert.deepEqual(await appearedStorage.read(),[]);
+  await fs.writeFile(appearedFile,JSON.stringify([{kind:'batch',envelope:{external:true}}]));
+  assert.equal((await appearedStorage.read())[0].envelope.external,true,'an externally created file is detected after empty startup');
+  await worker.terminate();
   await fs.writeFile(file,JSON.stringify([{kind:'batch',status:'pending',envelope}]));
   const storage=createInboxStorage(file);
   let records=cloneInboxMetadata(await storage.read());

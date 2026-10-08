@@ -29,6 +29,7 @@ const { isAllowedWorkspaceUrl } = require("./workspace-navigation.cjs");
 const { createInboxServiceController } = require("./inbox-service.cjs");
 const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecycle.cjs');
 const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
+const { createRemoteViewLoader } = require('./remote-view-loader.cjs');
 const { registerWorkspaceSystemIpc } = require('./workspace-system-ipc.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
@@ -71,8 +72,8 @@ const views = new Map();
 const attachedViews = new Set();
 const tabState = {
   workspace: { id: "workspace", title: "Lworkstation", status: "ready", url: DEV_URL || "" },
-  erp: { id: "erp", title: "ERP", status: "loading", url: "https://www.zhuolinkeji.cn/" },
-  "1688": { id: "1688", title: "1688", status: "loading", url: "https://www.1688.com/" },
+  erp: { id: "erp", title: "ERP", status: "idle", extension: { status: "deferred" }, url: "https://www.zhuolinkeji.cn/" },
+  "1688": { id: "1688", title: "1688", status: "idle", extension: { status: "deferred" }, url: "https://www.1688.com/" },
 };
 let mainWindow;
 let desktopLifecycle;
@@ -91,6 +92,14 @@ let inboxService;
 const inboxCapability = crypto.randomBytes(32).toString("base64url");
 const workspaceContextCoordinator = createWorkspaceContextCoordinator();
 let activeWorkspaceContext = null;
+const remoteExtensions = { erp: "erp-assistant-extension", "1688": "1688-selection-extension" };
+const remotePartitions = { erp: 'persist:erp', '1688': 'persist:1688' };
+const canCreateRemoteView = () => Boolean(mainWindow && !mainWindow.isDestroyed() && !desktopLifecycle?.getState().quitting);
+const remoteViewLoader = createRemoteViewLoader({
+  getView: tabId => views.get(tabId), canCreate: canCreateRemoteView,
+  build: tabId => buildRemoteView(tabId, remotePartitions[tabId], remoteExtensions[tabId]),
+  discard: discardRemoteView,
+});
 let shutdownPromise = null;
 let shutdownComplete = false;
 let shellAppearance = loadAppearancePreference({
@@ -154,6 +163,7 @@ function openInExternalChrome(url) {
 
 function setStatus(tabId, patch) {
   Object.assign(tabState[tabId], patch);
+  if (tabId !== 'workspace' && patch.status) resizeViews();
   publishState();
 }
 
@@ -208,7 +218,7 @@ function resizeViews() {
   const [width, height] = mainWindow.getContentSize();
   for (const [id, view] of views) {
     if (!view.webContents || view.webContents.isDestroyed()) continue;
-    const shouldAttach = id === activeTab && (id !== 'workspace' || startup.getState().status === 'ready');
+    const shouldAttach = id === activeTab && (id === 'workspace' ? startup.getState().status === 'ready' : tabState[id].status === 'ready');
     const isAttached = attachedViews.has(id);
     if (shouldAttach && !isAttached) {
       mainWindow.contentView.addChildView(view);
@@ -357,6 +367,7 @@ function openUpdatePopover(anchor) {
 }
 
 async function shutdownDesktop() {
+  remoteViewLoader.stop();
   desktopLifecycle?.dispose();
   workspaceRecovery.dispose();
   startup.dispose();
@@ -446,14 +457,42 @@ async function runUpdatePopoverDomClickSmoke() {
   };
 }
 
-function setActiveTab(tabId) {
-  if (!views.has(tabId)) return { ok: false, error: "未知标签" };
+async function setActiveTab(tabId) {
+  if (!Object.hasOwn(tabState, tabId)) return { ok: false, error: "未知标签" };
   activeTab = tabId;
   workspaceRecovery.pause();
   resizeViews();
   publishState();
   restoreWorkspaceSurface();
+  if (tabId !== 'workspace') {
+    try {
+      await remoteViewLoader.ensure(tabId);
+      // Initialization may finish after the user has selected another tab.
+      // resizeViews always follows the current selection, never this request.
+      resizeViews();
+      publishState();
+    } catch (error) {
+      if (canCreateRemoteView()) setStatus(tabId, { status: 'error', error: error.message });
+      return { ok: false, error: error.message };
+    }
+  }
   return { ok: true };
+}
+
+function discardRemoteView(tabId) {
+  const view = views.get(tabId);
+  if (!view) return;
+  const targetSession = view.webContents.isDestroyed() ? null : view.webContents.session;
+  if (attachedViews.delete(tabId) && mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(view);
+  if (!view.webContents.isDestroyed()) view.webContents.close();
+  const extensionId = tabState[tabId].extension?.id;
+  if (extensionId) {
+    targetSession?.extensions.removeExtension(extensionId);
+    const { id, ...extension } = tabState[tabId].extension;
+    tabState[tabId].extension = extension;
+  }
+  views.delete(tabId);
+  workspaceContextCoordinator.forget(tabId);
 }
 
 function restoreWorkspaceSurface() {
@@ -487,6 +526,7 @@ function hardenSession(targetSession) {
 }
 
 async function buildRemoteView(tabId, partition, extensionDirectory) {
+  setStatus(tabId, { status: 'loading', error: null, extension: { status: 'loading' } });
   const tabSession = session.fromPartition(partition, { cache: true });
   hardenSession(tabSession);
   const view = new WebContentsView({
@@ -502,6 +542,7 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
     },
   });
   views.set(tabId, view);
+  resizeViews();
   if (tabId === 'erp') view.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
     if (!isMainFrame) return;
     erpNavigationStartedAt = Date.now();
@@ -588,14 +629,16 @@ async function loadExtension(tabId, tabSession, extensionDirectory) {
       runtimeId: tabId,
       userDataPath: app.getPath("userData"),
     });
+    if (!canCreateRemoteView()) throw new Error('工作站正在退出。');
     const loaded = await tabSession.extensions.loadExtension(runtimeDirectory, { allowFileAccess: true });
+    if (!canCreateRemoteView()) throw new Error('工作站正在退出。');
     nextExtension = { ...extension, status: "loaded", id: loaded.id, name: loaded.name, path: runtimeDirectory };
     setStatus(tabId, { extension: nextExtension });
-    const contextToConfigure = activeWorkspaceContext || workspaceContextCoordinator.getPendingContext();
-    if (contextToConfigure) {
-      await configureExtensionStorage(tabId, tabSession, loaded.id, contextToConfigure);
-      workspaceContextCoordinator.recordConfigured(tabId, loaded.id, contextToConfigure);
-    }
+    // Join the same queue as workspace changes. Resolve both context and
+    // targets inside it so a cold/late page never installs stale credentials.
+    const result = await workspaceContextCoordinator.configureCurrent(extensionTargets, configureExtensionTarget);
+    activeWorkspaceContext = workspaceContextCoordinator.getCommittedContext();
+    if (!result.ok || !result.committedContext) throw new Error('工作区安全配置尚未就绪，请返回工作站后重试。');
   } catch (error) {
     if (nextExtension) {
       workspaceContextCoordinator.forget(tabId);
@@ -604,10 +647,12 @@ async function loadExtension(tabId, tabSession, extensionDirectory) {
     } else {
       setStatus(tabId, { extension: extensionLoadFailureState(extension, null, error) });
     }
+    throw error;
   }
 }
 
 async function configureExtensionStorage(tabId, tabSession, extensionId, context) {
+  if (!canCreateRemoteView()) throw new Error('工作站正在退出。');
   if (!tabSession || !extensionId || !context?.workspaceId) throw new Error("缺少受控工作区上下文，扩展收件配置已拒绝。");
   const popupPath = tabId === "erp" ? "popup/popup.html" : "popup.html";
   const configWindow = new BrowserWindow({
@@ -638,10 +683,11 @@ async function configureExtensionStorage(tabId, tabSession, extensionId, context
   }
 }
 
-async function configureLoadedExtensions(context) {
-  const targets = ["erp", "1688"].map((tabId) => {
+function extensionTargets() {
+  return ["erp", "1688"].map((tabId) => {
     const extension = tabState[tabId].extension;
     const view = views.get(tabId);
+    if (!extension?.id && (!view || extension?.status === 'loading')) return { tabId, deferred: true };
     return {
       tabId,
       extension,
@@ -649,15 +695,20 @@ async function configureLoadedExtensions(context) {
       session: view?.webContents?.session,
     };
   });
-  const result = await workspaceContextCoordinator.apply(context, targets, async (target, targetContext = context) => {
-    try {
-      await configureExtensionStorage(target.tabId, target.session, target.extensionId, targetContext);
-      setStatus(target.tabId, { extension: { ...target.extension, status: "loaded", message: null } });
-    } catch (error) {
-      setStatus(target.tabId, { extension: { ...target.extension, status: "failed", message: `安全收件配置失败：${error.message}` } });
-      throw error;
-    }
-  });
+}
+
+async function configureExtensionTarget(target, targetContext) {
+  try {
+    await configureExtensionStorage(target.tabId, target.session, target.extensionId, targetContext);
+    setStatus(target.tabId, { extension: { ...target.extension, status: "loaded", message: null } });
+  } catch (error) {
+    setStatus(target.tabId, { extension: { ...target.extension, status: "failed", message: `安全收件配置失败：${error.message}` } });
+    throw error;
+  }
+}
+
+async function configureLoadedExtensions(context) {
+  const result = await workspaceContextCoordinator.apply(context, extensionTargets, configureExtensionTarget);
   if (result.ok) activeWorkspaceContext = result.committedContext;
   else activeWorkspaceContext = workspaceContextCoordinator.getCommittedContext();
   return normalizeConfigurationResult(result);
@@ -766,6 +817,7 @@ async function runErpV2SmokeFixture() {
   const extensionConfiguration = await configureLoadedExtensions({ workspaceId, memberId: "desktop-smoke-member", visibility: "workspace" });
   const extensionConfigurationResponse = configurationHttpResult(extensionConfiguration);
   if (extensionConfigurationResponse.status !== 200) throw new Error(`Packaged smoke 扩展安全配置失败：${extensionConfigurationResponse.failures.join(",") || "没有可确认的已加载扩展"}`);
+  await Promise.all(['erp', '1688'].map(tabId => remoteViewLoader.ensure(tabId)));
   const selectionStatusProbe = await requestJson("/selection/v1/status");
   const requestedAt = new Date().toISOString();
   const expectedSkus = [{ platformSku, platformSkc, warehouseSku }];
@@ -1157,7 +1209,7 @@ async function writeSmokeReport() {
   const updatePopoverDomClickSmoke = await runUpdatePopoverDomClickSmoke();
   const tabSwitches = [];
   for (const tabId of ["erp", "1688", "workspace"]) {
-    setActiveTab(tabId);
+    await setActiveTab(tabId);
     tabSwitches.push({
       activeTab,
       attachedViews: [...attachedViews],
@@ -1398,10 +1450,6 @@ async function createWindow() {
     await writeUpdateSmokeReport();
     return;
   }
-  await buildRemoteView("erp", "persist:erp", "erp-assistant-extension");
-  if (desktopLifecycle?.getState().quitting || !mainWindow || mainWindow.isDestroyed()) return;
-  await buildRemoteView("1688", "persist:1688", "1688-selection-extension");
-  if (desktopLifecycle?.getState().quitting || !mainWindow || mainWindow.isDestroyed()) return;
   resizeViews();
   publishState();
   await writeSmokeReport();
@@ -1507,7 +1555,16 @@ ipcMain.handle("desktop:forward", () => {
   setTimeout(publishState, result.ok ? 50 : 0);
   return result;
 });
-ipcMain.handle("desktop:refresh", () => activeTab === 'workspace' ? retryWorkspace() : views.get(activeTab)?.webContents.reload());
+ipcMain.handle("desktop:refresh", async () => {
+  if (activeTab === 'workspace') return retryWorkspace();
+  const tabId = activeTab;
+  const existing = views.get(tabId);
+  if (remoteViewLoader.isPending(tabId)) { await remoteViewLoader.ensure(tabId); return { ok: true }; }
+  if (!existing || existing.webContents.isDestroyed()) return setActiveTab(tabId);
+  if (tabState[tabId].extension?.status === 'failed') await loadExtension(tabId, existing.webContents.session, remoteExtensions[tabId]);
+  existing.webContents.reload();
+  return { ok: true };
+});
 ipcMain.handle("desktop:open-external", () => {
   if (activeTab === "workspace") return { ok: false, error: "工作站页面不能外部打开" };
   const url = views.get(activeTab)?.webContents.getURL();
@@ -1543,9 +1600,10 @@ ipcMain.handle("desktop:postpone-update", (event) => isUpdateSender(event) ? pos
 ipcMain.handle("desktop:install-update", (event) => isUpdateSender(event) ? installDownloadedUpdate() : { ok: false, error: "无效的更新请求" });
 ipcMain.handle("desktop:open-release-notes", (event) => isUpdateSender(event) ? openDesktopReleaseNotes() : { ok: false, error: "无效的更新请求" });
 ipcMain.handle("desktop:retry-extension", async (_event, tabId) => {
-  const map = { erp: "erp-assistant-extension", "1688": "1688-selection-extension" };
-  if (!map[tabId]) return { ok: false, error: "该标签没有扩展" };
-  await loadExtension(tabId, session.fromPartition(`persist:${tabId}`, { cache: true }), map[tabId]);
+  if (!Object.hasOwn(remoteExtensions, tabId)) return { ok: false, error: "该标签没有扩展" };
+  const existed = views.has(tabId) && !remoteViewLoader.isPending(tabId);
+  const view = await remoteViewLoader.ensure(tabId);
+  if (existed) await loadExtension(tabId, view.webContents.session, remoteExtensions[tabId]);
   return { ok: true };
 });
 

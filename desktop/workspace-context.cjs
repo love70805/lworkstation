@@ -57,11 +57,16 @@ function createWorkspaceContextCoordinator() {
   const configured = new Map();
   let applyChain = Promise.resolve();
 
+  // Deferred targets are declared by the desktop lifecycle, never by IPC.
+  // They have no running extension to configure; opening one joins this queue.
+  const isDeferred = target => target?.deferred === true && !target.extensionId && !target.session;
+  const loaded = targets => targets.filter(target => !isDeferred(target) && target?.extensionId && target?.session);
+
   function isFullyConfigured(targets = []) {
     const key = contextKey(committedContext);
     if (!key) return false;
-    const loadedTargets = targets.filter((target) => target?.extensionId && target?.session);
-    return loadedTargets.length > 0 && loadedTargets.every((target) => {
+    const loadedTargets = loaded(targets);
+    return targets.length > 0 && loadedTargets.length + targets.filter(isDeferred).length === targets.length && loadedTargets.every((target) => {
       const entry = configured.get(target.tabId);
       return entry?.contextKey === key && entry.extensionId === target.extensionId;
     });
@@ -88,8 +93,8 @@ function createWorkspaceContextCoordinator() {
     if (!nextKey) throw new Error("缺少有效工作区上下文。");
     const previousContext = cloneContext(committedContext);
     pendingContext = cloneContext(context);
-    const loadedTargets = targets.filter((target) => target?.extensionId && target?.session);
-    if (committedContext && contextKey(committedContext) === nextKey && isFullyConfigured(loadedTargets)) {
+    const loadedTargets = loaded(targets);
+    if (committedContext && contextKey(committedContext) === nextKey && isFullyConfigured(targets)) {
       return { ok: true, shortCircuited: true, failures: [], committedContext: cloneContext(committedContext) };
     }
 
@@ -108,7 +113,7 @@ function createWorkspaceContextCoordinator() {
       }
     }
 
-    const complete = loadedTargets.length > 0 && loadedTargets.every((target) => {
+    const complete = targets.length > 0 && loadedTargets.length + targets.filter(isDeferred).length === targets.length && loadedTargets.every((target) => {
       const entry = configured.get(target.tabId);
       return entry?.contextKey === nextKey && entry.extensionId === target.extensionId;
     });
@@ -147,7 +152,17 @@ function createWorkspaceContextCoordinator() {
   }
 
   function apply(context, targets, configure) {
-    const run = applyChain.then(() => applyInternal(context, targets, configure));
+    const run = applyChain.then(() => applyInternal(context, typeof targets === 'function' ? targets() : targets, configure));
+    applyChain = run.catch(() => {});
+    return run;
+  }
+
+  function configureCurrent(targets, configure) {
+    const run = applyChain.then(() => {
+      const context = committedContext || pendingContext;
+      if (!context) return { ok: true, committedContext: null, failures: [] };
+      return applyInternal(context, typeof targets === 'function' ? targets() : targets, configure);
+    });
     applyChain = run.catch(() => {});
     return run;
   }
@@ -167,7 +182,7 @@ function createWorkspaceContextCoordinator() {
     };
   }
 
-  return { apply, forget, getCommittedContext, getPendingContext, getState, invalidate, recordConfigured };
+  return { apply, configureCurrent, forget, getCommittedContext, getPendingContext, getState, invalidate, recordConfigured };
 }
 
 module.exports = {

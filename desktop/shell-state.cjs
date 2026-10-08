@@ -14,6 +14,8 @@
       return { tone: "danger", label: "ERP 异常", aria: `ERP 通道异常：${errorMessage(inbox, flow)}` };
     }
 
+    if (inbox.extensionLoadState === 'deferred' && inbox.pageStatus === 'idle') return { tone: 'muted', label: 'ERP 待使用', aria: 'ERP 尚未打开，首次进入时加载助手' };
+
     if (['error', 'failed'].includes(inbox.extensionLoadState) || inbox.pageStatus === 'error') return { tone: 'danger', label: '助手异常', aria: 'ERP 助手不可用，请重新加载助手' };
     if (inbox.status !== 'online' || ['loading', 'starting', 'restarting'].includes(inbox.extensionLoadState) || inbox.pageStatus === 'loading') return { tone: 'warning', label: '等待连接', aria: 'ERP 助手等待初始化与通信' };
     const extension = inbox.latestExtension;
@@ -34,8 +36,17 @@
     };
   }
 
+  function getSurfacePresentation(state = {}) {
+    if (!state.activeTab || state.activeTab === 'workspace') return { title: 'Lworkstation', retryLabel: '重新加载工作站', ...state.startup };
+    const tab = state.tabs?.[state.activeTab] || {};
+    const status = tab.status === 'ready' ? 'ready' : tab.status === 'error' ? 'error' : 'loading';
+    return { title: tab.title || state.activeTab, retryLabel: '重新加载页面', status,
+      message: status === 'error' ? (tab.error || '页面无法打开，请重试。') : `正在加载 ${tab.title || state.activeTab} 页面与助手…` };
+  }
+
   return {
     classifyErpState,
     getAddressPresentation,
+    getSurfacePresentation,
   };
 });
