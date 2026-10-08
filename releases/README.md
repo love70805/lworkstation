@@ -1,3 +1,7 @@
+## 0.4.12 启动与空闲内存优化（候选已验收，待集成/公开）
+
+候选 candidates/0.4.12/，证据 archive/memory-performance/。1346 前端测试、完整门禁、desktop verify、实际候选冷启动/草稿/配置/错误重试/隐藏 smoke、662 文件/616 输入一致性通过；候选原生扩展复验进行中。相同环境空闲私有内存中位数 491.1 → 340.0 MiB，降低 30.8%，渲染进程 6 → 2。构建源码 1f5ccfe，安装包 119075144 字节，SHA256 `EC26199013C23F7307EEBD17BE34FFDAE44DE9E8C04FC6BCA15D0F73C2D8B83A`。不自动安装或改写真实数据；见 [发布记录](../docs/RELEASE_0.4.12.md)。
+
 ## 0.4.11 平台 SKC/SKU 精确范围（已公开稳定 Latest）
 
 候选 candidates/0.4.11/，证据 archive/erp-exact-scope/。1346 测试、完整门禁、最终候选精确范围/原生扩展/无头用户路径/隐藏 smoke、662 文件/615 输入一致性通过。源码 6685d23，安装包 119073307 字节，SHA256 `A3001BCB8E218A1277B0B5FC4463E8E6748D2913C54892C171659332F56BDA4C`。[PR #179](https://github.com/love70805/lworkstation/pull/179) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37756944645) 通过，标签固定 cea783c，四公开资产匿名完整哈希与生产更新入口通过，2026-10-08 17:35:09 已公开稳定 Latest。本机未安装；见 [发布记录](../docs/RELEASE_0.4.11.md)。
