@@ -63,6 +63,19 @@ function buildFixture() {
 }
 
 describe("ERP cost batch envelope v2", () => {
+  it("requires both registered platform identities for exact-scope rows and nested archive mappings", () => {
+    const expectedSkus = [{ platformSku: 'SKU-1', platformSkc: 'SKC-1' }];
+    const args = { batchId: 'EXACT', workspaceId: 'W', ledgerId: 'L', requestId: 'R', platformSkcs: ['SKC-1'], expectedSkus,
+      sourceMeta: { platformScopePolicy: 'ledger_platform_pair' }, warehouseEvidence: [evidence('WH-1')],
+      results: [{ warehouseSku: 'WH-1', mappings: [{ platformSku: 'SKU-1', platformSkc: 'SKC-1' }], unitCost: 4 }] };
+    const exact = buildErpCostBatchEnvelope(args);
+    expect(validateErpCostBatchEnvelope(exact, { expectedSkus }).rows).toHaveLength(1);
+    expect(() => validateErpCostBatchEnvelope(exact)).toThrow(/缺少已登记的平台/);
+    expect(() => buildErpCostBatchEnvelope({ ...args, results: [{ ...args.results[0], mappings: [{ platformSku: 'SKU-UNUSED', platformSkc: 'SKC-1' }] }] })).toThrow(/之外的规格/);
+    expect(() => buildErpCostBatchEnvelope({ ...args, results: [{ ...args.results[0], catalogMappings: [{ platformSku: 'SKU-1', platformSkc: 'SKC-1', warehouseSku: 'WH-1' }, { platformSku: 'SKU-UNUSED', platformSkc: 'SKC-1', warehouseSku: 'WH-1' }] }] })).toThrow(/范围外平台映射/);
+    expect(() => buildErpCostBatchEnvelope({ ...args, results: [{ ...args.results[0], catalogMappings: [{ platformSku: 'SKU-1', platformSkc: 'SKC-FOREIGN', warehouseSku: 'WH-1' }] }] })).toThrow(/范围外平台映射/);
+    expect(buildErpCostBatchEnvelope({ ...args, sourceMeta: {}, results: [{ ...args.results[0], mappings: [{ platformSku: 'SKU-UNUSED', platformSkc: 'SKC-1' }] }] }).rows[0].ledgerScopeRole).toBe('auxiliary');
+  });
   it("round-trips optional catalog mappings and per-purchase fields without changing cost evidence", () => {
     const imageUrl = "https://cbu01.alicdn.com/img/one.jpg";
     const purchaseCatalog = { picturesLinking: imageUrl, pictureLink1688: "https://cbu01.alicdn.com/img/1688.jpg", purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-1", purchaseOrderId: "PUR-1", purchaseOrderNo: "PO-1", lineNumber: 0, supplierId: "SUP-1", barcodeSkuid: "SKU-1", barcodeSkcid: "SKC-1", raw: { token: "discard" } };

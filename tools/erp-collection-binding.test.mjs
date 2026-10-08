@@ -21,7 +21,7 @@ function fixture() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(k => Object.hasOwn(state.storage, k)).map(k => [k, structuredClone(state.storage[k])])); },
     async set(values) { if (state.failSave && values[key]?.length) throw Error('synthetic storage unavailable'); Object.assign(state.storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.37' }), onMessage: { addListener(fn) { state.dispatch = fn; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.38' }), onMessage: { addListener(fn) { state.dispatch = fn; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async (raw, init) => {
     const url = new URL(raw);
     // This suite deliberately exercises the legacy checkpoint protocol.
@@ -111,7 +111,7 @@ async function verifyContentBinding() {
     } } };
     window.fetch = async raw => {
       const url = new URL(raw), endpoint = url.pathname.split('/').at(-1); reads.push(endpoint);
-      const data = endpoint === 'purchase-order-page' ? [{ purchaseOrderId: 'ORDER-A' }] : endpoint === 'purchase-order-details' ? [{ purchaseOrderDetailId: 'ROW-A', itemId: 'WH-A', creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }] : [{ associatedProductId: 'WH-A', barcodeSkuid: 'SKU-A', barcodeSkcid: 'SKC-A' }];
+      const data = endpoint === 'product-page' ? [{ itemId: 'WH-A' }] : endpoint === 'purchase-order-page' ? [{ purchaseOrderId: 'ORDER-A' }] : endpoint === 'purchase-order-details' ? [{ purchaseOrderDetailId: 'ROW-A', itemId: 'WH-A', creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }] : [{ associatedProductId: 'WH-A', barcodeSkuid: 'SKU-A', barcodeSkcid: 'SKC-A' }];
       return { ok: true, status: 200, json: async () => ({ code: 0, count: data.length + (incomplete && endpoint === 'product-info-sku' ? 1 : 0), data }) };
     };
     const until = async predicate => { const deadline = Date.now() + 5000; while (!predicate()) { if (Date.now() > deadline) throw Error(mode + ': ' + window.document.body.textContent); await new Promise(resolve => setTimeout(resolve, 5)); } };
@@ -124,8 +124,9 @@ async function verifyContentBinding() {
         assert.equal(reads.length, 0, 'first checkpoint failure stops collection before business reads');
         assert.equal(f.messages.some(m => m.type === 'shopeers.erp.submitCostResult'), false);
       } else if (mode === 'unbound-preview') {
-        await until(() => !window.document.getElementById('erpa-export').disabled);
-        assert.ok(window.document.getElementById('erpa-table-body').textContent.includes('WH-A'));
+        await until(() => window.document.getElementById('erpa-error').classList.contains('erpa-visible'));
+        assert.equal(reads.length, 0, 'unbound platform scope stops before all ERP reads');
+        assert.equal(window.document.getElementById('erpa-export').disabled, true);
         assert.equal(f.messages.some(m => m.type === 'shopeers.erp.submitCostResult'), false, 'independent preview never creates a formal delivery without a saved request');
       } else {
         await until(() => f.posts.length === 1 && f.storage[pendingKey]?.length === 0 && !window.document.getElementById('erpa-recalculate').disabled);

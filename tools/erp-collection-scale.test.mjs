@@ -11,7 +11,7 @@ async function scenario(fault = '') {
   const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
   const messages = [], requests = [];
   let fail = fault;
-  window.chrome = { runtime: { sendMessage(message, done) { messages.push(structuredClone(message)); done(collectionReply(message, { requestId: 'SYN-REQUEST', platformSkcs: ['SKC-A', 'SKC-B'] }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' })); } } };
+  window.chrome = { runtime: { sendMessage(message, done) { messages.push(structuredClone(message)); done(collectionReply(message, { requestId: 'SYN-REQUEST', platformSkcs: ['SKC-A', 'SKC-B'], expectedSkus: ['A','B'].map(id => ({ platformSku: 'SKU-' + id, platformSkc: 'SKC-' + id })) }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' })); } } };
   window.fetch = async raw => {
     const url = new URL(raw), endpoint = url.pathname.split('/').at(-1), page = Number(url.searchParams.get('page'));
     requests.push({ endpoint, page, sku: url.searchParams.get('sku') });
@@ -31,6 +31,8 @@ async function scenario(fault = '') {
     } else if (endpoint === 'purchase-order-details') {
       const id = url.searchParams.get('purchaseOrderId'), sku = id.startsWith('SKC-A') ? 'A' : 'B';
       data = [{ purchaseOrderDetailId: id, itemId: 'WH-' + sku, creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: 4 }];
+    } else if (endpoint === 'product-page') {
+      data = [{ itemId: 'WH-' + url.searchParams.get('skuGroup').slice(-1) }];
     } else if (endpoint === 'product-info-sku') {
       const sku = url.searchParams.get('productId').slice(-1);
       data = [{ associatedProductId: 'WH-' + sku, barcodeSkuid: 'SKU-' + sku, barcodeSkcid: 'SKC-' + sku }];
@@ -88,7 +90,7 @@ async function resumeAcrossTargets() {
   window.confirm = () => true;
   window.chrome = { runtime: { sendMessage(message, done) {
     messages.push(structuredClone(message));
-    done(collectionReply(message, { requestId, platformSkcs: scope }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' }));
+    done(collectionReply(message, { requestId, platformSkcs: scope, expectedSkus: scope.map(platformSkc => ({ platformSkc, platformSku: platformSkc.replace('SKC-', 'SKU-') })) }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: false } : { ok: true, status: 'success' }));
   } } };
   window.fetch = async raw => {
     const url = new URL(raw), endpoint = url.pathname.split('/').at(-1);
@@ -101,6 +103,8 @@ async function resumeAcrossTargets() {
     } else if (endpoint === 'purchase-order-details') {
       const sku = url.searchParams.get('purchaseOrderId').split('-')[1];
       data = [{ purchaseOrderDetailId: `D-${sku}`, itemId: `WH-${sku}`, creationTime: '2026-08-20 12:00:00', purchaseQuantity: 2, purchaseUnitPrice: currentAccountPrice }];
+    } else if (endpoint === 'product-page') {
+      data = [{ itemId: url.searchParams.get('skuGroup').replace('SKC-', 'WH-') }];
     } else if (endpoint === 'product-info-sku') {
       const sku = url.searchParams.get('productId').split('-')[1];
       data = [{ associatedProductId: `WH-${sku}`, barcodeSkuid: `SKU-${sku}`, barcodeSkcid: `SKC-${sku}` }];

@@ -293,7 +293,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     "orderCount", "validOrderCount", "skippedOrderCount", "detailCount",
     "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid",
     "warehouseSkuCount", "platformSkuCount", "durationMs", "detailFailureCount",
-    "mappingFailureCount", "evidenceRecordCount", "excludedEvidenceCount", "costWarningCount",
+    "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "costWarningCount",
     "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount",
   ];
   const result = {
@@ -305,7 +305,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     const value = Number(meta[field]);
     if (Number.isFinite(value) && value >= 0) result[field] = value;
   }
-  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku"]) {
+  for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku", "platformScopePolicy"]) {
     if (optionalText(meta[field])) result[field] = optionalText(meta[field]);
   }
   for (const field of ["detailFailures", "mappingFailures", "exclusionStats", "failureStats", "sourceWarnings"]) {
@@ -383,6 +383,17 @@ export function validateErpCostBatchEnvelope(payload, {
     expectedScopeBySku,
     queriedSkcs,
   }));
+  if (payload.sourceMeta?.platformScopePolicy === 'ledger_platform_pair') {
+    if (!expectedScopeBySku?.size) throw new Error('ERP 精确采集缺少已登记的平台 SKU/SKC 范围。');
+    for (const row of rows) {
+      const target = expectedScopeBySku.get(row.canonicalPlatformSku);
+      if (!target || target.canonicalPlatformSkc !== row.canonicalPlatformSkc) throw new Error('ERP 精确采集返回了已登记平台 SKU/SKC 之外的规格。');
+      for (const mapping of row.catalogMappings || []) {
+        const mapped = expectedScopeBySku.get(canonicalPlatformSku(mapping.platformSku));
+        if (!mapped || mapped.canonicalPlatformSkc !== canonicalPlatformSkc(mapping.platformSkc)) throw new Error('ERP 精确采集档案包含范围外平台映射。');
+      }
+    }
+  }
   const warehouseEvidence = normalizeWarehouseEvidence(payload.warehouseEvidence, { strictSourceWarnings: !legacyFormat });
   const evidenceByRef = new Map(warehouseEvidence.map((entry) => [entry.evidenceRef, entry]));
   if (!legacyFormat) {
@@ -480,7 +491,7 @@ function evidenceInputByWarehouse(value) {
   const globalWarnings = [
     ...(Array.isArray(value?.detailFailures) ? value.detailFailures : []).map((item) => `detail_failure:${item?.purchaseOrderId ?? item?.message ?? "unknown"}`),
     ...(Array.isArray(value?.mappingFailures) ? value.mappingFailures : [])
-      .filter((item) => !item?.warehouseSku)
+      .filter((item) => !item?.warehouseSku && !item?.platformSku)
       .map((item) => `mapping_failure:${item?.message ?? "unknown"}`),
   ];
   return new Map(source.map((entry) => {

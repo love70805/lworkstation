@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
       requests.push(url.pathname);
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-A' }]
         : url.pathname.endsWith('purchase-order-details') ? [{ purchaseOrderDetailId: 'D-A', itemId: 'WH-A', tradeName: '原生隔离商品', creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }]
-          : url.pathname.endsWith('product-info-sku') ? [{ associatedProductId: 'WH-A', barcodeSkcid: 'SKC-A', barcodeSkuid: 'SKU-A' }] : [];
+          : url.pathname.endsWith('product-page') ? [{ itemId: 'WH-A' }] : url.pathname.endsWith('product-info-sku') ? [{ associatedProductId: 'WH-A', barcodeSkcid: 'SKC-A', barcodeSkuid: 'SKU-A' }] : [];
       return new Response(JSON.stringify({ code: 0, count: data.length, data }), { headers: { 'content-type': 'application/json' } });
     });
     const directory = await prepareRuntimeExtension({ sourceDirectory: path.join(resources, 'integrations/erp-assistant-extension'), userDataPath: profile, port, runtimeId: 'erp' });

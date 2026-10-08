@@ -501,6 +501,15 @@ try {
       excludedDetails: [{ recordId: "R-CURRENT", warehouseSku: "WH-A", exclusionReasons: ["current_month"] }],
     },
   };
+  for (const [index, mutate] of [value => { value.rows[0].platformSku = "SKU-UNUSED"; }, value => { value.rows[0].platformSkc = "SKC-OTHER"; }, value => { value.rows[0].catalogMappings = [{ platformSku: "SKU-UNUSED", platformSkc: "SKC-A", warehouseSku: "WH-A" }]; }].entries()) {
+    const exact = structuredClone(acceptedResultPayload);
+    exact.resultDeliveryId = "EXACT-OUTSIDE-" + index;
+    exact.sourceMeta.platformScopePolicy = "ledger_platform_pair";
+    if (index < 2) exact.rows[0].catalogMappings = [];
+    mutate(exact);
+    response = await post("/erp/v1/cost-results", exact);
+    assert.equal(response.status, 400, "exact deliveries cannot widen a registered platform pair");
+  }
   response = await post("/erp/v1/cost-results", acceptedResultPayload);
   assert.equal(response.status, 202);
   const delivered = await response.json();

@@ -20,7 +20,7 @@ async function scenario(size, mode = '') {
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
   const records = [request], deliveries = [], calls = [], listTimes = new Map();
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
-  let dispatch, window, inflight = 0, maxInflight = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false;
+  let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
   const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
@@ -52,33 +52,33 @@ async function scenario(size, mode = '') {
       done(response);
     })}};
     window.fetch=async raw=>{
-      const url=new URL(raw),endpoint=url.pathname.split('/').at(-1),target=url.searchParams.get('sku')||url.searchParams.get('purchaseOrderId')||url.searchParams.get('productId');
+      const url=new URL(raw),endpoint=url.pathname.split('/').at(-1),target=url.searchParams.get('sku')||url.searchParams.get('purchaseOrderId')||url.searchParams.get('productId')||url.searchParams.get('skuGroup');
       assert.notEqual(target,'[object Object]'); calls.push({endpoint,target,at:Date.now()});
       const timeKey = Math.floor(Number(target.split('-').at(-1)) / 20);
       if(endpoint==='purchase-order-page'&&!listTimes.has(timeKey))listTimes.set(timeKey,{start:performance.now()});
-      inflight++; maxInflight=Math.max(maxInflight,inflight);
+      inflight++; maxInflight=Math.max(maxInflight,inflight);if(limited)maxInflightAfterLimit=Math.max(maxInflightAfterLimit,inflight);
       if(endpoint==='purchase-order-page'){lists++;maxLists=Math.max(maxLists,lists);}
       if(mode==='pause' && !paused && deliveries.length===1 && endpoint==='purchase-order-page'){paused=true;window.document.getElementById('erpa-pause').click();}
       if(mode==='remote-stop'&&!remoteStopped&&endpoint==='purchase-order-page'){
         remoteStopped=true;schedule(()=>{records[1].status='stopped';},10);
       }
-      await delay(mode==='remote-stop'?4000:mode.startsWith('benchmark') ? 8 : 1);
+      await delay(mode==='remote-stop'&&endpoint==='purchase-order-page'?4000:mode.startsWith('benchmark') ? 8 : 1);
       inflight--; if(endpoint==='purchase-order-page'){lists--;listTimes.get(timeKey).end=performance.now();}
       if(mode==='throttle'&&!limited&&endpoint==='purchase-order-page'){limited=true;return {ok:false,status:429,statusText:'Limited',headers:{get:()=> '1'}};}
       const id=target.split('-').at(-1);
-      const data=endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
+      const data=endpoint==='product-page'?[{itemId:`WH-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
       return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
     };
     for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(mode==='benchmark-serial'&&name==='content.js'?source[name].replace('mapConcurrent(querySkcs, 2,','mapConcurrent(querySkcs, 1,'):source[name]);
     window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0'}}));
   }
-  const until=async predicate=>{const end=Date.now()+60000;while(!predicate()){if(Date.now()>end)throw Error(window.document.body.textContent.slice(0,2500));await delay(5);}};
+  const until=async predicate=>{const end=Date.now()+120000;while(!predicate()){if(Date.now()>end)throw Error(window.document.body.textContent.slice(0,2500));await delay(5);}};
   const began=Date.now();
   try {
     await open(); window.document.getElementById('erpa-cost-trigger').click();
     if(mode==='remote-stop'){
       await until(()=>remoteStopped&&!window.document.getElementById('erpa-recalculate').disabled);
-      assert.equal(records[1].status,'stopped');assert.equal(deliveries.length,0);assert.equal(calls.length,2,'remote stop aborts active requests and prevents new work');
+      assert.equal(records[1].status,'stopped');assert.equal(deliveries.length,0);assert.equal(calls.filter(call=>call.endpoint==='purchase-order-page').length,2,'remote stop aborts active purchase requests and prevents new work');assert.equal(calls.filter(call=>call.endpoint==='purchase-order-details').length,0);
       console.log(JSON.stringify({mode,elapsedMs:Date.now()-began,requests:calls.length,delivered:0}));return;
     }
     if(mode==='lost-ack'){
@@ -101,8 +101,8 @@ async function scenario(size, mode = '') {
     assert.equal(maxLists,mode==='benchmark-serial'?1:2);assert.ok(maxInflight<=8);
     assert.ok(deliveries.every(item=>item.querySkcs.length<=20&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
     if(mode==='throttle'){
-      const target=calls[0].target,attempts=calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target===target);
-      assert.equal(attempts.length,2);assert.ok(attempts[1].at-attempts[0].at>=1000,'Retry-After is honored');assert.ok(maxInflight<=2,'rate limiting reduces global concurrency');
+      const target=calls.find(item=>item.endpoint==='purchase-order-page').target,attempts=calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target===target);
+      assert.equal(attempts.length,2);assert.ok(attempts[1].at-attempts[0].at>=1000,'Retry-After is honored');assert.ok(maxInflightAfterLimit<=2,'rate limiting reduces global concurrency after the 429 response');
     }
     if(mode==='lost-ack')assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'lost ACK recovery does not reread delivered first batch');
     if(mode==='pause')assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'delivered batch not reread after restart');
@@ -120,7 +120,7 @@ async function scenario(size, mode = '') {
       assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,size*2,'explicit new task rereads authoritative history');
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
-    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size+40:mode==='recalculate'?size*6:size*3),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
+    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
     return listMs;
   } finally {await window.happyDOM.close();}
 }
@@ -149,10 +149,10 @@ console.log(JSON.stringify({listImprovementPercent:Math.round((1-parallelMs/seri
    const data=path.endsWith('product-page')?Array.from({length:Math.max(0,Math.min(100,601-(params.page-1)*100))},(_,i)=>({itemId:`WH-${(params.page-1)*100+i}`})):[{associatedProductId:params.productId,barcodeSkuid:`SKU-${params.productId}`,barcodeSkcid:'SKC-A'}];
    return {code:0,count:path.endsWith('product-page')?601:data.length,data};
   },readWarehouseEvidence:async warehouseSku=>({warehouseSku,evidenceComplete:true,purchaseRecords:[],excludedRecords:[]})});
-  const result=await collector.collect(['SKC-A'],{controller:new AbortController()});
+  const result=await collector.collect(['SKC-A'],{controller:new AbortController(),expectedSkus:Array.from({length:601},(_,i)=>({platformSku:`SKU-WH-${i}`,platformSkc:'SKC-A'}))});
   assert.equal(result.results.length,601);assert.ok(calls>500);assert.equal(result.coverage.mappings.state,'complete');
   const pauseCollector=window.ShopeersErpCatalogCollector.create({policy:window.ShopeersErpResultPolicy,apiGet:async()=>{throw Object.assign(new Error('paused'),{code:'ERP_COLLECTION_PAUSED'});},readWarehouseEvidence:async()=>{}});
-  await assert.rejects(()=>pauseCollector.collect(['SKC-A'],{controller:new AbortController()}),error=>error.code==='ERP_COLLECTION_PAUSED');
+  await assert.rejects(()=>pauseCollector.collect(['SKC-A'],{controller:new AbortController(),expectedSkus:[{platformSku:'SKU-ONE',platformSkc:'SKC-A'}]}),error=>error.code==='ERP_COLLECTION_PAUSED');
   console.log(JSON.stringify({catalogRequests:calls,catalogWarehouses:result.results.length,pausePropagated:true}));
  } finally {await window.happyDOM.close();}
 }

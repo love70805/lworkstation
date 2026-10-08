@@ -28,8 +28,8 @@ export function buildErpCostInboxEnvelope({
   deliveryId = makeDeliveryId(),
   sentAt = new Date().toISOString(),
   transport = "browser-message",
-} = {}) {
-  const validated = validateErpCostBatchEnvelope(batch).envelope;
+} = {}, options = {}) {
+  const validated = validateErpCostBatchEnvelope(batch, options).envelope;
   return validateErpCostInboxEnvelope({
     type: ERP_INBOX_MESSAGE_TYPE,
     source: ERP_INBOX_SOURCE,
@@ -40,7 +40,7 @@ export function buildErpCostInboxEnvelope({
     transport,
     baseline: ERP_V8_BASELINE,
     batch: validated,
-  }).envelope;
+  }, options).envelope;
 }
 
 export function validateErpCostInboxEnvelope(payload, {

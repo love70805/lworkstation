@@ -1,8 +1,8 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0410-erp-progress",
+  "integrationBranch": "codex/v0411-erp-exact-scope",
   "requiredCommits": [
     {
       "module": "v0.4.10-response-driven-erp-progress",

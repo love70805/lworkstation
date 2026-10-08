@@ -6,6 +6,18 @@ const mapping = { platformSku: 'SKU-NEW', platformSkc: 'SKC-1', warehouseSku: 'W
 const payload = () => ({ catalog: { batchId: 'batch-1', requestId: 'catalog-1', workspaceId: 'w-1', ledgerPeriod: '2026-08', generatedAt: '2026-09-29T01:00:00Z', query: { unit: 'platform_skc', platformSkcs: ['SKC-1'] }, coverage: { directory: { state: 'complete' }, mappings: { state: 'complete' }, images: { state: 'unavailable', reasons: ['network'] }, suppliers: { state: 'complete' }, purchaseEvidence: { state: 'complete' } }, rows: [{ ...mapping, catalogMappings: [mapping], productName: '商品名称', previewUnitCost: 100, unitCost: 100 }], warehouseEvidence: [{ warehouseSku: 'WH-1', evidenceComplete: true, purchaseRecords: [{ recordId: 'purchase-1', quantity: 3, unitPrice: 0.00001, purchaseDate: '2026-08-29', purchaseCatalog: { purchaseSpecificationAndModel1688: '采购规格' } }] }] }, deliveryId: 'delivery-1', sentAt: '2026-09-29T01:00:00Z' });
 
 describe('ERP independent catalog requests', () => {
+  it('validates every platform pair in exact-scope deliveries and preserves that policy on replay', () => {
+    const input = payload();
+    input.catalog.platformScopePolicy = 'ledger_platform_pair';
+    input.catalog.rows = [{ ...input.catalog.rows[0], platformSku: 'SKU-1', catalogMappings: [{ ...mapping, platformSku: 'SKU-1' }] }];
+    const envelope = buildErpCatalogInboxEnvelope(input, { request: request() });
+    expect(envelope.catalog.platformScopePolicy).toBe('ledger_platform_pair');
+    expect(validateErpCatalogInboxEnvelope(envelope, { request: request() }).envelope).toEqual(envelope);
+    for (const mutate of [value => { value.catalog.rows[0].platformSku = 'SKU-UNUSED'; }, value => { value.catalog.rows[0].catalogMappings.push(mapping); }, value => { value.catalog.rows[0].catalogMappings[0].platformSkc = 'WRONG'; }]) {
+      const changed = structuredClone(input); mutate(changed);
+      expect(() => buildErpCatalogInboxEnvelope(changed, { request: request() })).toThrow();
+    }
+  });
   it('uses confirmed identity without a ledger or sales and requires an explicit reference period', () => {
     expect(request()).toMatchObject({ kind: 'catalog', ledgerId: null, ledgerPeriod: '2026-08' });
     expect(() => request({})).not.toThrow();

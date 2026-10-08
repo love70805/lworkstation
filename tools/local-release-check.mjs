@@ -9,6 +9,7 @@ const commands = [
   ["ERP Assistant 桥接生成", "pnpm", ["erp:bridge:test"]],
   ["ERP 分批任务持久化与恢复", "node", ["../tools/erp-collection-tasks.test.mjs"]],
   ["ERP 真实进度与并发任务", "node", ["../tools/erp-collection-progress.test.mjs"]],
+  ["ERP 平台 SKU/SKC 精确采集范围", "node", ["../tools/erp-platform-scope.test.mjs"]],
   ["清空本机数据与 ERP 历史隔离", "node", ["../tools/local-workspace-reset.test.mjs"]],
   ["ERP 分批采集规模与性能", "node", ["../tools/erp-collection-batches.test.mjs"]],
   ["ERP 延长时限与取消", "node", ["../tools/erp-collection-time-budget.test.mjs"]],

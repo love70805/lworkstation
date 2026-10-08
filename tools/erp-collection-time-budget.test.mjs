@@ -36,8 +36,8 @@ async function slowCollection(cancel) {
   const scope = ['SKC-A', 'SKC-B', 'SKC-C', 'SKC-D', 'SKC-E', 'SKC-F'];
   window.chrome = { runtime: { sendMessage(message, callback) {
     messages.push({ ...structuredClone(message), elapsed });
-    callback(collectionReply(message, { platformSkcs: scope }) || (message.type === 'shopeers.erp.catalogContext'
-      ? { ok: true, request: { requestId: 'CAT-SLOW', platformSkcs: scope } }
+    callback(collectionReply(message, { platformSkcs: scope, expectedSkus: scope.map(platformSkc => ({ platformSkc, platformSku: platformSkc.replace('SKC-', 'SKU-') })) }) || (message.type === 'shopeers.erp.catalogContext'
+      ? { ok: true, request: { requestId: 'CAT-SLOW', platformSkcs: scope, expectedSkus: [...scope.map(platformSkc => ({ platformSkc, platformSku: platformSkc.replace('SKC-', 'SKU-') })), { platformSku: 'SKU-G', platformSkc: 'SKC-A' }] } }
       : { ok: true, status: 'success' }));
   } } };
   window.fetch = raw => {
@@ -46,8 +46,8 @@ async function slowCollection(cancel) {
     const id = target.split('-').at(-1); calls.push({ endpoint, elapsed });
     const data = endpoint === 'purchase-order-page' ? [{ purchaseOrderId: `PO-${id}` }]
       : endpoint === 'purchase-order-details' ? [{ purchaseOrderDetailId: `D-${id}`, itemId: `WH-${id}`, creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }]
-        : endpoint === 'product-info-sku' ? [{ associatedProductId: `WH-${id}`, barcodeSkuid: `SKU-${id}`, barcodeSkcid: `SKC-${id}` }]
-          : [{ itemId: `WH-${id}` }];
+        : endpoint === 'product-info-sku' ? [{ associatedProductId: `WH-${id}`, barcodeSkuid: `SKU-${id}`, barcodeSkcid: id === 'G' ? 'SKC-A' : `SKC-${id}` }]
+          : id === 'A' ? [{ itemId: 'WH-A' }, { itemId: 'WH-G' }] : [{ itemId: `WH-${id}` }];
     return new Promise(resolve => window.setTimeout(() => resolve({ ok: true, status: 200, json: async () => ({ code: 0, count: data.length, data }) }), 80000));
   };
   try {

@@ -22,7 +22,8 @@ async function fixture(mode, realClock = false) {
  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
    if (mode === 'context-hang' && message.type === 'shopeers.erp.previewContext') return;
-   callback(collectionReply(message) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', platformSkcs: ['SKC-A'] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }));
+   if (message.type === 'shopeers.erp.catalogContext') optional = true;
+   callback(collectionReply(message, { expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }] }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', platformSkcs: ['SKC-A'], expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }, { platformSku: 'SKU-WH-UNSOLD', platformSkc: 'SKC-A' }] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }));
  } } };
  window.fetch = async (raw, options) => {
    const url = new URL(raw), endpoint = url.pathname.split('/').at(-1); calls.push({ endpoint, params: Object.fromEntries(url.searchParams), at: Date.now() - started });
@@ -34,13 +35,13 @@ async function fixture(mode, realClock = false) {
      assert.equal(url.searchParams.get('sku'), optional ? 'WH-UNSOLD' : 'SKC-A', 'history reads stay in the captured target or its verified warehouse mapping');
      assert.equal(url.searchParams.get('queryRange'), '0');
      assert.equal(url.searchParams.get('storeId'), 'STORE-A');
+     if (optional && ['optional-history-hang', 'cancel-optional'].includes(mode)) return new Promise(() => {});
      if (optional && mode === 'huge') body = response(Array.from({ length: 50 }, (_, i) => ({ purchaseOrderId: 'H-' + url.searchParams.get('page') + '-' + i })), 100000);
      else body = response([{ purchaseOrderId: 'PO-A' }]);
    } else if (endpoint === 'purchase-order-details') body = response([detail(url.searchParams.get('purchaseOrderId'))]);
-   else if (endpoint === 'product-info-sku') body = response([mapping(url.searchParams.get('productId'))]);
+   else if (endpoint === 'product-info-sku') body = response([{ ...mapping(url.searchParams.get('productId')), barcodeSkcid: 'SKC-A' }]);
    else if (endpoint === 'product-page') {
-     optional = true;
-     if (mode === 'directory-hang' || mode === 'cancel-optional') return new Promise(() => {});
+     if (mode === 'directory-hang') return new Promise(() => {});
      if (mode === 'directory-failure') throw new Error('Failed to fetch');
      body = response([{ itemId: 'WH-A' }, { itemId: 'WH-UNSOLD' }, { itemId: 'WH-UNSOLD' }], 2);
    } else throw new Error(endpoint);
@@ -54,41 +55,52 @@ async function fixture(mode, realClock = false) {
 }
 const cost = f => f.messages.find(m => m.type === 'shopeers.erp.submitCostResult');
 const catalog = f => f.messages.find(m => m.type === 'shopeers.erp.submitCatalogResult');
-for (const mode of ['directory-hang', 'directory-failure', 'huge']) {
+for (const mode of ['optional-history-hang', 'huge']) {
  const f = await fixture(mode);
  try {
   await until(() => cost(f));
   assert.equal(cost(f).payload.results[0].unitCost, '4.0000');
-  if (mode === 'directory-hang') await until(() => !f.window.document.getElementById('erpa-catalog-progress').hidden);
+  if (mode === 'optional-history-hang') await until(() => !f.window.document.getElementById('erpa-catalog-progress').hidden);
   assert.equal(f.window.document.getElementById('erpa-loading').classList.contains('erpa-visible'), false, 'optional phase cannot obscure completed table');
   assert.match(f.window.document.getElementById('erpa-table-body').textContent, /WH-A/);
   await until(() => catalog(f));
   assert.ok(cost(f).at <= catalog(f).at);
-  if (mode === 'directory-hang') assert.equal(catalog(f).payload.catalogCoverage.directory.state, 'unavailable');
+  if (mode === 'optional-history-hang') assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial');
   if (mode === 'huge') {
    const lists = f.calls.filter(c => c.endpoint === 'purchase-order-page');
    assert.ok(lists.length > 11 && lists.length <= 2001, 'history continues past ten pages until the optional time budget, without a fixed order cap');
    assert.equal(f.calls.filter(c => c.endpoint === 'purchase-order-details').length, 1, 'huge optional history stops before high fan-out details');
    assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial');
-   assert.equal(catalog(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);
+   assert.equal(cost(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);
   }
   checks.push({ mode, clock: 'accelerated deadlines only; unchanged production code', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length });
+ } finally { await f.close(); }
+}
+for (const mode of ['directory-hang', 'directory-failure']) {
+ const f = await fixture(mode);
+ try {
+  await until(() => f.window.document.getElementById('erpa-error').classList.contains('erpa-visible'));
+  assert.equal(cost(f), undefined, 'unresolved target directory cannot collect cost evidence');
+  assert.equal(f.calls.filter(c => c.endpoint === 'purchase-order-page').length, 0);
+  checks.push({ mode, stoppedBeforePurchaseEvidence: true });
  } finally { await f.close(); }
 }
 {
  const f = await fixture('context-hang');
  try {
-  await until(() => !f.window.document.getElementById('erpa-export').disabled);
-  assert.equal(cost(f), undefined, 'a request-context timeout preserves only local preview and export');
-  assert.match(f.window.document.getElementById('erpa-table-body').textContent, /WH-A/);
-  checks.push({ mode: 'context-hang', localPreview: true, automaticCostDelivery: false });
+  await until(() => f.window.document.getElementById('erpa-error').classList.contains('erpa-visible'));
+  assert.equal(cost(f), undefined, 'a request-context timeout cannot confirm a platform pair');
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.window.document.getElementById('erpa-export').disabled, true);
+  checks.push({ mode: 'context-hang', stoppedBeforeErpReads: true });
  } finally { await f.close(); }
 }
 for (const mode of ['first-hang', 'json-hang', 'login', 'login-detail']) {
  const f = await fixture(mode);
  try {
   await until(() => f.window.document.getElementById('erpa-error').classList.contains('erpa-visible'));
-  assert.equal(f.calls.length, mode.startsWith('login') ? (mode === 'login' ? 1 : 2) : 3, 'bounded retries, no second page-size retry chain');
+  const failedReads = f.calls.filter(c => c.endpoint === (mode === 'login' ? 'product-page' : mode === 'login-detail' ? 'purchase-order-details' : 'purchase-order-page'));
+  assert.equal(failedReads.length, mode.startsWith('login') ? 1 : 3, 'bounded retries, no second page-size retry chain');
   assert.equal(cost(f), undefined);
   assert.match(f.window.document.getElementById('erpa-error-title').textContent, mode.startsWith('login') ? /登录已失效/ : /超时/);
   if (!mode.startsWith('login')) { f.retry(); await until(() => cost(f)); }
@@ -107,8 +119,8 @@ for (const mode of ['first-hang', 'cancel-optional']) {
  } finally { await f.close(); }
 }
 if (process.env.ERP_REAL_DEADLINE_QA === '1') {
- const f = await fixture('directory-hang', true);
- try { await until(() => cost(f)); await until(() => catalog(f), 365000); assert.ok(catalog(f).at >= 359000 && catalog(f).at < 365000); checks.push({ mode: 'directory-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length }); }
+ const f = await fixture('optional-history-hang', true);
+ try { await until(() => cost(f)); await until(() => catalog(f), 365000); assert.ok(catalog(f).at >= 359000 && catalog(f).at < 365000); checks.push({ mode: 'optional-history-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length }); }
  finally { await f.close(); }
 }
 await mkdir(path.join(root, 'archive/release-0.3.4'), { recursive: true });
