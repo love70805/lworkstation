@@ -142,6 +142,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       batch.status = payload.state;
       if (payload.state === 'collected') {
         batch.collectedAt = timestamp(now); batch.evidenceComplete = payload.evidenceComplete !== false;
+        batch.error = batch.evidenceComplete ? null : String(payload.error || '成本证据未齐，请展开本批回传结果核对。').slice(0,2000);
         if (payload.resultDeliveryId) batch.resultDeliveryId = String(payload.resultDeliveryId).slice(0,200);
       }
       if (payload.state === 'failed') batch.error = String(payload.error ?? '采集失败').slice(0,2000);
@@ -183,6 +184,7 @@ export function recordCollectionDelivery(context, receipt, now = Date.now()) {
   const {task,batch} = context;
   if (receipt.evidenceComplete === false) batch.evidenceComplete = false;
   batch.status = batch.evidenceComplete === false ? 'incomplete' : 'delivered';
+  if (batch.status === 'incomplete') batch.error ||= 'ERP 回传缺少本批台账 SKU 的完整成本证据，请展开回传结果核对。';
   batch.collectedAt ||= timestamp(now); batch.deliveredAt = timestamp(now); batch.deliveryId = receipt.deliveryId; batch.resultDeliveryId = receipt.resultDeliveryId;
   batch.adoption = null; task.updatedAt = timestamp(now); refresh(task);
 }

@@ -4,7 +4,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { handleCollectionTaskRequest, collectionScopeHash, recoverCollectionTasks } from './erp-collection-tasks.mjs';
+import { handleCollectionTaskRequest, collectionScopeHash, recoverCollectionTasks, recordCollectionDelivery } from './erp-collection-tasks.mjs';
+
+{
+  const records = [{ kind: 'request', status: 'registered', requestId: 'R-reason', workspaceId: 'W', ledgerId: 'L', platformSkcs: ['A'], expectedSkus: [] }];
+  const call = (suffix, payload) => handleCollectionTaskRequest(records, { method: 'POST', url: new URL(`http://localhost/erp/v1/collection-tasks${suffix}`), payload: { workspaceId: 'W', ...payload }, instanceId: 'I' }).body;
+  const { task } = call('', { requestId: 'R-reason' });
+  call(`/${task.taskId}/control`, { action: 'resume' });
+  const { batch } = call(`/${task.taskId}/batches/${task.batches[0].batchId}`, { state: 'running' });
+  const batchUrl = `/${task.taskId}/batches/${batch.batchId}`;
+  call(batchUrl, { state: 'collected', attemptId: batch.attemptId, evidenceComplete: false, error: '平台 SKU 映射不完整 2 个仓库 SKU（ERP 返回空映射 2 个）' });
+  recordCollectionDelivery({ task, batch }, { deliveryId: 'D', resultDeliveryId: 'RESULT', evidenceComplete: false });
+  assert.equal(batch.status, 'incomplete'); assert.match(batch.error, /空映射 2 个/);
+  assert.equal(task.summary.delivered, 1, 'incomplete evidence still has a durable receipt');
+  call(`/${task.taskId}/control`, { action: 'retry_failed' });
+  call(batchUrl, { state: 'running' });
+  call(batchUrl, { state: 'collected', attemptId: batch.attemptId, evidenceComplete: true });
+  recordCollectionDelivery({ task, batch }, { deliveryId: 'D2', resultDeliveryId: 'RESULT2', evidenceComplete: true });
+  assert.equal(batch.error, null); assert.equal(batch.status, 'delivered');
+}
 
 // Scale and time are deterministic; no ERP account or real workspace is used.
 for (const size of [100, 500, 2000]) {

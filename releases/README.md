@@ -1,3 +1,7 @@
+## 0.4.10 ERP 真实进度与批次原因（候选通过）
+
+候选 `candidates/0.4.10/`，证据 `archive/erp-progress/`。1342 前端测试、完整 ERP 与桌面门禁、实际响应与并发进度、开发/候选扩展用户路径、浅深色窄屏、隐藏 smoke、649 安装文件/602 生产输入一致性通过。构建源码 e46094e；安装包 118924372 字节，SHA256 `5D3FCF3989077C7DEB868876D1E3E7380834911135B192284EDFC33986C555AF`。等待 PR/主线 CI 与公开资产回读；当前 Latest 仍为 0.4.9。本机未安装、真实业务库未改写，见 [发布记录](../docs/RELEASE_0.4.10.md)。
+
 ## 0.4.9 清空本机核算历史（已公开）
 
 候选 `candidates/0.4.9/`，证据 `archive/local-reset-history/`。1340 测试、完整前端/ERP 与桌面门禁、开发/生产实际清空及重启/同月 CSV 重导入、隐藏 smoke、636 安装文件/589 生产输入一致性通过。构建源码 f1ec19c；安装包 118775892 字节，SHA256 `0EA5F2632116A2D1B9F56994DB1F394F9768EB1F4547A36E31DCB53BBBC450CE`。[PR #175](https://github.com/love70805/lworkstation/pull/175) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37724384103) 通过，稳定标签固定 ce5047a，四公开资产匿名完整哈希及生产更新入口通过，已公开稳定 Latest。本机未安装、真实数据未改写，见 [发布记录](../docs/RELEASE_0.4.9.md)。

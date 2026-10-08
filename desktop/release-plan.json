@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "candidateOnly": true,
-  "integrationBranch": "codex/v049-local-reset-history",
+  "integrationBranch": "codex/v0410-erp-progress",
   "requiredCommits": [
+    {
+      "module": "v0.4.10-response-driven-erp-progress",
+      "commit": "544a823ee96d9703cb8b9738ca38e320ea801a1e"
+    },
+    {
+      "module": "v0.4.9-verified-main-baseline",
+      "commit": "8bfe0c2"
+    },
     {
       "module": "v0.4.9-local-workspace-and-desktop-history-reset",
       "commit": "3260a0c291ac9e8d819c97707ff6c82bfdfa7c9e"
