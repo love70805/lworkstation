@@ -2,7 +2,11 @@
 
 更新时间：2026-10-08
 
-## 当前公开稳定 Latest：0.4.10
+## 当前公开稳定 Latest：0.4.11
+
+[v0.4.11](https://github.com/love70805/lworkstation/releases/tag/v0.4.11) 固定 cea783c，内置 ERP Assistant 8.0.38。只采台账已使用且平台 SKC/SKU 同时匹配的规格，仓库 SKU 只关联档案与采购证据；公共关联、同 SKC 未用 SKU 和混合单未用明细不扩大范围。真实缺映射单独提示，其他完整目标可采用。1346 测试、完整门禁、最终候选精确范围/原生扩展/无头窄屏、隐藏 smoke、662 文件/615 输入一致性通过；候选 SHA256 A3001BCB…，源码 6685d23。[PR #179](https://github.com/love70805/lworkstation/pull/179) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37756944645) 通过，四公开资产匿名完整哈希及生产更新入口通过。本机未安装，真实数据与旧任务未改写；升级后重新采集生效，见 [发布记录](RELEASE_0.4.11.md)。
+
+## 历史公开稳定版：0.4.10
 
 [v0.4.10](https://github.com/love70805/lworkstation/releases/tag/v0.4.10) 固定 5931979，内置 ERP Assistant 8.0.37。采集按实际完成量展示阶段汇总和各并发路，区分成本已送达、证据缺项与资料齐全，保留具体映射/采购缺项原因。1342 测试、完整门禁、隔离开发/候选用户路径、隐藏 smoke、649 文件/602 输入一致性通过；候选 SHA256 `5D3FCF39…`，源码 e46094e。[PR #177](https://github.com/love70805/lworkstation/pull/177) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37739497593) 通过，四公开资产匿名完整哈希及生产更新入口通过。只读确认现有任务 6/6 成本批次已送达、两批存在映射缺项；本机未安装、真实数据未改写，见 [发布记录](RELEASE_0.4.10.md)。
 
