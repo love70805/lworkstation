@@ -1,3 +1,7 @@
+## 0.4.11 平台 SKC/SKU 精确范围（已公开稳定 Latest）
+
+候选 candidates/0.4.11/，证据 archive/erp-exact-scope/。1346 测试、完整门禁、最终候选精确范围/原生扩展/无头用户路径/隐藏 smoke、662 文件/615 输入一致性通过。源码 6685d23，安装包 119073307 字节，SHA256 `A3001BCB8E218A1277B0B5FC4463E8E6748D2913C54892C171659332F56BDA4C`。[PR #179](https://github.com/love70805/lworkstation/pull/179) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37756944645) 通过，标签固定 cea783c，四公开资产匿名完整哈希与生产更新入口通过，2026-10-08 17:35:09 已公开稳定 Latest。本机未安装；见 [发布记录](../docs/RELEASE_0.4.11.md)。
+
 ## 0.4.10 ERP 真实进度与批次原因（已公开稳定 Latest）
 
 候选 `candidates/0.4.10/`，证据 `archive/erp-progress/`。1342 前端测试、完整 ERP 与桌面门禁、实际响应与并发进度、开发/候选扩展用户路径、浅深色窄屏、隐藏 smoke、649 安装文件/602 生产输入一致性通过。构建源码 e46094e；安装包 118924372 字节，SHA256 `5D3FCF3989077C7DEB868876D1E3E7380834911135B192284EDFC33986C555AF`。[PR #177](https://github.com/love70805/lworkstation/pull/177) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37739497593) 通过，标签固定 5931979，四公开资产匿名完整哈希及生产更新入口通过，2026-10-08 14:51 已公开稳定 Latest。本机未安装、真实业务库未改写，见 [发布记录](../docs/RELEASE_0.4.10.md)。
@@ -40,7 +44,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.9](https://github.com/love70805/lworkstation/releases/tag/v0.4.9)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.11](https://github.com/love70805/lworkstation/releases/tag/v0.4.11)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 
