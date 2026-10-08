@@ -1,8 +1,8 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "candidateOnly": true,
-  "integrationBranch": "codex/v049-local-reset-history",
+  "integrationBranch": "codex/v0410-erp-progress",
   "requiredCommits": [
     {
       "module": "v0.4.9-local-workspace-and-desktop-history-reset",

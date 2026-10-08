@@ -423,5 +423,8 @@
 .erp-collection-progress h2 { margin: 0; font-size: 16px; }
 .erp-collection-progress p { color: var(--text-muted); overflow-wrap: anywhere; }
 .erp-collection-progress progress { width: 100%; accent-color: var(--primary); }
+.erp-collection-meter { display: grid; gap: 5px; margin-block: 12px; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.erp-collection-progress details { margin-block: 10px; }
+.erp-collection-progress summary { cursor: pointer; color: var(--text); overflow-wrap: anywhere; }
 .erp-collection-counts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-block: 14px; }
 .erp-collection-counts strong { font-variant-numeric: tabular-nums; }
