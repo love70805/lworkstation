@@ -1,6 +1,6 @@
 # v0.4.8 台账自主筛选与利润流程引导
 
-2026-10-08：本机候选验收通过，GitHub CI、合并与公开发布待完成。当前公开稳定版仍为 0.4.7；本记录不表示 0.4.8 已发布。
+2026-10-08：[v0.4.8](https://github.com/love70805/lworkstation/releases/tag/v0.4.8) 已公开为稳定 Latest，标签固定 `f534e9a256ae0a64b73f716b3a39a5d158674fc8`；[PR #173](https://github.com/love70805/lworkstation/pull/173) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37719306291) 通过，四公开资产匿名完整回读和生产更新入口验证通过。本机未自动安装。
 
 ## 使用变化
 
@@ -23,3 +23,9 @@
 安装包：118,774,638 字节；SHA256：`12BA2191E39CA19EAB813A5BA55ABC34C075EBF48D7ECCCDFDDB9D46C75D6E76`。
 
 候选保留在 `releases/candidates/0.4.8/`，原始验收证据在 `archive/ledger-movement-flow/`。本版不自动安装，不触发真实 ERP 采集；ERP Assistant 继续为已验收的 8.0.36。实施契约见 [筛选与引导记录](integration/LEDGER_MOVEMENT_FILTER_0.4.8.md)。
+
+## 公开发布
+
+公开时间：2026-10-08T02:47:57Z。公开资产为 `Lworkstation-Setup-0.4.8.exe`、同名 blockmap、`latest.yml` 和 `SHA256.txt`；匿名完整下载与候选 SHA256、文件长度及 GitHub digest 一致，更新元数据 SHA512 和长度一致。生产 GitHub provider 返回 0.4.8，解析后的实际下载 URL 回读同一安装包；稳定 0.4.7 可升级，0.4.8 不重复升级，Beta/RC 通道保持隔离。
+
+发布标签与候选构建源码 373cdf0 仅有验收文档差异，589 项生产输入未变；未重复构建候选。源码、候选、CI、公开回读及用户路径证据保全在本机候选与 archive 目录。没有真实工作区改写、ERP 实采或自动安装。
