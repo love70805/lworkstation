@@ -261,7 +261,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const adoptionNotice = summarizeAdoptionForDisplay(reviewAdoption, { status: (currentInbox ?? latestAdoptionInbox)?.status, failure: reviewAdoptionFailure });
   const otherAdoptionFailure = currentInbox && latestAdoptionInbox?.id !== currentInbox.id && Date.parse(latestAdoptionInbox?.receivedAt) > Date.parse(currentInbox.receivedAt) && ['pending', 'loaded'].includes(latestAdoptionInbox?.status) ? latestAdoptionInbox?.adoptionFailure : null;
   const adoptionItemsBySku = useMemo(() => new Map((reviewAdoption?.items ?? []).map(item => [item.canonicalPlatformSku, item])), [reviewAdoption]);
-  const exceptionGroups = useMemo(() => groupAdoptionExceptions(reviewAdoption), [reviewAdoption]);
+  const rawExceptionGroups = useMemo(() => groupAdoptionExceptions(reviewAdoption), [reviewAdoption]);
 
   const persistedCostRows = useMemo(() => snapshot?.costs ?? [], [snapshot?.costs]);
   const effectiveCostRows = useMemo(() => {
@@ -625,6 +625,11 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const canRetryAutomatic = ['pending', 'loaded'].includes(currentInbox?.status) && (Boolean(currentInbox?.adoptionFailure) || Boolean(currentInbox?.adoption?.version) && resolutions.length > 0) && !locked;
   const hasFilteredRows = filteredSalesLines.length > 0;
   const allCostsReady = formalSalesLines.length > 0 && formalSalesLines.every(row => row.finalizable);
+  const unresolvedSkus = useMemo(() => new Set(formalSalesLines.filter(row => !row.finalizable).map(row => row.canonicalPlatformSku)), [formalSalesLines]);
+  const exceptionGroups = useMemo(() => hasNewBatch && !isAutomaticInbox ? rawExceptionGroups
+    : rawExceptionGroups.map(group => ({ ...group, items: group.items.filter(item => unresolvedSkus.has(item.canonicalPlatformSku ?? canonicalPlatformSku(item.platformSku))) })).filter(group => group.items.length),
+  [hasNewBatch, isAutomaticInbox, rawExceptionGroups, unresolvedSkus]);
+  const effectiveCostsReady = allCostsReady && (!hasNewBatch || isAutomaticInbox);
   const clearFilters = () => {
     const next = new URLSearchParams(searchParams);
     for (const key of ["q", "supplier"]) next.delete(key);
@@ -787,6 +792,13 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   }), [formalSalesLines, formalCostsBySku, reviewMatchBySku, snapshot?.ledger, snapshot?.approvals]);
   const filteredReviewRowIds = useMemo(() => new Set(filteredSalesLines.map(row => row.id)), [filteredSalesLines]);
   const reviewRows = useMemo(() => allReviewRows.filter(row => filteredReviewRowIds.has(row.id)), [allReviewRows, filteredReviewRowIds]);
+  const missingReviewRows = useMemo(() => reviewRows.filter(row => !row.decision.eligibleForExactProfit), [reviewRows]);
+  const reviewRowsRef = useRef(allReviewRows);
+  reviewRowsRef.current = allReviewRows;
+  const openMissingCorrection = () => {
+    if (locked || !missingReviewRows.length) return;
+    setManualTarget({ id: missingReviewRows[0].id, mode: "edit", queueIds: missingReviewRows.map(row => row.id) });
+  };
   const reviewRowsBySku = useMemo(() => {
     const result = new Map();
     for (const row of reviewRows) { const group = result.get(row.canonicalPlatformSku) ?? []; group.push(row); result.set(row.canonicalPlatformSku, group); }
@@ -869,8 +881,21 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const groupedMatches = useMemo(() => groupCostMatchesBySkc(reviewMatches), [reviewMatches]);
   const visibleGroupedMatches = useMemo(() => filterCostMatchGroups(groupedMatches, resultQuery), [groupedMatches, resultQuery]);
   const visibleReviewRows = useMemo(() => visibleGroupedMatches.flatMap(group => group.variants.flatMap(item => reviewRowsBySku.get(item.canonicalPlatformSku) ?? [])), [visibleGroupedMatches, reviewRowsBySku]);
-  const targetIndex = targetRow ? visibleReviewRows.findIndex(row => row.id === targetRow.id) : -1;
-  const nextTarget = targetIndex >= 0 ? visibleReviewRows[targetIndex + 1] : null;
+  const correctionIds = manualTarget?.queueIds ?? visibleReviewRows.map(row => row.id);
+  const targetIndex = targetRow ? correctionIds.indexOf(targetRow.id) : -1;
+  const findNextTarget = (rows) => {
+    const byId = new Map(rows.map(row => [row.id, row]));
+    for (let index = targetIndex + 1; index < correctionIds.length; index++) {
+      const row = byId.get(correctionIds[index]);
+      if (row && (!manualTarget?.queueIds || !row.decision.eligibleForExactProfit)) return row;
+    }
+    return null;
+  };
+  const nextTarget = targetIndex >= 0 ? findNextTarget(allReviewRows) : null;
+  const nextCorrection = () => {
+    const next = findNextTarget(reviewRowsRef.current);
+    setManualTarget(next ? { ...manualTarget, id: next.id, mode: "edit" } : null);
+  };
 
   const resolutionDialog = (
     <Modal
@@ -989,17 +1014,17 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       {!locked && platformSkcs.length > 0 && registrationState.message ? <p className="cost-registration-status" role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
       {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>本机已收到新批次；正常项已自动处理，剩余项和当前草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></Panel> : null}
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
-      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">待处理 {inboxQueue.pendingCount}</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
+      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">回传记录 · {inboxQueue.pendingCount} 批待核对</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} onChange={changeScope} /> : null}
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
       {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会自动确定父级关系，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 
       <div className="cost-flow-guide" aria-label="成本核对状态" role="status">
-        <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : adoptionNotice?.title ?? (hasNewBatch ? "手动批次待核对" : allCostsReady ? "本月成本已齐" : "等待 ERP 回传或人工更正")}</strong><span>{adoptionNotice?.details ?? (hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。")}</span></div>
+        <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : effectiveCostsReady ? "本月成本已齐" : adoptionNotice?.title ?? (hasNewBatch ? "手动批次待核对" : "等待 ERP 回传或人工更正")}</strong><span>{effectiveCostsReady ? "本月已有有效 ERP 或人工成本；原始异常证据保留在回传记录中。" : adoptionNotice?.details ?? (hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。")}</span></div>
       </div>
 
       {otherAdoptionFailure ? <p className="cost-registration-status" role="alert">较新的 ERP 回传自动采用未完成：{otherAdoptionFailure.message}。证据已保存，系统将继续重试。<Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></p> : null}
-      {(adoptionNotice?.remainingCount > 0 || hasNewBatch && adoption.summary.blockedAnomalyCount > 0) ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>{adoptionNotice?.remainingCount ?? adoption.summary.blockedAnomalyCount} 个 SKU 仍需核对</strong><small>查看采购证据并处理异常、补齐缺失项或按店铺人工更正。原始回传记录保留。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
+      {!effectiveCostsReady && (adoptionNotice?.remainingCount > 0 || hasNewBatch && adoption.summary.blockedAnomalyCount > 0) ? <div className="cost-anomaly-warning" role="alert"><AlertCircle size={20} /><span><strong>{exceptionGroups.length ? new Set(exceptionGroups.flatMap(group => group.items.map(item => item.canonicalPlatformSku))).size : adoptionNotice?.remainingCount ?? adoption.summary.blockedAnomalyCount} 个 SKU 仍需核对</strong><small>查看采购证据并处理异常、补齐缺失项或按店铺人工更正。原始回传记录保留。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
       {exceptionGroups.length ? <details className="cost-exception-groups" open>
         <summary>按原因查看剩余项与处理方式</summary>
         <div className="cost-exception-grid">{exceptionGroups.map(group => <section key={group.state}>
@@ -1012,14 +1037,15 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       <div className="match-stat-grid">
         <Panel className="match-stat"><ListChecks size={22} /><span>当前查看平台 SKU</span><strong>{displaySkuSet.size}</strong></Panel>
         <Panel className="match-stat match-success"><CheckCircle2 size={22} /><span>当前有效成本</span><strong>{filteredSalesLines.filter(row => row.finalizable).length}<small> 条店铺 SKU</small></strong></Panel>
-        <Panel className="match-stat match-warning"><AlertCircle size={22} /><span>ERP 自动采用</span><strong>{adoptionNotice?.automaticCount ?? 0}<small> 个 SKU</small></strong></Panel>
-        <Panel className="match-stat match-danger"><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{filteredSalesLines.filter(row => !row.finalizable).length}<small> 条店铺 SKU</small></strong><p>按当前查看范围</p></Panel>
+        <Panel className="match-stat match-batch"><CheckCircle2 size={22} /><span>{currentInbox ? "当前批次自动采用" : "最近批次自动采用"}</span><strong>{adoptionNotice?.automaticCount ?? 0}<small> 个 SKU</small></strong><p>仅此回传批次，非本月累计；不随查看筛选变化</p></Panel>
+        <Panel className={`match-stat match-correction ${missingReviewRows.length ? "match-danger" : "match-success"}`}><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{missingReviewRows.length}<small> 条店铺 SKU</small></strong><div className="cost-correction-entry"><small>按当前月份与查看范围</small>{!locked && missingReviewRows.length ? <Button onClick={openMissingCorrection}>逐项更正</Button> : null}</div></Panel>
       </div>
 
       <div className="cost-workflow">
         <Panel className={`cost-preview-panel ${resultHighlighted ? "cost-preview-highlight" : ""}`}>
           {parseError ? <div className="cost-inline-error" role="alert"><AlertCircle size={16} />{parseError}</div> : null}
           <div className="panel-header cost-preview-header"><div className="panel-title"><ListChecks size={19} /><h2>成本核对与更正</h2></div><div className="cost-preview-tools"><SearchInput value={resultQuery} onChange={(event) => setResultQuery(event.target.value)} placeholder="搜索 SKC、SKU、仓库 SKU、供应商或采购单..." /><span className="cost-preview-count">显示 {visibleGroupedMatches.length} / {groupedMatches.length} 个 SKC</span><Button variant="ghost" onClick={clearFilters}>清除筛选</Button></div></div>
+          {!locked && missingReviewRows.length ? <p className="cost-correction-help">人工更正无需选择待处理批次：点击上方“逐项更正”，或在对应店铺 SKU 行点击“人工更正”。填写单件成本和说明后即可生效。</p> : null}
           {visibleGroupedMatches.length ? <DataTable ref={rememberTable} className="cost-match-table" columns={columns} data={visibleGroupedMatches} getRowId={(row) => row.id} pageSize={12} initialViewState={initialView?.table} paginationResetKey={`${profitHref}/${resultQuery}`} /> : <EmptyState icon={ListChecks} title={!hasFilteredRows && profitFilter.missingOnly && allCostsReady ? "本月成本已齐" : "当前筛选没有匹配明细"} description={!hasFilteredRows && profitFilter.missingOnly && allCostsReady ? "没有待补成本的店铺 SKU，可返回利润明细继续核算。" : "清除搜索、店铺或缺成本筛选后查看；这不代表台账缺少 SKC。"} action={<Button onClick={clearFilters}>查看全部明细</Button>} />}
           {reconciliation?.overrides.length ? <div className="cost-audit-note"><AlertCircle size={17} />检测到 {reconciliation.overrides.length} 次候选替换，旧值与新值会随采用写入批次审计。</div> : null}
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
@@ -1034,8 +1060,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         description={`${snapshot.ledger.period} · ${targetRow.store} · ${targetRow.platformSku}。${locked ? "已定稿或锁定，当前只读。" : "查看当前采用结果与采购证据；需要调整时选择人工更正。"}`}
         onClose={() => setManualTarget(null)} footer={<><Button onClick={() => setManualTarget(null)}>关闭</Button>{!locked ? <Button onClick={() => setManualTarget({ id: targetRow.id, mode: "edit" })}>{targetRow.manualOverride ? "更正 / 撤销" : "人工更正"}</Button> : null}</>}>
         {targetDetails}
-      </Modal> : <ManualCostDialog key={targetRow.id} ledger={snapshot.ledger} row={targetRow} readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)} className="cost-detail-modal" title="成本详情与更正" onClose={() => setManualTarget(null)} onNext={nextTarget ? () => setManualTarget({ id: nextTarget.id, mode: "edit" }) : undefined}>
-        {targetDetails}
+      </Modal> : <ManualCostDialog key={targetRow.id} ledger={snapshot.ledger} row={targetRow} readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)} className="cost-detail-modal" title="人工更正成本" formFirst queueProgress={manualTarget.queueIds ? { index: targetIndex + 1, total: correctionIds.length } : null} saveLabel={manualTarget.queueIds && !nextTarget ? "保存并完成" : "保存更正"} onClose={() => setManualTarget(null)} onNext={nextTarget ? nextCorrection : undefined}>
+        <details className="cost-correction-evidence"><summary>查看当前成本、ERP 采购证据与异常原因</summary>{targetDetails}</details>
       </ManualCostDialog> : null}
       {deleteBatchDialog}
       {voidBatchDialog}

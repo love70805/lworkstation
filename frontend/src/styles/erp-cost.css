@@ -28,7 +28,15 @@
 .match-stat.match-warning > span, .match-stat.match-warning > svg { color: var(--warning); }
 .match-stat.match-danger { border-color: var(--danger-border); background: var(--danger-bg); }
 .match-stat.match-danger > span, .match-stat.match-danger > svg, .match-stat.match-danger > strong { color: var(--danger); }
-.match-stat p { position: absolute; right: 20px; bottom: 17px; left: 20px; color: var(--text-muted); font-size: 11px; }
+.match-stat p { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.match-stat > span { padding-right: 28px; }
+.cost-correction-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.cost-correction-entry > small { color: var(--text-muted); font-size: 12px; }
+.cost-correction-entry .button { min-height: 44px; }
+.cost-correction-help { margin: 0 0 16px; color: var(--text-muted); font-size: 13px; line-height: 1.7; }
+.cost-correction-progress { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.cost-correction-evidence > summary { cursor: pointer; color: var(--text-muted); font-size: 13px; line-height: 1.7; }
+.cost-correction-evidence > .cost-detail-current { margin-top: 12px; }
 .match-layout { display: grid; grid-template-columns: 440px minmax(0, 1fr); gap: 24px; }
 .imported-cost-panel { min-height: 600px; overflow: hidden; }
 .imported-table { min-width: 0; table-layout: fixed; }

@@ -24,8 +24,8 @@ export function CostMatchingInboxQueueDialog({
   return (
     <Modal
       open={open}
-      title={`ERP 回传待处理（${inboxQueue.pendingCount}）`}
-      description="正常 ERP 成本接收后自动校验采用；异常、缺失和定稿保护在此保留处理记录。"
+      title={`ERP 回传记录（${inboxQueue.pendingCount} 批待核对）`}
+      description="每批最多采集 20 个 SKC，SKU 数随规格而变化。待核对计的是回传批次，不是缺成本商品数；同批正常成本已自动采用，剩余异常、缺证据或定稿保护记录保留。人工更正可直接从缺成本卡片或明细行进入。"
       className="cost-inbox-queue-modal"
       onClose={onClose}
       footer={<><Button variant="ghost" onClick={onManualImport}>手动导入</Button>{selectedPendingInboxIds.size > 0 ? <Button icon={Trash2} variant="danger" disabled={ledgerLocked} onClick={() => onDeleteSelected([...selectedPendingInboxIds])}>删除所选 {selectedPendingInboxIds.size} 个</Button> : null}<Button variant="primary" onClick={onClose}>关闭</Button></>}

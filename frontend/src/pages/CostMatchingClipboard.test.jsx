@@ -10,7 +10,8 @@ import { costDraftKey } from '../lib/costMatchingDraft';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn(), saveManual: vi.fn() }));
+vi.mock('../data/repositories/profitRepository', async importOriginal => ({ ...await importOriginal(), saveManualCostOverride: mocks.saveManual }));
 vi.mock('../hooks/useErpCollectionTasks', () => ({ useErpCollectionTasks: () => ({ tasks: mocks.tasks ?? [], loading: false, error: '', refresh: () => {} }) }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
 vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : query.toString().includes('listErpCostRequests') ? mocks.requests : initial }));
@@ -46,6 +47,7 @@ beforeEach(() => {
   mocks.tasks = [];
   mocks.requests = [];
   mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
+  mocks.saveManual.mockReset().mockResolvedValue({});
   mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.cancel.mockReset().mockResolvedValue(null);
   mocks.register.mockReset().mockImplementation(async input => ({ id: `REG-${input.ledger.id}`, workspaceId: input.ledger.workspaceId, ledgerId: input.ledger.id, ledgerPeriod: input.ledger.period, platformSkcs: input.platformSkcs, expectedSkus: input.expectedSkus }));
   writeText = vi.fn().mockResolvedValue(undefined);
@@ -252,6 +254,76 @@ it('opens adopted cost details without a correction form and offers correction a
   expect(container.querySelector('#manual-cost-value')?.value).toBe('10');
   expect(container.querySelector('#manual-cost-reason')).not.toBeNull();
 });
+it('corrects only missing store SKUs directly without loading a receipt, accepting zero and tiny real costs', async () => {
+  await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'DIRECT', stores: ['甲', '乙', '丙'], costs: [formalCost] });
+  await act(async () => button('逐项更正').click());
+  const dialog = () => container.querySelector('[role="dialog"]');
+  expect(dialog().textContent).toContain('乙 · SKU-1');
+  expect(dialog().textContent).toContain('第 1 / 2 项');
+  expect(container.querySelector('#manual-cost-value').value).toBe('');
+  expect(container.querySelector('.cost-correction-evidence').open).toBe(false);
+  const form = [...container.querySelector('.modal-body').children];
+  expect(form.indexOf(container.querySelector('#manual-cost-value').parentElement)).toBeLessThan(form.indexOf(container.querySelector('.cost-correction-evidence')));
+  const fill = async amount => act(async () => {
+    Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: amount } });
+    Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '核实异常后更正' } });
+  });
+  await fill('0');
+  await act(async () => button('保存并下一项').click());
+  expect(mocks.saveManual).toHaveBeenNthCalledWith(1, { ledgerId: 'DIRECT', store: '乙', platformSku: 'SKU-1', unitCost: '0', reason: '核实异常后更正' });
+  expect(dialog().textContent).toContain('丙 · SKU-2');
+  expect(dialog().textContent).toContain('第 2 / 2 项');
+  expect(container.querySelector('#manual-cost-reason').value).toBe('');
+  await fill('0.00001');
+  await act(async () => button('保存并完成').click());
+  expect(mocks.saveManual).toHaveBeenNthCalledWith(2, { ledgerId: 'DIRECT', store: '丙', platformSku: 'SKU-2', unitCost: '0.00001', reason: '核实异常后更正' });
+  expect(dialog()).toBeNull();
+  expect(mocks.switchInbox).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+it('keeps direct correction within the selected store even when a SKU is shared across stores', async () => {
+  await render(['SKC-1', 'SKC-1'], 'ready', { ledgerId: 'STORE-CORRECTION', stores: ['甲', '乙'], skuIds: ['SHARED', 'SHARED'], contextStore: '乙' });
+  await act(async () => button('逐项更正').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('乙 · SHARED');
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('第 1 / 1 项');
+  expect(button('保存并下一项')).toBeUndefined();
+});
+it('skips a queued row that becomes effective while the previous correction is saving', async () => {
+  let finishSave;
+  mocks.saveManual.mockImplementation(() => new Promise(resolve => { finishSave = resolve; }));
+  await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION' });
+  await act(async () => button('逐项更正').click());
+  await act(async () => {
+    Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '8.5' } });
+    Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '已核实' } });
+  });
+  await act(async () => button('保存并下一项').click());
+  await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION', costs: [{ ...formalCost, platformSku: 'SKU-1' }] });
+  await act(async () => finishSave({}));
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-2');
+  expect(button('保存并完成')).toBeDefined();
+});
+it('keeps a failed direct correction and entered amount open for retry', async () => {
+  mocks.saveManual.mockRejectedValue(new Error('隔离保存故障'));
+  await render(['SKC-1'], 'ready', { ledgerId: 'CORRECTION-FAILURE' });
+  await act(async () => button('逐项更正').click());
+  await act(async () => {
+    Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '3.5' } });
+    Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '已核实' } });
+  });
+  await act(async () => button('保存并完成').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('隔离保存故障');
+  expect(container.querySelector('#manual-cost-value').value).toBe('3.5');
+});
+it('shows current cost coverage instead of requesting another correction from historical exception metadata', async () => {
+  const adoption = { version: 'erp-auto-adoption@1', state: 'partial', summary: { adoptedCount: 0, remainingCount: 1 }, items: [{ canonicalPlatformSku: 'SKU-0', platformSku: 'SKU-0', state: 'anomaly_pending' }] };
+  mocks.inboxRecords = [{ id: 'HISTORICAL-ANOMALY', ledgerId: 'COST-COVERED', workspaceId: 'W', status: 'pending', adoption, receivedAt: '2026-10-09T00:00:00Z' }];
+  await render(['SKC-1'], 'ready', { ledgerId: 'COST-COVERED', costs: [formalCost] });
+  expect(container.querySelector('.cost-flow-guide').textContent).toContain('本月成本已齐');
+  expect(container.querySelector('.cost-exception-groups')).toBeNull();
+  expect(container.querySelector('.cost-anomaly-warning')).toBeNull();
+  expect(mocks.inboxRecords[0].adoption).toBe(adoption);
+});
 it.each(['finalized', 'locked'])('shows only details and preserves read-only cost evidence for %s', async status => {
   await render(['SKC-1'], status, { ledgerId: `DETAILS-${status}`, costs: [formalCost] });
   expect(container.querySelectorAll('.cost-match-row-actions button')).toHaveLength(1);
@@ -259,6 +331,7 @@ it.each(['finalized', 'locked'])('shows only details and preserves read-only cos
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain('已定稿或锁定');
   expect(container.querySelector('#manual-cost-value')).toBeNull();
   expect(button('人工更正')).toBeUndefined();
+  expect(button('逐项更正')).toBeUndefined();
   expect(button('撤销当前更正')).toBeUndefined();
 });
 it('recognizes a restored draft already in the automatic inbox and explains its block', async () => {
