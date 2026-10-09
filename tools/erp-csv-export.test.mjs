@@ -178,12 +178,13 @@ async function verifyCachedCsv(extensionRoot) {
       }
       assert.deepEqual([row[8], row[11], ...row.slice(13, 16)], ["0", "0", "", "", ""]);
       assert.match(row[16], /台账月份待关联/);
-      assert.equal(row[9], "");
+      assert.match(row[9], /台账月份待关联/);
       assert.deepEqual(JSON.parse(row[10]), []);
     });
     assert.deepEqual(rows.at(-3).slice(13, 16), ["", "", ""], "cached monetary values cannot bypass missing ledger scope");
     assert.deepEqual(rows.at(-2).slice(13, 16), ["", "", ""], "missing costs do not become zero");
-    assert.equal(rows.at(-1)[9], "", "cached cost warnings are recomputed from selected evidence");
+    assert.match(rows.at(-1)[9], /台账月份待关联/, "cached cost warnings are recomputed from selected evidence");
+    assert.doesNotMatch(rows.at(-1)[9], /=1\+1/, "untrusted stale warning reasons are not restored");
     const typed = Papa.parse(csv, { header: true, dynamicTyping: (field) => ["总采购量", "总采购价(￥)", "预览单件成本"].includes(field) });
     assert.deepEqual([typed.data[0]["总采购量"], typed.data[0]["总采购价(￥)"], typed.data[0]["预览单件成本"]], [null, null, null]);
     assert.equal((await extension.exportCsv()).csv, csv, "repeated exports must not accumulate prefixes in live results");
@@ -228,7 +229,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 4, "cost verifies directory and mapping before reading scoped purchase evidence");
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.40");
+    assert.equal(delivery.meta.extensionVersion, "8.0.41");
     assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);
@@ -397,7 +398,7 @@ async function verifyLedgerPreview(extensionRoot) {
       } else {
         assert.equal(result.unitCost, null);
         assert.equal(rows[1][15], '');
-        assert.match(window.document.body.textContent, ledgerPeriod ? /台账当月及以前无可用采购/ : /台账月份待关联/);
+        assert.match(window.document.body.textContent, ledgerPeriod ? /台账月末前无采购/ : /台账月份待关联/);
       }
     } finally { await extension.close(); }
   }
@@ -418,6 +419,7 @@ async function verifyLedgerPreview(extensionRoot) {
 }
 
 export async function verifyCsvExport(extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension")) {
+  await verifyReviewDiagnostics(extensionRoot);
   await verifyLegacyCacheIsolation(extensionRoot, 4);
   await verifyLegacyCacheIsolation(extensionRoot, 5);
   await verifyCachedCsv(extensionRoot);
@@ -439,6 +441,43 @@ export async function verifyCsvExport(extensionRoot = path.join(workspaceRoot, "
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(JSON.parse(copied).batchId, "CURRENT");
     assert.equal(JSON.parse(window.localStorage.getItem(cacheKey)).importEnvelope.batchId, "CURRENT");
+  } finally { await extension.close(); }
+}
+
+async function verifyReviewDiagnostics(extensionRoot) {
+  const records = [
+    { warehouseSku: 'NO-PRICE', unitPrice: null },
+    { warehouseSku: 'ZERO', unitPrice: 0 },
+    { warehouseSku: 'MICRO', unitPrice: 0.0003 },
+  ].map((record, index) => ({ recordId:String(index), purchaseDate:'2026-08-01', quantity:2, ...record }));
+  const cache = { timestamp:Date.now(), results:records.map(record => cachedResult(record.warehouseSku)),
+    resultDeliveryId:'REVIEW-CACHE', meta:{filters:{}},
+    warehouseEvidence:{warehouses:records.map(record => ({warehouseSku:record.warehouseSku,evidenceComplete:true,purchaseRecords:[record]}))} };
+  const original = JSON.stringify(cache), extension = await loadExtension(extensionRoot, {cache});
+  try {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const doc = extension.window.document;
+    assert.match(doc.querySelector('[data-sku="NO-PRICE"]').textContent, /无可用成本.*采购单价缺失或无效/);
+    assert.match(doc.querySelector('[data-sku="ZERO"]').textContent, /0\.0000.*需核对/);
+    const filter = doc.getElementById('erpa-result-filter');
+    filter.value = 'review'; filter.dispatchEvent(new extension.window.Event('change'));
+    assert.deepEqual([...doc.querySelectorAll('.erpa-result-row')].map(row => row.dataset.sku), ['NO-PRICE','ZERO']);
+    const search = doc.getElementById('erpa-search');
+    search.value = '单价缺失'; search.dispatchEvent(new extension.window.Event('input'));
+    assert.equal(doc.querySelectorAll('.erpa-result-row').length, 1);
+    doc.querySelector('.erpa-result-row').click();
+    assert.match(doc.querySelector('.erpa-detail-row').textContent, /缺失值不会按 0 计算/);
+    assert.match(doc.querySelector('.erpa-source-evidence pre').textContent, /"unitPrice": null/);
+    const {rows} = await extension.exportCsv();
+    assert.equal(rows.length, 4, 'export retains all results even when review/search filters narrow the display');
+    assert.equal(rows[1][15], '', 'missing price stays null in numeric CSV field');
+    assert.match(rows[1][9], /采购单价缺失或无效/);
+    assert.equal(rows[2][15], '0.0000');
+    assert.match(rows[2][9], /疑似异常/);
+    assert.equal(rows[3][15], '0.0003');
+    assert.equal(rows[3][9], '');
+    assert.equal(extension.window.localStorage.getItem(cacheKey), original);
+    assert.equal(extension.deliveries.length, 0, 'viewing and exporting diagnostics does not deliver or adopt costs');
   } finally { await extension.close(); }
 }
 

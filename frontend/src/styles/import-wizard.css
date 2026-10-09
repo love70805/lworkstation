@@ -342,6 +342,13 @@ fieldset:disabled .import-supplier-option { cursor: default; opacity: .6; }
 .batch-import .batch-suffix-picker > label { display: block; margin-bottom: 8px; font-weight: 600; }
 .batch-import .batch-suffix-picker > div { display: flex; gap: 10px; align-items: center; }
 .batch-import .batch-suffix-picker > div > input { flex: 1; }
+.batch-import .batch-suffix-picker select { max-width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px; }
+.batch-import .import-supplier-groups { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.batch-import .import-group-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.batch-import .import-group-controls > label { font-weight: 600; }
+.batch-import .import-group-controls > select, .batch-import .import-group-controls > input { flex: 1 1 180px; min-width: 0; }
+.batch-import .import-supplier-groups summary { cursor: pointer; padding: 12px 0; }
+.batch-import .import-supplier-groups details > .import-group-controls { margin-top: 12px; }
 .batch-import .batch-suffix-picker p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .batch-import .batch-store-suppliers > summary { color: var(--primary); }
 .batch-import .import-movement-picker { margin: 16px 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
@@ -370,5 +377,6 @@ fieldset:disabled .import-supplier-option { cursor: default; opacity: .6; }
   .batch-import .batch-suffix-picker > div { flex-wrap: wrap; }
   .batch-import .batch-suffix-picker > div > input { flex-basis: 100%; }
   .batch-import .batch-suffix-picker > div > .button { width: 100%; }
+  .batch-import .import-group-controls > label { flex-basis: 100%; }
 }
 @media (max-width: 520px) { .import-supplier-picker { padding: 10px; } .import-supplier-actions .button { flex: 1 1 140px; } }

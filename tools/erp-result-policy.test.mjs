@@ -15,6 +15,34 @@ const policy = sandbox.window.ShopeersErpResultPolicy;
 
 assert.ok(policy, "result policy should expose its browser API");
 
+const diagnosticRecords = [
+  { warehouseSku: 'MISSING', unitPrice: null },
+  { warehouseSku: 'INVALID', unitPrice: -2 },
+  { warehouseSku: 'QTY', quantity: 0, unitPrice: 3 },
+  { warehouseSku: 'DATE', purchaseDate: '', unitPrice: 3 },
+  { warehouseSku: 'FUTURE', purchaseDate: '2026-09-01', unitPrice: 3 },
+  { warehouseSku: 'CANCELLED', unitPrice: 3, statusFields: { orderStatus: '已取消' } },
+  { warehouseSku: 'ZERO', unitPrice: 0 },
+  { warehouseSku: 'ONE', unitPrice: 1 },
+  { warehouseSku: 'MICRO', unitPrice: 0.0003 },
+].map((record, index) => ({ recordId: String(index), purchaseDate: '2026-08-01', quantity: 2, ...record }));
+const diagnosticEvidence = { warehouses: diagnosticRecords.map(record => ({warehouseSku:record.warehouseSku, evidenceComplete:true, purchaseRecords:[record]})) };
+const originalEvidence = JSON.stringify(diagnosticEvidence);
+const diagnostics = policy.previewForLedger(diagnosticRecords.map(record => ({ warehouseSku: record.warehouseSku })), diagnosticEvidence, '2026-08');
+assert.deepEqual(Array.from(diagnostics, row => row.previewDiagnostic.code), ['price_missing','price_invalid','quantity_invalid','date_invalid','after_period','cancelled_purchase','cost_warning','cost_warning','ready']);
+assert.deepEqual(Array.from(diagnostics, row => row.unitCost), [null,null,null,null,null,null,'0.0000','1.0000','0.0003']);
+assert.equal(JSON.stringify(diagnosticEvidence), originalEvidence, 'diagnostics cannot mutate complete ERP evidence');
+const incompleteDiagnostic = policy.previewForLedger([{warehouseSku:'MISSING'}], {warehouses:[{...diagnosticEvidence.warehouses[0],evidenceComplete:false}]}, '2026-08')[0];
+assert.equal(incompleteDiagnostic.previewDiagnostic.code, 'evidence_incomplete', 'incomplete history takes priority over a missing price');
+for (const [warning, code] of [['target_mapping_incomplete','mapping_incomplete'], ['target_directory_incomplete','directory_incomplete']]) {
+  const row = policy.previewForLedger([{warehouseSku:'MISSING'}], {warehouses:[{...diagnosticEvidence.warehouses[0],evidenceComplete:false,sourceWarnings:[warning]}]}, '2026-08')[0];
+  assert.equal(row.previewDiagnostic.code, code);
+  assert.equal(row.unitCost, null);
+}
+const excludedDiagnostic = policy.previewForLedger([{warehouseSku:'MISSING'}], {warehouses:[{warehouseSku:'MISSING',purchaseRecords:[],excludedRecords:[diagnosticRecords[0]]}],excludedDetails:[diagnosticRecords[0]]}, '2026-08')[0];
+assert.equal(excludedDiagnostic.previewDiagnostic.code, 'price_missing', 'invalid excluded evidence is still explained');
+assert.equal(policy.previewEvidenceRecords(excludedDiagnostic, {warehouses:[{warehouseSku:'MISSING',excludedRecords:[diagnosticRecords[0]]}],excludedDetails:[diagnosticRecords[0]]}).length, 1, 'duplicate excluded evidence is displayed once');
+
 const mappings = policy.normalizeMappings([
   { barcodeSkuid: "SKU-TARGET-RED", barcodeSkcid: "SKC-TARGET", barcodeArticleNumber: "YW-672-LYYY", platform: "Shein", storeName: "恩昭672" },
   { barcodeSkuid: "SKU-TARGET-BLUE", barcodeSkcid: "skc-target", barcodeArticleNumber: "YW-672-LYYY", platform: "Shein", storeName: "恩昭672" },

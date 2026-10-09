@@ -1,6 +1,8 @@
 import ImportSupplierPicker from '../components/ImportSupplierPicker';
+import ImportSupplierGroups from '../components/ImportSupplierGroups';
 import ImportMovementPicker from '../components/ImportMovementPicker';
-import { readImportPreference, restoreImportPreference, saveImportNumbers, parseImportKeywords, matchImportNumberSuffixes } from '../lib/importSupplierPreferences';
+import { readImportPreference, restoreImportPreference, saveImportNumbers, parseImportKeywords } from '../lib/importSupplierPreferences';
+import { readSupplierGroups, matchImportNumberRule, restoreSupplierGroupSelection, rememberSupplierGroupSelection } from '../lib/importSupplierGroups';
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
@@ -158,7 +160,9 @@ export default function ImportPreview() {
   const [result, setResult] = useState(null);
   const [batchSuffixText, setBatchSuffixText] = useState('');
   const [appliedSuffixes, setAppliedSuffixes] = useState([]);
-  const batchSuffixesRef = useRef([]);
+  const [batchMode, setBatchMode] = useState('suffix');
+  const [groupWorkspaceId, setGroupWorkspaceId] = useState(null);
+  const batchRuleRef = useRef({ aliases: [], mode: 'suffix' });
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
   const periodEvidence = summarizeImportPeriod(files, requestedLedgerId ? period : null);
@@ -274,7 +278,7 @@ export default function ImportPreview() {
         if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
         const choices = refreshed.facets?.supplierNumbers ?? next.facets?.supplierNumbers ?? [];
         const preference = patch.storeName !== undefined ? readImportPreference(importWorkspaceRef.current, next.storeName) : next.supplierPreference;
-        const saved = next.usesBatchSuffix ? matchImportNumberSuffixes(choices, batchSuffixesRef.current)
+        const saved = next.usesBatchSuffix ? matchImportNumberRule(choices, batchRuleRef.current)
           : patch.storeName !== undefined ? preference.selected : next.filterOptions?.supplierNumbers ?? [];
         const movementChoices = refreshed.facets?.movementTypes ?? next.facets?.movementTypes ?? [];
         const movementTypes = next.mapping.movementType && Array.isArray(next.filterOptions.movementTypes)
@@ -293,7 +297,17 @@ export default function ImportPreview() {
     if (retryItem) additions[0] = { ...retryItem, status: "queued", error: null, selectedSheet };
     setFiles((current) => retryItem ? current.map(item => item.itemId === retryItem.itemId ? additions[0] : item) : [...current, ...additions]);
     try {
+      await assertImportContext();
       importWorkspaceRef.current = (await getActiveMemberContext()).workspaceId;
+      setGroupWorkspaceId(importWorkspaceRef.current);
+      const groupState = readSupplierGroups(importWorkspaceRef.current);
+      if (!batchRuleRef.current.aliases.length && !batchSuffixText.trim()) {
+        const previous = groupState.groups.find(group => group.id === groupState.lastAppliedId);
+        if (previous) {
+          batchRuleRef.current = previous;
+          setBatchSuffixText(previous.aliases.join('、')); setBatchMode(previous.mode); setAppliedSuffixes(previous.aliases);
+        }
+      }
       for (let index = 0; index < additions.length; index += 1) {
         if (generation !== generationRef.current) return;
         const item = additions[index];
@@ -313,8 +327,8 @@ export default function ImportPreview() {
           const supplierPreference = readImportPreference(importWorkspaceRef.current, item.storeName);
           const choices = parsed.facets?.supplierNumbers ?? [];
           const restored = restoreImportPreference(supplierPreference, choices);
-          const suffixes = batchSuffixesRef.current;
-          const filterOptions = { supplierNumbers: suffixes.length ? matchImportNumberSuffixes(choices, suffixes) : restored.selected, ...(parsed.preset === "ledger_report" ? {
+          const rule = batchRuleRef.current;
+          const filterOptions = { supplierNumbers: rule.aliases.length ? rule.id ? restoreSupplierGroupSelection(choices, rule, groupState, item.storeName) : matchImportNumberRule(choices, rule) : restored.selected, ...(parsed.preset === "ledger_report" ? {
             movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
             deriveAmountFromUnitPrice: true,
           } : {}) };
@@ -324,7 +338,7 @@ export default function ImportPreview() {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, usesBatchSuffix: Boolean(suffixes.length), supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: suffixes.length ? [] : restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, usesBatchSuffix: Boolean(rule.aliases.length), supplierGroupRule: rule.id ? { ...rule, aliases: [...rule.aliases] } : null, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: rule.aliases.length ? [] : restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before
@@ -350,15 +364,17 @@ export default function ImportPreview() {
     const columns = Object.values(source.mapping).filter(Boolean);
     for (const item of files) if (item.itemId !== source.itemId && item.status === 'parsed' && columns.every(column => item.headers.includes(column))) void update(item.itemId, { mapping: { ...source.mapping } });
   };
-  const applyBatchSuffixes = () => {
+  const applyBatchSuffixes = (group = null) => {
     if (busy || contextBlocked) return;
-    const suffixes = parseImportKeywords(batchSuffixText);
+    const suffixes = group?.aliases ?? parseImportKeywords(batchSuffixText);
     if (!suffixes.length) return;
-    batchSuffixesRef.current = suffixes;
+    const rule = { ...(group || {}), aliases: [...suffixes], mode: group?.mode || batchMode };
+    batchRuleRef.current = rule;
+    if (group) { setBatchSuffixText(suffixes.join('、')); setBatchMode(group.mode); }
     setAppliedSuffixes(suffixes);
     for (const item of files) if (item.status === 'parsed') void update(item.itemId, {
-      usesBatchSuffix: true, missingNumbers: [],
-      filterOptions: { ...item.filterOptions, supplierNumbers: matchImportNumberSuffixes(item.facets?.supplierNumbers ?? [], suffixes) },
+      usesBatchSuffix: true, supplierGroupRule: group ? rule : null, missingNumbers: [],
+      filterOptions: { ...item.filterOptions, supplierNumbers: matchImportNumberRule(item.facets?.supplierNumbers ?? [], rule) },
     });
   };
   const validate = async () => {
@@ -417,7 +433,7 @@ export default function ImportPreview() {
       setProgress({ value: null, label: "正在核对并原子写入，完成前可取消" });
       setResult(await saveSalesImports({ ...payload, preview, overwriteSignature, signal: controller.signal,
         onProgress: ({ completed, total }) => setProgress({ value: completed / total * 100, label: `写入 ${completed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")} 行` }) }));
-      try { saveImportNumbers(importWorkspaceRef.current, files); }
+      try { saveImportNumbers(importWorkspaceRef.current, files); rememberSupplierGroupSelection(importWorkspaceRef.current, files); }
       catch { notify("数据已导入，但货号偏好未能保存；下次请重新选择。", "warning"); }
       notify("整批处理完成，来源批次已保留。");
       // The result contains summaries only. Release raw workbook jobs and the
@@ -479,11 +495,12 @@ export default function ImportPreview() {
               <Button onClick={() => inputRef.current?.click()}>添加文件</Button>{!files.length && <Button variant="ghost" onClick={() => loadFiles([sampleFile()])}>使用示例</Button>}
             </div>
             <section className="batch-suffix-picker" aria-label="整批货号后缀选择">
-              <label htmlFor="batch-supplier-suffix">整批按货号后缀选择</label>
-              <div><input id="batch-supplier-suffix" className="text-input" value={batchSuffixText} placeholder="例如 HHHX；多个后缀用逗号分隔" aria-describedby="batch-suffix-help" onChange={event => setBatchSuffixText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); applyBatchSuffixes(); } }} /><Button disabled={!parseImportKeywords(batchSuffixText).length} onClick={applyBatchSuffixes}>应用到本批文件</Button></div>
-              <p id="batch-suffix-help">只匹配货号末尾，忽略英文大小写与全半角差异。应用后替换本批选择；新增文件沿用，仍可逐店调整。</p>
-              {!!parseImportKeywords(batchSuffixText).length && <p role="status">{files.filter(item => item.status === 'parsed').map(item => `${item.storeName}：命中 ${matchImportNumberSuffixes(item.facets?.supplierNumbers ?? [], parseImportKeywords(batchSuffixText)).length} / ${item.facets?.supplierNumbers?.length ?? 0} 个`).join('；') || '添加文件后显示各店命中数量。'}</p>}
-              {!!appliedSuffixes.length && <p role="status">已应用后缀：{appliedSuffixes.join('、')}。零命中的店铺请单独调整或移除文件。</p>}
+              <label htmlFor="batch-supplier-suffix">整批按货号别名选择</label>
+              <div><input id="batch-supplier-suffix" className="text-input" value={batchSuffixText} placeholder="例如 LBYY、LBY；多个别名用逗号分隔" aria-describedby="batch-suffix-help" onChange={event => setBatchSuffixText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); applyBatchSuffixes(); } }} /><select aria-label="货号匹配方式" value={batchMode} onChange={event => setBatchMode(event.target.value)}><option value="suffix">货号末尾</option><option value="contains">货号包含</option><option value="exact">完整货号</option></select><Button disabled={!parseImportKeywords(batchSuffixText).length} onClick={() => applyBatchSuffixes()}>应用到本批文件</Button></div>
+              <p id="batch-suffix-help">默认只匹配货号末尾，忽略英文大小写与全半角差异。多个别名命中任意一项即选入。应用后替换本批选择；新增文件沿用，仍可逐店调整。</p>
+              {!!parseImportKeywords(batchSuffixText).length && <p role="status">{files.filter(item => item.status === 'parsed').map(item => `${item.storeName}：命中 ${matchImportNumberRule(item.facets?.supplierNumbers ?? [], { aliases: parseImportKeywords(batchSuffixText), mode: batchMode }).length} / ${item.facets?.supplierNumbers?.length ?? 0} 个`).join('；') || '添加文件后显示各店命中数量。'}</p>}
+              {!!appliedSuffixes.length && <p role="status">已应用{batchRuleRef.current.name ? `货号组「${batchRuleRef.current.name}」` : '别名'}：{appliedSuffixes.join('、')}（{({ suffix: '末尾匹配', contains: '包含匹配', exact: '完整匹配' })[batchRuleRef.current.mode]}）。零命中的店铺请单独调整或移除文件。</p>}
+              <ImportSupplierGroups workspaceId={groupWorkspaceId} aliasesText={batchSuffixText} mode={batchMode} onLoad={group => { setBatchSuffixText(group.aliases.join('、')); setBatchMode(group.mode); }} onApply={applyBatchSuffixes} />
             </section>
           </fieldset>
           {busy && <div className="import-progress" role="status">{progress.value == null ? <span>{progress.label}</span> : <ProgressBar value={progress.value} label={progress.label} />}<Button onClick={cancel}>取消当前处理</Button></div>}
@@ -495,7 +512,7 @@ export default function ImportPreview() {
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
-              <details className="batch-store-suppliers" open={!item.usesBatchSuffix}><summary>本店货号 · 已选 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个{item.usesBatchSuffix ? ' · 沿用整批后缀' : ' · 可单独调整'}</summary>
+              <details className="batch-store-suppliers" open={!item.usesBatchSuffix}><summary>本店货号 · 已选 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个{item.usesBatchSuffix ? ' · 沿用整批规则' : ' · 可单独调整'}</summary>
               <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} keywords={item.supplierKeywords ?? []} previousMatches={item.supplierPreference?.matched ?? []} hasSaved={item.supplierPreference?.hasSaved ?? false} onKeywordsChange={supplierKeywords => setFiles(entries => entries.map(entry => entry.itemId === item.itemId ? { ...entry, supplierKeywords } : entry))} onChange={supplierNumbers => update(item.itemId, { usesBatchSuffix: false, filterOptions: { ...item.filterOptions, supplierNumbers } })} />
               </details>
               {item.usesBatchSuffix && !item.filterOptions?.supplierNumbers?.length && <p role="alert" className="import-error">本店没有命中所选后缀，请展开本店货号调整，或移除此文件。</p>}
