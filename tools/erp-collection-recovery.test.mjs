@@ -29,7 +29,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, storageRoundTrip(structuredClone(values))); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.38' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.39' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -284,10 +284,10 @@ request = fresh(); storage[checkpointKey] = []; api = background();
 const old30 = (await api.collectionCheckpoint(await input(), sender)).checkpoint;
 storage[checkpointKey][0].extensionVersion = '8.0.30';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.30 checkpoint retained under 8.0.38');
+console.log('8.0.30 checkpoint retained under 8.0.39');
 storage[checkpointKey][0].extensionVersion = '8.0.31';
 assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender)).checkpoint.resultDeliveryId, old30.resultDeliveryId);
-console.log('8.0.31 checkpoint retained under 8.0.38 with current query validation');
+console.log('8.0.31 checkpoint retained under 8.0.39 with current query validation');
 
 // The production inbox contract returns identity objects, unlike legacy strings.
 request = { ...fresh(), platformSkcs: ['skc-a', 'SKC-B'].map(platformSkc => ({ platformSkc, canonicalPlatformSkc: platformSkc.toUpperCase() })) };
@@ -304,21 +304,25 @@ await objectTargets.window.happyDOM.close();
 console.log('Production identity-object request targets: exact ERP query values and nonempty cost delivery passed');
 storage[checkpointKey][0].extensionVersion = '8.0.32';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.32 object-target checkpoint remains recoverable under 8.0.38');
+console.log('8.0.32 object-target checkpoint remains recoverable under 8.0.39');
 
 storage[checkpointKey][0].extensionVersion = '8.0.33';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.33 checkpoint retained under 8.0.38 time-budget hotfix');
+console.log('8.0.33 checkpoint retained under 8.0.39 time-budget hotfix');
 storage[checkpointKey][0].extensionVersion = '8.0.34';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.34 checkpoint retained under 8.0.38 without assuming completed batches');
+console.log('8.0.34 checkpoint retained under 8.0.39 without assuming completed batches');
 storage[checkpointKey][0].extensionVersion = '8.0.35';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.35 checkpoint retained under 8.0.38 durable transport fix');
+console.log('8.0.35 checkpoint retained under 8.0.39 durable transport fix');
 storage[checkpointKey][0].extensionVersion = '8.0.36';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.36 checkpoint retained under 8.0.38 response-driven progress update');
+console.log('8.0.36 checkpoint retained under 8.0.39 response-driven progress update');
 
 storage[checkpointKey][0].extensionVersion = '8.0.37';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.37 checkpoint retained under 8.0.38 exact platform scope');
+console.log('8.0.37 checkpoint retained under 8.0.39 exact platform scope');
+
+storage[checkpointKey][0].extensionVersion = '8.0.38';
+assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
+console.log('8.0.38 checkpoint retained under 8.0.39 parallel material collection');

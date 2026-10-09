@@ -42,6 +42,8 @@ try {
   for (const file of files) window.eval(source[file]);
   window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=A,B,C' } }));
   window.document.getElementById('erpa-cost-trigger').click();
+  await until(() => pending.size === 2);
+  assert.match(window.document.getElementById('erpa-loading-meters').textContent, /正在处理 2 个目标.*实际读取 2 \/ 8 个请求/);
   for (const skc of skcs) await reply('product-page:' + skc + ':1', ids.filter(id => id[0] === skc).map(id => ({ itemId: 'W-' + id })), ids.filter(id => id[0] === skc).length);
   await until(() => pending.size === 5);
   assert.match(stage().getAttribute('aria-label'), /平台 SKU 映射/); assert.equal(stage().value, 0); assert.equal(stage().max, 9);
