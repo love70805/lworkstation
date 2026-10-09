@@ -102,7 +102,8 @@ for (const mode of ['first-hang', 'json-hang', 'login', 'login-detail']) {
   const failedReads = f.calls.filter(c => c.endpoint === (mode === 'login' ? 'product-page' : mode === 'login-detail' ? 'purchase-order-details' : 'purchase-order-page'));
   assert.equal(failedReads.length, mode.startsWith('login') ? 1 : 3, 'bounded retries, no second page-size retry chain');
   assert.equal(cost(f), undefined);
-  assert.match(f.window.document.getElementById('erpa-error-title').textContent, mode.startsWith('login') ? /登录已失效/ : /超时/);
+  assert.match(f.window.document.getElementById('erpa-error-title').textContent, mode.startsWith('login') ? /登录已失效/ : /ERP 服务暂不可用/);
+  if (!mode.startsWith('login')) assert.match(f.window.document.getElementById('erpa-error').textContent, /超过 120 秒.*恢复后继续/s, 'service guidance retains the original exhausted timeout cause');
   if (!mode.startsWith('login')) { f.retry(); await until(() => cost(f)); }
   checks.push({ mode, requestsBeforeRetry: mode.startsWith('login') ? (mode === 'login' ? 1 : 2) : 3, recoverable: !mode.startsWith('login') });
  } finally { await f.close(); }
