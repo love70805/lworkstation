@@ -1,4 +1,4 @@
-# 0.4.17 缺成本直接更正（候选已验收）
+# 0.4.17 缺成本直接更正（已公开稳定 Latest）
 
 成本异常原先隐藏在分页明细和 ERP 回传批次中；“ERP 自动采用”只统计当前或最近一批，未说明与本月有效成本的区别。
 
@@ -6,7 +6,7 @@
 
 自动采用卡片明确当前/最近批次、非本月累计及不随查看筛选变化；“待处理”改为“回传记录 · N 批待核对”，解释每批最多 20 SKC、各批 SKU 数因规格而变化，以及正常成本可已采用但同批异常证据仍保留。当前有效成本已齐时显示“本月成本已齐”，历史异常不重复要求人工更正。
 
-保持工作区/月/店铺/SKU 隔离、正式 ERP 默认、人工优先、审计撤销和定稿保护，不增加数据字段或迁移，不改写真实库与队列，不自动安装。用户旁支提出的总批次汇总已评估并记录，是否纳入仍待确认；本候选范围为直接更正及统计/记录说明，见 [契约](integration/COST_CORRECTION_SHORTCUTS_0.4.17.md)。
+保持工作区/月/店铺/SKU 隔离、正式 ERP 默认、人工优先、审计撤销和定稿保护，不增加数据字段或迁移，不改写真实库与队列，不自动安装。用户旁支提出的总批次汇总已评估并记录，后续范围待确认；本版本交付直接更正及统计/记录说明，见 [契约](integration/COST_CORRECTION_SHORTCUTS_0.4.17.md)。
 
 174 文件 / 1374 前端测试、生产构建、完整 ERP/同步门禁、17 组桌面 verify、前端/桌面低风险级依赖审计通过。页面回归验证跨页直达、多店共享 SKU、保存中 ERP 生效跳过、失败保留输入及历史异常提示；原集成测试验证人工优先、零/微小值、撤销和定稿保护。
 
@@ -16,4 +16,14 @@
 
 基线 origin/main `b7671ae` / 0.4.16，实现 `5292666`，构建源码 `00b2998b41442c0e6c0687167bb91128b616260b`。安装包 119391236 字节，SHA256 `6C1BEEFDE4D95B6656D440DE4CF3EA95D6B29A19A48750C8CB497E7C66D57C42`。候选 `releases/candidates/0.4.17/`，证据 `archive/cost-correction-shortcuts/`。
 
-候选验收已通过；代码集成、主线 CI、稳定标签和公开资产完整回读随后分别登记，当前尚未标记公开发布。
+[PR #192](https://github.com/love70805/lworkstation/pull/192) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37919903134) 通过，稳定标签 v0.4.17 固定 `f959468cd4b5f02110cd54e9842eb2f28db5aa2c`，生产输入与验收候选逐字节相同。2026-10-09T10:53:12Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 均一致，安装包 SHA512 与 latest.yml 一致。生产更新入口从 0.4.16 识别 0.4.17，同版与跨通道保护通过。本机未自动安装，真实数据库与队列未改写。
+
+
+| 公开资产 | 字节数 | SHA256 |
+| --- | --- | --- |
+| Lworkstation-Setup-0.4.17.exe | 119391236 | `6C1BEEFDE4D95B6656D440DE4CF3EA95D6B29A19A48750C8CB497E7C66D57C42` |
+| Lworkstation-Setup-0.4.17.exe.blockmap | 125979 | `B5FAEB208FCAF5FA87BE9E91A1841C95EB96B2AA17206F9E684F170BDD49C8DB` |
+| latest.yml | 356 | `C4EBA884EA2AB0574D49EB127DD01A1A6D1012A7EC76EB6F1F563C75DB3AC6F3` |
+| SHA256.txt | 278 | `CF366976E3FCB3051202F3CB2D0406BE198BD83E7841A3C535BCCA5C026D63EE` |
+
+公开证据 archive/cost-correction-shortcuts/public-readback.json。候选、原始脚本/日志/界面证据及最终文档保全至原主工作区同名 candidates / archive；原工作区未提交内容保留。
