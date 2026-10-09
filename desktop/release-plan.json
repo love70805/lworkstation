@@ -5,6 +5,10 @@
   "integrationBranch": "codex/v0413-erp-background-status",
   "requiredCommits": [
     {
+      "module": "v0.4.13-erp-background-status",
+      "commit": "26f4a2b8528305d12a5e6d2bb1415622d5ed0981"
+    },
+    {
       "module": "v0.4.13-verified-main-baseline",
       "commit": "2eb11ddb30d2dd0efb511eacc7d70e1553d14e09"
     },
