@@ -1,6 +1,6 @@
-## 0.4.18 货号组与 ERP 异常原因（候选准备）
+## 0.4.18 货号组与 ERP 异常原因（已公开稳定 Latest）
 
-候选 candidates/0.4.18/，证据 archive/supplier-groups-erp-feedback/。1383 前端测试、完整 ERP/同步门禁、desktop verify 和无头生产用户路径通过。货号组支持 LBYY/LBY 明确别名、三种匹配、成功后记忆逐店例外与未选核对；ERP Assistant 8.0.41 显示原因、证据与需核对筛选，成本列固定在右侧。全自动采集仅保留为 Beta 目标；待候选、CI 与公开回读完成后补记稳定发布。本机不安装、不改写真实库，见 [0.4.18](../docs/RELEASE_0.4.18.md)。
+候选 candidates/0.4.18/，证据 archive/supplier-groups-erp-feedback/。1383 前端测试、完整 ERP/同步门禁、desktop verify 和无头生产用户路径通过。货号组支持 LBYY/LBY 明确别名、三种匹配、成功后记忆逐店例外与未选核对；ERP Assistant 8.0.41 显示原因、证据与需核对筛选，成本列固定在右侧。全自动采集仅保留为 Beta 目标；[PR #195](https://github.com/love70805/lworkstation/pull/195) 和测试等待修复 [PR #196](https://github.com/love70805/lworkstation/pull/196) 已合并，PR 与[最终主线 CI](https://github.com/love70805/lworkstation/actions/runs/37978451288) 通过，稳定标签 v0.4.18 固定 `31a537370c7fcc93cdbf9e109d90475058d77e28`，生产输入与验收候选逐字节相同。2026-10-09T19:17:52Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 一致，EXE SHA512 与 latest.yml 一致。生产更新入口从 0.4.17 识别 0.4.18，同版与跨通道保护通过。本机未安装，真实数据库与队列未改写。 安装包 119555539 字节，SHA256 B299D51ED58C76A1B118FE60C4D876BFFAE9169AB98FEC56C1135AD16D8E4591；701 文件 / 655 输入一致性通过。本机不安装、不改写真实库，见 [0.4.18](../docs/RELEASE_0.4.18.md)。
 
 ## 0.4.17 缺成本直接更正（已公开稳定 Latest）
 

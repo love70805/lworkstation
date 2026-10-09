@@ -1,4 +1,4 @@
-# 0.4.18 货号组与 ERP 异常原因（候选准备）
+# 0.4.18 货号组与 ERP 异常原因（已公开稳定 Latest）
 
 货号后缀独立匹配时，LBYY 会漏掉同组的 LBY。新增按工作区保存的命名货号组，把多个明确别名共同筛选；支持货号末尾、包含和完整匹配，忽略大小写与全半角，保持原始货号、SKC 和 SKU 标识。成功导入后记住所用组和逐店增选/排除，下次按新文件重新匹配并加入新成员。逐店“未选”视图用于核对漏选；编辑或删除组需重新应用才改变本批选择，零命中保持未选。
 
@@ -8,4 +8,17 @@ ERP Assistant 8.0.41 的结果行说明缺失或无效单价、数量/日期、�
 
 175 文件 / 1383 前端测试、生产构建、完整 ERP/同步门禁及 17 组桌面 verify 通过。无头隔离生产资源实际操作两店 CSV 的三种匹配、分组保存、逐店例外、原子导入四行、重开恢复、新别名成员和组编辑/删除；ERP 原因/搜索/筛选/原始证据通过，12 组中文浅深色 × 1280/900/390 布局通过。旧偏好与 8.0.29–40 检查点兼容，零/微小值和正式成本回传回归通过。
 
-候选准备中；完成候选隐藏 smoke、原生扩展、包内用户路径、安装包/源码输入一致性及 PR/main CI 后，按用户已有授权公开稳定 Latest，并完整回读四资产。候选位置 releases/candidates/0.4.18/，原始证据 archive/supplier-groups-erp-feedback/。
+最终 Windows 候选隐藏 packaged smoke 通过，可见窗口为 0；包内原生 MV3 扩展冷启动、三次真实刷新、36 次连接并发、成本采集/持久回传、100 秒分离页心跳、服务重启重连及采购 iframe/登录阻断通过。ERP HTTP 与账号为隔离样本，原生扩展 API、渲染器、存储、消息与服务真实执行；没有把隐藏检查当作可见窗口、托盘或焦点验收。安装包解出的 701 文件与被测候选逐字节一致，655 生产输入与源码一致。构建源码 `4d580d931dc0eca880b36cf13fbb08082292f621`，119555539 字节，SHA256 `B299D51ED58C76A1B118FE60C4D876BFFAE9169AB98FEC56C1135AD16D8E4591`。
+
+首次主线 CI 的旧新增文件测试固定等待 150 毫秒，提前断言上一批预览；PR #196 改为等待实际预览文件数及忙碌状态结束，35 项局部回归及最终 required CI 通过。该修复只修改测试，未改变生产输入或重建已验收安装包。
+
+[PR #195](https://github.com/love70805/lworkstation/pull/195) 和测试等待修复 [PR #196](https://github.com/love70805/lworkstation/pull/196) 已合并，PR 与[最终主线 CI](https://github.com/love70805/lworkstation/actions/runs/37978451288) 通过，稳定标签 v0.4.18 固定 `31a537370c7fcc93cdbf9e109d90475058d77e28`，生产输入与验收候选逐字节相同。2026-10-09T19:17:52Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 一致，EXE SHA512 与 latest.yml 一致。生产更新入口从 0.4.17 识别 0.4.18，同版与跨通道保护通过。本机未安装，真实数据库与队列未改写。
+
+| 公开资产 | 字节数 | SHA256 |
+| --- | --- | --- |
+| Lworkstation-Setup-0.4.18.exe | 119555539 | `B299D51ED58C76A1B118FE60C4D876BFFAE9169AB98FEC56C1135AD16D8E4591` |
+| Lworkstation-Setup-0.4.18.exe.blockmap | 125905 | `AEBA0691804BDD65A2C8D3A2A12FBB6A37D7128C96C18B1C2D4F173720DBF983` |
+| latest.yml | 356 | `825EB7C264A5AA4941A52ABA3D0479C251BF6207B54E792664DB71209F0DFCF0` |
+| SHA256.txt | 278 | `9D0F07FDED35F71A5A4AC0B27ED6F0205E3F146ABFC25AF199669FFB1B9D780C` |
+
+候选 releases/candidates/0.4.18/，原始证据 archive/supplier-groups-erp-feedback/，公开证据 public-readback.json。候选、脚本、日志与界面证据保全至原工作区同名 candidates/archive；原工作区未提交内容保持。
