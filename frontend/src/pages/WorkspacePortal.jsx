@@ -76,7 +76,7 @@ export default function WorkspacePortal() {
     const [summary, auditEvents, referenceSnapshot] = await Promise.all([
       getWorkspaceOperationalSummary(),
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
-      getSelectionReferenceSnapshot(),
+      getSelectionReferenceSnapshot({ compact: true }),
     ]);
     const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestOpenLedger, summary.latestFinalizedLedger].filter(Boolean));
     if ((await getActiveMemberContext()).workspaceId !== workspaceId) throw new Error('工作区已切换，请重新读取。');

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { db, DEFAULT_WORKSPACE_ID, createOrGetMonthlyLedger, setActiveMemberContext, saveErpCostRequest, receiveErpCostInboxEnvelope, getLatestLedgerCosts, processErpCostInboxAdoption, recoverErpCostInboxAdoptions, saveManualCostOverride, revokeManualCostOverride, getLedgerSnapshot, voidPublishedErpCostBatch, rejectErpCostInboxBatches, createWorkspaceBackupPayload } from './database';
+import { db, DEFAULT_WORKSPACE_ID, createOrGetMonthlyLedger, setActiveMemberContext, saveErpCostRequest, receiveErpCostInboxEnvelope, getLatestLedgerCosts, processErpCostInboxAdoption, recoverErpCostInboxAdoptions, listErpCostAdoptionStates, saveManualCostOverride, revokeManualCostOverride, getLedgerSnapshot, voidPublishedErpCostBatch, rejectErpCostInboxBatches, createWorkspaceBackupPayload } from './database';
 import { buildErpCostRequest } from '../domain/erpCosts';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
@@ -9,6 +9,7 @@ import { resolveFormalCostDecision } from '../domain/costPolicy';
 import { costDraftKey } from '../lib/costMatchingDraft';
 import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
 import { buildErpInboxQueue } from '../domain/erpInboxMatching';
+import { sourceRevision, selectionFactsRevision } from './db/derivedCache';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1'}={}){
@@ -88,6 +89,73 @@ it('automatically adopts only normal items on receipt, preserves partial history
  expect({rows:await db.erpCostRows.count(),audit:await db.auditEvents.count()}).toEqual(before);expect(await db.erpCostBatches.count()).toBe(1);
  await expect(rejectErpCostInboxBatches({ids:[receipt.id]})).rejects.toThrow('删除');
  await voidPublishedErpCostBatch({inboxId:receipt.id,reason:'合成撤回'});await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);expect((await db.erpCostInbox.get(receipt.id)).status).toBe('voided');
+});
+it('does not rewrite unchanged partial adoption or invalidate live-reader caches during idle recovery',async()=>{
+ const {ledger,envelope}=await seed();
+ const receipt=await receiveErpCostInboxEnvelope({envelope});
+ expect(receipt.adoption).toMatchObject({state:'partial',summary:{adoptedCount:1,anomalyCount:1}});
+ await new Promise(resolve=>setTimeout(resolve,20));
+ const batchId=(await db.erpCostInbox.get(receipt.id)).appliedBatchId;
+ const before=await db.erpCostBatches.get(batchId);
+ const revisions=[sourceRevision(),selectionFactsRevision()];
+ const update=vi.spyOn(db.erpCostBatches,'update');
+ for(let cycle=0;cycle<3;cycle++){
+  const results=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+  expect(results[0]).toMatchObject({idempotent:true,adoption:{state:'partial',summary:{adoptedCount:1,anomalyCount:1}}});
+ }
+ await new Promise(resolve=>setTimeout(resolve,20));
+ expect(update).not.toHaveBeenCalled();
+ expect(await db.erpCostBatches.get(batchId)).toEqual(before);
+ expect([sourceRevision(),selectionFactsRevision()]).toEqual(revisions);
+});
+it('reuses idle recovery without rereading evidence, but rechecks manual costs and ledger protection after changes',async()=>{
+ const {ledger,envelope}=await seed();
+ const receipt=await receiveErpCostInboxEnvelope({envelope});
+ await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ const toArray=db.Collection.prototype.toArray;
+ let evidenceReads=0;
+ vi.spyOn(db.Collection.prototype,'toArray').mockImplementation(function(...args){
+  if(['erpCostInbox','erpCostBatches','erpCostRows','salesRows'].includes(this._ctx.table.name))evidenceReads++;
+  return toArray.apply(this,args);
+ });
+ for(let cycle=0;cycle<3;cycle++)await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect(evidenceReads).toBe(0);
+ await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'A',unitCost:0,reason:'真实零'});
+ const manual=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect(evidenceReads).toBeGreaterThan(0);
+ expect(manual[0].adoption.summary.manualEffectiveCount).toBe(1);
+ await db.ledgers.update(ledger.id,{status:'locked'});
+ const locked=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect(locked[0].adoption.summary.protectedCount).toBe(1);
+ expect(await db.erpCostRows.count()).toBe(1);
+ await db.ledgers.update(ledger.id,{status:'draft'});
+ expect((await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId}))[0].adoption.summary).toMatchObject({protectedCount:0,anomalyCount:1});
+ const batchId=(await db.erpCostInbox.get(receipt.id)).appliedBatchId;
+ await db.erpCostBatches.update(batchId,{adoption:null});
+ await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
+ expect((await db.erpCostBatches.get(batchId)).adoption.summary).toMatchObject({adoptedCount:1,anomalyCount:1});
+});
+it('keeps background adoption reports small and cached while refreshing voided state and enforcing workspace scope',async()=>{
+ const {ledger,envelope}=await seed();
+ const receipt=await receiveErpCostInboxEnvelope({envelope});
+ const first=await listErpCostAdoptionStates({workspaceId:ledger.workspaceId});
+ expect(first[0]).toMatchObject({deliveryId:envelope.deliveryId,status:'pending',adoption:{state:'partial',summary:{adoptedCount:1,anomalyCount:1}}});
+ expect(first[0]).not.toHaveProperty('envelope');
+ expect(first[0].adoption).not.toHaveProperty('items');
+ const toArray=db.Collection.prototype.toArray;
+ let inboxReads=0;
+ vi.spyOn(db.Collection.prototype,'toArray').mockImplementation(function(...args){
+  if(this._ctx.table.name==='erpCostInbox')inboxReads++;
+  return toArray.apply(this,args);
+ });
+ for(let cycle=0;cycle<3;cycle++)expect(await listErpCostAdoptionStates({workspaceId:ledger.workspaceId})).toEqual(first);
+ expect(inboxReads).toBe(0);
+ await voidPublishedErpCostBatch({inboxId:receipt.id,reason:'合成撤回'});
+ expect((await listErpCostAdoptionStates({workspaceId:ledger.workspaceId}))[0].status).toBe('voided');
+ expect(inboxReads).toBeGreaterThan(0);
+ await setActiveMemberContext({workspaceId:'foreign',memberId:'other',role:'finance'});
+ await expect(listErpCostAdoptionStates({workspaceId:ledger.workspaceId})).rejects.toThrow('工作区');
+ expect(await listErpCostAdoptionStates({workspaceId:'foreign'})).toEqual([]);
 });
 it('isolates local incomplete evidence without turning it into a global envelope failure',async()=>{
  const {envelope}=await seed({prices:[5,8],incomplete:true});

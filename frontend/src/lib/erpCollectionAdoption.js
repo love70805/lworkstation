@@ -1,11 +1,11 @@
 import { listErpCollectionTasks, reportErpCollectionAdoption } from './erpInboxTransport';
-import { listErpCostInbox } from '../data/database';
+import { listErpCostAdoptionStates } from '../data/database';
 import { publishErpCollectionActivity } from './erpCollectionActivity';
 
 const reported = new Map();
 // Receipt acknowledgement and adopted cost are independent facts. Retry failed
 // reports from durable local inboxes, including after app/service restart.
-export async function syncErpCollectionAdoptions({ workspaceId, listTasks = listErpCollectionTasks, listInboxes = listErpCostInbox, report = reportErpCollectionAdoption } = {}) {
+export async function syncErpCollectionAdoptions({ workspaceId, listTasks = listErpCollectionTasks, listInboxes = listErpCostAdoptionStates, report = reportErpCollectionAdoption } = {}) {
   let tasks;
   try {
     ({ tasks = [] } = await listTasks({ workspaceId }));
@@ -15,7 +15,7 @@ export async function syncErpCollectionAdoptions({ workspaceId, listTasks = list
     throw error;
   }
   if (!tasks.length) return;
-  const inboxes = await listInboxes({ statuses: ['pending', 'loaded', 'applied', 'rejected', 'voided'] });
+  const inboxes = await listInboxes({ workspaceId });
   const byDelivery = new Map(inboxes.filter(inbox => inbox.workspaceId === workspaceId).map(inbox => [inbox.deliveryId, inbox]));
   for (const task of tasks) for (const batch of task.batches ?? []) {
     const inbox = byDelivery.get(batch.deliveryId);

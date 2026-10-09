@@ -26,7 +26,7 @@ import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
-import { sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
+import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -537,21 +537,58 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     const summary = summarizeErpAdoption(items);
     const state = summary.remainingCount === 0 && items.length ? 'applied' : summary.adoptedCount ? 'partial' : summary.protectedCount ? 'protected' : boundary.globalReasons.length ? 'blocked' : 'pending';
     const result = await persistResult(items, state, boundary.globalReasons.join(',') || null, appliedBatchId);
-    if (appliedBatchId) await db.erpCostBatches.update(appliedBatchId, { adoption: result.adoption });
+    // Pending exceptions are checked again while the app is idle. Rewriting an
+    // identical adoption invalidates every finance-derived live reader and
+    // repeatedly clones/recomputes the complete reference evidence. Keep the
+    // batch metadata aligned, including legacy missing metadata, only on change.
+    if (appliedBatchId && JSON.stringify(batchById.get(appliedBatchId)?.adoption) !== JSON.stringify(result.adoption)) {
+      await db.erpCostBatches.update(appliedBatchId, { adoption: result.adoption });
+    }
     return result;
   });
 }
 
+let lastStableErpRecovery = null;
+
 export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = null } = {}) {
   const member = await getActiveMemberContext();
   if (!workspaceId || workspaceId !== member.workspaceId) throw new Error('恢复 ERP 收件必须限定当前工作区。');
+  const revision = selectionFactsRevision();
+  const key = JSON.stringify([workspaceId, ledgerId, member.memberId, member.role, revision]);
+  // A completed check remains valid until a financial/context source changes.
+  // Keep one small, process-local result; failures always retry, and startup
+  // still checks durable receipts. Never cache a pass that wrote/changed data.
+  if (lastStableErpRecovery?.key === key) return structuredClone(lastStableErpRecovery.results);
+  lastStableErpRecovery = null;
   const inboxes = await db.erpCostInbox.where('workspaceId').equals(workspaceId).toArray();
   const results = [];
   for (const inbox of inboxes.filter(row => ['pending', 'loaded'].includes(row.status) && (!ledgerId || row.ledgerId === ledgerId))) {
     try { results.push(await processErpCostInboxAdoption({ inboxId: inbox.id })); }
     catch (error) { results.push({ id: inbox.id, status: inbox.status, error: error.message }); }
   }
+  if (selectionFactsRevision() === revision && !results.some(result => result.error)) {
+    lastStableErpRecovery = { key, results: structuredClone(results) };
+  }
   return results;
+}
+
+// Background task reporting needs adoption state, not multi-megabyte purchase
+// envelopes. Reuse this tiny projection while its financial sources are stable.
+export async function listErpCostAdoptionStates({ workspaceId = null } = {}) {
+  return retrySourceRead(async () => {
+    const revision = selectionFactsRevision();
+    const member = await getActiveMemberContext();
+    if (workspaceId && workspaceId !== member.workspaceId) throw new Error('ERP 采用状态必须限定当前工作区。');
+    assertSourceRevision(revision, selectionFactsRevision);
+    return cachedDerived({ scope: [member.workspaceId, member.memberId, member.role], formula: 'erp-cost-adoption-states@1',
+      revision, revisionReader: selectionFactsRevision, persist: false,
+      compute: async () => (await db.erpCostInbox.where('workspaceId').equals(member.workspaceId).toArray()).map(inbox => ({
+        id: inbox.id, deliveryId: inbox.deliveryId, workspaceId: inbox.workspaceId, status: inbox.status,
+        adoptionPending: inbox.adoptionPending, adoptionFailure: inbox.adoptionFailure,
+        adoption: inbox.adoption ? { state: inbox.adoption.state, processedAt: inbox.adoption.processedAt, summary: inbox.adoption.summary } : null,
+      })),
+    });
+  });
 }
 
 

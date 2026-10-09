@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-vi.mock('../data/database', () => ({ listErpCostInbox: vi.fn() }));
+vi.mock('../data/database', () => ({ listErpCostAdoptionStates: vi.fn() }));
 import { syncErpCollectionAdoptions } from './erpCollectionAdoption';
 import { readErpCollectionActivity } from './erpCollectionActivity';
 
