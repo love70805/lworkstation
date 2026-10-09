@@ -18,7 +18,13 @@ async function fixture(mode, realClock = false) {
  const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
  const messages = [], calls = []; let optional = false, fail = true;
  const started = Date.now();
- if (!realClock) { const schedule = window.setTimeout.bind(window); window.setTimeout = (fn, ms, ...args) => schedule(fn, ms === 30 * 60 * 1000 ? 160 : ms === 120000 ? 40 : ms === 8000 ? 15 : ms === 5000 ? 100 : ms === 500 ? 5 : ms === 1000 ? 10 : ms, ...args); }
+ if (!realClock) {
+  const schedule = window.setTimeout.bind(window);
+  // Separate the overall material deadline from exhausted request retries:
+  // 160 ms previously raced three 40 ms timeouts plus backoff/runner overhead.
+  const catalogDeadline = mode === 'optional-history-hang' ? 60 : mode === 'optional-service-hang' ? 5000 : 160;
+  window.setTimeout = (fn, ms, ...args) => schedule(fn, ms === 30 * 60 * 1000 ? catalogDeadline : ms === 120000 ? 40 : ms === 8000 ? 15 : ms === 5000 ? 100 : ms === 500 ? 5 : ms === 1000 ? 10 : ms, ...args);
+ }
  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
    if (mode === 'context-hang' && message.type === 'shopeers.erp.previewContext') return;
@@ -35,7 +41,7 @@ async function fixture(mode, realClock = false) {
      assert.equal(url.searchParams.get('sku'), optional ? 'WH-UNSOLD' : 'SKC-A', 'history reads stay in the captured target or its verified warehouse mapping');
      assert.equal(url.searchParams.get('queryRange'), '0');
      assert.equal(url.searchParams.get('storeId'), 'STORE-A');
-     if (optional && ['optional-history-hang', 'cancel-optional'].includes(mode)) return new Promise(() => {});
+     if (optional && ['optional-history-hang', 'optional-service-hang', 'cancel-optional'].includes(mode)) return new Promise(() => {});
      if (optional && mode === 'huge') body = response(Array.from({ length: 50 }, (_, i) => ({ purchaseOrderId: 'H-' + url.searchParams.get('page') + '-' + i })), 100000);
      else body = response([{ purchaseOrderId: 'PO-A' }]);
    } else if (endpoint === 'purchase-order-details') body = response([detail(url.searchParams.get('purchaseOrderId'))]);
@@ -74,6 +80,19 @@ for (const mode of ['optional-history-hang', 'huge']) {
    assert.equal(cost(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);
   }
   checks.push({ mode, clock: 'accelerated deadlines only; unchanged production code', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length });
+ } finally { await f.close(); }
+}
+{
+ const f = await fixture('optional-service-hang');
+ try {
+  await until(() => cost(f));
+  await until(() => !f.window.document.getElementById('erpa-recalculate').disabled);
+  assert.equal(catalog(f), undefined, 'exhausted optional service retries must not deliver incomplete material as completed');
+  assert.equal(f.calls.filter(call => call.endpoint === 'purchase-order-page' && call.params.sku === 'WH-UNSOLD').length, 3);
+  assert.match(f.window.document.body.textContent, /ERP 服务暂不可用/);
+  assert.equal(cost(f).payload.warehouseEvidence.warehouses.find(warehouse => warehouse.warehouseSku === 'WH-A').evidenceComplete, true);
+  assert.match(f.window.document.getElementById('erpa-table-body').textContent, /WH-A/);
+  checks.push({ mode: 'optional-service-hang', preservedCost: true, boundedRetries: 3, materialDelivery: false });
  } finally { await f.close(); }
 }
 for (const mode of ['directory-hang', 'directory-failure']) {
@@ -120,8 +139,9 @@ for (const mode of ['first-hang', 'cancel-optional']) {
  } finally { await f.close(); }
 }
 if (process.env.ERP_REAL_DEADLINE_QA === '1') {
- const f = await fixture('optional-history-hang', true);
- try { await until(() => cost(f)); await until(() => catalog(f), 365000); assert.ok(catalog(f).at >= 359000 && catalog(f).at < 365000); checks.push({ mode: 'optional-history-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length }); }
+ const f = await fixture('optional-service-hang', true);
+ const started = Date.now();
+ try { await until(() => cost(f)); await until(() => !f.window.document.getElementById('erpa-recalculate').disabled, 365000); const elapsedMs = Date.now() - started; assert.ok(elapsedMs >= 359000 && elapsedMs < 365000); assert.equal(catalog(f), undefined); assert.match(f.window.document.body.textContent, /ERP 服务暂不可用/); checks.push({ mode: 'optional-service-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, elapsedMs, requests: f.calls.length }); }
  finally { await f.close(); }
 }
 await mkdir(path.join(root, 'archive/release-0.3.4'), { recursive: true });
