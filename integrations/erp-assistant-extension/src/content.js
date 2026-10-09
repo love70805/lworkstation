@@ -1383,7 +1383,7 @@
             const bridge = window.ShopeersErpDeliveryBridge;
             const settled = await requestContextPolicy.settleRequestContext(bridge.catalogContext({ querySkcs: state.meta.querySkcs, queryCapturedAt: run.queryCapturedAt }), 5000);
             const context = settled.context;
-            if (!context?.ok || !context.request) { showToast('成本已完成；资料请求未关联，可在工作台登记后补充资料'); return; }
+            if (!context?.ok || !context.request) { showToast('成本已采集；资料请求未关联，可在工作台登记后补充资料'); return; }
             if (run.controller.signal.aborted) return;
             run.expectedSkus = context.request.expectedSkus;
             run.catalogPhase = true;

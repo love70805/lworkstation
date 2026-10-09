@@ -223,16 +223,17 @@
 .erpa-statusbar {
   grid-row: 5;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 42px;
   padding: 8px 18px;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
   border-bottom: 1px solid var(--erpa-border);
   background: var(--erpa-surface);
   color: var(--erpa-muted);
   font-size: 11px;
-  white-space: nowrap;
+  line-height: 1.5;
 }
 
 .erpa-status-item { display: inline-flex; align-items: center; gap: 5px; }
@@ -454,6 +455,8 @@
   .erpa-anomaly-banner { align-items: stretch; flex-direction: column; gap: 8px; padding-inline: 12px; }
   .erpa-table { min-width: 1120px; }
   .erpa-footer { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .erpa-footer > span { white-space: normal; overflow-wrap: anywhere; }
+  .erpa-footer > span:last-child { max-width: 100%; }
 }
 
 .erpa-catalog-progress { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 16px; color: var(--erpa-text); background: var(--erpa-primary-soft); font-size: 12px; }
