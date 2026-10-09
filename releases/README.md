@@ -1,4 +1,8 @@
-## 0.4.14 已送达 ERP 成本接收修复（已公开稳定 Latest）
+## 0.4.15 启动后空闲内存增长修复（已公开稳定 Latest）
+
+候选 candidates/0.4.15/，证据 archive/startup-memory-growth/。174 文件 / 1367 前端测试、完整门禁、desktop verify、候选隐藏 smoke/包内原生扩展后台与重连、三页浅深色窗口和 675 安装文件/629 生产输入一致性通过。真实数据只读副本候选约 189 秒，完整进程树含收件服务空闲 530.6–541.2 MiB；业务计数、采用状态、证据大小和来源版本未变，七条价格异常保留，未强制 GC。源码 `3529163`，119231627 字节，SHA256 `91CC59733F9604D3F70FEE525D556205BCAC13371E5C40DB95144EB398E2284E`。[PR #187](https://github.com/love70805/lworkstation/pull/187) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37882974226) 通过，标签固定 `7f61c85`，四公开资产完整回读及更新入口通过，2026-10-09 12:20:22 已公开稳定 Latest。本机未安装、真实库/队列未改写，见 [记录](../docs/RELEASE_0.4.15.md)。
+
+## 0.4.14 已送达 ERP 成本接收修复（历史公开稳定版）
 
 候选 candidates/0.4.14/，证据 archive/erp-cost-adoption/。174 文件 / 1364 前端测试、完整门禁、desktop verify、生产默认轮询/正常采用/价格异常/错误恢复/跨页及浅深色窄屏、最终候选隐藏 smoke/原生扩展后台与重连、675 安装文件 / 629 生产输入一致性通过。历史六批原始回传隔离重放全部接收，367 自动采用、7 价格异常，未确认真实队列。源码 `0066558`，安装包 119231343 字节，SHA256 `F3169B6215052E79687488D35298F5E4EBAA478A675681C293BFC22700937022`。[PR #185](https://github.com/love70805/lworkstation/pull/185) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37878655429) 通过，标签固定 `5eaae4c`，四公开资产完整哈希及更新入口通过，2026-10-09 11:24:54 已公开稳定 Latest。本机未安装、真实数据未改写，ERP Assistant 8.0.39，见 [记录](../docs/RELEASE_0.4.14.md)。
 
@@ -56,7 +60,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.13](https://github.com/love70805/lworkstation/releases/tag/v0.4.13)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.15](https://github.com/love70805/lworkstation/releases/tag/v0.4.15)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 
