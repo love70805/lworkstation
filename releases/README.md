@@ -1,6 +1,6 @@
-## 0.4.17 缺成本直接更正（候选验收通过）
+## 0.4.17 缺成本直接更正（已公开稳定 Latest）
 
-候选 candidates/0.4.17/，证据 archive/cost-correction-shortcuts/。1374 测试、完整门禁、desktop verify、实际连续更正/七条审计/重开/撤销/范围隔离、12 组中文浅深色窗口、隐藏 smoke 与 688 安装文件 / 642 生产输入一致性通过。构建源码 00b2998，安装包 119391236 字节，SHA256 6C1BEEFDE4D95B6656D440DE4CF3EA95D6B29A19A48750C8CB497E7C66D57C42。集成和公开回读接续进行，尚未标记公开发布，见 [0.4.17](../docs/RELEASE_0.4.17.md)。不自动安装、不改写真实库。
+候选 candidates/0.4.17/，证据 archive/cost-correction-shortcuts/。1374 测试、完整门禁、desktop verify、实际连续更正/七条审计/重开/撤销/范围隔离、12 组中文浅深色窗口、隐藏 smoke 与 688 安装文件 / 642 生产输入一致性通过。构建源码 00b2998，安装包 119391236 字节，SHA256 6C1BEEFDE4D95B6656D440DE4CF3EA95D6B29A19A48750C8CB497E7C66D57C42。[PR #192](https://github.com/love70805/lworkstation/pull/192) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37919903134) 通过，稳定标签 v0.4.17 固定 `f959468cd4b5f02110cd54e9842eb2f28db5aa2c`，生产输入与验收候选逐字节相同。2026-10-09T10:53:12Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 均一致，安装包 SHA512 与 latest.yml 一致。生产更新入口从 0.4.16 识别 0.4.17，同版与跨通道保护通过。本机未自动安装，真实数据库与队列未改写。 见 [0.4.17](../docs/RELEASE_0.4.17.md)。不自动安装、不改写真实库。
 
 ## 0.4.16 ERP 维护恢复与整批采集反馈（已公开稳定 Latest）
 
@@ -68,7 +68,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.15](https://github.com/love70805/lworkstation/releases/tag/v0.4.15)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.17](https://github.com/love70805/lworkstation/releases/tag/v0.4.17)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 
