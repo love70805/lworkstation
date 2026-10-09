@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.16",
+  "version": "0.4.17",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0416-erp-collection-resilience",
+  "integrationBranch": "codex/v0417-cost-correction-shortcuts",
   "requiredCommits": [
+    {
+      "module": "v0.4.17-direct-cost-correction",
+      "commit": "5292666d2acd6c11e9adc36b95971077feaa5d20"
+    },
+    {
+      "module": "v0.4.17-verified-main-baseline",
+      "commit": "b7671aeb9af27a5027bad14b44e79d073f40fea7"
+    },
     {
       "module": "v0.4.16-verified-main-baseline",
       "commit": "74cc9ab33fa9626f91cc433d63ef642c24322f7e"
