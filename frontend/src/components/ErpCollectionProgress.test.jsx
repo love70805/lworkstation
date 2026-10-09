@@ -39,3 +39,31 @@ it('offers material continuation for a partial task with all cost receipts', () 
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches: [{ platformSkcs: ['A'], status: 'incomplete', deliveryId: 'D', catalogStatus: 'failed' }] }} />);
   expect(html).toContain('继续补充资料'); expect(html).toContain('重试失败批次');
 });
+
+it('explains background work and does not ask users to continue an active material read', () => {
+  const task = { status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] };
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
+  expect(html).toContain('正在后台补充商品资料');
+  expect(html).toContain('可以继续使用工作台，无需重复启动');
+  expect(html).toContain('暂停采集');
+  expect(html).not.toContain('继续补充资料');
+  expect(html).not.toContain('恢复后请在 ERP 助手点击继续采集');
+});
+
+it('removes stale pause and continuation controls after all material checks finish', () => {
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'completed' }] }} />);
+  expect(html).toContain('成本采集与资料检查已结束');
+  expect(html).not.toContain('暂停采集');
+  expect(html).not.toContain('停止采集');
+  expect(html).not.toContain('继续补充资料');
+});
+
+it('reports an unavailable service without claiming cached reads are still running', () => {
+  const html = renderToStaticMarkup(<ErpCollectionProgress error="本机服务未连接" statusError="本机服务未连接" task={{ status: 'cost_complete', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] }} />);
+  expect(html).toContain('采集状态暂无法确认');
+  expect(html).toContain('本机服务未连接');
+  expect(html).not.toContain('正在后台补充商品资料');
+  expect(html).not.toContain('暂停采集');
+  expect(html).not.toContain('继续补充资料');
+  expect(html).not.toContain('class="spin"');
+});

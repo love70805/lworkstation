@@ -428,3 +428,21 @@
 .erp-collection-progress summary { cursor: pointer; color: var(--text); overflow-wrap: anywhere; }
 .erp-collection-counts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-block: 14px; }
 .erp-collection-counts strong { font-variant-numeric: tabular-nums; }
+
+.erp-background-notice, .erp-collection-activity { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
+.erp-background-notice { margin-bottom: 18px; }
+.erp-background-notice > svg, .erp-collection-activity > svg { flex-shrink: 0; margin-top: 2px; color: var(--primary); }
+.erp-background-copy { display: grid; gap: 5px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.erp-background-copy span, .erp-background-copy small, .erp-collection-activity p { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.erp-collection-activity p { margin: 5px 0 0; }
+.erp-background-notice .button { flex-shrink: 0; }
+.erp-activity-warning > svg { color: var(--warning); }
+.erp-activity-success > svg { color: var(--success); }
+@media (max-width: 640px) {
+  .erp-background-notice { flex-wrap: wrap; }
+  .erp-background-notice .erp-background-copy { flex-basis: calc(100% - 32px); }
+  .erp-background-notice .button { margin-left: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .erp-background-notice .spin, .erp-collection-activity .spin { animation: none; }
+}

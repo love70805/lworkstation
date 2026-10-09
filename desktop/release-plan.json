@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0412-memory-performance",
+  "integrationBranch": "codex/v0413-erp-background-status",
   "requiredCommits": [
+    {
+      "module": "v0.4.13-verified-main-baseline",
+      "commit": "2eb11ddb30d2dd0efb511eacc7d70e1553d14e09"
+    },
     {
       "module": "v0.4.12-lazy-remote-and-empty-queue-memory",
       "commit": "9e52198"
