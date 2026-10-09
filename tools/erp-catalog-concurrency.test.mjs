@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
-const sandbox = { window: {}, URL, AbortController, setTimeout, clearTimeout };
+let expireMaterialDeadline;
+const sandbox = { window: {}, URL, AbortController, setTimeout: (callback, ms, ...args) => {
+  if (ms === 5000) expireMaterialDeadline = callback;
+  return setTimeout(callback, ms, ...args);
+}, clearTimeout };
 for (const file of ['result-policy.js', 'catalog-collector.js']) vm.runInNewContext(await readFile(new URL('../integrations/erp-assistant-extension/src/' + file, import.meta.url), 'utf8'), sandbox);
 const policy = sandbox.window.ShopeersErpResultPolicy;
 const create = sandbox.window.ShopeersErpCatalogCollector.create;
@@ -65,8 +69,11 @@ const catalogResults = scope.map(skc => {
   return { warehouseSku: 'W-' + skc, unitCost: '4.0000', catalogMappingsComplete: true, catalogMappings, mappings: policy.normalizeMappings(catalogMappings) };
 });
 let timedEvidenceReads = 0;
-const timed = create({ policy, budgetMs: 50, apiGet: async (endpoint, params) => endpoint.endsWith('product-page') ? product(params.skuGroup) : mapping(params.productId.slice(2)), readWarehouseEvidence: () => { timedEvidenceReads += 1; return new Promise(() => {}); } });
-const partial = await timed.collect(scope, { controller: new AbortController(), expectedSkus }, { results: catalogResults, warehouseEvidence: { warehouses: [{ ...evidence('A'), purchaseRecords: [{ recordId: 'REC-A', warehouseSku: 'W-A', quantity: 1, unitPrice: 4, purchaseDate: '2026-08-10' }] }] } });
+const timed = create({ policy, budgetMs: 5000, apiGet: async (endpoint, params) => endpoint.endsWith('product-page') ? product(params.skuGroup) : mapping(params.productId.slice(2)), readWarehouseEvidence: () => { timedEvidenceReads += 1; return new Promise(() => {}); } });
+const partialPromise = timed.collect(scope, { controller: new AbortController(), expectedSkus }, { results: catalogResults, warehouseEvidence: { warehouses: [{ ...evidence('A'), purchaseRecords: [{ recordId: 'REC-A', warehouseSku: 'W-A', quantity: 1, unitPrice: 4, purchaseDate: '2026-08-10' }] }] } });
+await until(() => timedEvidenceReads === 5);
+expireMaterialDeadline();
+const partial = await partialPromise;
 assert.equal(timedEvidenceReads, 5, 'deadline must not start queued network reads');
 assert.equal(partial.results.find(item => item.warehouseSku === 'W-A').unitCost, '4.0000');
 assert.equal(partial.warehouseEvidence.warehouses.find(item => item.warehouseSku === 'W-A').evidenceComplete, true);
