@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0414-erp-cost-intake",
+  "integrationBranch": "codex/startup-memory-growth",
   "requiredCommits": [
+    {
+      "module": "v0.4.15-idle-erp-adoption-memory",
+      "commit": "1a71336d9c0ea99aa8203a2e62a223c7da17738c"
+    },
+    {
+      "module": "v0.4.15-verified-main-baseline",
+      "commit": "8b1d8eeefbeeffb7524e47d4cb79487dca04cc4e"
+    },
     {
       "module": "v0.4.14-registered-scope-cost-intake",
       "commit": "2fd0dc853d6aafc8e7d4e9c04614038795622545"
