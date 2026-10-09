@@ -24,7 +24,19 @@ export function publishErpCollectionActivity({ workspaceId, tasks, error = '' })
       platformSkcs: batch.platformSkcs ?? [],
     })),
   }));
-  const next = { tasks: projected, error };
+  const next = { tasks: projected, error, ...(previous.receiptError ? { receiptError: previous.receiptError } : {}) };
+  if (JSON.stringify(previous) === JSON.stringify(next)) return;
+  snapshots.set(workspaceId, next);
+  for (const listener of listeners) listener();
+}
+
+// Receipt/adoption failures differ from a failed task-status read. Preserve the
+// known stages and expose this small, workspace-scoped processing notice.
+export function publishErpCollectionReceiptError({ workspaceId, error = '' }) {
+  if (!workspaceId) return;
+  const previous = readErpCollectionActivity(workspaceId);
+  const next = { ...previous };
+  if (error) next.receiptError = String(error); else delete next.receiptError;
   if (JSON.stringify(previous) === JSON.stringify(next)) return;
   snapshots.set(workspaceId, next);
   for (const listener of listeners) listener();

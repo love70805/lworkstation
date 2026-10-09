@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { expect, it } from 'vitest';
 import ErpBackgroundNotice, { ErpBackgroundNoticeContent } from './ErpBackgroundNotice';
-import { publishErpCollectionActivity, readErpCollectionActivity } from '../lib/erpCollectionActivity';
+import { publishErpCollectionActivity, publishErpCollectionReceiptError, readErpCollectionActivity } from '../lib/erpCollectionActivity';
 
 const task = { taskId: 'T', workspaceId: 'NOTICE-W', ledgerId: 'LEDGER-A', ledgerPeriod: '2026-09', status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] };
 
@@ -37,5 +37,28 @@ it('shares updates across page mounts, isolates workspaces and removes completed
     await render('NOTICE-W'); expect(container.textContent).toContain('正在后台补充商品资料');
     await act(() => publishErpCollectionActivity({ workspaceId: 'NOTICE-W', tasks: [{ ...task, batches: task.batches.map(batch => ({ ...batch, catalogStatus: 'completed' })) }] }));
     expect(container.textContent).toBe('');
+  } finally { await act(() => root.unmount()); container.remove(); }
+});
+
+it('keeps a receipt failure visible after collection completes, through task refresh and workspace switches, until a healthy receipt cycle', async () => {
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container);
+  const workspaceId = 'RECEIPT-W';
+  const render = id => act(() => root.render(<MemoryRouter><ErpBackgroundNotice workspaceId={id} /></MemoryRouter>));
+  try {
+    publishErpCollectionReceiptError({ workspaceId, error: '已登记请求不一致' });
+    await render(workspaceId);
+    expect(container.textContent).toContain('成本回传处理遇到问题');
+    expect(container.textContent).toContain('已登记请求不一致');
+    expect(container.querySelector('a').getAttribute('href')).toBe('/profit?view=cost');
+    await act(() => publishErpCollectionActivity({ workspaceId, tasks: [{ ...task, workspaceId, batches: task.batches.map(batch => ({ ...batch, catalogStatus: 'completed' })) }] }));
+    expect(container.textContent).toContain('成本回传处理遇到问题');
+    expect(container.querySelector('a').getAttribute('href')).toBe('/profit?ledger=LEDGER-A&view=cost');
+    expect(container.querySelector('.spin')).toBeNull();
+    await render('RECEIPT-OTHER'); expect(container.textContent).toBe('');
+    await render(workspaceId); expect(container.textContent).toContain('成本回传处理遇到问题');
+    await act(() => publishErpCollectionReceiptError({ workspaceId }));
+    expect(container.textContent).toBe('');
+    expect(readErpCollectionActivity(workspaceId).receiptError).toBeUndefined();
   } finally { await act(() => root.unmount()); container.remove(); }
 });

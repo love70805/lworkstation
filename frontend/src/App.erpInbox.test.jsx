@@ -96,6 +96,20 @@ describe('ERP inbox background delivery and adoption', () => {
     expect(result.failures).toHaveLength(1);
   });
 
+  it('publishes deduplicated receipt failures in the current workspace and clears them on recovery', async () => {
+    const onReceiptStatus = vi.fn();
+    const options = defaults({ onReceiptStatus,
+      pollRecords: vi.fn(async () => [record('bad'), record('bad')]),
+    });
+    await runErpInboxCycle(options);
+    expect(onReceiptStatus).toHaveBeenLastCalledWith({ workspaceId: 'W1', error: 'invalid evidence' });
+    options.pollRecords.mockResolvedValueOnce([]);
+    await runErpInboxCycle(options);
+    expect(onReceiptStatus).toHaveBeenLastCalledWith({ workspaceId: 'W1', error: '' });
+    await runErpInboxCycle({ ...options, isDisposed: () => true });
+    expect(onReceiptStatus).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps durable inbox recovery running when an old local draft cannot be inspected', async () => {
     const options = defaults({ pollRecords: vi.fn(async () => []), recoverDrafts: vi.fn(async () => { throw Error('draft read failed'); }) });
     const result = await runErpInboxCycle(options);
