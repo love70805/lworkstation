@@ -1,9 +1,25 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0412-memory-performance",
+  "integrationBranch": "codex/v0413-erp-background-status",
   "requiredCommits": [
+    {
+      "module": "v0.4.13-catalog-deadline-partial-preservation",
+      "commit": "a313ca98222a7bec8447a3b1b1852d49000ec0c2"
+    },
+    {
+      "module": "v0.4.13-parallel-catalog-and-collection-ui",
+      "commit": "2a14d51903ec450c91d950b0c08952e5ffefc21d"
+    },
+    {
+      "module": "v0.4.13-erp-background-status",
+      "commit": "26f4a2b8528305d12a5e6d2bb1415622d5ed0981"
+    },
+    {
+      "module": "v0.4.13-verified-main-baseline",
+      "commit": "2eb11ddb30d2dd0efb511eacc7d70e1553d14e09"
+    },
     {
       "module": "v0.4.12-lazy-remote-and-empty-queue-memory",
       "commit": "9e52198"

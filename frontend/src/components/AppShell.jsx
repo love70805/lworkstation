@@ -32,6 +32,7 @@ import { toggleAppearance } from "../lib/uiState";
 import { applyAppearance, readAppearance } from '../lib/appearance';
 import { profitWorkspaceHref, validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
+import ErpBackgroundNotice from './ErpBackgroundNotice';
 import { Button, IconButton, Modal, useToast } from "./UI";
 
 const APP_VERSION = typeof window !== "undefined" ? window.shopeersDesktopRuntime?.version ?? null : null;
@@ -373,7 +374,7 @@ export default function AppShell({ children, pageClass = "" }) {
       </header>
 
       <main className={`main-canvas ${pageClass}`}>
-        <div className="page-container">{children}</div>
+        <div className="page-container"><ErpBackgroundNotice workspaceId={navigationContext?.workspaceId} />{children}</div>
       </main>
 
       <Modal

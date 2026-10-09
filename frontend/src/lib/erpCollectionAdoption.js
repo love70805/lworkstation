@@ -1,11 +1,19 @@
 import { listErpCollectionTasks, reportErpCollectionAdoption } from './erpInboxTransport';
 import { listErpCostInbox } from '../data/database';
+import { publishErpCollectionActivity } from './erpCollectionActivity';
 
 const reported = new Map();
 // Receipt acknowledgement and adopted cost are independent facts. Retry failed
 // reports from durable local inboxes, including after app/service restart.
 export async function syncErpCollectionAdoptions({ workspaceId, listTasks = listErpCollectionTasks, listInboxes = listErpCostInbox, report = reportErpCollectionAdoption } = {}) {
-  const { tasks = [] } = await listTasks({ workspaceId });
+  let tasks;
+  try {
+    ({ tasks = [] } = await listTasks({ workspaceId }));
+    publishErpCollectionActivity({ workspaceId, tasks });
+  } catch (error) {
+    publishErpCollectionActivity({ workspaceId, error: error.message });
+    throw error;
+  }
   if (!tasks.length) return;
   const inboxes = await listInboxes({ statuses: ['pending', 'loaded', 'applied', 'rejected', 'voided'] });
   const byDelivery = new Map(inboxes.filter(inbox => inbox.workspaceId === workspaceId).map(inbox => [inbox.deliveryId, inbox]));
