@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ImportPreview from "./ImportPreview";
 import { ToastProvider } from "../components/UI";
 import { suggestLedgerReportMapping, suggestMappings } from "../lib/salesImport";
+import { saveSupplierGroup, readSupplierGroups, rememberSupplierGroupSelection } from "../lib/importSupplierGroups";
 const mocks = vi.hoisted(() => ({ parse:vi.fn(), inspectPeriod:vi.fn(), validate:vi.fn(), release:vi.fn(), terminate:vi.fn(), preview:vi.fn(), save:vi.fn() }));
 vi.mock('../lib/importWorkerClient', () => ({createImportWorkerClient:()=>mocks}));
 vi.mock('../data/database', () => ({getActiveMemberContext:async()=>({workspaceId:"W"}),previewSalesImports:mocks.preview,saveSalesImports:mocks.save}));
@@ -446,4 +447,51 @@ it('uses an applied batch suffix for newly added files without selecting middle 
   await settled();
   await choose([new File(['second'], '乙店.csv')]); await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX'],['A-HHHX']]);
+});
+
+it('saves LBYY and LBY together, applies the saved group, and remembers it only after a successful import', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-LBYY','B-LBY','OTHER']}});
+  await upload(); await settled();
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'LBYY、LBY'}}));
+  await act(async () => Simulate.change(container.querySelector('#supplier-group-name'), {target:{value:'LBYY / LBY'}}));
+  await click('保存货号组');
+  const group = readSupplierGroups('W').groups[0];
+  expect(group.aliases).toEqual(['LBY','LBYY']);
+  expect(readSupplierGroups('W').lastAppliedId).toBe('');
+  await click('应用货号组'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-LBYY','B-LBY'],['A-LBYY','B-LBY']]);
+  await act(async () => container.querySelector('.batch-overwrite input').click());
+  await click('导入');
+  expect(readSupplierGroups('W').lastAppliedId).toBe(group.id);
+});
+
+it('restores a group and its store exceptions without a new apply click, including newly seen alias members', async () => {
+  const group = saveSupplierGroup('W', { name: '负责组', aliases: ['LBYY','LBY'], mode: 'suffix' });
+  rememberSupplierGroupSelection('W', [{storeName:'甲店',supplierGroupRule:group,facets:{supplierNumbers:['A-LBYY','B-LBY']},filterOptions:{supplierNumbers:['A-LBYY']}}]);
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-LBYY','B-LBY','NEW-LBY','OTHER']}});
+  const input = container.querySelector('input[type=file]');
+  Object.defineProperty(input,'files',{configurable:true,value:[new File(['first'],'甲店.csv')]});
+  await act(async () => input.dispatchEvent(new Event('change',{bubbles:true})));
+  await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
+  await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBYY','NEW-LBY']);
+  const picker = container.querySelector('.import-supplier-picker');
+  await act(async () => [...picker.querySelectorAll('button')].find(node => node.textContent === '未选 (2)').click());
+  expect([...picker.querySelectorAll('[role=option] strong')].map(node => node.textContent)).toEqual(['B-LBY','OTHER']);
+});
+
+it('switches matching mode only on apply and leaves file selections intact when a saved group is deleted', async () => {
+  const group = saveSupplierGroup('W', {name:'负责人',aliases:['LBYY'],mode:'suffix'});
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['LBYY','A-LBYY','LBYY-MID']}});
+  await upload(); await settled();
+  await act(async () => Simulate.change(container.querySelector('#supplier-group-select'), {target:{value:group.id}}));
+  await click('应用货号组'); await settled();
+  const count = mocks.preview.mock.calls.length;
+  await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), {target:{value:'exact'}}));
+  await settled(); expect(mocks.preview).toHaveBeenCalledTimes(count);
+  await click('应用到本批文件'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['LBYY']);
+  await click('删除货号组'); await settled();
+  expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
+  expect(readSupplierGroups('W').groups).toEqual([]);
 });
