@@ -1,3 +1,7 @@
+## 0.4.17 缺成本直接更正（候选验收通过）
+
+候选 candidates/0.4.17/，证据 archive/cost-correction-shortcuts/。1374 测试、完整门禁、desktop verify、实际连续更正/七条审计/重开/撤销/范围隔离、12 组中文浅深色窗口、隐藏 smoke 与 688 安装文件 / 642 生产输入一致性通过。构建源码 00b2998，安装包 119391236 字节，SHA256 6C1BEEFDE4D95B6656D440DE4CF3EA95D6B29A19A48750C8CB497E7C66D57C42。集成和公开回读接续进行，尚未标记公开发布，见 [0.4.17](../docs/RELEASE_0.4.17.md)。不自动安装、不改写真实库。
+
 ## 0.4.16 ERP 维护恢复与整批采集反馈（已公开稳定 Latest）
 
 候选 candidates/0.4.16/，证据 archive/erp-collection-resilience/。174 文件 / 1369 前端测试、完整门禁、desktop verify、最终候选隐藏 smoke、包内原生维护/重启/继续/失败重读、18 组浅深色窗口、688 安装文件/642 输入一致性通过。构建源码 `7e692a1`，119390491 字节，SHA256 `86B9A4FBE26627E748D91E246ECC1088B391751E322A91CE2FC82AE9F2ABFE0B`。ERP Assistant 8.0.40；[PR #189](https://github.com/love70805/lworkstation/pull/189) 与 [QA PR #190](https://github.com/love70805/lworkstation/pull/190) 已合并，PR 与 [主线 CI](https://github.com/love70805/lworkstation/actions/runs/37898370804) 通过。稳定标签 v0.4.16 固定 `a2e837f2dbee556be9eaf7690e5427c0f14c8686`，代码树与 QA PR 验收基线一致；生产输入与候选仍逐字节相同。2026-10-09T07:28:25Z 已公开非草稿、非预发布的稳定 Latest。四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 均一致，EXE SHA512 与 latest.yml 一致；生产更新入口从 0.4.15 识别 0.4.16，同版与跨通道保护通过。未向用户客户端下载或安装软件。本机不安装、真实库/队列不改写，见 [记录](../docs/RELEASE_0.4.16.md)。

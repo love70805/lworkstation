@@ -113,7 +113,7 @@ describe("CostMatching ERP inbox dialogs", () => {
 
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-    expect(container.textContent).toContain("ERP 回传待处理（1）");
+    expect(container.textContent).toContain("ERP 回传记录（1 批待核对）");
 
     const loadedRow = [...container.querySelectorAll(".cost-inbox-item")].find((row) => row.textContent.includes("B-LOADED"));
     await act(async () => { findButton(loadedRow, "删除批次").click(); });
@@ -139,7 +139,7 @@ describe("CostMatching ERP inbox dialogs", () => {
 
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-    expect(container.textContent).toContain("ERP 回传待处理（1）");
+    expect(container.textContent).toContain("ERP 回传记录（1 批待核对）");
   });
   it("shows partial automatic adoption with a remaining review path and no delete action", async () => {
     const partial = {
