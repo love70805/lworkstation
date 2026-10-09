@@ -57,4 +57,18 @@ await until(() => started === 2);
 controller.abort(new Error('synthetic_cancel'));
 await assert.rejects(interrupted, /synthetic_cancel/);
 assert.equal(started, 2, 'cancel must not start queued targets');
-console.log('Catalog targets: actual 2-directory/5-material parallel reads, ordered results, independent failure and queued cancellation passed');
+
+// A material deadline preserves previously complete cost/evidence and marks
+// unfinished targets partial; it must not act like an explicit user cancel.
+const catalogResults = scope.map(skc => {
+  const catalogMappings = policy.normalizeCatalogMappings(mapping(skc).data, 'W-' + skc);
+  return { warehouseSku: 'W-' + skc, unitCost: '4.0000', catalogMappingsComplete: true, catalogMappings, mappings: policy.normalizeMappings(catalogMappings) };
+});
+let timedEvidenceReads = 0;
+const timed = create({ policy, budgetMs: 50, apiGet: async (endpoint, params) => endpoint.endsWith('product-page') ? product(params.skuGroup) : mapping(params.productId.slice(2)), readWarehouseEvidence: () => { timedEvidenceReads += 1; return new Promise(() => {}); } });
+const partial = await timed.collect(scope, { controller: new AbortController(), expectedSkus }, { results: catalogResults, warehouseEvidence: { warehouses: [{ ...evidence('A'), purchaseRecords: [{ recordId: 'REC-A', warehouseSku: 'W-A', quantity: 1, unitPrice: 4, purchaseDate: '2026-08-10' }] }] } });
+assert.equal(timedEvidenceReads, 5, 'deadline must not start queued network reads');
+assert.equal(partial.results.find(item => item.warehouseSku === 'W-A').unitCost, '4.0000');
+assert.equal(partial.warehouseEvidence.warehouses.find(item => item.warehouseSku === 'W-A').evidenceComplete, true);
+assert.equal(partial.coverage.purchaseEvidence.state, 'partial');
+console.log('Catalog targets: actual 2-directory/5-material parallel reads, ordered results, independent failure, deadline preservation and queued cancellation passed');

@@ -11,11 +11,13 @@
     function create({ apiGet: requestApi, readWarehouseEvidence: requestEvidence, policy, budgetMs = 30 * 60 * 1000, maxRequests = Infinity, getCache = () => null, setCache = () => {}, onProgress = () => {} }) {
         // Parallel targets share the same budget and request limiter. Pages of
         // one target remain ordered so count drift/repeated pages still fail.
+        // After a material deadline, bounded() prevents new network reads while
+        // remaining targets retain available fields and mark missing coverage.
         async function targets(items, limit, worker, run) {
             const output = new Array(items.length);
             let cursor = 0, fatal = null;
             const runners = Array.from({ length: Math.min(limit, items.length) }, async (_, lane) => {
-                while (cursor < items.length && !fatal && !run.controller.signal.aborted) {
+                while (cursor < items.length && !fatal && (!run.controller.signal.aborted || run.budgetExpired)) {
                     const index = cursor++;
                     try { output[index] = await worker(items[index], lane); }
                     catch (error) { if (!fatal) { fatal = error; run.controller.abort(error); } }
@@ -23,7 +25,7 @@
             });
             await Promise.all(runners);
             if (fatal) throw fatal;
-            if (run.controller.signal.aborted) throw run.controller.signal.reason || new Error('collection_cancelled');
+            if (run.controller.signal.aborted && !run.budgetExpired) throw run.controller.signal.reason || new Error('collection_cancelled');
             return output;
         }
         async function bounded(operation, run) {
