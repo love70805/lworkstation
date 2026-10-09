@@ -1,4 +1,8 @@
-## 0.4.13 ERP 后台提示、并发与采集界面（已公开稳定 Latest）
+## 0.4.14 已送达 ERP 成本接收修复（已公开稳定 Latest）
+
+候选 candidates/0.4.14/，证据 archive/erp-cost-adoption/。174 文件 / 1364 前端测试、完整门禁、desktop verify、生产默认轮询/正常采用/价格异常/错误恢复/跨页及浅深色窄屏、最终候选隐藏 smoke/原生扩展后台与重连、675 安装文件 / 629 生产输入一致性通过。历史六批原始回传隔离重放全部接收，367 自动采用、7 价格异常，未确认真实队列。源码 `0066558`，安装包 119231343 字节，SHA256 `F3169B6215052E79687488D35298F5E4EBAA478A675681C293BFC22700937022`。[PR #185](https://github.com/love70805/lworkstation/pull/185) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37878655429) 通过，标签固定 `5eaae4c`，四公开资产完整哈希及更新入口通过，2026-10-09 11:24:54 已公开稳定 Latest。本机未安装、真实数据未改写，ERP Assistant 8.0.39，见 [记录](../docs/RELEASE_0.4.14.md)。
+
+## 0.4.13 ERP 后台提示、并发与采集界面（历史公开稳定版）
 
 候选 candidates/0.4.13/，证据 archive/erp-background-status/。1359 前端测试、完整门禁、desktop verify、实际 2/5 目标并发/截止/取消、生产跨页面状态与中文浅深色窄屏、最终候选隐藏 smoke/原生扩展后台与重连、675 文件/629 输入一致性通过。构建源码 d707782，最终验证 d120825 只调整测试时钟；安装包 119231074 字节，SHA256 `5D8DEEB3C77D6D78D19E3AD9D46BF095755B8618570C7C99A636C12FC556C6A3`。[PR #183](https://github.com/love70805/lworkstation/pull/183) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37872439021) 通过，稳定标签固定 617aa88，四公开资产匿名完整哈希及生产更新入口通过，2026-10-09 10:05:54 已公开稳定 Latest。本机未安装、真实数据未改写；ERP Assistant 8.0.39，见 [发布记录](../docs/RELEASE_0.4.13.md)。
 
