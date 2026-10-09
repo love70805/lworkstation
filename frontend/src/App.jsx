@@ -62,8 +62,13 @@ export async function runErpInboxCycle({
 
   let received = 0;
   const receiptFailures = [];
+  let receiptSourceAvailable = true;
   const finish = result => {
-    if (!isDisposed()) onReceiptStatus({ workspaceId: context.workspaceId, error: [...new Set(receiptFailures)].join('；') });
+    // A disconnected source cannot prove that a failed return has recovered.
+    // Its connectivity is already shown by the task-status projection.
+    if (!isDisposed() && (receiptSourceAvailable || receiptFailures.length)) {
+      onReceiptStatus({ workspaceId: context.workspaceId, error: [...new Set(receiptFailures)].join('；') });
+    }
     return result;
   };
   try {
@@ -89,7 +94,7 @@ export async function runErpInboxCycle({
   } catch (error) {
     // The transport can be offline while previously acknowledged inbox data remains recoverable.
     failures.push(error);
-    receiptFailures.push(error.message);
+    receiptSourceAvailable = false;
   }
 
   if (isDisposed()) return { received, failures, recovered: false };

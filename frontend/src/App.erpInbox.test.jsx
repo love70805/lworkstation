@@ -103,6 +103,9 @@ describe('ERP inbox background delivery and adoption', () => {
     });
     await runErpInboxCycle(options);
     expect(onReceiptStatus).toHaveBeenLastCalledWith({ workspaceId: 'W1', error: 'invalid evidence' });
+    options.pollRecords.mockRejectedValueOnce(new Error('offline'));
+    await runErpInboxCycle(options);
+    expect(onReceiptStatus).toHaveBeenCalledTimes(1);
     options.pollRecords.mockResolvedValueOnce([]);
     await runErpInboxCycle(options);
     expect(onReceiptStatus).toHaveBeenLastCalledWith({ workspaceId: 'W1', error: '' });
