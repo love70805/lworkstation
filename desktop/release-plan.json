@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.17",
+  "version": "0.4.18",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0417-cost-correction-shortcuts",
+  "integrationBranch": "codex/v0418-supplier-groups-erp-feedback",
   "requiredCommits": [
+    {
+      "module": "v0.4.18-supplier-groups-and-ERP-diagnostics",
+      "commit": "8ac55439c608f2c065f8fc5e2a133d6a997e2cf1"
+    },
+    {
+      "module": "v0.4.18-verified-main-baseline",
+      "commit": "dbb2a39f207160ae250a64fe25935d8483d09cec"
+    },
     {
       "module": "v0.4.17-direct-cost-correction",
       "commit": "5292666d2acd6c11e9adc36b95971077feaa5d20"
