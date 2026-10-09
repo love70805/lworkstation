@@ -444,8 +444,13 @@ it('uses an applied batch suffix for newly added files without selecting middle 
   };
   await choose([new File(['first'], '甲店.csv')]); await settled();
   await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
-  await settled();
-  await choose([new File(['second'], '乙店.csv')]); await settled();
+  const waitForFiles = async count => vi.waitFor(async () => {
+    await act(async () => {});
+    expect(mocks.preview.mock.calls.at(-1)?.[0].items).toHaveLength(count);
+    expect(container.querySelector('.batch-fieldset').disabled).toBe(false);
+  }, { timeout: 5000 });
+  await waitForFiles(1);
+  await choose([new File(['second'], '乙店.csv')]); await waitForFiles(2);
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX'],['A-HHHX']]);
 });
 
