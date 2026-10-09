@@ -1,8 +1,8 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "candidateOnly": true,
-  "integrationBranch": "codex/startup-memory-growth",
+  "integrationBranch": "codex/v0416-erp-collection-resilience",
   "requiredCommits": [
     {
       "module": "v0.4.15-idle-erp-adoption-memory",

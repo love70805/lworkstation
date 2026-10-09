@@ -61,6 +61,13 @@ export function recoverCollectionTasks(records, instanceId, now = Date.now()) {
   return changed;
 }
 
+function resetAttempt(batch) {
+  batch.status = 'pending'; batch.attemptId = null;
+  // Historical envelopes remain in the inbox; only the current attempt's
+  // references are detached so an old receipt cannot skip fresh ERP reads.
+  for (const field of ['resultDeliveryId', 'deliveryId', 'collectedAt', 'deliveredAt', 'evidenceComplete', 'error', 'adoption', 'adoptionReportedAt', 'catalogStatus', 'catalogUpdatedAt', 'catalogError']) delete batch[field];
+}
+
 export function handleCollectionTaskRequest(records, { method, url, payload = {}, instanceId, now = Date.now() }) {
   if (!url.pathname.startsWith(PREFIX)) return null;
   const requestedWorkspace = String(payload.workspaceId ?? url.searchParams.get('workspaceId') ?? '').trim();
@@ -108,13 +115,16 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       if (action !== 'heartbeat') {
         if (task.status === 'running' && !task.recoveryRequired) return { status: 200, body: { task: refresh(task), idempotent: true } };
         for (const batch of task.batches) if (batch.status === 'running' || (action === 'retry_failed' && ['failed','incomplete'].includes(batch.status))) {
-          batch.status = 'pending'; batch.attemptId = null;
+          resetAttempt(batch);
         }
-        task.status = 'running'; task.recoveryRequired = false;
+        task.status = 'running'; task.recoveryRequired = false; delete task.pauseReason;
       }
       renew(task, request, records, now);
     } else if (action === 'pause' || action === 'stop') {
+      if (payload.reason != null && (action !== 'pause' || payload.reason?.code !== 'ERP_SERVICE_UNAVAILABLE')) fail('ERP_TASK_PAUSE_REASON_INVALID', '暂停原因格式无效。', 400);
       task.status = action === 'pause' ? 'paused' : 'stopped'; task.updatedAt = timestamp(now);
+      if (payload.reason) task.pauseReason = { code: 'ERP_SERVICE_UNAVAILABLE', message: String(payload.reason.message || 'ERP 服务暂不可用，请在服务恢复后继续原任务。').slice(0, 500), at: timestamp(now) };
+      else delete task.pauseReason;
     } else fail('ERP_TASK_ACTION_INVALID', '未知任务操作。', 400);
     return { status: 200, body: { task: refresh(task) } };
   }

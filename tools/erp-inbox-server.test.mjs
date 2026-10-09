@@ -628,7 +628,8 @@ try {
     workspaceId: "workspace-evidence",
     querySkcs: ["SKC-EVIDENCE"],
     rows: [{ platformSku: "SKU-NOT-IN-REQUEST", platformSkc: "SKC-EVIDENCE", warehouseSku: "WH-EVIDENCE", unitCost: 2.5, sourceWarnings: ["raw-row-warning"] }],
-    sourceMeta: { mappingFailures: [{ warehouseSku: "WH-EVIDENCE", message: "mapping unavailable" }] },
+    sourceMeta: { mappingFailures: [{ warehouseSku: "WH-EVIDENCE", message: "mapping unavailable" }], scopeDirectoryComplete: false, scopeRetrySkcCount: 1,
+      scopeDirectoryFailures: [{ platformSkc: 'SKC-EVIDENCE', message: 'x'.repeat(700), cookie: 'discard', nested: { secret: 'discard' } }] },
     warehouseEvidence: {
       formatVersion: 1,
       warehouses: [{ warehouseSku: "WH-EVIDENCE", evidenceComplete: false, purchaseRecords: [{ recordId: "E-R1", quantity: 2, unitPrice: 2.5 }] }],
@@ -643,6 +644,10 @@ try {
   assert.equal(unknownEvidenceBatch.rows[0].sourceWarnings.some((warning) => warning.includes("unknown_platform_sku")), false);
   assert.ok(unknownEvidenceBatch.sourceMeta.sourceWarnings.includes("mapping_failure:missing_expected_platform_sku:SKU-EVIDENCE"));
   assert.equal(unknownEvidenceBatch.sourceMeta.mappingFailures[0].warehouseSku, "WH-EVIDENCE");
+  assert.equal(unknownEvidenceBatch.sourceMeta.scopeDirectoryComplete, false);
+  assert.equal(unknownEvidenceBatch.sourceMeta.scopeRetrySkcCount, 1);
+  assert.deepEqual(unknownEvidenceBatch.sourceMeta.scopeDirectoryFailures, [{ platformSkc: 'SKC-EVIDENCE', message: 'x'.repeat(500) }]);
+  assert.equal(unknownEvidenceBatch.sourceMeta.evidenceComplete, false);
   assert.ok(unknownEvidenceBatch.warehouseEvidence[0].sourceWarnings.some((warning) => warning.startsWith("mapping_failure:")));
 
   await post("/erp/v1/requests", {

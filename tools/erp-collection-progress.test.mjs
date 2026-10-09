@@ -55,6 +55,11 @@ try {
     const warehouse = key.split(':')[1];
     await reply(key, [{ associatedProductId: warehouse, barcodeSkuid: 'SKU-' + warehouse, barcodeSkcid: warehouse.slice(2, 3) }], 1);
   }
+  await until(() => pending.has('product-page:A:1'));
+  await reply('product-page:A:1', ids.filter(id => id[0] === 'A').map(id => ({ itemId: 'W-' + id })), 5);
+  await until(() => pending.size === 5);
+  await reply('product-info-sku:W-A1:', '查询结果为空', 0);
+  for (const id of ids.filter(id => id[0] === 'A' && id !== 'A1')) await reply('product-info-sku:W-' + id + ':', [{ associatedProductId: 'W-' + id, barcodeSkuid: 'SKU-W-' + id, barcodeSkcid: 'A' }], 1);
   await until(() => pending.size === 2 && [...pending.keys()].every(key => key.startsWith('purchase-order-page:')));
   assert.equal(stage().getAttribute('value'), '0'); assert.equal(stage().max, 3);
   assert.equal(lane(0).hasAttribute('value'), false, 'total pages remain unknown until ERP responds');

@@ -35,5 +35,14 @@ it('ends activity when every material check completes despite the retained catal
 
 it('keeps material omissions separate from cost evidence failures', () => {
   expect(erpCollectionPresentation({ status: 'cost_complete', batches: [{ ...delivered, catalogStatus: 'failed' }] })).toMatchObject({ state: 'attention', running: false, canResume: true, canRetry: false });
-  expect(erpCollectionPresentation({ status: 'partial', batches: [{ ...delivered, status: 'incomplete', catalogStatus: 'completed' }] })).toMatchObject({ state: 'attention', running: false, canRetry: true });
+  expect(erpCollectionPresentation({ status: 'partial', batches: [{ ...delivered, status: 'incomplete', catalogStatus: 'completed' }] })).toMatchObject({ state: 'attention', running: false, canRetry: true, canResume: false });
+});
+
+it('shows durable ERP service pause separately from initial waiting and user pause', () => {
+  const task = { status: 'paused', pauseReason: { code: 'ERP_SERVICE_UNAVAILABLE', message: 'ERP 返回了维护页面' }, batches: [{ status: 'pending' }] };
+  const view = erpCollectionPresentation(task);
+  expect(view).toMatchObject({ state: 'paused', running: false, canResume: true, canRetry: false, tone: 'warning' });
+  expect(view.title).toContain('ERP 服务暂不可用');
+  expect(view.description).toContain('服务恢复后');
+  expect(erpCollectionPresentation({ ...task, status: 'running', batches: [{ status: 'running' }] }).state).toBe('cost_running');
 });
