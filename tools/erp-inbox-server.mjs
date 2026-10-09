@@ -529,7 +529,7 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
   expectedRows = null,
   expectedSkus = null,
 } = {}) {
-  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount"];
+  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount"];
   const topLevelWarnings = sourceWarningsContract(meta, { strict: strictSourceWarnings });
   const evidenceByRef = new Map(warehouseEvidence.map((entry) => [entry.evidenceRef, entry]));
   const expectedScope = normalizedExpectedSkus(expectedSkus);
@@ -556,7 +556,8 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
     const value = String(meta?.[field] ?? "").trim();
     if (value) result[field] = value;
   }
-  for (const field of ["detailFailures", "mappingFailures", "exclusionStats", "failureStats"]) {
+  if (typeof meta?.scopeDirectoryComplete === 'boolean') result.scopeDirectoryComplete = meta.scopeDirectoryComplete;
+  for (const field of ["detailFailures", "mappingFailures", "scopeDirectoryFailures", "exclusionStats", "failureStats"]) {
     if (Array.isArray(meta?.[field])) result[field] = meta[field].map((item) => {
       if (typeof item === "string") return item.slice(0, 500);
       if (!item || typeof item !== "object" || Array.isArray(item)) return null;

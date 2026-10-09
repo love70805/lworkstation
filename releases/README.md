@@ -1,3 +1,7 @@
+## 0.4.16 ERP 维护恢复与整批采集反馈（候选已验收）
+
+候选 candidates/0.4.16/，证据 archive/erp-collection-resilience/。174 文件 / 1369 前端测试、完整门禁、desktop verify、最终候选隐藏 smoke、包内原生维护/重启/继续/失败重读、18 组浅深色窗口、688 安装文件/642 输入一致性通过。构建源码 `7e692a1`，119390491 字节，SHA256 `86B9A4FBE26627E748D91E246ECC1088B391751E322A91CE2FC82AE9F2ABFE0B`。ERP Assistant 8.0.40；待代码合并、CI 与公开资产回读，尚未发布。本机不安装、真实库/队列不改写，见 [记录](../docs/RELEASE_0.4.16.md)。
+
 ## 0.4.15 启动后空闲内存增长修复（已公开稳定 Latest）
 
 候选 candidates/0.4.15/，证据 archive/startup-memory-growth/。174 文件 / 1367 前端测试、完整门禁、desktop verify、候选隐藏 smoke/包内原生扩展后台与重连、三页浅深色窗口和 675 安装文件/629 生产输入一致性通过。真实数据只读副本候选约 189 秒，完整进程树含收件服务空闲 530.6–541.2 MiB；业务计数、采用状态、证据大小和来源版本未变，七条价格异常保留，未强制 GC。源码 `3529163`，119231627 字节，SHA256 `91CC59733F9604D3F70FEE525D556205BCAC13371E5C40DB95144EB398E2284E`。[PR #187](https://github.com/love70805/lworkstation/pull/187) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/37882974226) 通过，标签固定 `7f61c85`，四公开资产完整回读及更新入口通过，2026-10-09 12:20:22 已公开稳定 Latest。本机未安装、真实库/队列未改写，见 [记录](../docs/RELEASE_0.4.15.md)。

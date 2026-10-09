@@ -18,6 +18,8 @@ import { handleCollectionTaskRequest, collectionScopeHash, recoverCollectionTask
   assert.equal(batch.status, 'incomplete'); assert.match(batch.error, /空映射 2 个/);
   assert.equal(task.summary.delivered, 1, 'incomplete evidence still has a durable receipt');
   call(`/${task.taskId}/control`, { action: 'retry_failed' });
+  assert.equal(batch.deliveryId, undefined); assert.equal(batch.resultDeliveryId, undefined);
+  assert.equal(batch.collectedAt, undefined); assert.equal(batch.catalogStatus, undefined);
   call(batchUrl, { state: 'running' });
   call(batchUrl, { state: 'collected', attemptId: batch.attemptId, evidenceComplete: true });
   recordCollectionDelivery({ task, batch }, { deliveryId: 'D2', resultDeliveryId: 'RESULT2', evidenceComplete: true });
@@ -136,6 +138,13 @@ try {
   const secondBatchUrl=`${secondUrl}/batches/${encodeURIComponent(second.batches[0].batchId)}`;
   await request(`${secondUrl}/control`,{action:'resume'});
   const old=(await request(secondBatchUrl,{state:'running'})).batch;
+  await request(`${secondUrl}/control`, { action: 'pause', reason: { code: 'ERP_SERVICE_UNAVAILABLE', message: '维护期间未取得响应', cookie: 'discard' } });
+  await stop(); await start();
+  assert.deepEqual(Object.keys((await request(secondUrl)).task.pauseReason).sort(), ['at', 'code', 'message']);
+  assert.equal((await request(secondUrl)).task.pauseReason.code, 'ERP_SERVICE_UNAVAILABLE', 'service pause survives a real service restart');
+  await request(`${secondUrl}/control`, { action: 'resume' });
+  assert.equal((await request(secondUrl)).task.pauseReason, undefined);
+  await request(secondBatchUrl, { state: 'running' });
   await request('requests',{request:{...scope,id:'R-three',replaceLedgerScope:true},expectedSkus:[]},409);
   await stop(); await start();
   assert.equal((await request(secondUrl)).task.recoveryRequired,true);

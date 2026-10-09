@@ -23,8 +23,10 @@ export function erpCollectionPresentation(task) {
   const costIssues = batches.some(batch => ['failed', 'incomplete'].includes(batch.status));
   const costDelivered = batches.length > 0 && batches.every(batch => batch.deliveryId);
   const neverStarted = batches.every(batch => batch.status === 'pending' && !batch.deliveryId && !batch.catalogStatus);
+  const pendingCost = batches.some(batch => ['pending', 'running', 'collected'].includes(batch.status));
   const canResume = !running && !terminal && (task.recoveryRequired
-    || ['ready', 'paused', 'interrupted', 'expired', 'partial', 'failed'].includes(task.status)
+    || ['ready', 'paused', 'interrupted', 'expired'].includes(task.status)
+    || ['partial', 'failed'].includes(task.status) && (pendingCost || catalogPending)
     || task.status === 'cost_complete' && catalogPending);
   let state = 'waiting', title = '等待 ERP 助手开始或继续采集';
   let description = '请在 ERP 助手开始或继续原任务；当前尚未确认有批次正在读取。';
@@ -35,6 +37,9 @@ export function erpCollectionPresentation(task) {
   } else if (task?.status === 'pausing') {
     state = 'pausing'; title = '正在暂停后台采集';
     description = '等待当前操作结束；已送达结果保留。';
+  } else if (task?.status === 'paused' && task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') {
+    state = 'paused'; title = 'ERP 服务暂不可用，采集已暂停';
+    description = '有限重试后仍未取得完整响应。已送达结果和已采用成本保留；服务恢复后在 ERP 助手继续原任务，成本证据缺项需重试失败批次。'; tone = 'warning';
   } else if (task?.recoveryRequired || ['interrupted', 'expired'].includes(task?.status) || task?.status === 'paused' && !neverStarted) {
     state = 'paused'; title = '后台采集已暂停，等待继续';
     description = '核验原任务范围后，在 ERP 助手继续；已采用成本保持有效。'; tone = 'warning';

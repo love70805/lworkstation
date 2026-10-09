@@ -294,7 +294,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid",
     "warehouseSkuCount", "platformSkuCount", "durationMs", "detailFailureCount",
     "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "costWarningCount",
-    "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount",
+    "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount",
   ];
   const result = {
     evidenceVersion: legacy ? 0 : (Number(meta.evidenceVersion) || ERP_COST_EVIDENCE_VERSION),
@@ -308,7 +308,8 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
   for (const field of ["sourceFormat", "sourceName", "excludedMonth", "extensionVersion", "queryCapturedAt", "registeredBefore", "requestRegisteredAt", "purchaseHistoryScope", "historyQueryRange", "historyTargetSku", "platformScopePolicy"]) {
     if (optionalText(meta[field])) result[field] = optionalText(meta[field]);
   }
-  for (const field of ["detailFailures", "mappingFailures", "exclusionStats", "failureStats", "sourceWarnings"]) {
+  if (typeof meta.scopeDirectoryComplete === 'boolean') result.scopeDirectoryComplete = meta.scopeDirectoryComplete;
+  for (const field of ["detailFailures", "mappingFailures", "scopeDirectoryFailures", "exclusionStats", "failureStats", "sourceWarnings"]) {
     if (Array.isArray(meta[field])) result[field] = meta[field].map((item) => {
       if (typeof item === "string") return item.slice(0, 500);
       if (!item || typeof item !== "object" || Array.isArray(item)) return null;

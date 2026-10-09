@@ -97,7 +97,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.39' }),
+        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.40' }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -198,7 +198,10 @@ export async function verifyErpCatalogTransport({
     assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
     assert.equal(new Set(requestedPaths).size, 4);
     assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, 1, 'complete original evidence does not trigger any optional history scan');
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, 2, 'complete original mappings are reused');
+    const unresolvedTarget = !legacyScope && expectedSkus.some(sku => sku.platformSku === 'SKU-MISSING');
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, unresolvedTarget ? 4 : 2,
+      unresolvedTarget ? 'an unresolved exact target gets one scoped mapping recheck' : 'complete original mappings are reused');
+    if (!legacyScope) assert.equal(submitted[0].payload.meta.scopeRetrySkcCount, unresolvedTarget ? 1 : 0);
     const retryCatalog = await window.ShopeersErpDeliveryBridge.submitCatalog(catalogSubmitted[0].payload);
     assert.equal(retryCatalog.status, "success", 'same independently delivered catalog is retry-idempotent');
     const resultResponse = await fetch(`${base}/erp/v1/cost-batches?workspaceId=${encodeURIComponent(workspaceId)}&ledgerId=${encodeURIComponent(ledgerId)}`, { headers: { authorization: `Bearer ${capability}` } });

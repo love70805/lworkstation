@@ -63,6 +63,18 @@ function buildFixture() {
 }
 
 describe("ERP cost batch envelope v2", () => {
+  it('preserves bounded directory diagnostics without treating them as financial decisions', () => {
+    const fixture = buildFixture();
+    fixture.sourceMeta.scopeDirectoryComplete = false;
+    fixture.sourceMeta.scopeRetrySkcCount = 1;
+    fixture.sourceMeta.scopeDirectoryFailures = [{ platformSkc: 'SKC-1', message: 'x'.repeat(700), token: 'discard', authorization: 'discard', nested: { secret: 'discard' } }];
+    const parsed = validateErpCostBatchEnvelope(JSON.parse(JSON.stringify(fixture)));
+    expect(parsed.envelope.sourceMeta).toMatchObject({ scopeDirectoryComplete: false, scopeRetrySkcCount: 1,
+      scopeDirectoryFailures: [{ platformSkc: 'SKC-1', message: 'x'.repeat(500) }] });
+    expect(JSON.stringify(parsed.envelope.sourceMeta)).not.toContain('discard');
+    expect(parsed.envelope.sourceMeta.evidenceComplete).toBe(true);
+  });
+
   it("requires both registered platform identities for exact-scope rows and nested archive mappings", () => {
     const expectedSkus = [{ platformSku: 'SKU-1', platformSkc: 'SKC-1' }];
     const args = { batchId: 'EXACT', workspaceId: 'W', ledgerId: 'L', requestId: 'R', platformSkcs: ['SKC-1'], expectedSkus,
