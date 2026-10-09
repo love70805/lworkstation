@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0413-erp-background-status",
+  "integrationBranch": "codex/v0414-erp-cost-intake",
   "requiredCommits": [
+    {
+      "module": "v0.4.14-registered-scope-cost-intake",
+      "commit": "2fd0dc853d6aafc8e7d4e9c04614038795622545"
+    },
+    {
+      "module": "v0.4.14-verified-main-baseline",
+      "commit": "a305f08e25142c20ad80de7912fd3fd88d1cb05a"
+    },
     {
       "module": "v0.4.13-catalog-deadline-partial-preservation",
       "commit": "a313ca98222a7bec8447a3b1b1852d49000ec0c2"

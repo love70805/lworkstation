@@ -53,6 +53,7 @@ it('explains background work and does not ask users to continue an active materi
 it('removes stale pause and continuation controls after all material checks finish', () => {
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'completed' }] }} />);
   expect(html).toContain('成本采集与资料检查已结束');
+  expect(html).not.toContain('当前阶段：补充资料');
   expect(html).not.toContain('暂停采集');
   expect(html).not.toContain('停止采集');
   expect(html).not.toContain('继续补充资料');

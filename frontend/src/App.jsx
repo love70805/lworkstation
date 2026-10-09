@@ -11,7 +11,6 @@ import { MemberContextGate } from "./components/MemberContextGate";
 import { DEFAULT_WORKSPACE_ID, getActiveMemberContext, receiveErpCostInboxEnvelope, recoverErpCostInboxAdoptions, receiveSelectionCaptureEnvelope } from "./data/database";
 import { runSyncOnce } from "./data/syncRunner";
 import { runtimeConfig } from "./config/runtimeConfig";
-import { parseErpInboxMessage } from "./domain/erpInboxContract";
 import { acknowledgeErpInbox, pollErpInbox } from "./lib/erpInboxTransport";
 import { acknowledgeErpCatalogInbox, pollErpCatalogInbox } from "./lib/erpInboxTransport";
 import { receiveErpCatalogInboxEnvelope } from "./data/repositories/erpCatalogRepository";
@@ -21,6 +20,7 @@ import { recoverCompleteErpCostDrafts } from "./lib/erpLegacyDraftRecovery";
 import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectionCaptureContext } from "./lib/selectionCaptureTransport";
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 import { syncErpCollectionAdoptions } from './lib/erpCollectionAdoption';
+import { publishErpCollectionReceiptError } from './lib/erpCollectionActivity';
 import { runWorkspaceBackgroundTask } from './lib/workspaceBackgroundTasks';
 
 const CaptureQueue = lazy(() => import("./pages/CaptureQueue"));
@@ -43,12 +43,15 @@ export async function runErpInboxCycle({
   isDisposed = () => false,
   getContext = getActiveMemberContext,
   pollRecords = pollErpInbox,
-  parseRecord = parseErpInboxMessage,
+  // The durable receiver resolves the registered request before validating its
+  // exact SKU/SKC scope. A scope-free preliminary parse rejects valid returns.
+  parseRecord = value => ({ envelope: value }),
   receive = receiveErpCostInboxEnvelope,
   acknowledge = acknowledgeErpInbox,
   recover = recoverErpCostInboxAdoptions,
   recoverDrafts = recoverCompleteErpCostDrafts,
   syncTaskAdoptions = null,
+  onReceiptStatus = publishErpCollectionReceiptError,
   emit = (envelope) => window.dispatchEvent(new CustomEvent("shopeers:erp-inbox-received", { detail: envelope })),
 } = {}) {
   const failures = [];
@@ -58,6 +61,16 @@ export async function runErpInboxCycle({
   if (isDisposed()) return { received: 0, failures, recovered: false };
 
   let received = 0;
+  const receiptFailures = [];
+  let receiptSourceAvailable = true;
+  const finish = result => {
+    // A disconnected source cannot prove that a failed return has recovered.
+    // Its connectivity is already shown by the task-status projection.
+    if (!isDisposed() && (receiptSourceAvailable || receiptFailures.length)) {
+      onReceiptStatus({ workspaceId: context.workspaceId, error: [...new Set(receiptFailures)].join('；') });
+    }
+    return result;
+  };
   try {
     const records = await pollRecords({ workspaceId: context.workspaceId });
     for (const record of records) {
@@ -70,16 +83,18 @@ export async function runErpInboxCycle({
           acknowledge: () => acknowledge(record.deliveryId, { workspaceId: context.workspaceId }),
         });
         received++;
-        if (receipt.adoptionError) failures.push(new Error(receipt.adoptionError));
+        if (receipt.adoptionError) { failures.push(new Error(receipt.adoptionError)); receiptFailures.push(receipt.adoptionError); }
         emit(parsed.envelope);
       } catch (error) {
         // One invalid or temporarily unavailable delivery must not block the rest.
         failures.push(error);
+        receiptFailures.push(error.message);
       }
     }
   } catch (error) {
     // The transport can be offline while previously acknowledged inbox data remains recoverable.
     failures.push(error);
+    receiptSourceAvailable = false;
   }
 
   if (isDisposed()) return { received, failures, recovered: false };
@@ -93,10 +108,12 @@ export async function runErpInboxCycle({
     }
     const recoveryFailures = Array.isArray(results) ? results.filter(result => result.error) : [];
     failures.push(...recoveryFailures.map(result => new Error(result.error)));
-    return { received, failures, recovered: recoveryFailures.length === 0 };
+    receiptFailures.push(...recoveryFailures.map(result => result.error));
+    return finish({ received, failures, recovered: recoveryFailures.length === 0 });
   } catch (error) {
     failures.push(error);
-    return { received, failures, recovered: false };
+    receiptFailures.push(error.message);
+    return finish({ received, failures, recovered: false });
   }
 }
 
