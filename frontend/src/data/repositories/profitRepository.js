@@ -2,6 +2,7 @@ import Dexie from "dexie";
 import { erpLedgerVersion } from '../../domain/erpLedgerVersion';
 import { calculateLedgerCostCoverage, ledgerStatusFromCoverage } from "../../domain/costCoverage";
 import { resolveFormalCostDecision } from "../../domain/costPolicy";
+import { buildLedgerSkuIdentityIndex, ledgerCostIdentityIssue, resolveLedgerCostDecision, describeLedgerCostIdentityIssue, LEDGER_COST_IDENTITY_VERSION } from '../../domain/ledgerCostIdentity';
 import {
   canonicalPlatformSkc,
   canonicalPlatformSku,
@@ -20,13 +21,13 @@ import { normalizeErpCatalogFields } from "../../domain/erpCatalogFields";
 import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
 import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../../domain/erpCostResolution";
-import { hasLegacyMonthExclusions } from "../../domain/erpCostPeriod";
+import { hasLegacyMonthExclusions, isErpCostWithinPeriod } from "../../domain/erpCostPeriod";
 import { purchaseOrderSummary } from "../../domain/erpPurchaseSelection";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
-import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
+import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -104,7 +105,7 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
     const scope = { workspaceId: ledger.workspaceId, ledgerId, store: scopedStore, platformSku: sku };
     const previous = selectManualOverride(approvals, scope);
     const erpCost = (await getLatestLedgerCosts(ledgerId)).find((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(sku));
-    const oldDecision = resolveFormalCostDecision({ ...scope, period: ledger.period, manualOverride: previous, erpCost });
+    const oldDecision = resolveLedgerCostDecision({ ...scope, identity: buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(sku)), period: ledger.period, manualOverride: previous, erpCost });
     const auditActor = await resolveProfitAuditActor();
     const revokedRecords = approvals.filter((item) => item.status === "approved" && manualSnapshot(item)?.kind === "manual_override" && storeIdentity(manualSnapshot(item).store) === scopedStore && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(sku));
     for (const item of revokedRecords) {
@@ -495,6 +496,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
       db.erpCostRows.where('ledgerId').equals(ledger.id).toArray(), db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
     ]);
     const ownedSales = salesRows.filter(row => row.workspaceId === ledger.workspaceId);
+    const identities = buildLedgerSkuIdentityIndex(ownedSales);
     const legacyScope = request.expectedSkus?.length ? null : legacyExpectedSkusForRequest({ request, salesRows: ownedSales, workspaceId: ledger.workspaceId });
     if (legacyScope?.reason) return persistResult([], 'blocked', legacyScope.reason);
     const expectedSkus = legacyScope?.expectedSkus ?? request.expectedSkus;
@@ -519,6 +521,8 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
       const previous = existingRows.find(cost => canonicalPlatformSku(cost.platformSku) === sku);
       if (previous) { items.push({ ...item, state: manualStores.length ? 'manual_effective' : 'adopted', costRowId: previous.id }); continue; }
       if (['finalized', 'locked'].includes(ledger.status)) { items.push({ ...item, state: 'ledger_protected', reason: ledger.status }); continue; }
+      const identityIssue = ledgerCostIdentityIssue(identities.get(sku), row, { requireSkc: true });
+      if (identityIssue) { items.push({ ...item, state: 'evidence_incomplete', reason: identityIssue.code, identityIssue }); continue; }
       if (!stores.length) { items.push({ ...item, state: 'evidence_incomplete', reason: 'sku_not_in_ledger' }); continue; }
       if (boundary.globalReasons.length) { items.push({ ...item, state: 'evidence_incomplete', reason: boundary.globalReasons.join(',') }); continue; }
       const newer = allRows.some(cost => cost.workspaceId === ledger.workspaceId && canonicalPlatformSku(cost.platformSku) === sku && cost.sourceEnvelopeBatchId !== batch.batchId && compareErpSourceOrder(cost.sourceOrder ?? batchById.get(cost.batchId)?.sourceOrder ?? [Date.parse(batchById.get(cost.batchId)?.publishedAt) || 0, 0, cost.batchId], order) > 0);
@@ -671,6 +675,9 @@ async function publishVerifiedErpCostBatch({
       || sourceRow.evidenceComplete !== true) {
       throw new Error(`平台 SKU ${row.platformSku || "未知"} 未通过当前账本 expected 证据独立校验。`);
     }
+    if (!row.platformSkc || canonicalPlatformSkc(row.platformSkc) !== canonicalPlatformSkc(sourceRow.platformSkc)) {
+      throw new Error(`平台 SKU ${row.platformSku} 的页面 SKC 与 ERP 原始证据不一致，请重新核对来源。`);
+    }
     const sourceEvidence = row.sourceWarehouseSku
       ? sourceEvidenceByWarehouseSku.get(canonicalWarehouseSku(row.sourceWarehouseSku))
       : null;
@@ -749,6 +756,15 @@ async function publishVerifiedErpCostBatch({
       db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
       db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     ]);
+    const identities = buildLedgerSkuIdentityIndex(salesRows);
+    for (const row of verifiedRows) {
+      const identity = identities.get(canonicalPlatformSku(row.platformSku));
+      // Request-scoped publication can precede the first sales import. Its
+      // envelope already proves the requested identity; compare live targets
+      // when present, and recheck them on every later import/report write.
+      const issue = identity && ledgerCostIdentityIssue(identity, row, { requireSkc: true });
+      if (issue) throw new Error(describeLedgerCostIdentityIssue(issue));
+    }
     const readiness = erpAdoptionReadiness({ ledger, salesRows, approvals, reconciliation: authoritativeReconciliation });
     if (!adoptionContext && readiness.blockedRows.length) {
       if (readiness.blockedRows.some(row => row.costDecision?.unitCost === 0 && row.costDecision?.selectedRecords?.length && row.costDecision.selectedRecords.every(record => record.effectiveUnitPrice > 0))) {
@@ -1671,7 +1687,15 @@ async function readLedgerSnapshot(ledgerId) {
     db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
   assertSourceRevision(dataVersion);
-  return { ledger, rows, batches, costs, approvals, profitLines, dataVersion };
+  // Older live ledgers may have a ready summary written before parent identity
+  // checks existed. Project current readiness without mutating business data or
+  // touching any frozen report/snapshot during an upgrade or ordinary read.
+  const snapshotLedger = ['finalized', 'locked'].includes(ledger.status) ? ledger : {
+    ...ledger,
+    ...buildLedgerCoveragePatch(ledger, calculateLedgerCostCoverage({ salesRows: rows, erpCosts: costs, approvals,
+      workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: ledger.period }), ledger.updatedAt),
+  };
+  return { ledger: snapshotLedger, rows, batches, costs, approvals, profitLines, dataVersion };
 }
 
 export async function getLatestLedgerSnapshot() {
@@ -1682,6 +1706,80 @@ export async function getLatestLedgerSnapshot() {
 export async function listLedgerSummaries() {
   const member = await getActiveMemberContext();
   return db.ledgers.where("workspaceId").equals(member.workspaceId).reverse().sortBy("period");
+}
+
+export async function withVerifiedLedgerCostSummaries(ledgers) {
+  return retrySourceRead(async () => {
+    await observeSourceRevision();
+    const revision = selectionFactsRevision();
+    const member = await getActiveMemberContext();
+    if (ledgers.some(ledger => ledger.workspaceId !== member.workspaceId)) throw new Error('账本成本摘要不属于当前工作区。');
+    const projected = await Promise.all(ledgers.map(async ledger => {
+      if (['finalized', 'locked'].includes(ledger.status) || ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
+      const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@1-identity',
+        revision, revisionReader: selectionFactsRevision, persist: false, compute: async () => {
+          const saleIdentities = new Map(), latest = new Map(), batchStates = new Map();
+          let needsOwnershipProof = false, invalidSales = false, foreignSales = false, foreignBatch = false, foreignCost = false;
+          await db.salesRows.where('ledgerId').equals(ledger.id).each(row => {
+            if (row.workspaceId && row.workspaceId !== ledger.workspaceId) { foreignSales = true; return; }
+            if (!row.workspaceId) needsOwnershipProof = true;
+            // Historical sales rows may carry only ledgerId. The owned ledger
+            // proves their scope; this read projection never rewrites the row.
+            const sku = String(row.platformSku ?? row.sku ?? '').normalize('NFKC').trim();
+            if (!sku) { invalidSales = true; return; }
+            const skc = String(row.platformSkc ?? '').normalize('NFKC').trim();
+            const identityKey = JSON.stringify([storeIdentity(row.store), canonicalPlatformSku(sku), skc ? canonicalPlatformSkc(skc) : '']);
+            saleIdentities.set(identityKey, { workspaceId: ledger.workspaceId, ledgerId: row.ledgerId,
+              store: row.store, platformSku: row.platformSku ?? row.sku, platformSkc: row.platformSkc });
+          });
+          if (foreignSales) throw new Error('台账存在跨工作区来源记录，请恢复完整备份后再核算。');
+          if (invalidSales) throw new Error('台账来源缺少平台 SKU，请核对导入记录后再核算。');
+          const salesRows = [...saleIdentities.values()];
+          // Summary-only legacy fixtures/records have no identity evidence to
+          // reassess. Preserve them rather than inventing an empty-ledger state.
+          if (!salesRows.length) return null;
+          if (needsOwnershipProof && (await db.ledgers.get(ledger.id))?.workspaceId !== ledger.workspaceId) throw new Error('缺少销售行所属工作区的账本依据，请恢复完整备份后再核算。');
+          await db.erpCostBatches.where('ledgerId').equals(ledger.id).each(batch => {
+            if (batch.workspaceId && batch.workspaceId !== ledger.workspaceId) { foreignBatch = true; return; }
+            batchStates.set(batch.id, batch.status);
+          });
+          if (foreignBatch) throw new Error('ERP 成本批次不属于当前账本工作区。');
+          await db.erpCostRows.where('ledgerId').equals(ledger.id).each(row => {
+            if (row.workspaceId && row.workspaceId !== ledger.workspaceId) { foreignCost = true; return; }
+            const sku = canonicalPlatformSku(row.platformSku), previous = latest.get(sku);
+            const order = previous ? String(row.publishedAt ?? '').localeCompare(String(previous.publishedAt ?? '')) || Number(row.id ?? 0) - Number(previous.id ?? 0) : 1;
+            if (order < 0) return;
+            // Consume period evidence while visiting the stored row; keep only
+            // the small identity/amount projection in the derived cache path.
+            latest.set(sku, { id: row.id, batchId: row.batchId, platformSku: row.platformSku, platformSkc: row.platformSkc,
+              unitCost: row.unitCost, resolutionStatus: row.resolutionStatus, unresolvedAnomalyCount: row.unresolvedAnomalyCount,
+              publishedAt: row.publishedAt, periodVerified: isErpCostWithinPeriod(row, ledger.period) });
+          });
+          if (foreignCost) throw new Error('ERP 成本记录不属于当前账本工作区。');
+          const identities = buildLedgerSkuIdentityIndex(salesRows);
+          const currentCosts = [...latest.values()].filter(row => batchStates.get(row.batchId) === 'published');
+          const erpCosts = currentCosts.filter(row => row.periodVerified);
+          const approvals = [];
+          await db.costApprovals.where('ledgerId').equals(ledger.id).each(row => {
+            if (row.workspaceId && row.workspaceId !== ledger.workspaceId) return;
+            const snapshot = manualSnapshot(row);
+            approvals.push({ id: row.id, workspaceId: row.workspaceId, ledgerId: row.ledgerId, platformSku: row.platformSku,
+              status: row.status, approvedAmount: row.approvedAmount, unitCost: row.unitCost, currency: row.currency,
+              approvedBy: row.approvedBy, approvedAt: row.approvedAt, reason: row.reason,
+              referenceCost: snapshot && { kind: snapshot.kind, store: snapshot.store } });
+          });
+          // Period eligibility was already checked above, before discarding the
+          // purchase payload. Coverage still owns manual priority and counts.
+          const result = calculateLedgerCostCoverage({ salesRows, erpCosts, approvals, workspaceId: ledger.workspaceId, ledgerId: ledger.id });
+          const currentBySku = new Map(currentCosts.map(row => [canonicalPlatformSku(row.platformSku), row]));
+          result.identityIssues = result.unresolvedSkus.map(sku => ledgerCostIdentityIssue(identities.get(sku), currentBySku.get(sku))).filter(Boolean);
+          return result;
+        } });
+      return coverage ? { ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, ledger.updatedAt) } : ledger;
+    }));
+    assertSourceRevision(revision, selectionFactsRevision);
+    return projected;
+  });
 }
 
 export async function deleteMonthlyLedger(ledgerId, deletedBy = "local-user") {

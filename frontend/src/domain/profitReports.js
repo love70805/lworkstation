@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { canonicalPlatformSku } from "./identifiers";
 import { createLedgerGroupKey, createLedgerSkuKey } from "./ledgerImport";
-import { resolveFormalCostDecision } from "./costPolicy";
+import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from './ledgerCostIdentity';
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
@@ -28,6 +28,7 @@ export async function sha256(value) {
 }
 
 export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, allowMissing = false }) {
+  const identities = buildLedgerSkuIdentityIndex(salesRows);
   const costs = new Map(erpCosts.map(row => [canonicalPlatformSku(row.platformSku), row]));
   const groups = new Map();
   const manualGroups = new Map();
@@ -52,9 +53,10 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
   return [...groups.values()].map(row => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const cost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveFormalCostDecision({ ...scope, period: ledger.period, erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
+    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: ledger.period, erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
     if (!decision.eligibleForExactProfit) {
-      if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId };
+      if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId, costIdentityIssue:decision.identityIssue ?? null };
+      if (decision.identityIssue) throw new Error(`${describeLedgerCostIdentityIssue(decision.identityIssue)}不能生成报告。`);
       throw new Error(`${row.store} / ${row.platformSku} 尚缺正式成本，不能生成报告。`);
     }
     const unitCostExact = exact(decision.unitCost, { nonnegative: true });

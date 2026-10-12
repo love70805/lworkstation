@@ -9,6 +9,10 @@ const ERP_ADOPTION_REASON_LABELS = Object.freeze({
   source_warning: 'ERP 来源存在整体采集警告',
   unscoped_source_failure: 'ERP 采集失败未定位到具体 SKU',
   sku_not_in_ledger: '该平台 SKU 不在当前账本',
+  ledger_sku_skc_conflict: '本月台账同一平台 SKU 对应多个平台 SKC，请核对导入归属',
+  erp_cost_skc_mismatch: 'ERP 成本的 SKC 与当前台账归属不一致，请按当前归属重新采集',
+  ledger_skc_unverified: '台账缺少平台 SKC，无法核实 ERP 成本归属',
+  erp_cost_skc_unverified: 'ERP 成本缺少平台 SKC，无法核实当前归属',
   item_evidence_incomplete: '该 SKU 的采购证据不完整',
   newer_source_exists: '已有较新的 ERP 回传',
 });

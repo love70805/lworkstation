@@ -8,7 +8,7 @@ import { ToastProvider } from '../components/UI';
 
 const mocks = vi.hoisted(() => ({
   snapshot: { status: 'ready', data: { security: { summary: { recordCount: 3 }, securityEvents: [] }, storage: { usage: 12, quota: 100 } }, checkedAt: '2026-09-22T00:00:00Z', refreshing: false, refresh: vi.fn() },
-  create: vi.fn(), record: vi.fn(), restore: vi.fn(), cloudRestore: vi.fn(), save: vi.fn(),
+  create: vi.fn(), record: vi.fn(), restore: vi.fn(), applied: vi.fn(), cloudRestore: vi.fn(), save: vi.fn(),
 }));
 vi.mock('../components/AppShell', () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock('../hooks/useSystemSnapshot', () => ({ useSystemSnapshot: () => mocks.snapshot }));
@@ -16,6 +16,7 @@ vi.mock('../data/database', () => ({
   db: { tables: [] }, DEFAULT_WORKSPACE_ID: 'fixture', getDataSecuritySnapshot: vi.fn(),
   createWorkspaceBackupPayload: mocks.create, recordWorkspaceBackupExport: mocks.record,
   restoreWorkspaceBackupPayload: mocks.restore, restoreWorkspaceSyncRecoveryPayload: mocks.cloudRestore,
+  inspectWorkspaceBackupPayload: () => ({ recordCount: 1 }),
   clearLocalWorkspaceData: vi.fn(), createWorkspaceCloudSeedPayload: vi.fn(), recordCloudSeedImportReceipt: vi.fn(),
 }));
 vi.mock('../domain/workspaceBackup', () => ({ validateWorkspaceBackupPayload: () => ({ recordCount: 1 }) }));
@@ -33,7 +34,7 @@ beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); localStorage.clear();
   mocks.create.mockResolvedValue({ format: 'shopeers-local-backup', formatVersion: 1, tables: {}, recordCount: 3 });
-  mocks.restore.mockResolvedValue({ recordCount: 1 });
+  mocks.restore.mockImplementation(async (_payload, _actor, options) => { await options?.beforeRestore?.(); mocks.applied(); return { recordCount: 1 }; });
   mocks.record.mockResolvedValue({});
   mocks.snapshot.refresh.mockResolvedValue({ status: 'ready' });
   window.shopeersDesktopRuntime = { desktop: true, saveBackup: mocks.save };
@@ -47,7 +48,7 @@ describe('backup workflow save protection', () => {
     mocks.save.mockResolvedValue(receipt);
     await chooseRestore();
     await act(async () => button('恢复备份').click());
-    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(mocks.applied).not.toHaveBeenCalled();
     expect(mocks.record).not.toHaveBeenCalled();
     expect(container.querySelector('[role=dialog]')).not.toBeNull();
     expect(container.querySelector('[role=dialog] [role=alert]')).not.toBeNull();
@@ -58,7 +59,7 @@ describe('backup workflow save protection', () => {
     mocks.save.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     await chooseRestore();
     await act(async () => button('恢复备份').click());
-    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(mocks.applied).not.toHaveBeenCalled();
     expect(button('恢复备份').disabled).toBe(true);
     await act(async () => finish({ status: 'saved', fileName: 'rollback.json', sizeBytes: 20 }));
     expect(mocks.restore).toHaveBeenCalledOnce();

@@ -10,7 +10,9 @@ beforeEach(async () => {
   clearDerivedMemory(); await db.delete(); await db.open(); await derivedCacheDb.delete(); await derivedCacheDb.open();
   await setActiveMemberContext({ workspaceId: 'W', memberId: 'admin' });
   await db.workspaces.put({ id: 'W' });
-  await db.ledgers.put({ id: 'L', workspaceId: 'W', period: '2026-08' });
+  // This fixture tests summary cache invalidation; its coverage is already
+  // projected by the current policy, rather than a pre-upgrade legacy summary.
+  await db.ledgers.put({ id: 'L', workspaceId: 'W', period: '2026-08', costSummary: { identityPolicyVersion: 'ledger-cost-identity@1' } });
   await db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'A', quantity: 1 });
 });
 afterEach(async () => { await db.delete(); await derivedCacheDb.delete(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -48,7 +50,7 @@ it('notifies a live reader that began from a cached summary after same-count led
     const subscription = liveQuery(getWorkspaceOperationalSummary).subscribe({
       next(summary) {
         if (summary.missingCostCount === 4) { clearTimeout(timer); subscription.unsubscribe(); resolve(); }
-        else if (!wrote) { wrote = true; setTimeout(() => db.ledgers.update('L', { costSummary: { missingCount: 4 } }), 0); }
+        else if (!wrote) { wrote = true; setTimeout(() => db.ledgers.update('L', { costSummary: { missingCount: 4, identityPolicyVersion: 'ledger-cost-identity@1' } }), 0); }
       }, error(error) { clearTimeout(timer); reject(error); },
     });
   });

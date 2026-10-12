@@ -23,18 +23,17 @@ import {
   createWorkspaceBackupPayload,
   createWorkspaceCloudSeedPayload,
   DEFAULT_WORKSPACE_ID,
-  db,
   getDataSecuritySnapshot,
   recordCloudSeedImportReceipt,
   recordWorkspaceBackupExport,
   restoreWorkspaceBackupPayload,
+  inspectWorkspaceBackupPayload,
   restoreWorkspaceSyncRecoveryPayload,
 } from "../data/database";
 import { createCloudSeedProvider } from "../data/cloudSeedProvider";
 import { createSyncProvider } from "../data/syncProvider";
 import { runtimeConfig } from "../config/runtimeConfig";
 import { validateCloudSeedPayload } from "../domain/cloudSeed";
-import { validateWorkspaceBackupPayload } from "../domain/workspaceBackup";
 import { replaySyncRecoveryPayload, validateSyncRecoveryPayload } from "../domain/syncRecovery";
 import { backupSaveMessage, downloadWorkspaceBackup, requireSavedWorkspaceBackup } from "../lib/workspaceBackupDownload";
 
@@ -309,14 +308,13 @@ export default function DataSecurity() {
     setCloudRecovering(true);
     setCloudRecoveryError('');
     try {
-      const currentPayload = await createWorkspaceBackupPayload();
-      const rollbackDownload = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-cloud-recovery" }));
-      const receipt = await restoreWorkspaceSyncRecoveryPayload(cloudRecoveryCandidate.payload);
-      await recordWorkspaceBackupExport({
-        ...rollbackDownload,
-        recordCount: currentPayload.recordCount,
-        generatedAt: currentPayload.generatedAt,
-      });
+      let rollback;
+      const receipt = await restoreWorkspaceSyncRecoveryPayload(cloudRecoveryCandidate.payload, 'local-user', { beforeRestore: async () => {
+        const currentPayload = await createWorkspaceBackupPayload();
+        const download = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-cloud-recovery" }));
+        rollback = { ...download, recordCount: currentPayload.recordCount, generatedAt: currentPayload.generatedAt };
+      } });
+      await recordWorkspaceBackupExport(rollback);
       await refreshStorageEstimate();
       setCloudRecoveryOpen(false);
       setCloudRecoveryCandidate(null);
@@ -338,9 +336,7 @@ export default function DataSecurity() {
     setLoadingRestoreFile(true);
     try {
       const payload = JSON.parse(await file.text());
-      const inspection = validateWorkspaceBackupPayload(payload, {
-        tableNames: db.tables.map((table) => table.name),
-      });
+      const inspection = inspectWorkspaceBackupPayload(payload);
       setRestoreCandidate({
         fileName: file.name,
         fileSize: file.size,
@@ -361,17 +357,17 @@ export default function DataSecurity() {
     setRestoreError('');
     try {
       let rollback = null;
-      if (rollbackBeforeRestore) {
-        const currentPayload = await createWorkspaceBackupPayload();
-        const download = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-restore" }));
-        rollback = {
-          ...download,
-          recordCount: currentPayload.recordCount,
-          generatedAt: currentPayload.generatedAt,
-        };
-      }
-
-      const inspection = await restoreWorkspaceBackupPayload(restoreCandidate.payload);
+      const inspection = await restoreWorkspaceBackupPayload(restoreCandidate.payload, 'local-user', { beforeRestore: async () => {
+        if (rollbackBeforeRestore) {
+          const currentPayload = await createWorkspaceBackupPayload();
+          const download = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-restore" }));
+          rollback = {
+            ...download,
+            recordCount: currentPayload.recordCount,
+            generatedAt: currentPayload.generatedAt,
+          };
+        }
+      } });
       if (rollback) await recordWorkspaceBackupExport(rollback);
       await refreshStorageEstimate();
       setRestoreCandidate(null);
@@ -405,7 +401,7 @@ export default function DataSecurity() {
       <SystemNavigation />
       <PageHeader
         title="数据备份"
-        description="导出完整本机数据、校验恢复文件，并保留可追溯的操作记录。"
+        description="备份本机业务数据、货号组和导入筛选配置，校验恢复文件并保留操作记录。"
         actions={<Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出本机备份</Button>}
       />
       {check.status === 'error' ? <div className="system-check-error" role="alert">读取失败：{check.error}<Button onClick={refreshRecords} loading={check.refreshing} disabled={check.refreshing}>重试读取</Button></div> : null}
@@ -425,7 +421,7 @@ export default function DataSecurity() {
             <div className="setting-row">
               <div>
                 <strong>恢复校验</strong>
-                <p>仅接受 Lworkstation 本机 JSON 备份；恢复前会检查格式、数据表和平台 SKU 全局唯一性。</p>
+                <p>检查数据库版本、完整表清单、记录数、业务筛选配置与平台 SKU 唯一性；恢复期间暂停后台收件。</p>
               </div>
               <Badge tone="success"><CheckCircle2 size={14} />始终启用</Badge>
             </div>
@@ -440,7 +436,7 @@ export default function DataSecurity() {
               </div>
             </div>
             <input ref={restoreInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择 Lworkstation JSON 备份文件" onChange={readRestoreFile} />
-            <div className="security-note">备份文件保存在你选择的位置；工作站不会在业务数据库中保存文件副本。旧版导出记录不能证明文件仍在磁盘中。</div>
+            <div className="security-note">备份包含货号组、上次应用组、逐店例外和导入筛选，不包含登录信息或桌面收件历史。文件保存在你选择的位置；旧版导出记录不能证明文件仍在磁盘中。</div>
             <div className="table-wrap">
               <table className="data-table snapshot-table">
                 <thead><tr><th>操作</th><th>本地时间</th><th>记录数</th><th>文件或来源</th></tr></thead>
@@ -570,7 +566,7 @@ export default function DataSecurity() {
           <span>待写入记录 <strong className="mono">{restoreCandidate?.inspection?.recordCount?.toLocaleString("zh-CN") ?? "--"}</strong></span>
         </div>
         {restoreError ? <p className="system-check-error" role="alert">{restoreError}</p> : null}
-        <p className="modal-note">{rollbackBeforeRestore ? "请先在保存窗口中保存当前状态作为回滚备份，保存成功后才执行恢复。" : "恢复前回滚备份已关闭，当前状态不会自动保存。"}</p>
+        <p className="modal-note">{restoreCandidate?.inspection.businessPreferencesIncluded ? '同时恢复备份中各工作区的货号组和导入筛选。' : '旧备份未包含业务筛选配置，现有货号组和导入筛选将保留。'}{rollbackBeforeRestore ? "请先在保存窗口中保存当前状态作为回滚备份，保存成功后才执行恢复。" : "恢复前回滚备份已关闭，当前状态不会自动保存。"}</p>
       </Modal>
 
       <Modal

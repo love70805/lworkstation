@@ -1,17 +1,19 @@
 import { aggregateLedgerRows, flattenLedgerGroups } from "./ledgerImport";
 import { canonicalPlatformSku } from "./identifiers";
-import { resolveFormalCostDecision } from "./costPolicy";
+import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision } from './ledgerCostIdentity';
 import { selectManualOverride } from "./manualCostOverride";
 import { calculateExactProfitLine } from "./profitCalculations";
 
 export function calculateFormalLedgerRows({ ledger, salesRows, erpCosts, approvals }) {
+  const identities = buildLedgerSkuIdentityIndex(salesRows);
   const costs = new Map(erpCosts.map((row) => [canonicalPlatformSku(row.platformSku), row]));
   return flattenLedgerGroups(aggregateLedgerRows(salesRows)).map(({ id: _id, ...row }) => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const erpCost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveFormalCostDecision({ ...scope, period: ledger.period, erpCost, manualOverride: selectManualOverride(approvals, scope) });
+    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: ledger.period, erpCost, manualOverride: selectManualOverride(approvals, scope) });
     return { ...row, ...calculateExactProfitLine({ revenue: row.revenue, quantity: row.qty, penalty: row.penalty, warehouseRate: ledger.warehouseRate, costDecision: decision }),
       unitCost: decision.unitCost, costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, costPolicyVersion: decision.policyVersion,
+      costIdentityIssue: decision.identityIssue ?? null,
       orderNumber: erpCost?.orderNumber ?? null,
       costPurchaseRecords: decision.source === "erp" ? adoptedCostEvidence(erpCost).selected : [],
       costResolutionVersion: decision.source === "erp" ? adoptedCostEvidence(erpCost).decision?.resolutionVersion ?? null : null };

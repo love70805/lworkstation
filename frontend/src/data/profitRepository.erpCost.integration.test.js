@@ -33,6 +33,22 @@ import { describeEvidenceIssues } from "../lib/costMatching";
 
 const period = "2026-08";
 
+it.each([['SKC-CHANGED'],['SKC-AUDIT','SKC-CONFLICT']])('rejects new publication against changed live ledger parents: %s',async (...parents)=>{
+  const {ledger,request}=await context(),purchaseRecords=[record('IDENTITY',5,1)];
+  await db.salesRows.bulkAdd(parents.map((platformSkc,index)=>({workspaceId:ledger.workspaceId,ledgerId:ledger.id,store:`店铺${index}`,platformSku:'SKU-AUDIT',platformSkc,quantity:1,amount:10})));
+  const before=(await createWorkspaceBackupPayload()).tables;
+  await expect(savePublishedErpCostBatch({ledgerId:ledger.id,requestId:request.id,reconciliation:reconcile({purchaseRecords}),sourceEnvelope:sourceEnvelope({ledger,request,purchaseRecords})})).rejects.toThrow(/不一致|多个平台 SKC/);
+  expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
+});
+
+it('rejects a page SKC substituted to hide mismatch with the verified ERP source',async()=>{
+  const {ledger,request}=await context(),purchaseRecords=[record('IDENTITY',5,1)],reconciliation=reconcile({purchaseRecords});
+  reconciliation.matches[0].platformSkc='FORGED';
+  const before=(await createWorkspaceBackupPayload()).tables;
+  await expect(savePublishedErpCostBatch({ledgerId:ledger.id,requestId:request.id,reconciliation,sourceEnvelope:sourceEnvelope({ledger,request,purchaseRecords})})).rejects.toThrow('页面 SKC 与 ERP 原始证据不一致');
+  expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
+});
+
 it("persists catalog carriers from verified source evidence and rejects page metadata substitution", async () => {
   const { ledger, request } = await context();
   const imageUrl = "https://cbu01.alicdn.com/img/one.jpg";

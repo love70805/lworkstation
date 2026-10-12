@@ -33,6 +33,7 @@ function VariantIdentity({ item, storeCount }) {
 
 function CurrentStoreCost({ line }) {
   if (!line) return <span className="cost-match-no-store">无对应店铺明细</span>;
+  if (line.decision.identityIssue) return <div className="cost-match-store-result"><strong>{line.store || '店铺未填'}</strong><span>归属待核对</span><small>台账 SKC：{line.platformSkc || '未填写'}{line.decision.identityIssue.erpPlatformSkc ? `；ERP SKC：${line.decision.identityIssue.erpPlatformSkc}` : ''}</small><small>{line.manualOverride ? '人工金额保留，先核对父级归属' : 'ERP 原始成本保留，暂不计入利润'}</small></div>;
   const effectiveAt = line.manualOverride?.approvedAt ?? line.erpCost?.publishedAt;
   return <div className="cost-match-store-result">
     <strong>{line.store || "店铺未填"}</strong>
@@ -65,7 +66,7 @@ export default function CostMatchGroupRows({ group, reviewRowsBySku, candidateSk
           {variantIndex === 0 && storeIndex === 0 ? skcCell : null}
           {storeIndex === 0 ? <><td rowSpan={storeLines.length} className="cost-match-sku-cell"><VariantIdentity item={item} storeCount={lines.length} /></td><td rowSpan={storeLines.length} className="cost-match-candidate-cell"><div className="cost-status-stack">{item.unitCost != null ? <span className="mono table-number">{formatErpUnitCost(item.unitCost)}</span> : <span className="pending-text">尚无可用值</span>}<small>{candidateStatus(item, candidateSkuSet, adoptionItemsBySku)}</small></div></td></> : null}
           <td className="cost-match-current-cell"><CurrentStoreCost line={line} /></td>
-          <td className="cost-match-actions-cell">{line ? <div className="cost-match-row-actions"><Button variant="ghost" aria-label={`${line.store} · ${item.platformSku} · 详情`} onClick={() => onDetails(line)}>详情</Button>{!locked && !line.decision.eligibleForExactProfit ? <Button variant="ghost" aria-label={`${line.store} · ${item.platformSku} · 人工更正`} onClick={() => onCorrect(line)}>人工更正</Button> : null}</div> : <small>仅原始证据</small>}</td>
+          <td className="cost-match-actions-cell">{line ? <div className="cost-match-row-actions"><Button variant="ghost" aria-label={`${line.store} · ${item.platformSku} · 详情`} onClick={() => onDetails(line)}>详情</Button>{!locked && !line.decision.eligibleForExactProfit && line.decision.identityIssue?.code !== 'ledger_sku_skc_conflict' ? <Button variant="ghost" aria-label={`${line.store} · ${item.platformSku} · 人工更正`} onClick={() => onCorrect(line)}>人工更正</Button> : null}</div> : <small>仅原始证据</small>}</td>
         </tr>)}</Fragment>;
       })}
       {collapsed ? <tr className="cost-match-collapsed-row">{!variantRows.length ? skcCell : null}<td colSpan={4}><span>{unmapped.length} 条未映射证据</span><Button variant="ghost" onClick={onToggle} aria-expanded={false}>展开查看</Button></td></tr> : null}

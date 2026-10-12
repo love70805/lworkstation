@@ -24,6 +24,7 @@ import { Button, Panel, PageHeader, useToast } from "../components/UI";
 import { db, getActiveMemberContext, getSelectionReferenceSnapshot, getWorkspaceOperationalSummary } from "../data/database";
 import { describeAuditEvent } from "../domain/auditEvents";
 import { resolveWorkspacePrimaryAction } from "../lib/workspaceActions";
+import { buildWorkspaceTaskItems } from "../lib/workspaceTasks";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
 import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
@@ -54,6 +55,13 @@ const activityToneLabels = {
   info: "信息",
 };
 
+const taskIcons = { "blocked-capture": TriangleAlert, capture: Hourglass, cost: Warehouse, profit: CircleDollarSign, ledger: CalendarDays };
+
+function WorkspaceTask({ item, navigate }) {
+  const TaskIcon = taskIcons[item.kind];
+  return <div className="task-item"><span className={`task-icon ${item.tone}`}><TaskIcon size={17} /></span><span><strong>{item.title}</strong><small>{item.detail}</small></span><button aria-label={`${item.title}：${item.action}`} onClick={() => navigate(item.path)}>{item.action}<ChevronRight size={15} /></button></div>;
+}
+
 function formatRelativeTime(value) {
   if (!value) return "--";
   const deltaMinutes = Math.round((new Date(value).getTime() - Date.now()) / 60000);
@@ -78,11 +86,11 @@ export default function WorkspacePortal() {
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
       getSelectionReferenceSnapshot({ compact: true }),
     ]);
-    const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestOpenLedger, summary.latestFinalizedLedger].filter(Boolean));
+    const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestFinalizedLedger].filter(Boolean));
     if ((await getActiveMemberContext()).workspaceId !== workspaceId) throw new Error('工作区已切换，请重新读取。');
     return {
       refresh,
-      summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestOpenLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
+      summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
       auditEvents,
       referenceRows: buildSelectionReferenceRows(referenceSnapshot),
     };
@@ -95,8 +103,6 @@ export default function WorkspacePortal() {
 
   const summary = portalData?.summary;
   const latestLedger = summary?.latestLedger ?? null;
-  const latestOpenLedger = summary?.latestOpenLedger ?? null;
-  const missingLedger = summary?.latestMissingCostLedger ?? null;
   const latestFinalizedLedger = summary?.latestFinalizedLedger ?? null;
   const latestSales = latestLedger?.summary ?? {};
   const recentActivities = (portalData?.auditEvents ?? []).map((event) => ({
@@ -118,21 +124,7 @@ export default function WorkspacePortal() {
     { title: workflowFrozen ? "查看成本" : "核对成本", detail: "ERP 默认，人工更正优先", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'cost') : "/import-preview" },
     { title: workflowFrozen ? "查看本月报告" : "保存本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "登记代发，预览后保存", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
   ];
-  const taskItems = useMemo(() => {
-    const items = [];
-    if ((summary?.blockedCaptureCount ?? 0) > 0) {
-      items.push({ icon: TriangleAlert, tone: "danger", title: "采集存在阻断项", detail: `${summary.blockedCaptureCount} 条记录需要补齐资料`, action: "处理采集", path: "/products?view=pending" });
-    } else if ((summary?.pendingCaptureCount ?? 0) > 0) {
-      items.push({ icon: Hourglass, tone: "warning", title: "待确认采集", detail: `${summary.pendingCaptureCount} 条记录等待人工确认`, action: "打开队列", path: "/products?view=pending" });
-    }
-    if (missingLedger) {
-      items.push({ icon: Warehouse, tone: "warning", title: `${missingLedger.period} 成本待补`, detail: `本月 ${missingLedger.costSummary.missingCount} 条 SKU 待补成本`, action: "核对成本", path: `/cost-matching?ledger=${encodeURIComponent(missingLedger.id)}` });
-    }
-    if (latestOpenLedger?.status === "ready") {
-      items.push({ icon: CircleDollarSign, tone: "success", title: "账本待确认利润", detail: `${latestOpenLedger.period} 成本已齐，等待人工核对`, action: "打开账本", path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}` });
-    }
-    return items.slice(0, 3);
-  }, [latestOpenLedger, missingLedger, summary?.blockedCaptureCount, summary?.pendingCaptureCount]);
+  const taskItems = useMemo(() => buildWorkspaceTaskItems(summary), [summary]);
 
   const runHealthCheck = () => {
     setHealthChecked(false);
@@ -140,41 +132,15 @@ export default function WorkspacePortal() {
     ledgerScope.retry();
   };
 
-  let alert = null;
-  if ((summary?.blockedCaptureCount ?? 0) > 0) {
-    alert = {
-      icon: TriangleAlert,
-      text: `${summary.blockedCaptureCount} 条采集记录存在阻断项，确认入库前需要补齐资料。`,
-      action: "处理采集问题",
-      path: "/products?view=pending",
-    };
-  } else if ((summary?.pendingCaptureCount ?? 0) > 0) {
-    alert = {
-      icon: Hourglass,
-      text: `${summary.pendingCaptureCount} 条采集记录等待人工确认。`,
-      action: "打开待确认采集",
-      path: "/products?view=pending",
-    };
-  } else if (missingLedger) {
-    alert = {
-      icon: TriangleAlert,
-      text: `${missingLedger.period} 仍有 ${missingLedger.costSummary.missingCount} 条平台 SKU 待补成本。`,
-      action: `查看 ${missingLedger.period} 成本`,
-      path: `/cost-matching?ledger=${encodeURIComponent(missingLedger.id)}`,
-    };
-  } else if (latestOpenLedger?.status === "ready") {
-    alert = {
-      icon: CircleDollarSign,
-      text: `${latestOpenLedger.period} 账本的成本已经齐全，可以执行人工核对。`,
-      action: "打开利润核算",
-      path: `/profit?ledger=${encodeURIComponent(latestOpenLedger.id)}`,
-    };
-  }
+  const alert = taskItems.find(item => ["blocked-capture", "capture"].includes(item.kind))
+    ?? taskItems.find(item => item.kind === "cost")
+    ?? taskItems.find(item => item.kind === "profit")
+    ?? taskItems[0];
 
   // Cross-month tasks identify their own month; normal actions follow selection.
   const primaryAction = resolveWorkspacePrimaryAction({ selectedLedger: workflowLedger, query: workflowQuery });
   const PrimaryActionIcon = primaryAction.kind === "cost" ? Warehouse : primaryAction.kind === "profit" ? CircleDollarSign : FileUp;
-  const AlertIcon = alert?.icon;
+  const AlertIcon = taskIcons[alert?.kind];
 
   return (
     <AppShell pageClass="workspace-page">
@@ -194,7 +160,7 @@ export default function WorkspacePortal() {
         <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近已保存利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已定稿账本"}</em></span></Panel>
       </div> : null}
 
-      {alert ? <div className="workspace-status-strip"><span className="workspace-status-icon"><AlertIcon size={18} /></span><span><strong>需要处理</strong><small>{alert.text}</small></span><Button variant="ghost" onClick={() => navigate(alert.path)}>{alert.action}<ChevronRight size={16} /></Button></div> : null}
+      {alert ? <div className="workspace-status-strip"><span className="workspace-status-icon"><AlertIcon size={18} /></span><span><strong>{alert.title}</strong><small>{alert.detail}</small></span><Button variant="ghost" onClick={() => navigate(alert.path)}>{alert.action}<ChevronRight size={16} /></Button></div> : null}
 
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
@@ -237,7 +203,10 @@ export default function WorkspacePortal() {
         <aside className="workspace-secondary">
           <Panel className="dashboard-widget tasks-panel">
             <div className="panel-header"><div className="panel-title"><Inbox size={19} /><h2>当前待办</h2></div><span className="widget-count">{taskItems.length} 项</span></div>
-            {!summary ? <div className="task-empty" role="status">{portalData?.error ? '待办读取失败，请重试总览。' : '正在读取工作区待办…'}</div> : taskItems.length > 0 ? <div className="task-list">{taskItems.map((item) => { const TaskIcon = item.icon; return <div className="task-item" key={item.path}><span className={`task-icon ${item.tone}`}><TaskIcon size={17} /></span><span><strong>{item.title}</strong><small>{item.detail}</small></span><button onClick={() => navigate(item.path)}>{item.action}<ChevronRight size={15} /></button></div>; })}</div> : <div className="task-empty"><CircleDollarSign size={20} /><span>当前没有待办事项。</span></div>}
+            {!summary ? <div className="task-empty" role="status">{portalData?.error ? '待办读取失败，请重试总览。' : '正在读取工作区待办…'}</div> : taskItems.length > 0 ? <>
+              <div className="task-list">{taskItems.slice(0, 3).map(item => <WorkspaceTask key={item.path} item={item} navigate={navigate} />)}</div>
+              {taskItems.length > 3 ? <details className="task-more"><summary>查看其余 {taskItems.length - 3} 项待办</summary><div className="task-list">{taskItems.slice(3).map(item => <WorkspaceTask key={item.path} item={item} navigate={navigate} />)}</div></details> : null}
+            </> : <div className="task-empty"><CircleDollarSign size={20} /><span>当前没有待办事项。</span></div>}
           </Panel>
 
           {referenceRows.length > 0 ? <details className="dashboard-widget reference-widget workspace-disclosure">

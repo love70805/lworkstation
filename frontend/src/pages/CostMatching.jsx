@@ -8,7 +8,7 @@ import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
 import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
 import { selectManualOverride } from "../domain/manualCostOverride";
-import { resolveFormalCostDecision } from "../domain/costPolicy";
+import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import ManualCostDialog from "./ManualCostDialog";
 import CostMatchGroupRows, { CostMatchTableHeader } from "./CostMatchGroupRows";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -316,27 +316,19 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   }, [batchEnvelope, loadedInboxId, parsedRows, resolutions, snapshot?.ledger?.id, sourceName, sourceText]);
 
   const salesLines = useMemo(() => snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot]);
+  const ledgerIdentities = useMemo(() => buildLedgerSkuIdentityIndex(snapshot?.rows), [snapshot?.rows]);
   const formalCostsBySku = useMemo(() => new Map((snapshot?.costs ?? []).map(row => [
     canonicalPlatformSku(row.platformSku), row,
   ])), [snapshot?.costs]);
   const formalSalesLines = useMemo(() => salesLines.map((row) => {
       const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
-      const decision = resolveFormalCostDecision({ ...scope, erpCost: formalCostsBySku.get(row.canonicalPlatformSku), manualOverride: selectManualOverride(snapshot?.approvals, scope) });
-      return { ...row, finalizable: decision.eligibleForExactProfit };
-    }), [formalCostsBySku, salesLines, snapshot?.ledger, snapshot?.approvals]);
+      const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost: formalCostsBySku.get(row.canonicalPlatformSku), manualOverride: selectManualOverride(snapshot?.approvals, scope) });
+      return { ...row, finalizable: decision.eligibleForExactProfit, costIdentityIssue: decision.identityIssue ?? null };
+    }), [formalCostsBySku, salesLines, ledgerIdentities, snapshot?.ledger, snapshot?.approvals]);
   const supplierSelectionKey = JSON.stringify(profitFilter.supplierSelection);
   const scopedSalesLines = useMemo(() => filterProfitRowsByScope(formalSalesLines, profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly]);
   const filteredSalesLines = useMemo(() => searchProfitRows(scopedSalesLines, profitFilter.query), [scopedSalesLines, profitFilter.query]);
-  const conflictingLedgerSkus = useMemo(() => {
-    const skcsBySku = new Map(), conflicts = new Set();
-    for (const row of formalSalesLines) {
-      if (!row.platformSkc) continue;
-      const sku = canonicalPlatformSku(row.platformSku), skc = canonicalPlatformSkc(row.platformSkc);
-      if (skcsBySku.has(sku) && skcsBySku.get(sku) !== skc) conflicts.add(sku);
-      else skcsBySku.set(sku, skc);
-    }
-    return conflicts;
-  }, [formalSalesLines]);
+  const conflictingLedgerSkus = useMemo(() => new Set([...ledgerIdentities].filter(([, identity]) => identity.platformSkcs.size > 1).map(([sku]) => sku)), [ledgerIdentities]);
   const scopeHasIdentityConflict = filteredSalesLines.some((row) => conflictingLedgerSkus.has(row.canonicalPlatformSku));
   const stores = useMemo(() => [...new Set(formalSalesLines.map((row) => row.store).filter(Boolean))].toSorted(), [formalSalesLines]);
   const suppliers = useMemo(() => [...new Set(formalSalesLines.filter((row) => profitFilter.storeFilter === "all" || row.store === profitFilter.storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [formalSalesLines, profitFilter.storeFilter]);
@@ -786,18 +778,19 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
     const manualOverride = selectManualOverride(snapshot?.approvals, scope);
     const erpCost = formalCostsBySku.get(row.canonicalPlatformSku);
-    const decision = resolveFormalCostDecision({ ...scope, erpCost, manualOverride });
+    const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost, manualOverride });
     const match = reviewMatchBySku.get(row.canonicalPlatformSku);
     return { ...row, manualOverride, erpCost, decision, match, unitCost: manualOverride?.approvedAmount ?? decision.unitCost ?? match?.unitCost };
-  }), [formalSalesLines, formalCostsBySku, reviewMatchBySku, snapshot?.ledger, snapshot?.approvals]);
+  }), [formalSalesLines, formalCostsBySku, reviewMatchBySku, ledgerIdentities, snapshot?.ledger, snapshot?.approvals]);
   const filteredReviewRowIds = useMemo(() => new Set(filteredSalesLines.map(row => row.id)), [filteredSalesLines]);
   const reviewRows = useMemo(() => allReviewRows.filter(row => filteredReviewRowIds.has(row.id)), [allReviewRows, filteredReviewRowIds]);
   const missingReviewRows = useMemo(() => reviewRows.filter(row => !row.decision.eligibleForExactProfit), [reviewRows]);
+  const correctableMissingRows = useMemo(() => missingReviewRows.filter(row => row.decision.identityIssue?.code !== 'ledger_sku_skc_conflict'), [missingReviewRows]);
   const reviewRowsRef = useRef(allReviewRows);
   reviewRowsRef.current = allReviewRows;
   const openMissingCorrection = () => {
-    if (locked || !missingReviewRows.length) return;
-    setManualTarget({ id: missingReviewRows[0].id, mode: "edit", queueIds: missingReviewRows.map(row => row.id) });
+    if (locked || !correctableMissingRows.length) return;
+    setManualTarget({ id: correctableMissingRows[0].id, mode: "edit", queueIds: correctableMissingRows.map(row => row.id) });
   };
   const reviewRowsBySku = useMemo(() => {
     const result = new Map();
@@ -805,8 +798,11 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     return result;
   }, [reviewRows]);
   const targetRow = manualTarget ? allReviewRows.find(row => row.id === manualTarget.id) ?? null : null;
+  const targetIdentityConflict = targetRow?.decision.identityIssue?.code === 'ledger_sku_skc_conflict';
   const targetAdoptionItem = targetRow ? adoptionItemsBySku.get(targetRow.canonicalPlatformSku) : null;
-  const targetCostExplanation = targetRow?.manualOverride
+  const targetCostExplanation = targetRow?.decision.identityIssue
+    ? describeLedgerCostIdentityIssue(targetRow.decision.identityIssue)
+    : targetRow?.manualOverride
     ? `更正说明：${targetRow.manualOverride.reason}。原 ERP 证据保留，更正不会将异常记录变为合格采购。`
     : targetRow?.decision.eligibleForExactProfit
       ? 'ERP 正式成本已生效，可直接核算。'
@@ -887,7 +883,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     const byId = new Map(rows.map(row => [row.id, row]));
     for (let index = targetIndex + 1; index < correctionIds.length; index++) {
       const row = byId.get(correctionIds[index]);
-      if (row && (!manualTarget?.queueIds || !row.decision.eligibleForExactProfit)) return row;
+      if (row && row.decision.identityIssue?.code !== 'ledger_sku_skc_conflict' && (!manualTarget?.queueIds || !row.decision.eligibleForExactProfit)) return row;
     }
     return null;
   };
@@ -1017,7 +1013,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">回传记录 · {inboxQueue.pendingCount} 批待核对</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} onChange={changeScope} /> : null}
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
-      {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会自动确定父级关系，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
+      {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会确定父级关系，冲突成本不能用于新报告，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
+      {!locked && filteredSalesLines.some(row => row.costIdentityIssue?.code === 'erp_cost_skc_mismatch') ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>已有 ERP 成本与当前台账归属不一致</strong><small>这些成本暂不计入正式利润。展开对应明细核对原始 SKC，重新采集当前归属，或按店铺人工更正。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 
       <div className="cost-flow-guide" aria-label="成本核对状态" role="status">
         <div className="cost-flow-guide-heading"><strong>{locked ? "当前账本只读" : effectiveCostsReady ? "本月成本已齐" : adoptionNotice?.title ?? (hasNewBatch ? "手动批次待核对" : "等待 ERP 回传或人工更正")}</strong><span>{effectiveCostsReady ? "本月已有有效 ERP 或人工成本；原始异常证据保留在回传记录中。" : adoptionNotice?.details ?? (hasNewBatch ? `已收到 ${parsedRows.length} 行证据 · 可采用 ${adoption.summary.erpAdoptableCount} 个 SKU · 异常待处理 ${adoption.summary.blockedAnomalyCount} 个` : persistedCostRows.length ? `已有 ${persistedCostRows.length} 个 SKU 的正式 ERP 成本。` : "可查询 ERP 并等待回传，也可从明细填写当前店铺的人工成本。")}</span></div>
@@ -1038,14 +1035,14 @@ function CostMatchingBody({ validatedContext, onPublished }) {
         <Panel className="match-stat"><ListChecks size={22} /><span>当前查看平台 SKU</span><strong>{displaySkuSet.size}</strong></Panel>
         <Panel className="match-stat match-success"><CheckCircle2 size={22} /><span>当前有效成本</span><strong>{filteredSalesLines.filter(row => row.finalizable).length}<small> 条店铺 SKU</small></strong></Panel>
         <Panel className="match-stat match-batch"><CheckCircle2 size={22} /><span>{currentInbox ? "当前批次自动采用" : "最近批次自动采用"}</span><strong>{adoptionNotice?.automaticCount ?? 0}<small> 个 SKU</small></strong><p>仅此回传批次，非本月累计；不随查看筛选变化</p></Panel>
-        <Panel className={`match-stat match-correction ${missingReviewRows.length ? "match-danger" : "match-success"}`}><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{missingReviewRows.length}<small> 条店铺 SKU</small></strong><div className="cost-correction-entry"><small>按当前月份与查看范围</small>{!locked && missingReviewRows.length ? <Button onClick={openMissingCorrection}>逐项更正</Button> : null}</div></Panel>
+        <Panel className={`match-stat match-correction ${missingReviewRows.length ? "match-danger" : "match-success"}`}><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{missingReviewRows.length}<small> 条店铺 SKU</small></strong><div className="cost-correction-entry"><small>按当前月份与查看范围</small>{!locked && correctableMissingRows.length ? <Button onClick={openMissingCorrection}>逐项更正</Button> : null}</div></Panel>
       </div>
 
       <div className="cost-workflow">
         <Panel className={`cost-preview-panel ${resultHighlighted ? "cost-preview-highlight" : ""}`}>
           {parseError ? <div className="cost-inline-error" role="alert"><AlertCircle size={16} />{parseError}</div> : null}
           <div className="panel-header cost-preview-header"><div className="panel-title"><ListChecks size={19} /><h2>成本核对与更正</h2></div><div className="cost-preview-tools"><SearchInput value={resultQuery} onChange={(event) => setResultQuery(event.target.value)} placeholder="搜索 SKC、SKU、仓库 SKU、供应商或采购单..." /><span className="cost-preview-count">显示 {visibleGroupedMatches.length} / {groupedMatches.length} 个 SKC</span><Button variant="ghost" onClick={clearFilters}>清除筛选</Button></div></div>
-          {!locked && missingReviewRows.length ? <p className="cost-correction-help">人工更正无需选择待处理批次：点击上方“逐项更正”，或在对应店铺 SKU 行点击“人工更正”。填写单件成本和说明后即可生效。</p> : null}
+          {!locked && correctableMissingRows.length ? <p className="cost-correction-help">人工更正无需选择待处理批次：点击上方“逐项更正”，或在对应店铺 SKU 行点击“人工更正”。同一 SKU 对应多个 SKC 时，须先核对台账归属。</p> : null}
           {visibleGroupedMatches.length ? <DataTable ref={rememberTable} className="cost-match-table" columns={columns} data={visibleGroupedMatches} getRowId={(row) => row.id} pageSize={12} initialViewState={initialView?.table} paginationResetKey={`${profitHref}/${resultQuery}`} /> : <EmptyState icon={ListChecks} title={!hasFilteredRows && profitFilter.missingOnly && allCostsReady ? "本月成本已齐" : "当前筛选没有匹配明细"} description={!hasFilteredRows && profitFilter.missingOnly && allCostsReady ? "没有待补成本的店铺 SKU，可返回利润明细继续核算。" : "清除搜索、店铺或缺成本筛选后查看；这不代表台账缺少 SKC。"} action={<Button onClick={clearFilters}>查看全部明细</Button>} />}
           {reconciliation?.overrides.length ? <div className="cost-audit-note"><AlertCircle size={17} />检测到 {reconciliation.overrides.length} 次候选替换，旧值与新值会随采用写入批次审计。</div> : null}
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
@@ -1057,8 +1054,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       </div>
       {inboxQueueDialog}
       {targetRow ? manualTarget.mode === "details" ? <Modal open className="cost-detail-modal" title="成本详情"
-        description={`${snapshot.ledger.period} · ${targetRow.store} · ${targetRow.platformSku}。${locked ? "已定稿或锁定，当前只读。" : "查看当前采用结果与采购证据；需要调整时选择人工更正。"}`}
-        onClose={() => setManualTarget(null)} footer={<><Button onClick={() => setManualTarget(null)}>关闭</Button>{!locked ? <Button onClick={() => setManualTarget({ id: targetRow.id, mode: "edit" })}>{targetRow.manualOverride ? "更正 / 撤销" : "人工更正"}</Button> : null}</>}>
+        description={`${snapshot.ledger.period} · ${targetRow.store} · ${targetRow.platformSku}。${locked ? "已定稿或锁定，当前只读。" : targetIdentityConflict ? "请先核对台账父级归属；人工金额不能消除多 SKC 冲突。" : "查看当前采用结果与采购证据；需要调整时选择人工更正。"}`}
+        onClose={() => setManualTarget(null)} footer={<><Button onClick={() => setManualTarget(null)}>关闭</Button>{!locked && (!targetIdentityConflict || targetRow.manualOverride) ? <Button onClick={() => setManualTarget({ id: targetRow.id, mode: "edit" })}>{targetIdentityConflict ? "撤销人工更正" : targetRow.manualOverride ? "更正 / 撤销" : "人工更正"}</Button> : null}</>}>
         {targetDetails}
       </Modal> : <ManualCostDialog key={targetRow.id} ledger={snapshot.ledger} row={targetRow} readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)} className="cost-detail-modal" title="人工更正成本" formFirst queueProgress={manualTarget.queueIds ? { index: targetIndex + 1, total: correctionIds.length } : null} saveLabel={manualTarget.queueIds && !nextTarget ? "保存并完成" : "保存更正"} onClose={() => setManualTarget(null)} onNext={nextTarget ? nextCorrection : undefined}>
         <details className="cost-correction-evidence"><summary>查看当前成本、ERP 采购证据与异常原因</summary>{targetDetails}</details>

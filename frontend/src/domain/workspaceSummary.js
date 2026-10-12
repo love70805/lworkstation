@@ -21,6 +21,14 @@ function hasCaptureBlocker(capture) {
   return false;
 }
 
+function pendingLedgerTask(ledger) {
+  const missingCount = Number(ledger.costSummary?.missingCount ?? 0);
+  const kind = missingCount > 0 || ["cost_pending", "approval_pending"].includes(ledger.status)
+    ? "cost"
+    : ledger.status === "ready" ? "profit" : "ledger";
+  return { ledgerId: ledger.id, period: ledger.period ?? "", kind, missingCount };
+}
+
 export function buildWorkspaceOperationalSummary({
   captures = [],
   products = [],
@@ -49,6 +57,9 @@ export function buildWorkspaceOperationalSummary({
     finalizedLedgerCount: finalizedLedgers.length,
     readyLedgerCount: openLedgers.filter((ledger) => ledger.status === "ready").length,
     missingCostCount: openLedgers.reduce((sum, ledger) => sum + Number(ledger.costSummary?.missingCount ?? 0), 0),
+    pendingLedgerTasks: [...openLedgers]
+      .sort((a, b) => String(a.period ?? "").localeCompare(String(b.period ?? "")) || String(a.id).localeCompare(String(b.id)))
+      .map(pendingLedgerTask),
     recordCount: Object.values(tableCounts).reduce((sum, count) => sum + Number(count ?? 0), 0),
     latestLedger,
     latestOpenLedger,

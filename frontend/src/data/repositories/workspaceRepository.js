@@ -5,14 +5,18 @@ import { validateReportBackup } from "../../domain/profitReportBackup";
 import { replaySyncRecoveryPayload } from "../../domain/syncRecovery";
 import { clearDesktopInboxData } from "../../lib/clearDesktopInboxData";
 import { clearAllCostDrafts } from "../../lib/costMatchingDraft";
-import { withWorkspaceReset } from "../../lib/workspaceBackgroundTasks";
+import { withWorkspaceReset, setWorkspaceRecoveryError } from "../../lib/workspaceBackgroundTasks";
+import { captureBusinessPreferences, preparePreferenceRestore, applyPreferenceRestore, finishPreferenceRestore,
+  readPreferenceRestoreJournal, PREFERENCE_RESTORE_COMMIT } from '../../lib/businessPreferencesBackup';
 import {
   validateWorkspaceBackupPayload,
   WORKSPACE_BACKUP_FORMAT,
   WORKSPACE_BACKUP_VERSION,
+  createWorkspaceBackupManifest,
 } from "../../domain/workspaceBackup";
 import { buildWorkspaceOperationalSummary } from "../../domain/workspaceSummary";
-import { db } from "../db/clientDatabase";
+import { db, CLIENT_DATABASE_BACKUP_SCHEMAS } from "../db/clientDatabase";
+import { withVerifiedLedgerCostSummaries } from "./profitRepository";
 import { cachedDerived, observeSourceRevision, sourceRevision, selectionFactsRevision, assertSourceRevision, retrySourceRead } from "../db/derivedCache";
 import {
   DEFAULT_WORKSPACE_ID,
@@ -31,7 +35,7 @@ export async function getWorkspaceOperationalSummary() {
     assertSourceRevision(revision);
     const compute = () => readWorkspaceOperationalSummary(context, observable);
     const summary = observable ? await cachedDerived({
-      scope: [context.workspaceId, context.memberId, context.role], formula: "workspace-operational-summary@1", revision, compute,
+      scope: [context.workspaceId, context.memberId, context.role], formula: "workspace-operational-summary@2", revision, compute,
     }) : await compute();
     assertSourceRevision(revision);
     return summary;
@@ -79,25 +83,27 @@ async function readWorkspaceOperationalSummary(context, observable) {
   tableCounts.products = visibleProducts.length;
   tableCounts.captures = visibleCaptures.length;
   tableCounts.platformSkus = visibleSkus.length;
+  const verifiedLedgers = await withVerifiedLedgerCostSummaries(ledgers);
 
   return buildWorkspaceOperationalSummary({
     captures: visibleCaptures,
     products: visibleProducts,
     platformSkus: visibleSkus,
-    ledgers: ledgers.filter(inWorkspace),
+    ledgers: verifiedLedgers.filter(inWorkspace),
     auditEvents: latestActivity ? [{ createdAt: latestActivity.createdAt }] : [],
     tableCounts,
   });
 }
 
 export async function createWorkspaceBackupPayload() {
+  if (readPreferenceRestoreJournal()) throw new Error('上次业务筛选配置恢复尚未完成，请先重试恢复检查。');
   await ensureDefaultWorkspace();
   const generatedAt = new Date().toISOString();
   const tableEntries = await db.transaction("r", db.tables, () => Promise.all(db.tables.map(async (table) => [table.name, await table.toArray()])));
   const tables = Object.fromEntries(tableEntries);
   const recordCount = tableEntries.reduce((sum, [, rows]) => sum + rows.length, 0);
 
-  return {
+  const payload = {
     format: WORKSPACE_BACKUP_FORMAT,
     formatVersion: WORKSPACE_BACKUP_VERSION,
     applicationVersion: "0.1.0",
@@ -109,12 +115,15 @@ export async function createWorkspaceBackupPayload() {
     recordCount,
     tables,
   };
+  const businessPreferences = captureBusinessPreferences((tables.workspaces ?? []).map(workspace => workspace.id));
+  if (businessPreferences !== undefined) payload.businessPreferences = businessPreferences;
+  payload.manifest = createWorkspaceBackupManifest(payload);
+  return payload;
 }
 
 export async function createWorkspaceCloudSeedPayload() {
   const backupPayload = await createWorkspaceBackupPayload();
   if (REPORT_TABLES.some(name => backupPayload.tables[name]?.length)) throw new Error("本机报告及补充来源不支持云端种子，请使用完整本机备份。");
-  for (const name of REPORT_TABLES) delete backupPayload.tables[name];
   return buildCloudSeedPayload(backupPayload);
 }
 
@@ -213,95 +222,142 @@ export async function getDataSecuritySnapshot() {
   };
 }
 
-export async function restoreWorkspaceBackupPayload(payload, restoredBy = "local-user") {
-  const tableNames = db.tables.map((table) => table.name);
-  const inspection = validateWorkspaceBackupPayload(payload, { tableNames });
-  await validateReportBackup(payload.tables);
-  const restoredAt = new Date().toISOString();
-
-  await db.transaction("rw", db.tables, async () => {
-    for (const table of db.tables) await table.clear();
-    for (const table of db.tables) {
-      const rows = payload.tables[table.name] ?? [];
-      if (rows.length > 0) await table.bulkAdd(rows);
-    }
-    if (await db.workspaces.count() === 0) {
-      await db.workspaces.put({
-        id: DEFAULT_WORKSPACE_ID,
-        name: DEFAULT_WORKSPACE_NAME,
-        defaultCurrency: "CNY",
-        timezone: "Asia/Shanghai",
-        createdAt: restoredAt,
-        updatedAt: restoredAt,
-      });
-    }
-    await db.auditEvents.add({
-      workspaceId: payload.workspaceId ?? DEFAULT_WORKSPACE_ID,
-      objectType: "backup",
-      objectId: `RESTORE-${restoredAt}`,
-      action: "backup_restored",
-      actorId: restoredBy,
-      createdAt: restoredAt,
-      after: {
-        sourceGeneratedAt: payload.generatedAt ?? null,
-        recordCount: inspection.recordCount,
-        databaseVersion: payload.databaseVersion ?? null,
-      },
-    });
+export function inspectWorkspaceBackupPayload(payload) {
+  return validateWorkspaceBackupPayload(payload, {
+    tableNames: db.tables.map(table => table.name), schemas: CLIENT_DATABASE_BACKUP_SCHEMAS,
   });
-
-  return inspection;
 }
 
-export async function restoreWorkspaceSyncRecoveryPayload(payload, restoredBy = "local-user") {
-  const recovery = replaySyncRecoveryPayload(payload);
-  const restoredAt = new Date().toISOString();
-  const restorableTables = CLOUD_SEED_TABLES.filter((name) => db.tables.some((table) => table.name === name));
-
-  await db.transaction("rw", db.tables, async () => {
-    if ((await Promise.all(REPORT_TABLES.map(name => db.table(name).count()))).some(Boolean)) throw new Error("已有本机报告或补充来源，不能使用旧云恢复替换父账本；请恢复完整本机备份。");
-    for (const tableName of restorableTables) await db.table(tableName).clear();
-    for (const tableName of restorableTables) {
-      const rows = recovery.tables[tableName] ?? [];
-      if (rows.length > 0) await db.table(tableName).bulkAdd(rows);
+async function resolvePreferenceJournal() {
+  try {
+    const journal = readPreferenceRestoreJournal();
+    if (journal) {
+      const marker = await db.settings.get(PREFERENCE_RESTORE_COMMIT);
+      applyPreferenceRestore(journal, marker?.value === journal.id);
+      finishPreferenceRestore();
     }
-    await db.settings.put({
-      key: "lastSyncRecovery",
-      value: {
-        workspaceId: recovery.workspaceId,
-        sourceGeneratedAt: recovery.generatedAt,
-        sourceCursor: recovery.cursor,
-        recordCount: recovery.recordCount,
-        restoredAt,
-      },
-      updatedAt: restoredAt,
-    });
-    await db.auditEvents.add({
-      workspaceId: recovery.workspaceId,
-      objectType: "cloud_recovery",
-      objectId: `RECOVERY-${restoredAt}`,
-      action: "sync_recovery_restored",
-      actorId: restoredBy,
-      createdAt: restoredAt,
-      after: {
-        sourceGeneratedAt: recovery.generatedAt,
-        sourceCursor: recovery.cursor,
-        recordCount: recovery.recordCount,
-      },
-    });
-  });
+    setWorkspaceRecoveryError();
+  } catch (error) {
+    setWorkspaceRecoveryError(`业务筛选配置恢复未完成：${error.message} 请重试恢复检查。`);
+    throw error;
+  }
+}
+let preferenceRecovery;
+export function recoverWorkspacePreferenceRestore() {
+  preferenceRecovery ??= withWorkspaceReset(resolvePreferenceJournal).finally(() => { preferenceRecovery = null; });
+  return preferenceRecovery;
+}
 
-  return {
-    workspaceId: recovery.workspaceId,
-    recordCount: recovery.recordCount,
-    eventCount: recovery.tables.auditEvents.length,
-    cursor: recovery.cursor,
-    restoredAt,
-  };
+export async function restoreWorkspaceBackupPayload(payload, restoredBy = "local-user", { beforeRestore } = {}) {
+  const inspection = inspectWorkspaceBackupPayload(payload);
+  await validateReportBackup(payload.tables);
+  return withWorkspaceReset(async () => {
+    await resolvePreferenceJournal();
+    await beforeRestore?.();
+    const restoredAt = new Date().toISOString();
+    let journal, committed = false;
+    try {
+      journal = preparePreferenceRestore(payload.businessPreferences);
+      await db.transaction("rw", db.tables, async () => {
+        for (const table of db.tables) await table.clear();
+        for (const table of db.tables) {
+          const rows = payload.tables[table.name] ?? [];
+          if (rows.length > 0) await table.bulkAdd(rows);
+        }
+        if (await db.workspaces.count() === 0) {
+          await db.workspaces.put({
+            id: DEFAULT_WORKSPACE_ID,
+            name: DEFAULT_WORKSPACE_NAME,
+            defaultCurrency: "CNY",
+            timezone: "Asia/Shanghai",
+            createdAt: restoredAt,
+            updatedAt: restoredAt,
+          });
+        }
+        await db.auditEvents.add({
+          workspaceId: payload.workspaceId ?? DEFAULT_WORKSPACE_ID,
+          objectType: "backup",
+          objectId: `RESTORE-${restoredAt}`,
+          action: "backup_restored",
+          actorId: restoredBy,
+          createdAt: restoredAt,
+          after: {
+            sourceGeneratedAt: payload.generatedAt ?? null,
+            recordCount: inspection.recordCount,
+            databaseVersion: payload.databaseVersion ?? null,
+          },
+        });
+        if (journal) {
+          await db.settings.put({ key: PREFERENCE_RESTORE_COMMIT, value: journal.id, updatedAt: restoredAt });
+          applyPreferenceRestore(journal, true);
+        }
+      });
+      committed = true;
+      if (journal) finishPreferenceRestore();
+    } catch (error) {
+      // IndexedDB is atomic. The durable marker selects rollback or completion
+      // after a failed write, failed commit, or an interrupted process.
+      await resolvePreferenceJournal();
+      if (!committed) throw error;
+    }
+    return inspection;
+  });
+}
+
+export async function restoreWorkspaceSyncRecoveryPayload(payload, restoredBy = "local-user", { beforeRestore } = {}) {
+  const recovery = replaySyncRecoveryPayload(payload);
+  return withWorkspaceReset(async () => {
+    await resolvePreferenceJournal();
+    await beforeRestore?.();
+    const restoredAt = new Date().toISOString();
+    const restorableTables = CLOUD_SEED_TABLES.filter((name) => db.tables.some((table) => table.name === name));
+
+    await db.transaction("rw", db.tables, async () => {
+      if ((await Promise.all(REPORT_TABLES.map(name => db.table(name).count()))).some(Boolean)) throw new Error("已有本机报告或补充来源，不能使用旧云恢复替换父账本；请恢复完整本机备份。");
+      for (const tableName of restorableTables) await db.table(tableName).clear();
+      for (const tableName of restorableTables) {
+        const rows = recovery.tables[tableName] ?? [];
+        if (rows.length > 0) await db.table(tableName).bulkAdd(rows);
+      }
+      await db.settings.put({
+        key: "lastSyncRecovery",
+        value: {
+          workspaceId: recovery.workspaceId,
+          sourceGeneratedAt: recovery.generatedAt,
+          sourceCursor: recovery.cursor,
+          recordCount: recovery.recordCount,
+          restoredAt,
+        },
+        updatedAt: restoredAt,
+      });
+      await db.auditEvents.add({
+        workspaceId: recovery.workspaceId,
+        objectType: "cloud_recovery",
+        objectId: `RECOVERY-${restoredAt}`,
+        action: "sync_recovery_restored",
+        actorId: restoredBy,
+        createdAt: restoredAt,
+        after: {
+          sourceGeneratedAt: recovery.generatedAt,
+          sourceCursor: recovery.cursor,
+          recordCount: recovery.recordCount,
+        },
+      });
+    });
+
+    return {
+      workspaceId: recovery.workspaceId,
+      recordCount: recovery.recordCount,
+      eventCount: recovery.tables.auditEvents.length,
+      cursor: recovery.cursor,
+      restoredAt,
+    };
+  });
 }
 
 export async function clearLocalWorkspaceData(clearedBy = "local-user") {
   return withWorkspaceReset(async () => {
+    await resolvePreferenceJournal();
     // Desktop requests/tasks live outside IndexedDB. Do not report an empty
     // workspace while those histories can still be matched to a new ledger.
     await clearDesktopInboxData();
