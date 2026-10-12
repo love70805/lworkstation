@@ -478,7 +478,11 @@ it('restores a group and its store exceptions without a new apply click, includi
   Object.defineProperty(input,'files',{configurable:true,value:[new File(['first'],'甲店.csv')]});
   await act(async () => input.dispatchEvent(new Event('change',{bubbles:true})));
   await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
-  await settled();
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(mocks.preview.mock.calls.at(-1)?.[0].items).toHaveLength(1);
+    expect(container.querySelector('.batch-fieldset').disabled).toBe(false);
+  }, { timeout: 5000 });
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBYY','NEW-LBY']);
   const picker = container.querySelector('.import-supplier-picker');
   await act(async () => [...picker.querySelectorAll('button')].find(node => node.textContent === '未选 (2)').click());
