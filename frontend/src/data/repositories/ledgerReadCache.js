@@ -4,8 +4,16 @@ import { cachedDerived, sourceRevision, observeSourceRevision } from '../db/deri
 // Every consumer establishes its own live-query dependency even on a shared hit.
 export async function readLedgerSalesRows(workspaceId, ledgerId, { strict = false } = {}) {
   const observable = await observeSourceRevision();
-  const read = () => db.salesRows.where('ledgerId').equals(ledgerId).toArray();
-  const rows = !observable ? await read() : await cachedDerived({ scope: [workspaceId, ledgerId], formula: 'raw-ledger-rows@1', revision: sourceRevision(), persist: false,
+  const read = async () => {
+    const rows = await db.salesRows.where('ledgerId').equals(ledgerId).toArray();
+    if (!rows.some(row => !row.workspaceId)) return rows;
+    const ledger = await db.ledgers.get(ledgerId);
+    // Old rows can predate workspaceId. A persisted, owned parent establishes
+    // their read scope; leave explicit foreign rows untouched for the guard.
+    return ledger?.workspaceId === workspaceId
+      ? rows.map(row => row.workspaceId ? row : { ...row, workspaceId }) : rows;
+  };
+  const rows = !observable ? await read() : await cachedDerived({ scope: [workspaceId, ledgerId], formula: 'raw-ledger-rows@2-owned-legacy', revision: sourceRevision(), persist: false,
     compute: read,
   });
   if (rows.some(row => row.workspaceId !== workspaceId)) {

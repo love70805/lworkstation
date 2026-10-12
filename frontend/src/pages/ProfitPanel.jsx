@@ -23,6 +23,7 @@ import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
 import ManualCostDialog from "./ManualCostDialog";
 import { ledgerNextStep } from "../domain/ledgerWorkflow";
+import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { readProfitViewState, saveProfitViewState } from "../lib/profitViewState";
 
 const currency = (value) => `¥${displayMoney(value)}`;
@@ -248,6 +249,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
       meta: { headerStyle: { width: "156px" } },
       cell: ({ row }) => {
         const item = row.original;
+        if (!locked && item.costIdentityIssue) return <div className="profit-status-actions"><Badge tone="warning">归属待核对</Badge><small>{describeLedgerCostIdentityIssue(item.costIdentityIssue)}</small><button className="inline-link" onClick={() => navigate(costMatchingHref)}>核对归属</button>{item.manualOverride ? <button className="inline-link" onClick={() => setManualTarget(item)}>撤销人工更正</button> : null}</div>;
         if (!locked) return <div className="profit-status-actions"><Badge tone={item.finalizable ? "success" : "warning"}>{item.costSource === "manual_override" ? "人工确认" : item.costSource === "erp" ? "ERP 结果已采用" : "待确认成本"}</Badge><button className="inline-link" onClick={() => setManualTarget(item)}>{item.manualOverride ? "更正 / 撤销" : "人工填写"}</button>{!item.finalizable ? <button className="inline-link" onClick={() => navigate(costMatchingHref)}>查看候选</button> : null}</div>;
         if (item.costSource === "manual_override") return <Badge tone="success">人工更正</Badge>;
         if (item.costSource === "erp") return <Badge tone="success">ERP 结果已采用</Badge>;
@@ -362,7 +364,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
 
       {snapshot.ledger.status === "finalized" ? <Button icon={RotateCcw} onClick={() => { setReopenReason(""); setReopenError(""); setReopenDialog(true); }}>重开本月全部店铺核算</Button> : null}
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本；定稿后不能直接修改。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
-      {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={manualTarget} onClose={() => setManualTarget(null)} /> : null}
+      {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={calculated.find(row => row.id === manualTarget.id) ?? manualTarget} onClose={() => setManualTarget(null)} /> : null}
       <Modal open={reopenDialog} title="确认重开本月全部店铺" description="重开后可更正成本并重新定稿。原报告和核对记录保留，已采用 ERP 成本继续有效。" onClose={() => { if (!reopening) setReopenDialog(false); }} footer={<><Button disabled={reopening} onClick={() => setReopenDialog(false)}>取消</Button><Button variant="primary" disabled={!reopenReason.trim() || reopening} loading={reopening} onClick={reopenLedger}>确认重开</Button></>}>
         <div className="form-field"><label htmlFor="profit-reopen-reason">重开原因</label><input id="profit-reopen-reason" className="text-input" value={reopenReason} onChange={(event) => setReopenReason(event.target.value)} /></div>
         {reopenError ? <p role="alert">{reopenError}</p> : null}

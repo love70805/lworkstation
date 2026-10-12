@@ -10,8 +10,8 @@ import { costDraftKey } from '../lib/costMatchingDraft';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn(), saveManual: vi.fn() }));
-vi.mock('../data/repositories/profitRepository', async importOriginal => ({ ...await importOriginal(), saveManualCostOverride: mocks.saveManual }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn(), saveManual: vi.fn(), revokeManual: vi.fn() }));
+vi.mock('../data/repositories/profitRepository', async importOriginal => ({ ...await importOriginal(), saveManualCostOverride: mocks.saveManual, revokeManualCostOverride: mocks.revokeManual }));
 vi.mock('../hooks/useErpCollectionTasks', () => ({ useErpCollectionTasks: () => ({ tasks: mocks.tasks ?? [], loading: false, error: '', refresh: () => {} }) }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
 vi.mock('dexie-react-hooks', () => ({ useLiveQuery: (query, _deps, initial) => query.toString().includes('listErpCostInbox') ? mocks.inboxRecords : query.toString().includes('listErpCostRequests') ? mocks.requests : initial }));
@@ -32,11 +32,11 @@ function ScopeControls() {
   const [params, setParams] = useSearchParams();
   return <input aria-label="测试查询范围" value={params.get('q') ?? ''} onChange={event => { const next = new URLSearchParams(params); next.set('q', event.target.value); setParams(next); }} />;
 }
-async function render(skcs, status = 'ready', { costs = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [] } = {}) {
+async function render(skcs, status = 'ready', { costs = [], approvals = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [] } = {}) {
   mocks.snapshot = {
     ledger: { id: ledgerId, workspaceId: 'W', period: '2026-08', status },
     rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: skuIds[index] ?? `SKU-${index}`, quantity: 1, amount: 10 })),
-    costs, approvals: [],
+    costs, approvals,
   };
   await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><ScopeControls /><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
 }
@@ -48,6 +48,7 @@ beforeEach(() => {
   mocks.requests = [];
   mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
   mocks.saveManual.mockReset().mockResolvedValue({});
+  mocks.revokeManual.mockReset().mockResolvedValue({});
   mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.cancel.mockReset().mockResolvedValue(null);
   mocks.register.mockReset().mockImplementation(async input => ({ id: `REG-${input.ledger.id}`, workspaceId: input.ledger.workspaceId, ledgerId: input.ledger.id, ledgerPeriod: input.ledger.period, platformSkcs: input.platformSkcs, expectedSkus: input.expectedSkus }));
   writeText = vi.fn().mockResolvedValue(undefined);
@@ -119,11 +120,54 @@ it('cancels the old scope immediately and registers only the final query after r
 });
 
 it('does not guess a SKU parent by filtering away conflicting ledger rows', async () => {
-  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'CONFLICT-SCOPE', stores: ['甲', '乙'], contextStore: '甲', skuIds: ['SAME-SKU', 'SAME-SKU'] });
+  const costs=[{platformSku:'SAME-SKU',platformSkc:'SKC-A',unitCost:5,resolutionStatus:'resolved',purchaseRecords:[{recordId:'R',purchaseDate:'2026-08-01',quantity:1,unitPrice:5}],selectedRecordIds:['R']}];
+  await render(['SKC-A', 'SKC-B'], 'ready', { ledgerId: 'CONFLICT-SCOPE', stores: ['甲', '乙'], contextStore: '甲', skuIds: ['SAME-SKU', 'SAME-SKU'],costs });
   expect(container.textContent).toContain('当前 SKU 在完整台账中对应多个平台 SKC');
   expect(mocks.register).not.toHaveBeenCalled();
   expect(button('复制 1 个平台 SKC').disabled).toBe(true);
   expect(mocks.snapshot.rows).toHaveLength(2);
+  expect(container.querySelector('.match-stat.match-success').textContent).toContain('当前有效成本0');
+  expect(container.textContent).toContain('归属待核对');
+  expect(button('逐项更正')).toBeUndefined();
+  await act(async()=>button('详情').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('人工金额不能消除多 SKC 冲突');
+  expect(button('人工更正')).toBeUndefined();
+});
+
+it('skips conflicting parents in the direct next-item correction flow',async()=>{
+  await render(['SKC-A','SKC-X','SKC-Y','SKC-Z'],'ready',{ledgerId:'NEXT-IDENTITY',skuIds:['A','B','B','C']});
+  await act(async()=>button('人工更正').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · A');
+  await act(async()=>{
+    Simulate.change(container.querySelector('#manual-cost-value'),{target:{value:'0'}});
+    Simulate.change(container.querySelector('#manual-cost-reason'),{target:{value:'核实零值'}});
+  });
+  await act(async()=>button('保存并下一项').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · C');
+  expect(mocks.saveManual).toHaveBeenCalledExactlyOnceWith({ledgerId:'NEXT-IDENTITY',store:'甲',platformSku:'A',unitCost:'0',reason:'核实零值'});
+});
+
+it('stops new amount edits when an open correction receives a conflicting identity',async()=>{
+  await render(['SKC-A'],'ready',{ledgerId:'OPEN-IDENTITY',skuIds:['A']});
+  await act(async()=>button('人工更正').click());
+  expect(container.querySelector('#manual-cost-value')).not.toBeNull();
+  await render(['SKC-A','SKC-B'],'ready',{ledgerId:'OPEN-IDENTITY',skuIds:['A','A']});
+  expect(container.querySelector('#manual-cost-value')).toBeNull();
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('对应多个平台 SKC');
+  expect(button('保存更正')).toBeUndefined();
+  expect(mocks.saveManual).not.toHaveBeenCalled();
+});
+
+it('retains revocation of an existing manual zero while a parent conflict blocks new amounts',async()=>{
+  const ledgerId='REVOKE-IDENTITY',approval={id:'M',workspaceId:'W',ledgerId,platformSku:'A',status:'approved',currency:'CNY',approvedAmount:0,approvedBy:'finance',approvedAt:'2026-08-31T00:00:00Z',reason:'真实零值',referenceCost:{kind:'manual_override',store:'甲'}};
+  await render(['SKC-A','SKC-B'],'ready',{ledgerId,skuIds:['A','A'],approvals:[approval]});
+  await act(async()=>button('详情').click());
+  await act(async()=>button('撤销人工更正').click());
+  expect(container.querySelector('#manual-cost-value')).toBeNull();
+  expect(button('保存更正')).toBeUndefined();
+  await act(async()=>button('撤销当前更正').click());
+  expect(mocks.revokeManual).toHaveBeenCalledExactlyOnceWith({ledgerId,approvalId:'M'});
+  expect(mocks.saveManual).not.toHaveBeenCalled();
 });
 
 it('ignores a late registration acknowledgement from the previous search range', async () => {
@@ -298,7 +342,7 @@ it('skips a queued row that becomes effective while the previous correction is s
     Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '已核实' } });
   });
   await act(async () => button('保存并下一项').click());
-  await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION', costs: [{ ...formalCost, platformSku: 'SKU-1' }] });
+  await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION', costs: [{ ...formalCost, platformSku: 'SKU-1', platformSkc: 'SKC-2' }] });
   await act(async () => finishSave({}));
   expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-2');
   expect(button('保存并完成')).toBeDefined();

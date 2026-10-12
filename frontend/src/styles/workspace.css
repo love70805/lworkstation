@@ -179,12 +179,16 @@
 .task-icon.warning { background: var(--warning-bg); color: var(--warning); }
 .task-icon.danger { background: var(--danger-bg); color: var(--danger); }
 .task-icon.success { background: var(--success-bg); color: var(--success); }
+.task-icon.info { background: var(--info-bg); color: var(--info); }
 .task-item > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .task-item strong { overflow-wrap: anywhere; font-size: 12px; }
 .task-item small { overflow-wrap: anywhere; color: var(--text-muted); font-size: 10px; line-height: 15px; }
 .task-item button { display: inline-flex; align-items: center; gap: 2px; padding: 4px 0 4px 4px; border: 0; background: transparent; color: var(--primary); font-size: 11px; font-weight: 600; white-space: nowrap; }
 .task-item button:hover { color: var(--primary-hover); }
 .task-empty { display: flex; min-height: 112px; align-items: center; justify-content: center; gap: 8px; padding: 18px; color: var(--text-muted); font-size: 11px; text-align: center; }
+.task-more { border-top: 1px solid var(--border); }
+.task-more > summary { padding: 12px 16px; color: var(--primary); cursor: pointer; font-size: 12px; }
+.task-more > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
 
 .reference-widget { overflow: hidden; }
 .reference-mini-table { padding: 0 14px 12px; }

@@ -6,6 +6,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SelectionPrestorageAutomation from './SelectionPrestorageAutomation';
 import { ToastProvider } from './UI';
 import { db, DEFAULT_WORKSPACE_ID, saveProductCatalogRecord } from '../data/database';
+import { withWorkspaceReset } from '../lib/workspaceBackgroundTasks';
 let root, container, product;
 async function waitFor(check) {
   for (let i = 0; i < 150; i++) {
@@ -43,5 +44,15 @@ it('reports a rolled-back automatic write and accepts an explicit retry of the s
   expect((await db.products.get(product.id)).status).toBe('draft');
   spy.mockRestore();
   await act(async () => window.dispatchEvent(new Event('lworkstation:retry-prestorage')));
+  await waitFor(async () => (await db.products.get(product.id)).status === 'active');
+});
+it('defers automatic promotion during restore and retries unchanged sources when maintenance ends', async () => {
+  let finish;
+  const paused = new Promise(resolve => { finish = resolve; });
+  const restore = withWorkspaceReset(() => paused);
+  await act(async () => receiveCost());
+  await act(async () => new Promise(resolve => setTimeout(resolve, 50)));
+  expect((await db.products.get(product.id)).status).toBe('draft');
+  await act(async () => { finish(); await restore; });
   await waitFor(async () => (await db.products.get(product.id)).status === 'active');
 });

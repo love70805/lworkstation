@@ -360,6 +360,12 @@ db.version(15).stores({
   profitReportLines: "id,workspaceId,ledgerId,reportId,[reportId+lineKind],[reportId+store]",
 });
 
+// Read the schemas already declared above; backup compatibility must not define
+// a second migration history. The regression test covers every declared version.
+export const CLIENT_DATABASE_BACKUP_SCHEMAS = Object.freeze(Object.fromEntries(
+  db._versions.map(version => [version._cfg.version, Object.freeze(Object.keys(version._cfg.dbschema))]),
+));
+
 db.auditEvents.hook("creating", (_primaryKey, event) => {
   if (!event.eventId) event.eventId = makeId("EVT");
   if (!event.syncState) event.syncState = SYNC_STATES.PENDING;

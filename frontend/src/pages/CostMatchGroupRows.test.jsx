@@ -27,6 +27,18 @@ afterEach(async () => {
 });
 
 describe("cost matching shared SKU and store rows", () => {
+  it('retains raw identity evidence and offers an amount correction only for a unique mismatching parent', async () => {
+    const mismatch=storeLine('A','甲店',{platformSkc:'SKC-B',decision:{eligibleForExactProfit:false,identityIssue:{code:'erp_cost_skc_mismatch',erpPlatformSkc:'SKC-A'}}});
+    const conflict=storeLine('B','乙店',{platformSkc:'SKC-C',manualOverride:{approvedAmount:0},decision:{eligibleForExactProfit:false,identityIssue:{code:'ledger_sku_skc_conflict'}}});
+    const props=await render([variant('SKU-A'),variant('SKU-B')],new Map([['SKU-A',[mismatch]],['SKU-B',[conflict]]]));
+    const rows=[...container.querySelectorAll('tbody > tr')];
+    expect(rows[0].textContent).toContain('台账 SKC：SKC-B；ERP SKC：SKC-A');
+    expect(rows[0].textContent).toContain('归属待核对');
+    expect(rows[1].textContent).toContain('人工金额保留');
+    expect(rows[1].querySelectorAll('button')).toHaveLength(1);
+    await act(async()=>rows[0].querySelector('button:last-child').click());
+    expect(props.onCorrect).toHaveBeenCalledExactlyOnceWith(mismatch);
+  });
   it("keeps four SKU identities, candidates, current costs and actions in the same actual rows", async () => {
     const longSku = "SKU-1234567890123456789012345678901234567890";
     const variants = [variant(longSku, { attribute: "象牙白色 / 加长袖口 / 最大尺寸 / 双层面料 / 长属性文本" }), variant("SKU-B"), variant("SKU-C"), variant("SKU-D")];

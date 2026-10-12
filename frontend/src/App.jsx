@@ -4,6 +4,7 @@ import { LoaderCircle } from "lucide-react";
 import SelectionPrestorageAutomation from "./components/SelectionPrestorageAutomation";
 import LegacyCostRedirect from './components/LegacyCostRedirect';
 import AppRouteError from './components/AppRouteError';
+import WorkspacePreferenceRecoveryGate from './components/WorkspacePreferenceRecoveryGate';
 import { ToastProvider } from "./components/UI";
 import { RuntimeConfigurationGate } from "./components/RuntimeConfigurationGate";
 import { CloudAuthenticationGate, hasAuthenticatedCloudIdentity, useCloudAuthenticationState } from "./components/CloudAuthenticationGate";
@@ -196,6 +197,7 @@ function SelectionCaptureListener() {
                 envelope: record.envelope,
                 inboxRecord: record,
                 receivedVia: "local-http",
+                expectedWorkspaceId: context.workspaceId,
               }),
               acknowledge: () => acknowledgeSelectionCapture(record.deliveryId, { workspaceId: context.workspaceId }),
             });
@@ -258,6 +260,7 @@ function AppContent() {
       <ToastProvider>
         <RuntimeConfigurationGate>
           <CloudAuthenticationGate>
+            <WorkspacePreferenceRecoveryGate>
             <MemberContextGate>
               <ErpInboxListener />
               <SelectionPrestorageAutomation />
@@ -281,6 +284,7 @@ function AppContent() {
                 </Routes>
               </Suspense>
             </MemberContextGate>
+            </WorkspacePreferenceRecoveryGate>
           </CloudAuthenticationGate>
         </RuntimeConfigurationGate>
       </ToastProvider>

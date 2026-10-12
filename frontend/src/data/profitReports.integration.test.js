@@ -7,6 +7,7 @@ import { previewMonthlySupplement,adoptMonthlySupplement,previewProfitReport,sav
 import { saveManualCostOverride,reopenLedgerForCostCorrection,deleteMonthlyLedger,finalizeMonthlyLedger } from "./repositories/profitRepository";
 import { createWorkspaceBackupPayload,restoreWorkspaceBackupPayload,createWorkspaceCloudSeedPayload } from "./repositories/workspaceRepository";
 import { validateReportBackup } from "../domain/profitReportBackup";
+import { createWorkspaceBackupManifest } from '../domain/workspaceBackup';
 import { claimPendingSyncEnvelope } from "./syncOutbox";
 import { REPORT_FORMULA_VERSION, REPORT_TABLES, REPORT_TEMPLATE_VERSION, canonicalJson, sha256 } from "../domain/profitReports";
 import { withCurrentLedgerResults } from './repositories/ledgerOverviewRepository';
@@ -129,6 +130,8 @@ it('upgrades an actual v14 database without changing any old table row',async()=
 it('restores a v14 backup without the four optional report tables',async()=>{
  const legacy=await createWorkspaceBackupPayload();legacy.databaseVersion=14;
  for(const name of REPORT_TABLES)delete legacy.tables[name];
+  delete legacy.manifest;
+  legacy.recordCount=Object.values(legacy.tables).reduce((count,rows)=>count+rows.length,0);
  await adopt('dispatch');await report();
  await restoreWorkspaceBackupPayload(legacy);
  expect(await db.ledgers.get('L')).toEqual(legacy.tables.ledgers[0]);
@@ -150,6 +153,10 @@ it('rejects damaged parent/child, scope, month and adopted uniqueness before mut
  ];
  for(const corrupt of corruptions){
   const bad=structuredClone(backup);corrupt(bad.tables);
+  // Keep the outer transport manifest coherent so this test still reaches
+  // business parent/scope/month validation, including the extra adopted row.
+  bad.recordCount=Object.values(bad.tables).reduce((count,rows)=>count+rows.length,0);
+  bad.manifest=createWorkspaceBackupManifest(bad);
   await expect(restoreWorkspaceBackupPayload(bad)).rejects.toThrow('校验失败');
   expect((await createWorkspaceBackupPayload()).tables).toEqual(backup.tables);
  }

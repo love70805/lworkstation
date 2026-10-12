@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "candidateOnly": true,
-  "integrationBranch": "codex/v0418-supplier-groups-erp-feedback",
+  "integrationBranch": "codex/reliability-fixes-0.4.19",
   "requiredCommits": [
+    {
+      "module": "v0.4.19-verified-main-baseline",
+      "commit": "f56dc28867218c28caa22d158d36e7ff9db5f58b"
+    },
     {
       "module": "v0.4.18-supplier-groups-and-ERP-diagnostics",
       "commit": "8ac55439c608f2c065f8fc5e2a133d6a997e2cf1"

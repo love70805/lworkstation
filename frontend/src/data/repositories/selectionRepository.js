@@ -194,12 +194,15 @@ function captureTimestamp(value, fallback) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
 }
 
-export async function receiveSelectionCaptureEnvelope({ envelope, inboxRecord = null, receivedVia = "local-http" } = {}) {
+export async function receiveSelectionCaptureEnvelope({ envelope, inboxRecord = null, receivedVia = "local-http", expectedWorkspaceId = null } = {}) {
   if (!envelope || envelope.schemaVersion !== 1 || envelope.source !== "1688") {
     throw new Error("1688 采集包版本或来源不受支持。");
   }
   const memberContext = await getActiveMemberContext();
   const workspaceId = memberContext.workspaceId || DEFAULT_WORKSPACE_ID;
+  if ([expectedWorkspaceId, inboxRecord?.workspaceId, envelope.workspaceId].some(scope => scope != null && scope !== workspaceId)) {
+    throw new Error('1688 采集不属于当前工作区，已保留原收件待重试。');
+  }
   const product = envelope.product ?? {};
   const requestId = catalogText(envelope.requestId);
   if (!requestId) throw new Error("1688 采集包缺少 requestId。");
@@ -294,7 +297,10 @@ export async function receiveSelectionCaptureEnvelope({ envelope, inboxRecord = 
     updatedAt: now,
   };
 
-  await db.transaction("rw", db.captures, db.auditEvents, async () => {
+  await db.transaction("rw", db.captures, db.auditEvents, db.settings, async () => {
+    if ((await getActiveMemberContext()).workspaceId !== workspaceId) {
+      throw new Error('工作区已切换，1688 采集未写入，已保留原收件待重试。');
+    }
     const concurrent = await db.captures.where("requestId").equals(requestId).first();
     if (concurrent) return;
     await db.captures.add(capture);

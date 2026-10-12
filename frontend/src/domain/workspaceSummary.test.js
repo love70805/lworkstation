@@ -41,6 +41,7 @@ describe("buildWorkspaceOperationalSummary", () => {
       finalizedLedgerCount: 0,
       readyLedgerCount: 0,
       missingCostCount: 0,
+      pendingLedgerTasks: [],
       recordCount: 0,
       latestLedger: null,
       latestOpenLedger: null,
@@ -50,6 +51,23 @@ describe("buildWorkspaceOperationalSummary", () => {
       latestActivityAt: null,
     });
   });
+});
+it('keeps every unfinished month when a newer draft obscures an older ready ledger', () => {
+ const summary = buildWorkspaceOperationalSummary({ ledgers: [
+  { id: 'new-draft', period: '2026-09', status: 'draft', updatedAt: '2026-10-12', sales: { secret: 'not in tasks' } },
+  { id: 'old-ready', period: '2026-06', status: 'ready', updatedAt: '2026-07-01', costSummary: { missingCount: 0 } },
+  { id: 'old-cost', period: '2026-07', status: 'cost_pending', updatedAt: '2026-08-01', costSummary: { missingCount: 2 } },
+  { id: 'review', period: '2026-08', status: 'approval_pending', costSummary: { missingCount: 0 } },
+  { id: 'final', period: '2026-05', status: 'finalized' },
+  { id: 'locked', period: '2026-04', status: 'locked' },
+ ] });
+ expect(summary.latestOpenLedger.id).toBe('new-draft');
+ expect(summary.pendingLedgerTasks).toEqual([
+  { ledgerId: 'old-ready', period: '2026-06', kind: 'profit', missingCount: 0 },
+  { ledgerId: 'old-cost', period: '2026-07', kind: 'cost', missingCount: 2 },
+  { ledgerId: 'review', period: '2026-08', kind: 'cost', missingCount: 0 },
+  { ledgerId: 'new-draft', period: '2026-09', kind: 'ledger', missingCount: 0 },
+ ]);
 });
 it('links cost tasks to a ledger that actually has missing costs', () => {
  const summary = buildWorkspaceOperationalSummary({ ledgers: [
