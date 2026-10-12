@@ -2,11 +2,11 @@
 
 更新时间：2026-10-12。现行规则：[AGENTS.md](../AGENTS.md)。不恢复旧的强制模块路由、重复审批或分散长期对话要求。
 
-## v0.4.19 现有核算与备份可靠性修复（候选已通过，CI 中）
+## v0.4.19 现有核算与备份可靠性修复（已公开稳定 Latest）
 
 用户在源码审查后要求“先优化修复现有代码”。基线 origin/main `f56dc28` / 0.4.18，独立托管工作树 reliability-fixes、分支 `codex/reliability-fixes-0.4.19`。本批处理 SKU/SKC 冲突下错误定稿、备份恢复与在途接收串扰、缺表/记录数不符备份误恢复、换机丢失货号组与导入偏好，以及较新草稿遮掉较早月份待办。契约及验收见 [0.4.19 修复](integration/RELIABILITY_FIXES_0.4.19.md)。无数据库迁移，不改写真实数据或队列，不安装；本批验收通过后统一稳定发布。独立后台自动采集保持后续 Beta 范围。
 
-181 文件 / 1428 前端测试、构建、完整门禁、17 组 desktop verify、交叉审查、包内实际用户路径和 18 组中文浅深色布局、隐藏桌面 smoke 与原生 ERP 扩展通过。701 文件 / 655 生产输入逐字节一致，安装包 SHA256 `21DAEB5A5FD9EE9C49493DD4266EDDC7F72DA8C7B0188CCBC52673E861043849`，构建源码 `32e4bfb`。[PR #198](https://github.com/love70805/lworkstation/pull/198) 运行强制 CI，验收、合并、公开回读分别记录；详见 [发布记录](RELEASE_0.4.19.md)。
+181 文件 / 1428 前端测试、构建、完整门禁、17 组 desktop verify、交叉审查、包内实际用户路径和 18 组中文浅深色布局、隐藏桌面 smoke 与原生 ERP 扩展通过。701 文件 / 655 生产输入逐字节一致，安装包 SHA256 `21DAEB5A5FD9EE9C49493DD4266EDDC7F72DA8C7B0188CCBC52673E861043849`，构建源码 `32e4bfb`。[PR #198](https://github.com/love70805/lworkstation/pull/198) 已合并，PR 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/38201219483) 通过。稳定标签 v0.4.19 固定 `bbc6f7c2055fd22cf02d4846ab0a1a86be057226`，生产输入与验收候选逐字节相同。2026-10-12T03:54:35Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 一致，EXE SHA512 与 latest.yml 一致。生产更新入口从 0.4.18 识别 0.4.19，同版与跨通道保护通过。本机未安装，真实数据库与队列未改写。 详见 [发布记录](RELEASE_0.4.19.md)。
 
 ## v0.4.18 货号组与 ERP 异常原因（已公开；自动采集仅 Beta 目标）
 

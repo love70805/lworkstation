@@ -36,4 +36,4 @@
 
 最终 Windows 候选隐藏 packaged smoke 通过，可见窗口为 0；包内原生 MV3 扩展冷启动、三次实际刷新、36 次并发连接刷新、成本采集和持久回传、100 秒分离页心跳、离线重连及采购 iframe/登录阻断通过。ERP HTTP 与账号为隔离样本，扩展 API、渲染器、存储、消息与服务真实执行，没有将隐藏检查记为可见窗口、托盘或焦点验收。最终包内用户路径及 18 组布局再次通过；解出的 701 个文件与被测候选逐字节相同，655 个生产输入与源码相同。构建源码 `32e4bfb4cee2fdd9aa535e20d26e981cf62488e1`，安装包 119559514 字节，SHA256 `21DAEB5A5FD9EE9C49493DD4266EDDC7F72DA8C7B0188CCBC52673E861043849`。
 
-候选验收已完成，[PR #198](https://github.com/love70805/lworkstation/pull/198) 运行强制 CI；合并与公开发布结果分别追加记录，见 [发布记录](../RELEASE_0.4.19.md)。
+候选验收、合并与公开回读已分别完成。[PR #198](https://github.com/love70805/lworkstation/pull/198) 已合并，PR 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/38201219483) 通过。稳定标签 v0.4.19 固定 `bbc6f7c2055fd22cf02d4846ab0a1a86be057226`，生产输入与验收候选逐字节相同。2026-10-12T03:54:35Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 一致，EXE SHA512 与 latest.yml 一致。生产更新入口从 0.4.18 识别 0.4.19，同版与跨通道保护通过。本机未安装，真实数据库与队列未改写。 见 [发布记录](../RELEASE_0.4.19.md)。
