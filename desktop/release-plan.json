@@ -5,6 +5,10 @@
   "integrationBranch": "codex/reliability-fixes-0.4.19",
   "requiredCommits": [
     {
+      "module": "v0.4.19-profit-identity-and-backup-recovery",
+      "commit": "0f13cce1c0fabfe4d68665a6c13f9243768ad331"
+    },
+    {
       "module": "v0.4.19-verified-main-baseline",
       "commit": "f56dc28867218c28caa22d158d36e7ff9db5f58b"
     },
