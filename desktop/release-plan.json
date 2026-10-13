@@ -5,6 +5,10 @@
   "integrationBranch": "codex/supplier-filter-workbench",
   "requiredCommits": [
     {
+      "module": "v0.4.20-missing-group-selection-hints",
+      "commit": "39f6401c7d9595f024ef58579d44e05901ed0d06"
+    },
+    {
       "module": "v0.4.20-supplier-filter-drafts-and-scope",
       "commit": "3e6c14c483c5a835c50d16562585229cb2e5d6ed"
     },
