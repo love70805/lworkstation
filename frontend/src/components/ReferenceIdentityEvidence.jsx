@@ -6,7 +6,7 @@ export default function ReferenceIdentityEvidence({ variant }) {
   const projected = fromErp || variant.platformSkcSource === "ledger" || variant.attributeSource === "ledger";
   if (!conflict && !projected) return null;
   return <details className="reference-identity-evidence">
-    <summary>{conflict ? "身份来源有差异" : fromErp ? "身份来自 ERP" : "身份来自台账"}</summary>
+    <summary>{conflict ? "资料来源待确认" : variant.attributeOrderEquivalent ? "属性内容一致 · 顺序不同" : fromErp ? "身份来自 ERP" : "身份来自台账"}</summary>
     {["platformSkc", "attribute"].map(field => (variant[`${field}Evidence`] ?? []).length ? <div key={field}>
       <strong>{field === "platformSkc" ? "平台 SKC" : "属性"} · {labels[variant[`${field}Source`]] ?? "待核对"}</strong>
       {variant[`${field}Evidence`].map(item => <p key={item.value}>

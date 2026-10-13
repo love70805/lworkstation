@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { useLiveQuery } from "dexie-react-hooks";
 import { AlertCircle, CheckCircle2, ChevronRight, ExternalLink, Image, Pencil, Plus, Trash2 } from "lucide-react";
 import AppShell from "../components/AppShell";
 import SelectionSalesTag from "../components/SelectionSalesTag";
+import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import ProductEditorLeaveGuard from "../components/ProductEditorLeaveGuard";
 import { productLibraryReturnPath } from "../components/productLibraryViewState";
 import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
@@ -140,21 +140,25 @@ function ProductEditor() {
   const catalogQueue = readContinuousCatalogQueue(queueId);
   const queuePosition = Number(searchParams.get("position"));
   const queueItem = catalogQueue?.items[queuePosition];
-  const snapshot = useLiveQuery(
+  const readSnapshot = useCallback(
     () => getProductEditorSnapshot({ captureId, productId, platformSkc: referenceSkc, platformSku: referenceSku, productName: referenceName }),
     [captureId, productId, referenceName, referenceSkc, referenceSku],
-    undefined,
   );
-  const salesStatusDefinitions = useLiveQuery(getSelectionStatusDefinitions, [], []);
+  const snapshotRead = useSelectionRead(readSnapshot);
+  const snapshot = snapshotRead.data;
+  const statusRead = useSelectionRead(getSelectionStatusDefinitions);
+  const salesStatusDefinitions = useMemo(() => statusRead.data ?? [], [statusRead.data]);
   const loadedKeyRef = useRef("");
   const [draft, setDraft] = useState(null);
   const referenceScopeSkc = draft?.platformSkc ?? snapshot?.draft?.platformSkc ?? referenceSkc;
   const referenceScopeSkus = JSON.stringify((draft?.variants ?? snapshot?.draft?.variants ?? []).map(row => row.platformSku).filter(Boolean));
-  const referenceSnapshot = useLiveQuery(() => {
+  const readReferenceSnapshot = useCallback(() => {
     const platformSkus = referenceSku ? [...JSON.parse(referenceScopeSkus), referenceSku] : JSON.parse(referenceScopeSkus);
     if (!referenceScopeSkc && !platformSkus.length) return null;
     return getSelectionReferenceSnapshot({ compact: true, platformSkc: referenceScopeSkc, platformSkus });
-  }, [referenceScopeSkc, referenceScopeSkus, referenceSku], null);
+  }, [referenceScopeSkc, referenceScopeSkus, referenceSku]);
+  const referenceRead = useSelectionRead(readReferenceSnapshot);
+  const referenceSnapshot = referenceRead.data;
   const [tagsText, setTagsText] = useState("");
   const [savedFingerprint, setSavedFingerprint] = useState(null);
   const [persistedProduct, setPersistedProduct] = useState(null);
@@ -310,11 +314,12 @@ function ProductEditor() {
   const isPrestorageFlow = snapshot?.mode !== "capture" && (persistedProduct ?? snapshot?.product)?.status !== "active"
     && Boolean(snapshot?.product?.status === "draft" || referenceSkc || referenceSku || returnTo === "/products?view=reference");
   const prestorageReadiness = useMemo(() => productPrestorageReadiness({ draft: draft ?? {}, prefill: snapshot?.prefill, historicalRows }), [draft, snapshot?.prefill, historicalRows]);
-  const canSavePrestorage = !saveReadiness.validation.blockingIssues.some(issue => issue !== "product_name_required") && !statusChoiceRequired && !unresolvedConflicts.length;
-  const canSave = saveReadiness.valid && !statusChoiceRequired && !unresolvedConflicts.length && (!isPrestorageFlow || prestorageReadiness.ready);
+  const coreReadReady = snapshotRead.status === "ready" && statusRead.status === "ready";
+  const canSavePrestorage = coreReadReady && !saveReadiness.validation.blockingIssues.some(issue => issue !== "product_name_required") && !statusChoiceRequired && !unresolvedConflicts.length;
+  const canSave = coreReadReady && saveReadiness.valid && !statusChoiceRequired && !unresolvedConflicts.length && (!isPrestorageFlow || prestorageReadiness.ready);
 
-  if (snapshot === undefined) {
-    return <AppShell pageClass="editor-page"><Panel className="route-loader">正在读取商品资料...</Panel></AppShell>;
+  if (!coreReadReady) {
+    return <AppShell pageClass="editor-page"><ProductEditorLeaveGuard dirty={dirty} saving={saving || advancing} canSave={false} allowNavigationRef={allowNavigationRef} onSave={async () => false} /><SelectionReadState read={snapshotRead.status !== "ready" ? snapshotRead : statusRead} label="商品资料" />{dirty ? <p role="status">已输入的内容仍保留，重新读取后可以继续编辑。</p> : null}<Button variant="ghost" onClick={() => navigate(returnTo)}>返回列表</Button></AppShell>;
   }
 
   if (snapshot === null) {
@@ -324,7 +329,7 @@ function ProductEditor() {
   if (draft === null) {
     return <AppShell pageClass="editor-page"><Panel className="route-loader">{queueScopeError || "正在准备商品编辑器..."}{queueScopeError ? <Button onClick={() => navigate(returnTo)}>返回列表</Button> : null}</Panel></AppShell>;
   }
-  const currentProductId = persistedProduct?.id ?? snapshot.product?.id;
+  const currentProductId = persistedProduct?.id ?? snapshot?.product?.id;
 
   const updateDraft = (field, value) => {
     setSaved(false);
@@ -604,10 +609,11 @@ function ProductEditor() {
       {queueId ? <div className="continuous-catalog-progress" role="status"><span>{queueItem ? `第 ${queuePosition + 1} 个 / 共 ${catalogQueue.items.length} 个` : "连续建档"}</span><span>{queueScopeError || queueError || "沿预存列表顺序补齐"}</span>{queueItem ? <Button variant="ghost" disabled={saving || advancing || Boolean(queueScopeError)} onClick={() => advanceCatalog()}>跳过</Button> : null}</div> : null}
       <div className="editor-titlebar">
         <div className="editor-heading"><h1>{draft.name || "新建商品档案"}</h1>{dirty ? <Badge tone="warning">未保存修改</Badge> : saved ? <Badge tone="success">已保存</Badge> : null}</div>
-        <div className="page-actions"><Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>取消</Button>{isPrestorageFlow ? <><Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ stay: Boolean(queueItem) })}>保存预存资料</Button>{queueItem ? <Button loading={saving || advancing} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ next: true })}>保存并下一个</Button> : null}</> : queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
+        <div className="page-actions"><Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>返回列表</Button>{isPrestorageFlow ? <><Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ stay: Boolean(queueItem) })}>保存预存资料</Button>{queueItem ? <Button loading={saving || advancing} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ next: true })}>保存并下一个</Button> : null}</> : queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
       </div>
 
-      {isPrestorageFlow ? <Panel className="prestorage-editor-status" role="status"><strong>{prestorageReadiness.ready ? "资料已齐全，保存后自动进入选品库" : "资料仍在预存区，可分次补齐并保存"}</strong>{prestorageReadiness.ready ? null : <><p>待补齐：{prestorageReadiness.labels.join("、")}</p><details><summary>查看各 SKU 缺项</summary><ul>{prestorageReadiness.missing.map(item => <li key={item.key}>{item.platformSku ? `${item.platformSku}：` : ""}{item.label}</li>)}</ul></details></>}</Panel> : null}
+      {[["商品资料", snapshotRead], ["状态配置", statusRead], ["参考数据", referenceRead]].filter(([, read]) => read.status === "error").map(([label, read]) => <Panel key={label} role="alert"><p>{label}读取失败：{read.error} 已输入的内容仍保留。</p><Button onClick={read.retry}>重试{label}</Button></Panel>)}
+      {isPrestorageFlow ? <Panel className="prestorage-editor-status" role="status"><strong>{prestorageReadiness.ready ? "资料已齐全，保存后自动进入选品库" : "资料仍在预存区，可分次补齐并保存"}</strong>{prestorageReadiness.ready ? null : <><p>待补齐：{prestorageReadiness.labels.join("、")}</p><details><summary>查看各 SKU 缺项</summary><ul>{prestorageReadiness.missing.map(item => <li key={item.key}>{item.platformSku ? `${item.platformSku}：` : ""}{item.label}{item.key.startsWith("attribute_") || item.key.endsWith("_attribute") ? <button className="inline-link" type="button" onClick={() => document.getElementById(`variant-${draft.variants.findIndex(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(item.platformSku))}-attribute`)?.focus()}>处理属性</button> : null}</li>)}</ul></details></>}</Panel> : null}
       <div className="editor-grid">
         <Panel className="editor-basic-panel">
           <div className="section-heading"><h2>基本信息</h2>{prefill?.source === "erp" ? <Badge tone="info">ERP 来源 · {prefill.skuCount ?? draft.variants.length} 个 SKU</Badge> : null}</div>
@@ -652,7 +658,13 @@ function ProductEditor() {
                 const profit = salePrice != null && cost != null ? salePrice - cost - 0.7 : null;
                 const skuIssue = issueText(`variant_${index}_platform_sku_duplicate`) || saveFieldErrors[canonicalPlatformSku(platformSku)];
                 return <tr key={variant.id ?? index}>
-                  <td><input aria-label={`第 ${index + 1} 个规格名称`} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" /></td>
+                  <td><input id={`variant-${index}-attribute`} aria-label={`第 ${index + 1} 个规格名称`} aria-describedby={(prefill?.conflicts ?? []).some(item => item.field === "attribute" && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(platformSku)) ? `variant-${index}-attribute-source` : undefined} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" />
+                    {(prefill?.conflicts ?? []).filter(item => item.field === "attribute" && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(platformSku)).map(conflict => <div className="attribute-source-choice" id={`variant-${index}-attribute-source`} key={conflict.platformSku}>
+                      <small role="status">{draft.fieldEdits?.variants?.[canonicalPlatformSku(platformSku)]?.attribute ? "已确认属性，保存后生效" : "属性内容不同，请选择来源或填写正确属性"}</small>
+                      {variant.attribute?.trim() && !(conflict.candidates ?? []).some(candidate => candidate.value === variant.attribute) ? <Button variant="ghost" disabled={saving || advancing} onClick={() => updateVariant(index, "attribute", variant.attribute)}>保留当前属性：{variant.attribute}</Button> : null}
+                      {(conflict.candidates ?? []).map(candidate => <Button key={candidate.value} variant="ghost" disabled={saving || advancing} onClick={() => updateVariant(index, "attribute", candidate.value)}>采用{[...new Set((candidate.sources ?? []).map(source => ({ erp: " ERP", ledger: "台账", profit: "定稿", catalog: "档案" })[source.kind] ?? "来源"))].join("/") || "来源"}：{candidate.value}</Button>)}
+                    </div>)}
+                  </td>
                   <td><input id={`variant-${index}-sku`} aria-label={`第 ${index + 1} 个平台 SKU`} aria-invalid={Boolean(skuIssue)} aria-describedby={skuIssue ? `variant-${index}-sku-error` : undefined} className="table-input catalog-sku-input mono" value={variant.platformSku ?? ""} onChange={event => updateVariant(index, "platformSku", event.target.value)} />{skuIssue ? <small className="field-error" id={`variant-${index}-sku-error`}>{skuIssue}</small> : null}</td>
                   <td><div className="catalog-cost-cell"><strong className="mono">{cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{cost == null ? <small>{({ not_checked: "尚未查询采购", incomplete: "采购证据尚未读齐", no_valid_purchase: "已读齐，无有效采购", mapping_conflict: "商品映射待核对" })[reference.erpPurchaseState] ?? "采购资料待补"}</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
                   <td><input aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice ?? ""} onChange={event => updateVariant(index, "salePrice", event.target.value)} />

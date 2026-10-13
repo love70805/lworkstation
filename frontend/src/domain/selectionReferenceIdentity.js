@@ -1,4 +1,5 @@
 import { canonicalPlatformSkc, canonicalPlatformSku } from "./identifiers";
+import { catalogAttributeKey } from "./catalogAttributes";
 
 const text = (value) => String(value ?? "").normalize("NFKC").trim();
 
@@ -50,11 +51,15 @@ export function projectReferenceIdentity(catalogSku, evidence) {
       .toSorted((a, b) => a.value.localeCompare(b.value));
     const erpCandidates = candidates.filter(item => item.sources.some(source => source.kind === "erp"));
     const preferred = erpCandidates.length ? erpCandidates : candidates;
-    const unique = preferred.length === 1 ? preferred[0] : null;
+    const comparisonKey = value => field === "platformSkc" ? canonicalPlatformSkc(value) : catalogAttributeKey(value);
+    const unique = new Set(preferred.map(item => comparisonKey(item.value))).size === 1 ? preferred[0] : null;
     result[field] = existing || unique?.value || "";
     result[`${field}Source`] = existing ? "catalog" : unique?.sources.some(source => source.kind === "erp") ? "erp" : unique?.sources.some(source => source.kind === "ledger") ? "ledger" : unique ? "profit" : null;
-    const existingKey = existing && field === "platformSkc" ? canonicalPlatformSkc(existing) : existing;
-    result[`${field}Conflict`] = candidates.length > 1 || Boolean(existing && candidates.some(item => (field === "platformSkc" ? canonicalPlatformSkc(item.value) : item.value) !== existingKey));
+    const existingKey = existing ? comparisonKey(existing) : null;
+    result[`${field}Conflict`] = new Set(candidates.map(item => comparisonKey(item.value))).size > 1
+      || Boolean(existing && candidates.some(item => comparisonKey(item.value) !== existingKey));
+    if (field === "attribute") result.attributeOrderEquivalent = !result.attributeConflict
+      && new Set([existing, ...candidates.map(item => item.value)].filter(Boolean)).size > 1;
     result[`${field}Evidence`] = candidates;
   }
   return result;

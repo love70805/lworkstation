@@ -7,12 +7,12 @@ import WorkspacePortal from "./WorkspacePortal";
 import { ToastProvider } from "../components/UI";
 import { buildWorkspaceOperationalSummary } from "../domain/workspaceSummary";
 
-const mocks = vi.hoisted(() => ({ portal: null }));
+const mocks = vi.hoisted(() => ({ portal: null, scope: null }));
 vi.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mocks.portal }));
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main>{children}</main> }));
 vi.mock("../components/WorkspaceLedgerControls", () => ({ default: () => null }));
 vi.mock("./SalesAnalytics", () => ({ default: () => null }));
-vi.mock("../lib/useWorkspaceLedgerScope", () => ({ useWorkspaceLedgerScope: () => ({ ready: true, context: { selected: null, query: "" }, retry: vi.fn() }) }));
+vi.mock("../lib/useWorkspaceLedgerScope", () => ({ useWorkspaceLedgerScope: () => mocks.scope ?? ({ ready: true, context: { selected: null, query: "" }, retry: vi.fn() }) }));
 vi.mock("../data/database", () => ({ db: {}, getActiveMemberContext: vi.fn(), getSelectionReferenceSnapshot: vi.fn(), getWorkspaceOperationalSummary: vi.fn() }));
 vi.mock("../data/repositories/ledgerOverviewRepository", () => ({ withCurrentLedgerResults: vi.fn() }));
 
@@ -28,7 +28,22 @@ async function render(ledgers, captures = []) {
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   mocks.portal = null;
+  mocks.scope = null;
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+});
+
+it.each([["cost_pending", "下一步：核对成本", "cost"], ["finalized", "查看本月报告", "detail"]])("opens the selected %s month from its primary workflow action", async (status, label, view) => {
+  const selected = { id: "selected/month", period: "2026-07", status, costSummary: { missingCount: status === "cost_pending" ? 2 : 0 } };
+  mocks.scope = { ready: true, context: { selected, query: "ledger=selected%2Fmonth&store=测试店" }, retry: vi.fn() };
+  await render([selected]);
+  const action = [...container.querySelectorAll(".workspace-flow button")].find(button => button.textContent === label);
+  expect(action).toBeTruthy();
+  await act(async () => action.click());
+  const url = new URL(container.querySelector("output").textContent, "http://localhost");
+  expect(url.pathname).toBe("/profit");
+  expect(url.searchParams.get("ledger")).toBe(selected.id);
+  expect(url.searchParams.get("store")).toBe("测试店");
+  expect(url.searchParams.get("view")).toBe(view);
 });
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;

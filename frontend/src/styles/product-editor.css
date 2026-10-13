@@ -267,3 +267,6 @@
 .prestorage-editor-status p { color: var(--text-muted); margin: 8px 0; }
 .prestorage-editor-status summary { cursor: pointer; }
 .prestorage-editor-status ul { padding-left: 20px; }
+.attribute-source-choice { display: grid; gap: 6px; margin-top: 6px; max-width: 280px; }
+.attribute-source-choice small { color: var(--text-muted); overflow-wrap: anywhere; }
+.attribute-source-choice .button { justify-content: flex-start; white-space: normal; text-align: left; overflow-wrap: anywhere; }

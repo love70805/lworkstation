@@ -4,6 +4,8 @@ import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, Git
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
 import SelectionSalesTag from "../components/SelectionSalesTag";
+import ProductDataReadiness from "../components/ProductDataReadiness";
+import { productDataStatusLabel } from "../domain/productPublication";
 import { SELECTION_SALES_LABELS } from "../domain/selectionSalesLabels";
 import ReferenceGroupRows, { ReferenceTableHeader } from "./ReferenceGroupRows";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
@@ -35,12 +37,6 @@ const catalogSourceLabels = {
   manual_confirmed: "人工确认",
   finalized_profit_history: "定稿历史",
   supplier_landed: "1688 参考",
-};
-
-const dataStatusLabels = {
-  complete: "完整",
-  partial: "部分覆盖",
-  missing: "暂无",
 };
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
@@ -248,9 +244,11 @@ function ProductLibraryView({ workspaceId, view }) {
     const matchesData = dataStatus === "all"
       || (dataStatus === "missing_purchase" && product.dataReadiness?.purchase.status !== "complete")
       || (dataStatus === "missing_profit" && product.dataReadiness?.profit.status !== "complete")
+      || (dataStatus === "missing_reference_profit" && product.dataReadiness?.referenceProfit?.status !== "complete")
       || (dataStatus === "missing_mapping" && product.dataReadiness?.warehouseMapping.status !== "complete")
       || (dataStatus === "erp_complete" && product.dataReadiness?.purchase.status === "complete")
       || (dataStatus === "profit_complete" && product.dataReadiness?.profit.status === "complete")
+      || (dataStatus === "reference_profit_complete" && product.dataReadiness?.referenceProfit?.status === "complete")
       || (dataStatus === "mapping_complete" && product.dataReadiness?.warehouseMapping.status === "complete");
     const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps;
     return matchesStatus && matchesData && matchesMissing && matchesProductSupplier(product, normalizedSupplierNumber);
@@ -392,7 +390,7 @@ function ProductLibraryView({ workspaceId, view }) {
     { accessorKey: "store", header: "店铺", cell: ({ getValue }) => <Badge>{getValue()}</Badge> },
     { id: "productStatus", header: "状态", cell: ({ row }) => { const resolved = resolveProductStatus(row.original, salesStatusDefinitions); const definition = resolveSalesStatus(resolved.statusId); return <span><Badge tone={definition?.tone ?? "neutral"} dot>{definition?.label ?? "未设置"}</Badge>{row.original.legacyStatusConflict || resolved.legacyConflict ? <small className="row-subtitle">旧状态待选择</small> : null}</span>; } },
     { id: "salesLabel", header: "月末七天销量", enableSorting: false, cell: ({ row }) => <SelectionSalesTag item={row.original.automaticSalesTag} /> },
-    { id: "dataReadiness", header: "经营数据", enableSorting: false, cell: ({ row }) => <span className="product-data-stack"><small>采购 <Badge tone={row.original.dataReadiness?.purchase.status === "complete" ? "success" : row.original.dataReadiness?.purchase.status === "partial" ? "warning" : "neutral"}>{dataStatusLabels[row.original.dataReadiness?.purchase.status] ?? "暂无"}</Badge></small><small>利润 <Badge tone={row.original.dataReadiness?.profit.status === "complete" ? "success" : row.original.dataReadiness?.profit.status === "partial" ? "warning" : "neutral"}>{dataStatusLabels[row.original.dataReadiness?.profit.status] ?? "暂无"}</Badge></small><small>映射 <Badge tone={row.original.dataReadiness?.warehouseMapping.status === "complete" ? "success" : row.original.dataReadiness?.warehouseMapping.status === "partial" ? "warning" : "neutral"}>{dataStatusLabels[row.original.dataReadiness?.warehouseMapping.status] ?? "暂无"}</Badge></small></span> },
+    { id: "dataReadiness", header: "参考与核算状态", enableSorting: false, cell: ({ row }) => <ProductDataReadiness readiness={row.original.dataReadiness} /> },
     { accessorKey: "updatedAt", header: "最后更新", cell: ({ getValue }) => <span className="mono">{formatUpdatedAt(getValue())}</span> },
   ], [allFilteredSelected, duplicateSkcCountByProductId, notify, salesStatusDefinitions, selectedProductIdSet]);
 
@@ -423,9 +421,11 @@ function ProductLibraryView({ workspaceId, view }) {
         售价: product.salePrice ?? "",
         币种: "CNY",
         店铺: product.store,
-        采购数据: dataStatusLabels[product.dataReadiness?.purchase.status] ?? "暂无",
-        利润数据: dataStatusLabels[product.dataReadiness?.profit.status] ?? "暂无",
-        仓库SKU映射: dataStatusLabels[product.dataReadiness?.warehouseMapping.status] ?? "暂无",
+        ERP采购数据: productDataStatusLabel("purchase", product.dataReadiness?.purchase.status),
+        参考利润数据: productDataStatusLabel("referenceProfit", product.dataReadiness?.referenceProfit.status),
+        SKU参考单件利润: product.skuReferences.map(sku => `${sku.platformSku}=${sku.referenceUnitProfit ?? "待成本/售价"}`).join("；"),
+        定稿历史: productDataStatusLabel("profit", product.dataReadiness?.profit.status),
+        仓库SKU映射: productDataStatusLabel("warehouseMapping", product.dataReadiness?.warehouseMapping.status),
         数据状态: statusLabel[product.status] ?? product.status,
         状态: salesStatusLabel(resolveProductStatus(product, salesStatusDefinitions).statusId),
         重复SKC档案数: duplicateSkcCountByProductId.get(product.id) ?? 1,
@@ -659,6 +659,7 @@ function ProductLibraryView({ workspaceId, view }) {
         </>
       ) : view === "official" ? (
         <>
+          <div className="selection-workflow-note"><p>参考利润用于选品；定稿历史来自月度报告，尚无定稿不代表商品资料缺失。</p><Button variant="ghost" icon={WalletCards} onClick={() => navigate("/profit")}>核对月度利润</Button></div>
           <Panel className="library-filter-panel">
             <div className="library-filters">
               <SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />
@@ -672,9 +673,9 @@ function ProductLibraryView({ workspaceId, view }) {
               <select className="select-input" aria-label="按档案类型筛选" value={recordStatus} onChange={event => setRecordStatus(event.target.value)}><option value="all">全部档案</option><option value="active">正式档案</option><option value="draft">草稿资料</option><option value="inactive">停用资料</option></select>
               {salesLabelFilter}
               <select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
-                <option value="all">全部经营数据</option><option value="missing_purchase">缺少采购数据</option><option value="missing_profit">缺少利润数据</option><option value="missing_mapping">缺少仓库 SKU 映射</option><option value="erp_complete">采购数据已覆盖</option><option value="profit_complete">已有利润数据</option><option value="mapping_complete">仓库 SKU 已映射</option>
+                <option value="all">全部参考与核算状态</option><option value="missing_purchase">ERP 采购未覆盖</option><option value="missing_reference_profit">参考利润待补</option><option value="missing_profit">定稿历史未覆盖</option><option value="missing_mapping">仓库 SKU 待映射</option><option value="erp_complete">ERP 采购已覆盖</option><option value="reference_profit_complete">参考利润可用</option><option value="profit_complete">定稿历史已覆盖</option><option value="mapping_complete">仓库 SKU 已映射</option>
               </select>
-              <button className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly((value) => !value)}><AlertCircle size={17} />缺失数据（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
+              <button className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly((value) => !value)}><AlertCircle size={17} />资料/参考待补（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
               {duplicateSkcGroups.length ? <button className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly((value) => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
               {duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}
               <Button variant="ghost" onClick={() => { setQuery(""); setSupplierNumber(""); setStore("all"); setStatus("all"); setRecordStatus("all"); setDataStatus("all"); setSalesLabel("all"); setMissingOnly(false); setDuplicatesOnly(false); }}>清空筛选</Button>

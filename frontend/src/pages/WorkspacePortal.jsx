@@ -125,6 +125,7 @@ export default function WorkspacePortal() {
     { title: workflowFrozen ? "查看本月报告" : "保存本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "登记代发，预览后保存", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
   ];
   const taskItems = useMemo(() => buildWorkspaceTaskItems(summary), [summary]);
+  const workflowAction = workflowSteps[Math.min(workflowStep, workflowSteps.length - 1)];
 
   const runHealthCheck = () => {
     setHealthChecked(false);
@@ -166,6 +167,7 @@ export default function WorkspacePortal() {
         <div className="workspace-flow-heading">
           <div><h2 id="workspace-flow-title">本月核算流程</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
           {workflowLedger ? <span className="workspace-flow-period mono">{workflowLedger.period}</span> : null}
+          <Button variant="primary" disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{workflowFrozen ? workflowAction.title : `下一步：${workflowAction.title}`}</Button>
         </div>
         <div className="workspace-flow-steps">
           {workflowSteps.map((step, index) => (
