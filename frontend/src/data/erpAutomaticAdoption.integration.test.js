@@ -10,6 +10,7 @@ import { costDraftKey } from '../lib/costMatchingDraft';
 import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
 import { buildErpInboxQueue } from '../domain/erpInboxMatching';
 import { sourceRevision, selectionFactsRevision } from './db/derivedCache';
+import { calculateFormalLedgerRows } from '../domain/ledgerProfit';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1'}={}){
@@ -89,6 +90,25 @@ it('automatically adopts only normal items on receipt, preserves partial history
  expect({rows:await db.erpCostRows.count(),audit:await db.auditEvents.count()}).toEqual(before);expect(await db.erpCostBatches.count()).toBe(1);
  await expect(rejectErpCostInboxBatches({ids:[receipt.id]})).rejects.toThrow('删除');
  await voidPublishedErpCostBatch({inboxId:receipt.id,reason:'合成撤回'});await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);expect((await db.erpCostInbox.get(receipt.id)).status).toBe('voided');
+});
+it('adopts healthy sibling SKUs and includes their costs in profit while one SKU under the same SKC is anomalous', async () => {
+ const ledger = await createOrGetMonthlyLedger({ period: '2026-09' });
+ const expectedSkus = ['PACK-10', 'PACK-50', 'PACK-20'].map(platformSku => ({ platformSku, platformSkc: 'SKC-PACK' }));
+ const prices = [1, 1.9791, 1.0323];
+ await db.salesRows.bulkAdd(expectedSkus.map(row => ({ ...row, workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: '甲', quantity: 2, amount: 100, importedAt: '2026-09-30T00:00:00Z' })));
+ const request = buildErpCostRequest({ id: 'REQ-SIBLINGS', workspaceId: ledger.workspaceId, ledgerId: ledger.id, ledgerPeriod: ledger.period, platformSkcs: ['SKC-PACK'], expectedSkus, requestedAt: '2026-10-01T00:00:00Z', requestedBy: 'finance' });
+ await saveErpCostRequest(request);
+ const batch = buildErpCostBatchEnvelope({ batchId: 'B-SIBLINGS', workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, platformSkcs: request.platformSkcs, expectedSkus, generatedAt: request.requestedAt,
+  results: expectedSkus.map((row, index) => ({ warehouseSku: `WH-${index + 1}`, mappings: [row], previewUnitCost: prices[index] })),
+  warehouseEvidence: expectedSkus.map((row, index) => ({ warehouseSku: `WH-${index + 1}`, evidenceComplete: true, purchaseRecords: [{ recordId: `R-${index + 1}`, purchaseDate: '2026-09-15', quantity: 2, unitPrice: prices[index] }] })) });
+ const receipt = await receiveErpCostInboxEnvelope({ envelope: buildErpCostInboxEnvelope({ batch, deliveryId: 'D-SIBLINGS', sentAt: request.requestedAt }) });
+ expect(receipt.adoptionError).toBeUndefined();
+ expect(receipt.adoption.summary).toMatchObject({ adoptedCount: 2, anomalyCount: 1, remainingCount: 1 });
+ const snapshot = await getLedgerSnapshot(ledger.id);
+ expect(snapshot.costs.map(row => row.platformSku)).toEqual(['PACK-50', 'PACK-20']);
+ const products = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
+ expect(products.find(row => row.platformSku === 'PACK-10').finalizable).toBe(false);
+ for (const platformSku of ['PACK-50', 'PACK-20']) expect(products.find(row => row.platformSku === platformSku)).toMatchObject({ finalizable: true, costSource: 'erp' });
 });
 it('does not rewrite unchanged partial adoption or invalidate live-reader caches during idle recovery',async()=>{
  const {ledger,envelope}=await seed();

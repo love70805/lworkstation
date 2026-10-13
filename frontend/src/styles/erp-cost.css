@@ -454,3 +454,64 @@
 @media (prefers-reduced-motion: reduce) {
   .erp-background-notice .spin, .erp-collection-activity .spin { animation: none; }
 }
+/* ERP 回传总览、当前缺成本与原始核验分开显示。 */
+.erp-review-panel { margin-block: 16px; padding: 18px; min-width: 0; }
+.erp-review-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.erp-review-heading h2 { margin: 0; font-size: 16px; }
+.erp-review-heading p, .erp-review-current-batch p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.erp-review-heading .button { flex-shrink: 0; }
+.erp-review-skus { display: grid; gap: 10px; }
+.erp-review-sku { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) 100px auto; align-items: start; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-bg); }
+.erp-review-identity, .erp-review-reason, .erp-review-candidate { min-width: 0; overflow-wrap: anywhere; }
+.erp-review-identity strong, .erp-review-identity span, .erp-review-identity small, .erp-review-candidate strong, .erp-review-candidate small { display: block; }
+.erp-review-identity strong { font-size: 13px; }
+.erp-review-identity span { margin-top: 5px; font-size: 12px; line-height: 1.5; }
+.erp-review-identity small, .erp-review-candidate small { margin-top: 5px; color: var(--text-muted); font-size: 12px; }
+.erp-review-reason strong { color: var(--warning); font-size: 12px; }
+.erp-review-reason p { margin: 5px 0 0; font-size: 13px; line-height: 1.6; }
+.erp-review-candidate strong { margin-top: 6px; font-size: 13px; }
+.erp-review-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.erp-review-empty { display: flex; align-items: center; gap: 8px; padding: 14px; font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+.erp-review-empty svg { flex-shrink: 0; color: var(--success); }
+.erp-review-current-batch { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 18px; margin-bottom: 14px; }
+.cost-inbox-queue-modal.erp-review-modal { width: min(1000px, calc(100vw - 24px)); }
+.erp-review-modal .modal-body { padding: 0; max-height: min(68vh, 720px); overflow-y: auto; }
+.erp-review-overview-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; padding: 16px 20px; background: var(--surface-bg); border-bottom: 1px solid var(--border); font-size: 13px; }
+.erp-review-batch { padding: 18px 20px; border-bottom: 1px solid var(--border); min-width: 0; }
+.erp-review-batch:last-child { border-bottom: none; }
+.erp-review-batch-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.erp-review-batch-heading strong { font-size: 14px; }
+.erp-review-batch-heading small { display: block; margin-top: 6px; color: var(--text-muted); font-size: 12px; }
+.erp-review-batch > p { margin: 10px 0 6px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.erp-review-batch > small { display: block; overflow-wrap: anywhere; color: var(--text-muted); font-size: 12px; }
+.erp-review-batch-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.erp-review-batch-footer label { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.erp-review-batch-detail { padding: 16px 20px; }
+.erp-review-detail-nav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.erp-review-detail-nav > span { color: var(--text-secondary); font-size: 13px; }
+.erp-review-batch-summary { padding: 14px; border: 1px solid var(--border); border-radius: 6px; }
+.erp-review-batch-summary p { margin: 10px 0; font-size: 13px; line-height: 1.6; }
+.erp-review-batch-summary > small { display: block; color: var(--text-muted); overflow-wrap: anywhere; font-size: 12px; }
+.erp-review-batch-actions { display: flex; flex-wrap: wrap; align-items: start; gap: 12px; margin-top: 14px; }
+.erp-review-more { font-size: 12px; }
+.erp-review-more summary { padding: 9px 6px; cursor: pointer; }
+.erp-review-more .button { margin-top: 4px; }
+.erp-review-covered { padding: 12px 0; font-size: 13px; }
+.erp-review-covered summary { cursor: pointer; }
+.erp-review-covered article { display: grid; gap: 5px; padding: 12px; margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
+.erp-review-covered article p { margin: 0; color: var(--text-muted); line-height: 1.6; }
+.erp-review-modal .erp-review-panel { padding: 14px 0 0; box-shadow: none; border: none; }
+.erp-review-modal .erp-review-heading { margin-bottom: 12px; }
+@media (max-width: 900px) {
+  .erp-review-sku { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+  .erp-review-candidate { align-self: center; }
+  .erp-review-actions { flex-direction: row; flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .erp-review-heading, .erp-review-current-batch { flex-direction: column; align-items: stretch; }
+  .erp-review-sku { grid-template-columns: minmax(0, 1fr); }
+  .erp-review-candidate { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+  .erp-review-modal .modal-header, .erp-review-batch, .erp-review-batch-detail { padding: 14px; }
+  .erp-review-modal .modal-footer { flex-wrap: wrap; }
+  .erp-review-modal .modal-body { max-height: 62vh; }
+}

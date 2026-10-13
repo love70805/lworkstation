@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "candidateOnly": true,
-  "integrationBranch": "codex/supplier-filter-workbench",
+  "integrationBranch": "codex/erp-inbox-review-0.4.21",
   "requiredCommits": [
+    {
+      "module": "v0.4.21-verified-main-baseline",
+      "commit": "8b34ce0"
+    },
     {
       "module": "v0.4.20-missing-group-selection-hints",
       "commit": "39f6401c7d9595f024ef58579d44e05901ed0d06"

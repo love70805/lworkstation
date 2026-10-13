@@ -76,6 +76,10 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 
 # Lworkstation 发布文件
 
+## 0.4.21 ERP 回传总览与待处理 SKU（候选准备）
+
+候选 `candidates/0.4.21/`；证据 `archive/erp-sku-isolation/`。184 文件 / 1462 前端测试、构建、ERP/同步/部署门禁及 17 组 desktop verify通过。六批总览明确返回，工作台直接列出异常 SKU、历史调价原因和来源；当前缺失与历史记录分开，金融口径保持。候选、CI及公开资产回读完成前不标记发布，本机不安装、不改真实数据/队列，见 [验收记录](../docs/RELEASE_0.4.21.md)。
+
 - `candidates/<版本与用途>/`：仅供本机验收的候选包与校验清单，不接入公开更新源。
 - `prerelease/<版本号>/`：经检查并整理的 Beta 产物，使用 `Lworkstation-Setup-<版本>.exe` 与 `beta.yml`。
 - `latest/`：当前稳定版产物，使用 `Lworkstation Setup <版本>.exe` 与 `latest.yml`。
