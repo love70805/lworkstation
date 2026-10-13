@@ -1,8 +1,14 @@
 # Lworkstation 发布状态
 
-更新时间：2026-10-12
+更新时间：2026-10-13
 
-## 当前公开稳定 Latest：0.4.19
+## 当前公开稳定 Latest：0.4.20
+
+[v0.4.20](https://github.com/love70805/lworkstation/releases/tag/v0.4.20) 提供导入货号筛选工作台、选择草稿/应用/撤销、按需平台成员与利润/ERP 共享选择器。182 文件 / 1440 项前端测试、生产构建、完整 ERP/同步门禁、17 组 desktop verify、最终隐藏候选 smoke、包内用户路径与 16 组中文浅深色窗口布局通过。704 个安装文件与 658 个生产输入逐字节一致；源码 `be6d02fdfe53576b4229428e3af86f2c105ee6b4`，安装包 119568904 字节，SHA256 `1425DF0267ED650DFBDC0416D3E59626915B8B69CFFE4457E77273769D73212E`。
+
+[PR #202](https://github.com/love70805/lworkstation/pull/202)、[收尾 PR #203](https://github.com/love70805/lworkstation/pull/203) 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/38360472063)通过。稳定标签 v0.4.20 固定 `2bc007f76e307b8290bb57694d3e00e00b1b27d1`，与验收候选代码树一致。2026-10-13T07:16:49Z 已公开非草稿、非预发布的稳定 Latest。公开页面、四附件和实际稳定更新入口匿名完整回读通过，字节数、SHA256/GitHub digest 与 EXE SHA512 均一致；发布元数据通过已连接 GitHub 只读核验，匿名 REST 当时限流。同版与跨通道保护通过，本机不安装、真实数据/队列不改写。 见[发布记录](RELEASE_0.4.20.md)。
+
+## 历史公开稳定版：0.4.19
 
 [v0.4.19](https://github.com/love70805/lworkstation/releases/tag/v0.4.19) 修复 SKU/SKC 归属冲突定稿、恢复与后台写入交错、损坏备份、货号组换机恢复和跨月份待办。181 文件 / 1428 测试、完整门禁、17 组 desktop verify、候选实际路径/18 组布局、隐藏 smoke/原生扩展及 701 文件 / 655 输入一致性通过。构建源码 `32e4bfb4cee2fdd9aa535e20d26e981cf62488e1`，安装包 SHA256 `21DAEB5A5FD9EE9C49493DD4266EDDC7F72DA8C7B0188CCBC52673E861043849`。[PR #198](https://github.com/love70805/lworkstation/pull/198) 已合并，PR 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/38201219483) 通过。稳定标签 v0.4.19 固定 `bbc6f7c2055fd22cf02d4846ab0a1a86be057226`，生产输入与验收候选逐字节相同。2026-10-12T03:54:35Z 已公开非草稿、非预发布的稳定 Latest；四公开资产匿名完整流式回读，字节数、SHA256 与 GitHub digest 一致，EXE SHA512 与 latest.yml 一致。生产更新入口从 0.4.18 识别 0.4.19，同版与跨通道保护通过。本机未安装，真实数据库与队列未改写。 见 [发布记录](RELEASE_0.4.19.md)。
 
