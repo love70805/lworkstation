@@ -1,7 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCostMatchingHref, buildProfitHref, filterProfitRows, filterProfitRowsByScope, searchProfitRows, readProfitFilter, saveProfitFilter } from "./profitFilter";
+afterEach(() => vi.unstubAllGlobals());
 
 describe("profit filter context", () => {
+  it('round-trips 10000 suppliers through a bounded, ledger/workspace-bound reference and fails closed if unavailable', () => {
+    const storage = new Map();
+    vi.stubGlobal('sessionStorage', {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)});
+    const selection = Array.from({length:10000},(_,i)=>`000${i}-LBY`);
+    const href = buildCostMatchingHref({ledgerId:'L',workspaceId:'W',supplierSelection:selection});
+    expect(href.length).toBeLessThan(200);
+    const params = new URL(href,'http://localhost').searchParams;
+    expect(readProfitFilter(params,'L',{workspaceId:'W'}).supplierSelection).toHaveLength(10000);
+    expect(readProfitFilter(params,'other',{workspaceId:'W'})).toMatchObject({supplierSelection:[],supplierScopeError:expect.any(String)});
+    expect(readProfitFilter(params,'L',{workspaceId:'other'}).supplierSelection).toEqual([]);
+    const old = params.get('supplier_scope');
+    const next = new URL(buildProfitHref({ledgerId:'L',workspaceId:'W',supplierSelection:selection.slice(0,9000)}),'http://localhost');
+    expect(next.searchParams.get('supplier_scope')).not.toBe(old);
+    expect(readProfitFilter(params,'L',{workspaceId:'W'}).supplierSelection).toHaveLength(10000);
+    storage.clear();
+    expect(readProfitFilter(params,'L',{workspaceId:'W'}).supplierSelection).toEqual([]);
+  });
   it("round-trips selected suppliers through profit and ERP routes", () => {
     const href = buildCostMatchingHref({ ledgerId: "L-1", query: "SKC-1", storeFilter: "680店", supplierSelection: ["YW-B", "YW-A"], missingOnly: true });
     const params = new URL(href, "http://localhost").searchParams;

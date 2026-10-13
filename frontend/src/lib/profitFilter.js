@@ -1,5 +1,27 @@
 const STORAGE_PREFIX = "shopeers:profit-filter:";
 const LAST_STORAGE_KEY = `${STORAGE_PREFIX}last`;
+const SCOPE_PREFIX = `${STORAGE_PREFIX}scope:`;
+const scopeCache = new Map();
+function readSupplierScope(id, ledgerId, workspaceId) {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`${SCOPE_PREFIX}${id}`) ?? 'null');
+    if (!value || value.ledgerId !== ledgerId || workspaceId && value.workspaceId !== workspaceId || !Array.isArray(value.suppliers)) throw Error('missing scope');
+    return { supplierSelection: cleanSupplierSelection(value.suppliers) };
+  } catch { return { supplierSelection: [], supplierScopeError: '货号范围引用已失效或不属于当前账本，请重新选择货号。' }; }
+}
+function saveSupplierScope(suppliers, ledgerId, workspaceId) {
+  const serialized = JSON.stringify({ suppliers, ledgerId, workspaceId: workspaceId ?? '' });
+  const cached = scopeCache.get(serialized);
+  if (cached && sessionStorage.getItem(`${SCOPE_PREFIX}${cached}`)) return cached;
+  const id = crypto.randomUUID();
+  sessionStorage.setItem(`${SCOPE_PREFIX}${id}`, serialized);
+  scopeCache.set(serialized, id);
+  while (scopeCache.size > 64) {
+    const [key, oldest] = scopeCache.entries().next().value;
+    sessionStorage.removeItem(`${SCOPE_PREFIX}${oldest}`); scopeCache.delete(key);
+  }
+  return id;
+}
 
 export const DEFAULT_PROFIT_FILTER = {
   query: "",
@@ -13,14 +35,15 @@ function cleanSupplierSelection(value) {
   return [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))].toSorted();
 }
 
-export function readProfitFilter(searchParams, ledgerId = "") {
-  const hasUrlFilter = ["q", "store", "supplier", "missing"].some((key) => searchParams?.has(key));
+export function readProfitFilter(searchParams, ledgerId = "", { workspaceId } = {}) {
+  const hasUrlFilter = ["q", "store", "supplier", "supplier_scope", "missing"].some((key) => searchParams?.has(key));
   if (hasUrlFilter) {
     return {
       query: searchParams?.get("q") ?? "",
       storeFilter: searchParams?.get("store") || "all",
       supplierSelection: searchParams?.has("supplier") ? cleanSupplierSelection(searchParams.getAll("supplier")) : null,
       missingOnly: searchParams?.get("missing") === "1",
+      ...(searchParams?.has('supplier_scope') ? readSupplierScope(searchParams.get('supplier_scope'), ledgerId || searchParams.get('ledger') || '', workspaceId) : {}),
     };
   }
 
@@ -89,7 +112,7 @@ export function readProfitView(searchParams) {
   return ["detail", "cost"].includes(view) ? view : null;
 }
 
-export function buildProfitQuery({ ledgerId, query = "", storeFilter = "all", supplierSelection = null, missingOnly = false, view } = {}) {
+export function buildProfitQuery({ ledgerId, workspaceId, query = "", storeFilter = "all", supplierSelection = null, missingOnly = false, view } = {}) {
   const params = new URLSearchParams();
   if (["detail", "cost"].includes(view)) params.set("view", view);
   if (ledgerId) params.set("ledger", ledgerId);
@@ -97,7 +120,10 @@ export function buildProfitQuery({ ledgerId, query = "", storeFilter = "all", su
   if (storeFilter && storeFilter !== "all") params.set("store", storeFilter);
   if (Array.isArray(supplierSelection)) {
     if (supplierSelection.length === 0) params.append("supplier", "");
-    else supplierSelection.forEach((supplier) => params.append("supplier", supplier));
+    else if (supplierSelection.length > 80 || JSON.stringify(supplierSelection).length > 1500) {
+      try { if (!ledgerId) throw Error('ledger required'); params.set('supplier_scope', saveSupplierScope(cleanSupplierSelection(supplierSelection), ledgerId, workspaceId)); }
+      catch { params.set('supplier_scope', 'unavailable'); }
+    } else supplierSelection.forEach((supplier) => params.append("supplier", supplier));
   }
   if (missingOnly) params.set("missing", "1");
   return params;

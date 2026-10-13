@@ -47,6 +47,8 @@ function mappedValue(row, mapping, key) {
 function normalizedText(value) {
   return String(value ?? "").normalize("NFKC").trim();
 }
+// Matching may fold widths/case; original goods identities must survive import.
+const identityText = value => String(value ?? "").trim();
 
 function hasValue(value) {
   return value !== null && value !== undefined && normalizedText(value) !== "";
@@ -99,7 +101,7 @@ export function collectSalesImportFacets(rawRows = [], mapping = {}) {
   const supplierCounts = new Map();
   const movementTypeCounts = new Map();
   rawRows.forEach((row) => {
-    const supplier = normalizedText(mappedValue(row, mapping, "supplierNumber"));
+    const supplier = identityText(mappedValue(row, mapping, "supplierNumber"));
     const movementType = normalizedText(mappedValue(row, mapping, "movementType"));
     if (supplier) supplierCounts.set(supplier, (supplierCounts.get(supplier) ?? 0) + 1);
     if (mapping.movementType) movementTypeCounts.set(movementType, (movementTypeCounts.get(movementType) ?? 0) + 1);
@@ -156,15 +158,15 @@ export function validateSalesRows(rawRows, mapping, {
   }
 
   const movementTypeFilter = Array.isArray(movementTypes) ? new Set(movementTypes.map(normalizedText)) : null;
-  const supplierFilter = Array.isArray(supplierNumbers) ? new Set(supplierNumbers.map(normalizedText)) : null;
+  const supplierFilter = Array.isArray(supplierNumbers) ? new Set(supplierNumbers.map(identityText)) : null;
 
   rawRows.forEach((rawRow, index) => {
     const sourceRow = rawRow.__salesSource?.sourceRow ?? index + 2;
     const issues = [];
     const store = normalizedText(mappedValue(rawRow, mapping, "store")) || normalizedText(defaultStore);
-    const supplierNumber = normalizedText(mappedValue(rawRow, mapping, "supplierNumber"));
-    const platformSkc = normalizedText(mappedValue(rawRow, mapping, "platformSkc"));
-    const platformSku = normalizedText(mappedValue(rawRow, mapping, "platformSku"));
+    const supplierNumber = identityText(mappedValue(rawRow, mapping, "supplierNumber"));
+    const platformSkc = identityText(mappedValue(rawRow, mapping, "platformSkc"));
+    const platformSku = identityText(mappedValue(rawRow, mapping, "platformSku"));
     const attribute = normalizedText(mappedValue(rawRow, mapping, "attribute"));
     const movementType = normalizedText(mappedValue(rawRow, mapping, "movementType"));
     const groupSkc = platformSkc || supplierNumber;

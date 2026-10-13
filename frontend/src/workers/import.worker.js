@@ -1,5 +1,7 @@
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import { createSupplierFilterIndex, addSupplierSourceRows, addSupplierEvidence } from '../domain/supplierFilterPreview';
+import { readSupplierFilterMembers, stageSupplierFilterIndex } from '../lib/supplierFilterStage';
 import { collectSalesImportFacets, salesPeriodEvidenceFromValidation, detectLedgerReport, suggestLedgerReportMapping, suggestMappings, validateSalesRows } from "../lib/salesImport";
 
 import { workbookSheetChunks } from "../lib/workbookSheetChunks";
@@ -117,6 +119,11 @@ self.onmessage = async ({ data }) => {
       self.postMessage({ type: "released", requestId });
       return;
     }
+    if (type === 'supplier-members') {
+      const result = await readSupplierFilterMembers(data.preview, data.supplierNumber, data.options);
+      self.postMessage({ type: 'supplier-members', requestId, revision: data.preview.scope?.revision, ...result });
+      return;
+    }
     if (type === "parse") {
       self.postMessage({ type: "progress", requestId, jobId: data.jobId, stage: "读取工作簿", completed: 0, total: null });
       const rows = await parseWorkbook(data.buffer, data.extension, data.selectedSheet);
@@ -169,13 +176,16 @@ self.onmessage = async ({ data }) => {
       if (!rows) throw new Error("导入预览已失效，请重新选择文件。");
       const facets = collectSalesImportFacets(rows, data.mapping);
       const noSelection = Array.isArray(data.options?.supplierNumbers) && !data.options.supplierNumbers.length;
+      const supplierIndex = data.buildSupplierIndex === false ? null : createSupplierFilterIndex(data.mapping, { workspaceId: data.options?.workspaceId, store: data.options?.defaultStore, revision: data.revision, requestId });
       const stageId = data.stageOwner ? await createImportStage(data.stageOwner) : null;
       const evidence = { sourceField: "sourceAddedAt", sourceColumn: data.mapping?.sourceAddedAt ?? "", distribution: [], validCount: 0, missingCount: 0, invalidCount: 0, errorCount: 0, ignoredCount: 0, eligibleCount: 0,
         validationSummary: { sourceRowCount: rows.length, validRowCount: 0, errorCount: 0, ignoredCount: 0, platformSkcMissingCount: 0, errors: [], ignored: [] } };
       const months = new Map(); let chunkCount = 0;
       for (let start = 0; start < rows.length; start += 2000) {
         const validation = validateSalesRows(rows.slice(start, start + 2000), data.mapping, { ...data.options, period: undefined });
-        const chunk = salesPeriodEvidenceFromValidation(noSelection ? validateSalesRows(rows.slice(start, start + 2000), data.mapping, { ...data.options, supplierNumbers: undefined, period: undefined }) : validation, data.mapping);
+        const allValidation = supplierIndex || noSelection ? validateSalesRows(rows.slice(start, start + 2000), data.mapping, { ...data.options, supplierNumbers: undefined, period: undefined }) : validation;
+        const chunk = salesPeriodEvidenceFromValidation(noSelection ? allValidation : validation, data.mapping);
+        if (supplierIndex) { addSupplierSourceRows(supplierIndex, rows.slice(start, start + 2000), data.mapping); addSupplierEvidence(supplierIndex, allValidation.rows); }
         for (const key of ['validCount', 'missingCount', 'invalidCount', 'errorCount', 'ignoredCount', 'eligibleCount']) evidence[key] += chunk[key];
         for (const key of ['validRowCount', 'errorCount', 'ignoredCount', 'platformSkcMissingCount']) evidence.validationSummary[key] += noSelection ? (key === 'ignoredCount' ? validation.ignored.length : 0) : chunk.validationSummary[key];
         for (const key of ['errors', 'ignored']) evidence.validationSummary[key].push(...chunk.validationSummary[key].slice(0, Math.max(0, 50 - evidence.validationSummary[key].length)));
@@ -186,7 +196,8 @@ self.onmessage = async ({ data }) => {
       evidence.distribution = [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, count]) => ({ month, count }));
       evidence.suggestedPeriod = months.size === 1 && !evidence.missingCount && !evidence.invalidCount && !evidence.errorCount ? evidence.distribution[0].month : null;
       const rowSource = stageId ? await sealImportStage(stageId, evidence.validationSummary.validRowCount, chunkCount) : undefined;
-      self.postMessage({ type: "period-inspected", requestId, evidence, facets, rowSource });
+      const supplierPreview = supplierIndex ? await stageSupplierFilterIndex(supplierIndex, data.stageOwner ?? 'worker-preview') : undefined;
+      self.postMessage({ type: "period-inspected", requestId, revision: data.revision, evidence, facets, rowSource, supplierPreview });
       return;
     }
 

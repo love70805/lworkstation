@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.19",
+  "version": "0.4.20",
   "candidateOnly": true,
-  "integrationBranch": "codex/reliability-fixes-0.4.19",
+  "integrationBranch": "codex/supplier-filter-workbench",
   "requiredCommits": [
+    {
+      "module": "v0.4.20-supplier-filter-drafts-and-scope",
+      "commit": "3e6c14c483c5a835c50d16562585229cb2e5d6ed"
+    },
+    {
+      "module": "v0.4.20-verified-main-baseline",
+      "commit": "a6a1506c3722f97e451815e436e2593e1bee2f36"
+    },
     {
       "module": "v0.4.19-profit-identity-and-backup-recovery",
       "commit": "0f13cce1c0fabfe4d68665a6c13f9243768ad331"

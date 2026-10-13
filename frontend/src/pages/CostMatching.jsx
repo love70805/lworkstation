@@ -171,8 +171,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const fileInputRef = useRef(null);
   const ledgerId = validatedContext?.ledgerId ?? searchParams.get("ledger");
   const filterSearchKey = searchParams.toString();
-  const profitFilter = useMemo(() => ({ ...readProfitFilter(searchParams, ledgerId), ...(validatedContext ? { storeFilter: validatedContext.store } : {}) }), [filterSearchKey, ledgerId, validatedContext]);
-  const profitHref = useMemo(() => buildProfitHref({ ledgerId, ...profitFilter }), [ledgerId, profitFilter]);
+  const snapshot = useLatestSalesImport(ledgerId);
+  const profitFilter = useMemo(() => ({ ...readProfitFilter(searchParams, ledgerId || snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId }), ...(validatedContext ? { storeFilter: validatedContext.store } : {}) }), [filterSearchKey, ledgerId, validatedContext, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
+  const profitHref = useMemo(() => buildProfitHref({ ledgerId, workspaceId: snapshot?.ledger?.workspaceId, ...profitFilter }), [ledgerId, profitFilter, snapshot?.ledger?.workspaceId]);
   const importSearch = useMemo(() => {
     const next = new URLSearchParams(searchParams);
     if (ledgerId) next.set("ledger", ledgerId);
@@ -187,7 +188,6 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const tableHandleRef = useRef(null);
   const rememberTable = useCallback(handle => { if (handle) tableHandleRef.current = handle; }, []);
   const viewStateRef = useRef(null);
-  const snapshot = useLatestSalesImport(ledgerId);
   const latestRequest = useLiveQuery(() => getLatestErpCostRequest(ledgerId), [ledgerId], null);
   const allInboxRecords = useLiveQuery(() => listErpCostInbox({ statuses: ["pending", "loaded", "applied", "rejected", "voided"] }), [], []);
   const requestRecords = useLiveQuery(() => listErpCostRequests(), [], []);
@@ -334,7 +334,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const suppliers = useMemo(() => [...new Set(formalSalesLines.filter((row) => profitFilter.storeFilter === "all" || row.store === profitFilter.storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [formalSalesLines, profitFilter.storeFilter]);
   const changeScope = (patch) => {
     const next = { ...profitFilter, ...patch };
-    const nextParams = buildProfitQuery({ ledgerId: snapshot?.ledger?.id ?? ledgerId, ...next, view: searchParams.get("view") });
+    const nextParams = buildProfitQuery({ ledgerId: snapshot?.ledger?.id ?? ledgerId, workspaceId: snapshot?.ledger?.workspaceId, ...next, view: searchParams.get("view") });
     nextParams.set("store", next.storeFilter || "all");
     nextParams.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(nextParams, { replace: true });
@@ -1011,7 +1011,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       {sourceText.trim() && inboxQueue.items.some((item) => item.scopeMatched && item.inbox.status === "pending" && item.inbox.id !== loadedInboxId) ? <Panel><p>本机已收到新批次；正常项已自动处理，剩余项和当前草稿仍保留。</p><Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></Panel> : null}
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={() => setInboxQueueOpen(true)} title="查看按时间排列的 ERP 回传批次">回传记录 · {inboxQueue.pendingCount} 批待核对</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
-      {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} onChange={changeScope} /> : null}
+      {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={formalSalesLines} onChange={changeScope} /> : null}
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
       {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会确定父级关系，冲突成本不能用于新报告，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
       {!locked && filteredSalesLines.some(row => row.costIdentityIssue?.code === 'erp_cost_skc_mismatch') ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>已有 ERP 成本与当前台账归属不一致</strong><small>这些成本暂不计入正式利润。展开对应明细核对原始 SKC，重新采集当前归属，或按店铺人工更正。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
