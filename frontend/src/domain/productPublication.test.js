@@ -25,4 +25,11 @@ describe("product publication lifecycle", () => {
       hasGaps: true,
     });
   });
+
+  it("does not treat an unfinalized month as missing catalog data when reference profit is available", () => {
+    expect(buildProductDataReadiness({ skuCount: 5, erpCoveredSkuCount: 5, warehouseMappedSkuCount: 5, referenceProfitSkuCount: 5 }))
+      .toMatchObject({ profit: { status: "missing" }, referenceProfit: { status: "complete" }, hasGaps: false });
+    expect(buildProductDataReadiness({ skuCount: 5, erpCoveredSkuCount: 5, warehouseMappedSkuCount: 5, referenceProfitSkuCount: 4 }))
+      .toMatchObject({ referenceProfit: { status: "partial", missingSkuCount: 1 }, hasGaps: true });
+  });
 });

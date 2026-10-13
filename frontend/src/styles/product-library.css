@@ -256,3 +256,5 @@
 .prestorage-readiness summary { cursor: pointer; color: var(--text-muted); }
 .prestorage-readiness ul { margin: 8px 0; padding-left: 20px; }
 @media (max-width: 760px) { .prestorage-flow { grid-template-columns: 1fr; } .prestorage-flow .button { grid-column: 1; grid-row: auto; justify-self: start; } }
+.selection-workflow-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; color: var(--text-muted); font-size: 13px; }
+.selection-workflow-note p { margin: 0; flex: 1 1 280px; }

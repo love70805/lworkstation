@@ -842,6 +842,7 @@ export async function listProductCatalogRecords() {
         supplierNumbers: [...new Set(skus.flatMap(sku => projectedReferenceBySku.get(sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku))?.supplierNumbers ?? []))],
         erpCoveredSkuCount: erpCoveredSkuCount + erpReferenceCoveredSkuCount,
         profitHistorySkuCount,
+        referenceProfitSkuCount: skuReferences.filter(item => item.referenceUnitProfit != null).length,
         warehouseMappedSkuCount,
       });
       const lowestReferenceCost = referenceCosts.length > 0 ? Math.min(...referenceCosts) : null;

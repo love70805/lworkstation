@@ -36,15 +36,27 @@ export function buildProductDataReadiness({
   skuCount = 0,
   erpCoveredSkuCount = 0,
   profitHistorySkuCount = 0,
+  referenceProfitSkuCount = 0,
   warehouseMappedSkuCount = 0,
 } = {}) {
   const purchase = coverage(skuCount, erpCoveredSkuCount);
   const profit = coverage(skuCount, profitHistorySkuCount);
+  const referenceProfit = coverage(skuCount, referenceProfitSkuCount);
   const warehouseMapping = coverage(skuCount, warehouseMappedSkuCount);
   return {
     purchase,
     profit,
+    referenceProfit,
     warehouseMapping,
-    hasGaps: [purchase, profit, warehouseMapping].some((item) => item.status !== "complete"),
+    hasGaps: [purchase, referenceProfit, warehouseMapping].some((item) => item.status !== "complete"),
   };
+}
+
+export function productDataStatusLabel(kind, status) {
+  return ({
+    purchase: { complete: "已覆盖", partial: "部分覆盖", missing: "未采集" },
+    referenceProfit: { complete: "可参考", partial: "部分可参考", missing: "待成本/售价" },
+    profit: { complete: "已有定稿", partial: "部分定稿", missing: "尚无定稿" },
+    warehouseMapping: { complete: "已映射", partial: "部分映射", missing: "待映射" },
+  })[kind]?.[status] ?? "待读取";
 }

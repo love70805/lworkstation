@@ -1,6 +1,7 @@
 import { canonicalPlatformSkc, canonicalPlatformSku, canonicalWarehouseSku } from "./identifiers";
 import { normalizeErpCatalogFields, normalizeErpCatalogUrl, normalizeErpPurchaseCatalog, normalizeErpSupplierLinks } from "./erpCatalogFields";
 import { suggestErpProductTitles } from "./erpProductTitles";
+import { catalogAttributeKey } from "./catalogAttributes";
 
 const text = value => String(value ?? "").trim();
 const fields = ["platformSkc", "productName", "imageUrl", "attribute", "warehouseSku", "storeName"];
@@ -191,7 +192,8 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
 
 export function erpCatalogField(catalog, field) {
   const candidates = [...(catalog?.fields[field]?.values() ?? [])];
-  return { value: candidates.length === 1 ? candidates[0].value : "", conflict: candidates.length > 1, candidates };
+  const distinctCount = field === "attribute" ? new Set(candidates.map(item => catalogAttributeKey(item.value))).size : candidates.length;
+  return { value: distinctCount === 1 ? candidates[0].value : "", conflict: distinctCount > 1, candidates };
 }
 
 export function erpCatalogIdentityRows(index) {

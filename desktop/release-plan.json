@@ -1,8 +1,8 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.21",
+  "version": "0.4.22",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-inbox-review-0.4.21",
+  "integrationBranch": "codex/catalog-usability-0.4.22",
   "requiredCommits": [
     {
       "module": "v0.4.21-batch-overview-and-SKU-reasons",

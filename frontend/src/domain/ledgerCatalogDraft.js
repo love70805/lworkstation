@@ -1,4 +1,5 @@
 import { canonicalPlatformSkc, canonicalPlatformSku } from './identifiers';
+import { catalogAttributeKey } from './catalogAttributes';
 
 const text = value => String(value ?? '').normalize('NFKC').trim();
 const key = value => text(value).toUpperCase();
@@ -29,7 +30,7 @@ export function createLedgerCatalogDraftBuilder() {
       const candidates = [], issues = [];
       for (const entry of identities.values()) {
         const reason = entry.skcs.size === 0 ? 'missing_skc' : entry.skcs.size > 1 ? 'skc_conflict'
-          : entry.stores.size !== 1 ? 'store_conflict' : entry.attributes.size > 1 ? 'attribute_conflict' : null;
+          : entry.stores.size !== 1 ? 'store_conflict' : new Set([...entry.attributes].map(catalogAttributeKey)).size > 1 ? 'attribute_conflict' : null;
         if (reason) { issues.push({ platformSku: entry.platformSku, reason }); continue; }
         candidates.push({
           platformSku: entry.platformSku, canonicalPlatformSku: entry.canonicalPlatformSku,

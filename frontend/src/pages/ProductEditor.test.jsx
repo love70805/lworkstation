@@ -12,7 +12,7 @@ import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 import { createContinuousCatalogQueue, continuousCatalogPath } from "../domain/continuousCatalogQueue";
 
 const delayedWrite = vi.hoisted(() => ({ wait: null, input: null }));
-const editorSnapshotOverride = vi.hoisted(() => ({ value: null }));
+const editorSnapshotOverride = vi.hoisted(() => ({ value: null, error: null }));
 const catalogRequests = vi.hoisted(() => ({ input: null, registered: false }));
 vi.mock("../data/repositories/erpCatalogRepository", async (importOriginal) => {
   const actual = await importOriginal();
@@ -21,7 +21,7 @@ vi.mock("../data/repositories/erpCatalogRepository", async (importOriginal) => {
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main>{children}</main> }));
 vi.mock("../data/database", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, getProductEditorSnapshot: async input => editorSnapshotOverride.value ?? actual.getProductEditorSnapshot(input), saveProductCatalogRecord: async (input) => { delayedWrite.input = input; if (delayedWrite.wait) await delayedWrite.wait; return actual.saveProductCatalogRecord(input); } };
+  return { ...actual, getProductEditorSnapshot: async input => { if (editorSnapshotOverride.error) throw editorSnapshotOverride.error; return editorSnapshotOverride.value ?? actual.getProductEditorSnapshot(input); }, saveProductCatalogRecord: async (input) => { delayedWrite.input = input; if (delayedWrite.wait) await delayedWrite.wait; return actual.saveProductCatalogRecord(input); } };
 });
 
 let container, root, router;
@@ -42,18 +42,18 @@ const change = (element, value) => act(async () => {
   element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
 });
 const click = (name) => act(async () => button(name).click());
-const mount = async (url, { library = false, initialEntries, initialIndex } = {}) => {
+const mount = async (url, { library = false, initialEntries, initialIndex, readError = false } = {}) => {
   router = createMemoryRouter([
     { path: "/products/edit", element: <ProductEditor /> },
     { path: "/products", element: library ? <ProductLibrary /> : <p>商品列表</p> },
   ], { initialEntries: initialEntries ?? ["/products", url], initialIndex });
   await act(async () => root.render(<ToastProvider><RouterProvider router={router} /></ToastProvider>));
-  await waitFor(() => library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索预存资料" : "搜索待确认采集") : input("商品名称"));
+  await waitFor(() => readError ? container.textContent.includes("商品资料读取失败") : library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索预存资料" : "搜索待确认采集") : input("商品名称"));
 };
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  delayedWrite.wait = null; delayedWrite.input = null; catalogRequests.input = null; catalogRequests.registered = false; editorSnapshotOverride.value = null;
+  delayedWrite.wait = null; delayedWrite.input = null; catalogRequests.input = null; catalogRequests.registered = false; editorSnapshotOverride.value = null; editorSnapshotOverride.error = null;
   await db.delete(); await db.open();
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -64,6 +64,50 @@ afterEach(async () => {
 });
 
 describe("product editing workflow", () => {
+  it("recovers a failed editor read instead of remaining on a loading screen", async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    editorSnapshotOverride.error = new Error("隔离读取故障");
+    await mount(`/products/edit?product=${product.id}`, { readError: true });
+    expect(button("返回列表")).toBeTruthy();
+    editorSnapshotOverride.error = null;
+    await click("重试读取");
+    await waitFor(() => input("商品名称"));
+    expect(input("商品名称").value).toBe(draft.name);
+    await change(input("商品名称"), "重试后修改");
+    await click("保存修改");
+    await waitFor(async () => (await db.products.get(product.id)).name === "重试后修改");
+  });
+
+  it("explicitly confirms an existing attribute from its source without requiring a text change", async () => {
+    const { product } = await saveProductCatalogRecord({ draft, status: "draft" });
+    editorSnapshotOverride.value = { mode: "product", product, draft: { ...draft, suppliers: [] }, prefill: { conflicts: [{ platformSku: "SKU-A", field: "attribute", candidates: [{ value: "红色", sources: [{ kind: "ledger" }] }, { value: "蓝色", sources: [{ kind: "erp" }] }] }] } };
+    await mount(`/products/edit?product=${product.id}`);
+    await click("采用台账：红色");
+    expect(container.textContent).toContain("已确认属性，保存后生效");
+    await click("保存预存资料");
+    await waitFor(() => delayedWrite.input?.draft.fieldEdits?.variants?.["SKU-A"]?.attribute === true);
+    expect(delayedWrite.input.draft.variants[0].attribute).toBe("红色");
+  });
+
+  it("retains unsaved input and the leave guard when a live reread fails", async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    await mount(`/products/edit?product=${product.id}`);
+    await change(input("商品名称"), "读取失败期间的草稿");
+    editorSnapshotOverride.error = new Error("后续读取故障");
+    await act(async () => { await db.products.update(product.id, { updatedAt: "2026-10-14T02:00:00Z" }); });
+    await waitFor(() => container.textContent.includes("商品资料读取失败"));
+    await click("返回列表");
+    await waitFor(() => container.textContent.includes("商品有未保存修改"));
+    expect(button("保存后离开").disabled).toBe(true);
+    await click("继续编辑");
+    editorSnapshotOverride.error = null;
+    await click("重试读取");
+    await waitFor(() => input("商品名称"));
+    expect(input("商品名称").value).toBe("读取失败期间的草稿");
+    await click("保存修改");
+    await waitFor(async () => (await db.products.get(product.id)).name === "读取失败期间的草稿");
+  });
+
   it("offers newly returned SKUs without overwriting an unsaved manual title", async () => {
     const id = await db.erpCostRows.add(erpProductCatalogFixture());
     await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
