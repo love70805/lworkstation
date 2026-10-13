@@ -5,6 +5,10 @@
   "integrationBranch": "codex/erp-inbox-review-0.4.21",
   "requiredCommits": [
     {
+      "module": "v0.4.21-batch-overview-and-SKU-reasons",
+      "commit": "f02174147ee481df14fa6e9ad2144ca8f729cb8c"
+    },
+    {
       "module": "v0.4.21-verified-main-baseline",
       "commit": "8b34ce0"
     },
