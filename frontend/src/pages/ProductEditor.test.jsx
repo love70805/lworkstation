@@ -80,9 +80,9 @@ describe("product editing workflow", () => {
 
   it("explicitly confirms an existing attribute from its source without requiring a text change", async () => {
     const { product } = await saveProductCatalogRecord({ draft, status: "draft" });
-    editorSnapshotOverride.value = { mode: "product", product, draft: { ...draft, suppliers: [] }, prefill: { conflicts: [{ platformSku: "SKU-A", field: "attribute", candidates: [{ value: "红色", sources: [{ kind: "ledger" }] }, { value: "蓝色", sources: [{ kind: "erp" }] }] }] } };
+    editorSnapshotOverride.value = { mode: "product", product, draft: { ...draft, suppliers: [] }, prefill: { conflicts: [{ platformSku: "SKU-A", field: "attribute", candidates: [{ value: "蓝色", sources: [{ kind: "erp" }] }] }] } };
     await mount(`/products/edit?product=${product.id}`);
-    await click("采用台账：红色");
+    await click("保留当前属性：红色");
     expect(container.textContent).toContain("已确认属性，保存后生效");
     await click("保存预存资料");
     await waitFor(() => delayedWrite.input?.draft.fieldEdits?.variants?.["SKU-A"]?.attribute === true);
