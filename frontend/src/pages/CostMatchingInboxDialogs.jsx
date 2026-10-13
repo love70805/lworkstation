@@ -2,6 +2,7 @@ import { History, Inbox, RotateCcw, Trash2 } from "lucide-react";
 import { Badge, Button, EmptyState, Modal } from "../components/UI";
 import { ERP_INBOX_MATCH_REASONS } from "../domain/erpInboxMatching";
 import { summarizeAdoptionForDisplay } from "../lib/erpAdoptionPresentation";
+import ErpInboxReviewDialog from './ErpInboxReviewPanel';
 
 export function CostMatchingInboxQueueDialog({
   open,
@@ -20,7 +21,11 @@ export function CostMatchingInboxQueueDialog({
   onLoadInbox,
   onDeleteOne,
   onVoid,
+  review,
+  onReviewItem,
+  overviewRevision,
 }) {
+  if (review) return <ErpInboxReviewDialog {...{ open, review, overviewRevision, inboxQueue, loadedInboxId, accountingReadOnly, ledgerLocked, selectedPendingInboxIds, onClose, onManualImport, onTogglePending, onDeleteSelected, onDeleteOne, onVoid, onLoadInbox, onReviewItem }} />;
   return (
     <Modal
       open={open}

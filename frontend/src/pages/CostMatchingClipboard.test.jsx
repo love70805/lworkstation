@@ -225,6 +225,69 @@ function incomingFixture(ledgerId) {
   });
   return { request, inbox: { id: `INBOX-${ledgerId}`, workspaceId: 'W', ledgerId, requestId: request.id, batchId: batch.batchId, status: 'pending', envelope: buildErpCostInboxEnvelope({ batch, deliveryId: `D-${ledgerId}`, sentAt: batch.generatedAt }) } };
 }
+function exceptionReceipt(ledgerId, number, platformSku, records) {
+  const request = { id: `REQ-${ledgerId}-${number}`, workspaceId: 'W', ledgerId, ledgerPeriod: '2026-08', platformSkcs: ['SKC-1'], expectedSkus: [{ platformSku, platformSkc: 'SKC-1' }] };
+  const batch = buildErpCostBatchEnvelope({ batchId: `B-${ledgerId}-${number}`, workspaceId: 'W', ledgerId, requestId: request.id, platformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus,
+    generatedAt: `2026-09-0${number}T00:00:00Z`, results: [{ warehouseSku: `WH-${number}`, mappings: request.expectedSkus, previewUnitCost: 1 }],
+    warehouseEvidence: [{ warehouseSku: `WH-${number}`, evidenceComplete: true, purchaseRecords: records }],
+  });
+  return { request, inbox: { id: `INBOX-${ledgerId}-${number}`, workspaceId: 'W', ledgerId, requestId: request.id, batchId: batch.batchId, status: 'pending', receivedAt: batch.generatedAt,
+    envelope: buildErpCostInboxEnvelope({ batch, deliveryId: `D-${ledgerId}-${number}`, sentAt: batch.generatedAt }),
+    adoption: { version: 'erp-auto-adoption@1', state: 'partial', summary: { adoptedCount: 0, remainingCount: 1, anomalyCount: 1 }, items: [{ platformSku, canonicalPlatformSku: platformSku, state: 'anomaly_pending' }] },
+  } };
+}
+it('opens one procurement-price dialog at a time and preserves an entered manual correction on return', async () => {
+  const ledgerId = 'SINGLE-PRICE-DIALOG', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
+  mocks.requests = [request]; mocks.inboxRecords = [{ ...inbox, status: 'loaded' }];
+  mocks.switchInbox.mockResolvedValue({});
+  await render(['SKC-1'], 'cost_pending', { ledgerId });
+  const first = name => [...container.querySelectorAll('button')].find(item => item.textContent === name);
+  await act(async () => first('查看证据').click());
+  await act(async () => first('确认真实价格').click());
+  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('确认真实采购价');
+  await act(async () => first('取消').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('成本详情');
+  await act(async () => container.querySelector('.cost-detail-modal .modal-footer button:last-child').click());
+  await act(async () => {
+    Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '9.3' } });
+    Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '手动核实保留草稿' } });
+    first('确认真实价格').click();
+  });
+  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  await act(async () => first('保存并重新核算').click());
+  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  expect(container.querySelector('#manual-cost-value').value).toBe('9.3');
+  expect(container.querySelector('#manual-cost-reason').value).toBe('手动核实保留草稿');
+  expect(container.querySelector('.cost-detail-evidence').textContent).toContain('已处置');
+  expect(mocks.saveManual).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+});
+it('binds the next missing SKU to its own receipt and skips healthy siblings in the direct exception list', async () => {
+  const ledgerId = 'NEXT-RECEIPT';
+  const first = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
+  const records = [...Array.from({ length: 6 }, (_, i) => ({ recordId: `OLD-${i}`, purchaseDate: `2026-07-0${i + 1}`, quantity: 10, unitPrice: 2.3 })),
+    ...[1, 2, 3].map(i => ({ recordId: `LOW-${i}`, purchaseDate: `2026-08-0${i}`, quantity: 10, unitPrice: 1.55 }))];
+  const second = exceptionReceipt(ledgerId, 2, 'SKU-2', records);
+  mocks.requests = [first.request, second.request]; mocks.inboxRecords = [first.inbox, second.inbox];
+  await render(['SKC-1', 'SKC-1', 'SKC-1'], 'cost_pending', { ledgerId, costs: [{ ...formalCost, platformSku: 'SKU-1' }] });
+  await act(async () => container.querySelector('.erp-review-panel .erp-review-sku button:last-child').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-0');
+  await act(async () => {
+    Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '0' } });
+    Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '真实零值' } });
+  });
+  await act(async () => button('保存并下一项').click());
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain('甲 · SKU-2');
+  expect(dialog.textContent).toContain('近期采购价格相比历史下降');
+  expect(dialog.textContent).toContain('仓库 SKU：WH-2');
+  expect(dialog.textContent).toContain('10 件 × ¥1.5500');
+  expect(dialog.textContent).not.toContain('仓库 SKU：WH-1');
+  expect(button('保存并下一项')).toBeUndefined();
+  expect(mocks.saveManual).toHaveBeenCalledExactlyOnceWith({ ledgerId, store: '甲', platformSku: 'SKU-0', unitCost: '0', reason: '真实零值' });
+  expect(mocks.switchInbox).not.toHaveBeenCalled();
+});
 it('waits for automatic receipt adoption and shows adopted costs without loading a draft or a red error', async () => {
   const ledgerId = 'RECEIPT-PENDING', { request, inbox } = incomingFixture(ledgerId);
   mocks.requests = [request]; mocks.inboxRecords = [{ ...inbox, adoptionPending: true }];
@@ -324,6 +387,24 @@ it('corrects only missing store SKUs directly without loading a receipt, accepti
   expect(dialog()).toBeNull();
   expect(mocks.switchInbox).not.toHaveBeenCalled();
   expect(mocks.publish).not.toHaveBeenCalled();
+});
+it('counts only the anomalous SKU and keeps healthy siblings out of the missing-cost correction queue', async () => {
+  const ledgerId = 'SIBLING-CORRECTION';
+  const siblingCosts = [1.9791, 1.0323].map((price, index) => ({
+    ...formalCost, id: `C-${index}`, platformSku: `SKU-${index + 1}`, unitCost: price,
+    purchaseRecords: formalCost.purchaseRecords.map(record => ({ ...record, unitPrice: price })),
+  }));
+  mocks.inboxRecords = [{ id: 'SIBLING-INBOX', ledgerId, workspaceId: 'W', status: 'pending', receivedAt: '2026-09-01T00:00:00Z',
+    adoption: { version: 'erp-auto-adoption@1', state: 'partial', summary: { adoptedCount: 2, anomalyCount: 1, remainingCount: 1 },
+      items: [{ platformSku: 'SKU-0', canonicalPlatformSku: 'SKU-0', state: 'anomaly_pending' }, ...['SKU-1', 'SKU-2'].map(platformSku => ({ platformSku, canonicalPlatformSku: platformSku, state: 'adopted' }))] },
+  }];
+  await render(['SKC-1', 'SKC-1', 'SKC-1'], 'cost_pending', { ledgerId, costs: siblingCosts });
+  expect(container.querySelector('.match-correction strong').textContent).toBe('1 条店铺 SKU');
+  for (const sku of ['SKU-1', 'SKU-2']) expect(container.querySelector(`[data-platform-sku="${sku}"] .cost-match-current-cell`).textContent).toContain('ERP 已采用');
+  await act(async () => button('逐项更正').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-0');
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('第 1 / 1 项');
+  expect(button('保存并下一项')).toBeUndefined();
 });
 it('keeps direct correction within the selected store even when a SKU is shared across stores', async () => {
   await render(['SKC-1', 'SKC-1'], 'ready', { ledgerId: 'STORE-CORRECTION', stores: ['甲', '乙'], skuIds: ['SHARED', 'SHARED'], contextStore: '乙' });

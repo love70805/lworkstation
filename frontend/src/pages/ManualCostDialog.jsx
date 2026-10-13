@@ -3,7 +3,7 @@ import { Button, Modal } from "../components/UI";
 import { saveManualCostOverride, revokeManualCostOverride } from "../data/repositories/profitRepository";
 import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 
-export default function ManualCostDialog({ ledger, row, onClose, onNext, children, readOnly = false, hasEffectiveErpCost = false, className = "", title = "人工更正成本", formFirst = false, queueProgress = null, saveLabel = "保存更正" }) {
+export default function ManualCostDialog({ ledger, row, onClose, onNext, children, open = true, readOnly = false, hasEffectiveErpCost = false, className = "", title = "人工更正成本", formFirst = false, queueProgress = null, saveLabel = "保存更正" }) {
   const identityIssue = row.decision?.identityIssue ?? row.costIdentityIssue;
   const identityConflict = identityIssue?.code === 'ledger_sku_skc_conflict';
   const [amount, setAmount] = useState(row.unitCost == null || row.decision?.eligibleForExactProfit === false ? "" : String(row.unitCost));
@@ -12,10 +12,10 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
   const [saving, setSaving] = useState(false);
   const amountRef = useRef(null);
   useEffect(() => {
-    if (readOnly || identityConflict || !formFirst) return;
+    if (!open || readOnly || identityConflict || !formFirst) return;
     const timer = window.setTimeout(() => amountRef.current?.focus({ preventScroll: true }), 0);
     return () => window.clearTimeout(timer);
-  }, [readOnly, identityConflict, formFirst]);
+  }, [open, readOnly, identityConflict, formFirst]);
   const act = async (revoke, next = false) => {
     if (saving || readOnly || (!revoke && identityConflict)) return;
     setSaving(true); setError("");
@@ -27,7 +27,7 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
     } catch (failure) { setError(failure.message); } finally { setSaving(false); }
   };
   const invalid = saving || amount.trim() === "" || !Number.isFinite(Number(amount)) || Number(amount) < 0 || !reason.trim();
-  return <Modal open title={title} className={className} description={`${ledger.period} · ${row.store} · ${row.platformSku}。${readOnly ? "已定稿或锁定，当前只读。" : identityConflict ? "当前台账归属存在冲突，已保存的人工金额可撤销。" : hasEffectiveErpCost ? "ERP 正式成本已生效，无需人工确认；仅需更正时填写下方金额和说明。" : "人工更正仅对当前店铺月份生效；撤销后恢复最新可用 ERP 或缺失状态。"}`} onClose={() => !saving && onClose()}
+  return <Modal open={open} title={title} className={className} description={`${ledger.period} · ${row.store} · ${row.platformSku}。${readOnly ? "已定稿或锁定，当前只读。" : identityConflict ? "当前台账归属存在冲突，已保存的人工金额可撤销。" : hasEffectiveErpCost ? "ERP 正式成本已生效，无需人工确认；仅需更正时填写下方金额和说明。" : "人工更正仅对当前店铺月份生效；撤销后恢复最新可用 ERP 或缺失状态。"}`} onClose={() => !saving && onClose()}
     footer={<>{!readOnly && row.manualOverride ? <Button disabled={saving} onClick={() => act(true)}>撤销当前更正</Button> : null}<Button disabled={saving} onClick={onClose}>{readOnly || identityConflict ? "关闭" : "取消"}</Button>{!readOnly && !identityConflict ? <><Button variant={onNext ? "secondary" : "primary"} loading={saving} disabled={invalid} onClick={() => act(false)}>{saveLabel}</Button>{onNext ? <Button variant="primary" disabled={invalid} onClick={() => act(false, true)}>保存并下一项</Button> : null}</> : null}</>}>
     {queueProgress ? <p className="cost-correction-progress" role="status">待补成本 · 第 {queueProgress.index} / {queueProgress.total} 项</p> : null}
     {!formFirst ? children : null}
