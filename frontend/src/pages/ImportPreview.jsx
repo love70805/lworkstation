@@ -351,7 +351,7 @@ export default function ImportPreview() {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, usesBatchSuffix: Boolean(rule.aliases.length), supplierMatchRule: rule, supplierGroupRule: rule.id ? { ...rule, aliases: [...rule.aliases] } : null, supplierPreview: inspected.supplierPreview, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: rule.aliases.length ? [] : restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, usesBatchSuffix: Boolean(rule.aliases.length), supplierMatchRule: rule, supplierGroupRule: rule.id ? { ...rule, aliases: [...rule.aliases] } : null, supplierPreview: inspected.supplierPreview, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before

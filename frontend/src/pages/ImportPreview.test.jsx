@@ -476,6 +476,7 @@ it('saves LBYY and LBY together, applies the saved group, and remembers it only 
 
 it('restores a group and its store exceptions without a new apply click, including newly seen alias members', async () => {
   const group = saveSupplierGroup('W', { name: '负责组', aliases: ['LBYY','LBY'], mode: 'suffix' });
+  localStorage.setItem('lworkstation:import-suppliers:v2:W', JSON.stringify({'甲店':{selected:['A-LBYY','PREVIOUS-LBY'],keywords:[],matched:[]}}));
   rememberSupplierGroupSelection('W', [{storeName:'甲店',supplierGroupRule:group,facets:{supplierNumbers:['A-LBYY','B-LBY']},filterOptions:{supplierNumbers:['A-LBYY']}}]);
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-LBYY','B-LBY','NEW-LBY','OTHER']}});
   const input = container.querySelector('input[type=file]');
@@ -488,6 +489,8 @@ it('restores a group and its store exceptions without a new apply click, includi
     expect(container.querySelector('.batch-fieldset').disabled).toBe(false);
   }, { timeout: 5000 });
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBYY','NEW-LBY']);
+  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('上次选择中，本文件未找到 · 1 个');
+  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('甲店 / PREVIOUS-LBY');
   const picker = container.querySelector('.supplier-filter-table');
   await act(async () => [...picker.querySelectorAll('.supplier-table-views button')].find(node => node.textContent.startsWith('未选 ')).click());
   expect([...picker.querySelectorAll('.supplier-number-link')].map(node => node.textContent)).toEqual(['B-LBY','OTHER']);
