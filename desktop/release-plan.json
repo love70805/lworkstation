@@ -5,6 +5,14 @@
   "integrationBranch": "codex/catalog-usability-0.4.22",
   "requiredCommits": [
     {
+      "module": "v0.4.22-catalog-attributes-readiness-and-recovery",
+      "commit": "d308fa22a6e8b166262ede23a2cdd3a159202e6e"
+    },
+    {
+      "module": "v0.4.22-verified-main-baseline",
+      "commit": "3b30daf1f54b9dbcda286bfec3965b61c382e596"
+    },
+    {
       "module": "v0.4.21-batch-overview-and-SKU-reasons",
       "commit": "f02174147ee481df14fa6e9ad2144ca8f729cb8c"
     },
