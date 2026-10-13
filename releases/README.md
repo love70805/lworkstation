@@ -1,4 +1,10 @@
-## 0.4.20 货号筛选工作台（已公开稳定 Latest）
+## 0.4.21 ERP 回传总览与待处理 SKU（已公开稳定 Latest）
+
+候选 `candidates/0.4.21/`；证据 `archive/erp-sku-isolation/`。184 文件 / 1462 前端测试、生产构建、完整 ERP/同步/部署门禁、17 组 desktop verify与交叉审查通过。本机只读副本及最终包内资源验证六批/七条异常（五个一元采购、两个历史降价）、总览/批次/SKU详情往返、人工零值/撤销与定稿只读。18 组中文浅深色 × 1280/900/390 布局、隐藏候选 smoke通过；704 个安装文件 / 658 个生产输入逐字节一致，构建源码 `640877e2d99bb9de7dbb19daffcd39eee36b0733`，安装包 119574225 字节，SHA256 `B5844100B14831BA2DD3DBA03AE7A0BE2F0AB5B5138958AA919C45524691488F`。原生资源未改；隐藏验收不记作可见窗口/焦点验收。
+
+[PR #205](https://github.com/love70805/lworkstation/pull/205) 已合并，PR 与[主线 CI](https://github.com/love70805/lworkstation/actions/runs/38438179724) 通过。稳定标签 v0.4.21 固定 `c385e9ba07a205ac4d8d98b471e6e30a5c3d63f0`，生产输入与验收候选逐字节相同。2026-10-13T17:27:57Z 已公开非草稿、非预发布的稳定 Latest；四资产匿名完整回读，字节数、SHA256/GitHub digest 与 EXE SHA512 一致。实际稳定更新入口从 0.4.20 识别 0.4.21，同版与跨通道保护通过。本机未安装，真实数据库/队列未改写。 见[发布记录](../docs/RELEASE_0.4.21.md)。
+
+## 0.4.20 货号筛选工作台（历史公开稳定版）
 
 候选 `candidates/0.4.20/`，证据 `archive/supplier-filter-workbench/`。182 文件 / 1440 项前端测试、生产构建、完整 ERP/同步门禁、17 组 desktop verify、最终隐藏候选 smoke、包内用户路径与 16 组中文浅深色窗口布局通过。704 个安装文件与 658 个生产输入逐字节一致；源码 `be6d02fdfe53576b4229428e3af86f2c105ee6b4`，安装包 119568904 字节，SHA256 `1425DF0267ED650DFBDC0416D3E59626915B8B69CFFE4457E77273769D73212E`。
 
@@ -76,9 +82,6 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 
 # Lworkstation 发布文件
 
-## 0.4.21 ERP 回传总览与待处理 SKU（候选准备）
-
-候选 `candidates/0.4.21/`；证据 `archive/erp-sku-isolation/`。184 文件 / 1462 前端测试、构建、ERP/同步/部署门禁及 17 组 desktop verify通过。六批总览明确返回，工作台直接列出异常 SKU、历史调价原因和来源；当前缺失与历史记录分开，金融口径保持。候选、CI及公开资产回读完成前不标记发布，本机不安装、不改真实数据/队列，见 [验收记录](../docs/RELEASE_0.4.21.md)。
 
 - `candidates/<版本与用途>/`：仅供本机验收的候选包与校验清单，不接入公开更新源。
 - `prerelease/<版本号>/`：经检查并整理的 Beta 产物，使用 `Lworkstation-Setup-<版本>.exe` 与 `beta.yml`。
@@ -86,7 +89,7 @@ candidates/0.4.5/ 已验收：1324 测试、构建、完整 ERP 门禁、桌面 
 - `history/<版本号>/`：历史稳定版产物，用于回退和核对。
 - 仓库根目录下的 `desktop/release/`、`desktop/release-test/`：临时构建产物与更新测试夹具，不作为已发布状态依据。
 
-当前公开稳定版为 [0.4.20](https://github.com/love70805/lworkstation/releases/tag/v0.4.20)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
+当前公开稳定版为 [0.4.21](https://github.com/love70805/lworkstation/releases/tag/v0.4.21)，Beta 为 [0.3.0-beta.10](https://github.com/love70805/lworkstation/releases/tag/v0.3.0-beta.10)。以下旧版本条目仅作历史记录。
 
 ## v0.4.4 已公开稳定 Latest（2026-10-07）
 
