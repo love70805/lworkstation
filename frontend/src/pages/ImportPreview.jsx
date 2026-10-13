@@ -1,9 +1,8 @@
-import ImportSupplierPicker from '../components/ImportSupplierPicker';
-import ImportSupplierGroups from '../components/ImportSupplierGroups';
+import ImportSupplierWorkbench from '../components/ImportSupplierWorkbench';
 import ImportMovementPicker from '../components/ImportMovementPicker';
-import { readImportPreference, restoreImportPreference, saveImportNumbers, parseImportKeywords } from '../lib/importSupplierPreferences';
+import { readImportPreference, restoreImportPreference, saveImportNumbers } from '../lib/importSupplierPreferences';
 import { readSupplierGroups, matchImportNumberRule, restoreSupplierGroupSelection, rememberSupplierGroupSelection } from '../lib/importSupplierGroups';
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
 import { Button, ProgressBar, useToast } from "../components/UI";
@@ -159,9 +158,10 @@ export default function ImportPreview() {
   const [overwriteSignature, setOverwriteSignature] = useState(null);
   const [result, setResult] = useState(null);
   const [batchSuffixText, setBatchSuffixText] = useState('');
-  const [appliedSuffixes, setAppliedSuffixes] = useState([]);
   const [batchMode, setBatchMode] = useState('suffix');
   const [groupWorkspaceId, setGroupWorkspaceId] = useState(null);
+  const [supplierDirty, setSupplierDirty] = useState(false);
+  const [supplierViewStore, setSupplierViewStore] = useState('all');
   const batchRuleRef = useRef({ aliases: [], mode: 'suffix' });
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
@@ -214,7 +214,9 @@ export default function ImportPreview() {
     void clearImportStages(cancelledOwner).catch(() => {});
     inspectionSequenceRef.current.clear();
     activeJobsRef.current.clear();
-    setFiles([]); setPreview(null); setPayload(null); setBusy(false); operationRef.current = false;
+    importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'suffix' };
+    setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('suffix'); setSupplierViewStore('all');
+    setFiles([]); setPreview(null); setPayload(null); setOverwriteSignature(null); setSupplierDirty(false); setBusy(false); operationRef.current = false;
     setError("解析已取消，尚未写入任何数据。可重新选择文件。");
   };
   const invalidate = () => { setPreview(null); setPayload(null); setOverwriteSignature(null); setError(""); };
@@ -235,22 +237,26 @@ export default function ImportPreview() {
   };
   const inspectPeriod = async (item) => {
     const sequence = (inspectionSequenceRef.current.get(item.itemId) ?? 0) + 1;
+    const generation = generationRef.current, client = clientRef.current;
     inspectionSequenceRef.current.set(item.itemId, sequence);
+    const currentRequest = () => generation === generationRef.current && client === clientRef.current && inspectionSequenceRef.current.get(item.itemId) === sequence;
     try {
       await ensureJob(item);
-      if (inspectionSequenceRef.current.get(item.itemId) !== sequence) return;
-      const { evidence, rowSource, facets } = await clientRef.current.inspectPeriod(item.itemId, item.mapping, {
-        ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
-      });
-      if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
-        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, facets: facets ?? entry.facets, periodEvidence: evidence, rowSource } : entry));
-      } else void removeImportStage(rowSource?.id).catch(() => {});
-      if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
+      if (!currentRequest()) return;
+      const { evidence, rowSource, facets, supplierPreview } = await client.inspectPeriod(item.itemId, item.mapping, {
+        ...item.filterOptions, defaultStore: item.storeName, enforceSingleStore: true, workspaceId: importWorkspaceRef.current,
+      }, { revision: sequence, buildSupplierIndex: !item.supplierPreview });
+      if (currentRequest()) {
+        await assertImportContext();
+        if (!currentRequest()) { void removeImportStage(rowSource?.id).catch(() => {}); void removeImportStage(supplierPreview?.memberSource?.id).catch(() => {}); return; }
+        setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? { ...entry, facets: facets ?? entry.facets, supplierPreview: supplierPreview ?? entry.supplierPreview, periodEvidence: evidence, rowSource } : entry));
+      } else { void removeImportStage(rowSource?.id).catch(() => {}); void removeImportStage(supplierPreview?.memberSource?.id).catch(() => {}); }
+      if (currentRequest()) {
         activeJobsRef.current.delete(item.itemId);
-        await clientRef.current.release(item.itemId).catch(() => {});
+        await client.release(item.itemId).catch(() => {});
       }
     } catch (inspectionError) {
-      if (inspectionSequenceRef.current.get(item.itemId) === sequence) {
+      if (currentRequest()) {
         setFiles((current) => current.map((entry) => entry.itemId === item.itemId ? {
           ...entry, periodEvidence: { distribution: [], suggestedPeriod: null, errorCount: 1 }, periodInspectionError: inspectionError.message,
         } : entry));
@@ -265,7 +271,9 @@ export default function ImportPreview() {
     const current = files.find((item) => item.itemId === itemId);
     if (!current) return;
     void removeImportStage(current.rowSource?.id).catch(() => {});
-    let next = { ...current, ...patch, validation: null, periodEvidence: null, rowSource: null, periodInspectionError: null };
+    const indexChanged = Boolean(patch.mapping || patch.storeName !== undefined || patch.filterOptions && JSON.stringify(patch.filterOptions.movementTypes) !== JSON.stringify(current.filterOptions?.movementTypes));
+    if (indexChanged) void removeImportStage(current.supplierPreview?.memberSource?.id).catch(() => {});
+    let next = { ...current, ...patch, supplierPreview: indexChanged ? null : current.supplierPreview, validation: null, periodEvidence: null, rowSource: null, periodInspectionError: null };
     setFiles((entries) => entries.map((item) => item.itemId === itemId ? next : item));
     if (patch.mapping || patch.storeName !== undefined) {
       const sequence = (inspectionSequenceRef.current.get(itemId) ?? 0) + 1;
@@ -273,13 +281,16 @@ export default function ImportPreview() {
       try {
         await ensureJob(next);
         if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
-        const refreshed = await clientRef.current.inspectPeriod(itemId, next.mapping, { ...next.filterOptions, supplierNumbers: [], defaultStore: next.storeName, enforceSingleStore: true });
+        const refreshed = await clientRef.current.inspectPeriod(itemId, next.mapping, { ...next.filterOptions, supplierNumbers: [], defaultStore: next.storeName, enforceSingleStore: true }, { buildSupplierIndex: false, revision: sequence });
         void removeImportStage(refreshed.rowSource?.id).catch(() => {});
         if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
         const choices = refreshed.facets?.supplierNumbers ?? next.facets?.supplierNumbers ?? [];
+        await assertImportContext();
+        if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
         const preference = patch.storeName !== undefined ? readImportPreference(importWorkspaceRef.current, next.storeName) : next.supplierPreference;
-        const saved = next.usesBatchSuffix ? matchImportNumberRule(choices, batchRuleRef.current)
-          : patch.storeName !== undefined ? preference.selected : next.filterOptions?.supplierNumbers ?? [];
+        const saved = patch.storeName !== undefined ? next.usesBatchSuffix
+          ? next.supplierGroupRule?.id ? restoreSupplierGroupSelection(choices, next.supplierGroupRule, readSupplierGroups(importWorkspaceRef.current), next.storeName) : matchImportNumberRule(choices, batchRuleRef.current)
+          : preference.selected : next.filterOptions?.supplierNumbers ?? [];
         const movementChoices = refreshed.facets?.movementTypes ?? next.facets?.movementTypes ?? [];
         const movementTypes = next.mapping.movementType && Array.isArray(next.filterOptions.movementTypes)
           ? next.filterOptions.movementTypes.filter(type => movementChoices.includes(type)) : undefined;
@@ -287,7 +298,7 @@ export default function ImportPreview() {
         setFiles(entries => entries.map(item => item.itemId === itemId ? next : item));
       } catch (error) { setError(error.message); return; }
     }
-    void inspectPeriod(next);
+    await inspectPeriod(next);
   };
   const loadFiles = async (selection, retryItem = null, selectedSheet = null) => {
     if (operationRef.current || !selection.length || result || contextBlocked) return;
@@ -305,7 +316,7 @@ export default function ImportPreview() {
         const previous = groupState.groups.find(group => group.id === groupState.lastAppliedId);
         if (previous) {
           batchRuleRef.current = previous;
-          setBatchSuffixText(previous.aliases.join('、')); setBatchMode(previous.mode); setAppliedSuffixes(previous.aliases);
+          setBatchSuffixText(previous.aliases.join('、')); setBatchMode(previous.mode);
         }
       }
       for (let index = 0; index < additions.length; index += 1) {
@@ -333,12 +344,14 @@ export default function ImportPreview() {
             deriveAmountFromUnitPrice: true,
           } : {}) };
           const inspected = await clientRef.current.inspectPeriod(item.itemId, parsed.suggestedMapping, {
-            ...filterOptions, defaultStore: item.storeName, enforceSingleStore: true,
-          });
+            ...filterOptions, defaultStore: item.storeName, enforceSingleStore: true, workspaceId: importWorkspaceRef.current,
+          }, { revision: generation });
+          if (generation !== generationRef.current) return;
+          await assertImportContext();
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, usesBatchSuffix: Boolean(rule.aliases.length), supplierGroupRule: rule.id ? { ...rule, aliases: [...rule.aliases] } : null, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: rule.aliases.length ? [] : restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, usesBatchSuffix: Boolean(rule.aliases.length), supplierMatchRule: rule, supplierGroupRule: rule.id ? { ...rule, aliases: [...rule.aliases] } : null, supplierPreview: inspected.supplierPreview, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: rule.aliases.length ? [] : restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before
@@ -357,26 +370,42 @@ export default function ImportPreview() {
     inspectionSequenceRef.current.delete(item.itemId);
     activeJobsRef.current.delete(item.itemId);
     void removeImportStage(item.rowSource?.id).catch(() => {});
+    void removeImportStage(item.supplierPreview?.memberSource?.id).catch(() => {});
     invalidate(); setFiles((current) => current.filter((entry) => entry.itemId !== item.itemId));
+    if (files.length === 1) {
+      generationRef.current += 1; importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'suffix' };
+      setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('suffix'); setSupplierViewStore('all'); setSupplierDirty(false);
+    }
     await clientRef.current.release(item.itemId).catch(() => {});
   };
   const applyMapping = (source) => {
     const columns = Object.values(source.mapping).filter(Boolean);
     for (const item of files) if (item.itemId !== source.itemId && item.status === 'parsed' && columns.every(column => item.headers.includes(column))) void update(item.itemId, { mapping: { ...source.mapping } });
   };
-  const applyBatchSuffixes = (group = null) => {
-    if (busy || contextBlocked) return;
-    const suffixes = group?.aliases ?? parseImportKeywords(batchSuffixText);
-    if (!suffixes.length) return;
-    const rule = { ...(group || {}), aliases: [...suffixes], mode: group?.mode || batchMode };
-    batchRuleRef.current = rule;
-    if (group) { setBatchSuffixText(suffixes.join('、')); setBatchMode(group.mode); }
-    setAppliedSuffixes(suffixes);
-    for (const item of files) if (item.status === 'parsed') void update(item.itemId, {
-      usesBatchSuffix: true, supplierGroupRule: group ? rule : null, missingNumbers: [],
-      filterOptions: { ...item.filterOptions, supplierNumbers: matchImportNumberRule(item.facets?.supplierNumbers ?? [], rule) },
-    });
+  const applySupplierDraft = async (selection, rule) => {
+    if (operationRef.current || busy || contextBlocked) return;
+    const generation = generationRef.current;
+    operationRef.current = true; setBusy(true); invalidate();
+    try {
+      await assertImportContext();
+      batchRuleRef.current = rule ?? { aliases: [], mode: 'suffix' };
+      for (const item of files) if (item.status === 'parsed') {
+        if (generation !== generationRef.current) return;
+        const allowed = new Set(item.facets?.supplierNumbers ?? []);
+        await update(item.itemId, { usesBatchSuffix: Boolean(rule?.aliases?.length), supplierMatchRule: rule, supplierGroupRule: rule?.id ? rule : null,
+          filterOptions: { ...item.filterOptions, supplierNumbers: (selection[item.itemId] ?? []).filter(value => allowed.has(value)) } });
+      }
+      if (generation === generationRef.current) setSupplierDirty(false);
+    } catch (failure) { if (generation === generationRef.current) setError(failure.message); }
+    finally { if (generation === generationRef.current) { setBusy(false); operationRef.current = false; } }
   };
+  const readSupplierMembers = useCallback(async (row, page) => {
+    await assertImportContext();
+    if (row.period !== period || row.workspaceId !== groupWorkspaceId) throw new Error('货号查看范围已改变，请重新查看。');
+    const file = files.find(item => row.itemIds.includes(item.itemId) && item.storeName === row.store);
+    if (!file?.supplierPreview) throw new Error('成员索引尚未就绪，请等待文件重新校验。');
+    return clientRef.current.supplierMembers(file.supplierPreview, row.supplierNumber, { period, page, pageSize: 30 });
+  }, [files, period, groupWorkspaceId, contextBlocked]);
   const validate = async () => {
     if (operationRef.current || !ready || result) return;
     const generation = generationRef.current;
@@ -423,7 +452,7 @@ export default function ImportPreview() {
     finally { if (generation === generationRef.current) { abortRef.current = null; setBusy(false); operationRef.current = false; setProgress({ value: 100, label: "整批校验完成" }); } }
   };
   const confirmImport = async () => {
-    if (operationRef.current || result || !preview || !payload || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)) return;
+    if (operationRef.current || supplierDirty || result || !preview || !payload || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)) return;
     operationRef.current = true; setBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -454,7 +483,8 @@ export default function ImportPreview() {
   const storesWithoutMovements = files.filter(item => item.status === 'parsed' && Array.isArray(item.filterOptions?.movementTypes) && !item.filterOptions.movementTypes.length).map(item => item.storeName || item.fileName);
   const importPreparation = periodEvidence.awaitingEvidence ? '正在按本次选择重新校验…'
     : storesWithoutMovements.length ? `${storesWithoutMovements.join('、')}未选变动类型，请勾选后再导入`
-    : storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，请调整后缀或展开本店货号选择`
+    : supplierDirty ? '货号选择草稿尚未应用，请应用或撤销本次调整'
+    : storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，请在货号筛选中调整或移除文件`
     : !period ? '请选择账本月份'
     : error || '选择货号并核对店铺后自动校验';
   validateRef.current = validate;
@@ -463,28 +493,28 @@ export default function ImportPreview() {
     const timer = setTimeout(() => { attemptedRef.current = configurationKey; void validateRef.current(); }, 100);
     return () => clearTimeout(timer);
   }, [configurationKey, ready, busy, result]);
-  return <main className="wizard-shell batch-import">
+  return <main className={`wizard-shell batch-import${files.length ? ' has-supplier-files' : ''}`}>
     <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate(returnHref)}><X size={20} />{result ? returnLabel : "取消导入"}</button><strong>月度台账批量导入</strong></header>
     <section className="wizard-content">
       <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，自动识别明细、校验并显示概览，核对归属后一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
-      <section className="import-flow-guide" aria-label="月度核算流程">
-        <div className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></div>
+      <details className="import-flow-guide" aria-label="月度核算流程" open={!files.length || Boolean(result)}>
+        <summary className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></summary>
         <div className="import-flow-guide-steps">
           <span className={result ? "completed" : "active"} aria-current={!result ? "step" : undefined}><b>1</b><strong>导入销售台账</strong><small>{result ? "已完成" : "当前步骤"}</small></span>
           <span className={result ? "active" : undefined} aria-current={result ? "step" : undefined}><b>2</b><strong>取得正式成本</strong><small>{result ? "下一步 · ERP 自动采用" : "ERP 自动采用"}</small></span>
           <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
           <span><b>4</b><strong>确认利润</strong><small>核对后再定稿</small></span>
         </div>
-      </section>
+      </details>
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
         {!!files.length && <section className="batch-action-bar" aria-label="本次导入操作">
           <div className="batch-action-summary"><strong>{period || '月份待确认'} · {files.length} 个文件</strong><span id="batch-import-status" role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组${preview.requiresOverwrite && overwriteSignature !== preview.targetSignature ? ' · 请确认替换范围后导入' : ''}` : importPreparation}</span></div>
           {preview?.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={event => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />确认本次全部替换范围（含分页内容）与移除旧分组；可展开下方 SKC 明细核对。</label>}
-          <Button variant="primary" aria-describedby="batch-import-status" disabled={busy || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
+          <Button variant="primary" aria-describedby="batch-import-status" disabled={busy || supplierDirty || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
         </section>}
         <section className="wizard-card">
-          <fieldset disabled={busy || contextBlocked} className="batch-fieldset">
+          <fieldset disabled={busy || contextBlocked} className="batch-fieldset batch-source-fieldset">
             <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">{requestedLedgerId ? '沿用当前账本月份' : suggestedPeriod && !periodChoiceRef.current ? `按销售台账“添加时间”识别：${suggestedPeriod}` : '请依据销售台账日期明确选择月份'}</p></div><input id="ledger-period" disabled={Boolean(requestedLedgerId)} aria-describedby="batch-period-note batch-period-evidence" className="text-input" type="month" value={period} onChange={(event) => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} /></div>
             {files.length ? <p id="batch-period-evidence" className={periodEvidence.conflictsExisting || periodEvidence.months.length > 1 || periodEvidence.missingCount || periodEvidence.invalidCount ? "batch-period-warning" : "batch-period-evidence"} role="status">
               {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>来源月份：{periodEvidence.months.length ? periodEvidence.months.map(({ month, count }) => `${month}（${count} 行）`).join("、") : "未识别到有效日期"}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? ` 来源月份与已有账本 ${period} 不一致，仍沿用账本月份。` : !requestedLedgerId && !suggestedPeriod ? "请核对文件并手动选择账本月份。" : ""}</>}
@@ -494,14 +524,7 @@ export default function ImportPreview() {
               <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；自动识别实际明细页；多个候选时仅需为该文件选择。</p></div>
               <Button onClick={() => inputRef.current?.click()}>添加文件</Button>{!files.length && <Button variant="ghost" onClick={() => loadFiles([sampleFile()])}>使用示例</Button>}
             </div>
-            <section className="batch-suffix-picker" aria-label="整批货号后缀选择">
-              <label htmlFor="batch-supplier-suffix">整批按货号别名选择</label>
-              <div><input id="batch-supplier-suffix" className="text-input" value={batchSuffixText} placeholder="例如 LBYY、LBY；多个别名用逗号分隔" aria-describedby="batch-suffix-help" onChange={event => setBatchSuffixText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); applyBatchSuffixes(); } }} /><select aria-label="货号匹配方式" value={batchMode} onChange={event => setBatchMode(event.target.value)}><option value="suffix">货号末尾</option><option value="contains">货号包含</option><option value="exact">完整货号</option></select><Button disabled={!parseImportKeywords(batchSuffixText).length} onClick={() => applyBatchSuffixes()}>应用到本批文件</Button></div>
-              <p id="batch-suffix-help">默认只匹配货号末尾，忽略英文大小写与全半角差异。多个别名命中任意一项即选入。应用后替换本批选择；新增文件沿用，仍可逐店调整。</p>
-              {!!parseImportKeywords(batchSuffixText).length && <p role="status">{files.filter(item => item.status === 'parsed').map(item => `${item.storeName}：命中 ${matchImportNumberRule(item.facets?.supplierNumbers ?? [], { aliases: parseImportKeywords(batchSuffixText), mode: batchMode }).length} / ${item.facets?.supplierNumbers?.length ?? 0} 个`).join('；') || '添加文件后显示各店命中数量。'}</p>}
-              {!!appliedSuffixes.length && <p role="status">已应用{batchRuleRef.current.name ? `货号组「${batchRuleRef.current.name}」` : '别名'}：{appliedSuffixes.join('、')}（{({ suffix: '末尾匹配', contains: '包含匹配', exact: '完整匹配' })[batchRuleRef.current.mode]}）。零命中的店铺请单独调整或移除文件。</p>}
-              <ImportSupplierGroups workspaceId={groupWorkspaceId} aliasesText={batchSuffixText} mode={batchMode} onLoad={group => { setBatchSuffixText(group.aliases.join('、')); setBatchMode(group.mode); }} onApply={applyBatchSuffixes} />
-            </section>
+            <ImportSupplierWorkbench key={`${groupWorkspaceId}/${period}`} files={files} workspaceId={groupWorkspaceId} period={period} aliasesText={batchSuffixText} mode={batchMode} initialRule={batchRuleRef.current} onAliasesChange={setBatchSuffixText} onModeChange={setBatchMode} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} disabled={busy || contextBlocked} />
           </fieldset>
           {busy && <div className="import-progress" role="status">{progress.value == null ? <span>{progress.label}</span> : <ProgressBar value={progress.value} label={progress.label} />}<Button onClick={cancel}>取消当前处理</Button></div>}
           <div className="batch-files">{files.map((item, index) => <section className="batch-file" key={item.itemId}>
@@ -512,10 +535,8 @@ export default function ImportPreview() {
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
-              <details className="batch-store-suppliers" open={!item.usesBatchSuffix}><summary>本店货号 · 已选 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个{item.usesBatchSuffix ? ' · 沿用整批规则' : ' · 可单独调整'}</summary>
-              <ImportSupplierPicker key={`${item.itemId}:${item.storeName}`} store={item.storeName} choices={item.facets?.supplierNumbers ?? []} counts={item.facets?.supplierCounts} selected={item.filterOptions?.supplierNumbers ?? []} missing={item.missingNumbers ?? []} keywords={item.supplierKeywords ?? []} previousMatches={item.supplierPreference?.matched ?? []} hasSaved={item.supplierPreference?.hasSaved ?? false} onKeywordsChange={supplierKeywords => setFiles(entries => entries.map(entry => entry.itemId === item.itemId ? { ...entry, supplierKeywords } : entry))} onChange={supplierNumbers => update(item.itemId, { usesBatchSuffix: false, filterOptions: { ...item.filterOptions, supplierNumbers } })} />
-              </details>
-              {item.usesBatchSuffix && !item.filterOptions?.supplierNumbers?.length && <p role="alert" className="import-error">本店没有命中所选后缀，请展开本店货号调整，或移除此文件。</p>}
+              <div className="batch-store-suppliers"><span>本店已应用 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个货号</span><Button variant="ghost" onClick={() => { setSupplierViewStore(item.storeName); document.querySelector('.supplier-workbench')?.scrollIntoView({ block: 'start' }); }}>查看本店货号</Button></div>
+              {!item.filterOptions?.supplierNumbers?.length && <p role="alert" className="import-error">本店未选货号，请在货号筛选中调整，或移除此文件。</p>}
               <ImportMovementPicker store={item.storeName} choices={item.facets?.movementTypes ?? []} counts={item.facets?.movementTypeCounts}
                 selected={item.filterOptions?.movementTypes ?? item.facets?.movementTypes ?? []}
                 defaults={item.preset === "ledger_report" ? LEDGER_REPORT_MOVEMENT_TYPES.filter(type => item.facets?.movementTypes?.includes(type)) : item.facets?.movementTypes ?? []}

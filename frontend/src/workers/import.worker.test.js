@@ -65,6 +65,17 @@ async function worker() {
 const headers = ['店铺','供方货号','SKC','平台SKU','数量','金额'];
 const mapping = {store:'店铺',supplierNumber:'供方货号',platformSkc:'SKC',platformSku:'平台SKU',quantity:'数量',amount:'金额'};
 describe('batch import Worker jobs', () => {
+  it('returns compact supplier evidence and reads bounded members after releasing the source job', async () => {
+    const send = await worker(), buffer = new TextEncoder().encode('供方货号,SKC,平台SKU,数量,金额,添加时间\n0001-LBY,父,001,1,2,2026-09-01\n0001-LBY,父,001,1,2,2026-09-01\n0001-LBY,旧父,002,1,2,2026-08-01\n0002-LBY,父,003,0,0,2026-09-01').buffer;
+    const parsed = await send({type:'parse',jobId:'preview',extension:'csv',buffer});
+    const result = await send({type:'inspect-period',jobId:'preview',mapping:parsed.suggestedMapping,options:{defaultStore:'甲',supplierNumbers:[],workspaceId:'W'},revision:7});
+    expect(result).toMatchObject({revision:7,supplierPreview:{scope:{workspaceId:'W',store:'甲',revision:7},entries:[{supplierNumber:'0001-LBY',sourceRowCount:3,memberCount:2},{supplierNumber:'0002-LBY',sourceRowCount:1,memberCount:0}]}});
+    expect(result.supplierPreview.entries[0].months.find(month=>month.month==='2026-09')).toMatchObject({skcs:['父'],skus:['001'],rowCount:2});
+    await send({type:'release',jobId:'preview'});
+    const members = await send({type:'supplier-members',preview:result.supplierPreview,supplierNumber:'0001-LBY',options:{period:'2026-09',pageSize:1}});
+    expect(members).toMatchObject({revision:7,total:1,rows:[{platformSku:'001',sourceRowCount:2}]});
+    expect(await send({type:'supplier-members',preview:result.supplierPreview,supplierNumber:'0001-LBY',options:{period:'2026-09',page:1,pageSize:1}})).toMatchObject({total:1,rows:[]});
+  });
   it('retains underlying decimals, real source rows, added date and activity without changing legacy amounts', async () => {
     const send = await worker();
     const book = XLSX.utils.book_new();

@@ -8,25 +8,28 @@ import ImportPreview from "./ImportPreview";
 import { ToastProvider } from "../components/UI";
 import { suggestLedgerReportMapping, suggestMappings } from "../lib/salesImport";
 import { saveSupplierGroup, readSupplierGroups, rememberSupplierGroupSelection } from "../lib/importSupplierGroups";
-const mocks = vi.hoisted(() => ({ parse:vi.fn(), inspectPeriod:vi.fn(), validate:vi.fn(), release:vi.fn(), terminate:vi.fn(), preview:vi.fn(), save:vi.fn() }));
+const mocks = vi.hoisted(() => ({ workspaceId:'W', parse:vi.fn(), inspectPeriod:vi.fn(), validate:vi.fn(), release:vi.fn(), terminate:vi.fn(), preview:vi.fn(), save:vi.fn() }));
 vi.mock('../lib/importWorkerClient', () => ({createImportWorkerClient:()=>mocks}));
-vi.mock('../data/database', () => ({getActiveMemberContext:async()=>({workspaceId:"W"}),previewSalesImports:mocks.preview,saveSalesImports:mocks.save}));
+vi.mock('../data/database', () => ({getActiveMemberContext:async()=>({workspaceId:mocks.workspaceId}),previewSalesImports:mocks.preview,saveSalesImports:mocks.save}));
 let container, root;
 function LocationProbe() { const location = useLocation(); return <output data-location>{location.pathname}{location.search}</output>; }
 const mapping = {platformSku:'SKU',platformSkc:'SKC',quantity:'数量',amount:'金额'};
 const summary = {quantity:2,revenue:10,penalty:0};
 function button(text) { return [...container.querySelectorAll('button')].find((node)=>node.textContent === text); }
 async function click(text) { await act(async()=>button(text).click()); }
+async function matchAndApply() { await click('重新匹配'); await click('应用本次筛选'); }
 async function upload(selectPeriod = true, files = [new File(['first'], '甲店.csv'),new File(['second'],'乙店.csv')]) {
+  const parseCount = mocks.parse.mock.calls.length;
   const input = container.querySelector('input[type=file]');
   Object.defineProperty(input,'files',{configurable:true,value:files});
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
-  await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(files.length)); });
-  for (const node of [...container.querySelectorAll('button')].filter(node=>node.textContent === '全部货号')) await act(async()=>node.click());
+  await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(parseCount + files.length)); });
+  await click('选中筛选结果'); await click('应用本次筛选');
   if (selectPeriod) await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
 }
 beforeEach(async()=>{
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  mocks.workspaceId='W';
   localStorage.clear();
   vi.clearAllMocks(); mocks.release.mockResolvedValue({});
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['测试货号'],supplierCounts:{测试货号:1}}});
@@ -270,7 +273,7 @@ it('asks for a sheet only for the ambiguous file and parses the chosen sheet', a
   await act(async () => Simulate.change(select,{target:{value:'明细乙'}}));
   await settled();
   expect(mocks.parse.mock.calls.some(call=>call[2]==='明细乙')).toBe(true);
-  for (const node of [...container.querySelectorAll('button')].filter(node=>node.textContent === '全部货号')) await act(async()=>node.click());
+  await click('选中筛选结果'); await click('应用本次筛选');
   await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(1);
 });
@@ -320,22 +323,22 @@ it('starts with no goods, preserves selected goods through search and remembers 
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
   await settled();
   expect(mocks.preview).not.toHaveBeenCalled();
-  expect(container.textContent).toContain('已选 0 / 1');
-  await click('全部货号');
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('0');
+  await click('选中筛选结果'); await click('应用本次筛选');
   await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ filterOptions:{supplierNumbers:['测试货号']}, sourceCoverage:{version:2,supplierNumbers:['测试货号'],scope:'full_month'}, importMode:'replace_store_month' });
-  const search=container.querySelector('.import-supplier-picker input[type=text], .import-supplier-picker > input');
+  const search=container.querySelector('.supplier-filter-table .search-input input');
   await act(async()=>Simulate.change(search,{target:{value:'not-found'}}));
-  expect(container.textContent).toContain('已选 1 / 1');
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('1');
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   await click('导入');
-  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:['NOT-FOUND'],matched:[]});
+  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:[],matched:[]});
 });
-it('keeps keyword edits local to matching and persists latest keywords only after confirmed import', async () => {
+it('keeps rule edits local to the rule draft and remembers actual selected goods only after confirmed import', async () => {
   await upload(true,[new File(['source'],'甲店.csv')]); await settled();
   const parseCount=mocks.parse.mock.calls.length, inspectCount=mocks.inspectPeriod.mock.calls.length, previewCount=mocks.preview.mock.calls.length;
-  await act(async()=>Simulate.change(container.querySelector('.import-supplier-picker > input'),{target:{value:'测试，new'}}));
+  await act(async()=>Simulate.change(container.querySelector('#batch-supplier-suffix'),{target:{value:'测试，new'}}));
   await settled();
   expect(mocks.parse).toHaveBeenCalledTimes(parseCount);
   expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount);
@@ -343,12 +346,12 @@ it('keeps keyword edits local to matching and persists latest keywords only afte
   expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   await click('导入');
-  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:['NEW','测试'],matched:['测试货号']});
+  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:[],matched:[]});
 });
 it('does not save temporary keyword preferences when the atomic import fails', async()=>{
   mocks.save.mockRejectedValueOnce(new Error('transaction failed'));
   await upload(true,[new File(['source'],'甲店.csv')]); await settled();
-  await act(async()=>Simulate.change(container.querySelector('.import-supplier-picker > input'),{target:{value:'测试'}}));
+  await act(async()=>Simulate.change(container.querySelector('#batch-supplier-suffix'),{target:{value:'测试'}}));
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   await click('导入');
   expect(container.textContent).toContain('整批未写入：transaction failed');
@@ -375,28 +378,29 @@ it('applies strict suffix selection across stores only on request, with a local 
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target: { value:'ｈｈｈｘ' } }));
   await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count);
-  await click('应用到本批文件'); await settled();
+  await matchAndApply(); await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx'],['A-HHHX','BhhHx']]);
-  expect([...container.querySelectorAll('.batch-store-suppliers')].every(details => !details.open)).toBe(true);
+  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('应用后已选4');
   expect([...container.querySelectorAll('.batch-impact-details')].every(details => !details.open)).toBe(true);
   expect(container.querySelector('.batch-action-bar').compareDocumentPosition(container.querySelector('.batch-files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  const first = container.querySelector('.batch-store-suppliers');
-  first.open = true;
-  await act(async () => [...first.querySelectorAll('button')].find(node => node.textContent === '全部货号').click());
+  await act(async () => Simulate.change(container.querySelector('[aria-label="查看货号店铺"]'), { target: { value: '甲店' } }));
+  await click('选中筛选结果');
+  expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
+  await click('应用本次筛选');
   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID','其他'],['A-HHHX','BhhHx']]);
-  expect(container.querySelectorAll('.batch-store-suppliers')[1].open).toBe(false);
+  expect(container.querySelectorAll('.batch-store-suppliers')[1].textContent).toContain('已应用 2 / 4');
 });
 
 it('rebuilds the preview after applying the same suffix twice and imports only after fresh overwrite approval', async () => {
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-HHHX','OTHER']}});
   await upload(); await settled();
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'HHHX'}}));
-  await click('应用到本批文件'); await settled();
+  await matchAndApply(); await settled();
   await act(async () => container.querySelector('.batch-overwrite input').click());
   expect(button('导入').disabled).toBe(false);
   const count = mocks.preview.mock.calls.length;
-  await click('应用到本批文件'); await settled();
+  await matchAndApply(); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
   expect(container.querySelector('.batch-preview')).not.toBeNull();
   expect(button('导入').disabled).toBe(true);
@@ -413,7 +417,7 @@ it('rebuilds a remembered identical supplier selection on its first batch suffix
   await upload(true,[new File(['first'],'甲店.csv')]); await settled();
   const count=mocks.preview.mock.calls.length;
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'hhhx'}}));
-  await click('应用到本批文件'); await settled();
+  await matchAndApply(); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count+1);
   expect(container.querySelector('.batch-preview')).not.toBeNull();
 });
@@ -424,11 +428,11 @@ it('keeps zero suffix matches unselected and invalidates an earlier overwrite ap
   expect(button('导入').disabled).toBe(false);
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{ value:'NOT-FOUND' } }));
   expect(button('导入').disabled).toBe(false);
-  await click('应用到本批文件'); await settled();
+  await matchAndApply(); await settled();
   expect(container.querySelector('.batch-preview')).toBeNull();
   expect(button('导入').disabled).toBe(true);
-  expect(container.textContent).toContain('本店没有命中所选后缀');
-  expect([...container.querySelectorAll('.import-supplier-picker')].every(node => node.textContent.includes('已选 0 / 1'))).toBe(true);
+  expect(container.textContent).toContain('本店未选货号');
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('0');
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
@@ -436,13 +440,13 @@ it('uses an applied batch suffix for newly added files without selecting middle 
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',
     facets:{supplierNumbers:['A-HHHX','HHHX-MID']}});
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{value:'HHHX'} }));
-  await click('应用到本批文件');
   const choose = async files => {
     const input = container.querySelector('input[type=file]');
     Object.defineProperty(input, 'files', {configurable:true, value:files});
     await act(async () => input.dispatchEvent(new Event('change', {bubbles:true})));
   };
   await choose([new File(['first'], '甲店.csv')]); await settled();
+  await matchAndApply();
   await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
   const waitForFiles = async count => vi.waitFor(async () => {
     await act(async () => {});
@@ -463,7 +467,7 @@ it('saves LBYY and LBY together, applies the saved group, and remembers it only 
   const group = readSupplierGroups('W').groups[0];
   expect(group.aliases).toEqual(['LBY','LBYY']);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
-  await click('应用货号组'); await settled();
+  await click('匹配货号组'); await click('应用本次筛选'); await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-LBYY','B-LBY'],['A-LBYY','B-LBY']]);
   await act(async () => container.querySelector('.batch-overwrite input').click());
   await click('导入');
@@ -484,9 +488,9 @@ it('restores a group and its store exceptions without a new apply click, includi
     expect(container.querySelector('.batch-fieldset').disabled).toBe(false);
   }, { timeout: 5000 });
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBYY','NEW-LBY']);
-  const picker = container.querySelector('.import-supplier-picker');
-  await act(async () => [...picker.querySelectorAll('button')].find(node => node.textContent === '未选 (2)').click());
-  expect([...picker.querySelectorAll('[role=option] strong')].map(node => node.textContent)).toEqual(['B-LBY','OTHER']);
+  const picker = container.querySelector('.supplier-filter-table');
+  await act(async () => [...picker.querySelectorAll('.supplier-table-views button')].find(node => node.textContent.startsWith('未选 ')).click());
+  expect([...picker.querySelectorAll('.supplier-number-link')].map(node => node.textContent)).toEqual(['B-LBY','OTHER']);
 });
 
 it('switches matching mode only on apply and leaves file selections intact when a saved group is deleted', async () => {
@@ -494,13 +498,73 @@ it('switches matching mode only on apply and leaves file selections intact when 
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['LBYY','A-LBYY','LBYY-MID']}});
   await upload(); await settled();
   await act(async () => Simulate.change(container.querySelector('#supplier-group-select'), {target:{value:group.id}}));
-  await click('应用货号组'); await settled();
+  await click('匹配货号组'); await click('应用本次筛选'); await settled();
   const count = mocks.preview.mock.calls.length;
   await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), {target:{value:'exact'}}));
   await settled(); expect(mocks.preview).toHaveBeenCalledTimes(count);
-  await click('应用到本批文件'); await settled();
+  await matchAndApply(); await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['LBYY']);
   await click('删除货号组'); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
   expect(readSupplierGroups('W').groups).toEqual([]);
+});
+
+it('keeps page/search selection in a draft, preserves hidden items, and restores applied selection on undo', async () => {
+  const choices = Array.from({length:65},(_,i)=>`货号${String(i).padStart(3,'0')}`);
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:65,previewRows:[{SKU:'001'}],preset:'generic',facets:{supplierNumbers:choices}});
+  const input = container.querySelector('input[type=file]'); Object.defineProperty(input,'files',{configurable:true,value:[new File(['source'],'甲店.csv')]});
+  await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+  await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
+  const parseCount=mocks.parse.mock.calls.length, inspectCount=mocks.inspectPeriod.mock.calls.length;
+  await act(async()=>container.querySelector('[aria-label="选中本页货号"]').click());
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('20');
+  await act(async()=>Simulate.change(container.querySelector('.supplier-filter-table .search-input input'),{target:{value:'货号064'}}));
+  await click('选中筛选结果');
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('21');
+  expect(mocks.parse).toHaveBeenCalledTimes(parseCount); expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount); expect(mocks.preview).not.toHaveBeenCalled();
+  await click('应用本次筛选'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual([...choices.slice(0,20),choices[64]]);
+  await click('取消筛选结果');
+  expect(button('导入').disabled).toBe(true);
+  await click('撤销本次调整');
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('21');
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+
+it('preserves same-group draft exceptions while switching groups without inheriting another group selection', async () => {
+  const group = saveSupplierGroup('W',{name:'LBY组',aliases:['LBY'],mode:'suffix'}), other=saveSupplierGroup('W',{name:'其他组',aliases:['OTHER'],mode:'suffix'});
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'001'}],preset:'generic',facets:{supplierNumbers:['A-LBY','B-LBY','C-OTHER']}});
+  await upload(true,[new File(['source'],'甲店.csv')]); await settled();
+  const count=mocks.preview.mock.calls.length;
+  await click('LBY组');
+  await act(async()=>container.querySelector('[aria-label="选择 甲店 B-LBY"]').click());
+  await click('重新匹配');
+  expect(container.querySelector('[aria-label="选择 甲店 B-LBY"]').checked).toBe(false);
+  await click('其他组');
+  expect(container.querySelector('[aria-label="选择 甲店 A-LBY"]').checked).toBe(false);
+  expect(container.querySelector('[aria-label="选择 甲店 C-OTHER"]').checked).toBe(true);
+  await click('LBY组');
+  expect(container.querySelector('[aria-label="选择 甲店 B-LBY"]').checked).toBe(false);
+  expect(mocks.preview).toHaveBeenCalledTimes(count);
+  expect(readSupplierGroups('W').lastAppliedId).toBe('');
+  await click('应用本次筛选'); await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBY']);
+  expect(readSupplierGroups('W').lastAppliedId).toBe('');
+  expect(readSupplierGroups('W').groups.map(g=>g.id)).toEqual([group.id,other.id]);
+  await act(async()=>Simulate.change(container.querySelector('[data-field=quantity] select'),{target:{value:''}}));await settled();
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBY']);
+});
+it('drops a removed file late inspection and lets a fresh batch use the current workspace without carrying its old group', async () => {
+  await upload(true,[new File(['source'],'甲店.csv')]); await settled();
+  let finish;
+  mocks.inspectPeriod.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  await act(async()=>Simulate.change(container.querySelector('.batch-store input'),{target:{value:'新店'}}));
+  await act(async()=>button('移除').click());
+  await act(async()=>finish({facets:{supplierNumbers:['旧货号']},rowSource:{id:'stale-stage'},evidence:{distribution:[{month:'2026-07',count:1}]}}));
+  expect(container.querySelector('.batch-file')).toBeNull();expect(container.querySelector('.batch-preview')).toBeNull();
+  mocks.workspaceId='W2';
+  await upload(true,[new File(['new'],'乙店.csv')]); await settled();
+  await act(async()=>container.querySelector('.batch-overwrite input').click());await click('导入');
+  expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();
+  expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W2'))['乙店'].selected).toEqual(['测试货号']);
 });

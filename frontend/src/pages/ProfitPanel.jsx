@@ -71,6 +71,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
   const [query, setQuery] = useState(initialFilter.query);
   const [storeFilter, setStoreFilter] = useState(initialFilter.storeFilter);
   const [supplierSelection, setSupplierSelection] = useState(initialFilter.supplierSelection);
+  const [supplierScopeError, setSupplierScopeError] = useState(initialFilter.supplierScopeError);
   const [missingOnly, setMissingOnly] = useState(initialFilter.missingOnly);
   const [warehouseRate, setWarehouseRate] = useState(0.7);
   const [rateDraft, setRateDraft] = useState("0.7");
@@ -78,12 +79,13 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    const next = readProfitFilter(searchParams, requestedLedgerId);
+    const next = readProfitFilter(searchParams, requestedLedgerId || snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId });
     setQuery(next.query);
     setStoreFilter(next.storeFilter);
     setSupplierSelection((previous) => JSON.stringify(previous) === JSON.stringify(next.supplierSelection) ? previous : next.supplierSelection);
     setMissingOnly(next.missingOnly);
-  }, [filterSearchKey, requestedLedgerId]);
+    setSupplierScopeError(next.supplierScopeError);
+  }, [filterSearchKey, requestedLedgerId, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
 
   useEffect(() => {
     if (snapshot?.ledger?.warehouseRate != null) {
@@ -120,13 +122,13 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
 
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
   const suppliers = useMemo(() => [...new Set(calculated.filter((row) => storeFilter === "all" || row.store === storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated, storeFilter]);
-  const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, missingOnly }), [missingOnly, query, storeFilter, supplierSelection]);
+  const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, missingOnly, ...(supplierScopeError ? { supplierScopeError } : {}) }), [missingOnly, query, storeFilter, supplierSelection, supplierScopeError]);
   const viewStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, filterState]);
   const detailsStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, 'details']);
   useEffect(() => { setDetailsOpen(readProfitViewState(detailsStateKey).detailsOpen); }, [detailsStateKey]);
   const changeFilter = (patch) => {
     const next = { ...filterState, ...patch };
-    const params = buildProfitQuery({ ledgerId: snapshot?.ledger?.id, ...next, view: "detail" });
+    const params = buildProfitQuery({ ledgerId: snapshot?.ledger?.id, workspaceId: snapshot?.ledger?.workspaceId, ...next, view: "detail" });
     params.set("store", next.storeFilter || "all");
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
@@ -143,7 +145,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
   const { revenue, totalUnits, purchaseCosts, warehouseFees, penalties, matchedProfit, missing, missingErp } = filteredSummary;
 
   const canFinalize = Boolean(calculated.length) && ledgerSummary.missing === 0 && !locked && !calculation.loading && !calculation.error;
-  const costMatchingHref = useMemo(() => buildProfitHref({ ledgerId: snapshot?.ledger?.id, ...filterState, view: "cost" }), [filterState, snapshot?.ledger?.id]);
+  const costMatchingHref = useMemo(() => buildProfitHref({ ledgerId: snapshot?.ledger?.id, workspaceId: snapshot?.ledger?.workspaceId, ...filterState, view: "cost" }), [filterState, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const allMissingCostsHref = buildProfitHref({ ledgerId: snapshot?.ledger?.id, view: 'cost', storeFilter: 'all', missingOnly: true });
 
   const columns = useMemo(() => [
@@ -342,7 +344,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
         <div className="profit-purpose-formula mono">{legacySnapshot ? "利润" : "商品利润"} = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元){legacySnapshot ? " − 客退罚款" : ""}</div>
       </Panel></details>
 
-      {!suppliedSnapshot ? <ProfitScopeFilters filter={filterState} stores={stores} suppliers={suppliers} onChange={changeFilter} /> : null}
+      {!suppliedSnapshot ? <ProfitScopeFilters filter={filterState} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={calculated} onChange={changeFilter} /> : null}
       <div className="profit-summary-strip">
         <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
         <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
@@ -380,13 +382,13 @@ export function ProfitViewsContent({ monthControl = null }) {
   const navigate = useNavigate();
   const snapshot = useLatestSalesImport(params.get("ledger"), undefined, retry);
   const view = readProfitView(params);
-  const filter = useMemo(() => readProfitFilter(params, snapshot?.ledger?.id), [params, snapshot?.ledger?.id]);
+  const filter = useMemo(() => readProfitFilter(params, snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId }), [params, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const store = filter.storeFilter;
   const stores = useMemo(() => [...new Set((snapshot?.rows ?? []).map((row) => row.store))], [snapshot?.rows]);
   const suppliers = useMemo(() => [...new Set((snapshot?.rows ?? []).filter((row) => store === "all" || row.store === store).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [snapshot?.rows, store]);
   const valid = snapshot?.ledger && (store === "all" || stores.includes(store));
   const change = (nextView, nextStore = store) => {
-    const next = buildProfitQuery({ ledgerId: snapshot.ledger.id, ...filter, storeFilter: nextStore, view: nextView });
+    const next = buildProfitQuery({ ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId, ...filter, storeFilter: nextStore, view: nextView });
     next.set("store", nextStore);
     next.set("missing", filter.missingOnly ? "1" : "0");
     setParams(next);
@@ -394,7 +396,7 @@ export function ProfitViewsContent({ monthControl = null }) {
   const openAllMissingCosts = () => setParams(buildProfitQuery({ ledgerId: snapshot.ledger.id, view: 'cost', storeFilter: 'all', missingOnly: true }));
   const changeScope = (patch) => {
     const next = { ...filter, ...patch };
-    const nextParams = buildProfitQuery({ ledgerId: snapshot.ledger.id, ...next, view });
+    const nextParams = buildProfitQuery({ ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId, ...next, view });
     nextParams.set("store", next.storeFilter || "all");
     nextParams.set("missing", next.missingOnly ? "1" : "0");
     setParams(nextParams, { replace: true });
@@ -404,7 +406,7 @@ export function ProfitViewsContent({ monthControl = null }) {
     {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set('view', 'detail'); setParams(next); }}>查看利润明细</Button></Panel> : snapshot === undefined ? <Panel role="status">正在读取月度账本...</Panel> : snapshot?.error ? <Panel><p role="alert">账本读取失败：{snapshot.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取</Button></Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p>{snapshot?.ledger ? <Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button> : <Button onClick={() => navigate('/ledger')}>选择账本</Button>}</Panel> : <>
       <header className="profit-workspace-header"><div><h1>利润核算</h1><p>{snapshot.ledger.period} · {ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status}</p></div><div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></div></header>
       <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button></nav>
-      <ProfitScopeFilters filter={filter} suppliers={suppliers} onChange={changeScope} showStore={false} />
+      <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={snapshot?.rows ?? []} onChange={changeScope} showStore={false} />
       {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><SalesAnalytics workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} stores={stores} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></>}
     </>}
   </>;

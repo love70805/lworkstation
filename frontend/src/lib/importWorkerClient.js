@@ -41,7 +41,8 @@ export function createImportWorkerClient(onProgress, { stageOwner = crypto.rando
       return request({ type: "parse", jobId, extension, buffer, selectedSheet }, [buffer]);
     },
     validate: (jobId, mapping, options) => request({ type: "validate", jobId, mapping, options, chunked: true }),
-    inspectPeriod: (jobId, mapping, options) => request({ type: "inspect-period", jobId, mapping, options }),
+    inspectPeriod: (jobId, mapping, options, context = {}) => request({ type: "inspect-period", jobId, mapping, options, ...context }),
+    supplierMembers: (preview, supplierNumber, options) => request({ type: "supplier-members", preview: { memberSource: preview.memberSource, scope: preview.scope, entries: preview.entries.filter(row => row.supplierNumber === supplierNumber) }, supplierNumber, options }),
     release: (jobId) => request({ type: "release", jobId }),
     terminate: () => {
       failure = "导入任务已停止。";
