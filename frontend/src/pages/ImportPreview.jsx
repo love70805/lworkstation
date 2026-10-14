@@ -554,7 +554,7 @@ export default function ImportPreview() {
               {item.validation && <div className="batch-validation"><p>有效 {item.validation.summary.validRowCount} 行 · 业务规则排除 {item.validation.summary.ignoredCount} 行 · 错误 {item.validation.summary.errorCount} 行</p>{item.validation.summary.errors.map((issue) => <p className="import-error" key={issue.sourceRow}>第 {issue.sourceRow} 行：{issue.messages.join("；")}</p>)}{!!item.validation.summary.platformSkcMissingCount && <p>有 {item.validation.summary.platformSkcMissingCount} 行缺少平台 SKC，无法生成对应 ERP 查询。</p>}</div>}
             </fieldset>}
           </section>)}</div>
-          <div className="wizard-card-footer"><span>{files.length ? `${files.length} 个文件 · 已自动解析与校验` : "添加文件后自动校验"}</span>{error && ready && <Button disabled={busy} onClick={validate}>重新校验</Button>}</div>
+          <div className="wizard-card-footer"><span>{files.length ? `${files.length} 个文件 · 已自动解析与校验` : "添加文件后自动校验"}</span>{(error || preview) && ready && <Button disabled={busy || supplierDirty} onClick={() => { invalidate(); void validate(); }}>重新校验</Button>}</div>
         </section>
         {error && <div className="import-error" role="alert"><AlertCircle size={18} />{error}</div>}
         {preview && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览 · {period}</h2>

@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.22",
+  "version": "0.4.23",
   "candidateOnly": true,
-  "integrationBranch": "codex/catalog-usability-0.4.22",
+  "integrationBranch": "codex/practical-supplier-flow-0.4.23",
   "requiredCommits": [
+    {
+      "module": "v0.4.23-verified-main-baseline",
+      "commit": "f0049a59bee3687623aea3f96a1213ba1587c81b"
+    },
     {
       "module": "v0.4.22-catalog-attributes-readiness-and-recovery",
       "commit": "d308fa22a6e8b166262ede23a2cdd3a159202e6e"

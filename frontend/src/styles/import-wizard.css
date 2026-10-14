@@ -416,6 +416,19 @@ fieldset:disabled .import-supplier-option { cursor: default; opacity: .6; }
 .supplier-group-chips > span { color: var(--text-muted); }
 .supplier-group-chips .button { min-height: 36px; padding: 5px 10px; font-size: 12px; }
 .supplier-group-chips .button[aria-pressed=true] { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+.supplier-group-chips .button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.supplier-group-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.supplier-group-editor { display: grid; gap: 14px; min-width: 0; }
+.supplier-group-editor label { display: grid; gap: 7px; font-size: 14px; }
+.supplier-group-editor .text-input, .supplier-group-editor select { width: 100%; min-width: 0; }
+.supplier-group-editor select { min-height: 40px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+.supplier-group-editor p { margin: 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.supplier-group-editor details { padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; }
+.supplier-group-editor details[open] > label { margin-top: 12px; }
+.supplier-group-editor summary { cursor: pointer; }
+.supplier-group-rule { color: var(--text-muted); }
+.supplier-group-delete { justify-self: start; color: var(--danger); }
+.supplier-rule-pending { font-size: 13px; line-height: 1.6; color: var(--warning-text, var(--text)); background: var(--warning-bg, var(--surface-bg)); padding: 8px 10px; border-radius: 5px; margin: 8px 0 0; }
 .supplier-rules .import-supplier-groups { position: relative; margin: 0; padding: 0; border: 0; }
 .supplier-rules .import-supplier-groups > details { margin-top: 4px; }
 .supplier-rules .import-supplier-groups > details > summary { min-height: 30px; padding: 4px 0; color: var(--text-muted); font-size: 12px; }
