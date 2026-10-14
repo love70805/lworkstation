@@ -1,3 +1,6 @@
+# Historical browser-development launcher; it opens a visible browser.
+# Current Windows Electron development uses: pnpm --dir desktop dev
+# Do not use this helper as desktop candidate or release acceptance.
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
