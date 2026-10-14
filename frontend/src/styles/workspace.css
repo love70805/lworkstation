@@ -13,7 +13,7 @@
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .dashboard-metric-card > span:last-child { display: flex; min-width: 0; flex-direction: column; }
@@ -442,24 +442,39 @@
 .workspace-month-picker .select-input { min-width:120px; }
 
 .workspace-month-picker > span { white-space:nowrap; }
-.workspace-ledger-controls { margin-bottom: 16px; padding: 16px; }
-.workspace-ledger-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
-.workspace-ledger-heading h2 { margin: 0 0 6px; font-size: 17px; }
-.workspace-ledger-heading p { margin: 0; color: var(--text-muted); font-size: 13px; }
-.workspace-ledger-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 12px 0; }
-.workspace-ledger-filters label { display: grid; gap: 6px; min-width: 140px; font-size: 13px; }
-.workspace-ledger-status { display: grid; gap: 6px; font-size: 13px; padding-bottom: 4px; }
-.workspace-ledger-status span { color: var(--text-muted); }
-.workspace-ledger-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
-@media (min-width: 1200px) {
-  .workspace-ledger-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; }
-  .workspace-ledger-heading { grid-column: 1 / -1; align-items: center; }
-  .workspace-ledger-filters { margin: 0; }
-  .workspace-ledger-actions { align-self: end; margin: 0; }
-}
-@media (max-width: 600px) {
-  .workspace-ledger-heading { flex-direction: column; }
-  .workspace-ledger-filters label { width: 100%; min-width: 0; }
-  .workspace-ledger-actions .button { flex: 1 1 100%; text-align: center; }
+.workspace-ledger-controls { margin-bottom: 16px; padding: 0; overflow: hidden; }
+.workspace-ledger-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 0; }
+.workspace-ledger-heading h2 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; }
+.workspace-ledger-heading h2 svg { color: var(--primary); }
+.workspace-ledger-controls > p, .workspace-ledger-controls > div:not([class]) { margin: 12px 16px; color: var(--text-muted); }
+.workspace-ledger-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 20px; padding: 12px 16px 16px; }
+.workspace-ledger-filters label { display: grid; gap: 6px; min-width: 150px; color: var(--text-muted); font-size: 12px; }
+.workspace-ledger-status { display: flex; gap: 10px; align-items: center; align-self: end; min-height: 40px; margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.workspace-ledger-controls .workspace-flow { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+.workspace-ledger-controls .workspace-flow-heading { align-items: center; margin-bottom: 12px; }
+.workspace-ledger-controls .workspace-flow-heading > div { min-width: 0; }
+.workspace-ledger-controls .workspace-flow-heading > .button { flex: 0 0 auto; }
+.workspace-ledger-controls .workspace-flow-heading h2 { font-size: 14px; }
+.workspace-ledger-controls .workspace-flow-step { min-height: 54px; background: var(--surface); }
+.workspace-ledger-controls .workspace-flow-step.active { background: var(--primary-soft); }
+.workspace-page .dashboard-metric-card { min-height: 88px; box-shadow: none; }
+.workspace-page .dashboard-metric-grid { gap: 10px; }
+.workspace-status-strip { color: var(--text); }
+.workspace-page .task-list { padding: 0 14px 12px; }
+.workspace-page .task-item { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+.workspace-page .task-item:last-child { border-bottom: 0; }
+@media (min-width: 1100px) { .workspace-page .dashboard-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .workspace-page .dashboard-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .workspace-page .dashboard-metric-card { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 12px; }
+  .workspace-page .dashboard-metric-card .overview-icon { display: none; }
+  .workspace-page .dashboard-metric-card strong { font-size: 20px; }
+  .workspace-page .dashboard-metric-card em { white-space: normal; }
+  .workspace-ledger-filters { gap: 12px; }
+  .workspace-ledger-filters label { flex: 1 1 120px; min-width: 0; }
+  .workspace-ledger-filters .select-input { width: 100%; min-width: 0; min-height: 44px; }
+  .workspace-ledger-status { width: 100%; margin: 0; min-height: 24px; }
+  .workspace-ledger-controls .workspace-flow-heading { align-items: stretch; flex-direction: column; gap: 10px; }
+  .workspace-ledger-heading .button, .workspace-ledger-controls .workspace-flow .button { min-height: 44px; }
 }
 .workspace-daily-trend .sales-analytics { margin: 0; }

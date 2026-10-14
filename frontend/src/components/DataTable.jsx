@@ -82,7 +82,7 @@ function StandardBody({ table, rows, emptyState, getRowProps }) {
   );
 }
 
-function VirtualBody({ table, rows, getRowProps, estimateSize, className = "" }) {
+function VirtualBody({ table, rows, getRowProps, estimateSize, className = "", scrollLabel }) {
   const scrollRef = useRef(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -94,7 +94,7 @@ function VirtualBody({ table, rows, getRowProps, estimateSize, className = "" })
   const tableWidth = table.getAllLeafColumns().reduce((total, column) => total + getColumnSize(column), 0);
 
   return (
-    <div className="virtual-table-scroll" ref={scrollRef}>
+    <div className="virtual-table-scroll" ref={scrollRef} role={scrollLabel ? "region" : undefined} aria-label={scrollLabel} tabIndex={scrollLabel ? 0 : undefined}>
       <table className={`data-table virtual-data-table ${className}`} style={{ width: tableWidth, minWidth: tableWidth }}>
         <TableHeader table={table} fixedWidths />
         <tbody style={{ height: virtualizer.getTotalSize(), width: tableWidth }}>
@@ -145,6 +145,7 @@ const DataTable = forwardRef(function DataTable({
   paginationResetKey,
   initialViewState,
   dataReady = true,
+  scrollLabel,
 }, ref) {
   const regionRef = useRef(null);
   const initialPage = Math.max(0, Math.floor(Number(initialViewState?.pageIndex) || 0));
@@ -219,9 +220,9 @@ const DataTable = forwardRef(function DataTable({
   return (
     <div className="data-table-region" ref={regionRef}>
       {shouldVirtualize ? (
-        <VirtualBody table={table} rows={rows} getRowProps={getRowProps} estimateSize={estimateSize} className={className} />
+        <VirtualBody table={table} rows={rows} getRowProps={getRowProps} estimateSize={estimateSize} className={className} scrollLabel={scrollLabel} />
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap" role={scrollLabel ? "region" : undefined} aria-label={scrollLabel} tabIndex={scrollLabel ? 0 : undefined}>
           <table className={`data-table ${className}`}>
             <TableHeader table={table} />
             <StandardBody table={table} rows={rows} emptyState={emptyState} getRowProps={getRowProps} />

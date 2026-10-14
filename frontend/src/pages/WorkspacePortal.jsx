@@ -8,7 +8,6 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
-  FileUp,
   History,
   Hourglass,
   Inbox,
@@ -23,7 +22,6 @@ import AppShell from "../components/AppShell";
 import { Button, Panel, PageHeader, useToast } from "../components/UI";
 import { db, getActiveMemberContext, getSelectionReferenceSnapshot, getWorkspaceOperationalSummary } from "../data/database";
 import { describeAuditEvent } from "../domain/auditEvents";
-import { resolveWorkspacePrimaryAction } from "../lib/workspaceActions";
 import { buildWorkspaceTaskItems } from "../lib/workspaceTasks";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
@@ -133,16 +131,6 @@ export default function WorkspacePortal() {
     ledgerScope.retry();
   };
 
-  const alert = taskItems.find(item => ["blocked-capture", "capture"].includes(item.kind))
-    ?? taskItems.find(item => item.kind === "cost")
-    ?? taskItems.find(item => item.kind === "profit")
-    ?? taskItems[0];
-
-  // Cross-month tasks identify their own month; normal actions follow selection.
-  const primaryAction = resolveWorkspacePrimaryAction({ selectedLedger: workflowLedger, query: workflowQuery });
-  const PrimaryActionIcon = primaryAction.kind === "cost" ? Warehouse : primaryAction.kind === "profit" ? CircleDollarSign : FileUp;
-  const AlertIcon = taskIcons[alert?.kind];
-
   return (
     <AppShell pageClass="workspace-page">
       <PageHeader
@@ -161,12 +149,10 @@ export default function WorkspacePortal() {
         <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近已保存利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已定稿账本"}</em></span></Panel>
       </div> : null}
 
-      {alert ? <div className="workspace-status-strip"><span className="workspace-status-icon"><AlertIcon size={18} /></span><span><strong>{alert.title}</strong><small>{alert.detail}</small></span><Button variant="ghost" onClick={() => navigate(alert.path)}>{alert.action}<ChevronRight size={16} /></Button></div> : null}
-
+      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
-          <div><h2 id="workspace-flow-title">本月核算流程</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
-          {workflowLedger ? <span className="workspace-flow-period mono">{workflowLedger.period}</span> : null}
+          <div><h2 id="workspace-flow-title">{workflowLedger ? `${workflowLedger.period} 核算流程` : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
           <Button variant="primary" disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{workflowFrozen ? workflowAction.title : `下一步：${workflowAction.title}`}</Button>
         </div>
         <div className="workspace-flow-steps">
@@ -179,7 +165,7 @@ export default function WorkspacePortal() {
           ))}
         </div>
       </section>
-      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')} />
+      </WorkspaceLedgerControls>
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="每日销售趋势">
@@ -221,7 +207,6 @@ export default function WorkspacePortal() {
               <div className="panel-title"><BarChart3 size={19} /><h2>快捷操作</h2></div>
             </div>
             <div className="quick-actions">
-              <button disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(primaryAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}><PrimaryActionIcon size={21} /><span><strong>{primaryAction.title}</strong><small>{primaryAction.detail}</small></span><ArrowUpRight size={17} /></button>
               <button onClick={() => navigate("/products?view=reference")}><BarChart3 size={21} /><span><strong>查看选品参考</strong><small>{summary?.platformSkuCount ?? 0} 个平台 SKU 可分析</small></span><ArrowUpRight size={17} /></button>
               <button onClick={() => navigate("/ledger")}><CalendarDays size={21} /><span><strong>管理月度账本</strong><small>{summary?.openLedgerCount ?? 0} 个未完成 · {summary?.finalizedLedgerCount ?? 0} 个已定稿</small></span><ArrowUpRight size={17} /></button>
             </div>

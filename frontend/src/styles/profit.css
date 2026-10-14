@@ -362,3 +362,25 @@
   @keyframes profit-reveal { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
 }
 @media(max-width:760px) { .profit-skc-group > summary { align-items:flex-start; flex-direction:column; gap:6px; } .profit-skc-group > summary span { text-align:left; } }
+
+/* Keep report work ahead of optional sales analysis. */
+.profit-workspace-controls > a { min-height: 40px; }
+.profit-page .profit-view-tabs { gap: 0; border-bottom: 1px solid var(--border-strong); margin-bottom: 14px; }
+.profit-page .profit-view-tabs > .button { min-height: 44px; padding: 8px 18px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; box-shadow: none; color: var(--text-muted); }
+.profit-page .profit-view-tabs > .button[aria-current="page"] { border-bottom-color: var(--primary); color: var(--primary); font-weight: 600; }
+.profit-page .profit-next-step { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; box-shadow: none; }
+.profit-page .profit-next-step > div { flex: 1 1 280px; display: grid; gap: 5px; }
+.profit-page .profit-next-step > .button { min-width: 128px; }
+.profit-sales-disclosure { margin-top: 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.profit-sales-disclosure > summary { padding: 14px 16px; cursor: pointer; color: var(--text); font-weight: 600; font-size: 14px; }
+.profit-sales-disclosure > summary > span { margin-left: 12px; color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.profit-sales-disclosure .sales-analytics { margin: 0; border: 0; box-shadow: none; }
+.profit-page .monthly-report-manager .report-sources-summary > div { border-radius: 6px; }
+@media (max-width: 760px) {
+  .profit-page .profit-next-step > .button { width: 100%; min-height: 44px; }
+  .profit-sales-disclosure > summary > span { display: block; margin: 6px 0 0; }
+  .profit-workspace-controls > a { min-height: 44px; }
+}
+
+.profit-report-section { scroll-margin-top: calc(var(--topbar-height) + 16px); }
+.profit-report-section:focus { outline: none; }

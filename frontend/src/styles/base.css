@@ -23,10 +23,10 @@
   --text-soft: #7c8796;
   --text-subtle: #7c8796;
   --action-soft: #eaf2ff;
-  --success: #138a5b;
+  --success: #087a55;
   --success-bg: #e7f7ef;
   --success-border: #9bd9bc;
-  --warning: #b76e00;
+  --warning: #a95c00;
   --warning-bg: #fff3dc;
   --warning-border: #efcb8a;
   --danger: #c73737;
@@ -46,7 +46,7 @@
 
 html[data-appearance="dark"] {
   color-scheme: dark;
-  --primary: #5a9cff;
+  --primary: #6ba7ff;
   --on-primary: #102135;
   --primary-hover: #7eb2ff;
   --primary-bright: #77aeff;
@@ -1378,3 +1378,8 @@ textarea::placeholder {
 
 .data-table-region { min-width: 0; }
 .data-table-region > .table-wrap, .data-table-region > .virtual-table-scroll { scroll-margin-top: calc(var(--topbar-height) + 12px); }
+
+/* Keyboard entry to each page, below the global navigation. */
+.skip-link { position: fixed; top: 8px; left: 12px; z-index: 1000; padding: 10px 16px; border: 2px solid var(--primary); border-radius: 4px; background: var(--surface); color: var(--primary); transform: translateY(-160%); }
+.skip-link:focus { transform: translateY(0); }
+.main-canvas:focus { outline: none; }

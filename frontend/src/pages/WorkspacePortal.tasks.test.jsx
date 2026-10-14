@@ -10,7 +10,7 @@ import { buildWorkspaceOperationalSummary } from "../domain/workspaceSummary";
 const mocks = vi.hoisted(() => ({ portal: null, scope: null }));
 vi.mock("dexie-react-hooks", () => ({ useLiveQuery: () => mocks.portal }));
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main>{children}</main> }));
-vi.mock("../components/WorkspaceLedgerControls", () => ({ default: () => null }));
+vi.mock("../components/WorkspaceLedgerControls", () => ({ default: ({ children }) => <section>{children}</section> }));
 vi.mock("./SalesAnalytics", () => ({ default: () => null }));
 vi.mock("../lib/useWorkspaceLedgerScope", () => ({ useWorkspaceLedgerScope: () => mocks.scope ?? ({ ready: true, context: { selected: null, query: "" }, retry: vi.fn() }) }));
 vi.mock("../data/database", () => ({ db: {}, getActiveMemberContext: vi.fn(), getSelectionReferenceSnapshot: vi.fn(), getWorkspaceOperationalSummary: vi.fn() }));
@@ -55,7 +55,7 @@ it("shows and opens an older ready month even when the latest month is a draft",
     { id: "new-draft", period: "2026-09", status: "draft", updatedAt: "2026-10-12" },
   ]);
   expect(container.querySelector(".tasks-panel .widget-count").textContent).toBe("2 项");
-  expect(container.querySelector(".workspace-status-strip").textContent).toContain("2026-06 利润待确认");
+  expect(container.querySelector(".tasks-panel").textContent).toContain("2026-06 利润待确认");
   expect(container.querySelector(".task-empty")).toBeNull();
   await act(async () => container.querySelector('button[aria-label="2026-06 利润待确认：核对利润"]').click());
   expect(container.querySelector("output").textContent).toBe("/profit?ledger=old%2Fready");
@@ -81,12 +81,12 @@ it("counts and exposes all remaining months with their own routes while closed m
   expect(container.querySelector("output").textContent).toBe("/ledger?ledger=sep");
 });
 
-it("a cost alert targets the month that needs costs rather than the latest draft", async () => {
+it("a cost task targets the month that needs costs rather than the latest draft", async () => {
   await render([
     { id: "old-cost", period: "2026-06", status: "cost_pending", costSummary: { missingCount: 3 } },
     { id: "new-draft", period: "2026-09", status: "draft", updatedAt: "2026-10-12" },
   ]);
-  expect(container.querySelector(".workspace-status-strip").textContent).toContain("2026-06 成本待补");
-  await act(async () => container.querySelector(".workspace-status-strip button").click());
+  expect(container.querySelector(".tasks-panel").textContent).toContain("2026-06 成本待补");
+  await act(async () => container.querySelector('button[aria-label="2026-06 成本待补：核对成本"]').click());
   expect(container.querySelector("output").textContent).toBe("/cost-matching?ledger=old-cost");
 });
