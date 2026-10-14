@@ -23,7 +23,7 @@ export default function ImportSupplierWorkbench({ files, workspaceId, period, al
   const indexKey = JSON.stringify(files.map(file => [file.itemId, file.storeName, file.status, file.supplierPreview?.scope?.requestId, file.supplierPreview ? null : file.facets?.supplierNumbers]));
   const candidates = useMemo(() => supplierFilterCandidates(files, { workspaceId, period }), [indexKey, workspaceId, period]);
   const preview = useMemo(() => supplierFilterPreview(candidates, { selected: selection, applied, rule, store: viewStore }), [candidates, selection, applied, rule, viewStore]);
-  const ruleEdited = supplierRuleKey({ ...rule, aliases: parseImportKeywords(aliasesText), mode }) !== supplierRuleKey(rule);
+  const ruleEdited = Boolean(parseImportKeywords(aliasesText).length || rule?.aliases?.length) && supplierRuleKey({ ...rule, aliases: parseImportKeywords(aliasesText), mode }) !== supplierRuleKey(rule);
   const selectionDirty = preview.batch.added > 0 || preview.batch.removed > 0;
   const ruleDirty = supplierRuleKey(rule) !== supplierRuleKey(initialRule);
   const dirty = selectionDirty || ruleDirty || ruleEdited;

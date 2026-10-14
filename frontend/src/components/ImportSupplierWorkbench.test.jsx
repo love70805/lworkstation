@@ -8,8 +8,8 @@ import ImportSupplierWorkbench from './ImportSupplierWorkbench';
 const initialRule = { aliases: ['HHHX'], mode: 'suffix' };
 const initialFiles = [{ itemId: 'F', storeName: '甲店', status: 'parsed', facets: { supplierNumbers: ['A-HHHX', 'B-LBY', 'MANUAL'] }, filterOptions: { supplierNumbers: ['A-HHHX', 'MANUAL'] } }];
 let root, container, snapshot, apply, members;
-function Harness() {
-  const [aliasesText, onAliasesChange] = useState('HHHX'), [mode, onModeChange] = useState('suffix'), [files, setFiles] = useState(initialFiles), [rule, setRule] = useState(initialRule), [dirty, onDirtyChange] = useState(false), [viewStore, onViewStore] = useState('all');
+function Harness({ startingEmpty = false }) {
+  const [aliasesText, onAliasesChange] = useState(startingEmpty ? '' : 'HHHX'), [mode, onModeChange] = useState('suffix'), [files, setFiles] = useState(initialFiles), [rule, setRule] = useState(startingEmpty ? { aliases: [], mode: 'suffix' } : initialRule), [dirty, onDirtyChange] = useState(false), [viewStore, onViewStore] = useState('all');
   snapshot = { aliasesText, files, rule, dirty };
   return <ImportSupplierWorkbench files={files} workspaceId="W" period="2026-09" aliasesText={aliasesText} mode={mode} onAliasesChange={onAliasesChange} onModeChange={onModeChange} initialRule={rule} onDirtyChange={onDirtyChange} viewStore={viewStore} onViewStore={onViewStore} onMembers={members} onApply={(selection, next) => { apply(selection, next); setRule(next); setFiles(files.map(file => ({ ...file, filterOptions: { supplierNumbers: selection[file.itemId] } }))); }} />;
 }
@@ -50,6 +50,17 @@ it('recovers from a synchronous member read failure in the same dialog', async (
   expect(container.querySelector('[role=dialog]').textContent).toContain('粉色-B');
   expect(members).toHaveBeenCalledTimes(2);
   expect(apply).not.toHaveBeenCalled();
+});
+
+it('does not block manual selection when the match mode changes with no keywords', async () => {
+  await act(async () => root.render(<Harness key="empty" startingEmpty />));
+  await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), { target: { value: 'exact' } }));
+  expect(snapshot.dirty).toBe(false);
+  await act(async () => container.querySelector('[aria-label="选择 甲店 B-LBY"]').click());
+  expect(button('应用本次筛选').disabled).toBe(false);
+  await click('应用本次筛选');
+  expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-HHHX', 'B-LBY', 'MANUAL']);
+  expect(snapshot.dirty).toBe(false);
 });
 
 it('drops a late member response after closing and opening another goods record', async () => {
