@@ -5,6 +5,10 @@
   "integrationBranch": "codex/practical-supplier-flow-0.4.23",
   "requiredCommits": [
     {
+      "module": "v0.4.23-supplier-groups-and-filter-recovery",
+      "commit": "fe7cc438c5e71ec7b60b94dab90b008a043546d3"
+    },
+    {
       "module": "v0.4.23-verified-main-baseline",
       "commit": "f0049a59bee3687623aea3f96a1213ba1587c81b"
     },
