@@ -11,7 +11,7 @@ let application,run,candidate=null;
 const evidence=[];
 async function attachCandidate(){await application.evaluate(({webContents,BrowserWindow,session})=>{
  globalThis.__erpUi={workspace:()=>webContents.getAllWebContents().find(w=>w.getURL().startsWith('shopeers://workstation/')),window:()=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('shell.html'))};
- for(const s of [session.defaultSession,session.fromPartition('persist:erp'),session.fromPartition('persist:1688')])s.webRequest.onBeforeRequest((d,cb)=>{const u=new URL(d.url);cb({cancel:['http:','https:'].includes(u.protocol)&&u.hostname!=='127.0.0.1'});});
+ for(const s of [session.defaultSession,session.fromPartition('persist:erp')])s.webRequest.onBeforeRequest((d,cb)=>{const u=new URL(d.url);cb({cancel:['http:','https:'].includes(u.protocol)&&u.hostname!=='127.0.0.1'});});
 });}
 async function wait(code){const end=Date.now()+30000;while(Date.now()<end){if(await run(code))return;await delay(100);}throw new Error('Timeout '+code+'\n'+await run('document.body.innerText'));}
 async function click(text){const query=`[...document.querySelectorAll('button')].find(e=>e.textContent.trim()===${JSON.stringify(text)}&&!e.disabled&&e.getClientRects().length)`;await wait(`Boolean(${query})`);await wait(`(()=>{const e=${query};if(!e)return false;e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===e||e.contains(hit);})()`);await run(`(${query}).click()`);await delay(100);}

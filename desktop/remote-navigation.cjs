@@ -1,6 +1,5 @@
 const REMOTE_DOMAINS = {
   erp: ["zhuolinkeji.cn"],
-  "1688": ["1688.com", "taobao.com", "tmall.com", "alibaba.com"],
 };
 
 function normalizeAllowedRemoteUrl(tabId, value) {

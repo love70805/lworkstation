@@ -616,12 +616,12 @@ function ProductLibraryView({ workspaceId, view }) {
   const resetReferenceFilters = () => { setQuery(""); setStore("all"); setSupplierNumber(""); setCatalogFilter("all"); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); };
   const visibleProductColumns = useMemo(() => columnView === "all" ? productColumns : productColumns.filter(column => COMPACT_COLUMN_IDS.has(column.id ?? column.accessorKey)), [columnView, productColumns]);
 
-  const pageTitle = view === "reference" ? "预存区" : view === "pending" ? "待确认采集" : "选品工作台";
+  const pageTitle = view === "reference" ? "预存区" : view === "pending" ? "历史采集资料" : "选品工作台";
   const pageDescription = view === "reference"
     ? "导入资料先预存，逐步补齐名称、图片、商品标识、店铺、属性、售价、参考成本和供应商链接；资料齐全后自动进入选品库。"
     : view === "pending"
-      ? "审核 1688 采集结果，补齐平台 SKC、平台 SKU 和供应商资料后再写入选品商品库。"
-      : "自由建立商品档案，管理发布状态、平台 SKC/SKU、仓库 SKU 映射、供应商、图片、1688 链接和售价。";
+      ? "整理旧采集资料，补齐后确认入库。新商品请直接新建，或从预存区补齐。"
+      : "管理商品资料、售价与销售状态。供应商链接和参考成本随档案保留。";
 
   return (
     <AppShell pageClass={`product-library-page ${view === "pending" ? "pending-view" : ""}`}>
@@ -638,7 +638,7 @@ function ProductLibraryView({ workspaceId, view }) {
       <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
         <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
         <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>预存区</span><small>{referenceRead.status === "ready" ? new Set(referenceRows.filter(row => !row.productId || row.productStatus === "draft").map(row => row.platformSkc || row.canonicalPlatformSku)).size + prestorageProducts.filter(product => !product.draft.variants.some(variant => variant.platformSku)).length : "—"}</small></button>
-        <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>待确认采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button>
+        {pendingCount > 0 || view === "pending" ? <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>历史采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button> : null}
       </div>
 
       {view === "reference" ? (

@@ -9,7 +9,7 @@ globalThis.__nativeWindowCount = () => globalThis.__qaWindows.filter(w => !w.isD
 globalThis.__erpStatusFixture = { mode: 'authenticated', calls: [] };
 electron.dialog.showErrorBox = (title, message) => { console.error(title + ': ' + message); };
 electron.app.whenReady().then(async () => {
-  for (const partition of ['persist:erp', 'persist:1688']) {
+  for (const partition of ['persist:erp']) {
     const current = electron.session.fromPartition(partition);
     await current.protocol.handle('https', request => {
       const url = new URL(request.url);

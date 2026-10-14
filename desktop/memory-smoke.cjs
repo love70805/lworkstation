@@ -12,7 +12,7 @@ async function switchTab(application, tabId) {
   return application.evaluate(async ({ BrowserWindow }, tabId) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('shell.html')).webContents.executeJavaScript(`window.desktop.switchTab(${JSON.stringify(tabId)})`), tabId);
 }
 async function configure(application, workspaceId) {
-  const result = await application.evaluate(async ({ webContents }, workspaceId) => webContents.getAllWebContents().find(c => c.getURL().includes('127.0.0.1') || c.getURL().startsWith('shopeers:')).executeJavaScript(`window.shopeersDesktopRuntime.requestInbox({ route: '/selection/v1/context', method: 'POST', body: { workspaceId: ${JSON.stringify(workspaceId)}, memberId: 'memory-member', visibility: 'workspace' } })`), workspaceId);
+  const result = await application.evaluate(async ({ webContents }, workspaceId) => webContents.getAllWebContents().find(c => c.getURL().includes('127.0.0.1') || c.getURL().startsWith('shopeers:')).executeJavaScript(`window.shopeersDesktopRuntime.requestInbox({ route: '/erp/v1/workspace-context', method: 'POST', body: { workspaceId: ${JSON.stringify(workspaceId)}, memberId: 'memory-member', visibility: 'workspace' } })`), workspaceId);
   assert.equal(result.status, 200, 'context synchronization accepts deferred pages');
 }
 async function extensionWorkspace(application, tabId) {
@@ -31,8 +31,8 @@ async function checkUserPaths(application) {
   const checks = [];
   const initial = await state(application);
   assert.equal(initial.tabs.erp.extension.status, 'deferred');
-  assert.equal(initial.tabs['1688'].extension.status, 'deferred');
-  assert.equal(await application.evaluate(({ session }) => ['erp', '1688'].reduce((sum, id) => sum + session.fromPartition(`persist:${id}`).extensions.getAllExtensions().length, 0)), 0);
+  assert.equal(initial.tabs['1688'], undefined);
+  assert.equal(await application.evaluate(({ session }) => ['erp'].reduce((sum, id) => sum + session.fromPartition(`persist:${id}`).extensions.getAllExtensions().length, 0)), 0);
   checks.push('cold start has no remote page or loaded extension');
   const workspaceIdentity = await application.evaluate(async ({ webContents }) => {
     const c = webContents.getAllWebContents().find(c => c.getURL().includes('/workspace'));
@@ -40,37 +40,35 @@ async function checkUserPaths(application) {
     return { id: c.id, pid: c.getOSProcessId() };
   });
   await configure(application, 'memory-workspace');
+  if (!process.env.MEMORY_SMOKE_EXECUTABLE) {
+    await application.evaluate(() => globalThis.__memory.failConfiguration('erp'));
+    assert.equal((await switchTab(application, 'erp')).ok, false);
+    assert.equal(await application.evaluate(({ session }) => session.fromPartition('persist:erp').extensions.getAllExtensions().length), 0);
+    checks.push('failed cold ERP configuration releases renderer and extension, allowing retry');
+  }
+  assert.equal((await switchTab(application, '1688')).ok, false, 'retired tab cannot be reopened through IPC');
   const first = switchTab(application, 'erp');
   const second = switchTab(application, 'erp');
   await switchTab(application, 'workspace');
   assert.equal((await first).ok, true); assert.equal((await second).ok, true);
   assert.equal((await state(application)).activeTab, 'workspace', 'late initialization cannot steal selection');
   await wait(async () => (await state(application)).tabs.erp.status === 'ready', 'cold ERP ready');
-  assert.equal((await state(application)).tabs['1688'].extension.status, 'deferred');
+  assert.equal((await state(application)).tabs['1688'], undefined);
   assert.equal(await extensionWorkspace(application, 'erp'), 'memory-workspace');
   checks.push('duplicate cold ERP opens initialize once; latest scope installed; late completion preserves selected workspace');
   // Restore the real frontend scope before its periodic background polling.
   await configure(application, 'workspace-default');
-  if (!process.env.MEMORY_SMOKE_EXECUTABLE) {
-    await application.evaluate(() => globalThis.__memory.failConfiguration('1688'));
-    assert.equal((await switchTab(application, '1688')).ok, false);
-    assert.equal(await application.evaluate(({ session }) => session.fromPartition('persist:1688').extensions.getAllExtensions().length), 0, 'failed cold start releases the loaded extension');
-    checks.push('configuration failure reports error and releases the remote renderer and extension');
-  }
-  assert.equal((await switchTab(application, '1688')).ok, true);
-  await wait(async () => (await state(application)).tabs['1688'].status === 'ready', 'cold 1688 ready');
-  assert.equal(await extensionWorkspace(application, '1688'), 'workspace-default');
   const remoteIds = await application.evaluate(async ({ webContents }) => {
-    const remotes = webContents.getAllWebContents().filter(c => ['https://www.zhuolinkeji.cn/', 'https://www.1688.com/'].includes(c.getURL()));
+    const remotes = webContents.getAllWebContents().filter(c => ['https://www.zhuolinkeji.cn/'].includes(c.getURL()));
     for (const c of remotes) await c.executeJavaScript("document.querySelector('#draft').value='页面草稿'; window.ticks=0; window.setInterval(()=>window.ticks++, 100)");
     return remotes.map(c => c.id).sort();
   });
-  for (let i = 0; i < 12; i++) { await switchTab(application, i % 2 ? '1688' : 'erp'); await switchTab(application, 'workspace'); }
+  for (let i = 0; i < 12; i++) { await switchTab(application, 'erp'); await switchTab(application, 'workspace'); }
   await pause(700);
   const retained = await application.evaluate(async ({ webContents }) => {
     const all = webContents.getAllWebContents();
     const workspace = all.find(c => c.getURL().includes('/workspace'));
-    return { workspace: { id: workspace.id, pid: workspace.getOSProcessId() }, workspaceDraft: await workspace.executeJavaScript("document.querySelector('#memory-draft').value"), remotes: await Promise.all(all.filter(c => ['https://www.zhuolinkeji.cn/', 'https://www.1688.com/'].includes(c.getURL())).map(async c => ({ id: c.id, draft: await c.executeJavaScript("document.querySelector('#draft').value"), ticks: await c.executeJavaScript('window.ticks') }))) };
+    return { workspace: { id: workspace.id, pid: workspace.getOSProcessId() }, workspaceDraft: await workspace.executeJavaScript("document.querySelector('#memory-draft').value"), remotes: await Promise.all(all.filter(c => ['https://www.zhuolinkeji.cn/'].includes(c.getURL())).map(async c => ({ id: c.id, draft: await c.executeJavaScript("document.querySelector('#draft').value"), ticks: await c.executeJavaScript('window.ticks') }))) };
   });
   assert.deepEqual(retained.workspace, workspaceIdentity);
   assert.equal(retained.workspaceDraft, '保留未保存内容');
@@ -139,7 +137,7 @@ async function sample(application, name) {
       application = await _electron.launch({ executablePath: process.env.MEMORY_SMOKE_EXECUTABLE || require('electron'), args: process.env.MEMORY_SMOKE_EXECUTABLE ? [] : [path.join(__dirname, 'memory-smoke-app.cjs')], env });
       if (process.env.MEMORY_SMOKE_EXECUTABLE) {
         await application.evaluate(({ session }) => {
-          for (const id of ['erp', '1688']) session.fromPartition(`persist:${id}`).protocol.handle('https', () => new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离页面</h1><input id="draft"></body></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+          for (const id of ['erp']) session.fromPartition(`persist:${id}`).protocol.handle('https', () => new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离页面</h1><input id="draft"></body></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
         });
       }
       await wait(async () => (await state(application)).startup.status === 'ready', 'real workspace ready');

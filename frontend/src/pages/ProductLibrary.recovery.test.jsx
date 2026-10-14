@@ -222,3 +222,17 @@ it("keeps active advanced scope visible when collapsed and restores all rows aft
   await mount(); await waitFor(() => container.querySelector('.product-table-all'));
   expect(container.querySelectorAll('.product-table thead th')).toHaveLength(13);
 });
+
+it("keeps the default library compact and exposes historical captures only when present", async () => {
+  await mount(); await waitFor(() => container.querySelector('.product-table-panel'));
+  expect(container.querySelectorAll('.product-view-tabs [role=tab]').length).toBe(2);
+  expect(container.textContent).not.toMatch(/安装 1688|1688 扩展状态|新增采集/);
+  await act(async () => createManualCaptureRecord({ name: "历史资料样例", sourceUrl: draft.sourceUrl }));
+  await waitFor(() => [...container.querySelectorAll('.product-view-tabs button')].some(el => el.textContent.includes('历史采集')));
+  const history = [...container.querySelectorAll('.product-view-tabs button')].find(el => el.textContent.includes('历史采集'));
+  await act(async () => history.click());
+  await waitFor(() => container.querySelector('.queue-item'));
+  expect(container.textContent).toContain('历史资料样例');
+  expect(container.textContent).not.toMatch(/安装 1688|1688 扩展状态|新增采集/);
+  expect(container.querySelector('[title="编辑采集记录"]')).toBeTruthy();
+});

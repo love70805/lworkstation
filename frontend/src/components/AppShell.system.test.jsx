@@ -31,7 +31,7 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); delete window.shopeersDesktopRuntime; delete globalThis.IS_REACT_ACT_ENVIRONMENT; });
 
 it('opens diagnostics directly and retains the actual failed connection result on retry', async () => {
-  expect(container.querySelector('a[href="/diagnostics"]').textContent).toContain('系统检查');
+  expect(container.querySelector('a[href="/diagnostics"]').textContent).toContain('系统与备份');
   await act(async () => container.querySelector('.environment-chip').click());
   const menu = container.querySelector('.environment-popover');
   expect(menu.textContent).toContain('检查失败');
@@ -52,5 +52,5 @@ it('edits desktop close behavior from preferences and keeps cloud setup folded',
   expect(desktop.setCloseBehavior).toHaveBeenCalledWith('quit');
   expect(select.value).toBe('quit');
   expect(container.querySelector('[role=dialog]').textContent).toContain('退出应用并停止后台收件');
-  expect(container.querySelector('[role=dialog] .system-advanced').open).toBe(false);
+  expect(container.querySelector('[role=dialog] .system-advanced')).toBeNull();
 });

@@ -5,7 +5,7 @@ const path = require('node:path');
 const Module = require('node:module');
 if (!process.env.SHOPEERS_DESKTOP_SMOKE_USER_DATA || !process.env.DESKTOP_ERP_UI_SMOKE) throw new Error('isolated smoke required');
 electron.app.whenReady().then(() => {
-  for (const current of [electron.session.defaultSession, electron.session.fromPartition('persist:erp'), electron.session.fromPartition('persist:1688')]) {
+  for (const current of [electron.session.defaultSession, electron.session.fromPartition('persist:erp')]) {
     current.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
       callback({ cancel: ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1' });

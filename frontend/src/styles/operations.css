@@ -165,3 +165,5 @@
 .diagnostic-card footer button { min-height: 32px; }
 
 .system-operation-warning { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--warning-border); border-radius: 6px; color: var(--text); background: var(--surface); line-height: 1.6; overflow-wrap: anywhere; }
+
+.diagnostic-extension-grid:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }

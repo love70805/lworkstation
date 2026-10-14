@@ -5,7 +5,7 @@ const path = require('node:path');
 const Module = require('node:module');
 if (!process.env.SHOPEERS_DESKTOP_SMOKE_USER_DATA || !process.env.DESKTOP_MEMORY_SMOKE) throw new Error('isolated memory smoke required');
 electron.app.whenReady().then(() => {
-  for (const id of ['erp', '1688']) {
+  for (const id of ['erp']) {
     const target = electron.session.fromPartition(`persist:${id}`);
     target.protocol.handle('https', () => new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离页面</h1><input id="draft"></body></html>', { headers: { 'content-type': 'text/html; charset=utf-8' } }));
   }

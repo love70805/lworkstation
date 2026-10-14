@@ -3,7 +3,7 @@ const fsSync = require("node:fs");
 const path = require("node:path");
 
 const RUNTIME_DIRECTORY = "Lworkstation-runtime-extensions";
-const ALLOWED_RUNTIME_IDS = new Set(["erp", "1688"]);
+const ALLOWED_RUNTIME_IDS = new Set(["erp"]);
 const INBOX_STORAGE_KEYS = Object.freeze([
   "shopeersErpInboxBaseUrl",
   "shopeersErpInboxCapability",
@@ -73,48 +73,6 @@ async function injectRuntimeContract(directory, port, runtimeId) {
       manifest.permissions = [...new Set([...(manifest.permissions || []), "storage"])]
         .sort((left, right) => left.localeCompare(right));
       await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    }
-  }
-  if (runtimeId === "1688") {
-    const bootstrap = `
-;(() => {
-  const nativeFetch = globalThis.fetch.bind(globalThis);
-  const baseKey = 'shopeersErpInboxBaseUrl';
-  const capabilityKey = 'shopeersErpInboxCapability';
-  const workspaceKey = 'shopeersErpWorkspaceId';
-  async function runtimeFetch(input, init = {}) {
-    const rawUrl = typeof input === 'string' ? input : input?.url;
-    let parsed;
-    try { parsed = new URL(String(rawUrl || '')); } catch { return nativeFetch(input, init); }
-    if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname) || !parsed.pathname.startsWith('/selection/v1/')) {
-      return nativeFetch(input, init);
-    }
-    const stored = await chrome.storage.local.get([baseKey, capabilityKey, workspaceKey]);
-    const baseUrl = String(stored[baseKey] || '').trim();
-    const capability = String(stored[capabilityKey] || '').trim();
-    const workspaceId = String(stored[workspaceKey] || '').trim();
-    let base;
-    try { base = new URL(baseUrl); } catch { throw new Error('SHOPEERS_INBOX_NOT_CONFIGURED'); }
-    if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname)
-      || capability.length < 32 || !workspaceId) {
-      throw new Error('SHOPEERS_INBOX_NOT_CONFIGURED');
-    }
-    parsed.protocol = base.protocol;
-    parsed.hostname = base.hostname;
-    parsed.port = base.port;
-    const headers = new Headers(init.headers || {});
-    headers.set('authorization', 'Bearer ' + capability);
-    headers.set('x-shopeers-workspace-id', workspaceId);
-    return nativeFetch(parsed.href, { ...init, headers });
-  }
-  globalThis.fetch = runtimeFetch;
-})();
-`;
-    for (const relativePath of ["background.js", "popup.js"]) {
-      const target = path.join(directory, relativePath);
-      if (!fsSync.existsSync(target)) continue;
-      const source = await fs.readFile(target, "utf8");
-      if (!source.includes("SHOPEERS_INBOX_NOT_CONFIGURED")) await fs.writeFile(target, `${bootstrap}${source}`, "utf8");
     }
   }
 }

@@ -5,7 +5,6 @@ import AppShell from "../components/AppShell";
 import SystemNavigation from "../components/SystemNavigation";
 import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
 import ErpAssistantSetup from "../components/ErpAssistantSetup";
-import SelectionCaptureSetup from "../components/SelectionCaptureSetup";
 import { Badge, Button, Panel, PageHeader, useToast } from "../components/UI";
 import { db, getDataSecuritySnapshot } from "../data/database";
 import { getSyncStatusSnapshot } from "../data/syncOutbox";
@@ -214,7 +213,7 @@ export default function Diagnostics() {
         actions={<Button icon={RefreshCw} loading={refreshing} disabled={refreshing} onClick={refresh}>刷新状态</Button>}
       />
       {check.status === 'error' ? <div className="system-check-error" role="alert">本机检查失败：{check.error}<Button onClick={refresh} loading={refreshing} disabled={refreshing}>重试检查</Button></div> : null}
-      <p className="system-check-note">本机检查读取数据库记录与存储占用；可读取不代表业务数据均正确，也不代表 ERP / 1688 服务正常。各连接状态在下方独立检查。</p>
+      <p className="system-check-note">本机检查读取数据库记录与存储占用；可读取不代表业务数据均正确，也不代表 ERP 服务正常。各连接状态在下方独立检查。</p>
 
       <div className="diagnostic-meta"><span>应用 <strong className="mono">{APP_VERSION}</strong></span><span>环境 <strong className="mono">{RUNTIME_COPY.environment}</strong></span><span>云端协作 <strong className="mono">{runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "未配置"}</strong></span><span>上次检查 <strong className="mono">{lastCheckedAt ? formatDateTime(lastCheckedAt) : "未运行"}</strong></span></div>
 
@@ -226,12 +225,11 @@ export default function Diagnostics() {
 
       <section className="diagnostic-extension-section" id="extensions" aria-labelledby="diagnostic-extension-title">
         <div className="diagnostic-section-heading">
-          <div><h2 id="diagnostic-extension-title">扩展与本机服务</h2><p>{DESKTOP_RUNTIME ? "桌面版扩展随应用内置；此处保留详细连接状态，不提供手工安装或扩展包下载。" : "检查浏览器扩展与本机收件服务；安装入口仍保留在对应业务页面。"}</p></div>
+          <div><h2 id="diagnostic-extension-title">ERP 助手与本机服务</h2><p>{DESKTOP_RUNTIME ? "ERP 助手随桌面版内置，可在这里检查连接。" : "检查浏览器扩展与本机收件服务；安装入口仍保留在对应业务页面。"}</p></div>
           <Badge tone={DESKTOP_RUNTIME ? "success" : "info"}>{DESKTOP_RUNTIME ? "桌面内置" : "浏览器扩展"}</Badge>
         </div>
         <div className="diagnostic-extension-grid">
           <div className="diagnostic-extension-group"><ErpAssistantSetup diagnostics /></div>
-          <div className="diagnostic-extension-group"><div className="diagnostic-extension-group-heading"><strong>1688 采集扩展与收件服务</strong><small>状态检查不会改变待确认队列或选品数据。</small></div><SelectionCaptureSetup diagnostics /></div>
         </div>
       </section>
 

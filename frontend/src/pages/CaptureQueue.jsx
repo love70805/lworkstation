@@ -1,27 +1,15 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
-import { AlertCircle, CheckCheck, Download, ExternalLink, Filter, Image, Pencil, Plus, Search, ShieldCheck, Trash2, TriangleAlert, X } from "lucide-react";
+import { AlertCircle, CheckCheck, ExternalLink, Filter, Image, Pencil, Search, Trash2, TriangleAlert, X } from "lucide-react";
 import { Badge, Button, EmptyState, Modal, Panel, useToast } from "../components/UI";
-import SelectionCaptureSetup from "../components/SelectionCaptureSetup";
 import {
-  createManualCaptureRecord,
   ignoreCaptureRecord,
   listPendingCaptureRecords,
   saveProductCatalogRecord,
 } from "../data/database";
 import { calculateSupplierLandedUnitCost } from "../domain/productCatalog";
 import { matchesSelectionSearch } from "../lib/selectionSearch";
-import { isDesktopRuntime } from "../lib/desktopRuntime";
-
-const emptyCaptureForm = {
-  name: "",
-  sourceUrl: "",
-  sourceProductId: "",
-  supplierCode: "",
-  supplierName: "",
-  imageUrl: "",
-};
 
 function formatCapturedAt(value) {
   if (!value) return "--";
@@ -77,13 +65,8 @@ export function CaptureQueueView({ captureRead, query = "", onQueryChange = () =
     if (initialScrollY != null) window.scrollTo({ top: initialScrollY, behavior: "auto" });
   }, [captureSnapshot, initialScrollY]);
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createForm, setCreateForm] = useState(emptyCaptureForm);
-  const [creating, setCreating] = useState(false);
   const [confirmingId, setConfirmingId] = useState(null);
   const [confirmingAll, setConfirmingAll] = useState(false);
-  const [setupOpen, setSetupOpen] = useState(false);
-  const desktop = isDesktopRuntime();
 
   const visibleCaptures = useMemo(() => {
     return captures.filter((capture) => {
@@ -107,20 +90,6 @@ export function CaptureQueueView({ captureRead, query = "", onQueryChange = () =
   const pendingCount = captures.length;
   const blockingCount = captures.filter((capture) => !capture.validation?.valid).length;
   const readyCaptures = captures.filter((capture) => capture.validation?.valid);
-
-  const createCapture = async () => {
-    setCreating(true);
-    try {
-      const capture = await createManualCaptureRecord(createForm);
-      setCreateForm(emptyCaptureForm);
-      setCreateOpen(false);
-      notify(`采集记录 ${capture.id} 已进入待确认队列。`, "success");
-    } catch (error) {
-      notify(`新增采集失败：${error.message}`, "error");
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const confirmCapture = async (capture) => {
     setConfirmingId(capture.id);
@@ -164,7 +133,7 @@ export function CaptureQueueView({ captureRead, query = "", onQueryChange = () =
   return (
     <>
       <div className="queue-view-toolbar">
-        <div><strong>{captureRead.status === "ready" ? `${pendingCount} 条采集记录等待确认` : "尚未取得待确认采集"}</strong><span>{captureRead.status === "ready" ? `${blockingCount} 条存在阻断项，确认后才会写入正式商品库。` : "请等待读取完成后确认入库。"}</span></div>
+        <div><strong>{captureRead.status === "ready" ? `${pendingCount} 条历史采集记录等待整理` : "尚未取得历史采集资料"}</strong><span>{captureRead.status === "ready" ? `${blockingCount} 条存在阻断项，确认后才会写入正式商品库。` : "请等待读取完成后确认入库。"}</span></div>
         <div>
           <div className="selection-domain-search queue-domain-search">
             <Search size={17} aria-hidden="true" />
@@ -172,8 +141,6 @@ export function CaptureQueueView({ captureRead, query = "", onQueryChange = () =
             {query ? <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onQueryChange("")}><X size={16} /></button> : null}
           </div>
           <label className="queue-filter button button-secondary"><Filter size={17} /><span>筛选</span><select aria-label="队列筛选" value={filter} onChange={(event) => onFilterChange(event.target.value)}><option value="all">全部</option><option value="needs-action">需要处理</option><option value="ready">可确认</option></select></label>
-          <Button icon={Plus} onClick={() => setCreateOpen(true)}>新增采集</Button>
-          <Button icon={desktop ? ShieldCheck : Download} onClick={() => setSetupOpen(true)}>{desktop ? "1688 扩展状态" : "安装 1688 扩展"}</Button>
           <Button variant="primary" icon={CheckCheck} loading={confirmingAll} disabled={readyCaptures.length === 0 || confirmingAll} onClick={confirmAllValid}>确认全部有效项</Button>
         </div>
       </div>
@@ -218,34 +185,9 @@ export function CaptureQueueView({ captureRead, query = "", onQueryChange = () =
         })}
 
         {captureRead.status !== "ready" ? <SelectionReadState read={captureRead} label="待确认采集" /> : visibleBatches.length === 0 ? (
-          <Panel className="queue-empty"><EmptyState icon={CheckCheck} title={captures.length === 0 ? "待确认队列为空" : "没有符合当前条件的采集记录"} description={captures.length === 0 ? "可先手工登记 1688 来源，后续浏览器扩展也会写入同一队列。" : "请调整筛选条件或搜索内容。"} action={captures.length === 0 ? <Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>新增采集记录</Button> : <Button onClick={() => { onFilterChange("all"); onQueryChange(""); }}>清除筛选</Button>} /></Panel>
+          <Panel className="queue-empty"><EmptyState icon={CheckCheck} title={captures.length === 0 ? "待确认队列为空" : "没有符合当前条件的采集记录"} description={captures.length === 0 ? "历史采集资料已整理完毕，可直接在商品库新建或在预存区补齐商品。" : "请调整筛选条件或搜索内容。"} action={captures.length === 0 ? <Button variant="primary" onClick={() => navigate("/products/edit")}>新建商品</Button> : <Button onClick={() => { onFilterChange("all"); onQueryChange(""); }}>清除筛选</Button>} /></Panel>
         ) : null}
       </div>
-
-      <Modal
-        open={setupOpen}
-        title={desktop ? "内置 1688 扩展状态" : "安装 1688 采集扩展"}
-        description={desktop ? "桌面版已内置扩展，这里只显示连接状态；详细信息可前往系统诊断。" : "只需安装一次。安装状态会在这里自动检测，无需单独进入设置页面。"}
-        onClose={() => setSetupOpen(false)}
-        footer={<Button onClick={() => setSetupOpen(false)}>完成</Button>}
-      >
-        <SelectionCaptureSetup />
-      </Modal>
-
-      <Modal
-        open={createOpen}
-        title="新增 1688 采集记录"
-        description="先登记来源，随后在商品编辑器中补齐平台 SKC、平台 SKU 和报价明细。"
-        onClose={() => setCreateOpen(false)}
-        footer={<><Button onClick={() => setCreateOpen(false)}>取消</Button><Button variant="primary" loading={creating} disabled={creating || !createForm.name.trim() || !createForm.sourceUrl.trim()} onClick={createCapture}>加入待确认队列</Button></>}
-      >
-        <div className="capture-create-form">
-          <div className="form-field"><label className="required">商品名称</label><input aria-label="商品名称" className="text-input" value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} placeholder="1688 商品名称或内部暂定名称" /></div>
-          <div className="form-field"><label className="required">1688 来源链接</label><input aria-label="1688 来源链接" className="text-input" value={createForm.sourceUrl} onChange={(event) => setCreateForm((current) => ({ ...current, sourceUrl: event.target.value }))} placeholder="https://detail.1688.com/offer/..." /></div>
-          <div className="source-two-col"><div className="form-field"><label>1688 商品 ID</label><input aria-label="1688 商品 ID" className="text-input mono" value={createForm.sourceProductId} onChange={(event) => setCreateForm((current) => ({ ...current, sourceProductId: event.target.value }))} /></div><div className="form-field"><label>供应商编号</label><input aria-label="供应商编号" className="text-input mono" value={createForm.supplierCode} onChange={(event) => setCreateForm((current) => ({ ...current, supplierCode: event.target.value }))} /></div></div>
-          <div className="source-two-col"><div className="form-field"><label>供应商名称</label><input aria-label="供应商名称" className="text-input" value={createForm.supplierName} onChange={(event) => setCreateForm((current) => ({ ...current, supplierName: event.target.value }))} /></div><div className="form-field"><label>商品图片链接</label><input aria-label="商品图片链接" className="text-input" value={createForm.imageUrl} onChange={(event) => setCreateForm((current) => ({ ...current, imageUrl: event.target.value }))} /></div></div>
-        </div>
-      </Modal>
 
       <Modal
         open={Boolean(pendingDelete)}

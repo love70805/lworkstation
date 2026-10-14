@@ -1,7 +1,7 @@
 {
   "name": "shopeers-workstation",
   "private": true,
-  "version": "0.4.25",
+  "version": "0.4.26",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,8 +9,6 @@
     "erp:inbox": "node ../tools/erp-inbox-server.mjs",
     "erp:inbox:test": "node ../tools/erp-inbox-server.test.mjs",
     "erp:bridge:test": "node ../tools/build-erpa-shopeers-bridge.test.mjs",
-    "selection:bridge": "node ../tools/build-selection-capture-extension.mjs",
-    "selection:bridge:test": "node ../tools/build-selection-capture-extension.test.mjs",
     "sync:postgres": "node ../tools/sync-production-server.mjs",
     "sync:deploy:check": "node ../tools/validate-sync-deployment.mjs",
     "sync:check": "node ../tools/sync-dev-smoke.mjs",

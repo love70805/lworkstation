@@ -9,7 +9,7 @@ const checks = [];
 const server = http.createServer((req,res) => {
   requests++;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end('<!doctype html><html><head><style>body{font:20px sans-serif;padding:32px;background:#eef2f8;color:#142038}input{padding:16px}</style></head><body><div id="root"><main class="app-shell"><h1>工作站恢复验收</h1><p>切换 ERP / 1688 后保留当前页面和未保存输入</p><input id="draft" value=""></main></div></body></html>');
+  res.end('<!doctype html><html><head><style>body{font:20px sans-serif;padding:32px;background:#eef2f8;color:#142038}input{padding:16px}</style></head><body><div id="root"><main class="app-shell"><h1>工作站恢复验收</h1><p>切换 ERP 后保留当前页面和未保存输入</p><input id="draft" value=""></main></div></body></html>');
 });
 async function wait(check, name, timeout=20000) {
   const end=Date.now()+timeout;
@@ -31,7 +31,7 @@ async function retry(shell) { await shell.locator('#startup-retry').click(); awa
   await evaluate(()=>globalThis.__experience.workspace().executeJavaScript("history.pushState({}, '', '/profit?month=2026-08');document.querySelector('#draft').value='11111.25'"));
   const loaded=requests;
   for(let i=0;i<12;i++) {
-    await evaluate(i=>{const x=globalThis.__experience;x.switchTab(i%2?'1688':'erp');x.window().minimize();},i);
+    await evaluate(i=>{const x=globalThis.__experience;x.switchTab('erp');x.window().minimize();},i);
     await delay(100);
     await evaluate(()=>{const x=globalThis.__experience;x.window().restore();x.window().show();x.switchTab('workspace');});
     await delay(150);
@@ -43,7 +43,7 @@ async function retry(shell) { await shell.locator('#startup-retry').click(); awa
   assert.equal(requests,loaded,'healthy return does not reload');
   const restored = await evaluate(()=>globalThis.__experience.workspace().capturePage().then(img=>img.toPNG().toString('base64')));
   fs.writeFileSync(path.join(output,'restored.png'),Buffer.from(restored,'base64'));
-  checks.push('12 ERP/1688 + minimize/restore cycles: visible, same renderer, route and draft preserved, no reload');
+  checks.push('12 ERP + minimize/restore cycles: visible, same renderer, route and draft preserved, no reload');
   await evaluate(()=>{const x=globalThis.__experience;x.switchTab('erp');return x.workspace().executeJavaScript("document.querySelector('#root').replaceChildren()");});
   await evaluate(()=>globalThis.__experience.switchTab('workspace'));
   await wait(()=>evaluate(()=>globalThis.__experience.state().startup.status==='error'),'blank DOM detected');
@@ -51,7 +51,7 @@ async function retry(shell) { await shell.locator('#startup-retry').click(); awa
   await retry(shell);
   assert.match(await evaluate(()=>globalThis.__experience.workspace().getURL()),/\/profit\?month=2026-08$/);
   checks.push('blank root detected on return; native retry keeps valid route');
-  await evaluate(()=>{const x=globalThis.__experience;x.switchTab('1688');x.window().minimize();x.workspace().forcefullyCrashRenderer();});
+  await evaluate(()=>{const x=globalThis.__experience;x.switchTab('erp');x.window().minimize();x.workspace().forcefullyCrashRenderer();});
   await wait(()=>evaluate(()=>globalThis.__experience.state().startup.status==='error'),'crash detected');
   await evaluate(()=>{const x=globalThis.__experience;x.window().restore();x.window().show();x.switchTab('workspace');});
   await retry(shell); checks.push('background renderer crash + minimized window: retry restores workspace');
@@ -72,7 +72,7 @@ async function retry(shell) { await shell.locator('#startup-retry').click(); awa
   checks.push('delayed probe: bounded error feedback, late actual preload reply restores same unsaved draft');
   await evaluate(()=>{const x=globalThis.__experience;x.switchTab('erp');x.holdProbe();x.switchTab('workspace');});
   await wait(()=>evaluate(()=>globalThis.__experience.state().startup.status==='error'),'second timeout',12000);
-  await evaluate(()=>{const x=globalThis.__experience;x.switchTab('1688');x.window().minimize();x.releaseProbe();});
+  await evaluate(()=>{const x=globalThis.__experience;x.switchTab('erp');x.window().minimize();x.releaseProbe();});
   await delay(100);
   await evaluate(()=>{const x=globalThis.__experience;x.window().restore();x.window().show();x.switchTab('workspace');});
   await ready();

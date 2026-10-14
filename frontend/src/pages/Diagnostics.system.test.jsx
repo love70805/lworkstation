@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({ check: { status: 'error', data: null, error: '
 vi.mock('../hooks/useSystemSnapshot', () => ({ useSystemSnapshot: () => mocks.check }));
 vi.mock('../components/AppShell', () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock('../components/ErpAssistantSetup', () => ({ default: () => <div>ERP 连接状态</div> }));
-vi.mock('../components/SelectionCaptureSetup', () => ({ default: () => <div>1688 连接状态</div> }));
 let root, container;
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -31,3 +30,5 @@ it('keeps failed checks visible without presenting missing data as healthy or em
   expect(mocks.check.refresh).toHaveBeenCalledOnce();
   expect(container.querySelector('.system-advanced').open).toBe(false);
 });
+
+it("only exposes the retained ERP integration", () => { expect(container.textContent).toContain("ERP 连接状态"); expect(container.textContent).not.toMatch(/1688.*(扩展|连接状态)|安装 1688/); });

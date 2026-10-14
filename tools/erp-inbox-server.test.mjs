@@ -15,7 +15,27 @@ const serverPath = fileURLToPath(new URL("./erp-inbox-server.mjs", import.meta.u
 const base = `http://127.0.0.1:${port}`;
 const capability = "erp-inbox-test-capability-0123456789abcdef";
 
-await fs.rm(spoolPath, { force: true });
+const selectionCapture = {
+  schemaVersion: 1,
+  requestId: "selection-request-001",
+  source: "1688",
+  sourceUrl: "https://detail.1688.com/offer/998877.html",
+  capturedAt: Date.now(),
+  extractorVersion: "1.2.0",
+  product: {
+    name: "测试商品",
+    sourceProductId: "998877",
+    imageUrl: "https://cbu01.alicdn.com/img/test.jpg",
+    purchasePrice: 8.8,
+    shippingFee: 3,
+    purchaseQty: 2,
+    skus: [{ spec: "红色", sourceSkuId: "SRC-RED", purchasePrice: 8.8, imageUrl: "https://cbu01.alicdn.com/img/red.jpg", purchaseQty: 2, lineSubtotal: 17.6 }],
+  },
+  warnings: [],
+};
+
+const selectionDelivery = { captureId: "SEL-LEGACY-1", deliveryId: "SEL-DELIVERY-LEGACY-1" };
+await fs.writeFile(spoolPath, JSON.stringify([{ kind: "selection-capture", ...selectionDelivery, workspaceId: "workspace-sales-a", ownerId: "sales-a", visibility: "private", status: "pending", receivedAt: new Date().toISOString(), envelope: selectionCapture }]));
 const missingCapabilityChild = spawn(process.execPath, [serverPath], {
   windowsHide: true,
   env: {
@@ -221,52 +241,19 @@ try {
   assert.equal(extensionStatus.online, true);
   assert.equal(extensionStatus.records[0].version, "8.0.1");
 
-  response = await post("/selection/v1/extension-status", {
-    extensionId: "selection-1688-capture",
-    version: "1.2.1",
-    pageUrl: "https://order.1688.com/order/confirm.html",
-    ready: true,
-  });
-  assert.equal(response.status, 202);
-  response = await fetch(`${base}/selection/v1/extension-status`);
-  assert.equal(response.status, 200);
-  const selectionExtensionStatus = await response.json();
-  assert.equal(selectionExtensionStatus.online, true);
-  assert.equal(selectionExtensionStatus.records[0].version, "1.2.1");
-  response = await post("/selection/v1/context", { workspaceId: "workspace-sales-a", memberId: "sales-a", visibility: "private" });
-  assert.equal(response.status, 202);
-  response = await fetch(`${base}/selection/v1/context`);
-  assert.equal((await response.json()).context.memberId, "sales-a");
-  const contextFileBefore = await fs.stat(spoolPath);
-  response = await post("/selection/v1/context", { workspaceId: "workspace-sales-a", memberId: "sales-a", visibility: "private" });
-  assert.equal(response.status, 202);
-  assert.equal((await fs.stat(spoolPath)).mtimeMs, contextFileBefore.mtimeMs, 'unchanged four-second workspace poll must not rewrite historical evidence');
-
-  const selectionCapture = {
-    schemaVersion: 1,
-    requestId: "selection-request-001",
-    source: "1688",
-    sourceUrl: "https://detail.1688.com/offer/998877.html",
-    capturedAt: Date.now(),
-    extractorVersion: "1.2.0",
-    product: {
-      name: "测试商品",
-      sourceProductId: "998877",
-      imageUrl: "https://cbu01.alicdn.com/img/test.jpg",
-      purchasePrice: 8.8,
-      shippingFee: 3,
-      purchaseQty: 2,
-      skus: [{ spec: "红色", sourceSkuId: "SRC-RED", purchasePrice: 8.8, imageUrl: "https://cbu01.alicdn.com/img/red.jpg", purchaseQty: 2, lineSubtotal: 17.6 }],
-    },
-    warnings: [],
-  };
-  response = await post("/selection/v1/captures", selectionCapture);
-  assert.equal(response.status, 202);
-  const selectionDelivery = await response.json();
-  assert.equal(selectionDelivery.code, "accepted");
-  response = await post("/selection/v1/captures", selectionCapture);
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).code, "duplicate");
+  const legacyBytes = await fs.readFile(spoolPath, "utf8");
+  for (const [method, route] of [["POST", "/selection/v1/extension-status"], ["GET", "/selection/v1/extension-status"], ["POST", "/selection/v1/context"], ["GET", "/selection/v1/context"], ["POST", "/selection/v1/captures"]]) {
+    response = method === "GET" ? await fetch(base + route) : await post(route, selectionCapture);
+    assert.equal(response.status, 410);
+    assert.equal((await response.json()).code, "SELECTION_CAPTURE_RETIRED");
+  }
+  assert.equal(await fs.readFile(spoolPath, "utf8"), legacyBytes, "retired endpoints do not rewrite or delete legacy evidence");
+  response = await fetch(base + "/selection/v1/status");
+  assert.equal((await response.json()).retired, true);
+  response = await fetch(base + "/selection/v1/captures?workspaceId=workspace-sales-b&memberId=sales-a");
+  assert.deepEqual((await response.json()).records, [], "legacy deliveries remain isolated by workspace");
+  response = await fetch(base + "/selection/v1/captures?workspaceId=workspace-sales-a&memberId=sales-b");
+  assert.deepEqual((await response.json()).records, [], "private legacy deliveries remain isolated by member");
   response = await fetch(`${base}/selection/v1/captures?workspaceId=workspace-sales-a&memberId=sales-a`);
   assert.equal(response.status, 200);
   const pendingSelection = await response.json();

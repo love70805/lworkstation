@@ -10,7 +10,7 @@ const commandPath = path.join(root, `${id}.command.json`);
 let report = { pid: process.pid, initialized: false, sequence: 0 };
 const write = () => fs.writeFileSync(reportPath, JSON.stringify(report));
 app.whenReady().then(() => {
-  for (const current of [session.defaultSession, session.fromPartition("persist:erp"), session.fromPartition("persist:1688")]) {
+  for (const current of [session.defaultSession, session.fromPartition("persist:erp")]) {
     current.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
       callback({ cancel: ["http:", "https:"].includes(url.protocol) && url.hostname !== "127.0.0.1" });
