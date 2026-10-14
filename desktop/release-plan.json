@@ -5,6 +5,10 @@
   "integrationBranch": "codex/formal-readiness-0.4.24",
   "requiredCommits": [
     {
+      "module": "v0.4.24-import-backup-and-recovery-readiness",
+      "commit": "0fa23cabcb5c87643b8c85bff338b38e2691984c"
+    },
+    {
       "module": "v0.4.24-verified-main-baseline",
       "commit": "404fe642e8f3b94b8824a082fbd90380db291878"
     },
