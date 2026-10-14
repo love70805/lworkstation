@@ -1,4 +1,4 @@
-# 0.4.24 正式使用可靠性优化（候选验收通过，待集成发布）
+# 0.4.24 正式使用可靠性优化（已公开稳定 Latest）
 
 台账导入选择文件后，误点返回或刷新时会提示保留准备；写入期间须等待完成，或返回导入页使用取消并等待回滚。成功导入后可直接进入本月成本核对。
 
@@ -12,4 +12,13 @@
 
 候选 `releases/candidates/0.4.24/`，原始证据 `archive/formal-readiness/`。无数据库迁移，本机未安装，真实数据和队列未改写；成本优先级、零/微小值、SKU 归属和定稿保护沿用。原生窗口和扩展逻辑未改，隐藏 smoke 不记作可见窗口、托盘或焦点验收。
 
-候选、合并、公开发布分别核验。当前尚未公开发布。
+[PR #213](https://github.com/love70805/lworkstation/pull/213) 已合并，PR 与 [主线 CI](https://github.com/love70805/lworkstation/actions/runs/38551042635) 通过。稳定标签 v0.4.24 固定于 `812f5ed0747247eb1babcd40ff3cb919f3574cc1`，合并后的生产代码树与验收候选一致。2026-10-14T10:49:29Z 已公开非草稿、非预发布的稳定 Latest。公开页面、四个资产均匿名完整下载回读；字节数、SHA256/GitHub digest 与 EXE SHA512 一致。实际稳定更新入口从 0.4.23 识别 0.4.24，同版与跨通道保护通过。
+
+| 公开资产 | 字节数 | SHA256 |
+| --- | --- | --- |
+| Lworkstation-Setup-0.4.24.exe | 119578311 | `7D6BAA3A1EC5B6232B962F3F902BF7F6938B8E7B11466D7733DE600DA0AAD138` |
+| Lworkstation-Setup-0.4.24.exe.blockmap | 126030 | `5904002EE4E4E3FC3CCEF77A2DF3A89CA3ACCA533ECB3F033FB60471F020D603` |
+| latest.yml | 356 | `48409DF078FD32516F79BF5E28DD14D89B5CCE1C3CED15D530907D5B62B49062` |
+| SHA256.txt | 278 | `D8DB47541373B36FDBE0D5FD1327EAD263D83D90F6A80DF0C05E4B0B9415F38B` |
+
+元数据来源：发行元数据通过现有 GitHub CLI 只读核验；公开页面、实际更新入口及四资产均匿名 HTTPS 验证。公开下载与实际稳定更新入口使用匿名 HTTPS，不执行下载后的安装。

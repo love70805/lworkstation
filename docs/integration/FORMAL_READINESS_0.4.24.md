@@ -37,4 +37,4 @@
 
 无数据库迁移，不安装本机，不改写真实业务数据或收件队列。原生窗口、登录和 ERP 扩展实现未改；隐藏 smoke 不作为真实可见窗口、托盘或焦点验收。真实 ERP 登录/远端站点行为不由本批合成样本证明。暂停的账号云端及后台自动采集仍不推进。
 
-当前状态：候选验收通过，等待 PR/主线 CI、合并和公开资产回读。原始日志、截图、合成备份及报告位于忽略目录 `archive/formal-readiness/`，候选位于 `releases/candidates/0.4.24/`。
+当前状态：候选验收、PR/主线 CI、合并、公开资产和稳定更新入口回读均完成。[PR #213](https://github.com/love70805/lworkstation/pull/213) 已合并，PR 与 [主线 CI](https://github.com/love70805/lworkstation/actions/runs/38551042635) 通过。稳定标签 v0.4.24 固定于 `812f5ed0747247eb1babcd40ff3cb919f3574cc1`，合并后的生产代码树与验收候选一致。2026-10-14T10:49:29Z 已公开非草稿、非预发布的稳定 Latest。公开页面、四个资产均匿名完整下载回读；字节数、SHA256/GitHub digest 与 EXE SHA512 一致。实际稳定更新入口从 0.4.23 识别 0.4.24，同版与跨通道保护通过。原始日志、截图、合成备份及报告位于忽略目录 `archive/formal-readiness/`，候选位于 `releases/candidates/0.4.24/`。
