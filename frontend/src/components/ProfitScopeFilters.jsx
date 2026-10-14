@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Button, Modal, SearchInput } from './UI';
 import SupplierFilterTable from './SupplierFilterTable';
@@ -7,6 +7,8 @@ import { expandSupplierScopeGroup } from '../domain/supplierFilterPreview';
 
 function SupplierMultiSelect({ options, selection, onChange, workspaceId, scopeRows, store }) {
   const [open, setOpen] = useState(false), [rule, setRule] = useState(null), [groupMessage, setGroupMessage] = useState('');
+  const scopeKey = JSON.stringify([workspaceId, store, options]);
+  useEffect(() => { setRule(null); setGroupMessage(''); }, [scopeKey]);
   const available = useMemo(() => new Set(options), [options]);
   const selectedSet = useMemo(() => new Set(selection === null ? options : selection ?? []), [selection, options]);
   const selected = options.filter(value => selectedSet.has(value)), missing = (selection ?? []).filter(value => !available.has(value));
@@ -17,6 +19,7 @@ function SupplierMultiSelect({ options, selection, onChange, workspaceId, scopeR
     return options.map(supplierNumber => ({ key: supplierNumber, supplierNumber, selected: selectedSet.has(supplierNumber), matched: matching.has(supplierNumber) }));
   }, [options, selectedSet, rule]);
   const select = (values, checked) => {
+    setRule(null); setGroupMessage('');
     const next = new Set(selection === null ? options : selection ?? []);
     for (const row of values) if (checked) next.add(row.supplierNumber); else next.delete(row.supplierNumber);
     onChange(next.size === options.length && options.every(value => next.has(value)) ? null : [...next].sort());
@@ -24,11 +27,11 @@ function SupplierMultiSelect({ options, selection, onChange, workspaceId, scopeR
   return <div className="profit-multi-select">
     <button type="button" className="profit-multi-select-trigger" aria-label="按供方货号筛选" aria-haspopup="dialog" aria-expanded={open} disabled={!options.length && !missing.length} onClick={() => setOpen(true)}><span>{label}</span><ChevronDown size={16} /></button>
     <Modal open={open} size="large" className="profit-supplier-dialog" title="选择供方货号" description={`${store === 'all' ? '全部店铺' : store} · 当前工作区与账本；搜索和查看已选不会改变范围。`} onClose={() => setOpen(false)} footer={<Button variant="primary" onClick={() => setOpen(false)}>完成选择</Button>}>
-      <div className="supplier-group-chips"><strong>常用货号组</strong>{groupState.groups.map(group => <Button key={group.id} aria-pressed={rule?.id === group.id} onClick={() => {
+      <div className="supplier-group-chips"><strong>常用组</strong>{groupState.groups.map(group => <Button key={group.id} aria-pressed={rule?.id === group.id} onClick={() => {
         const values = expandSupplierScopeGroup(scopeRows, group, groupState, store).filter(value => available.has(value));
         onChange(values); setRule(group); setGroupMessage(`${group.name}：当前范围匹配 ${values.length} 个完整货号${!values.length ? '，保持空选' : ''}`);
       }}>{group.name}</Button>)}{!groupState.groups.length && <span>可在导入货号筛选中保存常用组。</span>}</div>
-      <div className="supplier-scope-actions"><span role="status">已选 {selected.length} / {options.length} 个完整货号</span><Button onClick={() => onChange(null)}>全部货号</Button><Button onClick={() => onChange([])}>清空选择</Button></div>
+      <div className="supplier-scope-actions"><span role="status">已选 {selected.length} / {options.length} 个完整货号</span><Button onClick={() => { setRule(null); setGroupMessage(''); onChange(null); }}>全部货号</Button><Button onClick={() => { setRule(null); setGroupMessage(''); onChange([]); }}>清空选择</Button></div>
       {groupMessage && <p role="status">{groupMessage}</p>}
       {!!missing.length && <p role="status" className="profit-scope-warning">已选但当前店铺/账本未出现 {missing.length} 个：{missing.slice(0, 30).join('、')}{missing.length > 30 ? '…' : ''}。有效范围仍按原选择，未自动扩大。</p>}
       <SupplierFilterTable compact rows={rows} resetKey={`${workspaceId}/${store}`} onSelect={select} />
