@@ -325,6 +325,7 @@ export default function AppShell({ children, pageClass = "" }) {
 
   return (
     <div className={`app-shell ${effectiveSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <a className="skip-link" href="#main-content">跳到主内容</a>
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
           <span className="brand-assets" aria-label={`${PRODUCT_NAME} 经营管理中心`}>
@@ -346,7 +347,7 @@ export default function AppShell({ children, pageClass = "" }) {
           {navigation.map((item) => {
             const Icon = item.icon;
             return (
-              <Link className={`nav-item ${isActive(pathname, item) ? "active" : ""}`} to={item.path} key={item.path} title={item.label}>
+              <Link className={`nav-item ${isActive(pathname, item) ? "active" : ""}`} to={item.path} key={item.path} title={item.label} aria-current={isActive(pathname, item) ? "page" : undefined}>
                 <Icon size={18} />
                 <span>{item.label}</span>
                 {item.count > 0 ? <small className="nav-count">{item.count}</small> : null}
@@ -369,7 +370,7 @@ export default function AppShell({ children, pageClass = "" }) {
             <button className="environment-chip" aria-haspopup="menu" aria-expanded={openMenu === "environment"} onClick={() => toggleMenu("environment")}><i /> {cloudEnvironment}</button>
             {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统检查<ChevronRight size={16} /></button></div> : null}
           </div>
-          <Button variant="primary" icon={Inbox} onClick={() => navigate("/products?view=pending")}>待确认采集{workspaceSummary?.pendingCaptureCount ? `（${workspaceSummary.pendingCaptureCount}）` : ""}</Button>
+          <Button icon={Inbox} onClick={() => navigate("/products?view=pending")}>待确认采集{workspaceSummary?.pendingCaptureCount ? `（${workspaceSummary.pendingCaptureCount}）` : ""}</Button>
           <span className="topbar-separator" />
           <div className="topbar-control appearance-control">
             <IconButton
@@ -390,7 +391,7 @@ export default function AppShell({ children, pageClass = "" }) {
         </div>
       </header>
 
-      <main className={`main-canvas ${pageClass}`}>
+      <main id="main-content" tabIndex={-1} className={`main-canvas ${pageClass}`}>
         <div className="page-container">
           {navigationContext?.error ? <div className="system-check-error" role="alert">核算范围读取失败：{navigationContext.error}<Button onClick={() => setNavigationAttempt(value => value + 1)}>重试月份导航</Button></div> : null}
           <ErpBackgroundNotice workspaceId={navigationContext?.workspaceId} />{children}

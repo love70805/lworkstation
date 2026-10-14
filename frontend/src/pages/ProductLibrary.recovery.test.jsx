@@ -199,3 +199,26 @@ it("keeps imported basic drafts in prestorage, shows complete missing fields and
   await waitFor(() => router.state.location.pathname === "/products/edit");
   expect(new URLSearchParams(router.state.location.search).get("product")).toBe(first.product.id);
 });
+
+it("keeps active advanced scope visible when collapsed and restores all rows after removing it", async () => {
+  await saveProductCatalogRecord({ draft });
+  await saveProductCatalogRecord({ draft: { ...draft, name: "另一个商品", platformSkc: "OTHER-SKC", variants: [{ ...draft.variants[0], platformSku: "OTHER-SKU" }] } });
+  await mount(); await waitFor(() => container.textContent.includes("匹配 2 / 2 条"));
+  const toggle = () => container.querySelector('.library-more-filters');
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  await act(async () => toggle().click());
+  await change("按经营数据筛选", "missing_mapping");
+  await waitFor(() => container.querySelector('button[aria-label="移除筛选：经营数据：仓库 SKU 待映射"]'));
+  await act(async () => toggle().click());
+  expect(container.querySelector('.library-filter-advanced').hidden).toBe(true);
+  expect(toggle().textContent).toContain('（1）');
+  await act(async () => container.querySelector('button[aria-label="移除筛选：经营数据：仓库 SKU 待映射"]').click());
+  expect(field('按经营数据筛选').value).toBe('all');
+  expect(toggle().textContent).not.toContain('（1）');
+  expect(container.textContent).toContain('匹配 2 / 2 条');
+  await act(async () => button('全部字段').click());
+  expect(container.querySelectorAll('.product-table thead th')).toHaveLength(13);
+  await act(async () => root.unmount()); root = createRoot(container);
+  await mount(); await waitFor(() => container.querySelector('.product-table-all'));
+  expect(container.querySelectorAll('.product-table thead th')).toHaveLength(13);
+});

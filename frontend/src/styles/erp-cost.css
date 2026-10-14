@@ -515,3 +515,15 @@
   .erp-review-modal .modal-footer { flex-wrap: wrap; }
   .erp-review-modal .modal-body { max-height: 62vh; }
 }
+
+/* Reserve space for the actual cost review on windowed desktops. */
+.cost-page .match-stat-grid { gap: 10px; margin-bottom: 16px; }
+.cost-page .match-stat { min-height: 126px; padding: 14px; box-shadow: none; }
+.cost-page .match-stat > strong { margin-top: 8px; font-size: 25px; line-height: 32px; }
+.cost-page .match-stat > strong small { font-size: 12px; }
+.cost-page .match-stat > svg { top: 14px; right: 14px; width: 18px; height: 18px; }
+.cost-page .match-stat p { margin-top: 6px; font-size: 11px; }
+.cost-page .cost-correction-entry { gap: 6px; flex-wrap: wrap; }
+@media (min-width: 1000px) { .cost-page .match-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 999px) { .cost-page .match-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .cost-page .match-stat { padding: 12px; } .cost-page .match-stat > svg { display: none; } .cost-page .match-stat > span { padding-right: 0; } .cost-page .match-stat > strong small { display: block; margin-left: 0; font-size: 11px; } }

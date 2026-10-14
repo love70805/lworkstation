@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "candidateOnly": true,
-  "integrationBranch": "codex/formal-readiness-0.4.24",
+  "integrationBranch": "codex/ui-experience-0.4.25",
   "requiredCommits": [
+    {
+      "module": "v0.4.25-verified-main-baseline",
+      "commit": "823f3c2f1c8d0cf9f9ce970781b8c40da83de5d7"
+    },
     {
       "module": "v0.4.24-import-backup-and-recovery-readiness",
       "commit": "0fa23cabcb5c87643b8c85bff338b38e2691984c"

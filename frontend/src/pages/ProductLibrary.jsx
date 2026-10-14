@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
+import LibraryFilterBar, { LibraryFilterField } from "../components/LibraryFilterBar";
 import SelectionSalesTag from "../components/SelectionSalesTag";
 import ProductDataReadiness from "../components/ProductDataReadiness";
 import { productDataStatusLabel } from "../domain/productPublication";
@@ -41,6 +42,7 @@ const catalogSourceLabels = {
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
 const EMPTY_ROWS = [];
+const COMPACT_COLUMN_IDS = new Set(["selection", "image", "name", "suppliers", "cost", "salePrice", "referenceProfit", "store", "productStatus", "updatedAt"]);
 const matchesProductQuery = createSelectionSearchIndex((product) => [
   product.name, product.supplier, product.platformSkc, product.supplierNumbers ?? [],
   (product.supplierProfiles ?? []).map((supplier) => [supplier.supplierCode, supplier.supplierName]),
@@ -73,6 +75,7 @@ function readProductFilters(workspaceId, view) {
       missingOnly: Boolean(saved.missingOnly),
       duplicatesOnly: Boolean(saved.duplicatesOnly),
       productSort: saved.productSort === "cost" ? "lowestCost" : saved.productSort ?? "updated",
+      columnView: saved.columnView === "all" ? "all" : "compact",
       referenceSource: saved.referenceSource ?? "all",
       negativeOnly: Boolean(saved.negativeOnly),
       salesLabel: saved.salesLabel ?? "all",
@@ -96,7 +99,7 @@ function formatUpdatedAt(value) {
 
 function SelectionDomainSearch({ value, onChange, label }) {
   return (
-    <div className="selection-domain-search">
+    <label className="selection-search-field"><span>{label}</span><span className="selection-domain-search">
       <Search size={17} aria-hidden="true" />
       <input
         aria-label={label}
@@ -106,7 +109,7 @@ function SelectionDomainSearch({ value, onChange, label }) {
         placeholder="搜索商品名、平台 SKC/SKU、仓库 SKU 或供应商"
       />
       {value ? <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onChange("")}><X size={16} /></button> : null}
-    </div>
+    </span></label>
   );
 }
 
@@ -146,6 +149,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const [salesLabel, setSalesLabel] = useState(initialFilters.salesLabel ?? "all");
   const [supplierNumber, setSupplierNumber] = useState(initialFilters.supplierNumber ?? "");
   const [catalogFilter, setCatalogFilter] = useState(savedView?.filters ? referenceCatalogFilter(savedView.filters) : initialFilters.catalogFilter ?? "unlinked");
+  const [columnView, setColumnView] = useState(() => readProductFilters(workspaceId, view).columnView === "all" ? "all" : "compact");
   const [exporting, setExporting] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
   const [bulkStatus, setBulkStatus] = useState("");
@@ -205,7 +209,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, referenceSource, negativeOnly, salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 3 } };
+  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, columnView, referenceSource, negativeOnly, salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 3 } };
 
   useEffect(() => {
     localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
@@ -215,12 +219,12 @@ function ProductLibraryView({ workspaceId, view }) {
       dataStatus,
       missingOnly,
       duplicatesOnly,
-      productSort,
+      productSort, columnView,
       referenceSource,
       negativeOnly,
       salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 3,
     }));
-  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, recordStatus, referenceSource, status, store, supplierNumber, catalogFilter, workspaceId, view]);
+  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, columnView, recordStatus, referenceSource, status, store, supplierNumber, catalogFilter, workspaceId, view]);
 
   useEffect(() => {
     if (statusManagerOpen && statusRead.status === "ready") setStatusDraft(salesStatusDefinitions);
@@ -589,6 +593,29 @@ function ProductLibraryView({ workspaceId, view }) {
   const referenceWithHistory = referenceRows.filter((row) => row.latestPeriod).length;
   const referenceWithErp = referenceRows.filter((row) => row.authoritativeSource === "erp").length;
   const negativeCount = referenceRows.filter((row) => row.hasNegativeProfit).length;
+
+  const commonActiveFilters = [
+    query.trim() && { key: "query", label: `搜索：${query.trim()}`, clear: () => setQuery("") },
+    store !== "all" && { key: "store", label: `店铺：${store}`, clear: () => setStore("all") },
+    supplierNumber.trim() && { key: "supplier", label: `供方货号：${supplierNumber.trim()}`, clear: () => setSupplierNumber("") },
+    salesLabel !== "all" && { key: "sales", label: `七天销量：${salesLabel}`, clear: () => setSalesLabel("all") },
+  ].filter(Boolean);
+  const officialActiveFilters = [...commonActiveFilters,
+    status !== "all" && { key: "status", label: `状态：${salesStatusLabel(status)}`, clear: () => setStatus("all") },
+    recordStatus !== "all" && { key: "record", label: `档案：${({ active: "正式档案", draft: "草稿资料", inactive: "停用资料" })[recordStatus] ?? recordStatus}`, clear: () => setRecordStatus("all") },
+    dataStatus !== "all" && { key: "data", label: `经营数据：${({missing_purchase:"ERP 采购未覆盖",missing_reference_profit:"参考利润待补",missing_profit:"定稿历史未覆盖",missing_mapping:"仓库 SKU 待映射",erp_complete:"ERP 采购已覆盖",reference_profit_complete:"参考利润可用",profit_complete:"定稿历史已覆盖",mapping_complete:"仓库 SKU 已映射"})[dataStatus] ?? dataStatus}`, clear: () => setDataStatus("all") },
+    missingOnly && { key: "missing", label: "资料/参考待补", clear: () => setMissingOnly(false) },
+    duplicatesOnly && { key: "duplicates", label: "重复 SKC", clear: () => setDuplicatesOnly(false) },
+  ].filter(Boolean);
+  const referenceActiveFilters = [...commonActiveFilters,
+    catalogFilter !== "all" && { key: "catalog", label: catalogFilter === "unlinked" ? "预存中" : "已进入选品库", clear: () => setCatalogFilter("all") },
+    referenceSource !== "all" && { key: "source", label: `成本：${referenceSourceLabels[referenceSource] ?? referenceSource}`, clear: () => setReferenceSource("all") },
+    negativeOnly && { key: "negative", label: "只看负利润", clear: () => setNegativeOnly(false) },
+  ].filter(Boolean);
+  const resetOfficialFilters = () => { setQuery(""); setSupplierNumber(""); setStore("all"); setStatus("all"); setRecordStatus("all"); setDataStatus("all"); setSalesLabel("all"); setMissingOnly(false); setDuplicatesOnly(false); };
+  const resetReferenceFilters = () => { setQuery(""); setStore("all"); setSupplierNumber(""); setCatalogFilter("all"); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); };
+  const visibleProductColumns = useMemo(() => columnView === "all" ? productColumns : productColumns.filter(column => COMPACT_COLUMN_IDS.has(column.id ?? column.accessorKey)), [columnView, productColumns]);
+
   const pageTitle = view === "reference" ? "预存区" : view === "pending" ? "待确认采集" : "选品工作台";
   const pageDescription = view === "reference"
     ? "导入资料先预存，逐步补齐名称、图片、商品标识、店铺、属性、售价、参考成本和供应商链接；资料齐全后自动进入选品库。"
@@ -623,26 +650,22 @@ function ProductLibraryView({ workspaceId, view }) {
             <span><small>采用 ERP 历史参考</small><strong>{referenceRead.status === "ready" ? referenceWithErp : "—"}</strong></span>
             <span className={negativeCount ? "danger" : ""}><small>负利润预警</small><strong>{referenceRead.status === "ready" ? negativeCount : "—"}</strong></span>
           </div>
-          <Panel className="library-filter-panel">
-            <div className="library-filters">
-              <SelectionDomainSearch value={query} onChange={setQuery} label="搜索预存资料" />
-              <select className="select-input" aria-label="参考来源店铺" value={store} onChange={event => setStore(event.target.value)}><option value="all">全部店铺</option>{[...new Set(referenceRows.flatMap(row => row.storeNames ?? []))].sort().map(name => <option key={name} value={name}>{name}</option>)}</select>
-              <input className="text-input" aria-label="按供方货号筛选" placeholder="供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} />
-              <select className="select-input" aria-label="按建档情况筛选" value={catalogFilter} onChange={event => setCatalogFilter(event.target.value)}><option value="all">全部记录</option><option value="linked">已进入选品库</option><option value="unlinked">预存中</option></select>
-              <select className="select-input" aria-label="按参考成本来源筛选" value={referenceSource} onChange={(event) => setReferenceSource(event.target.value)}>
+          <LibraryFilterBar key="reference-filters"
+            search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索预存资料" />}
+            common={<><LibraryFilterField label="店铺"><select className="select-input" aria-label="参考来源店铺" value={store} onChange={event => setStore(event.target.value)}><option value="all">全部店铺</option>{[...new Set(referenceRows.flatMap(row => row.storeNames ?? []))].sort().map(name => <option key={name} value={name}>{name}</option>)}</select></LibraryFilterField><LibraryFilterField label="建档情况"><select className="select-input" aria-label="按建档情况筛选" value={catalogFilter} onChange={event => setCatalogFilter(event.target.value)}><option value="all">全部记录</option><option value="linked">已进入选品库</option><option value="unlinked">预存中</option></select></LibraryFilterField></>}
+            advancedCount={[supplierNumber.trim(), referenceSource !== "all", salesLabel !== "all", negativeOnly].filter(Boolean).length}
+            advanced={<><LibraryFilterField label="供方货号"><input className="text-input" aria-label="按供方货号筛选" placeholder="输入供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} /></LibraryFilterField><LibraryFilterField label="参考成本来源"><select className="select-input" aria-label="按参考成本来源筛选" value={referenceSource} onChange={(event) => setReferenceSource(event.target.value)}>
                 <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="erp_catalog_reference">ERP 采购参考</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">定稿历史</option><option value="supplier_landed">1688 参考</option>
-              </select>
-              {salesLabelFilter}
-              <button className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly((value) => !value)}><AlertCircle size={17} />只看负利润</button>
-            </div>
-            <Button variant="ghost" onClick={() => { setQuery(""); setStore("all"); setSupplierNumber(""); setCatalogFilter("all"); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); }}>清空筛选</Button>
-            {catalogFilter === "unlinked" ? <Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续补齐</Button> : null}
-            <span className="reference-filter-count">{referenceRead.status === "ready" ? `匹配 ${filteredReferences.length} / ${referenceRows.length} 条` : "尚未取得参考记录"}</span>
-          </Panel>
+              </select></LibraryFilterField><LibraryFilterField label="月末七天销量">{salesLabelFilter}</LibraryFilterField><button aria-pressed={negativeOnly} className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly(value => !value)}><AlertCircle size={17} />只看负利润</button></>}
+            activeFilters={referenceActiveFilters} onClear={resetReferenceFilters}
+            actions={catalogFilter === "unlinked" ? <Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续补齐</Button> : null}
+            result={referenceRead.status === "ready" ? `匹配 ${filteredReferences.length} / ${referenceRows.length} 条` : "尚未取得参考记录"}
+          />
           <Panel className="product-table-panel">
             {referenceRead.status !== "ready" ? <SelectionReadState read={referenceRead} label="预存区" /> : referenceRows.length || prestorageProducts.length ? (
               <DataTable
                 className="selection-reference-table"
+                scrollLabel="预存资料表格，可横向和纵向滚动"
                 ref={tableRef}
                 initialViewState={savedView?.table}
                 dataReady={referenceSnapshot !== undefined}
@@ -660,32 +683,28 @@ function ProductLibraryView({ workspaceId, view }) {
       ) : view === "official" ? (
         <>
           <div className="selection-workflow-note"><p>参考利润用于选品；定稿历史来自月度报告，尚无定稿不代表商品资料缺失。</p><Button variant="ghost" icon={WalletCards} onClick={() => navigate("/profit")}>核对月度利润</Button></div>
-          <Panel className="library-filter-panel">
-            <div className="library-filters">
-              <SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />
-              <input className="text-input" aria-label="按供方货号筛选" placeholder="供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} />
-              <select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
+          <LibraryFilterBar key="official-filters"
+            search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />}
+            common={<><LibraryFilterField label="店铺"><select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
                 <option value="all">全部店铺</option>{store !== "all" && !catalogProducts.some(product => product.store === store) ? <option value={store}>{store}</option> : null}{[...new Set(catalogProducts.map((product) => product.store).filter(Boolean))].map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
-              </select>
-              <select className="select-input" aria-label="按商品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
+              </select></LibraryFilterField><LibraryFilterField label="销售状态"><select className="select-input" aria-label="按商品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="all">全部状态</option>{status !== "all" && !salesStatusDefinitions.some(item => item.id === status) ? <option value={status}>当前选中状态（等待读取）</option> : null}{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}
-              </select>
-              <select className="select-input" aria-label="按档案类型筛选" value={recordStatus} onChange={event => setRecordStatus(event.target.value)}><option value="all">全部档案</option><option value="active">正式档案</option><option value="draft">草稿资料</option><option value="inactive">停用资料</option></select>
-              {salesLabelFilter}
-              <select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
+              </select></LibraryFilterField></>}
+            advancedCount={[supplierNumber.trim(), recordStatus !== "all", salesLabel !== "all", dataStatus !== "all", missingOnly, duplicatesOnly].filter(Boolean).length}
+            advanced={<>
+              <LibraryFilterField label="供方货号"><input className="text-input" aria-label="按供方货号筛选" placeholder="输入供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} /></LibraryFilterField>
+              <LibraryFilterField label="档案类型"><select className="select-input" aria-label="按档案类型筛选" value={recordStatus} onChange={event => setRecordStatus(event.target.value)}><option value="all">全部档案</option><option value="active">正式档案</option><option value="draft">草稿资料</option><option value="inactive">停用资料</option></select></LibraryFilterField>
+              <LibraryFilterField label="月末七天销量">{salesLabelFilter}</LibraryFilterField>
+              <LibraryFilterField label="参考与核算状态"><select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
                 <option value="all">全部参考与核算状态</option><option value="missing_purchase">ERP 采购未覆盖</option><option value="missing_reference_profit">参考利润待补</option><option value="missing_profit">定稿历史未覆盖</option><option value="missing_mapping">仓库 SKU 待映射</option><option value="erp_complete">ERP 采购已覆盖</option><option value="reference_profit_complete">参考利润可用</option><option value="profit_complete">定稿历史已覆盖</option><option value="mapping_complete">仓库 SKU 已映射</option>
-              </select>
-              <button className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly((value) => !value)}><AlertCircle size={17} />资料/参考待补（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
-              {duplicateSkcGroups.length ? <button className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly((value) => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
-              {duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}
-              <Button variant="ghost" onClick={() => { setQuery(""); setSupplierNumber(""); setStore("all"); setStatus("all"); setRecordStatus("all"); setDataStatus("all"); setSalesLabel("all"); setMissingOnly(false); setDuplicatesOnly(false); }}>清空筛选</Button>
-              <Button variant="ghost" icon={Settings2} disabled={statusRead.status !== "ready"} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>
-            </div>
-            <span className="reference-filter-count">匹配 {filteredProducts.length} / {catalogProducts.length} 条</span>
-            <label className="sort-control">排序：
-              <select value={productSort} onChange={(event) => setProductSort(event.target.value)}><option value="updated">最后更新</option><option value="coverage">成本覆盖情况</option><option value="lowestCost">最低 SKU 参考成本</option><option value="name">商品名称</option></select>
-            </label>
-          </Panel>
+              </select></LibraryFilterField>
+              <button aria-pressed={missingOnly} className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly(value => !value)}><AlertCircle size={17} />资料/参考待补（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
+              {duplicateSkcGroups.length ? <button aria-pressed={duplicatesOnly} className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly(value => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
+            </>}
+            activeFilters={officialActiveFilters} onClear={resetOfficialFilters}
+            result={catalogState.status === "ready" ? `匹配 ${filteredProducts.length} / ${catalogProducts.length} 条` : "正在读取商品档案"}
+            tools={<><div className="library-column-switch" role="group" aria-label="商品表格字段"><button aria-pressed={columnView === "compact"} onClick={() => setColumnView("compact")}>常用列</button><button aria-pressed={columnView === "all"} onClick={() => setColumnView("all")}>全部字段</button></div><label className="sort-control">排序<select value={productSort} onChange={event => setProductSort(event.target.value)}><option value="updated">最后更新</option><option value="coverage">成本覆盖情况</option><option value="lowestCost">最低 SKU 参考成本</option><option value="name">商品名称</option></select></label><Button variant="ghost" icon={Settings2} disabled={statusRead.status !== "ready"} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>{duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}</>}
+          />
           <Panel className="product-table-panel">
             {selectedProductIds.length ? (
               <div className="product-bulk-toolbar" role="status">
@@ -704,15 +723,16 @@ function ProductLibraryView({ workspaceId, view }) {
               </div>
             ) : null}
             {catalogState.status !== "ready" ? <SelectionReadState read={catalogState} label="商品档案" /> : <DataTable
-              className="product-table"
+              className={columnView === "all" ? "product-table product-table-all" : "product-table product-table-compact"}
+              scrollLabel="商品档案表格，可横向和纵向滚动"
               ref={tableRef}
               initialViewState={savedView?.table}
               dataReady={catalogSnapshot !== undefined}
               paginationResetKey={JSON.stringify([query, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort, supplierNumber])}
-              columns={productColumns}
+              columns={visibleProductColumns}
               data={filteredProducts}
               getRowId={(row) => row.id}
-              getRowProps={(row) => ({ onClick: () => navigate(`/products/edit?product=${encodeURIComponent(row.id)}`), tabIndex: 0, onKeyDown: (event) => event.key === "Enter" && navigate(`/products/edit?product=${encodeURIComponent(row.id)}`) })}
+              getRowProps={(row) => ({ onClick: () => navigate(`/products/edit?product=${encodeURIComponent(row.id)}`), tabIndex: 0, onKeyDown: (event) => event.target === event.currentTarget && event.key === "Enter" && navigate(`/products/edit?product=${encodeURIComponent(row.id)}`) })}
               emptyState="没有符合当前筛选条件的商品，请清除部分筛选条件。"
             />}
           </Panel>

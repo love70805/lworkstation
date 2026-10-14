@@ -54,3 +54,17 @@ it('exposes supplier and SKU scope outside collapsed details and keeps it across
  expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('T');
  expect(container.querySelector('[aria-label="按供方货号筛选"]').textContent).toBe('货号B');
 });
+
+it('opens and focuses the monthly report from cost view while preserving the selected store and search', async () => {
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();
+ container=document.createElement('div');document.body.append(container);root=createRoot(container);
+ await act(async()=>root.render(<MemoryRouter initialEntries={['/profit?ledger=L&view=cost&store=乙&missing=0&q=T']}><ToastProvider><ProfitViewsContent/></ToastProvider></MemoryRouter>));
+ expect(container.querySelector('[data-testid="cost-scope"]').textContent).toBe('乙');
+ await act(async()=>container.querySelector('a[href="#monthly-report-section"]').click());
+ expect(container.querySelector('[data-testid="cost-scope"]')).toBeNull();
+ expect(container.querySelector('.profit-workspace-controls select').value).toBe('乙');
+ expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('T');
+ expect(document.activeElement).toBe(container.querySelector('#monthly-report-section'));
+ expect(container.querySelector('.profit-sales-disclosure').open).toBe(false);
+ expect(container.querySelector('.sales-analytics')).toBeNull();
+});

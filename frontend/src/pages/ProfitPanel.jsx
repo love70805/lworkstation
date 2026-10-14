@@ -376,12 +376,19 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness } = {}) {
 }
 
 export function ProfitViewsContent({ monthControl = null }) {
+  const [reportJump, setReportJump] = useState(false);
+  const [trendOpen, setTrendOpen] = useState(false);
   const [readiness, setReadiness] = useState(null);
   const [retry, setRetry] = useState(0);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const snapshot = useLatestSalesImport(params.get("ledger"), undefined, retry);
   const view = readProfitView(params);
+  useEffect(() => {
+    if (!reportJump || view !== "detail") return;
+    const report = document.getElementById("monthly-report-section");
+    if (report) { report.focus(); report.scrollIntoView?.({ block: "start" }); setReportJump(false); }
+  }, [reportJump, view]);
   const filter = useMemo(() => readProfitFilter(params, snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId }), [params, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const store = filter.storeFilter;
   const stores = useMemo(() => [...new Set((snapshot?.rows ?? []).map((row) => row.store))], [snapshot?.rows]);
@@ -404,10 +411,10 @@ export function ProfitViewsContent({ monthControl = null }) {
   };
   return <>
     {!view ? <Panel><p role="alert">利润视图无效，请使用明细或成本核对。</p><Button onClick={() => { const next = new URLSearchParams(params); next.set('view', 'detail'); setParams(next); }}>查看利润明细</Button></Panel> : snapshot === undefined ? <Panel role="status">正在读取月度账本...</Panel> : snapshot?.error ? <Panel><p role="alert">账本读取失败：{snapshot.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取</Button></Panel> : !valid ? <Panel><p role="alert">没有可用的账本或店铺，请从月度账本重新进入。</p>{snapshot?.ledger ? <Button onClick={() => { const next = new URLSearchParams(params); next.set("store", "all"); setParams(next); }}>查看全部店铺</Button> : <Button onClick={() => navigate('/ledger')}>选择账本</Button>}</Panel> : <>
-      <header className="profit-workspace-header"><div><h1>利润核算</h1><p>{snapshot.ledger.period} · {ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status}</p></div><div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></div></header>
+      <header className="profit-workspace-header"><div><h1>利润核算</h1><p>{snapshot.ledger.period} · {ledgerStatusLabels[snapshot.ledger.status] ?? snapshot.ledger.status}</p></div><div className="profit-workspace-controls"><a className="button button-secondary" href="#monthly-report-section" onClick={event => { if (view === "cost") { event.preventDefault(); setReportJump(true); change("detail"); } }}>本月报告</a>{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></div></header>
       <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button></nav>
       <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={snapshot?.rows ?? []} onChange={changeScope} showStore={false} />
-      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><SalesAnalytics workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} stores={stores} /><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></>}
+      {view === "cost" ? <div className="cost-page"><CostMatchingContent key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><section id="monthly-report-section" className="profit-report-section" tabIndex={-1} aria-label="本月报告"><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></section><details className="profit-sales-disclosure" open={trendOpen} onToggle={event => { if (event.currentTarget.open !== trendOpen) setTrendOpen(event.currentTarget.open); }}><summary>查看本月销售趋势<span>按日期与店铺分析销售额、销量</span></summary>{trendOpen ? <SalesAnalytics workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} stores={stores} /> : null}</details></>}
     </>}
   </>;
 }
