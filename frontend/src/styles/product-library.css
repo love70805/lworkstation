@@ -338,3 +338,6 @@
 
 .product-table-panel .table-wrap:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 @media (max-width: 760px) { .library-filter-tools .sort-control { flex: 1 1 100%; order: 1; justify-content: space-between; } .library-filter-tools .sort-control select { width: auto; max-width: none; flex: 0 1 220px; } }
+
+/* Historical captures appear only when there is something to recover. */
+.product-view-tabs { flex-wrap: wrap; }

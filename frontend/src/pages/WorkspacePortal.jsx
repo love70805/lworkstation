@@ -135,7 +135,7 @@ export default function WorkspacePortal() {
     <AppShell pageClass="workspace-page">
       <PageHeader
         title="经营概览"
-        description="汇总本机工作区中的商品、采集、销售账本和精确利润状态。"
+        description="查看经营数据，按当前月份完成台账、成本核对与利润报告。"
         actions={<Button icon={healthChecked ? Check : RefreshCw} loading={checkingHealth} disabled={checkingHealth} onClick={runHealthCheck}>{healthChecked ? "总览已刷新" : "刷新总览"}</Button>}
       />
 
@@ -144,7 +144,7 @@ export default function WorkspacePortal() {
 
       {summary ? <div className="dashboard-metric-grid">
         <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>正式商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU</em></span></Panel>
-        <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待确认采集</small><strong>{summary?.pendingCaptureCount ?? 0}</strong><em>{summary?.blockedCaptureCount ?? 0} 条存在阻断项</em></span></Panel>
+        <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待核算账本</small><strong>{summary?.openLedgerCount ?? 0}</strong><em>进入当前月份继续处理</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon info"><ShoppingCart size={19} /></span><span><small>{latestLedger ? `${latestLedger.period} 销售额` : "最近月度销售额"}</small><strong>{money(latestSales.revenue ?? 0)}</strong><em>总销量 {Number(latestSales.quantity ?? 0).toLocaleString("zh-CN")} 件</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近已保存利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已定稿账本"}</em></span></Panel>
       </div> : null}

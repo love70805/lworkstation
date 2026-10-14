@@ -73,7 +73,6 @@ const attachedViews = new Set();
 const tabState = {
   workspace: { id: "workspace", title: "Lworkstation", status: "ready", url: DEV_URL || "" },
   erp: { id: "erp", title: "ERP", status: "idle", extension: { status: "deferred" }, url: "https://www.zhuolinkeji.cn/" },
-  "1688": { id: "1688", title: "1688", status: "idle", extension: { status: "deferred" }, url: "https://www.1688.com/" },
 };
 let mainWindow;
 let desktopLifecycle;
@@ -92,8 +91,8 @@ let inboxService;
 const inboxCapability = crypto.randomBytes(32).toString("base64url");
 const workspaceContextCoordinator = createWorkspaceContextCoordinator();
 let activeWorkspaceContext = null;
-const remoteExtensions = { erp: "erp-assistant-extension", "1688": "1688-selection-extension" };
-const remotePartitions = { erp: 'persist:erp', '1688': 'persist:1688' };
+const remoteExtensions = { erp: "erp-assistant-extension" };
+const remotePartitions = { erp: 'persist:erp' };
 const canCreateRemoteView = () => Boolean(mainWindow && !mainWindow.isDestroyed() && !desktopLifecycle?.getState().quitting);
 const remoteViewLoader = createRemoteViewLoader({
   getView: tabId => views.get(tabId), canCreate: canCreateRemoteView,
@@ -532,7 +531,7 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
   const view = new WebContentsView({
     webPreferences: {
       session: tabSession,
-      // ERP/1688 collection and connection heartbeats continue when another
+      // ERP collection and connection heartbeats continue when another
       // workspace tab is selected or the workstation is in the tray.
       backgroundThrottling: false,
       nodeIntegration: false,
@@ -684,7 +683,7 @@ async function configureExtensionStorage(tabId, tabSession, extensionId, context
 }
 
 function extensionTargets() {
-  return ["erp", "1688"].map((tabId) => {
+  return ["erp"].map((tabId) => {
     const extension = tabState[tabId].extension;
     const view = views.get(tabId);
     if (!extension?.id && (!view || extension?.status === 'loading')) return { tabId, deferred: true };
@@ -817,7 +816,7 @@ async function runErpV2SmokeFixture() {
   const extensionConfiguration = await configureLoadedExtensions({ workspaceId, memberId: "desktop-smoke-member", visibility: "workspace" });
   const extensionConfigurationResponse = configurationHttpResult(extensionConfiguration);
   if (extensionConfigurationResponse.status !== 200) throw new Error(`Packaged smoke 扩展安全配置失败：${extensionConfigurationResponse.failures.join(",") || "没有可确认的已加载扩展"}`);
-  await Promise.all(['erp', '1688'].map(tabId => remoteViewLoader.ensure(tabId)));
+  await Promise.all(['erp'].map(tabId => remoteViewLoader.ensure(tabId)));
   const selectionStatusProbe = await requestJson("/selection/v1/status");
   const requestedAt = new Date().toISOString();
   const expectedSkus = [{ platformSku, platformSkc, warehouseSku }];
@@ -977,95 +976,6 @@ async function runErpV2SmokeFixture() {
       },
     });
   if (!deliveryResult?.ok || deliveryResult.requestId !== requestId || deliveryResult.ledgerId !== ledgerId) throw new Error(`Packaged smoke 原请求回传失败：${deliveryResult?.code || deliveryResult?.message || "登记范围不一致"}`);
-  const selectionBackgroundPath = tabState["1688"].extension?.path && path.join(tabState["1688"].extension.path, "background.js");
-  if (!selectionBackgroundPath || !fs.existsSync(selectionBackgroundPath)) throw new Error("Packaged smoke 找不到 1688 运行时后台模块。");
-  const selectionRequests = [];
-  const selectionRuntimeStorage = new Map([
-    ["shopeersErpInboxBaseUrl", `http://127.0.0.1:${inboxState.port}`],
-    ["shopeersErpInboxCapability", inboxCapability],
-    ["shopeersErpWorkspaceId", workspaceId],
-  ]);
-  const selectionChrome = {
-    storage: { local: {
-      get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : []).map((key) => [key, selectionRuntimeStorage.get(key)])),
-      set: async (values) => { for (const [key, value] of Object.entries(values || {})) selectionRuntimeStorage.set(key, value); },
-    } },
-    runtime: {
-      onMessage: { addListener: () => {} },
-      onInstalled: { addListener: () => {} },
-      onStartup: { addListener: () => {} },
-      getManifest: () => ({ version: "1.2.1" }),
-      lastError: null,
-    },
-    alarms: { create: () => {}, onAlarm: { addListener: () => {} } },
-  };
-  const selectionBackgroundSource = fs.readFileSync(selectionBackgroundPath, "utf8");
-  const startupInvocation = "\nreportInstalled();";
-  const startupInvocationIndex = selectionBackgroundSource.lastIndexOf(startupInvocation);
-  if (startupInvocationIndex < 0) throw new Error("1688 运行时未找到启动 heartbeat。");
-  const selectionSmokeBackgroundSource = `${selectionBackgroundSource.slice(0, startupInvocationIndex)}
-globalThis.__SELECTION_WORKBENCH_EXTENSION_STARTUP_PROMISE__ = reportInstalled();${selectionBackgroundSource.slice(startupInvocationIndex + startupInvocation.length)}`;
-  const selectionContext = vm.createContext({
-    __SELECTION_WORKBENCH_EXTENSION_TEST__: true,
-    chrome: selectionChrome,
-    URL,
-    Headers,
-    AbortController,
-    fetch: (url, options) => {
-      const headers = Object.fromEntries(new Headers(options?.headers || {}).entries());
-      selectionRequests.push({ url: String(url), headers });
-      return net.fetch(url, options);
-    },
-    console,
-    setTimeout,
-    clearTimeout,
-  });
-  vm.runInContext(selectionSmokeBackgroundSource, selectionContext, { filename: selectionBackgroundPath });
-  const selectionApi = selectionContext.__SELECTION_WORKBENCH_EXTENSION_TEST_API__;
-  if (!selectionApi || typeof selectionApi.reportInstalled !== "function") throw new Error("1688 运行时 heartbeat 接口未加载。");
-  const selectionHeartbeatResult = await selectionContext.__SELECTION_WORKBENCH_EXTENSION_STARTUP_PROMISE__;
-  const selectionRequest = selectionRequests.at(-1);
-  const selectionHeartbeat = {
-    ok: selectionHeartbeatResult === true
-      && selectionRequest?.url === `http://127.0.0.1:${inboxState.port}/selection/v1/extension-status`
-      && selectionRequest.headers.authorization === `Bearer ${inboxCapability}`
-      && selectionRequest.headers["x-shopeers-workspace-id"] === workspaceId,
-    requestCount: selectionRequests.length,
-  };
-  const runSelectionNegativeCase = async (storageValues, label) => {
-    const requests = [];
-    const storage = new Map(Object.entries(storageValues || {}));
-    const negativeContext = vm.createContext({
-      __SELECTION_WORKBENCH_EXTENSION_TEST__: true,
-      chrome: { ...selectionChrome, storage: { local: {
-        get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : []).map((key) => [key, storage.get(key)])),
-        set: async () => {},
-      } } },
-      URL,
-      Headers,
-      AbortController,
-      fetch: (url, options) => {
-        requests.push({ url: String(url), options });
-        return net.fetch(url, options);
-      },
-      console,
-      setTimeout,
-      clearTimeout,
-    });
-    vm.runInContext(selectionSmokeBackgroundSource, negativeContext, { filename: `${selectionBackgroundPath}:${label}` });
-    const result = await negativeContext.__SELECTION_WORKBENCH_EXTENSION_STARTUP_PROMISE__;
-    return { rejected: result === false && requests.length === 0, requestCount: requests.length };
-  };
-  const selectionNegativeCases = [
-    {},
-    { shopeersErpInboxBaseUrl: `http://127.0.0.1:${inboxState.port}`, shopeersErpInboxCapability: "short", shopeersErpWorkspaceId: workspaceId },
-    { shopeersErpInboxBaseUrl: `http://192.0.2.1:${inboxState.port}`, shopeersErpInboxCapability: inboxCapability, shopeersErpWorkspaceId: workspaceId },
-    { shopeersErpInboxBaseUrl: `http://127.0.0.1:${inboxState.port}`, shopeersErpInboxCapability: inboxCapability, shopeersErpWorkspaceId: "" },
-  ];
-  const selectionNegativeResults = await Promise.all(selectionNegativeCases.map((values, index) => runSelectionNegativeCase(values, `negative-${index + 1}`)));
-  selectionHeartbeat.failClosed = selectionNegativeResults.every((result) => result.rejected);
-  selectionHeartbeat.failClosedCount = selectionNegativeResults.filter((result) => result.rejected).length;
-  if (!selectionHeartbeat.ok || !selectionHeartbeat.failClosed) throw new Error(`Packaged smoke 1688 storage transport failed: ${JSON.stringify(selectionHeartbeat)}`);
   const deadline = Date.now() + 15000;
   let status;
   do {
@@ -1081,12 +991,6 @@ globalThis.__SELECTION_WORKBENCH_EXTENSION_STARTUP_PROMISE__ = reportInstalled()
     requestId,
     transport: "runtime-extension-bridge",
     delivery: deliveryResult,
-    selectionHeartbeat: {
-      ok: selectionHeartbeat.ok,
-      requestCount: selectionHeartbeat.requestCount,
-      failClosed: selectionHeartbeat.failClosed,
-      failClosedCount: selectionHeartbeat.failClosedCount,
-    },
     selectionStatusProbe: {
       ok: selectionStatusProbe?.ok === true,
       application: selectionStatusProbe?.application || null,
@@ -1208,7 +1112,7 @@ async function writeSmokeReport() {
   const erpIndicatorSmoke = await runErpIndicatorSmoke();
   const updatePopoverDomClickSmoke = await runUpdatePopoverDomClickSmoke();
   const tabSwitches = [];
-  for (const tabId of ["erp", "1688", "workspace"]) {
+  for (const tabId of ["erp", "workspace"]) {
     await setActiveTab(tabId);
     tabSwitches.push({
       activeTab,
@@ -1223,8 +1127,6 @@ async function writeSmokeReport() {
   };
   const erpBridgeText = extensionFileText(state.tabs.erp.extension?.path, path.join("src", "shopeers-bridge.js"));
   const erpBackgroundText = extensionFileText(state.tabs.erp.extension?.path, path.join("src", "background.js"));
-  const selectionBackgroundText = extensionFileText(state.tabs["1688"].extension?.path, "background.js");
-  const selectionPopupText = extensionFileText(state.tabs["1688"].extension?.path, "popup.js");
   const isolatedViews = tabSwitches.every((entry) => entry.attachedViews.length === 1 && entry.attachedViews[0] === entry.activeTab);
   const report = {
     ok: state.tabs.workspace.status === "ready" && Boolean(state.tabs.workspace.url) && isolatedViews && erpIndicatorSmoke.ok && (hiddenSmoke ? updatePopoverDomClickSmoke.skipped : updatePopoverDomClickSmoke.ok) && (!smokeRequiresErpV2 || erpV2Fixture?.ok),
@@ -1242,7 +1144,6 @@ async function writeSmokeReport() {
     electron: process.versions.electron,
     workspace: state.tabs.workspace,
     erp: state.tabs.erp,
-    selection1688: state.tabs["1688"],
     update: state.update,
     updateFeedConfig: updateRuntime?.feedConfig ?? null,
     updateInstallInvocationCount,
@@ -1252,18 +1153,10 @@ async function writeSmokeReport() {
       port: inboxState.port,
       root: runtimeRoot({ userDataPath: app.getPath("userData") }),
       erpPath: state.tabs.erp.extension?.path || null,
-      selectionPath: state.tabs["1688"].extension?.path || null,
       erpBridgeDynamic: erpBridgeText.includes(`127.0.0.1:${inboxState.port}`),
       erpBridgeHardcoded: erpBridgeText.includes("127.0.0.1:8790/erp/v1/cost-results"),
       erpStorageKey: erpBridgeText.includes("__SHOPEERS_ERP_INBOX_BASE_URL__") && erpBackgroundText.includes("shopeersErpInboxBaseUrl"),
-      selectionStorageContract: ["shopeersErpInboxBaseUrl", "shopeersErpInboxCapability", "shopeersErpWorkspaceId"]
-        .every((key) => selectionBackgroundText.includes(key) && selectionPopupText.includes(key))
-        && !selectionBackgroundText.includes("127.0.0.1:8790/selection/v1")
-        && !selectionPopupText.includes("127.0.0.1:8790/selection/v1")
-        && !selectionBackgroundText.includes("targetAddressSpace")
-        && !selectionPopupText.includes("targetAddressSpace"),
-      selectionHeartbeatCompatible: !selectionBackgroundText.includes("targetAddressSpace") && !selectionPopupText.includes("targetAddressSpace"),
-      storageConfigured: workspaceContextCoordinator.getState(["erp", "1688"].map((tabId) => ({
+      storageConfigured: workspaceContextCoordinator.getState(["erp"].map((tabId) => ({
         tabId,
         extensionId: tabState[tabId].extension?.id,
         session: views.get(tabId)?.webContents?.session,
@@ -1487,7 +1380,7 @@ ipcMain.handle("desktop:request-inbox", async (event, input) => {
   } catch (error) {
     return { status: error.status || 400, body: { error: error.code || "INVALID_INBOX_REQUEST", message: error.message } };
   }
-  if (request.route === "/selection/v1/context" && request.method === "POST") {
+  if (request.route === "/erp/v1/workspace-context" && request.method === "POST") {
     let context;
     try {
       context = normalizeWorkspaceContext(request.body?.value);
@@ -1497,6 +1390,7 @@ ipcMain.handle("desktop:request-inbox", async (event, input) => {
     const configuration = await configureLoadedExtensions(context);
     const configurationResponse = configurationHttpResult(configuration);
     if (configurationResponse.status !== 200) return configurationResponse;
+    return { status: 200, body: { ok: true, context } };
   }
   try {
     request = enforceWorkspaceContext(request, workspaceContextCoordinator.getCommittedContext());

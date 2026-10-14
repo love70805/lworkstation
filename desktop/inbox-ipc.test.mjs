@@ -12,8 +12,8 @@ const {
 assert.deepEqual(normalizeInboxRequest({ route: "/erp/v1/status" }), {
   route: "/erp/v1/status", method: "GET", query: {}, body: null,
 });
-assert.deepEqual(normalizeInboxRequest({ route: "/selection/v1/context", method: "post", body: { ok: true } }), {
-  route: "/selection/v1/context", method: "POST", query: {}, body: { value: { ok: true }, serialized: '{"ok":true}' },
+assert.deepEqual(normalizeInboxRequest({ route: "/erp/v1/workspace-context", method: "post", body: { ok: true } }), {
+  route: "/erp/v1/workspace-context", method: "POST", query: {}, body: { value: { ok: true }, serialized: '{"ok":true}' },
 });
 assert.equal(buildInboxUrl(29876, normalizeInboxRequest({ route: "/erp/v1/status", query: { workspaceId: "w-1" } })).href,
   "http://127.0.0.1:29876/erp/v1/status?workspaceId=w-1");
@@ -57,12 +57,12 @@ assert.equal(derivedBatch.body.value.memberId, "member-a");
 assert.equal(derivedBatch.body.value.batch.workspaceId, "workspace-a");
 assert.equal(derivedBatch.body.value.batch.memberId, "member-a");
 assert.throws(() => enforceWorkspaceContext(normalizeInboxRequest({
-  route: "/selection/v1/captures",
+  route: "/selection/v1/captures/ack",
   method: "POST",
   body: { workspaceId: "workspace-a", ownerId: "attacker", payload: { skc: "SKC-1" } },
 }), committed), /成员/);
 const derivedCapture = enforceWorkspaceContext(normalizeInboxRequest({
-  route: "/selection/v1/captures",
+  route: "/selection/v1/captures/ack",
   method: "POST",
   body: { workspaceId: "workspace-a", payload: { skc: "SKC-1" } },
 }), committed);
@@ -85,3 +85,5 @@ const catalogAck = enforceWorkspaceContext(normalizeInboxRequest({
 }), committed);
 assert.equal(catalogAck.body.value.workspaceId, "workspace-a");
 console.log("desktop inbox IPC contract tests passed");
+
+for (const request of [{ route: "/selection/v1/context", method: "POST" }, { route: "/selection/v1/extension-status" }, { route: "/selection/v1/captures", method: "POST" }]) assert.throws(() => normalizeInboxRequest(request), /组合不受支持/);

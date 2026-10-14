@@ -44,7 +44,7 @@ const SIDEBAR_COMPACT_QUERY = "(max-width: 1200px)";
 
 const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
-  { id: "products", label: "选品工作台", path: "/products", icon: Archive, match: ["/products", "/capture"] },
+  { id: "products", label: "商品资料", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
   { id: "diagnostics", label: "系统检查", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
 ];
@@ -151,7 +151,7 @@ export default function AppShell({ children, pageClass = "" }) {
       items.push({
         id: `captures:${workspaceSummary.pendingCaptureCount}:${workspaceSummary.latestCaptureAt ?? "none"}`,
         tone: workspaceSummary.blockedCaptureCount > 0 ? "warning" : "info",
-        title: `${workspaceSummary.pendingCaptureCount} 条采集等待确认`,
+        title: `${workspaceSummary.pendingCaptureCount} 条历史资料待整理`,
         detail: workspaceSummary.blockedCaptureCount > 0
           ? `${workspaceSummary.blockedCaptureCount} 条存在阻断项`
           : "均可进入待确认队列处理",
@@ -344,7 +344,7 @@ export default function AppShell({ children, pageClass = "" }) {
         </div>
 
         <nav className="side-navigation" aria-label="主导航">
-          {navigation.map((item) => {
+          {navigation.filter(item => item.id !== "diagnostics").map((item) => {
             const Icon = item.icon;
             return (
               <Link className={`nav-item ${isActive(pathname, item) ? "active" : ""}`} to={item.path} key={item.path} title={item.label} aria-current={isActive(pathname, item) ? "page" : undefined}>
@@ -355,7 +355,7 @@ export default function AppShell({ children, pageClass = "" }) {
             );
           })}
         </nav>
-
+        <nav className="sidebar-bottom" aria-label="系统与帮助"><Link className={`nav-item ${pathname === "/diagnostics" || pathname === "/data-security" ? "active" : ""}`} to="/diagnostics" title="系统与备份" aria-current={pathname === "/diagnostics" || pathname === "/data-security" ? "page" : undefined}><ShieldCheck size={18} /><span>系统与备份</span></Link></nav>
       </aside>
 
       {mobileOpen ? <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setMobileOpen(false)} /> : null}
@@ -370,7 +370,7 @@ export default function AppShell({ children, pageClass = "" }) {
             <button className="environment-chip" aria-haspopup="menu" aria-expanded={openMenu === "environment"} onClick={() => toggleMenu("environment")}><i /> {cloudEnvironment}</button>
             {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统检查<ChevronRight size={16} /></button></div> : null}
           </div>
-          <Button icon={Inbox} onClick={() => navigate("/products?view=pending")}>待确认采集{workspaceSummary?.pendingCaptureCount ? `（${workspaceSummary.pendingCaptureCount}）` : ""}</Button>
+          {workspaceSummary?.pendingCaptureCount > 0 ? <Button icon={Inbox} onClick={() => navigate("/products?view=pending")}>历史资料（{workspaceSummary.pendingCaptureCount}）</Button> : null}
           <span className="topbar-separator" />
           <div className="topbar-control appearance-control">
             <IconButton
@@ -413,7 +413,7 @@ export default function AppShell({ children, pageClass = "" }) {
           {desktopRuntime?.desktop ? <div className="desktop-close-preference"><span><label htmlFor="desktop-close-behavior"><strong>关闭窗口时</strong></label><small>{closePreference.status === 'loading' ? '正在读取桌面偏好…' : closePreference.trayAvailable === false ? '系统托盘当前不可用，关闭窗口会退出应用。' : closePreference.closeBehavior === 'quit' ? '退出应用并停止后台收件。' : '隐藏到系统托盘，继续后台收件。'}</small>{closePreference.error ? <small className="system-inline-error" role="alert">{closePreference.error}</small> : null}</span><select id="desktop-close-behavior" className="select-input" value={closePreference.closeBehavior ?? ''} disabled={savingClosePreference || closePreference.status !== 'ready'} onChange={event => changeClosePreference(event.target.value)}>{closePreference.status !== 'ready' ? <option value="">未读取</option> : null}<option value="tray">隐藏到托盘</option><option value="quit">退出应用</option></select></div> : null}
           <button type="button" disabled={backingUp} onClick={exportLocalBackup}><Download size={18} /><span><strong>{backingUp ? "正在导出备份" : "导出本机备份"}</strong><small>生成包含当前工作区全部表的 JSON 文件</small></span><ChevronRight size={16} /></button>
         </div>
-        <details className="system-advanced"><summary>高级：云端账户</summary><p>本机工作不需要登录云端。</p><Button onClick={() => showDialog('cloud-auth')}>管理云端账户</Button></details>
+        {runtimeConfig.cloudConfigured ? <details className="system-advanced"><summary>高级：云端账户</summary><Button onClick={() => showDialog('cloud-auth')}>管理云端账户</Button></details> : null}
       </Modal>
 
       <Modal

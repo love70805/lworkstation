@@ -64,7 +64,8 @@ assert.match(main, /contextIsolation:\s*true/);
 assert.match(main, /nodeIntegration:\s*false/);
 assert.match(main, /sandbox:\s*true/);
 assert.match(main, /persist:erp/);
-assert.match(main, /persist:1688/);
+assert.doesNotMatch(main, /persist:1688|1688-selection-extension/);
+assert.doesNotMatch(read("shell.html"), /data-tab="1688"/);
 assert.match(main, /loadExtension/);
 assert.match(main, /setWindowOpenHandler/);
 assert.match(main, /navigateRemoteView\(tabId, decision\.url, "新窗口"\)/);
@@ -265,16 +266,6 @@ for (const file of ['erp-inbox-storage.mjs', 'erp-inbox-storage-worker.mjs']) {
 assert.ok(pkg.build.files.includes("extension-runtime.cjs"));
 assert.ok(pkg.build.files.includes("inbox-ipc.cjs"));
 assert.ok(pkg.build.files.includes("workspace-context.cjs"));
-for (const file of [
-  "../integrations/1688-selection-extension/background.js",
-  "../integrations/1688-selection-extension/popup.js",
-  "../frontend/public/integrations/1688-selection/Shopeers-1688-Capture-v1.2.1/background.js",
-  "../frontend/public/integrations/1688-selection/Shopeers-1688-Capture-v1.2.1/popup.js",
-]) assert.doesNotMatch(fs.readFileSync(path.join(root, file), "utf8"), /targetAddressSpace/);
-assert.match(read("main.cjs"), /selectionStorageContract/);
-assert.match(read("smoke.mjs"), /selectionStorageContract/);
-assert.match(read("main.cjs"), /selectionHeartbeat/);
-assert.match(read("smoke.mjs"), /failClosed/);
 assert.match(read("smoke.mjs"), /storageConfigured/);
 const shellHtml = read("shell.html");
 assert.ok(shellHtml.indexOf("./shell-state.cjs") < shellHtml.indexOf("./shell.js"));
@@ -400,14 +391,14 @@ cleanupRuntimeExtensionStagingSync({ userDataPath: runtimeUserData });
 assert.equal(fs.existsSync(stagingPath), false);
 assert.equal(fs.existsSync(outsidePath), true);
 fs.rmSync(runtimeFixture, { recursive: true, force: true });
-assert.equal(normalizeAllowedRemoteUrl("1688", "http://detail.1688.com/offer/123.html"), "https://detail.1688.com/offer/123.html");
-assert.equal(normalizeAllowedRemoteUrl("1688", "https://login.taobao.com/member/login.jhtml"), "https://login.taobao.com/member/login.jhtml");
+assert.equal(normalizeAllowedRemoteUrl("1688", "http://detail.1688.com/offer/123.html"), null);
+assert.equal(normalizeAllowedRemoteUrl("1688", "https://login.taobao.com/member/login.jhtml"), null);
 assert.equal(normalizeAllowedRemoteUrl("1688", "javascript:alert(1)"), null);
 assert.equal(normalizeAllowedRemoteUrl("1688", "https://1688.com.example.com/"), null);
 assert.equal(normalizeAllowedRemoteUrl("erp", "https://www.zhuolinkeji.cn/"), "https://www.zhuolinkeji.cn/");
-assert.deepEqual(resolveRemotePopup("1688", "http://detail.1688.com/offer/123.html"), { action: "navigate", url: "https://detail.1688.com/offer/123.html" });
+assert.deepEqual(resolveRemotePopup("1688", "http://detail.1688.com/offer/123.html"), { action: "block", url: null });
 assert.deepEqual(resolveRemotePopup("1688", "https://example.com/"), { action: "block", url: null });
-for (const manifest of ["../integrations/erp-assistant-extension/manifest.json", "../integrations/1688-selection-extension/manifest.json"]) {
+for (const manifest of ["../integrations/erp-assistant-extension/manifest.json"]) {
   const parsed = JSON.parse(fs.readFileSync(path.join(root, manifest), "utf8"));
   assert.equal(parsed.manifest_version, 3);
 }
@@ -427,3 +418,5 @@ assert.doesNotMatch(read('shell.js'), /inboxAction\.addEventListener|inboxAction
 assert.match(read('shell.html'), /<div id="inbox-status"[^>]*role="img"/);
 assert.doesNotMatch(read('shell.html'), /erp-status-hint|erp-ready-notice/);
 assert.match(read('smoke.mjs'), /erpIndicatorSmoke/);
+
+for (const removed of ["../integrations/1688-selection-extension", "../frontend/public/integrations/1688-selection", "../tools/build-selection-capture-extension.mjs"]) assert.equal(fs.existsSync(path.join(root, removed)), false, removed);

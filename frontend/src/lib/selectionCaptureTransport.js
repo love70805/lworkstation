@@ -24,20 +24,3 @@ export async function acknowledgeSelectionCapture(deliveryId, { workspaceId = nu
   });
   deliveryWorkspaces.delete(deliveryId);
 }
-
-export async function publishSelectionCaptureContext({ workspaceId, memberId, visibility = "workspace" } = {}) {
-  if (!workspaceId || !memberId) return;
-  await requestInbox({
-    route: "/selection/v1/context",
-    method: "POST",
-    body: { workspaceId, memberId, visibility },
-  });
-}
-
-export async function checkSelectionCaptureInbox() {
-  return requestInbox({ route: "/selection/v1/status" });
-}
-
-export function getSelectionExtensionStatus() {
-  return requestInbox({ route: "/selection/v1/extension-status" });
-}

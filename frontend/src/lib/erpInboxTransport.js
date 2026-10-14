@@ -69,3 +69,7 @@ export function reportErpCollectionAdoption(taskId, { workspaceId, deliveryId, a
     workspaceId, deliveryId, ...adoption.summary, state: adoption.state, processedAt: adoption.processedAt,
   } });
 }
+
+export async function publishWorkspaceInboxContext(context) {
+  return requestInbox({ route: "/erp/v1/workspace-context", method: "POST", body: { workspaceId: context.workspaceId, memberId: context.memberId, visibility: context.canSeeAllSelection ? "workspace" : "private" } });
+}

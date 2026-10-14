@@ -13,7 +13,7 @@ const contextA = { workspaceId: "workspace-a", memberId: "member-a", visibility:
 const contextB = { workspaceId: "workspace-b", memberId: "member-b", visibility: "workspace" };
 const targets = [
   { tabId: "erp", extensionId: "erp-id", session: {} },
-  { tabId: "1688", extensionId: "selection-id", session: {} },
+  { tabId: "fixture", extensionId: "selection-id", session: {} },
 ];
 
 const zeroTargetCoordinator = createWorkspaceContextCoordinator();
@@ -57,7 +57,7 @@ let failSelection = true;
 const coordinator = createWorkspaceContextCoordinator();
 const configure = async (target, targetContext) => {
   calls.push(`${target.tabId}:${target.extensionId}`);
-  if (target.tabId === "1688" && targetContext?.workspaceId === contextB.workspaceId && failSelection) throw new Error("selection unavailable");
+  if (target.tabId === "fixture" && targetContext?.workspaceId === contextB.workspaceId && failSelection) throw new Error("selection unavailable");
 };
 
 failSelection = false;
@@ -73,14 +73,14 @@ assert.equal(failedB.ok, false);
 assert.equal(coordinator.getState(targets).storageConfigured, true);
 assert.deepEqual(coordinator.getCommittedContext(), contextA);
 assert.deepEqual(coordinator.getPendingContext(), contextB);
-assert.deepEqual(calls.slice(-2), ["erp:erp-id", "1688:selection-id"]);
+assert.deepEqual(calls.slice(-2), ["erp:erp-id", "fixture:selection-id"]);
 
 failSelection = false;
 const retryB = await coordinator.apply(contextB, targets, configure);
 assert.equal(retryB.ok, true);
 assert.deepEqual(coordinator.getCommittedContext(), contextB);
 assert.ok(calls.filter((call) => call === "erp:erp-id").length >= 4);
-assert.ok(calls.filter((call) => call === "1688:selection-id").length >= 4);
+assert.ok(calls.filter((call) => call === "fixture:selection-id").length >= 4);
 
 const firstFailure = createWorkspaceContextCoordinator();
 let firstAttempt = true;
@@ -117,14 +117,14 @@ assert.deepEqual(normalizeConfigurationResult({ ok: false, failures: [] }), {
 console.log("desktop workspace context coordination tests passed");
 
 const lazyCoordinator = createWorkspaceContextCoordinator();
-let lazyTargets = [{ tabId: 'erp', deferred: true }, { tabId: '1688', deferred: true }];
+let lazyTargets = [{ tabId: 'erp', deferred: true }, { tabId: 'fixture', deferred: true }];
 const lazyCalls = [];
 const lazyConfigure = async (target, context) => { lazyCalls.push(`${target.tabId}:${context.workspaceId}`); };
 assert.equal((await lazyCoordinator.apply(contextA, () => lazyTargets, lazyConfigure)).ok, true);
 assert.deepEqual(lazyCoordinator.getCommittedContext(), contextA);
 assert.deepEqual(lazyCalls, [], 'context publication cannot start unopened extensions');
 assert.equal((await lazyCoordinator.apply(contextB, () => lazyTargets, lazyConfigure)).ok, true);
-lazyTargets = [targets[0], { tabId: '1688', deferred: true }];
+lazyTargets = [targets[0], { tabId: 'fixture', deferred: true }];
 assert.equal((await lazyCoordinator.configureCurrent(() => lazyTargets, lazyConfigure)).ok, true);
 assert.deepEqual(lazyCalls, ['erp:workspace-b'], 'cold extension uses the latest committed context');
 let releaseTransition;
@@ -139,7 +139,7 @@ const lateLoad = lazyCoordinator.configureCurrent(() => lazyTargets, lazyConfigu
 releaseTransition();
 assert.equal((await transition).ok, true);
 assert.equal((await lateLoad).ok, true);
-assert.deepEqual(lazyCalls.slice(-2), ['erp:workspace-c', '1688:workspace-c'], 'late loads serialize behind workspace transitions');
+assert.deepEqual(lazyCalls.slice(-2), ['erp:workspace-c', 'fixture:workspace-c'], 'late loads serialize behind workspace transitions');
 assert.equal(lazyCoordinator.getState(targets).storageConfigured, true);
 assert.equal((await lazyCoordinator.apply(contextA, [{ tabId: 'erp', deferred: true, session: {} }], lazyConfigure)).ok, false, 'an incomplete live target is never treated as deferred');
 assert.deepEqual(lazyCoordinator.getCommittedContext(), contextC);

@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.25",
+  "version": "0.4.26",
   "candidateOnly": true,
-  "integrationBranch": "codex/ui-experience-0.4.25",
+  "integrationBranch": "codex/workspace-simplify-0.4.26",
   "requiredCommits": [
+    {
+      "module": "v0.4.26-verified-main-baseline",
+      "commit": "873ff7b30c9d331d7feec5d9ba43c6d2771b520f"
+    },
     {
       "module": "v0.4.25-workspace-and-catalog-experience",
       "commit": "44bd4e754f1862d18894c6893b5872ed4bf4312a"

@@ -12,7 +12,7 @@ assert.match(classifyErpState({ ...inbox, extensionLoadState: 'deferred', pageSt
 assert.equal(classifyErpState({ ...inbox, extensionLoadState: 'deferred', pageStatus: 'idle', status: 'error' }).tone, 'danger');
 assert.equal(getSurfacePresentation({ activeTab: 'workspace', startup: { status: 'error', message: '需要重试' } }).message, '需要重试');
 assert.equal(getSurfacePresentation({ activeTab: 'erp', tabs: { erp: { title: 'ERP', status: 'loading' } } }).status, 'loading');
-assert.match(getSurfacePresentation({ activeTab: '1688', tabs: { '1688': { title: '1688', status: 'loading' } } }).message, /加载 1688/);
+assert.match(getSurfacePresentation({ activeTab: 'erp', tabs: { 'erp': { title: 'erp', status: 'loading' } } }).message, /加载 erp/);
 assert.equal(getSurfacePresentation({ activeTab: 'erp', tabs: { erp: { status: 'error', error: '安全配置失败' } } }).message, '安全配置失败');
 assert.equal(getSurfacePresentation({ activeTab: 'erp', tabs: { erp: { status: 'ready' } } }).status, 'ready');
 assert.equal(classifyErpState(inbox).tone, 'success', 'a fresh authenticated page handshake is ready without opening purchase');

@@ -1,8 +1,8 @@
 # Lworkstation 经营管理工作台
 
-面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、1688 参考采集、ERP 成本核对和利润核算放在同一个本机工作区。
+面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、ERP 成本核对和利润核算放在同一个本机工作区。
 
-**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.25 更新说明](docs/RELEASE_0.4.25.md)
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.26 更新说明](docs/RELEASE_0.4.26.md)
 
 当前稳定版为 **v0.4.25**，重点优化界面、布局和操作体验：首页先选择核算范围；商品与预存列表分层筛选，支持常用列、全部字段及表内滚动；利润页可直达本月报告。浅深色、窗口化、窄屏和键盘使用一并改善。ERP 正式成本、人工更正优先及定稿口径沿用既有规则。当前为本机 Windows 桌面版，无需云端数据库，下载和安装更新由用户操作。
 
@@ -67,7 +67,7 @@ pnpm --dir desktop release:check
 | --- | --- |
 | `frontend/` | 工作站界面、业务契约、本机数据库与测试 |
 | `desktop/` | Electron 桌面壳、扩展加载、本机收件服务管理和更新 |
-| `integrations/` | ERP Assistant 与 1688 采集扩展 |
+| `integrations/` | ERP Assistant 集成 |
 | `tools/` | 契约验证、采集回归、构建和辅助工具 |
 | `docs/` | 当前任务、发布记录、业务契约及历史归档 |
 | `releases/` | 候选和历史产物的登记说明；安装包从 Releases 下载 |

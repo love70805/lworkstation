@@ -9,10 +9,9 @@ const INBOX_ROUTE_METHODS = new Map([
   ["/erp/v1/catalog-batches", new Set(["GET", "POST"])],
   ["/erp/v1/extension-status", new Set(["GET", "POST"])],
   ["/selection/v1/status", new Set(["GET"])],
-  ["/selection/v1/context", new Set(["GET", "POST"])],
-  ["/selection/v1/captures", new Set(["GET", "POST"])],
+  ["/erp/v1/workspace-context", new Set(["POST"])],
+  ["/selection/v1/captures", new Set(["GET"])],
   ["/selection/v1/captures/ack", new Set(["POST"])],
-  ["/selection/v1/extension-status", new Set(["GET", "POST"])],
 ]);
 const ALLOWED_ROUTE_PREFIXES = ["/erp/v1/", "/selection/v1/"];
 const MAX_BODY_BYTES = 5 * 1024 * 1024;

@@ -16,8 +16,6 @@ const maxBytes = 25 * 1024 * 1024;
 const requestTtlMs = Math.max(Number(process.env.SHOPEERS_ERP_REQUEST_TTL_MS || 2 * 60 * 60 * 1000), 60_000);
 const extensionTtlMs = Math.max(Number(process.env.SHOPEERS_ERP_EXTENSION_TTL_MS || 90_000), 30_000);
 const inboxInstanceId = crypto.randomUUID();
-const selectionCaptureMaxBytes = 5 * 1024 * 1024;
-const selectionWorkspaceId = String(process.env.SHOPEERS_SELECTION_WORKSPACE_ID || "workspace-default").trim() || "workspace-default";
 const BASELINE = Object.freeze({
   application: "ERP Assistant",
   version: "8.0.0",
@@ -899,69 +897,6 @@ function querySkcSet(values) {
     .filter(Boolean));
 }
 
-function validateSelectionCaptureEnvelope(payload) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw Object.assign(new Error("1688 采集包内容无效。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  if (Number(payload.schemaVersion) !== 1 || payload.source !== "1688") {
-    throw Object.assign(new Error("1688 采集包版本或来源不受支持。"), { status: 400, code: "UNSUPPORTED_SELECTION_CAPTURE" });
-  }
-  const requestId = String(payload.requestId ?? "").trim();
-  const sourceUrl = String(payload.sourceUrl ?? "").trim();
-  const product = payload.product;
-  if (requestId.length < 8 || requestId.length > 128) {
-    throw Object.assign(new Error("1688 采集包缺少有效 requestId。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  let parsedUrl;
-  try { parsedUrl = new URL(sourceUrl); } catch {
-    throw Object.assign(new Error("1688 来源链接无效。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  if (parsedUrl.protocol !== "https:" || !/(^|\.)1688\.com$/i.test(parsedUrl.hostname)) {
-    throw Object.assign(new Error("来源链接必须来自 1688。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  if (!product || typeof product !== "object" || Array.isArray(product)) {
-    throw Object.assign(new Error("1688 采集包缺少商品内容。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  if (String(product.name ?? "").trim().length === 0 || String(product.name ?? "").length > 500) {
-    throw Object.assign(new Error("1688 采集包缺少商品名称。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  if (!Array.isArray(product.skus) || product.skus.length > 1000) {
-    throw Object.assign(new Error("1688 SKU 明细数量无效。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-  }
-  const skuIds = new Set();
-  product.skus.forEach((sku) => {
-    if (!sku || typeof sku !== "object") throw Object.assign(new Error("1688 SKU 明细格式无效。"), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-    for (const key of ["spec", "sourceSkuId", "imageUrl"]) {
-      if (String(sku[key] ?? "").length > 4096) throw Object.assign(new Error(`1688 SKU 字段 ${key} 过长。`), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-    }
-    const sourceSkuId = String(sku.sourceSkuId ?? "").trim();
-    if (sourceSkuId) skuIds.add(sourceSkuId.toUpperCase());
-    for (const key of ["purchasePrice", "purchaseQty", "lineSubtotal"]) {
-      if (sku[key] != null && (!Number.isFinite(Number(sku[key])) || Number(sku[key]) < 0)) {
-        throw Object.assign(new Error(`1688 SKU 字段 ${key} 数值无效。`), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-      }
-    }
-  });
-  for (const key of ["purchasePrice", "priceMin", "priceMax", "shippingFee", "purchaseQty", "bundleQty"]) {
-    if (product[key] != null && (!Number.isFinite(Number(product[key])) || Number(product[key]) < 0)) {
-      throw Object.assign(new Error(`1688 商品字段 ${key} 数值无效。`), { status: 400, code: "INVALID_SELECTION_CAPTURE" });
-    }
-  }
-  return { requestId, sourceUrl, sourceProductId: String(product.sourceProductId ?? "").trim(), skuIds };
-}
-
-function selectionCaptureDuplicate(records, details, workspaceId) {
-  return records.find((item) => {
-    if (item.kind !== "selection-capture" || item.workspaceId !== workspaceId) return false;
-    if (item.requestId === details.requestId) return true;
-    const envelope = item.envelope?.product ?? {};
-    if (details.sourceProductId && String(envelope.sourceProductId ?? "").trim().toUpperCase() === details.sourceProductId.toUpperCase()) return true;
-    if (details.sourceUrl && String(item.envelope?.sourceUrl ?? "").trim() === details.sourceUrl) return true;
-    const existingIds = new Set((envelope.skus ?? []).map((sku) => String(sku?.sourceSkuId ?? "").trim().toUpperCase()).filter(Boolean));
-    return details.skuIds.size > 0 && [...details.skuIds].some((id) => existingIds.has(id));
-  }) ?? null;
-}
-
 function requestSkcSet(request) {
   return new Set((request?.platformSkcs ?? []).map((item) => normalizeSkc(item?.platformSkc ?? item)).filter(Boolean));
 }
@@ -1094,26 +1029,19 @@ const server = http.createServer(async (req, res) => {
       } else if (req.method === 'POST') await writeSpool(records);
       return json(res, taskResponse.status, taskResponse.body);
     }
+    const selectionRoute = new URL(req.url, `http://${bindHost}:${port}`).pathname;
+    if (["/selection/v1/context", "/selection/v1/extension-status"].includes(selectionRoute)
+      || (req.method === "POST" && selectionRoute === "/selection/v1/captures")) {
+      return json(res, 410, { ok: false, code: "SELECTION_CAPTURE_RETIRED", error: "1688 采集扩展已移除，请在商品库直接建立商品资料。" });
+    }
     if (req.method === "GET") {
       const url = new URL(req.url, `http://${bindHost}:${port}`);
       if (url.pathname === "/erp/v1/status") return json(res, 200, runtimeStatus(records));
       if (url.pathname === "/selection/v1/status") {
-        return json(res, 200, { ok: true, status: "ok", application: "selection-workbench-inbox", apiVersion: 1 });
-      }
-      if (url.pathname === "/selection/v1/extension-status") {
-        const now = Date.now();
-        const extensionRecords = records
-          .filter((item) => item.kind === "selection-extension-status")
-          .map((item) => ({ ...item, online: extensionIsOnline(item, now) }))
-          .toSorted((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)));
-        return json(res, 200, { ok: true, records: extensionRecords, online: extensionRecords.some((item) => item.online), ttlMs: extensionTtlMs });
-      }
-      if (url.pathname === "/selection/v1/context") {
-        const context = records.find((item) => item.kind === "selection-active-context") ?? null;
-        return json(res, 200, { ok: true, context: context ? { workspaceId: context.workspaceId, memberId: context.memberId, visibility: context.visibility, updatedAt: context.updatedAt } : null });
+        return json(res, 200, { ok: true, status: "ok", application: "selection-workbench-inbox", apiVersion: 1, retired: true });
       }
       if (url.pathname === "/selection/v1/captures") {
-        const workspaceId = String(url.searchParams.get("workspaceId") || selectionWorkspaceId).trim();
+        const workspaceId = String(url.searchParams.get("workspaceId") || "workspace-default").trim();
         const memberId = String(url.searchParams.get("memberId") || "").trim();
         const includeAll = url.searchParams.get("includeAll") === "true";
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 50), 1), 100);
@@ -1165,71 +1093,6 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method !== "POST") return json(res, 405, { error: "METHOD_NOT_ALLOWED" });
     const requestUrl = new URL(req.url, `http://${bindHost}:${port}`);
-    if (requestUrl.pathname === "/selection/v1/extension-status") {
-      const extensionId = String(payload?.extensionId ?? "selection-1688-capture").trim();
-      const version = String(payload?.version ?? "").trim();
-      if (!extensionId || !version) return json(res, 400, { ok: false, code: "INVALID_EXTENSION_STATUS", error: "扩展状态缺少 extensionId 或 version。" });
-      const record = {
-        kind: "selection-extension-status",
-        extensionId,
-        version,
-        pageUrl: String(payload?.pageUrl ?? "").trim(),
-        ready: payload?.ready !== false,
-        lastSeenAt: new Date().toISOString(),
-        userAgent: String(req.headers["user-agent"] ?? "").slice(0, 240),
-      };
-      const existingIndex = records.findIndex((item) => item.kind === "selection-extension-status" && item.extensionId === extensionId);
-      if (existingIndex >= 0) records[existingIndex] = record;
-      else records.push(record);
-      extensionHeartbeats.set(`selection:${extensionId}`,record);
-      return json(res, 202, { ok: true, accepted: true, extensionId, version, lastSeenAt: record.lastSeenAt });
-    }
-    if (requestUrl.pathname === "/selection/v1/context") {
-      const workspaceId = String(payload?.workspaceId ?? "").trim();
-      const memberId = String(payload?.memberId ?? "").trim();
-      const visibility = payload?.visibility === "private" ? "private" : "workspace";
-      if (!workspaceId || !memberId) return json(res, 400, { ok: false, code: "INVALID_SELECTION_CONTEXT", error: "工作区上下文缺少 workspaceId 或 memberId。" });
-      const existing = records.find(item => item.kind === 'selection-active-context');
-      // The workspace publishes this context every four seconds. Its identity
-      // has no lease: an unchanged poll must not rewrite all purchase evidence.
-      if (existing && existing.workspaceId === workspaceId && existing.memberId === memberId && existing.visibility === visibility) {
-        return json(res, 202, { ok: true, context: existing });
-      }
-      const record = { kind: "selection-active-context", workspaceId, memberId, visibility, updatedAt: new Date().toISOString() };
-      const index = records.findIndex((item) => item.kind === "selection-active-context");
-      if (index >= 0) records[index] = record;
-      else records.push(record);
-      await writeSpool(records);
-      return json(res, 202, { ok: true, context: record });
-    }
-    if (requestUrl.pathname === "/selection/v1/captures") {
-      const encodedSize = Buffer.byteLength(JSON.stringify(payload), "utf8");
-      if (encodedSize > selectionCaptureMaxBytes) return json(res, 413, { ok: false, code: "CAPTURE_TOO_LARGE", error: "1688 采集包过大。" });
-      const details = validateSelectionCaptureEnvelope(payload);
-      const activeContext = records.find((item) => item.kind === "selection-active-context") ?? null;
-      const workspaceId = String(req.headers["x-shopeers-workspace-id"] || payload.workspaceId || activeContext?.workspaceId || selectionWorkspaceId).trim() || selectionWorkspaceId;
-      const ownerId = String(req.headers["x-shopeers-member-id"] || payload.ownerId || activeContext?.memberId || "local-user").trim() || "local-user";
-      const visibility = activeContext?.visibility === "private" ? "private" : "workspace";
-      const duplicate = selectionCaptureDuplicate(records, details, workspaceId);
-      if (duplicate) return json(res, 200, { ok: true, code: "duplicate", idempotent: true, captureId: duplicate.captureId, deliveryId: duplicate.deliveryId });
-      const receivedAt = new Date().toISOString();
-      const record = {
-        kind: "selection-capture",
-        captureId: `SEL-CAP-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        deliveryId: `SEL-DELIVERY-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        requestId: details.requestId,
-        workspaceId,
-        ownerId,
-        visibility,
-        source: "1688",
-        status: "pending",
-        receivedAt,
-        envelope: payload,
-      };
-      records.push(record);
-      await writeSpool(records);
-      return json(res, 202, { ok: true, code: "accepted", idempotent: false, captureId: record.captureId, deliveryId: record.deliveryId });
-    }
     if (requestUrl.pathname === "/selection/v1/captures/ack") {
       const deliveryId = String(payload?.deliveryId ?? "").trim();
       const workspaceId = String(payload?.workspaceId ?? "").trim();

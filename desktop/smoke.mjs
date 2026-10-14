@@ -154,10 +154,6 @@ if (!validationError) {
       || fixture?.status?.latestBatch?.evidenceStatus !== "complete"
       || fixture?.status?.latestBatch?.status !== "acknowledged"
       || fixture?.transport !== "runtime-extension-bridge"
-      || fixture?.selectionHeartbeat?.ok !== true
-      || fixture?.selectionHeartbeat?.failClosed !== true
-      || fixture?.selectionHeartbeat?.failClosedCount < 3
-      || fixture?.selectionHeartbeat?.requestCount !== 1
       || report.erpZoom?.percent !== 80
       || report.erpZoom?.min !== 70
       || report.erpZoom?.max !== 120
@@ -166,14 +162,12 @@ if (!validationError) {
       || runtime.port === 8790
       || runtime.root !== path.join(userDataPath, "Lworkstation-runtime-extensions")
       || runtime.erpPath !== path.join(runtime.root, "erp")
-      || runtime.selectionPath !== path.join(runtime.root, "1688")
       || !runtime.erpPath
-      || !runtime.selectionPath
       || !runtime.erpBridgeDynamic
       || runtime.erpBridgeHardcoded
       || !runtime.erpStorageKey
-      || !runtime.selectionStorageContract
-      || !runtime.selectionHeartbeatCompatible) {
+      || Object.hasOwn(report, "selection1688")
+      || report.tabSwitches?.some(entry => entry.activeTab === "1688")) {
       throw new Error(`Packaged desktop smoke test failed: ${JSON.stringify(report)}`);
     }
     if (!runtime.storageConfigured) {
@@ -181,7 +175,9 @@ if (!validationError) {
     }
     const runtimeEntries = fs.readdirSync(runtime.root, { withFileTypes: true }).map((entry) => entry.name);
     if (!fs.existsSync(runtime.erpPath)
-      || !fs.existsSync(runtime.selectionPath)
+      || runtimeEntries.includes("1688")
+      || fs.existsSync(path.join(path.dirname(executable), "resources/integrations/1688-selection-extension"))
+      || fs.existsSync(path.join(path.dirname(executable), "resources/frontend/integrations/1688-selection"))
       || runtimeEntries.some((name) => name.startsWith(".staging-") || name.startsWith(".previous-"))) {
       throw new Error(`Packaged desktop runtime extension boundary check failed: ${JSON.stringify({ runtime, runtimeEntries })}`);
     }

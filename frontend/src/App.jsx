@@ -18,7 +18,8 @@ import { receiveErpCatalogInboxEnvelope } from "./data/repositories/erpCatalogRe
 import { validateErpCatalogInboxEnvelope } from "./domain/erpCatalogRequest";
 import { receiveAndAcknowledgeInboxRecord } from "./lib/inboxDelivery";
 import { recoverCompleteErpCostDrafts } from "./lib/erpLegacyDraftRecovery";
-import { acknowledgeSelectionCapture, pollSelectionCaptureInbox, publishSelectionCaptureContext } from "./lib/selectionCaptureTransport";
+import { publishWorkspaceInboxContext } from "./lib/erpInboxTransport";
+import { acknowledgeSelectionCapture, pollSelectionCaptureInbox } from "./lib/selectionCaptureTransport";
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 import { syncErpCollectionAdoptions } from './lib/erpCollectionAdoption';
 import { publishErpCollectionReceiptError } from './lib/erpCollectionActivity';
@@ -146,16 +147,22 @@ export async function runErpCatalogInboxCycle({ isDisposed = () => false, getCon
   return { received, failures };
 }
 
+async function getInboxContext() {
+  const context = await getActiveMemberContext();
+  await publishWorkspaceInboxContext(context);
+  return context;
+}
+
 function ErpInboxListener() {
   useEffect(() => {
     let disposed = false;
-    const poll = createErpInboxPoller({ isDisposed: () => disposed, syncTaskAdoptions: syncErpCollectionAdoptions });
+    const poll = createErpInboxPoller({ getContext: getInboxContext, isDisposed: () => disposed, syncTaskAdoptions: syncErpCollectionAdoptions });
     void poll();
     let catalogRunning = false;
     const pollCatalog = async () => {
       if (disposed || catalogRunning) return;
       catalogRunning = true;
-      try { await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ isDisposed: () => disposed })); }
+      try { await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ getContext: getInboxContext, isDisposed: () => disposed })); }
       finally { catalogRunning = false; }
     };
     void pollCatalog();
@@ -168,27 +175,26 @@ function ErpInboxListener() {
   return null;
 }
 
-function SelectionCaptureListener() {
+function LegacySelectionInboxRecovery() {
   useEffect(() => {
     let disposed = false;
     let running = false;
+    const recoveredContexts = new Set();
     const poll = async () => {
       if (disposed || running) return;
       running = true;
       try {
         await runWorkspaceBackgroundTask(async () => {
-          const context = await getActiveMemberContext();
-          await publishSelectionCaptureContext({
-            workspaceId: context.workspaceId,
-            memberId: context.memberId,
-            visibility: context.canSeeAllSelection ? "workspace" : "private",
-          });
+          const context = await getInboxContext();
+          const contextKey = JSON.stringify([context.workspaceId, context.memberId, context.canSeeAllSelection]);
+          if (recoveredContexts.has(contextKey)) return;
           const records = await pollSelectionCaptureInbox({
             workspaceId: context.workspaceId,
             memberId: context.memberId,
             includeAll: context.canSeeAllSelection,
             limit: 50,
           });
+          if (records.length === 0) recoveredContexts.add(contextKey);
           for (const record of records) {
             if (disposed) break;
             const result = await receiveAndAcknowledgeInboxRecord({
@@ -205,13 +211,13 @@ function SelectionCaptureListener() {
           }
         });
       } catch {
-        // 本地采集服务未启动时保持静默，手工登记仍可继续使用。
+        // 仅恢复升级前遗留收件；服务未就绪时保留队列，稍后重试。
       } finally {
         running = false;
       }
     };
     poll();
-    const timer = window.setInterval(poll, 4000);
+    const timer = window.setInterval(poll, 5000);
     return () => {
       disposed = true;
       window.clearInterval(timer);
@@ -264,7 +270,7 @@ function AppContent() {
             <MemberContextGate>
               <ErpInboxListener />
               <SelectionPrestorageAutomation />
-              <SelectionCaptureListener />
+              <LegacySelectionInboxRecovery />
               <CloudSyncListener />
               <Suspense fallback={<RouteLoader />}>
                 <Routes>
