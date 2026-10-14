@@ -77,3 +77,41 @@ describe('backup workflow save protection', () => {
     expect(container.querySelector('.system-navigation a[href="/diagnostics"]')).not.toBeNull();
   });
 });
+
+ it('reports a saved file accurately when registering its record fails', async () => {
+  mocks.save.mockResolvedValue({ status: 'saved', fileName: 'saved.json', sizeBytes: 20 });
+  mocks.record.mockRejectedValueOnce(new Error('登记失败样例'));
+  await act(async () => button('导出本机备份').click());
+  expect(container.querySelector('.toast-warning').textContent).toContain('备份文件已保存：saved.json');
+  expect(container.querySelector('.system-operation-warning').textContent).toContain('备份文件已保存');
+  expect(container.textContent).not.toContain('备份导出失败');
+ });
+ it('closes a committed restoration even when its rollback record fails, without inviting a second restore', async () => {
+  mocks.save.mockResolvedValue({ status: 'saved', fileName: 'rollback.json', sizeBytes: 20 });
+  mocks.record.mockRejectedValueOnce(new Error('登记失败样例'));
+  await chooseRestore();
+  await act(async () => button('恢复备份').click());
+  expect(mocks.applied).toHaveBeenCalledOnce();
+  expect(container.querySelector('[role=dialog]')).toBeNull();
+  expect(container.querySelector('.toast-warning').textContent).toContain('备份已恢复，共写入 1 条记录');
+  expect(container.querySelector('.toast-warning').textContent).toContain('无需重复恢复');
+  expect(container.querySelector('.system-operation-warning').textContent).toContain('无需重复恢复');
+  expect(container.textContent).not.toContain('备份恢复失败');
+ });
+ it('prevents the two export controls from submitting the same save twice', async () => {
+  let finish;
+  mocks.save.mockImplementation(() => new Promise(resolve => { finish=resolve; }));
+  await act(async () => { button('导出本机备份').click(); button('导出完整备份').click(); });
+  expect(mocks.create).toHaveBeenCalledOnce();expect(mocks.save).toHaveBeenCalledOnce();
+  await act(async () => finish({ status: 'saved', fileName: 'once.json', sizeBytes: 20 }));
+  expect(mocks.record).toHaveBeenCalledOnce();
+ });
+ it('prevents a same-event duplicate restoration before React disables the button', async () => {
+  let finish;
+  mocks.save.mockImplementation(() => new Promise(resolve => { finish=resolve; }));
+  await chooseRestore();
+  await act(async () => { button('恢复备份').click(); button('恢复备份').click(); });
+  expect(mocks.restore).toHaveBeenCalledOnce();
+  await act(async () => finish({ status: 'saved', fileName: 'rollback.json', sizeBytes: 20 }));
+  expect(mocks.applied).toHaveBeenCalledOnce();
+ });

@@ -2,7 +2,7 @@
 import { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { createMemoryRouter, RouterProvider, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ImportPreview from "./ImportPreview";
 import { ToastProvider } from "../components/UI";
@@ -39,7 +39,7 @@ beforeEach(async()=>{
     items:input.items.map(item=>({...item,status:'ready',validRowCount:1,ignoredRowCount:0,errorCount:0,summary,addedGroupCount:0,replacedGroupCount:1,overlaps:[{groupKey:item.itemId,store:item.storeName,platformSkc:'父商品',before:{...summary,rowCount:1},after:{...summary,rowCount:1}}]}))}));
   mocks.save.mockResolvedValue({items:[],finalSummary:summary,ledgerId:'L'});
   container=document.createElement('div');document.body.append(container);root=createRoot(container);
-  await act(async()=>root.render(<MemoryRouter><ToastProvider><ImportPreview/><LocationProbe/></ToastProvider></MemoryRouter>));
+  await act(async()=>root.render(<RouterProvider router={createMemoryRouter([{ path: "*", element: <ToastProvider><ImportPreview/><LocationProbe/></ToastProvider> }])} />));
 });
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 
@@ -577,4 +577,17 @@ it('drops a removed file late inspection and lets a fresh batch use the current 
   await act(async()=>container.querySelector('.batch-overwrite input').click());await click('导入');
   expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();
   expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W2'))['乙店'].selected).toEqual(['测试货号']);
+});
+
+it('preserves actual uploaded files, mappings and preview when cancel navigation is dismissed', async () => {
+ await upload();await settled();
+ const files=[...container.querySelectorAll('.batch-file')];
+ const selected=container.querySelector('.batch-store input').value;
+ await act(async()=>container.querySelector('.wizard-topbar button').click());
+ expect(container.querySelector('[role=dialog]').textContent).toContain('本次导入尚未完成');
+ await click('继续准备');
+ expect(container.querySelectorAll('.batch-file')).toHaveLength(files.length);
+ expect(container.querySelector('.batch-store input').value).toBe(selected);
+ expect(container.querySelector('.batch-preview')).not.toBeNull();
+ expect(mocks.save).not.toHaveBeenCalled();
 });

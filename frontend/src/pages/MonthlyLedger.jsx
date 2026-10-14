@@ -52,10 +52,16 @@ export default function MonthlyLedger() {
   const [query, setQuery] = useState("");
   const [sourceLedger, setSourceLedger] = useState(null);
   const [confirmingSource, setConfirmingSource] = useState(false);
-  const sources = useLiveQuery(() => sourceLedger ? listSalesSourceConfirmations(sourceLedger.id) : [], [sourceLedger?.id], []);
+  const [sourceAttempt, setSourceAttempt] = useState(0);
+  const sourceResult = useLiveQuery(async () => {
+    if (!sourceLedger) return null;
+    try { return { ledgerId: sourceLedger.id, attempt: sourceAttempt, items: await listSalesSourceConfirmations(sourceLedger.id) }; }
+    catch (error) { return { ledgerId: sourceLedger.id, attempt: sourceAttempt, error: error?.message || '本机数据读取失败。' }; }
+  }, [sourceLedger?.id, sourceAttempt], null);
+  const sourceState = sourceResult?.ledgerId === sourceLedger?.id && sourceResult?.attempt === sourceAttempt ? sourceResult : null;
   const confirmSource = async batchId => {
     setConfirmingSource(true);
-    try { await confirmSalesSourceCoverage({ ledgerId: sourceLedger.id, batchId, confirmed: true }); notify('已确认整月来源，销量标签将自动刷新。'); }
+    try { await confirmSalesSourceCoverage({ ledgerId: sourceLedger.id, batchId, confirmed: true }); setSourceAttempt(value => value + 1); notify('已确认整月来源，销量标签将自动刷新。'); }
     catch (error) { notify(error.message, 'error'); }
     finally { setConfirmingSource(false); }
   };
@@ -159,8 +165,8 @@ export default function MonthlyLedger() {
       )}
 
       <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
-      <Modal open={Boolean(sourceLedger)} title="确认台账来源" description="仅在原文件包含该店整月全部商品时确认。确认后更新销量参考，不修改销售明细或正式利润。" onClose={() => { if (!confirmingSource) setSourceLedger(null); }}>
-        {sources.length ? sources.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或账本已定稿，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
+      <Modal open={Boolean(sourceLedger)} title={sourceLedger ? `确认台账来源 · ${formatLedgerPeriod(sourceLedger.period)}` : "确认台账来源"} description="仅在原文件包含该店整月全部商品时确认。确认后更新销量参考，不修改销售明细或正式利润。" onClose={() => { if (!confirmingSource) setSourceLedger(null); }}>
+        {!sourceState ? <p role="status">正在读取本月台账来源…</p> : sourceState.error ? <div role="alert"><p>台账来源读取失败：{sourceState.error}</p><Button onClick={() => setSourceAttempt(value => value + 1)}>重试读取来源</Button></div> : sourceState.items.length ? sourceState.items.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或账本已定稿，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
       </Modal>
     </AppShell>
   );

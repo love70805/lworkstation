@@ -127,6 +127,8 @@ function describeSecurityEvent(event) {
 export default function DataSecurity() {
   const { notify } = useToast();
   const restoreInputRef = useRef(null);
+  const exportPendingRef = useRef(false);
+  const restorePendingRef = useRef(false);
   const cloudSeedInputRef = useRef(null);
   const check = useSystemSnapshot(readSecurityState);
   const security = check.data?.security;
@@ -136,6 +138,7 @@ export default function DataSecurity() {
   const [loadingRestoreFile, setLoadingRestoreFile] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState('');
+  const [operationNotice, setOperationNotice] = useState('');
   const [cloudRecoveryError, setCloudRecoveryError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [seedExporting, setSeedExporting] = useState(false);
@@ -174,12 +177,17 @@ export default function DataSecurity() {
   };
 
   const exportBackup = async ({ prefix = "shopeers-backup", successMessage } = {}) => {
+    if (exportPendingRef.current) return null;
+    exportPendingRef.current = true;
+    setOperationNotice('');
+    let savedBackup = null;
     setExporting(true);
     try {
       const payload = await createWorkspaceBackupPayload();
       const download = await downloadWorkspaceBackup(payload, { prefix });
       const notice = backupSaveMessage(download);
       if (notice) { notify(notice, 'info'); return null; }
+      savedBackup = download;
       await recordWorkspaceBackupExport({
         ...download,
         recordCount: payload.recordCount,
@@ -189,9 +197,12 @@ export default function DataSecurity() {
       notify(successMessage ?? `本机备份已保存：${download.fileName}。`, "success");
       return { payload, download };
     } catch (error) {
-      notify(`备份导出失败：${error.message}`, "error");
+      const message = savedBackup ? `备份文件已保存：${savedBackup.fileName}；记录或检查状态暂未更新：${error.message}。请保留已保存的文件。` : `备份导出失败：${error.message}`;
+      if (savedBackup) setOperationNotice(message);
+      notify(message, savedBackup ? 'warning' : 'error');
       return null;
     } finally {
+      exportPendingRef.current = false;
       setExporting(false);
     }
   };
@@ -352,7 +363,10 @@ export default function DataSecurity() {
   };
 
   const restoreBackup = async () => {
-    if (!restoreCandidate) return;
+    if (!restoreCandidate || restorePendingRef.current) return;
+    restorePendingRef.current = true;
+    setOperationNotice('');
+    let restoredCount = null;
     setRestoring(true);
     setRestoreError('');
     try {
@@ -368,14 +382,22 @@ export default function DataSecurity() {
           };
         }
       } });
+      restoredCount = inspection.recordCount;
+      setRestoreCandidate(null);
       if (rollback) await recordWorkspaceBackupExport(rollback);
       await refreshStorageEstimate();
-      setRestoreCandidate(null);
       notify(`备份已恢复，共写入 ${inspection.recordCount.toLocaleString("zh-CN")} 条记录。`, "success");
     } catch (error) {
-      setRestoreError(error.message);
-      notify(`备份恢复失败：${error.message}`, "error");
+      if (restoredCount !== null) {
+        const message = `备份已恢复，共写入 ${restoredCount.toLocaleString('zh-CN')} 条记录；记录或检查状态暂未更新：${error.message}。无需重复恢复，请刷新检查。`;
+        setOperationNotice(message);
+        notify(message, 'warning');
+      } else {
+        setRestoreError(error.message);
+        notify(`备份恢复失败：${error.message}`, 'error');
+      }
     } finally {
+      restorePendingRef.current = false;
       setRestoring(false);
     }
   };
@@ -404,6 +426,7 @@ export default function DataSecurity() {
         description="备份本机业务数据、货号组和导入筛选配置，校验恢复文件并保留操作记录。"
         actions={<Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出本机备份</Button>}
       />
+      {operationNotice ? <p className="system-operation-warning" role="status">{operationNotice}</p> : null}
       {check.status === 'error' ? <div className="system-check-error" role="alert">读取失败：{check.error}<Button onClick={refreshRecords} loading={check.refreshing} disabled={check.refreshing}>重试读取</Button></div> : null}
       <p className="system-check-note" role="status">{check.status === 'loading' ? '正在读取本机备份记录与存储占用…' : `最近检查：${formatDateTime(check.checkedAt)} · ${check.status === 'error' ? '未通过' : '仅检查本机记录可读取，不验证磁盘中的历史备份文件'}`}</p>
 
