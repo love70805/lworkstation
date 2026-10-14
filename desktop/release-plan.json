@@ -5,6 +5,10 @@
   "integrationBranch": "codex/workspace-simplify-0.4.26",
   "requiredCommits": [
     {
+      "module": "v0.4.26-retire-1688-and-simplify-workspace",
+      "commit": "74b1e3d0deef5a1aceb6bcab6050121fc7bc24e2"
+    },
+    {
       "module": "v0.4.26-verified-main-baseline",
       "commit": "873ff7b30c9d331d7feec5d9ba43c6d2771b520f"
     },
