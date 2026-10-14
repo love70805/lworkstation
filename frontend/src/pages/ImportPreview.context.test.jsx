@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider, useLocation } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import ImportPreview from './ImportPreview';
 import { ToastProvider } from '../components/UI';
@@ -15,7 +15,7 @@ async function mount(id) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   mocks.member.mockResolvedValue({ workspaceId: 'w' });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: '/import-preview', search: '?ledger=' + id + '&store=A&q=sku', state: { importReturnTo: '/workspace?ledger=' + id + '&store=A&q=sku' } }]}><ToastProvider><ImportPreview /><Location /></ToastProvider></MemoryRouter>));
+  await act(async () => root.render(<RouterProvider router={createMemoryRouter([{ path: '*', element: <ToastProvider><ImportPreview /><Location /></ToastProvider> }], { initialEntries: [{ pathname: '/import-preview', search: '?ledger=' + id + '&store=A&q=sku', state: { importReturnTo: '/workspace?ledger=' + id + '&store=A&q=sku' } }] })} />));
 }
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); });
 it('holds the selected ledger month and returns to the original page and filters', async () => {

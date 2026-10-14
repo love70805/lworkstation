@@ -91,6 +91,8 @@ export default function AppShell({ children, pageClass = "" }) {
   const [openDialog, setOpenDialog] = useState("");
   const [readNotificationIds, setReadNotificationIds] = useState(readStoredNotificationIds);
   const [backingUp, setBackingUp] = useState(false);
+  const [backupWarning, setBackupWarning] = useState('');
+  const backupPendingRef = useRef(false);
   const [supportCopied, setSupportCopied] = useState(false);
   const [appearance, setAppearance] = useState(readAppearance);
   const connectionCheck = useSystemSnapshot(getWorkspaceOperationalSummary);
@@ -102,12 +104,18 @@ export default function AppShell({ children, pageClass = "" }) {
   const [savingClosePreference, setSavingClosePreference] = useState(false);
   const desktopRuntime = typeof window !== 'undefined' ? window.shopeersDesktopRuntime : null;
   const requestedLedgerId = new URLSearchParams(location.search).get("ledger");
-  const navigationContext = useLiveQuery(async () => {
-    const context = await getActiveMemberContext();
-    const ledger = requestedLedgerId ? await db.ledgers.get(requestedLedgerId) : null;
-    return { requestedLedgerId, ledger, workspaceId: context.workspaceId };
-  }, [requestedLedgerId], null);
-  const navigationSearch = navigationContext?.requestedLedgerId === requestedLedgerId
+  const [navigationAttempt, setNavigationAttempt] = useState(0);
+  const navigationResult = useLiveQuery(async () => {
+    try {
+      const context = await getActiveMemberContext();
+      const ledger = requestedLedgerId ? await db.ledgers.get(requestedLedgerId) : null;
+      return { requestedLedgerId, attempt: navigationAttempt, ledger, workspaceId: context.workspaceId };
+    } catch (error) {
+      return { requestedLedgerId, attempt: navigationAttempt, error: error?.message || '本机数据读取失败。' };
+    }
+  }, [requestedLedgerId, navigationAttempt], null);
+  const navigationContext = navigationResult?.requestedLedgerId === requestedLedgerId && navigationResult.attempt === navigationAttempt ? navigationResult : null;
+  const navigationSearch = navigationContext && !navigationContext.error
     ? validatedLedgerSearch(location.search, navigationContext.ledger, navigationContext.workspaceId) : "";
   const cloudAuth = useCloudAuth();
   const cloudEnvironment = runtimeConfig.syncProvider === "supabase"
@@ -270,6 +278,7 @@ export default function AppShell({ children, pageClass = "" }) {
   };
 
   const checkLocalWorkspace = async () => {
+    setNavigationAttempt(value => value + 1);
     const result = await connectionCheck.refresh();
     if (result?.status === 'error') notify(`本机数据库检查失败：${result.error}`, 'error');
   };
@@ -287,12 +296,17 @@ export default function AppShell({ children, pageClass = "" }) {
   };
 
   const exportLocalBackup = async () => {
+    if (backupPendingRef.current) return;
+    backupPendingRef.current = true;
+    setBackupWarning('');
+    let savedBackup = null;
     setBackingUp(true);
     try {
       const payload = await createWorkspaceBackupPayload();
       const download = await downloadWorkspaceBackup(payload);
       const notice = backupSaveMessage(download);
       if (notice) { notify(notice, 'info'); return; }
+      savedBackup = download;
       await recordWorkspaceBackupExport({
         ...download,
         recordCount: payload.recordCount,
@@ -300,8 +314,11 @@ export default function AppShell({ children, pageClass = "" }) {
       });
       notify(`本机备份已保存：${download.fileName}。`, "success");
     } catch (error) {
-      notify(`备份导出失败：${error.message}`, "error");
+      const message = savedBackup ? `备份文件已保存：${savedBackup.fileName}；操作记录暂未更新：${error.message}。请保留已保存的文件。` : `备份导出失败：${error.message}`;
+      if (savedBackup) setBackupWarning(message);
+      notify(message, savedBackup ? 'warning' : 'error');
     } finally {
+      backupPendingRef.current = false;
       setBackingUp(false);
     }
   };
@@ -374,7 +391,10 @@ export default function AppShell({ children, pageClass = "" }) {
       </header>
 
       <main className={`main-canvas ${pageClass}`}>
-        <div className="page-container"><ErpBackgroundNotice workspaceId={navigationContext?.workspaceId} />{children}</div>
+        <div className="page-container">
+          {navigationContext?.error ? <div className="system-check-error" role="alert">核算范围读取失败：{navigationContext.error}<Button onClick={() => setNavigationAttempt(value => value + 1)}>重试月份导航</Button></div> : null}
+          <ErpBackgroundNotice workspaceId={navigationContext?.workspaceId} />{children}
+        </div>
       </main>
 
       <Modal
@@ -385,6 +405,7 @@ export default function AppShell({ children, pageClass = "" }) {
         footer={<Button variant="primary" onClick={() => setOpenDialog("")}>完成</Button>}
       >
         <div className="shell-dialog-list">
+          {backupWarning ? <p className="system-operation-warning" role="status">{backupWarning}</p> : null}
           <div><span><strong>界面语言</strong><small>导航、状态和提示均使用中文</small></span><b>简体中文</b></div>
           <div><span><strong>数据保存位置</strong><small>IndexedDB 本地数据不会自动上传云端</small></span><b>仅本机</b></div>
           <div><span><strong>当前数据量</strong><small>商品、账本、成本与审计等全部本地记录</small></span><b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : "读取中"}</b></div>

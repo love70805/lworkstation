@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.23",
+  "version": "0.4.24",
   "candidateOnly": true,
-  "integrationBranch": "codex/practical-supplier-flow-0.4.23",
+  "integrationBranch": "codex/formal-readiness-0.4.24",
   "requiredCommits": [
+    {
+      "module": "v0.4.24-import-backup-and-recovery-readiness",
+      "commit": "0fa23cabcb5c87643b8c85bff338b38e2691984c"
+    },
+    {
+      "module": "v0.4.24-verified-main-baseline",
+      "commit": "404fe642e8f3b94b8824a082fbd90380db291878"
+    },
     {
       "module": "v0.4.23-supplier-groups-and-filter-recovery",
       "commit": "fe7cc438c5e71ec7b60b94dab90b008a043546d3"

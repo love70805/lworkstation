@@ -163,3 +163,5 @@
 .diagnostic-log-details[open] > summary { border-bottom: 1px solid var(--border); }
 .diagnostic-card > p { margin-bottom: 16px; overflow-wrap: anywhere; }
 .diagnostic-card footer button { min-height: 32px; }
+
+.system-operation-warning { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--warning-border); border-radius: 6px; color: var(--text); background: var(--surface); line-height: 1.6; overflow-wrap: anywhere; }

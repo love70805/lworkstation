@@ -1,3 +1,4 @@
+import ImportLeaveGuard from '../components/ImportLeaveGuard';
 import ImportSupplierWorkbench from '../components/ImportSupplierWorkbench';
 import ImportMovementPicker from '../components/ImportMovementPicker';
 import { readImportPreference, restoreImportPreference, saveImportNumbers } from '../lib/importSupplierPreferences';
@@ -151,6 +152,7 @@ export default function ImportPreview() {
   const [files, setFiles] = useState([]);
   const [period, setPeriod] = useState("");
   const [busy, setBusy] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [progress, setProgress] = useState({ value: 0, label: "" });
   const [error, setError] = useState("");
   const [preview, setPreview] = useState(null);
@@ -453,7 +455,7 @@ export default function ImportPreview() {
   };
   const confirmImport = async () => {
     if (operationRef.current || supplierDirty || result || !preview || !payload || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)) return;
-    operationRef.current = true; setBusy(true);
+    operationRef.current = true; setBusy(true); setCommitting(true);
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -471,7 +473,7 @@ export default function ImportPreview() {
       setFiles([]); setPayload(null); setPreview(null);
       void clearImportStages(stageOwnerRef.current).catch(() => {});
     } catch (writeError) { invalidate(); setError(`整批未写入：${writeError.message}`); }
-    finally { abortRef.current = null; setBusy(false); operationRef.current = false; }
+    finally { abortRef.current = null; setBusy(false); setCommitting(false); operationRef.current = false; }
   };
   const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && !periodEvidence.awaitingEvidence && files.every((item) => {
     const columns = Object.values(item.mapping ?? {}).filter(Boolean);
@@ -494,6 +496,7 @@ export default function ImportPreview() {
     return () => clearTimeout(timer);
   }, [configurationKey, ready, busy, result]);
   return <main className={`wizard-shell batch-import${files.length ? ' has-supplier-files' : ''}`}>
+    <ImportLeaveGuard pending={!result && files.length > 0} committing={committing} />
     <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate(returnHref)}><X size={20} />{result ? returnLabel : "取消导入"}</button><strong>月度台账批量导入</strong></header>
     <section className="wizard-content">
       <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，自动识别明细、校验并显示概览，核对归属后一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
