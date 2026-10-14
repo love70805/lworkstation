@@ -40,7 +40,7 @@ pnpm --dir desktop install
 pnpm --dir desktop dev
 ```
 
-`frontend/` 为 Electron 内置界面，开发时由 Vite 提供热更新；当前产品以 Windows 桌面安装版交付。工作站入口和模块边界见 [AGENTS.md](AGENTS.md)。
+`frontend/` 为 Electron 内置界面，开发时由 Vite 提供热更新；当前产品以 Windows 桌面安装版交付。工作站入口和模块边界见 [AGENTS.md](AGENTS.md)，开发目录、当前状态和历史材料的边界见 [开发工作区说明](docs/DEVELOPMENT_WORKSPACE.md)。
 
 常用验证：
 
