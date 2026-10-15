@@ -5,6 +5,10 @@
   "integrationBranch": "codex/catalog-evidence-0.4.28",
   "requiredCommits": [
     {
+      "module": "v0.4.28-catalog-source-review",
+      "commit": "ef7686a"
+    },
+    {
       "module": "v0.4.28-verified-main-baseline",
       "commit": "76692669e8eacbe3cfa5ae5d5456f5a5ff6fc4d1"
     },
