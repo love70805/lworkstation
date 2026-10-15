@@ -5,6 +5,10 @@
   "integrationBranch": "codex/catalog-order-0.4.29",
   "requiredCommits": [
     {
+      "module": "v0.4.29-attribute-order-and-multiple-suppliers",
+      "commit": "0ba319e"
+    },
+    {
       "module": "v0.4.29-verified-main-baseline",
       "commit": "52c98e3c7afecbf8a3c5a0bea3b674bbbb1950cd"
     },
