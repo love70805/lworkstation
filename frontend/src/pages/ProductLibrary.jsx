@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
 import AppShell from "../components/AppShell";
@@ -43,6 +43,8 @@ const catalogSourceLabels = {
 
 const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
 const EMPTY_ROWS = [];
+const catalogRowId = row => row.id;
+const SKU_PREVIEW_COUNT = 5;
 const COMPACT_COLUMN_IDS = new Set(["selection", "image", "name", "suppliers", "cost", "salePrice", "referenceProfit", "store", "productStatus", "updatedAt"]);
 const matchesProductQuery = createSelectionSearchIndex((product) => [
   product.name, product.supplier, product.platformSkc, product.supplierNumbers ?? [],
@@ -127,6 +129,8 @@ function ProductLibraryView({ workspaceId, view }) {
     saveProductLibraryViewState(workspaceId, view, { ...navigationSnapshotRef.current, table: tableRef.current?.getViewState(), windowScrollY: window.scrollY, focusId: document.activeElement?.id });
     routeNavigate(target, { state: { productLibraryReturnTo: `/products?view=${view}` } });
   }, [routeNavigate, workspaceId, view]);
+  const catalogRowProps = useCallback(row => ({ onClick: () => navigate(`/products/edit?product=${encodeURIComponent(row.id)}`), tabIndex: 0,
+    onKeyDown: event => event.target === event.currentTarget && event.key === "Enter" && navigate(`/products/edit?product=${encodeURIComponent(row.id)}`) }), [navigate]);
   const [, setSearchParams] = useSearchParams();
   const { notify } = useToast();
   const initialFilters = useMemo(() => savedView?.filters ?? readProductFilters(workspaceId, view), [savedView, workspaceId, view]);
@@ -146,6 +150,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const [columnView, setColumnView] = useState(() => readProductFilters(workspaceId, view).columnView === "all" ? "all" : "compact");
   const [exporting, setExporting] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
+  const [expandedProductIds, setExpandedProductIds] = useState(() => new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
   const [updatingBulkStatus, setUpdatingBulkStatus] = useState(false);
@@ -166,12 +171,15 @@ function ProductLibraryView({ workspaceId, view }) {
   const catalogSnapshot = catalogState.status === "ready" ? catalogRead.data : undefined;
   const catalogProductsRaw = useMemo(() => (catalogSnapshot ?? EMPTY_ROWS).filter(product => product.status !== "draft"), [catalogSnapshot]);
   const readCompactReferences = useCallback(async () => {
-    const staged = await getSelectionPrestorageSnapshot({ store });
+    const staged = await getSelectionPrestorageSnapshot();
     return { ...staged.sourceSnapshot, prestorageProducts: staged.products, unlinkedReadiness: staged.unlinkedReadiness };
-  }, [store]);
+  }, []);
   const referenceRead = useSelectionRead(readCompactReferences);
   const referenceSnapshot = referenceRead.data;
-  const referenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows({ ...referenceSnapshot, store }) : EMPTY_ROWS, [referenceSnapshot, store]);
+  const allReferenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows(referenceSnapshot) : EMPTY_ROWS, [referenceSnapshot]);
+  const referenceRows = useMemo(() => store === "all" ? allReferenceRows : allReferenceRows.map(row => ({ ...row,
+    automaticSalesTag: row.automaticSalesTagsByStore?.[store] ?? null,
+  })), [allReferenceRows, store]);
   const placement = useMemo(() => selectionCatalogPlacement({ products: catalogProductsRaw, rows: referenceRows, drafts: referenceSnapshot?.prestorageProducts ?? EMPTY_ROWS }), [catalogProductsRaw, referenceRows, referenceSnapshot]);
   const pendingReferences = placement.pendingRows;
   const prestorageProducts = placement.pendingDrafts;
@@ -246,8 +254,9 @@ function ProductLibraryView({ workspaceId, view }) {
     setSearchParams(params, { replace: true });
   };
 
-  const normalizedQuery = normalizeSelectionSearchQuery(query);
-  const normalizedSupplierNumber = normalizeSelectionSearchQuery(supplierNumber);
+  const deferredQuery = useDeferredValue(query), deferredSupplierNumber = useDeferredValue(supplierNumber);
+  const normalizedQuery = normalizeSelectionSearchQuery(deferredQuery);
+  const normalizedSupplierNumber = normalizeSelectionSearchQuery(deferredSupplierNumber);
   const scopedProducts = useMemo(() => catalogProducts.filter((product) => {
     if (store !== "all" && !product.catalogStoreNames.includes(store)) return false;
     if (recordStatus !== "all" && product.status !== recordStatus) return false;
@@ -277,6 +286,10 @@ function ProductLibraryView({ workspaceId, view }) {
     return String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? ""));
   }), [catalogProducts, dataStatus, duplicateSkcProductIds, duplicatesOnly, missingOnly, productSort, recordStatus, salesStatusDefinitions, salesLabel, status, store, normalizedSupplierNumber]);
   const filteredProducts = useMemo(() => scopedProducts.filter((product) => matchesProductQuery(product, normalizedQuery)), [scopedProducts, normalizedQuery]);
+  const tableProducts = useMemo(() => filteredProducts.map(product => ({ ...product,
+    displaySkuReferences: expandedProductIds.has(product.id) ? product.skuReferences : product.skuReferences.slice(0, SKU_PREVIEW_COUNT),
+    skuExpanded: expandedProductIds.has(product.id),
+  })), [filteredProducts, expandedProductIds]);
   const filteredProductIds = useMemo(() => filteredProducts.map((product) => product.id), [filteredProducts]);
   const selectedProductIdSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
   const allFilteredSelected = filteredProductIds.length > 0 && filteredProductIds.every((id) => selectedProductIdSet.has(id));
@@ -384,7 +397,11 @@ function ProductLibraryView({ workspaceId, view }) {
         {row.original.incomingReferences.length ? <button className="inline-link product-incoming-link" type="button" onClick={event => { event.stopPropagation(); navigate(`/products/edit?product=${encodeURIComponent(row.original.id)}`); }}>补齐 {row.original.incomingReferences.length} 个新增 SKU</button> : null}
         {row.original.relatedDrafts.length ? <details className="product-related-drafts" onClick={event => event.stopPropagation()}><summary>同 SKC 另有 {row.original.relatedDrafts.length} 份预存资料</summary>{row.original.relatedDrafts.map(draft => <button key={draft.id} className="inline-link" type="button" onClick={() => navigate(`/products/edit?product=${encodeURIComponent(draft.id)}`)}>{draft.name || "未命名资料"} · 查看并整理</button>)}</details> : null}
         {row.original.tags?.length || duplicateSkcCountByProductId.has(row.original.id) ? <span className="product-tag-list">{duplicateSkcCountByProductId.has(row.original.id) ? <small className="product-conflict-tag">重复 SKC · {duplicateSkcCountByProductId.get(row.original.id)} 份档案</small> : null}{(row.original.tags ?? []).slice(0, 3).map((tag) => <small key={tag}>{tag}</small>)}</span> : null}
-        {row.original.skuCount === 0 ? <span className="missing-sku"><AlertCircle size={12} />{row.original.pendingVariantCount ? `待分配平台 SKU · ${row.original.pendingVariantCount} 个属性分支` : "缺少平台 SKU"}</span> : <span className="product-sku-branches">{row.original.skuReferences.map((sku) => <span className="product-sku-branch" key={sku.id ?? sku.platformSku}><strong className="mono">{sku.platformSku}</strong><small>{sku.attribute || "未填写属性"}</small></span>)}</span>}
+        {row.original.skuCount === 0 ? <span className="missing-sku"><AlertCircle size={12} />{row.original.pendingVariantCount ? `待分配平台 SKU · ${row.original.pendingVariantCount} 个属性分支` : "缺少平台 SKU"}</span> : <span className="product-sku-branches">{row.original.displaySkuReferences.map((sku) => <span className="product-sku-branch" key={sku.id ?? sku.platformSku}><strong className="mono">{sku.platformSku}</strong><small>{sku.attribute || "未填写属性"}</small></span>)}</span>}
+        {row.original.skuReferences.length > SKU_PREVIEW_COUNT ? <button type="button" className="inline-link product-sku-toggle" aria-expanded={row.original.skuExpanded}
+          onClick={event => { event.stopPropagation(); setExpandedProductIds(previous => { const next = new Set(previous); next.has(row.original.id) ? next.delete(row.original.id) : next.add(row.original.id); return next; }); }}>
+          {row.original.skuExpanded ? "收起 SKU 明细" : `显示全部 ${row.original.skuReferences.length} 个 SKU`}
+        </button> : null}
       </div>,
     },
     {
@@ -400,11 +417,11 @@ function ProductLibraryView({ workspaceId, view }) {
       id: "warehouseSku",
       header: "ERP 仓库 SKU",
       enableSorting: false,
-      cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-warehouse-stack">{row.original.skuReferences.map((sku) => <span className="product-warehouse-line" key={sku.id ?? sku.platformSku}>{sku.warehouseSku ? <><Warehouse size={14} /><strong className="mono">{sku.warehouseSku}</strong></> : <Badge tone="warning">待映射</Badge>}</span>)}</span>,
+      cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-warehouse-stack">{row.original.displaySkuReferences.map((sku) => <span className="product-warehouse-line" key={sku.id ?? sku.platformSku}>{sku.warehouseSku ? <><Warehouse size={14} /><strong className="mono">{sku.warehouseSku}</strong></> : <Badge tone="warning">待映射</Badge>}</span>)}</span>,
     },
-    { accessorKey: "cost", header: "SKU 参考成本", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-cost-stack">{row.original.skuReferences.map((sku) => <span className="product-cost-line" key={sku.id ?? sku.platformSku}>{sku.unitCost == null ? <Badge tone="warning">待补</Badge> : <><strong className="mono money-cell">{money(sku.unitCost, ["erp", "erp_reference"].includes(sku.source) ? 4 : 2)}</strong><Badge tone={sku.source === "erp" ? "success" : ["manual_confirmed", "erp_reference"].includes(sku.source) ? "info" : "neutral"}>{catalogSourceLabels[sku.source] ?? "参考"}</Badge></>}</span>)}</span> },
-    { accessorKey: "salePrice", header: "SKU 售价", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-price-stack">{row.original.skuReferences.map((sku) => <span className="product-price-line mono" key={sku.id ?? sku.platformSku}>{sku.salePrice == null ? "待填写" : money(sku.salePrice)}</span>)}</span> },
-    { id: "referenceProfit", header: "参考单件利润", enableSorting: false, cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-profit-stack">{row.original.skuReferences.map((sku) => <span className={`product-profit-line ${sku.referenceUnitProfit == null ? "" : sku.referenceUnitProfit < 0 ? "danger-text" : "success-text"}`} key={sku.id ?? sku.platformSku}>{sku.referenceUnitProfit == null ? <span className="pending-text">待成本/售价</span> : <><strong className="mono">{money(sku.referenceUnitProfit)}</strong><small>{percent(sku.referenceProfitRate)}</small></>}</span>)}</span> },
+    { accessorKey: "cost", header: "SKU 参考成本", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-cost-stack">{row.original.displaySkuReferences.map((sku) => <span className="product-cost-line" key={sku.id ?? sku.platformSku}>{sku.unitCost == null ? <Badge tone="warning">待补</Badge> : <><strong className="mono money-cell">{money(sku.unitCost, ["erp", "erp_reference"].includes(sku.source) ? 4 : 2)}</strong><Badge tone={sku.source === "erp" ? "success" : ["manual_confirmed", "erp_reference"].includes(sku.source) ? "info" : "neutral"}>{catalogSourceLabels[sku.source] ?? "参考"}</Badge></>}</span>)}</span> },
+    { accessorKey: "salePrice", header: "SKU 售价", cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-price-stack">{row.original.displaySkuReferences.map((sku) => <span className="product-price-line mono" key={sku.id ?? sku.platformSku}>{sku.salePrice == null ? "待填写" : money(sku.salePrice)}</span>)}</span> },
+    { id: "referenceProfit", header: "参考单件利润", enableSorting: false, cell: ({ row }) => row.original.skuCount === 0 ? <span className="pending-text">--</span> : <span className="product-profit-stack">{row.original.displaySkuReferences.map((sku) => <span className={`product-profit-line ${sku.referenceUnitProfit == null ? "" : sku.referenceUnitProfit < 0 ? "danger-text" : "success-text"}`} key={sku.id ?? sku.platformSku}>{sku.referenceUnitProfit == null ? <span className="pending-text">待成本/售价</span> : <><strong className="mono">{money(sku.referenceUnitProfit)}</strong><small>{percent(sku.referenceProfitRate)}</small></>}</span>)}</span> },
     { accessorKey: "store", header: "店铺", cell: ({ getValue }) => <Badge>{getValue()}</Badge> },
     { id: "productStatus", header: "状态", cell: ({ row }) => { const resolved = resolveProductStatus(row.original, salesStatusDefinitions); const definition = resolveSalesStatus(resolved.statusId); return <span><Badge tone={definition?.tone ?? "neutral"} dot>{definition?.label ?? "未设置"}</Badge>{row.original.legacyStatusConflict || resolved.legacyConflict ? <small className="row-subtitle">旧状态待选择</small> : null}</span>; } },
     { id: "salesLabel", header: "月末七天销量", enableSorting: false, cell: ({ row }) => <SelectionSalesTag item={row.original.automaticSalesTag} /> },
@@ -462,6 +479,7 @@ function ProductLibraryView({ workspaceId, view }) {
   };
 
   const confirmBulkStatusUpdate = async () => {
+    if (updatingBulkStatus) return;
     setUpdatingBulkStatus(true);
     try {
       const updated = await bulkUpdateProductCatalogSalesStatus({
@@ -738,11 +756,11 @@ function ProductLibraryView({ workspaceId, view }) {
               ref={tableRef}
               initialViewState={savedView?.table}
               dataReady={catalogSnapshot !== undefined}
-              paginationResetKey={JSON.stringify([query, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort, supplierNumber])}
+              paginationResetKey={JSON.stringify([deferredQuery, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort, deferredSupplierNumber])}
               columns={visibleProductColumns}
-              data={filteredProducts}
-              getRowId={(row) => row.id}
-              getRowProps={(row) => ({ onClick: () => navigate(`/products/edit?product=${encodeURIComponent(row.id)}`), tabIndex: 0, onKeyDown: (event) => event.target === event.currentTarget && event.key === "Enter" && navigate(`/products/edit?product=${encodeURIComponent(row.id)}`) })}
+              data={tableProducts}
+              getRowId={catalogRowId}
+              getRowProps={catalogRowProps}
               emptyState="没有符合当前筛选条件的商品，请清除部分筛选条件。"
             />}
           </Panel>

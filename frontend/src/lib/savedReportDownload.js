@@ -1,9 +1,9 @@
 import * as XLSX from 'xlsx';
 import { sha256, Exact, exact, REPORT_TEMPLATE_VERSION } from '../domain/profitReports';
-import { base64ToBytes, buildProfitReportWorkbook } from './profitReportWorkbook';
+import { base64ToBytes, buildProfitReportWorkbook, formatArchivedReportSkcs } from './profitReportWorkbook';
 import { profitOrderNumberForExport } from './profitOrderDisplay';
 
-const templates = new Set(['profit-zebra@1', 'profit-zebra@2-purchase-evidence', 'profit-zebra@3-single-order', REPORT_TEMPLATE_VERSION]);
+const templates = new Set(['profit-zebra@1', 'profit-zebra@2-purchase-evidence', 'profit-zebra@3-single-order', 'profit-zebra@4-two-decimal-columns', REPORT_TEMPLATE_VERSION]);
 const fail = () => { throw new Error('原报告信息不足或文件损坏，无法生成简化下载。原始审计存档未改变，请恢复完整报告备份后重试。'); };
 const decode = value => value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 const attrs = tag => Object.fromEntries([...tag.matchAll(/([\w:]+)="([^"]*)"/g)].map(match => [match[1], decode(match[2])]));
@@ -28,8 +28,6 @@ export async function simplifySavedReport(report) {
     if (book.Sheets['汇总表']?.J1?.v !== '利润' || book.Sheets['汇总表']?.I1?.v !== '仓储成本') return fail();
     return bytes;
   }
-  if (report.warehouseRateExact == null || !report.totalsExact?.stores?.length) return fail();
-  try { exact(report.warehouseRateExact, { nonnegative: true }); } catch { return fail(); }
   const files = new Map(Object.entries(book.files ?? {}).filter(([name, entry]) => name && entry.type === 2 && name !== '\u0001Sh33tJ5').map(([name, entry]) => [name, new Uint8Array(entry.content)]));
   const decoded=new Map();
   const read = name => {if(!files.has(name))return fail();if(!decoded.has(name))decoded.set(name,new TextDecoder().decode(files.get(name)));return decoded.get(name);};
@@ -43,6 +41,12 @@ export async function simplifySavedReport(report) {
     return { name: attributes.name, tag: match[0], relation, path: `xl/${relation.Target}`, sheet: book.Sheets[attributes.name] };
   });
   if (sheets.length !== book.SheetNames.length || sheets[0]?.name !== '汇总表' || !sheets.some(row => row.name === '代发表')) return fail();
+  if (report.templateVersion === 'profit-zebra@4-two-decimal-columns') {
+    if (book.Sheets['汇总表']?.J1?.v !== '利润' || book.Sheets['汇总表']?.I1?.v !== '仓储成本') return fail();
+    return formatArchivedReportSkcs(files, sheets);
+  }
+  if (report.warehouseRateExact == null || !report.totalsExact?.stores?.length) return fail();
+  try { exact(report.warehouseRateExact, { nonnegative: true }); } catch { return fail(); }
   const productSheet = sheet => sheet?.A1?.v === 'SKC' && sheet?.B1?.v === 'SKU' && ['关联单号', '1688单号'].includes(sheet?.F1?.v) && sheet?.I1?.v === '利润';
   const purchases = sheets.find(row => row.name === '核算采购' && row.sheet?.A1?.v === '店铺' && row.sheet?.B1?.v === 'SKU' && row.sheet?.C1?.v === '次序' && row.sheet?.F1?.v === '关联单号');
   if (sheets.some(row => row.name === '核算采购' && row !== purchases && !productSheet(row.sheet))) return fail();

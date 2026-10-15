@@ -4,7 +4,7 @@ import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../domain/
 import { sumMoney } from "./money";
 import { buildReferenceIdentityIndex, projectReferenceIdentity } from "../domain/selectionReferenceIdentity";
 import { buildErpProductCatalogIndex, catalogProductName, erpCatalogField, erpCatalogIdentityRows } from "../domain/erpProductCatalog";
-import { buildSelectionSalesLabels } from "../domain/selectionSalesLabels";
+import { buildSelectionSalesLabels, prepareSelectionSalesLabelFacts } from "../domain/selectionSalesLabels";
 import { selectCurrentErpCatalogCoverage } from "../domain/erpCatalogFields";
 import { resolveProductStatus } from "../domain/selectionStatuses";
 import Decimal from "decimal.js";
@@ -108,6 +108,7 @@ export function buildSelectionReferenceRows({
   computedReferenceRows,
   compactEvidence = false,
   selectionSalesFacts = null,
+  includeStoreTags = false,
 }) {
   if (computedReferenceRows) return computedReferenceRows;
   if (selectionSalesFacts?.packedParts) selectionSalesFacts = combineSelectionSalesFacts(selectionSalesFacts.packedParts.map(unpackSelectionSalesFacts), workspaceId);
@@ -266,9 +267,19 @@ export function buildSelectionReferenceRows({
     String(b.latestPeriod ?? "").localeCompare(String(a.latestPeriod ?? ""))
       || a.platformSku.localeCompare(b.platformSku)
   ));
-  const labels = buildSelectionSalesLabels({ salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId, store, labelFacts: selectionSalesFacts?.labelFacts });
+  const labelInput = { salesRows, importBatches, ledgers, products, productSkus: rows, workspaceId,
+    labelFacts: selectionSalesFacts?.labelFacts ?? (includeStoreTags ? prepareSelectionSalesLabelFacts({ salesRows, importBatches, ledgers, workspaceId }) : null) };
+  const labels = buildSelectionSalesLabels({ ...labelInput, store });
   const labelBySkc = new Map(labels.items.map(item => [item.canonicalPlatformSkc, item]));
-  return rows.map(row => ({ ...row, automaticSalesTag: row.platformSkc ? labelBySkc.get(canonicalPlatformSkc(row.platformSkc)) ?? null : null }));
+  const storeTags = new Map();
+  if (includeStoreTags) for (const storeName of new Set([...rows.flatMap(row => row.storeNames ?? []), ...importBatches.filter(batch => !workspaceId || batch.workspaceId === workspaceId).map(batch => batch.store)].filter(Boolean))) {
+    for (const tag of buildSelectionSalesLabels({ ...labelInput, store: storeName }).items) {
+      if (!storeTags.has(tag.canonicalPlatformSkc)) storeTags.set(tag.canonicalPlatformSkc, {});
+      storeTags.get(tag.canonicalPlatformSkc)[storeName] = tag;
+    }
+  }
+  return rows.map(row => ({ ...row, automaticSalesTag: row.platformSkc ? labelBySkc.get(canonicalPlatformSkc(row.platformSkc)) ?? null : null,
+    ...(includeStoreTags ? { automaticSalesTagsByStore: row.platformSkc ? storeTags.get(canonicalPlatformSkc(row.platformSkc)) ?? {} : {} } : {}) }));
 }
 
 /** Keep the reference dataset at SKU granularity while grouping the UI by SKC. */

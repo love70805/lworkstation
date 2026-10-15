@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.31",
+  "version": "0.4.32",
   "candidateOnly": true,
-  "integrationBranch": "codex/ui-scroll-0.4.31",
+  "integrationBranch": "codex/export-skc-0.4.32",
   "requiredCommits": [
+    {
+      "module": "v0.4.32-verified-main-baseline",
+      "commit": "1722c3ea3ff414d07d745a5e88e363fefe9ac2bd"
+    },
     {
       "module": "v0.4.31-page-scrolling-and-space",
       "commit": "af4771876dfd75e11cbf46b640fb971fcb96cb41"

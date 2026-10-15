@@ -8,7 +8,7 @@ import { packSelectionSalesFacts } from '../domain/selectionSalesFactsCodec';
 
 export function computeDerived(kind, input) {
   if (kind === 'selection-facts') return packSelectionSalesFacts(prepareSelectionSalesFacts(input), input.ledgers[0]);
-  if (kind === 'selection') return buildSelectionReferenceRows({ ...input, compactEvidence: true });
+  if (kind === 'selection') return buildSelectionReferenceRows({ ...input, compactEvidence: true, includeStoreTags: true });
   if (kind === 'period-detail') return aggregatePeriodSalesDetails(input.rows, input);
   if (kind === 'sales') {
     const result = aggregateDailySales(input.rows, { period: input.period, includeSkuStats: false });

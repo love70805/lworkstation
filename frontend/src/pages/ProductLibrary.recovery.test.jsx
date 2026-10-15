@@ -9,11 +9,12 @@ import AppRouteError from "../components/AppRouteError";
 import { ToastProvider } from "../components/UI";
 import { db, saveProductCatalogRecord, createManualCaptureRecord } from "../data/database";
 
-const faults = vi.hoisted(() => ({ catalog: false, reference: false, capture: false, context: false, wait: null }));
+const faults = vi.hoisted(() => ({ catalog: false, reference: false, capture: false, context: false, wait: null, referenceReads: 0 }));
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main data-testid="shell">{children}</main> }));
 vi.mock("../data/database", async (importOriginal) => {
   const actual = await importOriginal();
   const read = (key, fn) => async (...args) => {
+    if (key === 'reference') faults.referenceReads++;
     if (key === "catalog" && faults.wait) await faults.wait;
     if (faults[key]) throw Error(`合成 ${key} 读取失败`);
     return fn(...args);
@@ -45,7 +46,7 @@ const retry = async () => act(async () => button("重试读取").click());
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  Object.assign(faults, { catalog: false, reference: false, capture: false, context: false, wait: null });
+  Object.assign(faults, { catalog: false, reference: false, capture: false, context: false, wait: null, referenceReads: 0 });
   localStorage.clear(); await db.delete(); await db.open();
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -145,6 +146,7 @@ it("searches catalog SKUs inside the selected store and supplier range without l
   await db.importBatches.bulkAdd(["甲店", "乙店"].map((store, index) => ({ id: `CATALOG-SEARCH-B${index}`, workspaceId, ledgerId: "CATALOG-SEARCH-L", store, status: "completed" })));
   await db.salesRows.bulkAdd(["RECOVERY", "SECOND"].map((prefix, index) => ({ id: `CATALOG-SEARCH-R${index}`, workspaceId, ledgerId: "CATALOG-SEARCH-L", batchId: `CATALOG-SEARCH-B${index}`, store: index === 0 ? "甲店" : "乙店", platformSku: `${prefix}-SKU`, platformSkc: `${prefix}-SKC`, supplierNumber: `货号${index + 1}`, attribute: "红", quantity: 1, amount: 30, sourceRow: index + 2 })));
   await mount(); await waitFor(() => container.textContent.includes("匹配 2 / 2 条"));
+  const referenceReads = faults.referenceReads;
   await change("按店铺筛选", "乙店");
   await change("按供方货号筛选", "货号2");
   await change("搜索商品档案", "SECOND-SKU");
@@ -155,6 +157,7 @@ it("searches catalog SKUs inside the selected store and supplier range without l
   await act(async () => button("清空筛选").click());
   await waitFor(() => container.textContent.includes("匹配 2 / 2 条"));
   expect(await db.salesRows.count()).toBe(2);
+  expect(faults.referenceReads).toBe(referenceReads);
   expect(await db.products.count()).toBe(2);
 });
 
@@ -261,4 +264,18 @@ it("keeps the default library compact and exposes historical captures only when 
   expect(container.textContent).toContain('历史资料样例');
   expect(container.textContent).not.toMatch(/安装 1688|1688 扩展状态|新增采集/);
   expect(container.querySelector('[title="编辑采集记录"]')).toBeTruthy();
+});
+
+it('previews five SKU branches per product, expands all columns together and searches hidden branches', async () => {
+  await saveProductCatalogRecord({ draft: { ...draft, variants: Array.from({ length: 40 }, (_, i) => ({ ...draft.variants[0], platformSku: `BRANCH-${String(i).padStart(2, '0')}`, attribute: `规格${i}` })) } });
+  await mount(); await waitFor(() => container.querySelector('.product-table .product-sku-toggle'));
+  expect(container.querySelectorAll('.product-sku-branch')).toHaveLength(5);
+  expect(container.querySelectorAll('.product-price-line')).toHaveLength(5);
+  await change('搜索商品档案', 'BRANCH-39'); await waitFor(() => container.textContent.includes('匹配 1 / 1 条'));
+  await act(async () => container.querySelector('.product-sku-toggle').click());
+  expect(container.querySelectorAll('.product-sku-branch')).toHaveLength(40);
+  expect(container.querySelectorAll('.product-price-line')).toHaveLength(40);
+  expect(container.querySelector('.product-sku-toggle').getAttribute('aria-expanded')).toBe('true');
+  await act(async () => container.querySelector('.product-sku-toggle').click());
+  expect(container.querySelectorAll('.product-sku-branch')).toHaveLength(5);
 });
