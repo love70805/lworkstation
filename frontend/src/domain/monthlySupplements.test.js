@@ -136,3 +136,22 @@ it('preserves physical source identity while displaying record coordinates and l
  expect(supplementRowIdentity(row)).toBe(supplementRowIdentity({...row,recordRow:288}));
  expect(supplementRowLabel({...row,recordRow:undefined,sourceFormat:undefined})).toBe('CSV 物理第 288 行 · 单号 ORDER');
 });
+
+it('excludes unmerged blank XLSX registrants while retaining explicit merges and numeric text quantities',()=>{
+ const cells=[headers,['9/1','甲人','甲','SKC-A','O1',100,'','P1'],['','','','SKC-B','O2','3'],['','','','SKC-C','O3',5],['','','','SKC-D','O4',3],['','','','SKC-E','O5',10],['','','','SKC-F','O6',10],['9/1','乙人','乙','OTHER','O7',7]];
+ const s={fileHash:'F',fileName:'isolated.xlsx',sheetName:'月度',sourceFormat:'xlsx',cells,merges:[{s:{r:1,c:1},e:{r:2,c:1}}]};
+ const result=inspectSupplementSource(s,{kind:'dispatch',ownerMarker:'甲人'});
+ expect(result.errors).toEqual([]);expect(result.rows.map(row=>row.quantityExact)).toEqual(['100','3']);
+ expect(result.rows[1]).toMatchObject({quantityFromText:true,mergedFrom:{owner:2}});
+ expect(result.ignored.filter(row=>row.reason==='unassigned_owner')).toMatchObject([{sourceRow:4,quantityExact:'5'},{sourceRow:5,quantityExact:'3'},{sourceRow:6,quantityExact:'10'},{sourceRow:7,quantityExact:'10'}]);
+ expect(candidate('dispatch',result.rows).adoptedQuantityExact).toBe('103');
+ expect(inspectSupplementSource(s,{kind:'dispatch',includeAll:true}).rows.map(row=>row.ownerMarker)).toEqual(['甲人','甲人','乙人']);
+ expect(result.source.ignored).toEqual(result.ignored);expect(result.source.parserVersion).toBe(SUPPLEMENT_PARSER_VERSION);
+});
+
+it('does not infer a blank XLSX owner even for the same SKU or purchase order, and does not leak it into another source',()=>{
+ const s={fileHash:'F',fileName:'isolated.xlsx',sheetName:'月度',sourceFormat:'xlsx',cells:[headers,['9/1','甲人','甲','SKC','O1',2,'','P1'],['','','','SKC','O2',4,'','P1'],['9/1','乙人','乙','OTHER','O3',6]]};
+ const result=inspectSupplementSource(s,{kind:'dispatch',ownerMarker:'甲人'});
+ expect(result.rows).toHaveLength(1);expect(result.ignored).toContainEqual(expect.objectContaining({sourceRow:3,reason:'unassigned_owner',quantityExact:'4'}));
+ expect(inspectSupplementSource({...s,cells:[headers,['','','','SKC','O4',8]]},{kind:'dispatch',includeAll:true}).rows).toEqual([]);
+});
