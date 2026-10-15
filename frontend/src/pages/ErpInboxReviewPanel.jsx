@@ -5,7 +5,7 @@ import { formatErpUnitCost } from '../lib/profitPrecision';
 
 export function ErpPendingSkuList({ entries = [], onReviewItem, onOverview, batchCount = 0, locked = false, title = '待处理 SKU', showOverview = true }) {
   return <Panel className="erp-review-panel">
-    <div className="erp-review-heading"><div><h2>{title} · {entries.length} 条店铺 SKU</h2><p>以下原因来自工作台对采购证据的核验。候选成本尚未计入利润。</p></div>{showOverview ? <Button icon={Inbox} onClick={onOverview}>全部 {batchCount} 批回传</Button> : null}</div>
+    <div className="erp-review-heading"><div><h2>{title} · {entries.length} 条店铺 SKU</h2><p>{new Set(entries.map(entry => entry.canonicalPlatformSku ?? entry.platformSku)).size} 个平台 SKU · {showOverview ? '汇总全部回传，按当前筛选范围显示；' : ''}仅列当前缺少有效成本的店铺 SKU。查看证据可直接核价，合格成本自动采用。</p></div>{showOverview ? <Button icon={Inbox} onClick={onOverview}>全部 {batchCount} 批回传</Button> : null}</div>
     {entries.length ? <div className="erp-review-skus">{entries.map(entry => <article className="erp-review-sku" key={entry.id} data-platform-sku={entry.platformSku} data-inbox-id={entry.inboxId}>
       <div className="erp-review-identity"><strong className="mono">{entry.platformSku}</strong><span>{entry.store} · {entry.attribute || entry.productName || '属性未提供'}</span><small>SKC <code>{entry.platformSkc || '待核对'}</code></small></div>
       <div className="erp-review-reason"><strong>待核对原因</strong><p>{entry.reasonText}</p></div>
@@ -31,7 +31,7 @@ export default function ErpInboxReviewDialog({ open, review, overviewRevision, i
   const batchActions = batch => {
     const queueItem = inboxQueue.items.find(item => item.inbox.id === batch.id);
     return <div className="erp-review-batch-actions">
-      {queueItem ? <Button disabled={accountingReadOnly || batch.id === loadedInboxId || !queueItem.scopeMatched} onClick={() => onLoadInbox(queueItem)}>{batch.id === loadedInboxId ? '采购证据已载入' : '载入采购证据核对'}</Button> : null}
+      {queueItem ? <Button disabled={accountingReadOnly || batch.id === loadedInboxId || !queueItem.scopeMatched} onClick={() => onLoadInbox(queueItem)}>{batch.id === loadedInboxId ? '已打开本批核对表' : '打开本批核对表'}</Button> : null}
       {batch.inbox.appliedBatchId && !['voided', 'rejected'].includes(batch.inbox.status) ? <details className="erp-review-more"><summary>更多操作</summary><Button icon={RotateCcw} variant="ghost" disabled={ledgerLocked} onClick={() => onVoid(batch.inbox)}>撤回本次采用</Button></details> : batch.inbox.status === 'pending' ? <details className="erp-review-more"><summary>更多操作</summary><Button icon={Trash2} variant="ghost" disabled={ledgerLocked} onClick={() => onDeleteOne(batch.id)}>删除批次</Button></details> : null}
     </div>;
   };

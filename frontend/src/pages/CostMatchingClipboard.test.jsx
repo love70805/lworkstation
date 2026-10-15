@@ -49,7 +49,7 @@ beforeEach(() => {
   mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
   mocks.saveManual.mockReset().mockResolvedValue({});
   mocks.revokeManual.mockReset().mockResolvedValue({});
-  mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset(); mocks.cancel.mockReset().mockResolvedValue(null);
+  mocks.notify.mockReset(); mocks.publish.mockReset(); mocks.retry.mockReset().mockResolvedValue({ adoption: { state: 'partial', items: [{ canonicalPlatformSku: 'SKU-0', state: 'anomaly_pending' }] } }); mocks.cancel.mockReset().mockResolvedValue(null);
   mocks.register.mockReset().mockImplementation(async input => ({ id: `REG-${input.ledger.id}`, workspaceId: input.ledger.workspaceId, ledgerId: input.ledger.id, ledgerPeriod: input.ledger.period, platformSkcs: input.platformSkcs, expectedSkus: input.expectedSkus }));
   writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal('navigator', { clipboard: { writeText } });
@@ -255,13 +255,57 @@ it('opens one procurement-price dialog at a time and preserves an entered manual
     first('确认真实价格').click();
   });
   expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-  await act(async () => first('保存并重新核算').click());
+  await act(async () => first('确认并自动采用').click());
   expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
   expect(container.querySelector('#manual-cost-value').value).toBe('9.3');
   expect(container.querySelector('#manual-cost-reason').value).toBe('手动核实保留草稿');
-  expect(container.querySelector('.cost-detail-evidence').textContent).toContain('已处置');
+  expect(container.querySelector('.cost-detail-evidence').textContent).toContain('采购价已确认');
+  expect(mocks.retry).toHaveBeenCalledWith({ inboxId: inbox.id, resolutions: [expect.objectContaining({ recordId: 'ONE', action: 'confirm_true_price', resolvedUnitPrice: 1 })] });
   expect(mocks.saveManual).not.toHaveBeenCalled();
   expect(mocks.publish).not.toHaveBeenCalled();
+});
+it('confirms procurement directly from an unloaded receipt without switching or creating a cost draft', async () => {
+  const ledgerId = 'DIRECT-CONFIRM', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  mocks.retry.mockResolvedValue({ status: 'applied', adoption: { state: 'applied', items: [{ canonicalPlatformSku: 'SKU-0', state: 'adopted' }] } });
+  await render(['SKC-1'], 'cost_pending', { ledgerId });
+  await act(async () => button('查看证据').click());
+  expect(container.textContent).not.toContain('载入此批采购证据');
+  await act(async () => button('确认真实价格').click());
+  await act(async () => button('确认并自动采用').click());
+  expect(mocks.retry).toHaveBeenCalledExactlyOnceWith({ inboxId: inbox.id, resolutions: [expect.objectContaining({ recordId: 'ONE', resolvedUnitPrice: 1 })] });
+  expect(mocks.switchInbox).not.toHaveBeenCalled();
+  expect(localStorage.getItem(costDraftKey(ledgerId))).toBeNull();
+  expect(mocks.saveManual).not.toHaveBeenCalled();
+  expect(mocks.notify).toHaveBeenCalledWith(expect.stringContaining('已自动采用'), 'success');
+});
+it('confirms all positive anomalous procurement prices for one SKU together', async () => {
+  const ledgerId = 'CONFIRM-SKU';
+  const records = [1, 2, 3].map(index => ({ recordId: 'ONE-' + index, purchaseDate: '2026-08-0' + index, quantity: index, unitPrice: 1 }));
+  const { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', records);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  await render(['SKC-1'], 'cost_pending', { ledgerId });
+  await act(async () => button('查看证据').click());
+  await act(async () => button('确认本 SKU 全部真实采购价').click());
+  expect(container.querySelector('.cost-resolution-prices').textContent).toContain('以下 3 笔');
+  await act(async () => button('确认并自动采用').click());
+  expect(mocks.retry.mock.calls[0][0].resolutions.map(row => row.recordId)).toEqual(['ONE-3', 'ONE-2', 'ONE-1']);
+});
+it('keeps the confirmation dialog and reason when adoption fails, allowing a retry', async () => {
+  const ledgerId = 'CONFIRM-RETRY', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  mocks.retry.mockRejectedValueOnce(new Error('隔离写入失败'));
+  await render(['SKC-1'], 'cost_pending', { ledgerId });
+  await act(async () => button('查看证据').click());
+  await act(async () => button('确认真实价格').click());
+  await act(async () => Simulate.change(container.querySelector('.cost-resolution-form textarea'), { target: { value: '已核对供应商账单' } }));
+  await act(async () => button('确认并自动采用').click());
+  expect(container.querySelector('.cost-resolution-form textarea').value).toBe('已核对供应商账单');
+  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  expect(mocks.notify).toHaveBeenCalledWith('采购核价保存失败：隔离写入失败', 'error');
+  await act(async () => button('确认并自动采用').click());
+  expect(mocks.retry).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('.cost-resolution-form')).toBeNull();
 });
 it('binds the next missing SKU to its own receipt and skips healthy siblings in the direct exception list', async () => {
   const ledgerId = 'NEXT-RECEIPT';

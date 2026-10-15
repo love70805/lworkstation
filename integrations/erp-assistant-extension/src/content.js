@@ -20,7 +20,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.41';
+    const EXTENSION_VERSION = '8.0.42';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1842,7 +1842,7 @@
         const diagnostic = result.previewDiagnostic;
         const note = diagnostic?.needsReview ? '<p class="erpa-review-note"><strong>' + escapeHtml(diagnostic.label) + '</strong><br>' + escapeHtml(diagnostic.action) + '</p>' : '';
         const records = resultPolicy.previewEvidenceRecords(result, lastWarehouseEvidence);
-        const evidence = records.length ? '<details class="erpa-source-evidence"><summary>查看采购证据 · ' + records.length + ' 笔</summary><p>保留采集证据；空白或无效单价不会补成 0。' + (records.length > 30 ? '这里显示前 30 笔，完整证据可在工作台查看。' : '') + '</p><pre>' + escapeHtml(JSON.stringify(records.slice(0, 30), null, 2)) + '</pre></details>' : '<p class="erpa-muted">当前没有对应仓库 SKU 的采购记录。</p>';
+        const evidence = records.length ? '<details class="erpa-source-evidence"><summary>查看采购证据 · ' + records.length + ' 笔</summary><p>空白或无效单价不会补成 0。' + (records.length > 30 ? '这里显示前 30 笔，完整证据可在工作台查看。' : '') + '</p><div class="erpa-evidence-list">' + records.slice(0, 30).map(record => '<article><strong>' + escapeHtml(record.purchaseDate || '日期未提供') + '</strong><span>' + escapeHtml(record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '单号未提供') + '</span><p>数量 ' + escapeHtml(record.quantity ?? '未提供') + ' · 采购单价 ¥' + escapeHtml(record.unitPrice ?? '未提供') + '</p><small>' + (result.selectedRecordIds?.includes(record.recordId) ? '参与本次最近三笔计算' : '历史或排除记录，未参与本次计算') + '</small></article>').join('') + '</div><details class="erpa-raw-evidence"><summary>原始采购数据</summary><pre>' + escapeHtml(JSON.stringify(records.slice(0, 30), null, 2)) + '</pre></details></details>' : '<p class="erpa-muted">当前没有对应仓库 SKU 的采购记录。</p>';
         if (result.previewStatus && result.previewStatus !== 'ready') return '<tr class="erpa-detail-row"><td colspan="9"><div class="erpa-detail-wrap">' + renderMappingList(result) + note + evidence + '</div></td></tr>';
         const rows = result.details.map((detail) => {
             const reasons = warningReasons(detail);
@@ -1897,7 +1897,9 @@
 
         const filtered = getFilteredResults();
         const filter = document.getElementById('erpa-result-filter');
-        if (filter) filter.options[1].textContent = '需核对（' + lastResults.filter(result => result.previewDiagnostic?.needsReview).length + '）';
+        if (filter) filter.options[1].textContent = '需核对（' + lastResults.filter(result => result.previewDiagnostic?.needsReview).length + ' 个仓库 SKU）';
+        const scopeNote = document.getElementById('erpa-result-scope');
+        if (scopeNote) scopeNote.textContent = '当前预览 ' + lastResults.length + ' 个仓库 SKU · ' + new Set(lastResults.flatMap(row => row.mappings.map(mapping => resultPolicy.canonical(mapping.platformSku)))).size + ' 个平台 SKU；工作台按全部回传中的当前缺成本店铺 SKU 计数，已确认和人工成本以工作台为准。';
         resultPage = Math.min(resultPage, Math.max(0, Math.ceil(filtered.length / 50) - 1));
         const results = filtered.slice(resultPage * 50, (resultPage + 1) * 50);
         const pagination = document.getElementById('erpa-result-pages');
@@ -1928,7 +1930,7 @@
                 ? '<span class="erpa-anomaly-badge erpa-anomaly-pending">需核对</span><small class="erpa-anomaly-note">' + escapeHtml(previewRowStatus(result)) + '</small>'
                 : '<span class="erpa-anomaly-badge erpa-anomaly-confirmed">预览</span>';
             const row = '<tr class="erpa-result-row' + (expanded ? ' erpa-expanded' : '') + warningClass + '" data-sku="' + escapeHtml(key) + '">' +
-                '<td class="erpa-cell-sku" title="' + escapeHtml(key) + '">' + escapeHtml(key) + '</td>' +
+                '<td class="erpa-cell-sku" title="' + escapeHtml(key) + '">' + escapeHtml(key) + '<button type="button" class="erpa-evidence-button" aria-expanded="' + expanded + '" aria-label="' + escapeHtml(key) + ' · ' + (expanded ? '收起采购证据' : '查看采购证据') + '">' + (expanded ? '收起采购证据' : '查看采购证据') + '</button></td>' +
                 '<td class="erpa-cell-platform" title="' + escapeHtml(result.mappings.map((item) => item.platformSku + ' · ' + item.platformSkc).join(', ')) + '">' + renderPlatformCell(result) + '</td>' +
                 '<td class="erpa-cell-order erpa-selected-records">' + renderSelectedOrders(result) + '</td>' +
                 '<td title="' + escapeHtml(result.name) + '">' + escapeHtml(result.name || '-') + '</td>' +
@@ -2247,7 +2249,7 @@
         root.innerHTML =
             '<section class="erpa-panel" role="dialog" aria-modal="true" aria-label="SKU 采购成本预览">' +
                 '<header class="erpa-header"><div class="erpa-title-wrap">' +
-                    '<div class="erpa-title-line"><h2 class="erpa-title">SKU 采购成本预览</h2><span class="erpa-badge">Lworkstation</span></div>' +
+                    '<div class="erpa-title-line"><h2 class="erpa-title">SKU 采购成本预览</h2><span class="erpa-badge">助手 ' + EXTENSION_VERSION + '</span></div>' +
                     '<p class="erpa-subtitle" id="erpa-preview-scope">按台账当月及以前采购，取时间最近三笔；完整证据回传工作台</p></div>' +
                     '<button class="erpa-icon-button" id="erpa-close" type="button" title="关闭" aria-label="关闭">×</button></header>' +
                 '<div class="erpa-page-context" id="erpa-page-context" role="status" aria-live="polite"></div>' +
@@ -2263,7 +2265,7 @@
                     '<button class="erpa-button" id="erpa-retry-delivery" type="button"><span>重试回传</span></button>' +
                     '<button class="erpa-button" id="erpa-export" type="button"><b aria-hidden="true">⇩</b><span>导出 CSV</span></button></div>' +
                 '<div class="erpa-status-region"><div id="erpa-task-status" role="status" aria-live="polite"></div><div class="erpa-catalog-progress" id="erpa-catalog-progress" hidden><div><span id="erpa-catalog-message" role="status" aria-live="polite"></span><div id="erpa-catalog-meters"></div></div><button class="erpa-button" id="erpa-cancel-catalog" type="button">取消补充</button></div>' +
-                '<div class="erpa-statusbar" id="erpa-statusbar"></div></div>' +
+                '<div class="erpa-statusbar" id="erpa-statusbar"></div><p class="erpa-result-scope" id="erpa-result-scope"></p></div>' +
                 '<div class="erpa-table-wrap" id="erpa-table-wrap"><table class="erpa-table">' +
                     '<colgroup><col style="width:180px"><col style="width:175px"><col style="width:180px"><col style="width:220px">' +
                     '<col style="width:70px"><col style="width:150px"><col style="width:90px"><col style="width:105px"><col style="width:168px"></colgroup>' +

@@ -20,7 +20,7 @@ import { ERP_COST_BATCH_VERSION, validateErpCostBatchEnvelope } from "../../doma
 import { normalizeErpCatalogFields } from "../../domain/erpCatalogFields";
 import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
 import { buildErpCostInboxEnvelope, validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
-import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION } from "../../domain/erpCostResolution";
+import { calculateWarehouseCostDecision, ERP_COST_RESOLUTION_VERSION, upsertCostResolution } from "../../domain/erpCostResolution";
 import { hasLegacyMonthExclusions, isErpCostWithinPeriod } from "../../domain/erpCostPeriod";
 import { purchaseOrderSummary } from "../../domain/erpPurchaseSelection";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
@@ -477,18 +477,22 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     if (['applied', 'rejected', 'voided'].includes(inbox.status)) return { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status, adoption: inbox.adoption, idempotent: true };
     const ledger = await db.ledgers.get(inbox.ledgerId), request = await db.erpCostRequests.get(inbox.requestId);
     const now = new Date().toISOString();
+    let costResolutions = inbox.costResolutions ?? [];
     const persistResult = async (items, state, reason = null, batchId = inbox.appliedBatchId) => {
       const summary = summarizeErpAdoption(items);
       const adoption = { version: ERP_ADOPTION_VERSION, state, items, summary, reason };
-      const changed = Boolean(inbox.adoptionPending || inbox.adoptionFailure) || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
+      const changed = Boolean(inbox.adoptionPending || inbox.adoptionFailure)
+        || JSON.stringify(inbox.costResolutions ?? []) !== JSON.stringify(costResolutions)
+        || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
       if (changed) {
-        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionPending: false, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
+        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), ...(costResolutions.length ? { costResolutions } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionPending: false, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
         await db.erpCostInbox.put(saved);
-        await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_processed', actorId: member.memberId, createdAt: now, before: { adoption: inbox.adoption ?? null }, after: { adoption, requestId: inbox.requestId, batchId: inbox.batchId, adoptionMethod: resolutions.length ? 'exception_retry' : 'automatic', systemSource: 'erp-auto-adoption', snapshot: saved } });
+        await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_processed', actorId: member.memberId, createdAt: now, before: { adoption: inbox.adoption ?? null }, after: { adoption, costResolutions, requestId: inbox.requestId, batchId: inbox.batchId, adoptionMethod: resolutions.length ? 'exception_retry' : 'automatic', systemSource: 'erp-auto-adoption', snapshot: saved } });
       }
       return { id: inbox.id, inboxId: inbox.id, batchId, status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: changed ? now : inbox.adoption?.processedAt }, ...summary, matchedCount: summary.adoptedCount, idempotent: !changed };
     };
     if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return persistResult([], 'blocked', 'request_or_ledger_missing');
+    if (resolutions.length && ['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或已锁定的账本不能确认采购价格。');
     if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
     if (request.ledgerVersion != null && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) return persistResult([], 'blocked', 'ledger_import_changed');
     const [salesRows, approvals, allRows, batches] = await Promise.all([
@@ -510,7 +514,18 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     const batchById = new Map(batches.map(row => [row.id, row]));
     const existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');
     if (inbox.appliedBatchId && batchById.get(inbox.appliedBatchId)?.status !== 'published') throw new Error('已采用成本批次关联失效，请核对历史记录。');
-    const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: expected, costRows: validated.rows, resolutions });
+    const mergedResolutions = [...existingRows.flatMap(row => row.resolutions ?? []), ...costResolutions, ...resolutions].reduce(upsertCostResolution, []);
+    const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: expected, costRows: validated.rows, resolutions: mergedResolutions });
+    const verifiedResolutions = reconciliation.matches.flatMap(row => row.resolutions ?? []).reduce(upsertCostResolution, []);
+    const sameResolution = (left, right) => canonicalWarehouseSku(left.warehouseSku) === canonicalWarehouseSku(right.warehouseSku)
+      && left.recordId === right.recordId && left.action === right.action
+      && left.originalUnitPrice === right.originalUnitPrice && left.resolvedUnitPrice === right.resolvedUnitPrice;
+    for (const resolution of resolutions) {
+      if (!verifiedResolutions.some(verified => sameResolution(verified, resolution))) throw new Error('采购核价与本批原始记录不一致，请重新查看采购证据。');
+      const adopted = existingRows.find(row => canonicalWarehouseSku(row.sourceWarehouseSku ?? row.warehouseSku) === canonicalWarehouseSku(resolution.warehouseSku));
+      if (adopted && !(adopted.resolutions ?? []).some(verified => sameResolution(verified, resolution))) throw new Error('本笔采购已用于正式成本，请使用人工更正调整。');
+    }
+    costResolutions = verifiedResolutions;
     const candidates = [], items = [];
     for (const row of reconciliation.matches) {
       const sku = canonicalPlatformSku(row.platformSku);
