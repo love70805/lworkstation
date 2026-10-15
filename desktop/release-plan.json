@@ -5,6 +5,10 @@
   "integrationBranch": "codex/export-skc-0.4.32",
   "requiredCommits": [
     {
+      "module": "v0.4.32-explicit-XLSX-dispatch-owner-and-count-explanation",
+      "commit": "2ce415811795d3c0bf977cf55e14246be03c4979"
+    },
+    {
       "module": "v0.4.32-export-grouping-catalog-response-and-title-evidence",
       "commit": "c230e207431749bc1961b9e345fce49737ecdc8e"
     },
