@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.27",
+  "version": "0.4.28",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-cost-review-0.4.27",
+  "integrationBranch": "codex/catalog-evidence-0.4.28",
   "requiredCommits": [
+    {
+      "module": "v0.4.28-verified-main-baseline",
+      "commit": "76692669e8eacbe3cfa5ae5d5456f5a5ff6fc4d1"
+    },
     {
       "module": "v0.4.27-procurement-price-confirmation",
       "commit": "70b91c5"

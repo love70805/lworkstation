@@ -3,6 +3,15 @@ import { buildErpProductCatalogIndex, erpCatalogField, erpCatalogSuppliers, erpP
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 describe("ERP catalog evidence projection", () => {
+  it("keeps the explicitly selected alternate supplier link and an empty store product ID", () => {
+    const links = [{ url: "https://detail.1688.com/offer/1234567890.html" }, { url: "https://shop-a.1688.com/" }];
+    const rows = [{ platformSku: "A", canonicalPlatformSku: "A", platformSkc: "S", attributeConflict: true, erpCatalogSuppliers: [{ stableSupplierId: "1", supplierName: "甲", sourceUrl: links[0].url, sourceProductId: "123", sourceLinks: links, sourceRecords: [] }] }];
+    const draft = { platformSkc: "S", variants: [{ platformSku: "A", attribute: "人工属性" }], suppliers: [{ id: "MANUAL", supplierName: "甲", sourceUrl: links[1].url, sourceUrlKind: "store", sourceProductId: "" }], fieldEdits: { variants: { A: { attribute: true } }, suppliers: { MANUAL: { sourceProductId: true, sourceUrl: true } } } };
+    const result = prefillErpProductDraft({ draft, rows });
+    expect(result.draft.suppliers[0]).toMatchObject({ sourceUrl: links[1].url, sourceUrlKind: "store", sourceProductId: "" });
+    expect(result.draft.variants[0].attribute).toBe("人工属性");
+    expect(result.prefill.warnings).toEqual([]);
+  });
   it("keeps a valid branch image when product titles disagree", () => {
     const rows = ["主体一", "主体二"].map((name, index) => ({ platformSku: `SKU-${index}`, canonicalPlatformSku: `SKU-${index}`, platformSkc: "SKC-A", erpImage: { value: `https://images.example.invalid/${index}.png`, conflict: false }, erpCatalogFields: { productName: { candidates: [{ value: name }] }, imageUrl: { candidates: [{ value: `https://images.example.invalid/${index}.png` }] } } }));
     const result = prefillErpProductDraft({ draft: { name: "", platformSkc: "SKC-A", variants: [], suppliers: [] }, rows });
