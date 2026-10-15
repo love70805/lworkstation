@@ -20,7 +20,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.42';
+    const EXTENSION_VERSION = '8.0.43';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -68,6 +68,9 @@
     let checkpointMessage = '';
     let taskStage = '';
     let collectionTaskState = null;
+    let catalogAction = null;
+    let catalogActionRevision = 0;
+    const catalogGroupLabels = { directory: '商品目录', mappings: 'SKU 映射', images: '图片', suppliers: '供应商/1688 链接', purchaseEvidence: '采购证据' };
     let requestSlots = 0;
     let requestTurns = 0;
     let requestLimit = 8;
@@ -123,17 +126,50 @@
         const recalculate = document.getElementById('erpa-recalculate');
         if (recalculate) recalculate.disabled = !available || !capturedListUrl || Boolean(activeRun);
         const supplement = document.getElementById('erpa-supplement-catalog');
-        if (supplement) supplement.disabled = !available || Boolean(activeRun) || !catalogCollector;
+        const catalogPending = catalogAction && ['pending', 'partial'].includes(catalogAction.state);
+        if (supplement) {
+            supplement.hidden = !available || !catalogPending || Boolean(activeRun);
+            supplement.disabled = !available || Boolean(activeRun) || !catalogCollector;
+            supplement.textContent = catalogAction?.state === 'partial' ? '补齐商品资料' : '补取商品资料';
+            supplement.title = '读取工作台已登记商品的 ERP 资料，不会重新采集正式成本';
+        }
+        const catalogState = document.getElementById('erpa-catalog-state');
+        if (catalogState) {
+            catalogState.hidden = !available || !catalogAction || Boolean(activeRun?.catalogPhase);
+            catalogState.textContent = catalogAction?.state === 'complete' ? '商品资料已齐全'
+                : catalogAction?.state === 'partial' ? '商品资料待补：' + catalogAction.missingGroups.map(group => catalogGroupLabels[group] || group).join('、') + '。已采用成本可继续核算。'
+                : catalogAction?.state === 'pending' ? '商品资料尚未补取，可按需补充；已采用成本可继续核算。' : '';
+        }
         const retry = document.getElementById('erpa-retry-delivery');
         if (retry) retry.disabled = !available;
         const resume = document.getElementById('erpa-resume');
         const pendingTaskWork = collectionTaskState && !['stopped', 'completed', 'invalidated'].includes(collectionTaskState.status)
             && collectionTaskState.batches?.some(batch => ['pending', 'running', 'collected'].includes(batch.status) || batch.deliveryId && batch.catalogStatus !== 'completed');
-        if (resume) { resume.hidden = Boolean(activeRun) || !resumableCheckpoint && !pendingTaskWork; resume.disabled = !available || Boolean(activeRun); }
+        const catalogOnlyTask = collectionTaskState?.batches?.length && collectionTaskState.batches.every(batch => batch.deliveryId && !['failed', 'incomplete'].includes(batch.status));
+        const specificCatalogAction = catalogOnlyTask && catalogAction?.requestId === collectionTaskState.requestId + '-CATALOG';
+        if (resume) {
+            resume.hidden = Boolean(activeRun) || !resumableCheckpoint && !pendingTaskWork || Boolean(specificCatalogAction);
+            resume.disabled = !available || Boolean(activeRun);
+            resume.textContent = catalogOnlyTask ? '继续补齐商品资料' : '继续未完成采集';
+        }
         const task = document.getElementById('erpa-task-status');
         const failed = document.getElementById('erpa-retry-batches');
         if (failed) { failed.hidden = !collectionTaskState?.batches?.some(batch => ['failed', 'incomplete'].includes(batch.status)); failed.disabled = Boolean(activeRun); }
         if (task) task.textContent = taskStage || (resumableCheckpoint ? '待继续 · 列表进度 ' + resumableCheckpoint.completedTargets.length + '/' + resumableCheckpoint.platformSkcs.length + '；原账号未验证' : checkpointMessage);
+    }
+
+    async function refreshCatalogAction(input) {
+        const revision = ++catalogActionRevision;
+        try {
+            const bridge = window.ShopeersErpDeliveryBridge;
+            if (!isPurchasePage() || needsLogin() || !bridge?.catalogContext) { catalogAction = null; return; }
+            const query = input || (capturedListUrl ? { querySkcs: extractQuerySkcs(parseCapturedFilters()), queryCapturedAt: capturedQueryCapturedAt } : {});
+            const response = (await requestContextPolicy.settleRequestContext(bridge.catalogContext(query), 5000)).context;
+            if (revision !== catalogActionRevision) return;
+            catalogAction = response?.ok && response.request ? { requestId: response.request.requestId,
+                state: response.request.catalogProgress?.state || 'pending', missingGroups: response.request.catalogProgress?.missingGroups || response.request.missingGroups || [] } : null;
+        } catch { if (revision === catalogActionRevision) catalogAction = null; }
+        finally { if (revision === catalogActionRevision) renderPageContext(); }
     }
 
     function previewScopeLabel() {
@@ -187,6 +223,7 @@
             const url = supportedErpUrl(rawUrl);
             if (url?.pathname === LIST_PATH) {
                 taskCache.clear();
+                catalogAction = null; catalogActionRevision++;
                 capturedListUrl = url.href;
                 capturedQueryCapturedAt = new Date().toISOString();
                 const filters = {};
@@ -1166,6 +1203,7 @@
 
     async function supplementCatalog() {
         if (activeRun || !isPurchasePage() || needsLogin() || !catalogCollector) return;
+        const requestId = catalogAction?.requestId;
         taskCache.clear();
         const run = { controller: new AbortController(), cancelledByUser: false, filters: capturedListUrl ? parseCapturedFilters() : null };
         activeRun = run;
@@ -1173,8 +1211,13 @@
         hideError();
         try {
             const bridge = window.ShopeersErpDeliveryBridge;
-            const context = (await requestContextPolicy.settleRequestContext(bridge.catalogContext({}), 5000)).context;
+            const context = (await requestContextPolicy.settleRequestContext(bridge.catalogContext({ requestId }), 5000)).context;
             if (!context?.ok || !context.request) throw new CostError('资料请求未关联', context?.message || '请先在工作台登记补充资料请求。');
+            if (context.request.catalogProgress?.state === 'complete') {
+                catalogAction = { requestId: context.request.requestId, state: 'complete', missingGroups: [] };
+                showToast('商品资料已齐全，无需重复补取');
+                return;
+            }
             run.requestId = context.request.requestId;
             run.ledgerPeriod = context.request.ledgerPeriod;
             run.expectedSkus = context.request.expectedSkus;
@@ -1183,6 +1226,7 @@
             const state = await catalogCollector.collect(context.request.platformSkcs, run);
             if (run.controller.signal.aborted) return;
             const response = await bridge.submitCatalog({ requestId: context.request.requestId, querySkcs: context.request.platformSkcs, platformScopePolicy: 'ledger_platform_pair', results: state.results, warehouseEvidence: state.warehouseEvidence, catalogCoverage: state.coverage, resultDeliveryId: makeResultDeliveryId(), createdAt: new Date().toISOString() });
+            await refreshCatalogAction({ requestId: context.request.requestId });
             showToast(response?.status === 'success' ? (state.coverage.purchaseEvidence.state === 'complete' ? '资料已送达本机收件服务' : '可用资料已送达，采购证据尚未读齐；再次补充时重新核验') : response?.retained ? '资料已由扩展后台保留，等待持久收件确认' : '资料尚未确认送达，请重试补充资料', response?.status === 'failed' ? 'error' : undefined);
         } catch (error) {
             if (!run.cancelledByUser) showError(error instanceof CostError ? error : new CostError('补充 ERP 资料失败', error?.message || String(error)));
@@ -1384,7 +1428,7 @@
             const bridge = window.ShopeersErpDeliveryBridge;
             const settled = await requestContextPolicy.settleRequestContext(bridge.catalogContext({ querySkcs: state.meta.querySkcs, queryCapturedAt: run.queryCapturedAt }), 5000);
             const context = settled.context;
-            if (!context?.ok || !context.request) { showToast('成本已采集；资料请求未关联，可在工作台登记后补充资料'); return; }
+            if (!context?.ok || !context.request) return;
             if (run.controller.signal.aborted) return;
             run.expectedSkus = context.request.expectedSkus;
             run.catalogPhase = true;
@@ -1401,6 +1445,7 @@
             run.readProgress = null;
             setLoading('资料读取已结束，正在回传', '等待本机持久收件确认');
             const response = await bridge.submitCatalog({ requestId: context.request.requestId, querySkcs: state.meta.querySkcs, platformScopePolicy: 'ledger_platform_pair', results: catalog.results, warehouseEvidence: catalog.warehouseEvidence, catalogCoverage: catalog.coverage, resultDeliveryId: makeResultDeliveryId(), createdAt: new Date().toISOString() });
+            await refreshCatalogAction({ requestId: context.request.requestId });
             showToast(response?.status === 'success' ? '资料已送达本机收件服务' : response?.retained ? '资料已由扩展后台保留，等待持久收件确认' : '资料尚未确认送达，请重试补充资料');
             const coverageComplete = Object.values(catalog.coverage).every(group => group.state === 'complete' || group.state === 'partial' && group.reasons?.length > 0 && group.reasons.every(reason => reason === 'query_scope_subset'));
             const labels = { directory: '商品目录', mappings: '平台映射', images: '图片', suppliers: '供应商/1688链接', purchaseEvidence: '采购证据' };
@@ -2259,14 +2304,14 @@
                     '<input class="erpa-search" id="erpa-search" type="search" autocomplete="off" aria-label="搜索成本结果或异常原因" placeholder="搜索 SKU、SKC、名称、单号或异常原因">' +
                     '<select class="erpa-button" id="erpa-result-filter" aria-label="成本结果筛选"><option value="all">全部结果</option><option value="review">需核对</option></select>' +
                     '<button class="erpa-button erpa-button-primary" id="erpa-recalculate" type="button"><b aria-hidden="true">↻</b><span>重新核算</span></button>' +
-                    '<button class="erpa-button" id="erpa-supplement-catalog" type="button"><span>补充资料</span></button>' +
+                    '<button class="erpa-button" id="erpa-supplement-catalog" type="button" hidden><span>补取商品资料</span></button>' +
                     '<button class="erpa-button" id="erpa-resume" type="button" hidden>继续未完成采集</button>' +
                     '<button class="erpa-button" id="erpa-retry-batches" type="button" hidden>重试失败批次</button>' +
                     '<button class="erpa-button" id="erpa-copy" type="button"><b aria-hidden="true">⎘</b><span>复制成本</span></button>' +
                     '<button class="erpa-button" id="erpa-retry-delivery" type="button"><span>重试回传</span></button>' +
                     '<button class="erpa-button" id="erpa-export" type="button"><b aria-hidden="true">⇩</b><span>导出 CSV</span></button></div>' +
                 '<div class="erpa-status-region"><div id="erpa-task-status" role="status" aria-live="polite"></div><div class="erpa-catalog-progress" id="erpa-catalog-progress" hidden><div><span id="erpa-catalog-message" role="status" aria-live="polite"></span><div id="erpa-catalog-meters"></div></div><button class="erpa-button" id="erpa-cancel-catalog" type="button">取消补充</button></div>' +
-                '<div class="erpa-statusbar" id="erpa-statusbar"></div><p class="erpa-result-scope" id="erpa-result-scope"></p></div>' +
+                '<div class="erpa-statusbar" id="erpa-statusbar"></div><p class="erpa-result-scope" id="erpa-result-scope"></p><p class="erpa-result-scope" id="erpa-catalog-state" hidden></p></div>' +
                 '<div class="erpa-table-wrap" id="erpa-table-wrap"><table class="erpa-table">' +
                     '<colgroup><col style="width:180px"><col style="width:175px"><col style="width:180px"><col style="width:220px">' +
                     '<col style="width:70px"><col style="width:150px"><col style="width:90px"><col style="width:105px"><col style="width:168px"></colgroup>' +
@@ -2315,7 +2360,13 @@
 
         document.getElementById('erpa-close').addEventListener('click', closePanel);
         document.getElementById('erpa-recalculate').addEventListener('click', requestRecalculate);
-        document.getElementById('erpa-supplement-catalog').addEventListener('click', supplementCatalog);
+        document.getElementById('erpa-supplement-catalog').addEventListener('click', () => {
+            const batches = collectionTaskState?.batches || [];
+            if (collectionTaskState && catalogAction?.requestId === collectionTaskState.requestId + '-CATALOG'
+                && !['stopped', 'completed', 'invalidated'].includes(collectionTaskState.status) && batches.length
+                && batches.every(batch => batch.deliveryId) && batches.some(batch => batch.catalogStatus !== 'completed')) void resumeCollection();
+            else void supplementCatalog();
+        });
         document.getElementById('erpa-page-prev').addEventListener('click', () => { resultPage = Math.max(0, resultPage - 1); renderResults(); });
         document.getElementById('erpa-page-next').addEventListener('click', () => { resultPage += 1; renderResults(); });
         document.getElementById('erpa-resume').addEventListener('click', resumeCollection);
@@ -2424,6 +2475,7 @@
                 userAgent: navigator.userAgent,
             });
             bridgeConnection = response?.ok ? 'connected' : 'disconnected';
+            if (!activeRun && response?.ok) await refreshCatalogAction();
         } catch { bridgeConnection = 'disconnected'; }
         finally {
             statusReportPending = false;
@@ -2440,6 +2492,7 @@
         currentPageUrl = window.location.href;
         if (changed) {
             taskCache.clear(); resumableCheckpoint = null; taskStage = '';
+            catalogAction = null; catalogActionRevision++;
             querySnapshotRestoreAllowed = false;
             capturedListUrl = '';
             capturedQueryCapturedAt = '';

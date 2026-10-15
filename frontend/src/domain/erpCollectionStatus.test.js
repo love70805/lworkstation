@@ -20,7 +20,7 @@ it('distinguishes active cost reads, durable delivery confirmation and preparati
 
 it('does not claim interrupted reads are still running and keeps continuation available', () => {
   const view = erpCollectionPresentation({ status: 'paused', recoveryRequired: true, phase: 'catalog', batches: [{ ...delivered, catalogStatus: 'running' }] });
-  expect(view).toMatchObject({ state: 'paused', running: false, canResume: true });
+  expect(view).toMatchObject({ state: 'cost_completed', running: false, canResume: true, tone: 'success', catalogOnly: true });
 });
 
 it('shows an initially prepared paused task as waiting for its first ERP read', () => {
@@ -34,7 +34,7 @@ it('ends activity when every material check completes despite the retained catal
 });
 
 it('keeps material omissions separate from cost evidence failures', () => {
-  expect(erpCollectionPresentation({ status: 'cost_complete', batches: [{ ...delivered, catalogStatus: 'failed' }] })).toMatchObject({ state: 'attention', running: false, canResume: true, canRetry: false });
+  expect(erpCollectionPresentation({ status: 'cost_complete', batches: [{ ...delivered, catalogStatus: 'failed' }] })).toMatchObject({ state: 'cost_completed', running: false, canResume: true, canRetry: false, catalogOnly: true });
   expect(erpCollectionPresentation({ status: 'partial', batches: [{ ...delivered, status: 'incomplete', catalogStatus: 'completed' }] })).toMatchObject({ state: 'attention', running: false, canRetry: true, canResume: false });
 });
 

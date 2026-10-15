@@ -8,6 +8,40 @@ export const ERP_CATALOG_BATCH_FORMAT = 'shopeers-erp-catalog-batch';
 export const ERP_CATALOG_VERSION = 1;
 export const ERP_CATALOG_GROUPS = Object.freeze(['directory', 'mappings', 'images', 'suppliers', 'purchaseEvidence']);
 
+// Summarize durable catalog receipts, independently of monthly cost adoption.
+// Each SKC uses its newest receipt; one complete batch cannot complete the whole request.
+export function erpCatalogRequestProgress(request, receipts = []) {
+  const targets = new Set((request.platformSkcs ?? []).map(canonicalPlatformSkc));
+  const requestedGroups = request.missingGroups ?? ERP_CATALOG_GROUPS;
+  const newest = new Map();
+  for (const receipt of receipts) {
+    const catalog = receipt.catalog ?? receipt.envelope?.catalog;
+    if (!catalog || catalog.requestId !== (request.requestId ?? request.id) || catalog.workspaceId !== request.workspaceId
+      || catalog.ledgerPeriod !== request.ledgerPeriod || (catalog.ledgerId ?? null) !== (request.ledgerId ?? null)) continue;
+    for (const item of catalog.query?.platformSkcs ?? []) {
+      const skc = canonicalPlatformSkc(typeof item === 'string' ? item : item.platformSkc);
+      if (!targets.has(skc)) continue;
+      const previous = newest.get(skc);
+      if (!previous || String(catalog.generatedAt ?? '') >= String(previous.generatedAt ?? '')) newest.set(skc, catalog);
+    }
+  }
+  const missing = new Set();
+  let completeSkcCount = 0;
+  for (const skc of targets) {
+    const catalog = newest.get(skc);
+    let complete = true;
+    for (const group of requestedGroups) {
+      const coverage = catalog?.coverage?.[group];
+      const ready = coverage?.state === 'complete' || coverage?.state === 'partial' && coverage.reasons?.length > 0
+        && coverage.reasons.every(reason => reason === 'query_scope_subset');
+      if (!ready) { missing.add(group); complete = false; }
+    }
+    if (complete) completeSkcCount++;
+  }
+  return { state: targets.size > 0 && !missing.size ? 'complete' : newest.size ? 'partial' : 'pending',
+    missingGroups: [...missing], completeSkcCount, totalSkcCount: targets.size };
+}
+
 const required = (value, label) => { const text = String(value ?? '').trim(); if (!text) throw new Error(`${label}不能为空。`); return text; };
 const optional = value => String(value ?? '').trim() || null;
 const timestamp = (value, label) => { const text = required(value, label); if (!Number.isFinite(Date.parse(text))) throw new Error(`${label}不是有效时间。`); return text; };

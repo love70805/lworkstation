@@ -1,5 +1,6 @@
 import { validateErpCatalogRequest, buildErpCatalogInboxEnvelope, normalizeErpCatalogPurchaseEvidence } from './erp-inbox-server-catalog-contract.mjs';
 import { normalizeErpCatalogCoverage, normalizeErpUnitConversion } from './erp-inbox-server-catalog-contract.mjs';
+import { erpCatalogRequestProgress } from './erp-inbox-server-catalog-contract.mjs';
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
@@ -1061,7 +1062,15 @@ const server = http.createServer(async (req, res) => {
           .filter((item) => item.kind === "request")
           .filter((item) => !workspaceId || item.workspaceId === workspaceId)
           .filter((item) => !Number.isFinite(registeredBefore) || Date.parse(String(item.registeredAt ?? "")) <= registeredBefore);
-        return json(res, 200, { records: includeHistory ? requestRecords : requestRecords.filter((item) => item.status === "registered") });
+        const visibleRequests = includeHistory ? requestRecords : requestRecords.filter((item) => item.status === "registered");
+        const catalogReceipts = new Map();
+        for (const receipt of records) {
+          if (receipt.kind !== 'catalog-batch' || receipt.workspaceId !== workspaceId || !['pending', 'acknowledged'].includes(receipt.status)) continue;
+          const entries = catalogReceipts.get(receipt.requestId) ?? [];
+          entries.push(receipt); catalogReceipts.set(receipt.requestId, entries);
+        }
+        return json(res, 200, { records: visibleRequests.map(request => request.requestKind === 'catalog'
+          ? { ...request, catalogProgress: erpCatalogRequestProgress(request, catalogReceipts.get(request.requestId) ?? []) } : request) });
       }
       if (url.pathname === "/erp/v1/extension-status") {
         const now = Date.now();

@@ -36,13 +36,13 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
   const view = statusError ? { ...erpCollectionPresentation(task), running: false, canResume: false, canRetry: false,
     tone: 'warning', title: '采集状态暂无法确认', description: '连接检查失败；已收到结果保留。连接恢复后自动刷新状态，请先查看下方错误原因。' }
     : erpCollectionPresentation(task);
-  const Icon = view.running ? LoaderCircle : view.tone === 'warning' ? AlertCircle : view.state === 'completed' ? CheckCircle2 : Info;
+  const Icon = view.running ? LoaderCircle : view.tone === 'warning' ? AlertCircle : ['completed', 'cost_completed'].includes(view.state) ? CheckCircle2 : Info;
   return <Panel className="erp-collection-progress">
     <div className="panel-header"><div><h2>ERP 分批采集</h2><p>{task.ledgerPeriod} · 固定 {total} 个 SKC</p></div>
       <div className="page-actions">
         {view.running ? <Button disabled={busy || task.status === 'pausing'} onClick={() => onControl('pause')}>暂停采集</Button> : null}
-        {view.canStop ? <Button disabled={busy || Boolean(statusError)} onClick={() => onControl('stop')}>停止采集</Button> : null}
-        {view.canResume ? <Button disabled={busy || locked} onClick={() => onControl('resume')}>{delivered.length === batches.length && view.catalogPending ? '继续补充资料' : '核验并继续'}</Button> : null}
+        {view.canStop && (!view.catalogOnly || view.running) ? <Button disabled={busy || Boolean(statusError)} onClick={() => onControl('stop')}>停止采集</Button> : null}
+        {view.canResume ? <Button disabled={busy || locked} onClick={() => onControl('resume')}>{view.catalogOnly ? '按需补齐商品资料' : '核验并继续'}</Button> : null}
         {failures.length ? <Button disabled={busy || locked || !view.canRetry} onClick={() => onControl('retry_failed')}>重试失败批次</Button> : null}
       </div>
     </div>
@@ -56,7 +56,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
     <div className="erp-collection-meter"><span>资料检查 · 已结束 {catalogChecked.length} / {batches.length} 批 · 资料齐全 {catalogComplete.length} 批{catalogIssues.length ? ` · 待补齐 ${catalogIssues.length} 批` : ''}</span><progress max={Math.max(1, batches.length)} value={catalogChecked.length} aria-label="ERP 资料检查进度" /></div>
     <p>已送达 {delivered.length} / {batches.length} 批 · 耗时 {elapsed} 分钟 · 最近进展 {task.updatedAt ? new Date(task.updatedAt).toLocaleTimeString('zh-CN') : '等待采集'}</p>
     <p>查看筛选不改变此任务；已送达结果按证据核验后采用。{view.canResume ? '恢复后请在 ERP 助手点击继续采集。' : ''}</p>
-    {task.phase && view.state !== 'completed' ? <p>当前阶段：{task.phase === 'catalog' ? '补充资料' : '采购成本'}</p> : null}
+    {task.phase && !['completed', 'cost_completed'].includes(view.state) ? <p>当前阶段：{task.phase === 'catalog' ? '补充资料' : '采购成本'}</p> : null}
     {view.catalogPending ? <p>成本回传与资料齐全分别核对；图片或供应商链接缺项时，已采用的成本继续保留。</p> : null}
     {readFailures.length ? <details><summary>{readFailures.length} 批请求失败</summary>{readFailures.map(batch => <p key={batch.batchId}>批次 {batches.indexOf(batch) + 1}：{batch.error?.message ?? batch.error ?? 'ERP 请求未完成，请重试此批次。'}</p>)}</details> : null}
     {incomplete.length ? <details><summary>{incomplete.length} 批成本已送达，证据待补齐</summary>{incomplete.map(batch => <p key={batch.batchId}>批次 {batches.indexOf(batch) + 1}：{costIssue(batch, outcomes)}</p>)}</details> : null}

@@ -14,7 +14,11 @@ it('does not count a collected idempotency key as a durable delivery or adoption
 it('preserves task scope and offers continued supplement after costs arrive', () => {
   const task = { status: 'cost_complete', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'failed' }] };
   expect(isActiveErpCollection(task)).toBe(true);
-  expect(renderToStaticMarkup(<ErpCollectionProgress task={task} />)).toContain('继续补充资料');
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
+  expect(html).toContain('按需补齐商品资料');
+  expect(html).toContain('成本采集已完成');
+  expect(html).not.toContain('停止采集');
+  expect(html).not.toContain('当前阶段：');
   task.batches[0].catalogStatus = 'completed';
   expect(isActiveErpCollection(task)).toBe(false);
 });

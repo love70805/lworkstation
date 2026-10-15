@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.29",
+  "version": "0.4.30",
   "candidateOnly": true,
-  "integrationBranch": "codex/catalog-order-0.4.29",
+  "integrationBranch": "codex/selection-flow-0.4.30",
   "requiredCommits": [
+    {
+      "module": "v0.4.30-verified-main-baseline",
+      "commit": "dadcd68db2230ae7163c3874e488527dcb323865"
+    },
     {
       "module": "v0.4.29-attribute-order-and-multiple-suppliers",
       "commit": "0ba319e"

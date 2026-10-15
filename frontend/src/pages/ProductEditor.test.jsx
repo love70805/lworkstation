@@ -478,8 +478,7 @@ describe("continuous catalog", () => {
   it("starts at the first full-filter item from page two, preserves list state and handles the next page", async () => {
     await seedContinuousCatalog(23);
     await mount("/products?view=reference", { library: true });
-    await change(input("按建档情况筛选"), "unlinked");
-    await waitFor(() => container.textContent.includes("匹配 23 / 23 条"));
+    await waitFor(() => container.textContent.includes("匹配 23 / 23 个商品 · 23 个 SKU"));
     await change(input("搜索预存资料"), "QUEUE");
     await act(async () => input("下一页").click());
     await waitFor(() => container.querySelector(".selection-reference-table").textContent.includes("QUEUE-SKC-22"));
@@ -496,7 +495,7 @@ describe("continuous catalog", () => {
     await click("跳过");
     await waitFor(() => container.querySelector(".selection-reference-table"));
     expect(input("搜索预存资料").value).toBe("QUEUE");
-    expect(input("按建档情况筛选").value).toBe("unlinked");
+    expect(input("按建档情况筛选")).toBeNull();
     expect(container.querySelector(".selection-reference-table").textContent).toContain("QUEUE-SKC-22");
     expect(document.activeElement.id).toBe("continuous-catalog-start");
   });

@@ -195,6 +195,11 @@ export async function verifyErpCatalogTransport({
     for (let attempt = 0; attempt < 200 && !catalogSubmitted.length; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(catalogSubmitted.length, 1);
     assert.equal(catalogSubmitted[0].response.status, "success", catalogSubmitted[0].response.message);
+    const catalogRequestState = await (await fetch(`${base}/erp/v1/requests?workspaceId=${encodeURIComponent(workspaceId)}`, { headers: { authorization: `Bearer ${capability}` } })).json();
+    const catalogProgress = catalogRequestState.records.find(record => record.requestId === `${requestId}-CATALOG`)?.catalogProgress;
+    assert.ok(catalogProgress, 'catalog completion comes from durable receipts');
+    assert.equal(catalogProgress.totalSkcCount, 1);
+    assert.equal(catalogProgress.state, catalogSubmitted[0].response.envelope.catalog.status === 'completed' ? 'complete' : 'partial');
     assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
     assert.equal(new Set(requestedPaths).size, 4);
     assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, 1, 'complete original evidence does not trigger any optional history scan');

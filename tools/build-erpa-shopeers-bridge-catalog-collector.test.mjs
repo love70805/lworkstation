@@ -145,7 +145,7 @@ export async function verifyErpCatalogButtonAndCostPipeline() {
     assert.equal(cost.results.some(result => result.warehouseSku === 'WH-AUX'), false, 'unused sibling cannot enter the cost channel');
     for (let attempt = 0; attempt < 100 && window.document.getElementById('erpa-supplement-catalog').disabled; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     const contextCalls = messages.filter(message => message.type === 'shopeers.erp.catalogContext').length;
-    assert.equal(contextCalls, 1, 'optional catalog lookup follows cost dispatch');
+    assert.ok(contextCalls >= 1, 'read-only catalog status is available independently of cost dispatch');
     window.document.getElementById('erpa-supplement-catalog').click();
     for (let attempt = 0; attempt < 150 && !messages.some(message => message.type === 'shopeers.erp.submitCatalogResult'); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     const catalog = messages.find(message => message.type === 'shopeers.erp.submitCatalogResult')?.payload;
@@ -156,6 +156,43 @@ export async function verifyErpCatalogButtonAndCostPipeline() {
     assert.equal(messages.filter(message => message.type === 'shopeers.erp.submitCostResult').length, 1, 'catalog supplement does not submit monthly costs');
     assert.doesNotMatch(JSON.stringify(catalog), /other-person|OTHER-PERSON-SKU/);
     console.log('ERP explicit supplement button and real content pipeline: optional auxiliary detail failure preserves original cost/selection/evidence passed');
+  } finally { await window.happyDOM.close(); }
+}
+
+export async function verifyErpCatalogActionPresentation() {
+  const frontendRequire = createRequire(path.join(root, 'frontend/package.json'));
+  const { Window } = await import(pathToFileURL(frontendRequire.resolve('happy-dom')).href);
+  const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
+  const heartbeats = [];
+  window.setInterval = (callback, delay) => { if (delay === 15000) heartbeats.push(callback); return 1; };
+  window.clearInterval = () => {};
+  let progress = { state: 'pending', missingGroups: ['images', 'suppliers'] }, businessReads = 0, submissions = 0;
+  window.fetch = async () => { businessReads++; throw Error('Presentation must not collect ERP business data'); };
+  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
+    if (/submit.*Result/.test(message.type)) submissions++;
+    callback(message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CATALOG-PRESENTATION', platformSkcs: ['SKC-TARGET'], ledgerPeriod: '2026-08', catalogProgress: progress } } : { ok: true });
+  } } };
+  const waitFor = async predicate => {
+    for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
+    assert.fail(window.document.body.textContent);
+  };
+  try {
+    for (const file of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) window.eval(await readFile(path.join(sourceRoot, file), 'utf8'));
+    const button = window.document.getElementById('erpa-supplement-catalog');
+    const status = window.document.getElementById('erpa-catalog-state');
+    await waitFor(() => !button.hidden);
+    assert.match(button.textContent, /补取商品资料/);
+    progress = { state: 'complete', missingGroups: [] };
+    for (const callback of heartbeats) await callback();
+    await waitFor(() => button.hidden && status.textContent === '商品资料已齐全');
+    progress = { state: 'partial', missingGroups: ['images', 'suppliers'] };
+    for (const callback of heartbeats) await callback();
+    await waitFor(() => !button.hidden && /图片、供应商/.test(status.textContent));
+    assert.equal(button.textContent, '补齐商品资料');
+    assert.match(status.textContent, /已采用成本可继续核算/);
+    assert.equal(businessReads, 0);
+    assert.equal(submissions, 0);
+    console.log('ERP catalog action: pending/complete/missing-groups update without collecting or resubmitting costs passed');
   } finally { await window.happyDOM.close(); }
 }
 
@@ -200,4 +237,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   await verifyErpCatalogCollection();
   await verifyErpCatalogButtonAndCostPipeline();
   await verifyErpCatalogBackgroundBinding();
+  await verifyErpCatalogActionPresentation();
 }
