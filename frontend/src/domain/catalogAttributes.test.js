@@ -4,6 +4,23 @@ import { buildReferenceIdentityIndex, projectReferenceIdentity } from "./selecti
 import { createLedgerCatalogDraftBuilder } from "./ledgerCatalogDraft";
 
 describe("catalog attribute comparison", () => {
+  it.each([['(1% of people choose) 1pc 小挂钩-A', 'A-(1% of people choose) 1pc 小挂钩'], ['1个白色沙滩帐篷-A1', 'A1-1个白色沙滩帐篷']])('accepts description/code order without changing either source: %s', (ledger, erp) => {
+    const index = buildReferenceIdentityIndex({ ledgerIdentityRows: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', attribute: ledger }], erpCatalogRows: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', attribute: erp }] });
+    const projected = projectReferenceIdentity({ attribute: ledger }, index.get('SKU-A'));
+    expect(projected).toMatchObject({ attribute: ledger, attributeConflict: false, attributeOrderEquivalent: true });
+    expect(projected.attributeEvidence.map(item => item.value).sort()).toEqual([ledger, erp].sort());
+    const builder = createLedgerCatalogDraftBuilder();
+    builder.addRows([{ platformSku: 'SKU-A', platformSkc: 'SKC-A', store: '店铺', attribute: ledger }, { platformSku: 'SKU-A', platformSkc: 'SKC-A', store: '店铺', attribute: erp }], 'BATCH');
+    expect(builder.finish().issues).toEqual([]);
+  });
+  it.each([
+    ['A-(1% of people choose) 1pc 小挂钩', 'B-(1% of people choose) 1pc 小挂钩'],
+    ['A-(1% of people choose) 1pc 小挂钩', '(1% of people choose) 2pc 小挂钩-A'],
+    ['A-(1% of people choose) 1pc 小挂钩', '(5% of people choose) 1pc 小挂钩-A'],
+    ['A-红色小挂钩', '蓝色小挂钩-A'], ['10-20厘米', '20厘米-10'], ['A-B-小挂钩', '小挂钩-B-A'],
+  ])('retains content or ambiguous differences: %s / %s', (left, right) => {
+    expect(catalogAttributeKey(left)).not.toBe(catalogAttributeKey(right));
+  });
   it.each(["粉色", "蓝色", "均码", "黑色", "白色"])("accepts order-only %s / B differences and preserves both raw sources", color => {
     const ledger = `${color}-B`, erp = `B-${color}`;
     const index = buildReferenceIdentityIndex({

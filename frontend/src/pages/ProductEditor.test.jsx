@@ -64,36 +64,68 @@ afterEach(async () => {
 });
 
 describe("product editing workflow", () => {
-  it("groups repeated ERP deliveries and saves an explicitly chosen alternate supplier link without changing quotes", async () => {
+  it("retains multiple suppliers and links across save/reopen without choosing a unique source", async () => {
     const { product } = await saveProductCatalogRecord({ draft: { name: "来源核对商品", platformSkc: "SKC-CATALOG", supplierName: "供应商甲", variants: [{ platformSku: "SKU-RED", attribute: "红色 · 大号" }] } });
     const fixture = erpProductCatalogFixture();
     fixture.purchaseRecords = [
       { recordId: "DETAIL-A", purchaseOrderNo: "ORDER-A", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/1234567890.html", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-A", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
       { recordId: "DETAIL-B", purchaseOrderNo: "ORDER-B", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://shop-a.1688.com/", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-B", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
+      { recordId: "DETAIL-C", purchaseOrderNo: "ORDER-C", warehouseSku: fixture.warehouseSku, supplierName: "供应商乙", supplier1688Url: "https://shop-b.1688.com/", purchaseCatalog: { supplierId: "SUP-2", purchaseOrderDetailId: "DETAIL-C", barcodeSkuid: "SKU-BLUE", purchaseSpecificationAndModel1688: "颜色:蓝色", purchaseProportion1688: "1-1" } },
     ];
     await db.erpCostRows.bulkAdd([fixture, { ...fixture, publishedAt: "2026-10-01T00:00:00Z" }]);
     const quotes = await db.supplierOffers.toArray();
     await mount(`/products/edit?product=${product.id}`);
     expect(container.querySelectorAll(".catalog-source-card")).toHaveLength(2);
-    expect(container.querySelectorAll(".catalog-purchase-group")).toHaveLength(1);
-    expect(container.querySelectorAll(".catalog-purchase-records > li")).toHaveLength(2);
-    expect(container.textContent).toContain("采购来源 · 2 条记录 / 1 组");
-    const choices = container.querySelector(".supplier-source-choices");
-    await act(async () => { choices.open = true; choices.dispatchEvent(new Event("toggle")); });
-    await act(async () => input("采用供应商 1 的链接 https://shop-a.1688.com/").click());
-    expect(choices.open).toBe(true);
-    expect(input("1688 来源链接").value).toBe("https://shop-a.1688.com/");
-    expect(container.textContent).toContain("已选择来源链接，保存后生效");
+    expect(container.querySelectorAll(".catalog-purchase-group")).toHaveLength(2);
+    expect(container.querySelectorAll(".catalog-purchase-records > li")).toHaveLength(3);
+    expect(container.querySelectorAll('.supplier-card')).toHaveLength(2);
+    expect(container.querySelectorAll('.supplier-source-links a')).toHaveLength(3);
+    expect(container.querySelector('button[aria-label^="采用供应商"]')).toBeNull();
+    expect(container.textContent).not.toContain('，请选择');
+    const originalUrl = input('1688 来源链接').value;
     await click("保存修改");
-    await waitFor(() => delayedWrite.input?.draft.sourceUrl === "https://shop-a.1688.com/");
-    await waitFor(async () => (await db.products.get(product.id)).sourceUrl === "https://shop-a.1688.com/");
+    await waitFor(async () => (await db.products.get(product.id)).attributes.supplierProfiles.length === 2);
     await act(async () => router.navigate("/products"));
     await act(async () => router.navigate(`/products/edit?product=${product.id}`));
-    await waitFor(() => input("1688 来源链接")?.value === "https://shop-a.1688.com/");
-    expect((await db.products.get(product.id)).sourceProductId).toBe("");
+    await waitFor(() => input("1688 来源链接")?.value === originalUrl);
+    expect(container.querySelectorAll('.supplier-source-links a')).toHaveLength(3);
+    const profiles = (await db.products.get(product.id)).attributes.supplierProfiles;
+    expect(profiles[0].sourceLinks).toHaveLength(2);
+    expect(profiles[1].stableSupplierId).toBe('SUP-2');
+    expect(profiles[1].variants.map(item => item.platformSku)).toEqual(['SKU-BLUE']);
+    expect(new Set(profiles[0].sourceRecords.map(item => item.recordId))).toEqual(new Set(['DETAIL-A', 'DETAIL-B']));
+    expect(new Set(profiles[1].sourceRecords.map(item => item.recordId))).toEqual(new Set(['DETAIL-C']));
     expect(await db.supplierOffers.toArray()).toEqual(quotes);
     expect(await db.profitLines.count()).toBe(0);
     expect(container.textContent).not.toContain("多个 ERP 链接来源");
+  });
+  it('does not request attribute confirmation when a description and code only change order', async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { name: '顺序测试商品', platformSkc: 'SKC-CATALOG', variants: [{ platformSku: 'SKU-RED', attribute: '1pc 小挂钩-A' }] } });
+    const fixture = erpProductCatalogFixture();
+    fixture.attribute = 'A-1pc 小挂钩'; fixture.catalogMappings[0].attribute = fixture.attribute;
+    await db.erpCostRows.add(fixture);
+    await mount(`/products/edit?product=${product.id}`);
+    expect(container.querySelector('.attribute-source-choice')).toBeNull();
+    await click('保存修改');
+    await waitFor(() => delayedWrite.input?.draft.variants.some(item => item.platformSku === 'SKU-RED' && item.attribute === '1pc 小挂钩-A'));
+  });
+  it('retains late links and suppliers while a manual title is unsaved', async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { name: '原始商品', platformSkc: 'SKC-CATALOG', variants: [{ platformSku: 'SKU-RED' }] } });
+    const fixture = erpProductCatalogFixture();
+    const record = { recordId: 'LINK-A', warehouseSku: fixture.warehouseSku, supplierName: '甲', supplier1688Url: 'https://detail.1688.com/offer/1234567890.html', purchaseCatalog: { supplierId: 'SUP-A' } };
+    fixture.purchaseRecords = [record];
+    const id = await db.erpCostRows.add(fixture);
+    await mount(`/products/edit?product=${product.id}`);
+    await change(input('商品名称'), '未保存人工标题');
+    await act(async () => db.erpCostRows.update(id, { purchaseRecords: [record, { ...record, recordId: 'LINK-A2', supplier1688Url: 'https://shop-a.1688.com/' }, { ...record, recordId: 'LINK-B', supplierName: '乙', supplier1688Url: 'https://shop-b.1688.com/', purchaseCatalog: { supplierId: 'SUP-B' } }] }));
+    await waitFor(() => container.querySelectorAll('.supplier-source-links a').length === 3);
+    expect(input('商品名称').value).toBe('未保存人工标题');
+    await click('保存修改');
+    await waitFor(async () => (await db.products.get(product.id)).attributes.supplierProfiles.length === 2);
+    const profiles = (await db.products.get(product.id)).attributes.supplierProfiles;
+    expect(profiles[0].sourceLinks).toHaveLength(2);
+    expect(profiles[1].sourceLinks).toHaveLength(1);
+    expect(await db.supplierOffers.count()).toBe(0);
   });
   it("recovers a failed editor read instead of remaining on a loading screen", async () => {
     const { product } = await saveProductCatalogRecord({ draft });

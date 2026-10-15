@@ -1,5 +1,5 @@
 import { makeId } from "../db/utils";
-import { erpSupplierLink } from "../../domain/erpProductCatalog";
+import { erpSupplierLink, erpSupplierStableIdentity } from "../../domain/erpProductCatalog";
 
 export function catalogText(value) {
   return String(value ?? "").trim();
@@ -30,6 +30,7 @@ export function catalogSupplierVariantProfile(variant = {}) {
 
 export function catalogSupplierHasData(supplier = {}) {
   if ([supplier.supplierCode, supplier.supplierName, supplier.sourceProductId, supplier.sourceUrl].some((value) => catalogText(value))) return true;
+  if (Array.isArray(supplier.sourceLinks) && supplier.sourceLinks.some(link => erpSupplierLink(link?.url))) return true;
   return (Array.isArray(supplier.variants) ? supplier.variants : []).some((variant) => (
     [variant.sourceSku, variant.purchaseUnitPrice].some((value) => catalogText(value))
   ));
@@ -40,6 +41,7 @@ export function catalogSupplierProfile(supplier = {}, fallback = "") {
   return {
     id: catalogText(supplier.id) || supplierId,
     supplierId,
+    stableSupplierId: catalogText(supplier.stableSupplierId),
     supplierCode: catalogText(supplier.supplierCode),
     supplierName: catalogText(supplier.supplierName),
     sourceProductId: catalogText(supplier.sourceProductId),
@@ -58,18 +60,36 @@ export function catalogSupplierProfile(supplier = {}, fallback = "") {
   };
 }
 
+export function matchingCatalogSupplierProfile(profiles, candidate) {
+  const byId = profiles.find(profile => profile.supplierId === candidate.supplierId);
+  if (byId) return byId;
+  const stable = erpSupplierStableIdentity(candidate);
+  const byStable = stable ? profiles.filter(profile => erpSupplierStableIdentity(profile) === stable) : [];
+  if (byStable.length === 1) return byStable[0];
+  const natural = catalogSupplierNaturalKey(candidate);
+  if (!natural) return null;
+  const matches = profiles.filter(profile => catalogSupplierNaturalKey(profile) === natural
+    && (!stable || !erpSupplierStableIdentity(profile) || erpSupplierStableIdentity(profile) === stable));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function mergeSupplierVariants(previous, incoming) {
+  const variants = new Map();
+  for (const variant of [...previous, ...incoming]) {
+    const sku = catalogText(variant.platformSku).normalize('NFKC').toUpperCase();
+    variants.set(sku || `pending-${variants.size}`, variant);
+  }
+  return [...variants.values()];
+}
+
 export function catalogSupplierProfiles(suppliers = []) {
   const profiles = [];
-  const indexBySupplierId = new Map();
-  const indexByNaturalKey = new Map();
   (Array.isArray(suppliers) ? suppliers : []).forEach((supplier, index) => {
     if (!catalogSupplierHasData(supplier)) return;
     const profile = catalogSupplierProfile(supplier, `supplier-${index + 1}`);
-    const naturalKey = catalogSupplierNaturalKey(profile);
-    const previousIndex = indexBySupplierId.get(profile.supplierId) ?? (naturalKey ? indexByNaturalKey.get(naturalKey) : null);
+    const matched = matchingCatalogSupplierProfile(profiles, profile);
+    const previousIndex = matched ? profiles.indexOf(matched) : null;
     if (previousIndex == null) {
-      indexBySupplierId.set(profile.supplierId, profiles.length);
-      if (naturalKey) indexByNaturalKey.set(naturalKey, profiles.length);
       profiles.push(profile);
       return;
     }
@@ -79,15 +99,15 @@ export function catalogSupplierProfiles(suppliers = []) {
       ...profile,
       id: previous.id,
       supplierId: previous.supplierId,
+      stableSupplierId: profile.stableSupplierId || previous.stableSupplierId,
       supplierCode: profile.supplierCode || previous.supplierCode,
       supplierName: profile.supplierName || previous.supplierName,
       sourceProductId: profile.sourceProductId || previous.sourceProductId,
       sourceUrl: profile.sourceUrl || previous.sourceUrl,
       sourceLinks: [...new Map([...previous.sourceLinks, ...profile.sourceLinks].map(item => [item.url, item])).values()],
-      variants: profile.variants.length ? profile.variants : previous.variants,
+      sourceRecords: [...new Map([...previous.sourceRecords, ...profile.sourceRecords].map(item => [JSON.stringify(item), item])).values()],
+      variants: mergeSupplierVariants(previous.variants, profile.variants),
     };
-    indexBySupplierId.set(profile.supplierId, previousIndex);
-    if (naturalKey) indexByNaturalKey.set(naturalKey, previousIndex);
   });
   return profiles;
 }
@@ -126,17 +146,11 @@ export function catalogPendingVariants(variants = []) {
 export function catalogDisplaySupplierProfiles(product, offers = []) {
   const profiles = catalogSupplierProfiles(product?.attributes?.supplierProfiles ?? []);
   if (!profiles.length && catalogSupplierHasData(product)) profiles.push(catalogSupplierProfile(product));
-  const bySupplierId = new Map(profiles.map((profile, index) => [profile.supplierId, index]));
-  const byNaturalKey = new Map(profiles
-    .map((profile, index) => [catalogSupplierNaturalKey(profile), index])
-    .filter(([key]) => key));
   (offers ?? []).forEach((offer) => {
     const profile = catalogSupplierProfile(offer, offer.id);
-    const naturalKey = catalogSupplierNaturalKey(profile);
-    const existingIndex = bySupplierId.get(profile.supplierId) ?? (naturalKey ? byNaturalKey.get(naturalKey) : null);
+    const matched = matchingCatalogSupplierProfile(profiles, profile);
+    const existingIndex = matched ? profiles.indexOf(matched) : null;
     if (existingIndex == null) {
-      bySupplierId.set(profile.supplierId, profiles.length);
-      if (naturalKey) byNaturalKey.set(naturalKey, profiles.length);
       profiles.push(profile);
       return;
     }
@@ -147,9 +161,9 @@ export function catalogDisplaySupplierProfiles(product, offers = []) {
       supplierName: existing.supplierName || profile.supplierName,
       sourceProductId: existing.sourceProductId || profile.sourceProductId,
       sourceUrl: existing.sourceUrl || profile.sourceUrl,
+      sourceLinks: [...new Map([...existing.sourceLinks, ...profile.sourceLinks].map(item => [item.url, item])).values()],
+      sourceRecords: [...new Map([...existing.sourceRecords, ...profile.sourceRecords].map(item => [JSON.stringify(item), item])).values()],
     };
-    bySupplierId.set(profile.supplierId, existingIndex);
-    if (naturalKey) byNaturalKey.set(naturalKey, existingIndex);
   });
   return profiles;
 }

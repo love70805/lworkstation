@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { erpSupplierSourceChoices, groupErpCatalogPurchases, groupErpCatalogSources } from "./erpCatalogPresentation";
+import { erpSupplierLinks, groupErpCatalogPurchases, groupErpCatalogSources } from "./erpCatalogPresentation";
 
 const source = { batchId: "B-1", capturedAt: "2026-09-01", recordId: "DETAIL-1", purchaseOrderNo: "ORDER-1", lineNumber: "0" };
 const row = { platformSku: "Sku-A", platformSkc: "SKC", warehouseSku: "WH-A", attribute: "红色", productName: "商品", source };
@@ -30,10 +30,13 @@ it("counts distinct purchase lines once across batches and keeps specification, 
 it("only offers validated links for the matching supplier identity and preserves product/store types", () => {
   const candidates = [{ stableSupplierId: "A", supplierName: "同名", sourceUrl: "https://detail.1688.com/offer/1234567890.html", sourceLinks: [{ url: "https://shop-a.1688.com/" }, { url: "javascript:alert(1)" }], sourceRecords: [source] },
     { stableSupplierId: "B", supplierName: "同名", sourceUrl: "https://detail.1688.com/offer/4567890123.html" }];
-  const links = erpSupplierSourceChoices({ stableSupplierId: "A", supplierName: "同名" }, candidates);
+  const links = erpSupplierLinks({ stableSupplierId: "A", supplierName: "同名" }, candidates);
   expect(links.map(item => [item.type, item.sourceProductId])).toEqual([["product", "1234567890"], ["store", ""]]);
-  expect(erpSupplierSourceChoices({ supplierName: "其他" }, candidates)).toEqual([]);
-  expect(erpSupplierSourceChoices({}, candidates)).toEqual([]);
+  expect(erpSupplierLinks({ supplierName: "其他" }, candidates)).toEqual([]);
+  expect(erpSupplierLinks({}, candidates)).toEqual([]);
+  expect(erpSupplierLinks({ supplierName: "同名" }, candidates)).toEqual([]);
+  expect(erpSupplierLinks({ supplierId: 'ERP-ERP-SUPPLIER:A', supplierName: '同名' }, candidates).map(item => item.url)).toEqual(links.map(item => item.url));
+  expect(erpSupplierLinks({ sourceLinks: [{ url: links[0].url }, { url: links[1].url }] }).map(item => item.url)).toEqual(links.map(item => item.url));
 });
 
 it("renders partial metadata and does not merge purchases whose record identity is missing", () => {

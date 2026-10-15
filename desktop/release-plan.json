@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.28",
+  "version": "0.4.29",
   "candidateOnly": true,
-  "integrationBranch": "codex/catalog-evidence-0.4.28",
+  "integrationBranch": "codex/catalog-order-0.4.29",
   "requiredCommits": [
+    {
+      "module": "v0.4.29-verified-main-baseline",
+      "commit": "52c98e3c7afecbf8a3c5a0bea3b674bbbb1950cd"
+    },
     {
       "module": "v0.4.28-catalog-source-review",
       "commit": "ef7686a"

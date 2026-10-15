@@ -45,10 +45,10 @@ import {
   catalogPendingVariants,
   catalogSupplierHasData,
   catalogSupplierIdentity,
-  catalogSupplierNaturalKey,
   catalogSupplierOfferKey,
   catalogSupplierProfile,
   catalogSupplierProfiles,
+  matchingCatalogSupplierProfile,
   catalogText,
   supplierOfferContent,
 } from "./selectionCatalogUtils";
@@ -519,16 +519,13 @@ function storedProductEditorDraft({ product, skuRows, storedOffers, statusDefini
       ...catalogPendingVariants(product.attributes?.pendingVariants),
     ];
     const supplierGroups = new Map();
-    const supplierGroupsByNaturalKey = new Map();
     const addSupplier = (supplier, fallback) => {
       const profile = catalogSupplierProfile(supplier, fallback);
-      const naturalKey = catalogSupplierNaturalKey(profile);
-      const current = supplierGroups.get(profile.supplierId) ?? (naturalKey ? supplierGroupsByNaturalKey.get(naturalKey) : null);
+      const current = supplierGroups.get(profile.supplierId) ?? matchingCatalogSupplierProfile([...new Set(supplierGroups.values())], profile);
       if (current) {
         const protectedFields = product.attributes?.fieldEdits?.suppliers?.[profile.supplierId] ?? {};
         const isPrimary = current === supplierGroups.values().next().value;
         supplierGroups.set(profile.supplierId, current);
-        if (naturalKey) supplierGroupsByNaturalKey.set(naturalKey, current);
         current.supplierCode ||= profile.supplierCode;
         if (!protectedFields.supplierName && !(isPrimary && product.attributes?.fieldEdits?.supplierName)) current.supplierName ||= profile.supplierName;
         current.sourceProductId ||= profile.sourceProductId;
@@ -536,12 +533,13 @@ function storedProductEditorDraft({ product, skuRows, storedOffers, statusDefini
         current.sourceLinks = [...new Map([...(current.sourceLinks ?? []), ...(profile.sourceLinks ?? [])].map(item => [item.url, item])).values()];
         current.shippingAmount ||= profile.shippingAmount;
         current.handlingFee ||= profile.handlingFee;
-        if (!current.profileVariants.length && profile.variants.length) current.profileVariants = profile.variants;
+        const variants = new Map(current.profileVariants.map((variant, index) => [catalogText(variant.platformSku) ? canonicalPlatformSku(variant.platformSku) : `pending-${index}`, variant]));
+        for (const variant of profile.variants) if (catalogText(variant.platformSku) && !variants.has(canonicalPlatformSku(variant.platformSku))) variants.set(canonicalPlatformSku(variant.platformSku), variant);
+        current.profileVariants = [...variants.values()];
         return current;
       }
       const next = { ...profile, profileVariants: profile.variants, offerBySku: new Map() };
       supplierGroups.set(profile.supplierId, next);
-      if (naturalKey) supplierGroupsByNaturalKey.set(naturalKey, next);
       return next;
     };
     const storedProfiles = catalogSupplierProfiles(product.attributes?.supplierProfiles ?? []);
@@ -555,6 +553,7 @@ function storedProductEditorDraft({ product, skuRows, storedOffers, statusDefini
     const suppliers = [...new Set(supplierGroups.values())].map((supplier) => ({
       id: supplier.id,
       supplierId: supplier.supplierId,
+      stableSupplierId: supplier.stableSupplierId,
       supplierCode: supplier.supplierCode,
       supplierName: supplier.supplierName,
       sourceProductId: supplier.sourceProductId,

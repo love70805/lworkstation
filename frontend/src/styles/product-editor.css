@@ -242,7 +242,7 @@
 
 .catalog-evidence-groups { display: grid; gap: 20px; margin-top: 16px; min-width: 0; }
 .catalog-evidence-groups h3 { margin: 0 0 6px; font-size: 14px; }
-.catalog-evidence-groups p, .supplier-source-choices p { margin: 6px 0 12px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.catalog-evidence-groups p, .supplier-source-links p { margin: 6px 0 12px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .catalog-source-card, .catalog-purchase-group { padding: 12px; border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; min-width: 0; overflow-wrap: anywhere; }
 .catalog-source-card > small { display: block; margin-top: 4px; color: var(--text-muted); }
 .catalog-source-version, .catalog-purchase-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
@@ -255,13 +255,11 @@
 .catalog-purchase-group > summary { line-height: 1.6; }
 .catalog-purchase-group > summary > span { margin-left: 12px; color: var(--text-muted); font-size: 12px; }
 .catalog-purchase-records > li { display: flex; flex-wrap: wrap; gap: 6px 12px; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; font-size: 12px; }
-.supplier-source-choices { margin-top: 10px; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
-.supplier-source-choices > summary { cursor: pointer; color: var(--primary); padding: 6px 0; }
+.supplier-source-links { margin-top: 10px; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.supplier-source-links > summary { cursor: pointer; color: var(--primary); padding: 6px 0; }
 .supplier-source-option { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--border); padding: 10px 0; }
 .supplier-source-option a { display: flex; flex: 1 1 160px; flex-wrap: wrap; gap: 4px; min-width: 0; align-items: center; }
 .supplier-source-option a small { flex-basis: 100%; color: var(--text-muted); overflow-wrap: anywhere; }
-.supplier-source-option .button { min-height: 36px; padding: 6px 10px; }
-.supplier-source-choices > small { display: block; color: var(--text-muted); line-height: 1.6; }
 
 @media (max-width: 840px) {
   .editor-titlebar > .editor-heading { flex: none; width: 100%; }

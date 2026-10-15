@@ -19,7 +19,7 @@ export function productPrestorageReadiness({ draft = {}, prefill = {}, historica
   if (!text(draft.platformSkc)) add('skc', '平台 SKC');
   if (!text(draft.store)) add('store', '店铺');
   const suppliers = draft.suppliers?.length ? draft.suppliers : [draft];
-  if (!suppliers.some(supplier => validUrl(supplier.sourceUrl))) add('supplier', '供应商来源链接');
+  if (!suppliers.some(supplier => validUrl(supplier.sourceUrl) || Array.isArray(supplier.sourceLinks) && supplier.sourceLinks.some(link => validUrl(link?.url)))) add('supplier', '供应商来源链接');
   const variants = draft.variants ?? [];
   if (!variants.some(variant => text(variant.platformSku))) add('sku', '平台 SKU');
   const references = productDraftReferences(draft, historicalRows);
