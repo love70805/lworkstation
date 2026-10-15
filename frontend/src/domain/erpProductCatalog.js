@@ -307,21 +307,24 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     variant.referenceKind = row.referenceKind;
     variant.referenceCostId = row.referenceCostId;
     variant.referencePeriod = row.referencePeriod ?? row.latestPeriod;
-    if (row.attributeConflict) warnings.push(`${row.platformSku} 的属性有不同来源，请核对。`);
+    // Attribute differences are resolved next to their active SKU, where the
+    // current manual/excluded state is available; do not repeat a stale warning.
   });
   const erpSuppliers = erpCatalogSuppliers(activeRows);
   let suppliers = draft.suppliers?.length ? draft.suppliers.map(item => ({ ...item })) : erpSuppliers;
   // Existing manual profiles remain authoritative. Fill missing fields only
   // from a uniquely matching purchase pair; additional sources stay reviewable.
   if (draft.suppliers?.length) suppliers = suppliers.map(supplier => {
-    const matches = erpSuppliers.filter(item => supplier.sourceUrl ? supplier.sourceUrl === item.sourceUrl : supplier.supplierName && supplier.supplierName === item.supplierName);
+    const matches = erpSuppliers.filter(item => supplier.sourceUrl ? [item.sourceUrl, ...(item.sourceLinks ?? []).map(link => link.url)].includes(supplier.sourceUrl) : supplier.supplierName && supplier.supplierName === item.supplierName);
     if (matches.length !== 1) {
-      if (matches.length > 1) warnings.push(`${supplier.supplierName || "供应商"} 有多个 ERP 链接来源，保持已有资料，请核对。`);
       return supplier;
     }
     const source = matches[0];
     const edited = draft.fieldEdits?.suppliers?.[supplier.supplierId || supplier.id] ?? {};
-    return { ...source, ...supplier, supplierName: edited.supplierName ? supplier.supplierName : supplier.supplierName || source.supplierName, sourceUrl: edited.sourceUrl ? supplier.sourceUrl : supplier.sourceUrl || source.sourceUrl, sourceProductId: supplier.sourceProductId || source.sourceProductId };
+    const link = erpSupplierLink(supplier.sourceUrl || source.sourceUrl);
+    return { ...source, ...supplier, supplierName: edited.supplierName ? supplier.supplierName : supplier.supplierName || source.supplierName, sourceUrl: edited.sourceUrl ? supplier.sourceUrl : supplier.sourceUrl || source.sourceUrl,
+      sourceProductId: edited.sourceProductId ? supplier.sourceProductId : supplier.sourceProductId || link?.sourceProductId || "",
+      sourceUrlKind: supplier.sourceUrlKind || link?.type || null };
   });
   const firstSupplier = suppliers[0] ?? {};
   const next = {

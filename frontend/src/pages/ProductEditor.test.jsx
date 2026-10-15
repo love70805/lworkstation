@@ -64,6 +64,37 @@ afterEach(async () => {
 });
 
 describe("product editing workflow", () => {
+  it("groups repeated ERP deliveries and saves an explicitly chosen alternate supplier link without changing quotes", async () => {
+    const { product } = await saveProductCatalogRecord({ draft: { name: "来源核对商品", platformSkc: "SKC-CATALOG", supplierName: "供应商甲", variants: [{ platformSku: "SKU-RED", attribute: "红色 · 大号" }] } });
+    const fixture = erpProductCatalogFixture();
+    fixture.purchaseRecords = [
+      { recordId: "DETAIL-A", purchaseOrderNo: "ORDER-A", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/1234567890.html", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-A", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
+      { recordId: "DETAIL-B", purchaseOrderNo: "ORDER-B", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://shop-a.1688.com/", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-B", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
+    ];
+    await db.erpCostRows.bulkAdd([fixture, { ...fixture, publishedAt: "2026-10-01T00:00:00Z" }]);
+    const quotes = await db.supplierOffers.toArray();
+    await mount(`/products/edit?product=${product.id}`);
+    expect(container.querySelectorAll(".catalog-source-card")).toHaveLength(2);
+    expect(container.querySelectorAll(".catalog-purchase-group")).toHaveLength(1);
+    expect(container.querySelectorAll(".catalog-purchase-records > li")).toHaveLength(2);
+    expect(container.textContent).toContain("采购来源 · 2 条记录 / 1 组");
+    const choices = container.querySelector(".supplier-source-choices");
+    await act(async () => { choices.open = true; choices.dispatchEvent(new Event("toggle")); });
+    await act(async () => input("采用供应商 1 的链接 https://shop-a.1688.com/").click());
+    expect(choices.open).toBe(true);
+    expect(input("1688 来源链接").value).toBe("https://shop-a.1688.com/");
+    expect(container.textContent).toContain("已选择来源链接，保存后生效");
+    await click("保存修改");
+    await waitFor(() => delayedWrite.input?.draft.sourceUrl === "https://shop-a.1688.com/");
+    await waitFor(async () => (await db.products.get(product.id)).sourceUrl === "https://shop-a.1688.com/");
+    await act(async () => router.navigate("/products"));
+    await act(async () => router.navigate(`/products/edit?product=${product.id}`));
+    await waitFor(() => input("1688 来源链接")?.value === "https://shop-a.1688.com/");
+    expect((await db.products.get(product.id)).sourceProductId).toBe("");
+    expect(await db.supplierOffers.toArray()).toEqual(quotes);
+    expect(await db.profitLines.count()).toBe(0);
+    expect(container.textContent).not.toContain("多个 ERP 链接来源");
+  });
   it("recovers a failed editor read instead of remaining on a loading screen", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     editorSnapshotOverride.error = new Error("隔离读取故障");

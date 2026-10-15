@@ -5,6 +5,8 @@ import AppShell from "../components/AppShell";
 import SelectionSalesTag from "../components/SelectionSalesTag";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import ProductEditorLeaveGuard from "../components/ProductEditorLeaveGuard";
+import ErpCatalogEvidence from "../components/ErpCatalogEvidence";
+import ErpSupplierSourceChoices from "../components/ErpSupplierSourceChoices";
 import { productLibraryReturnPath } from "../components/productLibraryViewState";
 import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
 import { getActiveMemberContext, getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
@@ -12,6 +14,7 @@ import { productPrestorageReadiness } from "../domain/productPrestorage";
 import { normalizeProductTags, productDraftReferences, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
 import { requestErpProductCatalog } from "../data/repositories/erpCatalogRepository";
 import { ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
+import { erpSupplierSourceChoices } from "../domain/erpCatalogPresentation";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSku } from "../domain/identifiers";
@@ -402,6 +405,20 @@ function ProductEditor() {
     }));
   };
 
+  const chooseSupplierSource = (supplierIndex, link) => {
+    setSaved(false);
+    setDraft(current => {
+      const suppliers = editableSuppliers(current), supplier = suppliers[supplierIndex];
+      const supplierId = supplier.supplierId || supplier.id || (supplierIndex === 0 ? "primary" : `supplier-${supplierIndex}`);
+      const fields = { sourceUrl: link.url, sourceUrlKind: link.type, sourceProductId: link.sourceProductId };
+      const edited = Object.fromEntries(Object.keys(fields).map(field => [field, true]));
+      return { ...current, ...(supplierIndex === 0 ? fields : {}),
+        suppliers: suppliers.map((item, index) => index === supplierIndex ? { ...item, ...fields } : item),
+        fieldEdits: { ...current.fieldEdits, ...(supplierIndex === 0 ? edited : {}), suppliers: { ...current.fieldEdits?.suppliers,
+          [supplierId]: { ...current.fieldEdits?.suppliers?.[supplierId], ...edited } } } };
+    });
+  };
+
   const updateSupplierVariant = (supplierIndex, platformSku, field, value) => {
     setSaved(false);
     setDraft((current) => ({
@@ -660,7 +677,7 @@ function ProductEditor() {
                 return <tr key={variant.id ?? index}>
                   <td><input id={`variant-${index}-attribute`} aria-label={`第 ${index + 1} 个规格名称`} aria-describedby={(prefill?.conflicts ?? []).some(item => item.field === "attribute" && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(platformSku)) ? `variant-${index}-attribute-source` : undefined} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" />
                     {(prefill?.conflicts ?? []).filter(item => item.field === "attribute" && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(platformSku)).map(conflict => <div className="attribute-source-choice" id={`variant-${index}-attribute-source`} key={conflict.platformSku}>
-                      <small role="status">{draft.fieldEdits?.variants?.[canonicalPlatformSku(platformSku)]?.attribute ? "已确认属性，保存后生效" : "属性内容不同，请选择来源或填写正确属性"}</small>
+                      <small role="status">{draft.fieldEdits?.variants?.[canonicalPlatformSku(platformSku)]?.attribute ? dirty ? "已确认属性，保存后生效" : "已采用人工确认属性" : "属性内容不同，请选择来源或填写正确属性"}</small>
                       {variant.attribute?.trim() && !(conflict.candidates ?? []).some(candidate => candidate.value === variant.attribute) ? <Button variant="ghost" disabled={saving || advancing} onClick={() => updateVariant(index, "attribute", variant.attribute)}>保留当前属性：{variant.attribute}</Button> : null}
                       {(conflict.candidates ?? []).map(candidate => <Button key={candidate.value} variant="ghost" disabled={saving || advancing} onClick={() => updateVariant(index, "attribute", candidate.value)}>采用{[...new Set((candidate.sources ?? []).map(source => ({ erp: " ERP", ledger: "台账", profit: "定稿", catalog: "档案" })[source.kind] ?? "来源"))].join("/") || "来源"}：{candidate.value}</Button>)}
                     </div>)}
@@ -690,6 +707,8 @@ function ProductEditor() {
             <div className="supplier-card-heading"><strong>{supplier.supplierName || `供应商 ${index + 1}`}</strong><span>{supplier.sourceUrl ? <a className="inline-link" href={supplier.sourceUrl} target="_blank" rel="noreferrer">打开来源<ExternalLink size={14} /></a> : null}{index > 0 ? <button type="button" className="icon-button danger" aria-label={`删除供应商 ${index + 1}`} onClick={() => removeSupplier(index)}><Trash2 size={16} /></button> : null}</span></div>
             <div className="form-field"><label htmlFor={`supplier-${index}-name`}>供应商名称</label><input id={`supplier-${index}-name`} aria-label={index === 0 ? "供应商名称" : `供应商 ${index + 1} 名称`} className="text-input" value={supplier.supplierName ?? ""} onChange={event => index === 0 ? updateDraft("supplierName", event.target.value) : updateSupplier(index, "supplierName", event.target.value)} /></div>
             <div className="form-field"><label htmlFor={`supplier-${index}-url`}>1688 来源链接</label><input id={`supplier-${index}-url`} aria-label={index === 0 ? "1688 来源链接" : `供应商 ${index + 1} 来源链接`} className="text-input" value={supplier.sourceUrl ?? ""} onChange={event => index === 0 ? updateDraft("sourceUrl", event.target.value) : updateSupplier(index, "sourceUrl", event.target.value)} placeholder="可后续补充" /></div>
+            {(() => { const links = erpSupplierSourceChoices(supplier, prefill?.suppliers); return links.length ? <ErpSupplierSourceChoices supplier={supplier} links={links} index={index} disabled={saving || advancing} dirty={dirty}
+              edited={draft.fieldEdits?.suppliers?.[supplier.supplierId || supplier.id || (index === 0 ? "primary" : `supplier-${index}`)]?.sourceUrl} onChoose={link => chooseSupplierSource(index, link)} /> : null; })()}
             <small className="supplier-associated-skus">{(supplier.variants ?? []).map(variant => variant.platformSku).filter(Boolean).join(" · ") || "保存后可补充 SKU 关联"}</small>
             {index > 0 ? <details className="editor-secondary-details"><summary>参考报价与单位换算</summary><div className="supplier-sku-grid supplier-sku-grid-detailed">{draft.variants.map(variant => { const offer = supplier.variants?.find(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(variant.platformSku)) ?? {}; return <div className="supplier-sku-row" key={variant.platformSku || variant.id}><span className="mono">{variant.platformSku || "未填写 SKU"}</span>{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="supplier-quote-field" key={field}><span>{label}</span><input aria-label={`${supplier.supplierName || "供应商"} ${variant.platformSku || "SKU"} ${label}`} className="table-input mono" type="number" min={min} step={step} value={offer[field] ?? (field === "unitsPerPack" ? 1 : "")} onChange={event => updateSupplierVariant(index, variant.platformSku, field, event.target.value)} /></label>)}</div>; })}</div></details> : null}
           </div>)}</div>
@@ -700,9 +719,8 @@ function ProductEditor() {
           {!catalogRequestPeriod ? <p className="editor-inline-note">请选择明确的采购截止月份；没有销量也可以为已确认身份的档案补充资料。</p> : null}
           {!missingCatalogGroups.length ? <p className="editor-inline-note">ERP 基础资料已收齐；参考成本仍按对应仓库商品的有效采购证据单独判定。</p> : null}
           {catalogRequestMessage ? <p className={`editor-inline-note ${catalogRequestFailed ? "field-error" : ""}`} role="status">{catalogRequestMessage}</p> : null}
-          {(prefill.warnings ?? []).map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
-          <ul className="erp-catalog-evidence">{(prefill.sources ?? []).map((item, index) => <li key={index}><strong className="mono">{item.platformSku}</strong><span>{item.platformSkc} · {item.attribute || "平台属性未提供"} · {item.productName || "原始名称未提供"}</span>{item.trusted === false ? <span>身份关系待核对</span> : null}</li>)}</ul>
-          <ul className="erp-catalog-evidence erp-purchase-evidence">{(prefill.purchases ?? []).map((item, index) => { const purchase = item.purchaseCatalog ?? {}; return <li key={index}><strong>{item.supplierName || "供应商未提供"} · {item.source?.purchaseOrderNo || item.source?.recordId || "采购明细"}</strong><span className="mono">仓库 {item.warehouseSku} · {(item.platformSkus ?? []).join("、")}</span><span>采购规格：{purchase.purchaseSpecificationAndModel1688 || "未提供"}</span>{purchase.purchaseProportion1688 ? <span>1688 采购规格比例：{purchase.purchaseProportion1688.replace(/^(\d+)-(\d+)$/, "$1:$2")}</span> : null}{purchase.pictureLink1688 ? <a href={purchase.pictureLink1688} target="_blank" rel="noreferrer">采购图片<ExternalLink size={12} /></a> : null}</li>; })}</ul>
+          {(prefill?.warnings ?? []).map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
+          <ErpCatalogEvidence sources={prefill?.sources} purchases={prefill?.purchases} />
         </details></Panel> : null}
       </div>
 
