@@ -8,6 +8,23 @@ beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemb
 afterEach(async () => { db.close(); await db.delete(); });
 
 describe("ERP catalog draft projection", () => {
+  it('saves and restores all supplier links and SKU/order associations without any chosen common URL', async () => {
+    const suppliers = [
+      { id: 'SUP-A', stableSupplierId: 'ERP-A', supplierName: '同名供货方', catalogSource: 'erp', sourceUrl: '', sourceLinks: [{ url: 'https://detail.1688.com/offer/1234567890.html' }, { url: 'https://shop-a.1688.com/' }], sourceRecords: [{ platformSku: 'SKU-A', recordId: 'ORDER-A' }], variants: [{ platformSku: 'SKU-A' }] },
+      { id: 'SUP-B', stableSupplierId: 'ERP-B', supplierName: '同名供货方', catalogSource: 'erp', sourceUrl: '', sourceLinks: [{ url: 'https://shop-b.1688.com/' }], sourceRecords: [{ platformSku: 'SKU-B', recordId: 'ORDER-B' }], variants: [{ platformSku: 'SKU-B' }] },
+    ];
+    const { product } = await saveProductCatalogRecord({ draft: { name: '多来源保留', platformSkc: 'SKC-LINKS', variants: [{ platformSku: 'SKU-A' }, { platformSku: 'SKU-B' }], suppliers } });
+    const backup = await createWorkspaceBackupPayload();
+    await db.delete(); await db.open(); await restoreWorkspaceBackupPayload(backup);
+    const editor = await getProductEditorSnapshot({ productId: product.id });
+    expect(editor.draft.suppliers.map(item => item.sourceUrl)).toEqual(['', '']);
+    expect(editor.draft.suppliers.map(item => item.stableSupplierId)).toEqual(['ERP-A', 'ERP-B']);
+    expect(editor.draft.suppliers.map(item => item.sourceLinks.length)).toEqual([2, 1]);
+    expect(editor.draft.suppliers.map(item => item.variants.map(variant => variant.platformSku))).toEqual([['SKU-A'], ['SKU-B']]);
+    expect(editor.draft.suppliers.map(item => item.sourceRecords.map(record => record.recordId))).toEqual([['ORDER-A'], ['ORDER-B']]);
+    expect(await db.supplierOffers.count()).toBe(0);
+    expect(await db.profitLines.count()).toBe(0);
+  });
   it("prefills all SKC SKUs from ERP without ledger data, persists and reopens without quoting aggregate cost", async () => {
     const source = erpProductCatalogFixture();
     await db.erpCostRows.add(source);

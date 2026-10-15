@@ -1,5 +1,5 @@
 import { canonicalPlatformSkc, canonicalPlatformSku, canonicalWarehouseSku } from "./identifiers";
-import { erpSupplierLink } from "./erpProductCatalog";
+import { erpSupplierLink, matchingErpCatalogSuppliers } from "./erpProductCatalog";
 
 const text = value => String(value ?? "").trim();
 const identifier = (normalize, value) => text(value) ? normalize(value) : "";
@@ -44,11 +44,9 @@ export function groupErpCatalogPurchases(rows = []) {
   return [...groups.values()];
 }
 
-export function erpSupplierSourceChoices(supplier, candidates = []) {
-  const matches = candidates.filter(item => supplier.stableSupplierId
-    ? item.stableSupplierId === supplier.stableSupplierId
-    : text(supplier.supplierName) ? text(item.supplierName) === text(supplier.supplierName)
-      : supplier.sourceUrl && [item.sourceUrl, ...(item.sourceLinks ?? []).map(link => link.url)].includes(supplier.sourceUrl));
+export function erpSupplierLinks(supplier, candidates = []) {
+  const identified = matchingErpCatalogSuppliers(supplier, candidates);
+  const matches = [supplier, ...(identified.length === 1 ? identified : [])];
   const links = new Map();
   for (const match of matches) for (const item of [{ url: match.sourceUrl }, ...(match.sourceLinks ?? [])]) {
     const link = erpSupplierLink(item.url);

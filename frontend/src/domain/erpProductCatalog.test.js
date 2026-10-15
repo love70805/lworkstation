@@ -3,6 +3,21 @@ import { buildErpProductCatalogIndex, erpCatalogField, erpCatalogSuppliers, erpP
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 describe("ERP catalog evidence projection", () => {
+  it('retains additional suppliers and all links/records without replacing manual fields or quotes', () => {
+    const sources = [
+      { stableSupplierId: '1', supplierName: 'ERP甲', sourceUrl: 'https://detail.1688.com/offer/1234567890.html', sourceLinks: [{ url: 'https://shop-a.1688.com/' }], sourceRecords: [{ recordId: 'NEW-A' }] },
+      { stableSupplierId: '2', supplierName: '乙', sourceUrl: 'https://detail.1688.com/offer/2234567890.html', sourceLinks: [], sourceRecords: [{ recordId: 'NEW-B' }] },
+    ];
+    const rows = sources.map((supplier, index) => ({ platformSku: `SKU-${index}`, canonicalPlatformSku: `SKU-${index}`, platformSkc: 'S', erpCatalogSuppliers: [supplier] }));
+    const draft = { platformSkc: 'S', suppliers: [{ id: 'MANUAL', stableSupplierId: '1', supplierName: '人工甲', sourceUrl: 'https://old-a.1688.com/', sourceLinks: [{ url: 'https://old-a.1688.com/' }], sourceRecords: [{ recordId: 'OLD-A' }], variants: [{ platformSku: 'SKU-0', purchaseUnitPrice: 7 }] }], fieldEdits: { suppliers: { MANUAL: { supplierName: true, sourceUrl: true } } } };
+    const result = prefillErpProductDraft({ draft, rows });
+    expect(result.draft.suppliers).toHaveLength(2);
+    expect(result.draft.suppliers[0]).toMatchObject({ supplierName: '人工甲', sourceUrl: 'https://old-a.1688.com/', variants: [{ platformSku: 'SKU-0', purchaseUnitPrice: 7 }] });
+    expect(result.draft.suppliers[0].sourceLinks).toHaveLength(3);
+    expect(result.draft.suppliers[0].sourceRecords.map(item => item.recordId)).toEqual(['OLD-A', 'NEW-A']);
+    expect(result.draft.suppliers[1].variants.map(item => item.platformSku)).toEqual(['SKU-1']);
+    expect(result.prefill.warnings).toEqual([]);
+  });
   it("keeps the explicitly selected alternate supplier link and an empty store product ID", () => {
     const links = [{ url: "https://detail.1688.com/offer/1234567890.html" }, { url: "https://shop-a.1688.com/" }];
     const rows = [{ platformSku: "A", canonicalPlatformSku: "A", platformSkc: "S", attributeConflict: true, erpCatalogSuppliers: [{ stableSupplierId: "1", supplierName: "甲", sourceUrl: links[0].url, sourceProductId: "123", sourceLinks: links, sourceRecords: [] }] }];

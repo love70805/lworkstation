@@ -16,3 +16,8 @@ it('requires every retained variant and honors explicit source resolution', () =
   expect(result.missing.filter(item => item.platformSku === 'B').map(item => item.label)).toEqual(['属性/规格', '售价', '参考成本']);
   expect(productPrestorageReadiness({ draft: { ...draft, fieldEdits: { name: true, variants: { A: { attribute: true } } } }, historicalRows, prefill: { needsTitleChoice: true, conflicts: [{ platformSku: 'A', field: 'attribute' }] } }).ready).toBe(true);
 });
+it('accepts all retained supplier links without choosing one common URL', () => {
+  const suppliers = [{ supplierName: '甲', sourceUrl: '', sourceLinks: [{ url: 'https://detail.1688.com/offer/1234567890.html' }, { url: 'https://shop-a.1688.com/' }] }, { supplierName: '乙', sourceUrl: '', sourceLinks: [{ url: 'https://shop-b.1688.com/' }] }];
+  expect(productPrestorageReadiness({ draft: { ...draft, sourceUrl: '', suppliers }, historicalRows }).ready).toBe(true);
+  expect(productPrestorageReadiness({ draft: { ...draft, sourceUrl: '', suppliers: [{ sourceLinks: [{ url: 'javascript:alert(1)' }] }] }, historicalRows }).labels).toContain('供应商来源链接');
+});

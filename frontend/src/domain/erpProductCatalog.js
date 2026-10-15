@@ -230,6 +230,45 @@ function catalogDisplaySources(entries) {
   return sources;
 }
 
+export const erpSupplierStableIdentity = supplier => text(supplier.stableSupplierId)
+  || /^ERP-ERP-SUPPLIER:(.+)$/.exec(text(supplier.supplierId || supplier.id))?.[1] || "";
+
+export function matchingErpCatalogSuppliers(supplier, candidates = []) {
+  const stable = erpSupplierStableIdentity(supplier);
+  if (stable) return candidates.filter(item => erpSupplierStableIdentity(item) === stable);
+  const id = supplier.supplierId || supplier.id;
+  const byId = id ? candidates.filter(item => (item.supplierId || item.id) === id) : [];
+  if (byId.length) return byId;
+  if (supplier.sourceUrl) return candidates.filter(item => [item.sourceUrl, ...(item.sourceLinks ?? []).map(link => link.url)].includes(supplier.sourceUrl));
+  return text(supplier.supplierName) ? candidates.filter(item => text(item.supplierName) === text(supplier.supplierName)) : [];
+}
+
+const supplierRecordKey = source => JSON.stringify(["platformSku", "platformSkc", "warehouseSku", "batchId", "evidenceRef", "recordId", "purchaseOrderNo", "purchaseOrderId", "lineNumber", "capturedAt"].map(field => text(source[field])));
+
+export function mergeErpCatalogSuppliers(existing, candidates, fieldEdits = {}) {
+  const used = new Set();
+  const merged = existing.map((supplier, index) => {
+    const matches = matchingErpCatalogSuppliers(supplier, candidates);
+    if (matches.length !== 1) return { ...supplier };
+    const source = matches[0]; used.add(source);
+    const edited = { ...fieldEdits.suppliers?.[supplier.id], ...fieldEdits.suppliers?.[supplier.supplierId] };
+    if (index === 0) for (const field of ['supplierName', 'sourceUrl', 'sourceProductId']) if (fieldEdits[field]) edited[field] = true;
+    const link = erpSupplierLink(supplier.sourceUrl || source.sourceUrl);
+    const sourceLinks = [...new Map([source.sourceUrl, supplier.sourceUrl, ...(source.sourceLinks ?? []).map(item => item.url), ...(supplier.sourceLinks ?? []).map(item => item.url)]
+      .map(erpSupplierLink).filter(Boolean).map(item => [item.url, item])).values()];
+    const sourceRecords = [...new Map([...(supplier.sourceRecords ?? []), ...(source.sourceRecords ?? [])].map(item => [supplierRecordKey(item), item])).values()];
+    const variants = [...(supplier.variants ?? [])];
+    for (const variant of source.variants ?? []) if (!variants.some(item => text(item.platformSku) && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(variant.platformSku))) variants.push(variant);
+    return { ...source, ...supplier, sourceLinks, sourceRecords, variants,
+      stableSupplierId: supplier.stableSupplierId || source.stableSupplierId,
+      supplierName: edited.supplierName ? supplier.supplierName : supplier.supplierName || source.supplierName,
+      sourceUrl: edited.sourceUrl ? supplier.sourceUrl : supplier.sourceUrl || source.sourceUrl,
+      sourceProductId: edited.sourceProductId ? supplier.sourceProductId : supplier.sourceProductId || link?.sourceProductId || "",
+      sourceUrlKind: supplier.sourceUrlKind || link?.type || null };
+  });
+  return [...merged, ...candidates.filter(item => !used.has(item))];
+}
+
 export function prefillErpProductDraft({ draft, rows, platformSku = "", platformSkc = "", productId = null, ownership = [] }) {
   const anchor = platformSku ? rows.find(row => row.canonicalPlatformSku === canonicalPlatformSku(platformSku)) : null;
   const warnings = [];
@@ -311,21 +350,9 @@ export function prefillErpProductDraft({ draft, rows, platformSku = "", platform
     // current manual/excluded state is available; do not repeat a stale warning.
   });
   const erpSuppliers = erpCatalogSuppliers(activeRows);
-  let suppliers = draft.suppliers?.length ? draft.suppliers.map(item => ({ ...item })) : erpSuppliers;
-  // Existing manual profiles remain authoritative. Fill missing fields only
-  // from a uniquely matching purchase pair; additional sources stay reviewable.
-  if (draft.suppliers?.length) suppliers = suppliers.map(supplier => {
-    const matches = erpSuppliers.filter(item => supplier.sourceUrl ? [item.sourceUrl, ...(item.sourceLinks ?? []).map(link => link.url)].includes(supplier.sourceUrl) : supplier.supplierName && supplier.supplierName === item.supplierName);
-    if (matches.length !== 1) {
-      return supplier;
-    }
-    const source = matches[0];
-    const edited = draft.fieldEdits?.suppliers?.[supplier.supplierId || supplier.id] ?? {};
-    const link = erpSupplierLink(supplier.sourceUrl || source.sourceUrl);
-    return { ...source, ...supplier, supplierName: edited.supplierName ? supplier.supplierName : supplier.supplierName || source.supplierName, sourceUrl: edited.sourceUrl ? supplier.sourceUrl : supplier.sourceUrl || source.sourceUrl,
-      sourceProductId: edited.sourceProductId ? supplier.sourceProductId : supplier.sourceProductId || link?.sourceProductId || "",
-      sourceUrlKind: supplier.sourceUrlKind || link?.type || null };
-  });
+  // Multiple suppliers are normal. Merge a uniquely identified profile, keep
+  // manual fields/quotes, and retain every other verified ERP supplier.
+  const suppliers = mergeErpCatalogSuppliers(draft.suppliers ?? [], erpSuppliers, draft.fieldEdits);
   const firstSupplier = suppliers[0] ?? {};
   const next = {
     ...draft,
