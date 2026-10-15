@@ -517,6 +517,9 @@
 }
 
 /* Reserve space for the actual cost review on windowed desktops. */
+.cost-resolution-prices { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted); }
+.cost-resolution-prices p { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 0; }
+.cost-resolution-prices p span { color: var(--text-muted); }
 .cost-page .match-stat-grid { gap: 10px; margin-bottom: 16px; }
 .cost-page .match-stat { min-height: 126px; padding: 14px; box-shadow: none; }
 .cost-page .match-stat > strong { margin-top: 8px; font-size: 25px; line-height: 32px; }

@@ -55,6 +55,9 @@
     const COST_WARNING_LABELS = Object.freeze({
         unit_price_zero: '采购单价为 0',
         unit_price_one: '采购单价为 1',
+        recent_price_shift_high: '近期采购价整体明显高于历史区间',
+        recent_price_shift_low: '近期采购价整体明显低于历史区间',
+        extreme_price_deviation: '单次采购价极端偏离历史中位价',
     });
 
     function numericPrice(value) {
@@ -92,6 +95,31 @@
             reasons: [...new Set(warningRecords.flatMap((record) => record.reasons))],
             records: warningRecords,
         };
+    }
+
+    // Same thresholds as erpCostResolution.detectPurchaseCostAnomalies. The
+    // parity regression covers history, month cutoff and latest-three selection.
+    function annotateHistoricalWarnings(selected, history) {
+        const median = values => {
+            const sorted = [...values].sort((a, b) => a - b);
+            const middle = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+        };
+        const positive = history.filter(record => Number(record.unitPrice) > 0).map(record => Number(record.unitPrice));
+        const baseline = positive.length ? median(positive) : null;
+        const enabled = positive.length >= 6 && baseline > 0;
+        const tolerance = enabled ? Math.max(baseline * 0.3, 0.5, 3 * median(positive.map(price => Math.abs(price - baseline)))) : null;
+        const states = annotateCostWarnings(selected).map(record => ({ record,
+            side: enabled && Math.abs(Number(record.unitPrice) - baseline) > tolerance ? Number(record.unitPrice) > baseline ? 'high' : 'low' : null }));
+        const high = states.filter(state => state.side === 'high').length;
+        const low = states.filter(state => state.side === 'low').length;
+        return states.map(({ record, side }) => {
+            const price = Number(record.unitPrice), reasons = [...record.warningReasons];
+            if (enabled && Math.abs(price - baseline) >= 1 && (price >= baseline * 2 || price <= baseline * 0.5)) reasons.push('extreme_price_deviation');
+            if (side === 'high' && high >= 2) reasons.push('recent_price_shift_high');
+            if (side === 'low' && low >= 2) reasons.push('recent_price_shift_low');
+            return { ...record, warningReasons: [...new Set(reasons)] };
+        });
     }
 
     function costWarningLabel(reason) {
@@ -459,17 +487,20 @@
         return (results || []).map(result => {
             const warehouse = warehouses.get(canonical(result.warehouseSku));
             const incomplete = warehouse?.evidenceComplete === false;
-            const selected = period && !incomplete ? (warehouse?.purchaseRecords || []).filter(record => {
+            const history = period && !incomplete ? (warehouse?.purchaseRecords || []).filter(record => {
                 const date = purchaseDateInfo(record.purchaseDate);
                 const cancelled = cancelledPurchase(record.statusFields);
-                return record.eligible !== false && !(record.exclusionReasons || []).length && !cancelled
+                const exclusions = (record.exclusionReasons || []).filter(reason => !['on_or_after_ledger_period', 'after_ledger_period'].includes(reason));
+                const onlyOldCutoff = record.exclusionReasons?.length > 0 && exclusions.length === 0;
+                return (record.eligible !== false || onlyOldCutoff) && !exclusions.length && !cancelled
                     && date && date.period <= period && Number(record.quantity) > 0
                     && Number.isFinite(Number(record.quantity)) && record.unitPrice != null
                     && Number.isFinite(Number(record.unitPrice)) && Number(record.unitPrice) >= 0
                     && exactDecimal(record.quantity) && exactDecimal(record.unitPrice);
-            }).sort((a, b) => purchaseDateInfo(b.purchaseDate).timestamp - purchaseDateInfo(a.purchaseDate).timestamp
+            }) : [];
+            const selected = annotateHistoricalWarnings([...history].sort((a, b) => purchaseDateInfo(b.purchaseDate).timestamp - purchaseDateInfo(a.purchaseDate).timestamp
                 || text(b.purchaseOrderId).localeCompare(text(a.purchaseOrderId), 'zh-CN', { numeric: true })
-                || text(b.recordId).localeCompare(text(a.recordId), 'zh-CN', { numeric: true })).slice(0, 3) : [];
+                || text(b.recordId).localeCompare(text(a.recordId), 'zh-CN', { numeric: true })).slice(0, 3), history);
             let qty = { n: 0n, s: 0 }, amount = { n: 0n, s: 0 };
             selected.forEach(record => {
                 const q = exactDecimal(record.quantity), p = exactDecimal(record.unitPrice);
@@ -486,7 +517,7 @@
                 supplierName: record.supplierName, supplier1688Url: record.supplier1688Url,
                 supplier1688Links: normalizeSupplier1688Links(record.supplier1688Links),
             }));
-            const costWarnings = summarizeCostWarnings(annotateCostWarnings(selected));
+            const costWarnings = summarizeCostWarnings(selected);
             const preview = { ...result, ledgerPeriod: period, previewStatus: !period ? 'period_unknown' : !warehouse ? 'evidence_missing' : incomplete ? 'evidence_incomplete' : !selected.length ? 'no_purchase' : 'ready',
                 calcTimes: selected.length, selectedRecordIds: selected.map(record => record.recordId), details,
                 unitCost, proposedUnitCost: unitCost, totalQty: qty.n ? decimalString(qty) : null,

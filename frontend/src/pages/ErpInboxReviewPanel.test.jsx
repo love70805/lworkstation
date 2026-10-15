@@ -51,7 +51,7 @@ it('separates a covered historical anomaly from other missing costs without muta
 });
 it('permits navigation and evidence browsing while a finalized ledger stays read-only',async()=>{
  await act(async()=>root.render(<Harness readOnly/>));await act(async()=>button('查看第 2 批待处理 SKU').click());
- expect(button('人工更正')).toBeUndefined();expect(button('载入采购证据核对').disabled).toBe(true);expect(button('撤回本次采用').disabled).toBe(true);
+ expect(button('人工更正')).toBeUndefined();expect(button('打开本批核对表').disabled).toBe(true);expect(button('撤回本次采用').disabled).toBe(true);
  await act(async()=>button('返回全部 6 批次').click());expect(container.querySelectorAll('.erp-review-batch')).toHaveLength(6);
 });
 it('explains missing evidence without inventing a source batch and prevents amount correction for ambiguous identity',async()=>{

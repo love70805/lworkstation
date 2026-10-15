@@ -93,7 +93,7 @@ function matchesForReview(inbox, request, ledger, scope, wantedSkus) {
     }
     const expectedSkus = [...scope].filter(([sku]) => wantedSkus.has(sku)).map(([, row]) => row);
     const costRows = result.rows.filter(row => wantedSkus.has(skuOf(row)) && row.ledgerScopeRole === "expected");
-    const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus, costRows });
+    const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus, costRows, resolutions: inbox.costResolutions ?? [] });
     return { matches: new Map(reconciliation.matches.map(row => [row.canonicalPlatformSku, row])), boundary: erpBatchAdoptionBoundary(result.batch), error: null };
   } catch (error) {
     return { matches: new Map(), boundary: null, error: error.message || "采购证据无法读取。" };
@@ -101,7 +101,7 @@ function matchesForReview(inbox, request, ledger, scope, wantedSkus) {
 }
 
 function anomalyReason(match) {
-  const reasons = unique((match?.costDecision?.anomalies ?? match?.anomalies ?? []).flatMap(record => record.reasons ?? []));
+  const reasons = unique((match?.costDecision?.anomalies ?? match?.anomalies ?? []).filter(record => record.status !== 'resolved').flatMap(record => record.reasons ?? []));
   const labels = {
     unit_price_zero: "原始采购单价为 0 元，须核对采购价格",
     unit_price_one: "原始采购单价为 1 元，须确认是否为真实采购价格",

@@ -276,6 +276,13 @@
 }
 
 .erpa-result-row { cursor: pointer; }
+.erpa-result-scope { margin: 0; padding: 6px 18px 10px; color: var(--erpa-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.erpa-evidence-button { display: block; margin-top: 6px; padding: 4px 0; border: 0; background: transparent; color: var(--erpa-primary); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.erpa-evidence-button:focus-visible { outline: 3px solid var(--erpa-focus); outline-offset: 2px; }
+.erpa-evidence-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.erpa-evidence-list article { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--erpa-border); border-radius: 8px; background: var(--erpa-surface); overflow-wrap: anywhere; }
+.erpa-evidence-list article span, .erpa-evidence-list article small { color: var(--erpa-muted); }
+.erpa-evidence-list article p { margin: 0; }
 .erpa-result-row:hover td { background: var(--erpa-hover); }
 .erpa-result-row.erpa-expanded td { background: var(--erpa-primary-soft); }
 .erpa-result-row.erpa-result-anomaly td { background: var(--erpa-warning-bg); }

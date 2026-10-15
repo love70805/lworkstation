@@ -13,12 +13,12 @@ import { sourceRevision, selectionFactsRevision } from './db/derivedCache';
 import { calculateFormalLedgerRows } from '../domain/ledgerProfit';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
-async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1'}={}){
+async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1',recordsB=null}={}){
  const ledger=await createOrGetMonthlyLedger({period:'2026-08'});
  const expectedSkus=['A','B'].map(platformSku=>({platformSku,platformSkc:`SKC-${platformSku}`}));
  if(!await db.salesRows.count())await db.salesRows.bulkAdd(expectedSkus.map(row=>({...row,workspaceId:ledger.workspaceId,ledgerId:ledger.id,store:'甲',quantity:2,amount:100,importedAt:'2026-08-31T00:00:00Z'})));
  const request=buildErpCostRequest({id:`REQ-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,ledgerPeriod:ledger.period,platformSkcs:expectedSkus.map(row=>row.platformSkc),expectedSkus,requestedAt:requestAt,requestedBy:'finance'});await saveErpCostRequest(request);
- const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
+ const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:i===1&&recordsB?recordsB:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
 it('preserves the receipt but never adopts a batch bound to an earlier ledger import', async () => {
@@ -327,4 +327,101 @@ it('keeps a voided newer source as a tombstone so old ERP evidence cannot revive
  const received=await receiveErpCostInboxEnvelope({envelope:older.envelope});
  expect(received.adoption.summary).toMatchObject({adoptedCount:0,supersededCount:2});
  expect(await getLatestLedgerCosts(older.ledger.id)).toEqual([]);
+});
+
+const confirmedPrice = (recordId, extra = {}) => ({ warehouseSku: 'WH-B', recordId, action: 'confirm_true_price', originalUnitPrice: 1, resolvedUnitPrice: 1, reason: '已核对供应商账单', resolvedBy: 'finance', resolvedAt: '2026-09-03T00:00:00Z', ...extra });
+const oneYuanRecords = [1, 2, 3].map(index => ({ recordId: `ONE-${index}`, purchaseDate: `2026-08-0${index}`, quantity: index, unitPrice: 1 }));
+
+it('persists each confirmation across restarts and adopts the final SKU without a separate retry or manual override', async () => {
+  const { ledger, envelope } = await seed({ prices: [5, 1], recordsB: oneYuanRecords });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope });
+  const original = JSON.stringify((await db.erpCostInbox.get(receipt.id)).envelope);
+  const first = confirmedPrice('ONE-3');
+  await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [first] });
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toHaveLength(1);
+  const auditCount = await db.auditEvents.count();
+  db.close(); await db.open();
+  await recoverErpCostInboxAdoptions({ workspaceId: ledger.workspaceId });
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toHaveLength(1);
+  expect(await db.auditEvents.count()).toBe(auditCount);
+  await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('ONE-2')] });
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toHaveLength(2);
+  const result = await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('ONE-1')] });
+  expect(result).toMatchObject({ status: 'applied', adoption: { summary: { adoptedCount: 2, remainingCount: 0 } } });
+  const stored = await db.erpCostInbox.get(receipt.id);
+  expect(stored.costResolutions).toHaveLength(3);
+  expect(JSON.stringify(stored.envelope)).toBe(original);
+  const snapshot = await getLedgerSnapshot(ledger.id);
+  expect(snapshot.costs.find(row => row.platformSku === 'B')).toMatchObject({ unitCost: 1, resolutionStatus: 'resolved', resolvedAnomalyCount: 3 });
+  expect(snapshot.ledger.status).toBe('ready');
+  expect(snapshot.approvals).toEqual([]);
+  expect(JSON.stringify(await createWorkspaceBackupPayload())).toContain('costResolutions');
+});
+
+it('rolls back the final confirmation with a failed publication, then retries using earlier durable confirmations', async () => {
+  const { envelope } = await seed({ prices: [5, 1], recordsB: oneYuanRecords });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope });
+  await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('ONE-3')] });
+  const add = vi.spyOn(db.erpCostRows, 'bulkAdd').mockRejectedValueOnce(new Error('确认事务隔离失败'));
+  await expect(processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('ONE-2'), confirmedPrice('ONE-1')] })).rejects.toThrow('确认事务隔离失败');
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions.map(row => row.recordId)).toEqual(['ONE-3']);
+  expect(await db.erpCostRows.count()).toBe(1);
+  add.mockRestore();
+  expect((await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('ONE-2'), confirmedPrice('ONE-1')] })).status).toBe('applied');
+});
+
+it.each([0, 0.0000001])('keeps store-scoped manual priority at %s while adopting confirmed ERP prices and supports revocation', async unitCost => {
+  const { ledger, envelope } = await seed({ prices: [5, 1] });
+  await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: '乙', platformSku: 'B', platformSkc: 'SKC-B', quantity: 1, amount: 10 });
+  const manual = await saveManualCostOverride({ ledgerId: ledger.id, store: '甲', platformSku: 'B', unitCost, reason: '当前店铺更正' });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope });
+  await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B')] });
+  let snapshot = await getLedgerSnapshot(ledger.id);
+  const products = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
+  expect(products.find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost, costSource: 'manual_override' });
+  expect(products.find(row => row.platformSku === 'B' && row.store === '乙')).toMatchObject({ unitCost: 1, costSource: 'erp' });
+  await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: manual.id });
+  snapshot = await getLedgerSnapshot(ledger.id);
+  expect(snapshot.costs.find(row => row.platformSku === 'B').unitCost).toBe(1);
+});
+
+it.each(['finalized', 'locked'])('rejects confirmation on a %s ledger and preserves its report', async status => {
+  const { ledger, envelope } = await seed({ prices: [5, 1] });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope });
+  await db.ledgers.update(ledger.id, { status, profitSummary: { sentinel: 'frozen' } });
+  await expect(processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B')] })).rejects.toThrow('不能确认采购价格');
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toBeUndefined();
+  expect((await db.ledgers.get(ledger.id))).toMatchObject({ status, profitSummary: { sentinel: 'frozen' } });
+  expect(await db.erpCostRows.count()).toBe(1);
+});
+
+it('rejects confirmations outside the original warehouse, purchase record or original price', async () => {
+  const { envelope } = await seed({ prices: [5, 1] });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope });
+  for (const extra of [{ warehouseSku: 'WH-OTHER' }, { recordId: 'OTHER' }, { originalUnitPrice: 2 }, { resolvedUnitPrice: 2 }]) {
+    await expect(processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B', extra)] })).rejects.toThrow('原始记录不一致');
+  }
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toBeUndefined();
+  expect(await db.erpCostRows.count()).toBe(1);
+});
+
+it('does not overwrite a newer ERP source when an older pending price is confirmed', async () => {
+  const older = await seed({ prices: [5, 1], id: 'confirm-old' });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope: older.envelope });
+  const newer = await seed({ prices: [7, 8], id: 'confirm-new', requestAt: '2026-09-02T00:00:00Z' });
+  await receiveErpCostInboxEnvelope({ envelope: newer.envelope });
+  const result = await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B')] });
+  expect(result.adoption.items.find(row => row.platformSku === 'B').state).toBe('superseded');
+  expect((await getLatestLedgerCosts(older.ledger.id)).map(row => row.unitCost)).toEqual([7, 8]);
+});
+
+it.each([true, false])('recovers already-confirmed prices from an older draft (loaded=%s) and adopts them automatically', async loaded => {
+  const { ledger, envelope } = await seed({ prices: [5, 1] });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope });
+  const values = new Map([[costDraftKey(ledger.id), JSON.stringify({ sourceText: JSON.stringify(envelope), loadedInboxId: loaded ? receipt.id : null, resolutions: [confirmedPrice('R-B')], updatedAt: 0 })]]);
+  const storage = { get length() { return values.size; }, key: index => [...values.keys()][index], getItem: key => values.get(key) ?? null, removeItem: key => values.delete(key) };
+  expect(await recoverCompleteErpCostDrafts({ workspaceId: ledger.workspaceId, storage })).toEqual({ recovered: 1, failures: [] });
+  expect(values.size).toBe(0);
+  expect((await db.erpCostInbox.get(receipt.id))).toMatchObject({ status: 'applied', costResolutions: [expect.objectContaining({ recordId: 'R-B' })] });
+  expect((await getLatestLedgerCosts(ledger.id)).find(row => row.platformSku === 'B').unitCost).toBe(1);
 });
