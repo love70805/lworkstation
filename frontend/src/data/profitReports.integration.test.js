@@ -38,7 +38,7 @@ it('replaces a legacy shared-order source without changing source identities and
  const preview=await previewMonthlySupplement(input);
  expect(preview.candidate).toMatchObject({adoptedQuantityExact:'25',conflicts:[],rows:[{order1688:purchase},{order1688:purchase},{order1688:purchase}]});
  const corrected=await adoptMonthlySupplement(input,preview);
- expect(corrected).toMatchObject({revision:2,replacesBatchId:legacy.id,rowCount:3,adoptedQuantityExact:'25',parserVersion:'monthly-supplement@4'});
+ expect(corrected).toMatchObject({revision:2,replacesBatchId:legacy.id,rowCount:3,adoptedQuantityExact:'25',parserVersion:'monthly-supplement@5-explicit-xlsx-owner'});
  const oldRows=await db.monthlySupplementRows.where('batchId').equals(legacy.id).toArray();
  expect(oldRows.every(row=>row.order1688==='')).toBe(true);
  expect((await db.monthlySupplementBatches.get(legacy.id)).status).toBe('superseded');
@@ -65,7 +65,7 @@ it('persists skipped CSV record locations outside calculation rows across reopen
  const parsed=inspectSupplementSource(source,{kind:'dispatch',ownerMarker:'人员'});
  const input={...scope,kind:'dispatch',mode:'files',rows:parsed.rows,sources:[parsed.source]};
  const preview=await previewMonthlySupplement(input),batch=await adoptMonthlySupplement(input,preview);
- expect(batch).toMatchObject({parserVersion:'monthly-supplement@4',rowCount:2,adoptedQuantityExact:'2',sources:[{ignored:[{reason:'missing_quantity',sourceRow:2,recordRow:2,businessId:'EMPTY'}]}]});
+ expect(batch).toMatchObject({parserVersion:'monthly-supplement@5-explicit-xlsx-owner',rowCount:2,adoptedQuantityExact:'2',sources:[{ignored:[{reason:'missing_quantity',sourceRow:2,recordRow:2,businessId:'EMPTY'}]}]});
  expect(await db.monthlySupplementRows.where('batchId').equals(batch.id).toArray()).toMatchObject([{businessId:'VALID',quantityExact:'2',sourceRow:4,recordRow:3},{businessId:'ZERO',quantityExact:'0',sourceRow:5,recordRow:4}]);
  db.close();await db.open();expect((await db.monthlySupplementBatches.get(batch.id)).sources).toEqual(batch.sources);
  const backup=await createWorkspaceBackupPayload();await restoreWorkspaceBackupPayload(backup);
@@ -262,4 +262,26 @@ it('persists equal allocated rows and requires a signed preview after cross-file
  expect(batch.signedAmountExact).toBe('2.697');
  expect(await db.monthlySupplementRows.where('batchId').equals(batch.id).count()).toBe(3);
  expect((await adoptMonthlySupplement(reviewed,preview)).id).toBe(batch.id);
+});
+
+it('retains legacy XLSX adopted rows until explicit replacement, persists new owner exclusions and text quantities through backup',async()=>{
+ const source={fileHash:'XLSX-OWNER',fileName:'owner.xlsx',sheetName:'来源',sourceFormat:'xlsx',headerRow:1,cells:[['登记人','店铺','SKC','订单号','数量'],['人员','甲','A','O1',100],['','','B','O2','23'],['','','C','O3',28]],merges:[{s:{r:1,c:0},e:{r:2,c:0}}]};
+ const parsed=inspectSupplementSource(source,{kind:'dispatch',ownerMarker:'人员'});
+ const input={...scope,kind:'dispatch',mode:'files',rows:parsed.rows,sources:[parsed.source]};
+ const legacyRows=[...parsed.rows,{...parsed.rows[0],sourceRow:4,recordRow:4,businessId:'O3',platformSkc:'C',quantityExact:'28',inheritedFrom:2,mergedFrom:{},quantityFromText:undefined}];
+ const prior=await adopt('dispatch',{mode:'files',rows:legacyRows,sources:[]});
+ await db.monthlySupplementBatches.update(prior.id,{parserVersion:'monthly-supplement@4'});
+ const oldRows=await db.monthlySupplementRows.where('batchId').equals(prior.id).toArray();
+ const preview=await previewMonthlySupplement(input);expect(preview.candidate.adoptedQuantityExact).toBe('123');
+ expect((await db.monthlySupplementBatches.get(prior.id)).adoptedQuantityExact).toBe('151');
+ expect(await db.monthlySupplementRows.where('batchId').equals(prior.id).toArray()).toEqual(oldRows);
+ const corrected=await adoptMonthlySupplement(input,preview);expect(corrected.replacesBatchId).toBe(prior.id);expect(corrected.revision).toBe(2);
+ expect(corrected.sources[0].ignored).toContainEqual(expect.objectContaining({reason:'unassigned_owner',sourceRow:4,quantityExact:'28'}));
+ const saved=await report();expect(saved.totalsExact.dispatchQuantityExact).toBe('123');
+ await expect(previewMonthlySupplement(input)).rejects.toThrow('重开');
+ const backup=await createWorkspaceBackupPayload();await restoreWorkspaceBackupPayload(backup);
+ expect((await db.monthlySupplementBatches.get(prior.id)).adoptedQuantityExact).toBe('151');
+ expect((await db.monthlySupplementBatches.get(corrected.id)).sources).toEqual(corrected.sources);
+ expect((await db.monthlySupplementRows.where('batchId').equals(corrected.id).toArray()).find(row=>row.businessId==='O2').quantityFromText).toBe(true);
+ expect((await readSavedProfitReport(saved.id)).fileBase64).toBe(saved.fileBase64);
 });

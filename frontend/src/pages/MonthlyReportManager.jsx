@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
 import { readMonthlyReportState, readSavedProfitReport, previewMonthlySupplement, adoptMonthlySupplement, previewProfitReport, saveProfitReport } from "../data/repositories/profitReportRepository";
-import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate } from "../domain/monthlySupplements";
+import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate, legacyUnassignedDispatchRows } from "../domain/monthlySupplements";
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
 import { downloadReportFile } from "../lib/profitReportWorkbook";
 import { displayMoney, exactSum } from "../domain/profitReports";
@@ -15,7 +15,7 @@ function missingSourceFields(source,kind) {
 }
 function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}) {
   const input={kind,ledgerId:state.ledger.id,workspaceId:state.ledger.workspaceId,period:state.ledger.period,mode,rows:[],sources:[],reviewedCrossFileConflicts:reviewed};
-  const stats={addedRows:[],retainedCount:0,skipped:0,duplicates:0,sourceCount:0};
+  const stats={addedRows:[],retainedCount:0,skipped:0,duplicates:0,sourceCount:0,unassigned:[]};
   try {
     if(mode==='manual') {
       if(kind==='dispatch') {if(!String(quantity).trim())return {ready:false,stats};input.adoptedQuantityExact=quantity;}
@@ -36,6 +36,7 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMo
         stats.sourceCount++;
         const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll?'':selection,includeAll,matchMode,store:source.store,stores:state.stores});
         stats.skipped+=parsed.ignored.filter(row=>row.reason==='missing_quantity').length;
+        stats.unassigned.push(...parsed.ignored.filter(row=>row.reason==='unassigned_owner').map(row=>({...row,sourceName:source.fileName})));
         if(parsed.errors.length)throw new Error(`${source.fileName} / ${source.sheetName}：${parsed.errors.length} 条异常，${parsed.errors.slice(0,10).map(supplementRowLabel).join('；')}${parsed.errors.length>10?'等':''}。${parsed.errors[0].message}`);
         const removed=[];
         for(const row of parsed.rows) {
@@ -44,7 +45,7 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMo
           if(seen.has(key)){stats.duplicates++;continue;}
           seen.add(key);input.rows.push(row);stats.addedRows.push(row);
         }
-        if(removed.length||stats.addedRows.some(row=>row.fileHash===source.fileHash&&row.sourceSheet===source.sheetName)||parsed.ignored.some(row=>row.reason==='missing_quantity'))input.sources.push({...parsed.source,excludedRows:removed});
+        if(removed.length||stats.addedRows.some(row=>row.fileHash===source.fileHash&&row.sourceSheet===source.sheetName)||parsed.ignored.some(row=>['missing_quantity','unassigned_owner'].includes(row.reason)))input.sources.push({...parsed.source,excludedRows:removed});
       }
       if(kind==='deduction')for(const store of zeroStores){
         if(input.rows.some(row=>row.store===store))throw new Error(`${store} 已有来源金额，不能同时标记无扣款。`);
@@ -110,6 +111,7 @@ export function SupplementEditor({ state, kind, onClose }) {
     <Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy||previewPending||!activePreview||blocked} onClick={adopt}>{current?'导入并更新本月来源':'导入本月来源'}</Button>
   </>}>
     <label className="report-mode">来源方式<select disabled={busy} value={mode} onChange={event=>{invalidate();setMode(event.target.value);}}><option value="files">导入来源表</option><option value="manual">手工录入{kind==='dispatch'?'总代发件数':'各店扣款'}</option></select></label>
+    {kind==='dispatch' && retaining && current ? <AdoptedDispatchNotice rows={state.adoptedRows} /> : null}
     {mode==='files'?<>
       <label className="report-upload">选择文件<input type="file" multiple accept={kind==='dispatch'?'.xlsx,.csv':'.xlsx'} disabled={busy} onChange={event=>{void upload(event.target.files);event.target.value='';}} /></label>
       {sources.length?<div className="report-selection">
@@ -131,6 +133,8 @@ export function SupplementEditor({ state, kind, onClose }) {
     {kind==='deduction'&&mode==='files'?<details><summary>没有扣款来源的店铺：明确真实零值</summary>{state.stores.map(store=><label key={store}><input type="checkbox" disabled={busy} checked={zeroStores.includes(store)} onChange={event=>{invalidate();setZeroStores(previous=>event.target.checked?[...previous,store]:previous.filter(name=>name!==store));}}/>{store} 本月扣款为 0</label>)}</details>:null}
     {notice?<p role="status">{notice}</p>:null}
     {draft.stats.skipped?<p role="status">已跳过 {draft.stats.skipped} 条无数量记录，来源位置已保留。</p>:null}
+    {draft.stats.unassigned.length?<Panel className="report-source-notice"><p role="status">来源表有 {draft.stats.unassigned.length} 条登记人不明记录，已排除，未计入任何登记人。可在原表补齐登记人后重新导入。</p><details><summary>查看未归属记录</summary>{draft.stats.unassigned.slice(0,100).map(row=><p key={`${row.sourceName}/${row.sourceSheet}/${row.sourceRow}`}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.rawQuantity || '无数量'} 件</p>)}{draft.stats.unassigned.length>100?<p>仅显示前 100 条，完整位置保留在来源记录中。</p>:null}</details></Panel>:null}
+    {draft.stats.addedRows.some(row=>row.quantityFromText)?<p role="status">已将 {draft.stats.addedRows.filter(row=>row.quantityFromText).length} 条文本数量识别为有效数字，共 {exactSum(draft.stats.addedRows.filter(row=>row.quantityFromText),'quantityExact')} 件，已计入预览。</p>:null}
     {draft.stats.duplicates?<p>已有 {draft.stats.duplicates} 条重复源记录已跳过。</p>:null}
     {previewPending?<p role="status">正在更新预览…</p>:null}
     {finalCandidate?<Panel className="report-adoption-preview"><strong>{state.ledger.period} 整月导入预览</strong>
@@ -144,6 +148,11 @@ export function SupplementEditor({ state, kind, onClose }) {
     {draft.error||error?<p role="alert">{draft.error||error}</p>:null}
     {error&&draft.ready?<Button disabled={busy||previewPending} onClick={()=>setRetry(value=>value+1)}>重新读取预览</Button>:null}
   </Modal>;
+}
+
+export function AdoptedDispatchNotice({ rows = [], locked = false }) {
+  const inherited = legacyUnassignedDispatchRows(rows);
+  return inherited.length ? <Panel className="report-source-notice"><p role="status">当前采用包含 {inherited.length} 条由上一登记人顺延归属的 XLSX 记录，共 {exactSum(inherited,'quantityExact')} 件，源表没有明确登记人归属。历史采用值保持不变。</p><p>{locked ? '已定稿账本需先显式重开，再核对源表并重新导入代发。' : '请核对源表后重新导入；替换已有来源即可应用新的归属规则。'}</p><details><summary>查看原采用中的未明确归属行</summary>{inherited.slice(0,100).map(row=><p key={supplementRowIdentity(row)}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.quantityExact} 件</p>)}</details></Panel> : null;
 }
 
 export default function MonthlyReportManager({ ledgerId, missingCostCount, onOpenCosts }) {
@@ -161,6 +170,7 @@ export default function MonthlyReportManager({ ledgerId, missingCostCount, onOpe
   async function prepare(kind){setBusy(true);setError('');try{const input={ledgerId,kind,baseReportId:kind==='financial'?data.ledger.currentBaseReportId:null};setPreview({input,...await previewProfitReport(input)});}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function save(){setBusy(true);setError('');try{const report=await saveProfitReport(preview.input,{expectedFingerprint:preview.fingerprint});await downloadReportFile(report);setPreview(null);notify('报告已保存并开始下载，可从历史报告重下载。');}catch(e){setError(e.message);setPreview(null);}finally{setBusy(false);}}
   return <Panel className="monthly-report-manager" id="monthly-reports" tabIndex={-1}><h2>本月报告 · {data.ledger.period}</h2><p>未扣款报告先留存商品与代发基础，后收到的扣款仍归入这个账本月份。下载使用简化表格，原始审计存档保持不变。</p>
+    <AdoptedDispatchNotice rows={data.adoptedRows} locked={locked} />
     <div className="report-sources-summary"><div><strong>代发</strong><p>{data.dispatch?`已采用 ${data.dispatch.adoptedQuantityExact} 件 · r${data.dispatch.revision}`:'尚未采用（真实零需明确填写）'}</p><Button disabled={locked} onClick={()=>setEditor('dispatch')}>登记代发</Button></div><div><strong>独立扣款</strong><p>{data.deduction?`已采用 ${data.deduction.signedAmountExact} 元 · r${data.deduction.revision}${data.deduction.missingStores.length?' · 部分店铺待取得':''}`:'尚未取得'}</p><Button disabled={data.ledger.status==='locked'} onClick={()=>setEditor('deduction')}>登记扣款</Button></div></div>
     <div className="report-readiness" aria-label="整月报告准备情况">
       <div><strong>商品成本</strong><span>{locked ? '已随基础保存' : missing == null ? '正在核对整月成本' : missing ? `整月 ${missing} 条待补` : '整月已齐'}</span>{!locked && missing > 0 && onOpenCosts ? <Button onClick={onOpenCosts}>补齐成本</Button> : null}</div>

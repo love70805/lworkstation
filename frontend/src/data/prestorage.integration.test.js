@@ -113,3 +113,17 @@ it('publishes a bounded group with one fresh projection and rolls back the entir
   const results = await promoteSelectionPrestorageRecords({ productIds: [...ids, ...ids], expectedWorkspaceId: DEFAULT_WORKSPACE_ID });
   expect(results.filter(result => result.product)).toHaveLength(3);
 });
+
+it('uses matching 1688 selling specifications to complete a staged title without changing manual names or costs', async () => {
+  const variants = ['A', 'B'].map((sku, i) => ({ ...full.variants[0], platformSku: `TITLE-${sku}`, attribute: i ? '蓝色' : '红色' }));
+  const first = await save({ ...full, name: '', platformSkc: 'TITLE-SKC', variants });
+  await db.erpCostRows.bulkAdd(variants.map((variant, i) => ({ workspaceId: DEFAULT_WORKSPACE_ID, platformSku: variant.platformSku, platformSkc: 'TITLE-SKC', warehouseSku: `WH-${i}`, catalogQuerySkcs: ['TITLE-SKC'], productName: `${variant.attribute}-收纳盒`, attribute: variant.attribute, imageUrl: full.imageUrl, publishedAt: '2026-10-15T01:00:00Z', purchaseRecords: [{ recordId: `REC-${i}`, warehouseSku: `WH-${i}`, supplierName: '规格供应商', purchaseCatalog: { purchaseSpecificationAndModel1688: `颜色:${variant.attribute}`, barcodeSkuid: variant.platformSku, barcodeSkcid: 'TITLE-SKC' } }] })));
+  const costs = await db.erpCostRows.toArray();
+  const ready = (await getSelectionPrestorageSnapshot()).products.find(p => p.id === first.product.id);
+  expect(ready.draft.name).toBe('收纳盒'); expect(ready.prefill.needsTitleChoice).toBe(false); expect(ready.readiness.ready).toBe(true);
+  expect((await promote(first.product.id)).product.status).toBe('active');
+  const product = await db.products.get(first.product.id);
+  await db.products.update(product.id, { name: '人工命名', attributes: { ...product.attributes, fieldEdits: { ...product.attributes.fieldEdits, name: true } } });
+  expect((await getProductEditorSnapshot({ productId: product.id })).draft.name).toBe('人工命名');
+  expect(await db.erpCostRows.toArray()).toEqual(costs); expect(await db.profitLines.count()).toBe(0);
+});

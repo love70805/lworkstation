@@ -1078,44 +1078,68 @@ export async function mergeProductSkcRecords({ primaryProductId, sourceProductId
 export async function bulkUpdateProductCatalogSalesStatus({ productIds, salesStatus, updatedBy = "local-user" }) {
   const ids = [...new Set((Array.isArray(productIds) ? productIds : []).map((id) => String(id || "").trim()).filter(Boolean))];
   if (!ids.length) throw new Error("请先选择至少一条商品记录。");
-  const definitions = await getSelectionStatusDefinitions();
-  const statusDefinition = selectionStatusById(definitions, salesStatus);
-  if (!statusDefinition || statusDefinition.archivedAt || statusDefinition.id !== salesStatus) throw new Error("不支持的选品状态。");
-
   const context = await getActiveMemberContext();
   const updatedAt = new Date().toISOString();
   const updatedProducts = [];
 
   await db.transaction("rw", db.products, db.auditEvents, db.platformSkus, db.supplierOffers, db.catalogManualCosts, db.erpCostRows, db.erpCostBatches, db.erpCostRequests, db.erpCostInbox, db.profitLines, db.salesRows, db.ledgers, db.importBatches, db.settings, db.workspaces, async () => {
+    const currentContext = await getActiveMemberContext();
+    if (currentContext.workspaceId !== context.workspaceId || currentContext.memberId !== context.memberId) throw new Error("工作区或账号已变化，请重新选择商品。");
+    const definitions = await getSelectionStatusDefinitions();
+    const statusDefinition = definitions.find(status => status.id === salesStatus && !status.archivedAt);
+    if (!statusDefinition) throw new Error("不支持的选品状态。");
     const products = await db.products.bulkGet(ids);
     for (const product of products) {
       if (!product) throw new Error("部分商品记录不存在，页面已刷新。");
-      if (!selectionRecordVisible(product, context)) throw new Error("当前账号无权修改选中的商品。");
+      if (!selectionRecordVisible(product, currentContext)) throw new Error("当前账号无权修改选中的商品。");
     }
 
     if (statusDefinition.requiresReadiness || statusDefinition.id === "on_sale") {
-      const historicalRows = buildSelectionReferenceRows(await getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction }));
+      const [skus, offers] = await Promise.all([
+        db.platformSkus.where('productId').anyOf(ids).toArray(),
+        db.supplierOffers.where('productId').anyOf(ids).toArray(),
+      ]);
+      const byProduct = rows => {
+        const groups = new Map();
+        for (const row of rows) {
+          if ((row.workspaceId ?? DEFAULT_WORKSPACE_ID) !== context.workspaceId) continue;
+          if (!groups.has(row.productId)) groups.set(row.productId, []);
+          groups.get(row.productId).push(row);
+        }
+        return groups;
+      };
+      const skuGroups = byProduct(skus), offerGroups = byProduct(offers);
+      let history, ownership;
       for (const product of products) {
-        const snapshot = await getProductEditorSnapshot({ productId: product.id });
-        assertProductSaveReadiness({ ...snapshot.draft, salesStatus }, statusDefinition, historicalRows);
+        let draft = storedProductEditorDraft({ product, skuRows: skuGroups.get(product.id) ?? [], storedOffers: offerGroups.get(product.id) ?? [], statusDefinitions: definitions });
+        // Status changes need persisted identity, not a full cost/sales rebuild per
+        // product. Legacy incomplete drafts may still use one shared ERP prefill.
+        if (!draft.name || !draft.platformSkc || !draft.variants.some(row => row.platformSku)) {
+          history ??= buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
+          ownership ??= await db.platformSkus.where('workspaceId').equals(context.workspaceId).toArray();
+          draft = prefillErpProductDraft({ draft, productId: product.id, rows: history, ownership }).draft;
+        }
+        assertProductSaveReadiness({ ...draft, salesStatus, productStatus: salesStatus }, statusDefinition, []);
       }
     }
 
+    const events = [];
     for (const product of products) {
       const savedProduct = { ...product, productStatus: statusDefinition.id, updatedAt };
-      await db.products.put(savedProduct);
       updatedProducts.push(savedProduct);
-      await db.auditEvents.add({
+      events.push({
         workspaceId: product.workspaceId,
         objectType: "product",
         objectId: product.id,
         action: "product_sales_status_bulk_updated",
         actorId: updatedBy,
         createdAt: updatedAt,
-        before: { salesStatus: resolveSelectionStatusId(product.salesStatus ?? (product.status === "active" ? "on_sale" : "pending_review"), definitions) },
+        before: { salesStatus: resolveProductStatus(product, definitions).statusId },
         after: { salesStatus: statusDefinition.id, batchSize: ids.length, snapshot: savedProduct },
       });
     }
+    await db.products.bulkPut(updatedProducts);
+    await db.auditEvents.bulkAdd(events);
   });
 
   return updatedProducts;
@@ -1871,7 +1895,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
   const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@4", revision, compute,
+    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@5-store-tags", revision, compute,
   }) : await compute();
   assertSourceRevision(revision);
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));

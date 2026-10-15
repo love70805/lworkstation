@@ -63,7 +63,7 @@ it.each(['pre_deduction','financial'])("exports one text order per SKU without a
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(new TextDecoder().decode(result.bytes)).not.toContain('name="核算采购"');
  expect(result.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
- expect(result.templateVersion).toBe("profit-zebra@4-two-decimal-columns");
+ expect(result.templateVersion).toBe("profit-zebra@5-merged-skc");
  const summaryRows=XLSX.utils.sheet_to_json(book.Sheets["汇总表"],{header:1});
  rows.forEach((row,index)=>{
   const summary=summaryRows.find(cells=>cells[1]===row.platformSku);

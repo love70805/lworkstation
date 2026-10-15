@@ -50,7 +50,7 @@ it('reads a shared XLSX purchase merge across SKCs and leaves out-of-range blank
   ['','','','S4','NEW',2,next],
   ['','','','S4','OUTSIDE-NEW',1,''],
  ]);
- sheet['!merges']=[{s:{r:1,c:6},e:{r:3,c:6}}];
+ sheet['!merges']=[{s:{r:1,c:1},e:{r:6,c:1}},{s:{r:1,c:6},e:{r:3,c:6}}];
  XLSX.utils.book_append_sheet(book,sheet,'甲');
  XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['登记人','店铺','SKC','订单号','数量','1688单号'],['人员','甲','S3','OTHER-SHEET',1,'']]),'乙');
  const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});

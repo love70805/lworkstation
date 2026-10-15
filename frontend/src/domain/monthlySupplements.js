@@ -1,7 +1,7 @@
 import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@4";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@5-explicit-xlsx-owner";
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
@@ -34,6 +34,7 @@ export function supplementMarkers(source, kind) {
 }
 export function supplementHeaders(source,headerRow){const index=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;return source.cells[index]??[];}
 export const supplementRowIdentity = row => canonicalJson([row.fileHash,row.sourceSheet,row.sourceRow,row.manual?row.store:null]);
+export const legacyUnassignedDispatchRows = rows => rows.filter(row => row.kind === 'dispatch' && row.sourceFormat === 'xlsx' && !row.manual && row.inheritedFrom && !row.mergedFrom?.owner);
 export function supplementRowLabel(row) {
   const csv=row.sourceFormat==='csv'||(!row.sourceFormat&&row.sourceSheet==='CSV');
   const position=row.recordRow?`表格第 ${row.recordRow} 行${csv?`（CSV 物理第 ${row.sourceRow} 行）`:''}`:`${csv?'CSV 物理':'工作表'}第 ${row.sourceRow} 行`;
@@ -84,6 +85,15 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
         if(group?.owner!==owner)group=null;
         sourceStore=sourceStore||group?.store||'';
         group={...group,owner,store:sourceStore,date:date||group?.date||'',sourceRow};
+      }else if(position.sourceFormat==='xlsx'){
+        // XLSX preserves merge metadata: an unmerged blank registrant is not
+        // evidence for the previous person, even inside the same date block.
+        // Keep it traceable and outside every person's adopted quantity.
+        group=null;
+        const quantity=decimalSource(get('quantity'),null);
+        ignored.push({...position,reason:missingQuantity?'missing_quantity':'unassigned_owner',ownerMarker:'',inheritedFrom:null,
+          rawQuantity:normalized(get('quantity')),quantityExact:quantity!==null&&/^\d+$/.test(exact(quantity))?exact(quantity):null});
+        continue;
       }else if(group){owner=group.owner;sourceStore=sourceStore||group.store;inheritedFrom=group.sourceRow;}
       else {
         if(missingQuantity)ignored.push({...position,reason:'missing_quantity',ownerMarker:'',inheritedFrom:null});
@@ -107,7 +117,7 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
     if (kind === "deduction" && !targetStore) { errors.push({ ...position, message:"请按实际源列或工作表映射店铺。" }); continue; }
     const mapped=new Set(Object.values(fields).map(Number).filter(value=>value>=0));
     const remarks=values.flatMap((value,col)=>!mapped.has(col)&&normalized(value)?[{column:col+1,header:normalized(headers[col]),value:normalized(value)}]:[]);
-    rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}) } : { signedAmountExact: exact(amount) }) });
+    rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}), ...(position.sourceFormat === "xlsx" && typeof get("quantity") === "string" ? { quantityFromText: true } : {}) } : { signedAmountExact: exact(amount) }) });
   }
   return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:marker,ownerField,matchMode,includeAll,store}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
 }

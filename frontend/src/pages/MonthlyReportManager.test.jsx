@@ -3,7 +3,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Simulate} from 'react-dom/test-utils';
 import {afterEach,expect,it,vi} from 'vitest';
-import {SupplementEditor} from './MonthlyReportManager';
+import {SupplementEditor,AdoptedDispatchNotice} from './MonthlyReportManager';
 import {ToastProvider} from '../components/UI';
 import {normalizeSupplementCandidate} from '../domain/monthlySupplements';
 const mock=vi.hoisted(()=>({preview:vi.fn(),adopt:vi.fn(),read:vi.fn()}));
@@ -67,4 +67,20 @@ it('does not ask again about previously reviewed conflicts when adding unrelated
  const row={kind:'dispatch',fileHash:'OLD-A',sourceName:'old-a.csv',sourceSheet:'CSV',sourceRow:2,store:'甲',businessId:'OLD-ORDER',quantityExact:'2'};
  await mount({...base,dispatch:{adoptedQuantityExact:'4',rowCount:2,revision:1,sources:[],reviewedCrossFileConflicts:true},adoptedRows:[row,{...row,fileHash:'OLD-B',sourceName:'old-b.csv'}]});
  await upload([source()]);await change(field('登记人'),'甲人');expect(container.textContent).not.toContain('跨文件相似记录');expect(button('导入并更新本月来源').disabled).toBe(false);
+});
+
+it('shows unassigned XLSX source rows outside adopted quantities and explains counted text numbers without another confirmation',async()=>{
+ await mount();const s={...source('XLSX',[['登记人','店铺','SKC','订单号','数量'],['甲人','甲','A','O1',100],['','','B','O2','23'],['','','C','O3',28]]),fileName:'isolated.xlsx',sheetName:'月度',sourceFormat:'xlsx',merges:[{s:{r:1,c:0},e:{r:2,c:0}}]};
+ await upload([s]);await change(field('登记人'),'甲人');
+ expect(container.textContent).toContain('1 条登记人不明记录');expect(container.textContent).toContain('共 23 件，已计入预览');
+ expect(container.textContent).toContain('采用 123 件');expect(container.textContent).toContain('O3');
+ expect(button('导入本月来源').disabled).toBe(false);await act(async()=>button('导入本月来源').click());
+ const adopted=mock.adopt.mock.calls[0][0];expect(adopted.rows).toHaveLength(2);expect(adopted.sources[0].ignored).toContainEqual(expect.objectContaining({reason:'unassigned_owner',quantityExact:'28',sourceRow:4}));
+});
+
+it('keeps historical adopted counts immutable and explains explicit reopening for a finalized ledger',async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;container=document.createElement('div');document.body.append(container);root=createRoot(container);
+ const rows=Object.freeze([{kind:'dispatch',sourceFormat:'xlsx',fileHash:'OLD',sourceName:'old.xlsx',sourceSheet:'来源',sourceRow:4,inheritedFrom:3,quantityExact:'28'}]);
+ await act(async()=>root.render(<AdoptedDispatchNotice rows={rows} locked/>));
+ expect(container.textContent).toContain('共 28 件');expect(container.textContent).toContain('历史采用值保持不变');expect(container.textContent).toContain('先显式重开');expect(rows[0].quantityExact).toBe('28');
 });

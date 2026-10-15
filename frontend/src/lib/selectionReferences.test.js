@@ -3,6 +3,17 @@ import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "./sele
 import { createSalesSourceCoverage } from "../domain/selectionSalesLabels";
 
 describe("selection reference rows", () => {
+  it('precomputes per-store tags once with the same results as store-scoped reference builds', () => {
+    const workspaceId = 'W', ledger = { id: 'L', workspaceId, period: '2026-09' };
+    const input = { workspaceId, ledgers: [ledger], products: [{ id: 'P', platformSkc: 'SKC-A', store: '甲店' }],
+      platformSkus: [{ productId: 'P', platformSkc: 'SKC-A', platformSku: 'SKU-A' }],
+      ledgerIdentityRows: ['甲店', '乙店'].map(store => ({ platformSku: 'SKU-A', platformSkc: 'SKC-A', store })),
+      importBatches: ['甲店', '乙店'].map((store, i) => ({ id: `B${i}`, workspaceId, ledgerId: 'L', period: ledger.period, store, status: 'completed', validRowCount: 1, fileHash: `HASH${i}`, sourceCoverage: createSalesSourceCoverage({ period: ledger.period, storeName: store }) })),
+      salesRows: ['甲店', '乙店'].map((store, i) => ({ id: i + 1, workspaceId, ledgerId: 'L', batchId: `B${i}`, store, platformSku: 'SKU-A', platformSkc: 'SKC-A', sourceRow: i + 2, sourceAddedDate: '2026-09-30', quantityExact: i ? '1' : '100' })) };
+    const [row] = buildSelectionReferenceRows({ ...input, includeStoreTags: true });
+    for (const store of ['甲店', '乙店']) expect(row.automaticSalesTagsByStore[store]).toEqual(buildSelectionReferenceRows({ ...input, store })[0].automaticSalesTag);
+    expect(row.automaticSalesTagsByStore['甲店'].label).toBe('高销'); expect(row.automaticSalesTagsByStore['乙店'].label).toBe('低销');
+  });
   it("ranks cover candidates by net sales in the catalog receipt's ledger, not finalized history or the seven-day window", () => {
     const input = { workspaceId: "W", ledgers: [{ id: "CURRENT", workspaceId: "W", period: "2026-08" }, { id: "OLD", workspaceId: "W", period: "2026-07" }],
       erpCatalogRows: ["A", "B"].map(sku => ({ workspaceId: "W", ledgerId: "CURRENT", platformSkc: "SKC", platformSku: sku, warehouseSku: `WH-${sku}`, productName: "商品", imageUrl: `https://images.example.invalid/${sku}.jpg`, publishedAt: "2026-09-01T00:00:00Z" })),

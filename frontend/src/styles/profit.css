@@ -87,6 +87,11 @@
 .report-mapping { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
 .report-mapping select { display:block; width:100%; }
 .report-adoption-preview { margin:16px 0; padding:12px; }
+.report-source-notice { padding:14px 16px; margin:12px 0; background:var(--surface-soft); overflow-wrap:anywhere; }
+.report-source-notice p { margin:0; line-height:1.65; }
+.report-source-notice p + p, .report-source-notice details { margin-top:8px; }
+.report-source-notice summary { cursor:pointer; }
+.report-source-notice summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .report-preview-rows { overflow-x:auto; }
 .report-preview-rows td, .report-preview-rows th { padding:8px; white-space:nowrap; }
 .report-import .report-selection label { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
