@@ -341,3 +341,7 @@
 
 /* Historical captures appear only when there is something to recover. */
 .product-view-tabs { flex-wrap: wrap; }
+.product-incoming-link { text-align: left; white-space: normal; }
+.product-related-drafts { white-space: normal; font-size: 12px; color: var(--text-muted); }
+.product-related-drafts summary { cursor: pointer; }
+.product-related-drafts > button { display: block; margin-top: 6px; text-align: left; white-space: normal; }

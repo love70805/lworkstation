@@ -20,6 +20,7 @@ import { CaptureQueueView } from "./CaptureQueue";
 import { activeSelectionStatusDefinitions, canonicalProductStatusId, createCustomSelectionStatus, normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
 import { canonicalPlatformSkc } from "../domain/identifiers";
 import { createContinuousCatalogQueue, continuousCatalogPath } from "../domain/continuousCatalogQueue";
+import { selectionCatalogPlacement } from "../domain/selectionCatalogPlacement";
 
 
 const money = (value, fractionDigits = 2) => Number(value ?? 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
@@ -47,6 +48,7 @@ const matchesProductQuery = createSelectionSearchIndex((product) => [
   product.name, product.supplier, product.platformSkc, product.supplierNumbers ?? [],
   (product.supplierProfiles ?? []).map((supplier) => [supplier.supplierCode, supplier.supplierName]),
   (product.skus ?? []).map((sku) => [sku.platformSku, sku.warehouseSku]),
+  (product.incomingReferences ?? []).map((sku) => [sku.platformSku, sku.warehouseSku]),
 ]);
 const matchesProductSupplier = createSelectionSearchIndex((product) => product.supplierNumbers ?? []);
 const matchesReferenceQuery = createSelectionSearchIndex((row) => [
@@ -56,12 +58,6 @@ const matchesReferenceQuery = createSelectionSearchIndex((row) => [
 const matchesReferenceSupplier = createSelectionSearchIndex((row) => row.supplierNumbers ?? []);
 
 const productFiltersKey = (workspaceId, view) => `${PRODUCT_FILTERS_KEY}:${JSON.stringify([workspaceId, view])}`;
-
-// Older versions persisted "all" even when no explicit choice was made.
-// Adopt the new default once, then preserve every explicit choice in v2.
-function referenceCatalogFilter(filters) {
-  return filters?.catalogFilterVersion === 3 && ['all', 'linked', 'unlinked'].includes(filters.catalogFilter) ? filters.catalogFilter : 'unlinked';
-}
 
 function readProductFilters(workspaceId, view) {
   try {
@@ -80,7 +76,6 @@ function readProductFilters(workspaceId, view) {
       negativeOnly: Boolean(saved.negativeOnly),
       salesLabel: saved.salesLabel ?? "all",
       supplierNumber: saved.supplierNumber ?? "",
-      catalogFilter: referenceCatalogFilter(saved),
     };
   } catch {
     return { store: "all", status: "all", publicationStatus: "all", dataStatus: "all", missingOnly: false, duplicatesOnly: false, productSort: "updated", referenceSource: "all", negativeOnly: false };
@@ -148,7 +143,6 @@ function ProductLibraryView({ workspaceId, view }) {
   const [negativeOnly, setNegativeOnly] = useState(initialFilters.negativeOnly);
   const [salesLabel, setSalesLabel] = useState(initialFilters.salesLabel ?? "all");
   const [supplierNumber, setSupplierNumber] = useState(initialFilters.supplierNumber ?? "");
-  const [catalogFilter, setCatalogFilter] = useState(savedView?.filters ? referenceCatalogFilter(savedView.filters) : initialFilters.catalogFilter ?? "unlinked");
   const [columnView, setColumnView] = useState(() => readProductFilters(workspaceId, view).columnView === "all" ? "all" : "compact");
   const [exporting, setExporting] = useState(false);
   const [selectedProductIds, setSelectedProductIds] = useState([]);
@@ -178,20 +172,35 @@ function ProductLibraryView({ workspaceId, view }) {
   const referenceRead = useSelectionRead(readCompactReferences);
   const referenceSnapshot = referenceRead.data;
   const referenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows({ ...referenceSnapshot, store }) : EMPTY_ROWS, [referenceSnapshot, store]);
-  const prestorageProducts = referenceSnapshot?.prestorageProducts ?? EMPTY_ROWS;
+  const placement = useMemo(() => selectionCatalogPlacement({ products: catalogProductsRaw, rows: referenceRows, drafts: referenceSnapshot?.prestorageProducts ?? EMPTY_ROWS }), [catalogProductsRaw, referenceRows, referenceSnapshot]);
+  const pendingReferences = placement.pendingRows;
+  const prestorageProducts = placement.pendingDrafts;
   const prestorageById = useMemo(() => new Map(prestorageProducts.map(product => [product.id, product])), [prestorageProducts]);
+  const prestorageBySkc = useMemo(() => {
+    const groups = new Map();
+    for (const product of prestorageProducts) {
+      if (!product.platformSkc) continue;
+      const key = canonicalPlatformSkc(product.platformSkc);
+      groups.set(key, groups.has(key) ? null : product);
+    }
+    return groups;
+  }, [prestorageProducts]);
   const [checkingPrestorage, setCheckingPrestorage] = useState(false);
   const catalogProducts = useMemo(() => {
-    if (store === "all" || !referenceSnapshot) return catalogProductsRaw;
     const tags = new Map(referenceRows.filter(row => row.platformSkc).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag]));
-    return catalogProductsRaw.map(product => ({ ...product, automaticSalesTag: tags.get(canonicalPlatformSkc(product.platformSkc)) ?? null }));
-  }, [catalogProductsRaw, referenceRows, referenceSnapshot, store]);
+    return catalogProductsRaw.map(product => ({ ...product,
+      ...(store !== "all" && referenceSnapshot ? { automaticSalesTag: tags.get(canonicalPlatformSkc(product.platformSkc)) ?? null } : {}),
+      incomingReferences: placement.incomingByProduct.get(product.id) ?? [],
+      relatedDrafts: placement.draftsByProduct.get(product.id) ?? [],
+      catalogStoreNames: [...new Set([product.store, ...(placement.storesByProduct.get(product.id) ?? [])].filter(Boolean))],
+    }));
+  }, [catalogProductsRaw, referenceRows, referenceSnapshot, store, placement]);
   const captureRead = useSelectionRead(listPendingCaptureRecords);
   const pendingCaptures = captureRead.data ?? EMPTY_ROWS;
   const salesStatusDefinitions = useMemo(() => normalizeSelectionStatusDefinitions(statusRead.data), [statusRead.data]);
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
   const pendingCount = pendingCaptures.length;
-  const missingProductCount = catalogProducts.filter((product) => product.dataReadiness?.hasGaps || product.skuCount === 0).length;
+  const missingProductCount = catalogProducts.filter((product) => product.dataReadiness?.hasGaps || product.skuCount === 0 || product.incomingReferences.length || product.relatedDrafts.length).length;
   const duplicateSkcGroups = useMemo(() => {
     const groups = new Map();
     catalogProducts.forEach((product) => {
@@ -209,7 +218,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const duplicateSkcCountByProductId = useMemo(() => new Map(duplicateSkcGroups.flatMap((group) => group.map((product) => [product.id, group.length]))), [duplicateSkcGroups]);
   const selectedMergeGroup = useMemo(() => duplicateSkcGroups.find((group) => canonicalPlatformSkc(group[0]?.platformSkc) === mergeSkc) ?? [], [duplicateSkcGroups, mergeSkc]);
   const mergeSourceIds = useMemo(() => selectedMergeGroup.filter((product) => product.id !== mergePrimaryId).map((product) => product.id), [mergePrimaryId, selectedMergeGroup]);
-  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, columnView, referenceSource, negativeOnly, salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 3 } };
+  navigationSnapshotRef.current = { query, queueFilter, filters: { store, status, recordStatus, dataStatus, missingOnly, duplicatesOnly, productSort, columnView, referenceSource, negativeOnly, salesLabel, supplierNumber } };
 
   useEffect(() => {
     localStorage.setItem(productFiltersKey(workspaceId, view), JSON.stringify({
@@ -222,9 +231,9 @@ function ProductLibraryView({ workspaceId, view }) {
       productSort, columnView,
       referenceSource,
       negativeOnly,
-      salesLabel, supplierNumber, catalogFilter, catalogFilterVersion: 3,
+      salesLabel, supplierNumber,
     }));
-  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, columnView, recordStatus, referenceSource, status, store, supplierNumber, catalogFilter, workspaceId, view]);
+  }, [dataStatus, duplicatesOnly, missingOnly, negativeOnly, salesLabel, productSort, columnView, recordStatus, referenceSource, status, store, supplierNumber, workspaceId, view]);
 
   useEffect(() => {
     if (statusManagerOpen && statusRead.status === "ready") setStatusDraft(salesStatusDefinitions);
@@ -240,7 +249,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const normalizedQuery = normalizeSelectionSearchQuery(query);
   const normalizedSupplierNumber = normalizeSelectionSearchQuery(supplierNumber);
   const scopedProducts = useMemo(() => catalogProducts.filter((product) => {
-    if (store !== "all" && product.store !== store) return false;
+    if (store !== "all" && !product.catalogStoreNames.includes(store)) return false;
     if (recordStatus !== "all" && product.status !== recordStatus) return false;
     if (salesLabel !== "all" && product.automaticSalesTag?.label !== salesLabel) return false;
     if (duplicatesOnly && !duplicateSkcProductIds.has(product.id)) return false;
@@ -254,7 +263,7 @@ function ProductLibraryView({ workspaceId, view }) {
       || (dataStatus === "profit_complete" && product.dataReadiness?.profit.status === "complete")
       || (dataStatus === "reference_profit_complete" && product.dataReadiness?.referenceProfit?.status === "complete")
       || (dataStatus === "mapping_complete" && product.dataReadiness?.warehouseMapping.status === "complete");
-    const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps;
+    const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps || product.incomingReferences.length || product.relatedDrafts.length;
     return matchesStatus && matchesData && matchesMissing && matchesProductSupplier(product, normalizedSupplierNumber);
   }).toSorted((a, b) => {
     if (productSort === "lowestCost") return (a.lowestReferenceCost ?? Number.POSITIVE_INFINITY) - (b.lowestReferenceCost ?? Number.POSITIVE_INFINITY);
@@ -272,31 +281,34 @@ function ProductLibraryView({ workspaceId, view }) {
   const selectedProductIdSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
   const allFilteredSelected = filteredProductIds.length > 0 && filteredProductIds.every((id) => selectedProductIdSet.has(id));
 
-  const scopedReferences = useMemo(() => referenceRows.filter((row) => {
+  const scopedReferences = useMemo(() => pendingReferences.filter((row) => {
     return (store === "all" || row.storeNames?.includes(store))
-      && (catalogFilter === "all" || (catalogFilter === "linked" ? Boolean(row.productId) && row.productStatus !== "draft" : !row.productId || row.productStatus === "draft"))
       && (referenceSource === "all" || row.referenceKind === referenceSource)
       && (!negativeOnly || row.hasNegativeProfit)
       && (salesLabel === "all" || row.automaticSalesTag?.label === salesLabel)
       && matchesReferenceSupplier(row, normalizedSupplierNumber);
-  }), [negativeOnly, referenceRows, referenceSource, salesLabel, store, normalizedSupplierNumber, catalogFilter]);
+  }), [negativeOnly, pendingReferences, referenceSource, salesLabel, store, normalizedSupplierNumber]);
   const filteredReferences = useMemo(() => scopedReferences.filter((row) => matchesReferenceQuery(row, normalizedQuery)), [scopedReferences, normalizedQuery]);
   const groupedReferences = useMemo(() => {
-    const groups = groupSelectionReferenceRows(filteredReferences).map(group => ({ ...group,
-      productStatus: group.variants.find(row => row.productId === group.productId)?.productStatus,
-      autoPromote: prestorageById.get(group.productId)?.autoPromote,
-      prestorageReadiness: prestorageById.get(group.productId)?.readiness ?? (!group.productId ? referenceSnapshot?.unlinkedReadiness?.[group.variants[0]?.platformSkc ? canonicalPlatformSkc(group.variants[0].platformSkc) : `SKU:${group.variants[0]?.canonicalPlatformSku}`] : undefined),
-    }));
-    if (catalogFilter !== "linked") {
-      for (const product of prestorageProducts) {
-        if (product.draft.variants.some(variant => variant.platformSku)) continue;
+    const groups = groupSelectionReferenceRows(filteredReferences).map(group => {
+      const draft = prestorageById.get(group.productId) ?? (!group.productId && group.variants.every(row => !row.platformSkcConflict)
+        ? prestorageBySkc.get(canonicalPlatformSkc(group.variants[0]?.platformSkc ?? '')) : null);
+      return { ...group, productId: group.productId ?? draft?.id,
+        productStatus: draft ? 'draft' : group.variants.find(row => row.productId === group.productId)?.productStatus,
+        autoPromote: draft?.autoPromote,
+        prestorageReadiness: draft?.readiness ?? (!group.productId ? referenceSnapshot?.unlinkedReadiness?.[group.variants[0]?.platformSkc ? canonicalPlatformSkc(group.variants[0].platformSkc) : `SKU:${group.variants[0]?.canonicalPlatformSku}`] : undefined),
+      };
+    });
+    for (const product of prestorageProducts) {
+        if (product.draft.variants.some(variant => variant.platformSku) || groups.some(group => group.productId === product.id)) continue;
         if (store !== "all" && product.store !== store || negativeOnly || referenceSource !== "all") continue;
         if (!matchesProductQuery({ ...product, skus: [] }, normalizedQuery) || !matchesProductSupplier(product, normalizedSupplierNumber)) continue;
         groups.push({ id: `prestorage-${product.id}`, productId: product.id, productStatus: "draft", platformSkc: product.platformSkc || "未填写平台 SKC", productName: product.name || "未命名商品", skuCount: 0, variants: [], prestorageReadiness: product.readiness });
-      }
     }
     return groups;
-  }, [filteredReferences, prestorageById, prestorageProducts, referenceSnapshot, catalogFilter, store, negativeOnly, referenceSource, normalizedQuery, normalizedSupplierNumber]);
+  }, [filteredReferences, prestorageById, prestorageBySkc, prestorageProducts, referenceSnapshot, store, negativeOnly, referenceSource, normalizedQuery, normalizedSupplierNumber]);
+  const pendingGroupCount = new Set([...pendingReferences.map(row => row.platformSkc ? canonicalPlatformSkc(row.platformSkc) : `SKU:${row.canonicalPlatformSku}`),
+    ...prestorageProducts.map(product => product.platformSkc ? canonicalPlatformSkc(product.platformSkc) : `PRODUCT:${product.id}`)]).size;
   const recheckPrestorage = async () => {
     if (checkingPrestorage) return;
     setCheckingPrestorage(true);
@@ -315,10 +327,10 @@ function ProductLibraryView({ workspaceId, view }) {
     finally { setCheckingPrestorage(false); }
   };
   useEffect(() => {
-    if (referenceRead.status !== "ready" || !savedView?.focusId) return;
+    if (referenceRead.status !== "ready" || catalogState.status !== "ready" || !savedView?.focusId) return;
     const target = document.getElementById(savedView.focusId);
-    (target && !target.disabled ? target : document.querySelector('[aria-label="按建档情况筛选"]'))?.focus({ preventScroll: true });
-  }, [referenceRead.status, savedView]);
+    (target && !target.disabled ? target : document.querySelector('[aria-label="搜索预存资料"]'))?.focus({ preventScroll: true });
+  }, [referenceRead.status, catalogState.status, savedView]);
   const startContinuousCatalog = () => {
     const queue = createContinuousCatalogQueue(workspaceId, groupedReferences);
     if (!queue.items.length) return;
@@ -369,6 +381,8 @@ function ProductLibraryView({ workspaceId, view }) {
         <strong className="truncate-name">{row.original.name || "未命名商品"}</strong>
         {row.original.status === 'draft' && row.original.attributes?.catalogOrigin === 'ledger_import' ? <Badge tone="warning">基础档案 · 待补全</Badge> : null}
         <span className="product-skc-identity"><strong className="mono">{row.original.platformSkc || "未填写 SKC"}</strong><button type="button" title="复制 SKC 与平台 SKU" aria-label={`复制 ${row.original.name} 的 SKC 与平台 SKU`} onClick={(event) => { event.stopPropagation(); copyProductIdentity(row.original); }}><Copy size={13} /></button></span>
+        {row.original.incomingReferences.length ? <button className="inline-link product-incoming-link" type="button" onClick={event => { event.stopPropagation(); navigate(`/products/edit?product=${encodeURIComponent(row.original.id)}`); }}>补齐 {row.original.incomingReferences.length} 个新增 SKU</button> : null}
+        {row.original.relatedDrafts.length ? <details className="product-related-drafts" onClick={event => event.stopPropagation()}><summary>同 SKC 另有 {row.original.relatedDrafts.length} 份预存资料</summary>{row.original.relatedDrafts.map(draft => <button key={draft.id} className="inline-link" type="button" onClick={() => navigate(`/products/edit?product=${encodeURIComponent(draft.id)}`)}>{draft.name || "未命名资料"} · 查看并整理</button>)}</details> : null}
         {row.original.tags?.length || duplicateSkcCountByProductId.has(row.original.id) ? <span className="product-tag-list">{duplicateSkcCountByProductId.has(row.original.id) ? <small className="product-conflict-tag">重复 SKC · {duplicateSkcCountByProductId.get(row.original.id)} 份档案</small> : null}{(row.original.tags ?? []).slice(0, 3).map((tag) => <small key={tag}>{tag}</small>)}</span> : null}
         {row.original.skuCount === 0 ? <span className="missing-sku"><AlertCircle size={12} />{row.original.pendingVariantCount ? `待分配平台 SKU · ${row.original.pendingVariantCount} 个属性分支` : "缺少平台 SKU"}</span> : <span className="product-sku-branches">{row.original.skuReferences.map((sku) => <span className="product-sku-branch" key={sku.id ?? sku.platformSku}><strong className="mono">{sku.platformSku}</strong><small>{sku.attribute || "未填写属性"}</small></span>)}</span>}
       </div>,
@@ -396,7 +410,7 @@ function ProductLibraryView({ workspaceId, view }) {
     { id: "salesLabel", header: "月末七天销量", enableSorting: false, cell: ({ row }) => <SelectionSalesTag item={row.original.automaticSalesTag} /> },
     { id: "dataReadiness", header: "参考与核算状态", enableSorting: false, cell: ({ row }) => <ProductDataReadiness readiness={row.original.dataReadiness} /> },
     { accessorKey: "updatedAt", header: "最后更新", cell: ({ getValue }) => <span className="mono">{formatUpdatedAt(getValue())}</span> },
-  ], [allFilteredSelected, duplicateSkcCountByProductId, notify, salesStatusDefinitions, selectedProductIdSet]);
+  ], [allFilteredSelected, duplicateSkcCountByProductId, notify, salesStatusDefinitions, selectedProductIdSet, navigate]);
 
   const referenceColumns = useMemo(() => [{
     id: "referenceGroup", header: () => <ReferenceTableHeader />, enableSorting: false,
@@ -590,9 +604,8 @@ function ProductLibraryView({ workspaceId, view }) {
   };
 
   const salesLabelFilter = <select className="select-input" aria-label="按七天销量筛选" value={salesLabel} onChange={event => setSalesLabel(event.target.value)}><option value="all">全部销量标签</option>{SELECTION_SALES_LABELS.map(label => <option value={label} key={label}>{label}</option>)}</select>;
-  const referenceWithHistory = referenceRows.filter((row) => row.latestPeriod).length;
-  const referenceWithErp = referenceRows.filter((row) => row.authoritativeSource === "erp").length;
-  const negativeCount = referenceRows.filter((row) => row.hasNegativeProfit).length;
+  const readyReferenceCount = groupedReferences.filter(group => group.prestorageReadiness?.ready).length;
+  const missingReferenceCostCount = filteredReferences.filter(row => row.referenceUnitCost == null).length;
 
   const commonActiveFilters = [
     query.trim() && { key: "query", label: `搜索：${query.trim()}`, clear: () => setQuery("") },
@@ -608,17 +621,16 @@ function ProductLibraryView({ workspaceId, view }) {
     duplicatesOnly && { key: "duplicates", label: "重复 SKC", clear: () => setDuplicatesOnly(false) },
   ].filter(Boolean);
   const referenceActiveFilters = [...commonActiveFilters,
-    catalogFilter !== "all" && { key: "catalog", label: catalogFilter === "unlinked" ? "预存中" : "已进入选品库", clear: () => setCatalogFilter("all") },
     referenceSource !== "all" && { key: "source", label: `成本：${referenceSourceLabels[referenceSource] ?? referenceSource}`, clear: () => setReferenceSource("all") },
     negativeOnly && { key: "negative", label: "只看负利润", clear: () => setNegativeOnly(false) },
   ].filter(Boolean);
   const resetOfficialFilters = () => { setQuery(""); setSupplierNumber(""); setStore("all"); setStatus("all"); setRecordStatus("all"); setDataStatus("all"); setSalesLabel("all"); setMissingOnly(false); setDuplicatesOnly(false); };
-  const resetReferenceFilters = () => { setQuery(""); setStore("all"); setSupplierNumber(""); setCatalogFilter("all"); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); };
+  const resetReferenceFilters = () => { setQuery(""); setStore("all"); setSupplierNumber(""); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); };
   const visibleProductColumns = useMemo(() => columnView === "all" ? productColumns : productColumns.filter(column => COMPACT_COLUMN_IDS.has(column.id ?? column.accessorKey)), [columnView, productColumns]);
 
   const pageTitle = view === "reference" ? "预存区" : view === "pending" ? "历史采集资料" : "选品工作台";
   const pageDescription = view === "reference"
-    ? "导入资料先预存，逐步补齐名称、图片、商品标识、店铺、属性、售价、参考成本和供应商链接；资料齐全后自动进入选品库。"
+    ? "只显示尚未进入选品库的资料。补齐后自动流转；已建档商品及新增 SKU 在选品商品库继续维护。"
     : view === "pending"
       ? "整理旧采集资料，补齐后确认入库。新商品请直接新建，或从预存区补齐。"
       : "管理商品资料、售价与销售状态。供应商链接和参考成本随档案保留。";
@@ -637,47 +649,45 @@ function ProductLibraryView({ workspaceId, view }) {
 
       <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
         <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
-        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>预存区</span><small>{referenceRead.status === "ready" ? new Set(referenceRows.filter(row => !row.productId || row.productStatus === "draft").map(row => row.platformSkc || row.canonicalPlatformSku)).size + prestorageProducts.filter(product => !product.draft.variants.some(variant => variant.platformSku)).length : "—"}</small></button>
+        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>预存区</span><small>{referenceRead.status === "ready" && catalogState.status === "ready" ? pendingGroupCount : "—"}</small></button>
         {pendingCount > 0 || view === "pending" ? <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>历史采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button> : null}
       </div>
 
       {view === "reference" ? (
         <>
-          <Panel className="prestorage-flow"><strong>导入资料 → 预存补齐 → 自动进入选品库</strong><p>资料可分次保存。每个 SKU 都须有属性、售价和参考成本；图片与供应商来源链接也须齐全。</p><Button loading={checkingPrestorage} disabled={referenceRead.status !== "ready" || checkingPrestorage} onClick={recheckPrestorage}>重新检查并流转</Button></Panel>
+          <Panel className="prestorage-flow"><strong>补齐预存资料，齐全后自动进入选品库</strong><p>资料可分次保存。每个 SKU 的属性、售价和参考成本，以及商品图片和供应商链接齐全后自动流转。</p><Button variant="ghost" loading={checkingPrestorage} disabled={referenceRead.status !== "ready" || checkingPrestorage || !pendingGroupCount} onClick={recheckPrestorage}>重新检查</Button></Panel>
           <div className="reference-summary" aria-label="预存参考摘要">
-            <span><small>平台 SKU</small><strong>{referenceRead.status === "ready" ? referenceRows.length : "—"}</strong></span>
-            <span><small>已有定稿历史</small><strong>{referenceRead.status === "ready" ? referenceWithHistory : "—"}</strong></span>
-            <span><small>采用 ERP 历史参考</small><strong>{referenceRead.status === "ready" ? referenceWithErp : "—"}</strong></span>
-            <span className={negativeCount ? "danger" : ""}><small>负利润预警</small><strong>{referenceRead.status === "ready" ? negativeCount : "—"}</strong></span>
+            <span><small>当前待补商品</small><strong>{referenceRead.status === "ready" ? groupedReferences.length : "—"}</strong></span>
+            <span><small>平台 SKU</small><strong>{referenceRead.status === "ready" ? filteredReferences.length : "—"}</strong></span>
+            <span><small>资料已齐全</small><strong>{referenceRead.status === "ready" ? readyReferenceCount : "—"}</strong></span>
+            <span><small>缺参考成本 SKU</small><strong>{referenceRead.status === "ready" ? missingReferenceCostCount : "—"}</strong></span>
           </div>
           <LibraryFilterBar key="reference-filters"
             search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索预存资料" />}
-            common={<><LibraryFilterField label="店铺"><select className="select-input" aria-label="参考来源店铺" value={store} onChange={event => setStore(event.target.value)}><option value="all">全部店铺</option>{[...new Set(referenceRows.flatMap(row => row.storeNames ?? []))].sort().map(name => <option key={name} value={name}>{name}</option>)}</select></LibraryFilterField><LibraryFilterField label="建档情况"><select className="select-input" aria-label="按建档情况筛选" value={catalogFilter} onChange={event => setCatalogFilter(event.target.value)}><option value="all">全部记录</option><option value="linked">已进入选品库</option><option value="unlinked">预存中</option></select></LibraryFilterField></>}
+            common={<LibraryFilterField label="店铺"><select className="select-input" aria-label="参考来源店铺" value={store} onChange={event => setStore(event.target.value)}><option value="all">全部店铺</option>{[...new Set([...pendingReferences.flatMap(row => row.storeNames ?? []), ...prestorageProducts.map(product => product.store)].filter(Boolean))].sort().map(name => <option key={name} value={name}>{name}</option>)}</select></LibraryFilterField>}
             advancedCount={[supplierNumber.trim(), referenceSource !== "all", salesLabel !== "all", negativeOnly].filter(Boolean).length}
             advanced={<><LibraryFilterField label="供方货号"><input className="text-input" aria-label="按供方货号筛选" placeholder="输入供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} /></LibraryFilterField><LibraryFilterField label="参考成本来源"><select className="select-input" aria-label="按参考成本来源筛选" value={referenceSource} onChange={(event) => setReferenceSource(event.target.value)}>
                 <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="erp_catalog_reference">ERP 采购参考</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">定稿历史</option><option value="supplier_landed">1688 参考</option>
               </select></LibraryFilterField><LibraryFilterField label="月末七天销量">{salesLabelFilter}</LibraryFilterField><button aria-pressed={negativeOnly} className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly(value => !value)}><AlertCircle size={17} />只看负利润</button></>}
             activeFilters={referenceActiveFilters} onClear={resetReferenceFilters}
-            actions={catalogFilter === "unlinked" ? <Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续补齐</Button> : null}
-            result={referenceRead.status === "ready" ? `匹配 ${filteredReferences.length} / ${referenceRows.length} 条` : "尚未取得参考记录"}
+            actions={<Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || catalogState.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续补齐</Button>}
+            result={referenceRead.status === "ready" ? `匹配 ${groupedReferences.length} / ${pendingGroupCount} 个商品 · ${filteredReferences.length} 个 SKU` : "尚未取得预存资料"}
           />
           <Panel className="product-table-panel">
-            {referenceRead.status !== "ready" ? <SelectionReadState read={referenceRead} label="预存区" /> : referenceRows.length || prestorageProducts.length ? (
+            {referenceRead.status !== "ready" || catalogState.status !== "ready" ? <SelectionReadState read={referenceRead.status !== "ready" ? referenceRead : catalogState} label="预存区" /> : pendingGroupCount ? (
               <DataTable
                 className="selection-reference-table"
                 scrollLabel="预存资料表格，可横向和纵向滚动"
                 ref={tableRef}
                 initialViewState={savedView?.table}
                 dataReady={referenceSnapshot !== undefined}
-                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly, salesLabel, store, supplierNumber, catalogFilter])}
+                paginationResetKey={JSON.stringify([query, referenceSource, negativeOnly, salesLabel, store, supplierNumber])}
                 columns={referenceColumns}
                 data={groupedReferences}
                 getRowId={(row) => row.id}
-                emptyState={catalogFilter === 'unlinked' && referenceRows.every(row => row.productId && row.productStatus !== 'draft') && !prestorageProducts.length
-                  ? "这些商品已进入选品库；切换到已进入选品库或全部记录可查阅参考历史。"
-                  : "没有符合当前筛选条件的选品参考记录。"}
+                emptyState="没有符合当前筛选条件的预存资料，可清空筛选。"
               />
-            ) : <EmptyState icon={BarChart3} title="预存区暂无资料" description="导入台账后资料会先进入预存区，可逐步补齐并自动进入选品库。" action={<Button variant="primary" icon={WalletCards} onClick={() => navigate("/ledger")}>打开月度账本</Button>} />}
+            ) : <EmptyState icon={CheckCircle2} title="暂无待补齐的预存资料" description="已建档商品与参考记录在选品商品库保留，可继续维护资料和新增 SKU。" action={<Button variant="primary" onClick={() => changeView("official")}>查看选品商品库</Button>} />}
           </Panel>
         </>
       ) : view === "official" ? (
@@ -686,7 +696,7 @@ function ProductLibraryView({ workspaceId, view }) {
           <LibraryFilterBar key="official-filters"
             search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />}
             common={<><LibraryFilterField label="店铺"><select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
-                <option value="all">全部店铺</option>{store !== "all" && !catalogProducts.some(product => product.store === store) ? <option value={store}>{store}</option> : null}{[...new Set(catalogProducts.map((product) => product.store).filter(Boolean))].map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
+                <option value="all">全部店铺</option>{store !== "all" && !catalogProducts.some(product => product.catalogStoreNames.includes(store)) ? <option value={store}>{store}</option> : null}{[...new Set(catalogProducts.flatMap(product => product.catalogStoreNames))].sort().map((storeName) => <option value={storeName} key={storeName}>{storeName}</option>)}
               </select></LibraryFilterField><LibraryFilterField label="销售状态"><select className="select-input" aria-label="按商品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="all">全部状态</option>{status !== "all" && !salesStatusDefinitions.some(item => item.id === status) ? <option value={status}>当前选中状态（等待读取）</option> : null}{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}
               </select></LibraryFilterField></>}

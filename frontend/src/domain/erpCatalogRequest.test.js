@@ -1,9 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { buildErpCatalogRequest, buildErpCatalogInboxEnvelope, validateErpCatalogInboxEnvelope } from './erpCatalogRequest';
+import { buildErpCatalogRequest, buildErpCatalogInboxEnvelope, validateErpCatalogInboxEnvelope, erpCatalogRequestProgress, ERP_CATALOG_GROUPS } from './erpCatalogRequest';
 
 const request = () => buildErpCatalogRequest({ id: 'catalog-1', workspaceId: 'w-1', platformSkcs: ['SKC-1'], confirmedSkus: [{ platformSku: 'SKU-1', platformSkc: 'SKC-1' }], sourceProductIds: ['product-1'], ledgerPeriod: '2026-08', idempotencyKey: 'refresh-1', requestedAt: '2026-09-29T00:00:00Z' });
 const mapping = { platformSku: 'SKU-NEW', platformSkc: 'SKC-1', warehouseSku: 'WH-1', attribute: '平台蓝色', unitConversion: { warehouseUnits: 2, platformUnits: 1, source: 'erp_platform_mapping', sourceRef: 'map-1' } };
 const payload = () => ({ catalog: { batchId: 'batch-1', requestId: 'catalog-1', workspaceId: 'w-1', ledgerPeriod: '2026-08', generatedAt: '2026-09-29T01:00:00Z', query: { unit: 'platform_skc', platformSkcs: ['SKC-1'] }, coverage: { directory: { state: 'complete' }, mappings: { state: 'complete' }, images: { state: 'unavailable', reasons: ['network'] }, suppliers: { state: 'complete' }, purchaseEvidence: { state: 'complete' } }, rows: [{ ...mapping, catalogMappings: [mapping], productName: '商品名称', previewUnitCost: 100, unitCost: 100 }], warehouseEvidence: [{ warehouseSku: 'WH-1', evidenceComplete: true, purchaseRecords: [{ recordId: 'purchase-1', quantity: 3, unitPrice: 0.00001, purchaseDate: '2026-08-29', purchaseCatalog: { purchaseSpecificationAndModel1688: '采购规格' } }] }] }, deliveryId: 'delivery-1', sentAt: '2026-09-29T01:00:00Z' });
+
+describe('durable catalog completion presentation', () => {
+  const coverage = Object.fromEntries(ERP_CATALOG_GROUPS.map(group => [group, { state: 'complete' }]));
+  const receipt = (overrides = {}) => ({ catalog: { ...payload().catalog, coverage, ...overrides } });
+  it('distinguishes no receipt, real missing groups and full completion', () => {
+    expect(erpCatalogRequestProgress(request()).state).toBe('pending');
+    expect(erpCatalogRequestProgress(request(), [payload()])).toMatchObject({ state: 'partial', missingGroups: ['images'] });
+    expect(erpCatalogRequestProgress(request(), [receipt()])).toEqual({ state: 'complete', missingGroups: [], completeSkcCount: 1, totalSkcCount: 1 });
+  });
+  it('requires every requested SKC across independent batch receipts', () => {
+    const req = { ...request(), platformSkcs: ['SKC-1', 'SKC-2'] };
+    const one = receipt({ coverage: { ...coverage, directory: { state: 'partial', reasons: ['query_scope_subset'] } } });
+    expect(erpCatalogRequestProgress(req, [one])).toMatchObject({ state: 'partial', completeSkcCount: 1, totalSkcCount: 2 });
+    expect(erpCatalogRequestProgress(req, [one, receipt({ query: { platformSkcs: ['skc-2'] } })]).state).toBe('complete');
+  });
+  it('keeps newer missing evidence and ignores foreign request/workspace/month/ledger receipts', () => {
+    expect(erpCatalogRequestProgress(request(), [receipt(), receipt({ generatedAt: '2026-09-30T00:00:00Z', coverage: payload().catalog.coverage })]).missingGroups).toEqual(['images']);
+    for (const override of [{ requestId: 'other' }, { workspaceId: 'other' }, { ledgerPeriod: '2026-09' }, { ledgerId: 'other' }]) {
+      expect(erpCatalogRequestProgress(request(), [receipt(override)]).state).toBe('pending');
+    }
+  });
+  it('checks the explicitly requested groups and never turns a missing receipt into completion', () => {
+    const req = { ...request(), missingGroups: ['suppliers'] };
+    expect(erpCatalogRequestProgress(req, [payload()]).state).toBe('complete');
+    expect(erpCatalogRequestProgress(req).state).toBe('pending');
+  });
+});
 
 describe('ERP independent catalog requests', () => {
   it('validates every platform pair in exact-scope deliveries and preserves that policy on replay', () => {

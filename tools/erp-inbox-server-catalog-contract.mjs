@@ -164,6 +164,42 @@ var ERP_CATALOG_INBOX_FORMAT = "shopeers-erp-catalog-inbox";
 var ERP_CATALOG_BATCH_FORMAT = "shopeers-erp-catalog-batch";
 var ERP_CATALOG_VERSION = 1;
 var ERP_CATALOG_GROUPS = Object.freeze(["directory", "mappings", "images", "suppliers", "purchaseEvidence"]);
+function erpCatalogRequestProgress(request, receipts = []) {
+  const targets = new Set((request.platformSkcs ?? []).map(canonicalPlatformSkc));
+  const requestedGroups = request.missingGroups ?? ERP_CATALOG_GROUPS;
+  const newest = /* @__PURE__ */ new Map();
+  for (const receipt of receipts) {
+    const catalog = receipt.catalog ?? receipt.envelope?.catalog;
+    if (!catalog || catalog.requestId !== (request.requestId ?? request.id) || catalog.workspaceId !== request.workspaceId || catalog.ledgerPeriod !== request.ledgerPeriod || (catalog.ledgerId ?? null) !== (request.ledgerId ?? null)) continue;
+    for (const item of catalog.query?.platformSkcs ?? []) {
+      const skc = canonicalPlatformSkc(typeof item === "string" ? item : item.platformSkc);
+      if (!targets.has(skc)) continue;
+      const previous = newest.get(skc);
+      if (!previous || String(catalog.generatedAt ?? "") >= String(previous.generatedAt ?? "")) newest.set(skc, catalog);
+    }
+  }
+  const missing = /* @__PURE__ */ new Set();
+  let completeSkcCount = 0;
+  for (const skc of targets) {
+    const catalog = newest.get(skc);
+    let complete = true;
+    for (const group of requestedGroups) {
+      const coverage = catalog?.coverage?.[group];
+      const ready = coverage?.state === "complete" || coverage?.state === "partial" && coverage.reasons?.length > 0 && coverage.reasons.every((reason) => reason === "query_scope_subset");
+      if (!ready) {
+        missing.add(group);
+        complete = false;
+      }
+    }
+    if (complete) completeSkcCount++;
+  }
+  return {
+    state: targets.size > 0 && !missing.size ? "complete" : newest.size ? "partial" : "pending",
+    missingGroups: [...missing],
+    completeSkcCount,
+    totalSkcCount: targets.size
+  };
+}
 var required = (value, label) => {
   const text2 = String(value ?? "").trim();
   if (!text2) throw new Error(`${label}\u4E0D\u80FD\u4E3A\u7A7A\u3002`);
@@ -308,6 +344,7 @@ export {
   ERP_CATALOG_VERSION,
   buildErpCatalogInboxEnvelope,
   buildErpCatalogRequest,
+  erpCatalogRequestProgress,
   normalizeErpCatalogCoverage,
   normalizeErpCatalogPurchaseEvidence,
   normalizeErpUnitConversion,

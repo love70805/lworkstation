@@ -92,7 +92,7 @@ describe("selection read recovery", () => {
     await mount("/products?view=reference"); await waitFor(() => container.textContent.includes("预存区读取失败"));
     expect(container.textContent).not.toContain("还没有选品经营参考");
     await change("搜索预存资料", "RECOVERY-SKU");
-    faults.reference = false; await retry(); await waitFor(() => container.querySelector(".selection-reference-table"));
+    faults.reference = false; await retry(); await waitFor(() => container.textContent.includes("暂无待补齐的预存资料"));
     expect(field("搜索预存资料").value).toBe("RECOVERY-SKU");
   });
 
@@ -120,19 +120,20 @@ it("searches all reference identities by supplier number and store, then clears 
   await db.importBatches.bulkAdd(["甲店", "乙店"].map((store, index) => ({ id: `SEARCH-B${index}`, workspaceId, ledgerId: "SEARCH-L", store, status: "completed" })));
   await db.salesRows.bulkAdd(Array.from({ length: 15 }, (_, index) => ({ id: `SEARCH-R${index}`, workspaceId, ledgerId: "SEARCH-L", batchId: index < 10 ? "SEARCH-B0" : "SEARCH-B1", store: index < 10 ? "甲店" : "乙店", platformSku: `SEARCH-SKU${index}`, platformSkc: `SEARCH-SKC${index}`, supplierNumber: `货号${index}`, attribute: "正常", quantity: 1, amount: 1, sourceRow: index + 2 })));
   await mount("/products?view=reference");
-  await waitFor(() => container.textContent.includes("匹配 15 / 15 条"));
+  await waitFor(() => container.textContent.includes("匹配 15 / 15 个商品 · 15 个 SKU"));
   await change("按供方货号筛选", "货号14");
-  await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
+  await waitFor(() => container.textContent.includes("匹配 1 / 15 个商品 · 1 个 SKU"));
+  expect(container.querySelector('.reference-summary').textContent).toBe('当前待补商品1平台 SKU1资料已齐全0缺参考成本 SKU1');
   expect(container.querySelector(".selection-reference-table").textContent).toContain("SEARCH-SKC14");
   await change("搜索预存资料", "SEARCH-SKU14");
-  await waitFor(() => container.textContent.includes("匹配 1 / 15 条"));
+  await waitFor(() => container.textContent.includes("匹配 1 / 15 个商品 · 1 个 SKU"));
   await change("搜索预存资料", "SEARCH-SKU13");
-  await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
+  await waitFor(() => container.textContent.includes("匹配 0 / 15 个商品 · 0 个 SKU"));
   await change("搜索预存资料", "SEARCH-SKU14");
   await change("参考来源店铺", "甲店");
-  await waitFor(() => container.textContent.includes("匹配 0 / 15 条"));
+  await waitFor(() => container.textContent.includes("匹配 0 / 15 个商品 · 0 个 SKU"));
   await act(async () => button("清空筛选").click());
-  await waitFor(() => container.textContent.includes("匹配 15 / 15 条"));
+  await waitFor(() => container.textContent.includes("匹配 15 / 15 个商品 · 15 个 SKU"));
   expect(await db.salesRows.count()).toBe(15);
 });
 
@@ -157,31 +158,39 @@ it("searches catalog SKUs inside the selected store and supplier range without l
   expect(await db.products.count()).toBe(2);
 });
 
-it("defaults to unlinked branches while keeping linked reference history and explicit filter choices", async () => {
+it("keeps catalog SKCs out of prestorage even with a saved historical all-records filter", async () => {
   await saveProductCatalogRecord({ draft });
   const workspaceId = "workspace-default";
   await db.ledgers.add({id:"REF-L",workspaceId,period:"2026-08"});
   await db.importBatches.add({id:"REF-B",workspaceId,ledgerId:"REF-L",store:"甲店",status:"completed"});
-  await db.salesRows.bulkAdd(["RECOVERY-SKU","UNLINKED-SKU"].map((platformSku,index)=>({
-    id:`REF-R${index}`,workspaceId,ledgerId:"REF-L",batchId:"REF-B",store:"甲店",platformSku,platformSkc:"RECOVERY-SKC",supplierNumber:"共同货号",quantity:1,amount:30,sourceRow:index+2,
+  await db.salesRows.bulkAdd(["RECOVERY-SKU","UNLINKED-SKU", "PENDING-SKU"].map((platformSku,index)=>({
+    id:`REF-R${index}`,workspaceId,ledgerId:"REF-L",batchId:"REF-B",store:"甲店",platformSku,platformSkc: index === 2 ? "PENDING-SKC" : "RECOVERY-SKC",supplierNumber:"共同货号",quantity:1,amount:30,sourceRow:index+2,
   })));
   // A previous release saved its old default automatically.
   const key = `shopeers-product-library-filters-v1:${JSON.stringify([workspaceId,"reference"])}`;
-  localStorage.setItem(key, JSON.stringify({catalogFilter:"all"}));
+  localStorage.setItem(key, JSON.stringify({catalogFilter:"all", catalogFilterVersion: 3}));
   await mount("/products?view=reference");
-  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("UNLINKED-SKU"));
-  expect(field("按建档情况筛选").value).toBe("unlinked");
+  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("PENDING-SKU"));
+  expect(field("按建档情况筛选")).toBeNull();
   expect(container.querySelector(".selection-reference-table").textContent).not.toContain("RECOVERY-SKU");
-  await change("按建档情况筛选","all");
-  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("RECOVERY-SKU"));
-  expect(container.querySelector(".selection-reference-table").textContent).toContain("UNLINKED-SKU");
+  expect(container.querySelector(".selection-reference-table").textContent).not.toContain("UNLINKED-SKU");
+  expect(container.textContent).toContain("匹配 1 / 1 个商品 · 1 个 SKU");
+  await change("搜索预存资料", "RECOVERY");
+  await waitFor(() => container.textContent.includes("匹配 0 / 1 个商品 · 0 个 SKU"));
+  await act(async () => button("清空筛选").click());
+  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("PENDING-SKU"));
+  expect(container.querySelector(".selection-reference-table").textContent).not.toContain("RECOVERY-SKC");
   await act(async () => root.unmount()); router.dispose(); root=createRoot(container);
   await mount("/products?view=reference");
-  await waitFor(() => field("按建档情况筛选")?.value === "all");
-  await change("按建档情况筛选","linked");
-  await waitFor(() => !container.querySelector(".selection-reference-table")?.textContent.includes("UNLINKED-SKU"));
-  expect(container.querySelector(".selection-reference-table").textContent).toContain("RECOVERY-SKU");
-  expect(await db.salesRows.count()).toBe(2);
+  await waitFor(() => container.querySelector(".selection-reference-table")?.textContent.includes("PENDING-SKU"));
+  expect(container.querySelector(".selection-reference-table").textContent).not.toContain("RECOVERY-SKC");
+  await act(async () => [...container.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.includes('选品商品库')).click());
+  await waitFor(() => button('补齐 1 个新增 SKU'));
+  await change('搜索商品档案', 'UNLINKED-SKU');
+  await waitFor(() => container.textContent.includes('匹配 1 / 1 条'));
+  expect(container.querySelector('.product-table').textContent).toContain('RECOVERY-SKC');
+  expect(await db.platformSkus.count()).toBe(1);
+  expect(await db.salesRows.count()).toBe(3);
   expect(await db.products.count()).toBe(1);
 });
 
@@ -198,6 +207,23 @@ it("keeps imported basic drafts in prestorage, shows complete missing fields and
   await act(async () => button("连续补齐").click());
   await waitFor(() => router.state.location.pathname === "/products/edit");
   expect(new URLSearchParams(router.state.location.search).get("product")).toBe(first.product.id);
+});
+
+it('reuses the sole existing SKC draft when its SKU evidence arrives before saved ownership', async () => {
+  const workspaceId = 'workspace-default';
+  await db.products.add({ id: 'EMPTY-DRAFT', workspaceId, name: '已预存商品', platformSkc: 'EMPTY-PARENT', status: 'draft', store: '甲店', attributes: { catalogOrigin: 'ledger_import' } });
+  await db.ledgers.add({ id: 'EMPTY-L', workspaceId, period: '2026-09' });
+  await db.importBatches.add({ id: 'EMPTY-B', workspaceId, ledgerId: 'EMPTY-L', store: '甲店', status: 'completed' });
+  await db.salesRows.add({ id: 'EMPTY-R', workspaceId, ledgerId: 'EMPTY-L', batchId: 'EMPTY-B', store: '甲店', platformSku: 'INCOMING-BRANCH', platformSkc: 'EMPTY-PARENT', attribute: '红色', quantity: 1, amount: 10 });
+  await mount('/products?view=reference');
+  await waitFor(() => container.querySelector('.selection-reference-table')?.textContent.includes('INCOMING-BRANCH'));
+  expect(container.querySelectorAll('.reference-group-table')).toHaveLength(1);
+  expect(container.textContent).toContain('匹配 1 / 1 个商品 · 1 个 SKU');
+  await act(async () => button('连续补齐').click());
+  await waitFor(() => router.state.location.pathname === '/products/edit');
+  expect(new URLSearchParams(router.state.location.search).get('product')).toBe('EMPTY-DRAFT');
+  expect(await db.products.count()).toBe(1);
+  expect(await db.platformSkus.count()).toBe(0);
 });
 
 it("keeps active advanced scope visible when collapsed and restores all rows after removing it", async () => {

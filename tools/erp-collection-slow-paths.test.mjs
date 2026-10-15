@@ -28,7 +28,7 @@ async function fixture(mode, realClock = false) {
  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
    if (mode === 'context-hang' && message.type === 'shopeers.erp.previewContext') return;
-   if (message.type === 'shopeers.erp.catalogContext') optional = true;
+   if (message.type === 'shopeers.erp.catalogContext' && messages.some(item => item.type === 'shopeers.erp.submitCostResult')) optional = true;
    callback(collectionReply(message, { expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }] }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', platformSkcs: ['SKC-A'], expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }, { platformSku: 'SKU-WH-UNSOLD', platformSkc: 'SKC-A' }] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }));
  } } };
  window.fetch = async (raw, options) => {

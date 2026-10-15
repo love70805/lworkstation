@@ -58,7 +58,12 @@
   }
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
-    const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === chrome.runtime.getManifest().version || ['8.0.41', '8.0.42'].includes(chrome.runtime.getManifest().version) && ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41'].includes(item.extensionVersion)) && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+    const currentVersion = chrome.runtime.getManifest().version;
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42'];
+    const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
+      || ['8.0.41', '8.0.42', '8.0.43'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+        && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
+      && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
     await chrome.storage.local.set({ [CHECKPOINT_KEY]: records });
     return records;
@@ -801,7 +806,7 @@
 
   async function catalogContext(input, sender) {
     const { request } = await catalogRequest(input, sender);
-    return { ok: true, request: { requestId: request.requestId, platformSkcs: request.platformSkcs, expectedSkus: normalizedExpectedSkus(request.confirmedSkus), ledgerPeriod: request.ledgerPeriod, missingGroups: request.missingGroups } };
+    return { ok: true, request: { requestId: request.requestId, platformSkcs: request.platformSkcs, expectedSkus: normalizedExpectedSkus(request.confirmedSkus), ledgerPeriod: request.ledgerPeriod, missingGroups: request.missingGroups, catalogProgress: request.catalogProgress } };
   }
 
   function buildCatalogRows(results, querySkcs) {
