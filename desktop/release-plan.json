@@ -5,6 +5,10 @@
   "integrationBranch": "codex/erp-cost-review-0.4.27",
   "requiredCommits": [
     {
+      "module": "v0.4.27-procurement-price-confirmation",
+      "commit": "70b91c5"
+    },
+    {
       "module": "v0.4.27-verified-main-baseline",
       "commit": "cf401a24ef0c9b1b596e6ac415334f063a145b9a"
     },
