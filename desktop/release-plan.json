@@ -5,6 +5,10 @@
   "integrationBranch": "codex/ui-scroll-0.4.31",
   "requiredCommits": [
     {
+      "module": "v0.4.31-page-scrolling-and-space",
+      "commit": "af4771876dfd75e11cbf46b640fb971fcb96cb41"
+    },
+    {
       "module": "v0.4.31-verified-main-baseline",
       "commit": "bc7ee55f89eba267bf876c3635318add7d057921"
     },
