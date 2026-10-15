@@ -108,7 +108,7 @@
 .cost-flow-guide-steps b { display: grid; width: 22px; height: 22px; flex: 0 0 22px; place-items: center; border-radius: 50%; background: var(--surface-strong); color: var(--text-muted); font-family: "JetBrains Mono", monospace; font-size: 10px; }
 .cost-flow-guide-steps span.active { color: var(--text); font-weight: 700; }
 .cost-flow-guide-steps span.active b { background: var(--primary); color: #fff; }
-.cost-source-panel, .cost-preview-panel { min-width: 0; overflow: hidden; }
+.cost-source-panel, .cost-preview-panel { min-width: 0; overflow: clip; }
 .cost-preview-panel { width: 100%; scroll-margin-top: 80px; }
 .cost-preview-header { align-items: center; }
 .cost-preview-tools { display: flex; min-width: 0; align-items: center; gap: 10px; }
@@ -161,7 +161,7 @@
 .cost-manual-input-modal { width: min(760px, calc(100vw - 32px)); }
 .cost-inbox-queue-modal { width: min(760px, calc(100vw - 32px)); }
 .cost-inbox-queue-modal .modal-body { padding: 0; }
-.cost-inbox-queue { display: grid; max-height: min(520px, 62vh); overflow-y: auto; }
+.cost-inbox-queue { display: grid; }
 .cost-inbox-item { display: flex; min-height: 82px; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .cost-inbox-item:last-child { border-bottom: 0; }
 .cost-inbox-item.loaded { background: var(--success-bg); }

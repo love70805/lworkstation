@@ -32,7 +32,7 @@
 .filter-chip.active { border-color: var(--warning); background: var(--warning-bg); color: var(--warning); }
 .sort-control { display: flex; align-items: center; gap: 8px; color: var(--text-muted); white-space: nowrap; }
 .sort-control select { min-height: 34px; padding: 5px 28px 5px 10px; border: 1px solid var(--text-soft); border-radius: 0; outline: 0; background: var(--surface); color: var(--primary); }
-.product-table-panel { overflow: hidden; }
+.product-table-panel { overflow: clip; }
 .product-table { min-width: 1740px; table-layout: fixed; }
 .product-table tbody tr { cursor: pointer; }
 .product-table th:first-child, .product-table td:first-child { width: 48px; padding-left: 18px; padding-right: 8px; text-align: center; }
@@ -106,7 +106,7 @@
 .catalog-cost-edit:hover { background: var(--primary-soft); }
 .manual-cost-form { display: grid; gap: 14px; }
 .status-manager-modal { width: min(680px, 100%); overflow-x: hidden; }
-.status-manager-list { display: flex; max-height: 360px; flex-direction: column; overflow-y: auto; overflow-x: hidden; border-top: 1px solid var(--border); }
+.status-manager-list { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .status-manager-row { display: grid; grid-template-columns: minmax(160px, 1fr) 112px 74px; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .status-manager-row.archived { opacity: 0.54; }
 .status-manager-row .text-input, .status-manager-row .select-input, .status-manager-add .text-input, .status-manager-add .select-input { min-width: 0; }
@@ -288,7 +288,6 @@
 .library-column-switch button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
 .library-filter-tools .sort-control { font-size: 12px; }
 .library-filter-tools .sort-control select { min-width: 110px; min-height: 34px; max-width: 190px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text); }
-.product-library-page .product-table-panel > .data-table-region > .table-wrap { max-height: min(660px, 65vh); overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .product-library-page .product-table-panel .data-table > thead { position: sticky; top: 0; z-index: 4; }
 .product-library-page .product-table-panel .data-table > thead th { background: var(--surface-soft); }
 .product-library-page .product-table-panel .table-footer { min-height: 52px; }

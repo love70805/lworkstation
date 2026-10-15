@@ -3,6 +3,7 @@ import DataTable from '../components/DataTable';
 import { Button } from '../components/UI';
 import { displayMoney } from '../domain/profitReports';
 import { readProfitViewState, saveProfitViewState } from '../lib/profitViewState';
+import { revealListStart } from '../lib/pageListScroll';
 
 const PAGE_SIZE = 12;
 function ProfitGroup({ group, columns, prepareRows, open, onToggle }) {
@@ -16,17 +17,26 @@ export default function ProfitGroups({ groups, columns, prepareRows, stateKey })
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
   const [expanded, setExpanded] = useState(() => readProfitViewState(stateKey).expanded);
   const scroll = useRef(null);
+  const previousPage = useRef(page);
   const count = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const current = Math.min(page, count - 1);
-  useLayoutEffect(() => { if (scroll.current) scroll.current.scrollTop = readProfitViewState(stateKey).scroll; }, [stateKey]);
-  const changePage = next => { setPage(next); saveProfitViewState(stateKey, { page: next, scroll: 0 }); if (scroll.current) scroll.current.scrollTop = 0; };
+  useLayoutEffect(() => {
+    const position = readProfitViewState(stateKey).windowScrollY;
+    if (Number.isFinite(position)) window.scrollTo({ top: position, behavior: 'auto' });
+    return () => saveProfitViewState(stateKey, { windowScrollY: window.scrollY });
+  }, [stateKey]);
+  useLayoutEffect(() => {
+    if (previousPage.current !== current) revealListStart(scroll.current);
+    previousPage.current = current;
+  }, [current]);
+  const changePage = next => { setPage(next); saveProfitViewState(stateKey, { page: next }); };
   const toggle = (id, open) => setExpanded(previous => {
     const next = open ? [...new Set([...previous, id])] : previous.filter(value => value !== id);
     saveProfitViewState(stateKey, { expanded: next });
     return next;
   });
   return <>
-    <div className="profit-groups-scroll" ref={scroll} onScroll={event => saveProfitViewState(stateKey, { scroll: event.currentTarget.scrollTop })}>
+    <div className="profit-groups-list" ref={scroll}>
       {groups.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE).map(group => <ProfitGroup key={group.id} group={group} columns={columns} prepareRows={prepareRows} open={expanded.includes(group.id)} onToggle={toggle} />)}
       {!groups.length ? <p className="no-results">没有符合筛选条件的商品。</p> : null}
     </div>

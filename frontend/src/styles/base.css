@@ -798,6 +798,13 @@ textarea::placeholder {
   scrollbar-gutter: stable both-edges;
 }
 
+.table-scroll-frame { position: relative; min-width: 0; }
+.table-scroll-frame > .table-wrap { scrollbar-width: none; }
+.table-scroll-frame > .table-wrap::-webkit-scrollbar { display: none; }
+.table-scrollbar { position: sticky; bottom: 0; z-index: 5; height: 18px; overflow-x: auto; overflow-y: hidden; background: var(--surface); border-top: 1px solid var(--border); }
+.table-scrollbar > div { height: 1px; }
+.table-scrollbar:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
 .data-table { font-variant-numeric: tabular-nums; }
 
 .data-table th {
@@ -890,45 +897,6 @@ textarea::placeholder {
 
 .pagination button:hover:not(:disabled):not(.active) {
   background: var(--surface-muted);
-}
-
-.virtual-table-scroll {
-  max-height: 620px;
-  overflow: auto;
-}
-
-.virtual-data-table {
-  display: grid;
-  min-width: 920px;
-}
-
-.virtual-data-table thead {
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  display: grid;
-}
-
-.virtual-data-table thead tr,
-.virtual-data-table tbody tr {
-  display: flex;
-  width: 100%;
-}
-
-.virtual-data-table tbody {
-  position: relative;
-  display: grid;
-}
-
-.virtual-data-table tbody tr {
-  position: absolute;
-}
-
-.virtual-data-table th,
-.virtual-data-table td {
-  display: flex;
-  min-width: 0;
-  align-items: center;
 }
 
 .progress-wrap {
@@ -1195,6 +1163,8 @@ textarea::placeholder {
   font-size: 13px;
 }
 
+.main-canvas .route-loader { min-height: clamp(120px, 24dvh, 220px); }
+
 .toast {
   display: flex;
   min-height: 44px;
@@ -1377,7 +1347,7 @@ textarea::placeholder {
 }
 
 .data-table-region { min-width: 0; }
-.data-table-region > .table-wrap, .data-table-region > .virtual-table-scroll { scroll-margin-top: calc(var(--topbar-height) + 12px); }
+.table-wrap, .profit-groups-list { scroll-margin-top: calc(var(--topbar-height) + 12px); }
 
 /* Keyboard entry to each page, below the global navigation. */
 .skip-link { position: fixed; top: 8px; left: 12px; z-index: 1000; padding: 10px 16px; border: 2px solid var(--primary); border-radius: 4px; background: var(--surface); color: var(--primary); transform: translateY(-160%); }

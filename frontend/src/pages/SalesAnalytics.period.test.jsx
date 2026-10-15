@@ -123,7 +123,7 @@ it('restores store and product queries separately and table scroll on reopening'
   await change(container.querySelector('.sales-details-controls select'), 'quantityExact');
   await click(button('下一页'));
   const before = container.querySelector('tbody').textContent;
-  const table = container.querySelector('.sales-day-table'); table.scrollTop = 42;
+  const table = container.querySelector('.sales-day-table'); table.scrollLeft = 42;
   await act(async () => Simulate.scroll(table));
   await click(button('返回店铺'));
   expect(container.querySelector('input').value).toBe('甲');
@@ -131,7 +131,7 @@ it('restores store and product queries separately and table scroll on reopening'
   expect(container.querySelector('input').value).toBe('SKC-');
   expect(container.querySelector('.sales-details-controls select').value).toBe('quantityExact');
   expect(container.querySelector('tbody').textContent).toBe(before);
-  expect(container.querySelector('.sales-day-table').scrollTop).toBe(42);
+  expect(container.querySelector('.sales-day-table').scrollLeft).toBe(42);
   await click(button('趋势')); await openDay();
   expect(container.querySelector('input').value).toBe('甲');
 });

@@ -28,11 +28,11 @@ describe("DataTable navigation", () => {
     const scrollArea = container.querySelector(".table-wrap");
     const scrollIntoView = vi.fn();
     scrollArea.scrollIntoView = scrollIntoView;
-    scrollArea.scrollTop = 240;
+    scrollArea.scrollLeft = 80;
     await act(async () => container.querySelector('[aria-label="下一页"]').click());
     expect(container.querySelector("tbody tr").textContent).toBe("商品 21");
     expect(container.querySelector('[aria-current="page"]').textContent).toBe("2");
-    expect(scrollArea.scrollTop).toBe(0);
+    expect(scrollArea.scrollLeft).toBe(80);
     expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: "start", behavior: "auto" });
   });
 
@@ -68,6 +68,16 @@ describe("DataTable navigation", () => {
       expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 420, behavior: "auto" });
       expect(tableRef.current.getViewState().pageIndex).toBe(1);
     } finally { scrollTo.mockRestore(); }
+  });
+
+  it('renders only the selected page of a large list without a second vertical viewport', async () => {
+    const many = Array.from({ length: 10000 }, (_, index) => ({ id: String(index), name: `货号 ${index}` }));
+    await act(async () => root.render(<DataTable data={many} columns={columns} pageSize={100} />));
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(100);
+    expect(container.querySelector('tbody tr:last-child').textContent).toBe('货号 99');
+    await act(async () => container.querySelector('[aria-label="下一页"]').click());
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(100);
+    expect(container.querySelector('tbody tr').textContent).toBe('货号 100');
   });
 
 });

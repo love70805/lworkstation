@@ -12,7 +12,7 @@ function PageCheck({ rows, disabled, onSelect }) {
 }
 const identityCount = (row, kind) => row.mappingPending || !row[`${kind}Mapped`] ? '待映射' : row[`${kind}Incomplete`] ? `${row[`${kind}Count`] || ''} 待补`.trim() : row[`${kind}Count`];
 
-// Both import and profit/ERP selectors use this bounded, searchable table.
+// Import and profit/ERP selectors share a searchable, paginated page list.
 export default function SupplierFilterTable({ rows = [], store = 'all', onSelect, onInspect, onExport, disabled = false, compact = false, resetKey = '' }) {
   const id = useId(), [query, setQuery] = useState(''), [view, setView] = useState('all'), [pageSize, setPageSize] = useState(20);
   const [pasteOpen, setPasteOpen] = useState(false), [paste, setPaste] = useState(''), [message, setMessage] = useState('');
@@ -46,7 +46,7 @@ export default function SupplierFilterTable({ rows = [], store = 'all', onSelect
     </div>
     <div className="supplier-table-views" role="group" aria-label="货号查看视图">{[['all', '全部'], ['matched', '规则匹配'], ['selected', '已选'], ['unselected', '未选'], ...(!compact ? [['added', '本次新增选择']] : [])].map(([value, label]) => <button type="button" key={value} aria-pressed={view === value} onClick={() => setView(value)}>{label} <span>{counts[value]}</span></button>)}</div>
     <div className="supplier-table-bulk"><span role="status">{store === 'all' ? '全部店铺' : store} · 筛选结果 {filtered.length} 个{!compact ? '（货号按店铺计数）' : ''}</span><div><Button variant="ghost" disabled={disabled || !filtered.length} onClick={() => onSelect(filtered, true)}>选中筛选结果</Button><Button variant="ghost" disabled={disabled || !filtered.length} onClick={() => onSelect(filtered, false)}>取消筛选结果</Button></div></div>
-    <DataTable key={pageSize} data={filtered} columns={columns} getRowId={row => row.key} pageSize={pageSize} virtualizeThreshold={50} estimateSize={48} paginationResetKey={`${resetKey}/${store}/${query}/${view}`} getRowProps={row => ({ className: `${row.selected ? 'is-selected' : ''} supplier-row-${row.change ?? 'unchanged'}` })} emptyState="当前查看筛选没有货号，已选项仍保留。" />
+    <DataTable key={pageSize} data={filtered} columns={columns} getRowId={row => row.key} pageSize={pageSize} paginationResetKey={`${resetKey}/${store}/${query}/${view}`} getRowProps={row => ({ className: `${row.selected ? 'is-selected' : ''} supplier-row-${row.change ?? 'unchanged'}` })} emptyState="当前查看筛选没有货号，已选项仍保留。" />
     <label className="supplier-page-size" htmlFor={`${id}-size`}>每页 <select id={`${id}-size`} value={pageSize} onChange={event => setPageSize(Number(event.target.value))}>{[20, 50, 100].map(size => <option key={size} value={size}>{size} 条</option>)}</select></label>
     <Modal open={pasteOpen} title="粘贴完整货号清单" description={`${store === 'all' ? '本批全部店铺' : store}；精确匹配完整货号，只加入命中项。`} onClose={() => setPasteOpen(false)} footer={<><Button onClick={() => setPasteOpen(false)}>完成</Button><Button variant="primary" disabled={disabled || !paste.trim()} onClick={addPasted}>添加匹配货号</Button></>}>
       <label htmlFor={`${id}-paste`}>每行一个完整货号，也可用空格、逗号或分号分隔</label><textarea id={`${id}-paste`} className="text-input" rows={7} value={paste} onChange={event => setPaste(event.target.value)} /><p role="status">{message}</p>
