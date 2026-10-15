@@ -2026,7 +2026,7 @@
             (lastMeta.requestContextError ? '<span class="erpa-status-item erpa-status-warn">自动回传上下文异常，本地结果已保留</span>' : '') +
             (lastMeta.excludedMappingCount ? '<span class="erpa-status-item">已排除范围外映射 <strong>' + lastMeta.excludedMappingCount + '</strong></span>' : '') +
             (lastMeta.excludedWarehouseSkuCount ? '<span class="erpa-status-item">未命中仓库SKU <strong>' + lastMeta.excludedWarehouseSkuCount + '</strong></span>' : '') +
-            (lastMeta.costWarningCount ? '<span class="erpa-status-item erpa-status-danger">疑似成本异常 <strong>' + lastMeta.costWarningCount + '</strong></span>' : '') +
+            (lastMeta.costWarningCount ? '<span class="erpa-status-item erpa-status-danger">待核对采购 <strong>' + lastMeta.costWarningCount + ' 笔</strong></span>' : '') +
             '<span class="erpa-status-item">有效采购证据 <strong>' + (lastMeta.evidenceRecordCount || 0) + '</strong></span>' +
             '<span class="erpa-status-item">请求分页 <strong>' + (lastMeta.pageSize || PREFERRED_PAGE_SIZE) + ' 条/页</strong>' + (lastMeta.pageSizeFallback ? '（已回退）' : '') + '</span>' +
             '<span class="erpa-status-item">后台实际返回峰值 <strong>' + (lastMeta.maxReturnedPerPage || 0) + ' 条/页</strong></span>' +
@@ -2153,8 +2153,9 @@
             return;
         }
         banner.className = 'erpa-anomaly-banner erpa-visible';
-        banner.innerHTML = '<span class="erpa-anomaly-copy"><strong>发现 ' + warningCount + ' 条疑似成本异常</strong>' +
-            '<small>扩展提供预览并回传原始证据。接收成功后可复制完整 JSON；表格和 CSV 仅作预览。修正与正式发布请在 Lworkstation 成本核对页处理。</small></span>';
+        const warehouseCount = lastResults.filter(result => resultCostWarnings(result).count > 0).length;
+        banner.innerHTML = '<span class="erpa-anomaly-copy"><strong>' + warehouseCount + ' 个仓库 SKU 采购价待核对 · ' + warningCount + ' 笔采购记录</strong>' +
+            '<small>请到工作台成本详情确认真实采购价或修正价格，核价完成后自动采用合格 ERP 成本。这里保留采集时的原始预览。</small></span>';
     }
 
     function updateActionState() {
