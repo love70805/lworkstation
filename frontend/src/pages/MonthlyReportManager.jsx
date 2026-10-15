@@ -133,7 +133,7 @@ export function SupplementEditor({ state, kind, onClose }) {
     {kind==='deduction'&&mode==='files'?<details><summary>没有扣款来源的店铺：明确真实零值</summary>{state.stores.map(store=><label key={store}><input type="checkbox" disabled={busy} checked={zeroStores.includes(store)} onChange={event=>{invalidate();setZeroStores(previous=>event.target.checked?[...previous,store]:previous.filter(name=>name!==store));}}/>{store} 本月扣款为 0</label>)}</details>:null}
     {notice?<p role="status">{notice}</p>:null}
     {draft.stats.skipped?<p role="status">已跳过 {draft.stats.skipped} 条无数量记录，来源位置已保留。</p>:null}
-    {draft.stats.unassigned.length?<Panel><p role="status">来源表有 {draft.stats.unassigned.length} 条登记人不明记录，已排除，未计入任何登记人。可在原表补齐登记人后重新导入。</p><details><summary>查看未归属记录</summary>{draft.stats.unassigned.slice(0,100).map(row=><p key={`${row.sourceName}/${row.sourceSheet}/${row.sourceRow}`}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.rawQuantity || '无数量'} 件</p>)}{draft.stats.unassigned.length>100?<p>仅显示前 100 条，完整位置保留在来源记录中。</p>:null}</details></Panel>:null}
+    {draft.stats.unassigned.length?<Panel className="report-source-notice"><p role="status">来源表有 {draft.stats.unassigned.length} 条登记人不明记录，已排除，未计入任何登记人。可在原表补齐登记人后重新导入。</p><details><summary>查看未归属记录</summary>{draft.stats.unassigned.slice(0,100).map(row=><p key={`${row.sourceName}/${row.sourceSheet}/${row.sourceRow}`}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.rawQuantity || '无数量'} 件</p>)}{draft.stats.unassigned.length>100?<p>仅显示前 100 条，完整位置保留在来源记录中。</p>:null}</details></Panel>:null}
     {draft.stats.addedRows.some(row=>row.quantityFromText)?<p role="status">已将 {draft.stats.addedRows.filter(row=>row.quantityFromText).length} 条文本数量识别为有效数字，共 {exactSum(draft.stats.addedRows.filter(row=>row.quantityFromText),'quantityExact')} 件，已计入预览。</p>:null}
     {draft.stats.duplicates?<p>已有 {draft.stats.duplicates} 条重复源记录已跳过。</p>:null}
     {previewPending?<p role="status">正在更新预览…</p>:null}
@@ -152,7 +152,7 @@ export function SupplementEditor({ state, kind, onClose }) {
 
 export function AdoptedDispatchNotice({ rows = [], locked = false }) {
   const inherited = legacyUnassignedDispatchRows(rows);
-  return inherited.length ? <Panel><p role="status">当前采用包含 {inherited.length} 条由上一登记人顺延归属的 XLSX 记录，共 {exactSum(inherited,'quantityExact')} 件，源表没有明确登记人归属。历史采用值保持不变。</p><p>{locked ? '已定稿账本需先显式重开，再核对源表并重新导入代发。' : '请核对源表后重新导入；替换已有来源即可应用新的归属规则。'}</p><details><summary>查看原采用中的未明确归属行</summary>{inherited.slice(0,100).map(row=><p key={supplementRowIdentity(row)}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.quantityExact} 件</p>)}</details></Panel> : null;
+  return inherited.length ? <Panel className="report-source-notice"><p role="status">当前采用包含 {inherited.length} 条由上一登记人顺延归属的 XLSX 记录，共 {exactSum(inherited,'quantityExact')} 件，源表没有明确登记人归属。历史采用值保持不变。</p><p>{locked ? '已定稿账本需先显式重开，再核对源表并重新导入代发。' : '请核对源表后重新导入；替换已有来源即可应用新的归属规则。'}</p><details><summary>查看原采用中的未明确归属行</summary>{inherited.slice(0,100).map(row=><p key={supplementRowIdentity(row)}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.quantityExact} 件</p>)}</details></Panel> : null;
 }
 
 export default function MonthlyReportManager({ ledgerId, missingCostCount, onOpenCosts }) {
