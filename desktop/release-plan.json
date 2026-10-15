@@ -5,6 +5,10 @@
   "integrationBranch": "codex/export-skc-0.4.32",
   "requiredCommits": [
     {
+      "module": "v0.4.32-export-grouping-catalog-response-and-title-evidence",
+      "commit": "c230e207431749bc1961b9e345fce49737ecdc8e"
+    },
+    {
       "module": "v0.4.32-verified-main-baseline",
       "commit": "1722c3ea3ff414d07d745a5e88e363fefe9ac2bd"
     },
