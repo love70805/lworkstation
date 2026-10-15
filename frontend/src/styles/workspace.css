@@ -145,7 +145,6 @@
 .workspace-disclosure > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
 .workspace-page .task-empty { min-height: 64px; padding: 12px 16px; }
 .workspace-page .quick-actions button { min-height: 58px; padding: 9px 8px; }
-.workspace-page .activity-list { max-height: 280px; overflow: auto; }
 
 .dashboard-widget { box-shadow: var(--shadow-sm); }
 .widget-subtitle { margin: -6px 16px 10px; color: var(--text-muted); font-size: 11px; line-height: 17px; }

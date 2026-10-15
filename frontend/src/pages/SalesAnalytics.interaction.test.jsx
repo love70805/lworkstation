@@ -38,7 +38,7 @@ beforeEach(async () => {
   await act(async () => root.render(<SalesAnalytics workspaceId="W" ledgerId="L" />));
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
-it('replaces daily stacks with a store pie, retains SKC details and resets only list scroll on paging', async () => {
+it('replaces daily stacks with a store pie, retains SKC details and preserves horizontal position while paging the page list', async () => {
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
   await act(async () => container.querySelector('.sales-daily-bar').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(0);
@@ -47,10 +47,16 @@ it('replaces daily stacks with a store pie, retains SKC details and resets only 
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
   await act(async () => container.querySelector('.sales-store-entry').click());
   expect(container.textContent).toContain('SKC');
-  const table = container.querySelector('.sales-day-table'); table.scrollTop = 200; document.documentElement.scrollTop = 400;
+  expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(5);
+  expect(container.querySelectorAll('.sales-store-pie [role="button"]').length).toBeGreaterThan(5);
+  const firstLegend = container.querySelector('.sales-pie-legend button').textContent;
+  const table = container.querySelector('.sales-day-table'); table.scrollLeft = 200; document.documentElement.scrollTop = 400;
   await act(async () => Simulate.scroll(table));
   await act(async () => find('下一页').click());
-  expect(table.scrollTop).toBe(0); expect(document.documentElement.scrollTop).toBe(400);
+  expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(5);
+  expect(container.querySelector('.sales-pie-legend button').textContent).not.toBe(firstLegend);
+  expect(container.querySelector('tbody tr').textContent).toContain(container.querySelector('.sales-pie-legend button span').childNodes[0].textContent);
+  expect(table.scrollLeft).toBe(200); expect(document.documentElement.scrollTop).toBe(400);
   await act(async () => find('趋势').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
 });
@@ -97,12 +103,12 @@ it('hover and keyboard focus keep chart and details DOM stable without extra dat
   expect(bar.getAttribute('aria-label')).toContain('占比');
   await act(async () => bar.click());
   const table = container.querySelector('.sales-day-table'), input = container.querySelector('input');
-  table.scrollTop = 50;
+  table.scrollLeft = 50;
   await act(async () => Simulate.scroll(table));
   await act(async () => find('销量').click());
   expect(container.querySelector('.sales-day-table')).toBe(table);
   expect(container.querySelector('input')).toBe(input);
-  expect(table.scrollTop).toBe(50);
+  expect(table.scrollLeft).toBe(50);
   expect(mock.read).toHaveBeenCalledTimes(1);
 });
 

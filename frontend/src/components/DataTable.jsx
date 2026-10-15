@@ -14,7 +14,8 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import TableScrollArea from './TableScrollArea';
+import { revealListStart } from '../lib/pageListScroll';
 
 const features = tableFeatures({
   rowSortingFeature,
@@ -33,18 +34,14 @@ function SortIcon({ direction }) {
   return <ArrowUpDown size={13} />;
 }
 
-function TableHeader({ table, fixedWidths = false }) {
+function TableHeader({ table }) {
   return (
     <thead>
       {table.getHeaderGroups().map((group) => (
         <tr key={group.id}>
           {group.headers.map((header) => {
             const sortable = header.column.getCanSort();
-            const width = getColumnSize(header.column);
-            const headerStyle = header.column.columnDef.meta?.headerStyle;
-            const style = fixedWidths
-              ? { width, minWidth: width, maxWidth: width, flex: `0 0 ${width}px`, ...headerStyle }
-              : headerStyle;
+            const style = header.column.columnDef.meta?.headerStyle;
             return (
               <th key={header.id} style={style} aria-sort={sortable ? (header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none") : undefined}>
                 {header.isPlaceholder ? null : sortable ? (
@@ -82,56 +79,6 @@ function StandardBody({ table, rows, emptyState, getRowProps }) {
   );
 }
 
-function VirtualBody({ table, rows, getRowProps, estimateSize, className = "", scrollLabel }) {
-  const scrollRef = useRef(null);
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => estimateSize,
-    getItemKey: (index) => rows[index].id,
-    overscan: 8,
-  });
-  const tableWidth = table.getAllLeafColumns().reduce((total, column) => total + getColumnSize(column), 0);
-
-  return (
-    <div className="virtual-table-scroll" ref={scrollRef} role={scrollLabel ? "region" : undefined} aria-label={scrollLabel} tabIndex={scrollLabel ? 0 : undefined}>
-      <table className={`data-table virtual-data-table ${className}`} style={{ width: tableWidth, minWidth: tableWidth }}>
-        <TableHeader table={table} fixedWidths />
-        <tbody style={{ height: virtualizer.getTotalSize(), width: tableWidth }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            const rowProps = getRowProps?.(row.original) ?? {};
-            return (
-              <tr
-                key={row.id}
-                data-index={virtualRow.index}
-                ref={virtualizer.measureElement}
-                style={{ width: tableWidth, transform: `translateY(${virtualRow.start}px)` }}
-                {...rowProps}
-              >
-                {row.getAllCells().map((cell) => (
-                  <td
-                    key={cell.id}
-                    style={{
-                      width: getColumnSize(cell.column),
-                      minWidth: getColumnSize(cell.column),
-                      maxWidth: getColumnSize(cell.column),
-                      flex: `0 0 ${getColumnSize(cell.column)}px`,
-                      ...cell.column.columnDef.meta?.cellStyle,
-                    }}
-                  >
-                    <table.FlexRender cell={cell} />
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 const DataTable = forwardRef(function DataTable({
   data,
   columns,
@@ -140,8 +87,6 @@ const DataTable = forwardRef(function DataTable({
   getRowId,
   getRowProps,
   pageSize = 20,
-  virtualizeThreshold = 100,
-  estimateSize = 64,
   paginationResetKey,
   initialViewState,
   dataReady = true,
@@ -157,8 +102,8 @@ const DataTable = forwardRef(function DataTable({
   const [pagination, setPagination] = useState({ pageIndex: initialPage, pageSize });
   useImperativeHandle(ref, () => ({
     getViewState: () => {
-      const area = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
-      return { pageIndex: pagination.pageIndex, sorting, scrollTop: area?.scrollTop ?? 0, scrollLeft: area?.scrollLeft ?? 0, windowScrollY: window.scrollY };
+      const area = regionRef.current?.querySelector(".table-wrap");
+      return { pageIndex: pagination.pageIndex, sorting, scrollLeft: area?.scrollLeft ?? 0, windowScrollY: window.scrollY };
     },
   }), [pagination.pageIndex, sorting]);
   const stableColumns = useMemo(() => columns, [columns]);
@@ -188,10 +133,10 @@ const DataTable = forwardRef(function DataTable({
     if (!restoringRef.current || !dataReady) return;
     const maxPage = Math.max(0, Math.ceil(data.length / pagination.pageSize) - 1);
     if (pagination.pageIndex > maxPage) return;
-    const area = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
+    const area = regionRef.current?.querySelector(".table-wrap");
     if (area) {
-      area.scrollTop = initialViewState.scrollTop ?? 0;
       area.scrollLeft = initialViewState.scrollLeft ?? 0;
+      area.dispatchEvent(new Event('scroll'));
     }
     window.scrollTo({ top: initialViewState.windowScrollY ?? 0, behavior: "auto" });
     previousPageRef.current = pagination.pageIndex;
@@ -200,12 +145,7 @@ const DataTable = forwardRef(function DataTable({
   useEffect(() => {
     if (restoringRef.current || previousPageRef.current === pagination.pageIndex) return;
     previousPageRef.current = pagination.pageIndex;
-    const scrollArea = regionRef.current?.querySelector(".virtual-table-scroll, .table-wrap");
-    if (scrollArea) {
-      scrollArea.scrollTop = 0;
-      const top = scrollArea.getBoundingClientRect().top;
-      if (top < 64 || top >= window.innerHeight) scrollArea.scrollIntoView?.({ block: "start", behavior: "auto" });
-    }
+    revealListStart(regionRef.current?.querySelector('.table-wrap'));
   }, [pagination.pageIndex]);
   const rows = table.getRowModel().rows;
   const totalRows = table.getRowCount();
@@ -215,20 +155,15 @@ const DataTable = forwardRef(function DataTable({
   const pageNumbers = Array.from({ length: pageCount }, (_, index) => index).filter((index) => (
     pageCount <= 5 || index === 0 || index === pageCount - 1 || Math.abs(index - pagination.pageIndex) <= 1
   ));
-  const shouldVirtualize = rows.length >= virtualizeThreshold;
 
   return (
     <div className="data-table-region" ref={regionRef}>
-      {shouldVirtualize ? (
-        <VirtualBody table={table} rows={rows} getRowProps={getRowProps} estimateSize={estimateSize} className={className} scrollLabel={scrollLabel} />
-      ) : (
-        <div className="table-wrap" role={scrollLabel ? "region" : undefined} aria-label={scrollLabel} tabIndex={scrollLabel ? 0 : undefined}>
-          <table className={`data-table ${className}`}>
-            <TableHeader table={table} />
-            <StandardBody table={table} rows={rows} emptyState={emptyState} getRowProps={getRowProps} />
-          </table>
-        </div>
-      )}
+      <TableScrollArea label={scrollLabel}>
+        <table className={`data-table ${className}`}>
+          <TableHeader table={table} />
+          <StandardBody table={table} rows={rows} emptyState={emptyState} getRowProps={getRowProps} />
+        </table>
+      </TableScrollArea>
       <div className="table-footer">
         <span role="status" aria-live="polite">显示第 {start} 至 {end} 条，共 {totalRows} 条</span>
         {pageCount > 1 ? (

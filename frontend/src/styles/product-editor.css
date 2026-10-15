@@ -85,7 +85,7 @@
 .input-with-icon { position: relative; }
 .input-with-icon input { padding-right: 34px; }
 .input-with-icon svg { position: absolute; top: 50%; right: 11px; color: var(--text-muted); transform: translateY(-50%); }
-.variants-panel { overflow: hidden; min-height: 370px; }
+.variants-panel { overflow: clip; }
 .variants-panel .panel-header .button { min-height: 34px; padding: 5px 8px; }
 .variants-panel .table-wrap { scrollbar-width: none; }
 .variants-panel .table-wrap::-webkit-scrollbar { display: none; }

@@ -6,7 +6,7 @@ import ProfitGroups from './ProfitGroups';
 vi.mock('../components/DataTable', () => ({ default: ({data}) => <table><tbody>{data.map(row => <tr key={row.id}><td>{row.id}</td></tr>)}</tbody></table> }));
 let root, host;
 afterEach(async()=>{ await act(async()=>root.unmount()); host.remove(); });
-it('mounts only opened variants and resets only the list on paging', async()=>{
+it('mounts only opened variants and reveals the page list after paging', async()=>{
   globalThis.IS_REACT_ACT_ENVIRONMENT=true;
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
   const groups=Array.from({length:30},(_,i)=>({id:String(i),store:'甲',groupSkc:`SKC${i}`,skuCount:1,qty:1,revenue:10,finalizable:false,variants:[{id:`SKU${i}`}]}));
@@ -17,9 +17,9 @@ it('mounts only opened variants and resets only the list on paging', async()=>{
   const first=host.querySelector('details');
   await act(async()=>{first.open=true;first.dispatchEvent(new Event('toggle'));});
   expect(host.querySelectorAll('table')).toHaveLength(1);
-  const scroll=host.querySelector('.profit-groups-scroll');scroll.scrollTop=180;
+  const list=host.querySelector('.profit-groups-list'); list.scrollIntoView=vi.fn();
   await act(async()=>[...host.querySelectorAll('button')].find(el=>el.textContent==='下一页').click());
-  expect(scroll.scrollTop).toBe(0);
+  expect(list.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' });
   expect(host.querySelector('summary').textContent).toContain('SKC12');
   expect(host.querySelector('table')).toBeNull();
 });

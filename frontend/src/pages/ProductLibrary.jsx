@@ -677,7 +677,7 @@ function ProductLibraryView({ workspaceId, view }) {
             {referenceRead.status !== "ready" || catalogState.status !== "ready" ? <SelectionReadState read={referenceRead.status !== "ready" ? referenceRead : catalogState} label="预存区" /> : pendingGroupCount ? (
               <DataTable
                 className="selection-reference-table"
-                scrollLabel="预存资料表格，可横向和纵向滚动"
+                scrollLabel="预存资料表格，可横向滚动，纵向随页面浏览"
                 ref={tableRef}
                 initialViewState={savedView?.table}
                 dataReady={referenceSnapshot !== undefined}
@@ -734,7 +734,7 @@ function ProductLibraryView({ workspaceId, view }) {
             ) : null}
             {catalogState.status !== "ready" ? <SelectionReadState read={catalogState} label="商品档案" /> : <DataTable
               className={columnView === "all" ? "product-table product-table-all" : "product-table product-table-compact"}
-              scrollLabel="商品档案表格，可横向和纵向滚动"
+              scrollLabel="商品档案表格，可横向滚动，纵向随页面浏览"
               ref={tableRef}
               initialViewState={savedView?.table}
               dataReady={catalogSnapshot !== undefined}

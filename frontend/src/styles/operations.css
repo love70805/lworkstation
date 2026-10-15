@@ -36,7 +36,7 @@
 .restore-button:hover { background: var(--surface-soft); }
 .security-note { margin: 0 18px; padding: 10px 12px; border-left: 3px solid var(--primary-bright); background: var(--surface-soft); color: var(--text-muted); font-size: 12px; line-height: 18px; }
 .security-empty { padding: 24px 18px; color: var(--text-muted); font-size: 12px; line-height: 18px; text-align: center; }
-.manual-export { display: flex; min-height: 330px; align-items: center; justify-content: center; flex-direction: column; padding: 28px; text-align: center; }
+.manual-export { display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 28px; text-align: center; }
 .export-icon { display: grid; width: 66px; height: 66px; place-items: center; border-radius: 8px; background: #e5efff; color: var(--primary); }
 .manual-export h2 { margin-top: 18px; font-size: 17px; }
 .manual-export p { margin: 10px 0 22px; color: var(--text-muted); font-size: 13px; }
