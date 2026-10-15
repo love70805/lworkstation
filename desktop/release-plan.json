@@ -5,6 +5,10 @@
   "integrationBranch": "codex/selection-flow-0.4.30",
   "requiredCommits": [
     {
+      "module": "v0.4.30-selection-placement-and-ERP-completion",
+      "commit": "5e802840597e541e52d52bab9d799e2efcceea15"
+    },
+    {
       "module": "v0.4.30-verified-main-baseline",
       "commit": "dadcd68db2230ae7163c3874e488527dcb323865"
     },
