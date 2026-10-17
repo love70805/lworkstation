@@ -39,21 +39,39 @@ async function confirmedIdentities(context, snapshot = null) {
 // Catalog metadata can be used after durable verified receipt, even when the
 // separate formal cost adoption is blocked. The original financial path keeps
 // its published/request checks; this projection never adopts or writes costs.
-export async function readTrustedErpCostInboxCatalogRecords(context, snapshot = null) {
-  const [inboxes, requests] = await Promise.all([db.erpCostInbox.toArray(), db.erpCostRequests.toArray()]);
-  if (!inboxes.some(row => row.workspaceId === context.workspaceId)) return [];
+export async function readTrustedErpCostInboxCatalogRecords(context, snapshot = null, { excludedBatchIds = new Set(), requests: providedRequests = null } = {}) {
+  // A published source is projected separately. Exclude its immutable receipt
+  // through the batch index before cloning its potentially large envelope.
+  const query = excludedBatchIds.size
+    ? db.erpCostInbox.where('batchId').noneOf([...excludedBatchIds])
+    : db.erpCostInbox.where('workspaceId').equals(context.workspaceId);
+  const inboxes = await query.filter(row => row.workspaceId === context.workspaceId && !['rejected', 'voided'].includes(row.status)).toArray();
+  if (!inboxes.length) return [];
+  const requests = providedRequests ?? await db.erpCostRequests.where('workspaceId').equals(context.workspaceId).toArray();
   const local = await confirmedIdentities(context, snapshot);
   const requestById = new Map(requests.filter(item => item.workspaceId === context.workspaceId).map(item => [item.id, item]));
   const known = new Set(local.identities.map(pair));
+  const skcsBySku = new Map();
+  for (const identity of local.identities) {
+    const sku = canonicalPlatformSku(identity.platformSku);
+    if (!skcsBySku.has(sku)) skcsBySku.set(sku, new Set());
+    skcsBySku.get(sku).add(skc(identity));
+  }
+  const trustedRequests = new Map();
+  const trustedRequest = request => {
+    if (!trustedRequests.has(request.id)) trustedRequests.set(request.id, Boolean(request.expectedSkus?.length)
+      && request.expectedSkus.every(item => known.has(pair(item)) && skcsBySku.get(canonicalPlatformSku(item.platformSku))?.size === 1));
+    return trustedRequests.get(request.id);
+  };
+  const ledgerById = new Map(local.ledgers.filter(item => item.workspaceId === context.workspaceId).map(item => [item.id, item]));
   const records = [];
   for (const inbox of inboxes) {
     const request = requestById.get(inbox.requestId);
-    const ledger = local.ledgers.find(item => item.id === inbox.ledgerId && item.workspaceId === context.workspaceId);
+    const ledger = ledgerById.get(inbox.ledgerId);
     if (inbox.workspaceId !== context.workspaceId || !request || !ledger
       || request.ledgerId !== ledger.id || request.ledgerPeriod !== ledger.period
       || ["rejected", "voided"].includes(inbox.status) || ["cancelled", "voided"].includes(request.status)
-      || !request.expectedSkus?.length || request.expectedSkus.some(item => !known.has(pair(item))
-        || local.identities.some(identity => canonicalPlatformSku(identity.platformSku) === canonicalPlatformSku(item.platformSku) && skc(identity) !== skc(item)))) continue;
+      || !trustedRequest(request)) continue;
     try {
       const verified = validateErpCostInboxEnvelope(inbox.envelope, {
         expectedWorkspaceId: context.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id,

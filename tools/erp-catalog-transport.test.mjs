@@ -97,7 +97,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.44' }),
+        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.45' }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },

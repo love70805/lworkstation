@@ -1,5 +1,18 @@
 import { expect, it } from 'vitest';
-import { erpCollectionPresentation, isActiveErpCollection } from './erpCollectionStatus';
+import { erpCollectionPresentation, isActiveErpCollection, erpCostCollectionTiming } from './erpCollectionStatus';
+
+it('does not extend finished costs for later adoption reports or optional catalog reads', () => {
+  const task = { createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T05:00:00Z', runMode: 'catalog', runnerId: 'material-runner',
+    batches: [{ deliveryId: 'D1', deliveredAt: '2026-10-18T00:10:00Z' }, { deliveryId: 'D2', deliveredAt: '2026-10-18T00:43:00Z' }] };
+  expect(erpCostCollectionTiming(task)).toEqual({ completed: true, endedAt: '2026-10-18T00:43:00.000Z', elapsedMinutes: 43 });
+  delete task.batches[1].deliveryId;
+  expect(erpCostCollectionTiming(task)).toMatchObject({ completed: false, elapsedMinutes: 300, endedAt: null });
+});
+
+it('leaves historical finished costs without timestamps unknown', () => {
+  expect(erpCostCollectionTiming({ createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T05:00:00Z', batches: [{ deliveryId: 'D' }] }))
+    .toEqual({ completed: true, elapsedMinutes: null, endedAt: null });
+});
 
 const delivered = { platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' };
 

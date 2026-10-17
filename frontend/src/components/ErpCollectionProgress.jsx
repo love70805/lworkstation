@@ -1,6 +1,6 @@
 import { Button, Panel } from './UI';
 import { AlertCircle, CheckCircle2, Info, LoaderCircle } from 'lucide-react';
-import { erpCollectionPresentation } from '../domain/erpCollectionStatus';
+import { erpCollectionPresentation, erpCostCollectionTiming } from '../domain/erpCollectionStatus';
 
 function costIssue(batch, outcomes) {
   if (batch.error) return batch.error.message ?? batch.error;
@@ -12,6 +12,11 @@ function costIssue(batch, outcomes) {
   if (mappingCount) reasons.push(`平台 SKU 映射不完整 ${mappingCount} 个仓库 SKU`);
   if (detailCount) reasons.push(`采购明细读取失败 ${detailCount} 单`);
   return reasons.join('；') || '成本已送达，但本批台账 SKU 的成本证据未齐，请展开回传结果核对。';
+}
+function mappingIssues(batch, outcomes) {
+  const source = outcomes.find(inbox => inbox.deliveryId === batch.deliveryId)?.envelope?.batch;
+  const failures = source?.sourceMeta?.mappingFailures ?? source?.warehouseEvidence?.mappingFailures;
+  return (Array.isArray(failures) ? failures : []).filter(item => item?.platformSku || item?.platformSkc || item?.warehouseSku);
 }
 export default function ErpCollectionProgress({ task, inboxes = [], onControl, busy = false, locked = false, error = '', statusError = '' }) {
   if (!task) return error ? <p className="cost-registration-status" role="status">采集任务状态暂不可用：{error}</p> : null;
@@ -31,8 +36,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
   const catalogIssues = batches.filter(batch => batch.catalogStatus === 'failed');
   const total = task.summary?.total ?? batches.reduce((sum, batch) => sum + batch.platformSkcs.length, 0);
   const count = list => list.reduce((sum, batch) => sum + batch.platformSkcs.length, 0);
-  const duration = Date.parse(task.updatedAt ?? task.createdAt) - Date.parse(task.createdAt);
-  const elapsed = Number.isFinite(duration) ? Math.max(0, Math.floor(duration / 60000)) : 0;
+  const timing = erpCostCollectionTiming(task);
   const view = statusError ? { ...erpCollectionPresentation(task), running: false, canResume: false, canRetry: false,
     tone: 'warning', title: '采集状态暂无法确认', description: '连接检查失败；已收到结果保留。连接恢复后自动刷新状态，请先查看下方错误原因。' }
     : erpCollectionPresentation(task);
@@ -54,12 +58,13 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
     {stores.length ? <p>原任务店铺：{stores.join('、')} · 剩余 {batches.length - delivered.length} 批成本待读取或送达</p> : null}
     <div className="erp-collection-meter"><span>成本回传 · 已送达 {delivered.length} / {batches.length} 批</span><progress max={Math.max(1, batches.length)} value={delivered.length} aria-label="ERP 批次送达进度" /></div>
     <div className="erp-collection-meter"><span>商品资料{task.catalogMode === 'on_demand' ? '（按需补齐）' : ''} · 已检查 {catalogChecked.length} / {batches.length} 批 · 资料齐全 {catalogComplete.length} 批{catalogIssues.length ? ` · 待补齐 ${catalogIssues.length} 批` : ''}</span><progress max={Math.max(1, batches.length)} value={catalogChecked.length} aria-label="ERP 资料检查进度" /></div>
-    <p>已送达 {delivered.length} / {batches.length} 批 · 任务历时 {elapsed} 分钟 · 最近活动 {task.updatedAt ? new Date(task.updatedAt).toLocaleTimeString('zh-CN') : '等待采集'}</p>
+    <p>已送达 {delivered.length} / {batches.length} 批 · 成本采集历时 {timing.elapsedMinutes == null ? '暂无记录' : `${timing.elapsedMinutes} 分钟`}{timing.endedAt ? ` · 成本送达完成 ${new Date(timing.endedAt).toLocaleTimeString('zh-CN')}` : ''} · 最近活动 {task.updatedAt ? new Date(task.updatedAt).toLocaleTimeString('zh-CN') : '等待采集'}</p>
+    {timing.completed ? <p>成本读取与送达已结束；后续采用同步和异常核对不计入采集历时。</p> : null}
     <p>查看筛选不改变此任务；已送达结果按证据核验后采用。继续原任务保留已送达进度；重新采集会从头读取。</p>
-    {task.phase && !['completed', 'cost_completed'].includes(view.state) ? <p>当前阶段：{task.phase === 'catalog' ? '补充资料' : '采购成本'}</p> : null}
+    {task.phase && !['completed', 'cost_completed'].includes(view.state) ? <p>当前阶段：{task.phase === 'catalog' ? '补充资料' : timing.completed ? '成本证据核对' : '采购成本'}</p> : null}
     {view.catalogPending ? <p>成本回传与资料齐全分别核对；图片或供应商链接缺项时，已采用的成本继续保留。</p> : null}
     {readFailures.length ? <details><summary>{readFailures.length} 批请求失败</summary>{readFailures.map(batch => <p key={batch.batchId}>批次 {batches.indexOf(batch) + 1}：{batch.error?.message ?? batch.error ?? 'ERP 请求未完成，请重试此批次。'}</p>)}</details> : null}
-    {incomplete.length ? <details><summary>{incomplete.length} 批成本已送达，证据待补齐</summary>{incomplete.map(batch => <p key={batch.batchId}>批次 {batches.indexOf(batch) + 1}：{costIssue(batch, outcomes)}</p>)}</details> : null}
+    {incomplete.length ? <details><summary>{incomplete.length} 批成本已送达，证据待补齐</summary>{incomplete.map(batch => <div key={batch.batchId}><p>批次 {batches.indexOf(batch) + 1}：{costIssue(batch, outcomes)}</p>{mappingIssues(batch, outcomes).map((issue, index) => <p key={index}>平台 SKU：{issue.platformSku || '未返回'} · SKC：{issue.platformSkc || '未返回'}{issue.warehouseSku ? ` · 仓库 SKU：${issue.warehouseSku}` : ''} · {issue.message || 'ERP 映射尚未确认，请核对该规格的映射关系。'}</p>)}</div>)}</details> : null}
     {catalogIssues.length ? <details><summary>{catalogIssues.length} 批资料待补齐</summary>{catalogIssues.map(batch => <p key={batch.batchId}>批次 {batches.indexOf(batch) + 1}：{batch.catalogError || '资料尚未齐全或回执未确认，可继续补充资料。'}</p>)}</details> : null}
     {error ? <p role="alert">{error}</p> : null}
   </Panel>;

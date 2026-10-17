@@ -20,7 +20,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.44';
+    const EXTENSION_VERSION = '8.0.45';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1509,14 +1509,18 @@
         const total = batches.reduce((n, batch) => n + batch.platformSkcs.length, 0);
         const failed = batches.filter(batch => ['failed','incomplete'].includes(batch.status));
         const stores = [...new Set((task.expectedSkus || task.requestSnapshot?.expectedSkus || []).map(item => item.store).filter(Boolean))];
-        const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(task.createdAt || new Date().toISOString())) / 1000));
+        const receiptTimes = batches.map(batch => Date.parse(batch.deliveredAt || batch.collectedAt)).filter(Number.isFinite);
+        const costFinished = batches.length > 0 && batches.every(batch => batch.deliveryId);
+        const costEnd = costFinished ? (receiptTimes.length ? Math.max(...receiptTimes) : NaN) : Date.now();
+        const duration = costEnd - Date.parse(task.createdAt || new Date().toISOString());
+        const elapsed = Number.isFinite(duration) ? Math.max(0, Math.floor(duration / 1000)) + ' 秒' : '暂无记录';
         taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'ready' ? '继续请求已保存，等待 ERP 接续' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '已暂停 · 可在工作台继续原任务' : activeRun?.catalogPhase ? '补充资料' : delivered === total && total ? '成本全部送达 · 商品资料按需补齐' : '分批采集')
             + ' · 任务 ' + task.taskId.slice(-8)
             + ' · 已采集 ' + collected + '/' + total + ' SKC · 已送达 ' + delivered + '/' + total
             + ' SKC · 已采用 ' + (task.summary?.adopted ?? 0) + ' SKU'
             + ' · 原范围 ' + (task.ledgerPeriod || '月份待关联') + (stores.length ? ' / ' + stores.join('、') : '')
             + ' · 已送达 ' + batches.filter(batch => batch.deliveryId).length + '/' + batches.length + ' 批'
-            + ' · ' + elapsed + ' 秒'
+            + ' · 成本历时 ' + elapsed
             + (failed.length ? ' · ' + failed.length + ' 批待核对：' + (failed[0].error?.message || failed[0].error || '证据不完整') : '')
             + (batches.some(batch => batch.catalogStatus) ? ' · 资料已检查 ' + batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).length + '/' + batches.length + ' 批，齐全 ' + batches.filter(batch => batch.catalogStatus === 'completed').length + ' 批' : '');
         if (task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') taskStage += ' · 已送达结果保留，服务恢复后继续原任务';

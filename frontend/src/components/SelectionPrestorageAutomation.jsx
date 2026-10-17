@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { getSelectionPrestorageSnapshot, promoteSelectionPrestorageRecords } from '../data/repositories/selectionRepository';
+import { getSelectionPrestorageAutomationSnapshot, promoteSelectionPrestorageRecords } from '../data/repositories/selectionRepository';
 import { useSelectionRead } from './SelectionReadState';
 import { useToast } from './UI';
 import { runWorkspaceBackgroundTask, subscribeWorkspaceResumed } from '../lib/workspaceBackgroundTasks';
 
 export default function SelectionPrestorageAutomation() {
-  const read = useSelectionRead(getSelectionPrestorageSnapshot);
+  const read = useSelectionRead(getSelectionPrestorageAutomationSnapshot);
   const { notify } = useToast();
   const attempted = useRef(new Map());
   const pending = useRef(null), running = useRef(false), mounted = useRef(true);

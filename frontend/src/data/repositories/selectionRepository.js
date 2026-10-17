@@ -1623,6 +1623,15 @@ export async function saveProductCatalogRecord({
   return { product: savedProduct, validation };
 }
 
+// Global automation does not need finance/history when there is no candidate.
+export async function getSelectionPrestorageAutomationSnapshot() {
+  const context = await getActiveMemberContext();
+  const products = await db.products.toArray();
+  const productIds = products.filter(product => selectionRecordVisible(product, context) && canAutoPromotePrestorage(product)).map(product => product.id);
+  if (!productIds.length) return { workspaceId: context.workspaceId, products: [] };
+  return getSelectionPrestorageSnapshot({ productIds });
+}
+
 // A single source projection supplies both the staging UI and the automation.
 // Group once so a large import does not rebuild the reference index per product.
 export async function getSelectionPrestorageSnapshot({ store = "all", productIds = null } = {}) {
@@ -1783,10 +1792,6 @@ export async function getSelectionReferenceSnapshot(options = {}) {
   ]);
   if (options.selectionSalesFacts && options.selectionSalesFacts.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
   const sourceSnapshot = { platformSkus, products, salesRows: options.selectionSalesFacts?.ledgerIdentityRows ?? salesRows, ledgers, importBatches };
-  const [independentCatalogRecords, receivedCatalogRecords] = await Promise.all([
-    readTrustedErpCatalogRecords(context, sourceSnapshot),
-    readTrustedErpCostInboxCatalogRecords(context, sourceSnapshot),
-  ]);
   const visibleProducts = products.filter((product) => selectionRecordVisible(product, context));
   const visibleProductIds = new Set(visibleProducts.map((product) => product.id));
   const workspaceMatch = (record) => (record.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId;
@@ -1798,7 +1803,11 @@ export async function getSelectionReferenceSnapshot(options = {}) {
       && request?.workspaceId === batch.workspaceId && request?.ledgerId === batch.ledgerId
       && batch.sourceContract?.requestId === request?.id;
   }).map(batch => [batch.id, batch]));
-  const publishedSourceBatchIds = new Set([...publishedCatalogBatches.values()].map(batch => batch.sourceContract.batchId));
+  const publishedSourceBatchIds = new Set([...publishedCatalogBatches.values()].map(batch => batch.sourceContract.batchId).filter(id => typeof id === 'string' && id));
+  const [independentCatalogRecords, receivedCatalogRecords] = await Promise.all([
+    readTrustedErpCatalogRecords(context, sourceSnapshot),
+    readTrustedErpCostInboxCatalogRecords(context, sourceSnapshot, { excludedBatchIds: publishedSourceBatchIds, requests: erpRequests }),
+  ]);
   const pendingCatalogRecords = receivedCatalogRecords.filter(record => !publishedSourceBatchIds.has(record.batchId));
   const catalogScope = batch => {
     const requested = new Set((requestById.get(batch.requestId)?.platformSkcs ?? []).map(item => item?.platformSkc ?? item).filter(Boolean).map(canonicalPlatformSkc));

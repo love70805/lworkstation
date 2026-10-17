@@ -579,9 +579,10 @@ export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = nul
   // still checks durable receipts. Never cache a pass that wrote/changed data.
   if (lastStableErpRecovery?.key === key) return structuredClone(lastStableErpRecovery.results);
   lastStableErpRecovery = null;
-  const inboxes = await db.erpCostInbox.where('workspaceId').equals(workspaceId).toArray();
+  const inboxes = await db.erpCostInbox.where('status').anyOf(['pending', 'loaded'])
+    .filter(row => row.workspaceId === workspaceId && (!ledgerId || row.ledgerId === ledgerId)).sortBy('id');
   const results = [];
-  for (const inbox of inboxes.filter(row => ['pending', 'loaded'].includes(row.status) && (!ledgerId || row.ledgerId === ledgerId))) {
+  for (const inbox of inboxes) {
     try { results.push(await processErpCostInboxAdoption({ inboxId: inbox.id })); }
     catch (error) { results.push({ id: inbox.id, status: inbox.status, error: error.message }); }
   }
@@ -601,11 +602,15 @@ export async function listErpCostAdoptionStates({ workspaceId = null } = {}) {
     assertSourceRevision(revision, selectionFactsRevision);
     return cachedDerived({ scope: [member.workspaceId, member.memberId, member.role], formula: 'erp-cost-adoption-states@1',
       revision, revisionReader: selectionFactsRevision, persist: false,
-      compute: async () => (await db.erpCostInbox.where('workspaceId').equals(member.workspaceId).toArray()).map(inbox => ({
-        id: inbox.id, deliveryId: inbox.deliveryId, workspaceId: inbox.workspaceId, status: inbox.status,
-        adoptionPending: inbox.adoptionPending, adoptionFailure: inbox.adoptionFailure,
-        adoption: inbox.adoption ? { state: inbox.adoption.state, processedAt: inbox.adoption.processedAt, summary: inbox.adoption.summary } : null,
-      })),
+      compute: async () => {
+        const states = [];
+        await db.erpCostInbox.where('workspaceId').equals(member.workspaceId).each(inbox => states.push({
+          id: inbox.id, deliveryId: inbox.deliveryId, workspaceId: inbox.workspaceId, status: inbox.status,
+          adoptionPending: inbox.adoptionPending, adoptionFailure: inbox.adoptionFailure,
+          adoption: inbox.adoption ? { state: inbox.adoption.state, processedAt: inbox.adoption.processedAt, summary: inbox.adoption.summary } : null,
+        }));
+        return states;
+      },
     });
   });
 }
