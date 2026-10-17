@@ -5,6 +5,10 @@
   "integrationBranch": "codex/monthly-supplements-0.4.33",
   "requiredCommits": [
     {
+      "module": "v0.4.33-monthly-supplements-and-dispatch-order-recovery",
+      "commit": "08fcf4e76094c36a50756eefd5b04fffc6cecd11"
+    },
+    {
       "module": "v0.4.33-verified-main-baseline",
       "commit": "6d10ac3abc90fdded2040cff00f3ee7e7306b78f"
     },
