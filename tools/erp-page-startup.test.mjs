@@ -51,7 +51,7 @@ export async function verifyErpPageStartup() {
   const { window, calls, messages, intervals } = page;
   try {
     assert.equal(window.document.querySelectorAll('#erpa-cost-trigger').length, 1, 'home cold start provides one assistant entry');
-    assert.equal(intervals.length, 1, 'one status heartbeat per document');
+    assert.deepEqual(intervals.map(([, ms]) => ms).toSorted((a,b) => a-b), [3000, 15000], 'one task-intent poll and one status heartbeat per document');
     window.document.querySelector('#erpa-cost-trigger').click();
     assert.ok(window.document.querySelector('#erpa-cost-root').classList.contains('erpa-open'));
     assert.match(window.document.querySelector('#erpa-page-context').textContent, /助手已加载.*工作台已连接.*请进入采购管理/);
@@ -62,7 +62,7 @@ export async function verifyErpPageStartup() {
 
     for (const source of sources) window.eval(source);
     assert.equal(window.document.querySelectorAll('#erpa-cost-trigger').length, 1);
-    assert.equal(intervals.length, 1, 're-injection does not duplicate listeners or heartbeats');
+    assert.deepEqual(intervals.map(([, ms]) => ms).toSorted((a,b) => a-b), [3000, 15000], 're-injection duplicates neither task polling nor status heartbeats');
 
     window.history.pushState({}, '', purchasePath);
     assert.match(window.document.querySelector('#erpa-page-context').textContent, /请先在采购管理点击/);
@@ -88,7 +88,7 @@ export async function verifyErpPageStartup() {
     window.dispatchEvent(new window.Event('pageshow'));
     window.dispatchEvent(new window.Event('online'));
     await tick();
-    assert.equal(intervals.length, 1);
+    assert.deepEqual(intervals.map(([, ms]) => ms).toSorted((a,b) => a-b), [3000, 15000]);
   } finally { await page.destroy(); }
 
   const login = await createPage(origin + '/login.html', { connected: false });

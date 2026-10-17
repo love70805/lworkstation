@@ -32,7 +32,7 @@ it('separates durable cost delivery, finished catalog checks and material comple
   const inboxes = [{ deliveryId: 'D1', envelope: { batch: { warehouseEvidence: { mappingFailures: [{ warehouseSku: 'WH-A' }] } } } }];
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches }} inboxes={inboxes} />);
   expect(html).toContain('已送达 2 / 3 批');
-  expect(html).toContain('已结束 2 / 3 批 · 资料齐全 1 批 · 待补齐 1 批');
+  expect(html).toContain('已检查 2 / 3 批 · 资料齐全 1 批 · 待补齐 1 批');
   expect(html).toContain('1 批请求失败'); expect(html).toContain('采购列表请求超时');
   expect(html).toContain('1 批成本已送达，证据待补齐'); expect(html).toContain('平台 SKU 映射不完整 1 个仓库 SKU');
   expect(html).toContain('1 批资料待补齐'); expect(html).toContain('图片缺项 1');
@@ -41,7 +41,7 @@ it('separates durable cost delivery, finished catalog checks and material comple
 
 it('offers material continuation for a partial task with all cost receipts', () => {
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches: [{ platformSkcs: ['A'], status: 'incomplete', deliveryId: 'D', catalogStatus: 'failed' }] }} />);
-  expect(html).toContain('继续补充资料'); expect(html).toContain('重试失败批次');
+  expect(html).toContain('继续原任务'); expect(html).toContain('重试失败批次');
 });
 
 it('explains background work and does not ask users to continue an active material read', () => {

@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.39",
+  "version": "0.4.40",
   "candidateOnly": true,
-  "integrationBranch": "codex/report-compact-0.4.39",
+  "integrationBranch": "codex/erp-task-continuation",
   "requiredCommits": [
+    {
+      "module": "v0.4.40-coordinated-continuation-and-cost-first",
+      "commit": "980b675"
+    },
+    {
+      "module": "v0.4.40-verified-main-baseline",
+      "commit": "219846dc670ab593393fafbf8c4d122fea006417"
+    },
     {
       "module": "v0.4.39-compact-neutral-exports",
       "commit": "6fb4c27f518b11f533a411d1468abaec0ce98ddc"

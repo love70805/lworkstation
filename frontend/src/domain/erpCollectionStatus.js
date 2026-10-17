@@ -4,6 +4,7 @@ export function hasPendingErpCatalog(task) {
 
 export function isActiveErpCollection(task) {
   if (!task || ['stopped', 'completed', 'invalidated'].includes(task.status)) return false;
+  if (task.status === 'cost_complete' && task.catalogMode === 'on_demand' && !task.runnerId) return false;
   return task.status !== 'cost_complete' || hasPendingErpCatalog(task);
 }
 
@@ -13,10 +14,11 @@ export function erpCollectionPresentation(task) {
   const batches = task?.batches ?? [];
   const catalogPending = hasPendingErpCatalog(task);
   const inactive = !task || task.recoveryRequired || ['ready', 'paused', 'interrupted', 'expired', 'stopped', 'completed', 'invalidated'].includes(task.status);
-  const catalogRunning = !inactive && batches.some(batch => batch.catalogStatus === 'running');
+  const catalogExecution = task?.catalogMode !== 'on_demand' || task?.runMode === 'catalog' && task?.runnerId;
+  const catalogRunning = !inactive && catalogExecution && batches.some(batch => batch.catalogStatus === 'running');
   const costRunning = !inactive && batches.some(batch => batch.status === 'running');
   const delivering = !inactive && batches.some(batch => batch.status === 'collected' && !batch.deliveryId);
-  const preparingCatalog = !inactive && ['cost_complete', 'partial'].includes(task.status)
+  const preparingCatalog = !inactive && (task.catalogMode !== 'on_demand' || task.runMode === 'catalog' && task.runnerId) && ['cost_complete', 'partial'].includes(task.status)
     && batches.some(batch => batch.deliveryId && !batch.catalogStatus);
   const running = catalogRunning || costRunning || delivering || preparingCatalog || task?.status === 'pausing';
   const terminal = !task || ['stopped', 'completed', 'invalidated'].includes(task.status);
@@ -25,12 +27,14 @@ export function erpCollectionPresentation(task) {
   const catalogOnly = costDelivered && !costIssues && catalogPending;
   const neverStarted = batches.every(batch => batch.status === 'pending' && !batch.deliveryId && !batch.catalogStatus);
   const pendingCost = batches.some(batch => ['pending', 'running', 'collected'].includes(batch.status));
-  const canResume = !running && !terminal && (task.recoveryRequired
+  const queued = task?.executionProtocol === 2 && task.status === 'ready';
+  const claimed = task?.executionProtocol === 2 && Boolean(task.runnerId) && !inactive;
+  const canResume = !running && !terminal && !queued && !claimed && (task.recoveryRequired
     || ['ready', 'paused', 'interrupted', 'expired'].includes(task.status)
-    || ['partial', 'failed'].includes(task.status) && (pendingCost || catalogPending)
+    || ['partial', 'failed'].includes(task.status) && (pendingCost || catalogPending && task.catalogMode !== 'on_demand')
     || task.status === 'cost_complete' && catalogPending);
-  let state = 'waiting', title = '等待 ERP 助手开始或继续采集';
-  let description = '请在 ERP 助手开始或继续原任务；当前尚未确认有批次正在读取。';
+  let state = 'waiting', title = '等待开始或继续原任务';
+  let description = '点击继续原任务后，已登录的 ERP 采购管理页会接续读取；两端显示同一个任务，无需再次点击。';
   let tone = 'info';
   if (task?.status === 'stopped' || task?.status === 'invalidated') {
     state = 'stopped'; title = task.status === 'invalidated' ? '采集范围已变化' : '采集已停止';
@@ -38,15 +42,18 @@ export function erpCollectionPresentation(task) {
   } else if (task?.status === 'pausing') {
     state = 'pausing'; title = '正在暂停后台采集';
     description = '等待当前操作结束；已送达结果保留。';
+  } else if (queued || claimed && !running) {
+    state = 'queued'; title = queued ? '继续请求已保存，等待 ERP 接续' : 'ERP 已接续，正在准备读取';
+    description = '无需重复点击。请保持 ERP 采购管理页已打开且已登录；连接恢复后会接续这个任务。';
   } else if (catalogOnly && !running) {
     state = 'cost_completed'; title = '成本采集已完成';
     description = '商品图片、链接等资料可按需补齐；已采用成本可以继续核算利润，无需重新采集成本。'; tone = 'success';
   } else if (task?.status === 'paused' && task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') {
     state = 'paused'; title = 'ERP 服务暂不可用，采集已暂停';
-    description = '有限重试后仍未取得完整响应。已送达结果和已采用成本保留；服务恢复后在 ERP 助手继续原任务，成本证据缺项需重试失败批次。'; tone = 'warning';
+    description = '有限重试后仍未取得完整响应。已送达结果和已采用成本保留；服务恢复后点击继续原任务，成本证据缺项需重试失败批次。'; tone = 'warning';
   } else if (task?.recoveryRequired || ['interrupted', 'expired'].includes(task?.status) || task?.status === 'paused' && !neverStarted) {
     state = 'paused'; title = '后台采集已暂停，等待继续';
-    description = '核验原任务范围后，在 ERP 助手继续；已采用成本保持有效。'; tone = 'warning';
+    description = '点击继续原任务，自动核验原月份、店铺和商品范围并接续；已送达批次不重采，已采用成本保持有效。'; tone = 'warning';
   } else if (catalogRunning || preparingCatalog) {
     state = 'catalog_running'; title = catalogRunning ? '正在后台补充商品资料' : '正在准备后台补充商品资料';
     description = '可以继续使用工作台，无需重复启动。图片和链接用于商品建档，不阻塞已采用成本的利润核算。';
@@ -61,5 +68,5 @@ export function erpCollectionPresentation(task) {
     description = '请查看对应批次原因。图片、链接缺项单独补齐，已采用成本可继续核算利润。'; tone = 'warning';
   }
   return { state, title, description, tone, running, catalogPending, catalogOnly, canResume,
-    canStop: isActiveErpCollection(task), canRetry: !running && !terminal && costIssues };
+    canStop: isActiveErpCollection(task), canRetry: !running && !terminal && !queued && !claimed && costIssues };
 }
