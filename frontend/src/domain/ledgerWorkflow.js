@@ -1,6 +1,10 @@
 const frozen = ledger => ['finalized', 'locked'].includes(ledger?.status);
 const latest = reports => [...reports].sort((a, b) => (b.revision || 0) - (a.revision || 0) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0];
 
+export function hasSavedFinancialReport(ledger, reports = []) {
+  return Boolean(frozen(ledger) && ledger.currentBaseReportId && reports.some(report => report.kind === 'financial' && report.workspaceId === ledger.workspaceId && report.ledgerId === ledger.id && report.period === ledger.period && report.baseReportId === ledger.currentBaseReportId));
+}
+
 // Projection only. Never replace the frozen base or rewrite a historical file.
 export function currentLedgerResult(ledger, reports = [], deduction = null) {
   if (!ledger) return { state: 'empty', label: '尚无账本', profit: null, report: null };
@@ -31,13 +35,13 @@ export function ledgerNextStep(ledger, { missingCount = ledger?.costSummary?.mis
   return { key: 'report', text: '整月成本已齐，登记代发与各店扣款后即可保存正式利润表。扣款待齐时可先保存未扣款报告。', action: '准备本月报告' };
 }
 
-export function reportReadiness({ ledger, stores = [], dispatch, deduction, missingCount }) {
+export function reportReadiness({ ledger, stores = [], dispatch, deduction, reports = [], missingCount }) {
   const locked = ledger?.status === 'locked';
   const baseSaved = frozen(ledger) && Boolean(ledger?.currentBaseReportId);
   const missingStores = stores.filter(store => !deduction?.coveredStores?.includes(store));
   const baseReady = !locked && !frozen(ledger) && missingCount === 0 && Boolean(dispatch);
   return {
-    baseSaved, missingStores,
+    baseSaved, missingStores, deductionSaved: hasSavedFinancialReport(ledger, reports),
     baseReady,
     financialReady: !locked && (baseSaved || baseReady) && Boolean(deduction) && missingStores.length === 0,
   };

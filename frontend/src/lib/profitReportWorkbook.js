@@ -84,7 +84,7 @@ function safeSheet(name,used){const base=String(name).replace(/[\[\]:*?/\\\x00-\
 
 function deductionSheet(report,rows) {
   const stores=[...report.totalsExact.stores].sort(byStore);
-  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额','实际店铺']),...[...rows].sort(byStore).map(row=>detailRow([text(row.businessId??'',1),text(row.platformSkc??'',1),text(row.supplierNumber??''),deductionNumber(row.signedAmountExact),text(row.store)]))],[headers(['店铺','明细合计']),...stores.map(store=>[text(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],6),widths:[26,28,28,15,16,3,16,18],rowHeight:34,alignment:[null,null,null,'right',null,null,null,'right']};
+  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额']),...[...rows].sort(byStore).map(row=>detailRow([text(row.businessId??'',1),text(row.platformSkc??'',1),text(row.supplierNumber??''),deductionNumber(row.signedAmountExact)]))],[headers(['店铺','明细合计']),...stores.map(store=>[text(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],5),widths:[26,28,28,15,3,16,18],rowHeight:34,alignment:[null,null,null,'right',null,null,'right']};
 }
 // Saved downloads reuse their original styles while replacing this sheet only.
 export function buildProfitDeductionSheet(report,rows,registry) {

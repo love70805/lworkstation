@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { currentLedgerResult, ledgerNextStep, reportReadiness } from './ledgerWorkflow';
+import { currentLedgerResult, ledgerNextStep, reportReadiness, hasSavedFinancialReport } from './ledgerWorkflow';
 
 const ledger = { id: 'june', workspaceId: 'w', period: '2026-06', status: 'finalized', currentBaseReportId: 'base', reportWorkflowVersion: 1, profitSummary: { profit: 100 } };
 const base = { id: 'base', ledgerId: 'june', workspaceId: 'w', period: '2026-06', kind: 'pre_deduction', displayTotals: { profit: '100.00' }, revision: 1 };
@@ -37,4 +37,13 @@ it('allows a direct formal report when all current sources are ready and blocks 
   for(const patch of [{dispatch:null},{missingCount:1},{missingCount:null},{deduction:null},{stores:['A','B']},{ledger:{...ledger,status:'locked'}}]){
     expect(reportReadiness({...ready,...patch}).financialReady).toBe(false);
   }
+});
+it('freezes deductions only for a formal report scoped to the current frozen base, including prior-template reports', () => {
+  expect(hasSavedFinancialReport(ledger,[base])).toBe(false);
+  expect(hasSavedFinancialReport(ledger,[base,financial])).toBe(true);
+  expect(reportReadiness({ledger,reports:[base,financial]}).deductionSaved).toBe(true);
+  for(const patch of [{workspaceId:'other'},{ledgerId:'other'},{period:'2026-10'},{baseReportId:'old'},{kind:'pre_deduction'}])expect(hasSavedFinancialReport(ledger,[{...financial,...patch}])).toBe(false);
+  expect(hasSavedFinancialReport({...ledger,status:'cost_pending'},[financial])).toBe(false);
+  expect(hasSavedFinancialReport({...ledger,currentBaseReportId:null},[financial])).toBe(false);
+  expect(hasSavedFinancialReport({...ledger,currentBaseReportId:'new-base'},[financial])).toBe(false);
 });

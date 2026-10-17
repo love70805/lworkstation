@@ -3,6 +3,8 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import MonthlyReportManager from './MonthlyReportManager';
+import MonthlyProfitSummary from './MonthlyProfitSummary';
+import {monthlyProfitSummary} from '../domain/monthlyProfitSummary';
 import { ToastProvider } from '../components/UI';
 
 const mock=vi.hoisted(()=>({state:null,preview:vi.fn(),save:vi.fn(),read:vi.fn(),download:vi.fn()}));
@@ -13,17 +15,17 @@ const ledger={id:'L',workspaceId:'W',period:'2026-09',status:'cost_pending',ware
 const scope={workspaceId:'W',ledgerId:'L',period:'2026-09'};
 const dispatch={...scope,id:'D',status:'adopted',adoptedQuantityExact:'10',revision:1};
 const deduction={...scope,id:'K',status:'adopted',signedAmountExact:'2',revision:1,coveredStores:['甲'],missingStores:[]};
-const base={...scope,id:'B',kind:'pre_deduction',revision:1,createdAt:'2026-10-17',displayTotals:{profit:'100.00'}};
+const base={...scope,id:'B',kind:'pre_deduction',revision:1,createdAt:'2026-10-17',warehouseRateExact:'0.7',totalsExact:{productProfitExact:'93',dispatchQuantityExact:'10',dispatchAmountExact:'7'},displayTotals:{profit:'100.00'}};
 const formal={...base,id:'F',kind:'financial',baseReportId:'B',adoptedBatchIds:['D','K'],registrantNames:['张三'],displayTotals:{profit:'98.00'},totalsExact:{productProfitExact:'93',dispatchAmountExact:'7',deductionExact:'2'}};
 let root,container;
 const button=name=>[...document.querySelectorAll('button')].find(node=>node.textContent===name);
-async function mount(patch={}){
+async function mount(patch={},controls={}){
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;
  for(const name of ['preview','save','read','download'])mock[name].mockReset();
  mock.state={ledgerId:'L',workspaceId:'W',data:{ledger,stores:['甲'],dispatch,deduction,adoptedRows:[],reports:[],...patch}};
  mock.preview.mockResolvedValue({report:formal,fingerprint:'checked'});mock.save.mockResolvedValue(formal);mock.read.mockResolvedValue({report:formal,dispatchRows:[{ownerMarker:'张三'}]});
  container=document.createElement('div');document.body.append(container);root=createRoot(container);
- await act(async()=>root.render(<ToastProvider><MonthlyReportManager ledgerId="L" workspaceId="W" missingCostCount={0} onEdit={vi.fn()}/></ToastProvider>));
+ await act(async()=>root.render(<ToastProvider><MonthlyReportManager ledgerId="L" workspaceId="W" missingCostCount={0} editor={controls.editor} onEdit={controls.onEdit??vi.fn()}/></ToastProvider>));
 }
 afterEach(async()=>{if(root)await act(async()=>root.unmount());container?.remove();root=null;});
 it('provides one direct formal action and saves the checked preview with the ledger-month export name',async()=>{
@@ -49,14 +51,30 @@ it('makes the saved formal download primary, hides duplicate generation and list
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
  expect(container.textContent).toContain('正式版已保存');expect(button('预览正式利润表')).toBeUndefined();expect(button('预览未扣款报告')).toBeUndefined();
  expect(button('下载正式利润表').classList.contains('button-primary')).toBe(true);expect(container.textContent).toContain('历史报告与基础（1）');
+ expect(button('更新扣款')).toBeUndefined();expect(button('登记扣款')).toBeUndefined();expect([...container.querySelectorAll('.report-source-status')].map(node=>node.textContent)).toEqual(['已随报告保存','已随报告保存']);
  await act(async()=>button('下载正式利润表').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined});
 });
-it('requires a new explicit formal save after deduction replacement and blocks changes while locked',async()=>{
+it('can finish a previously adopted legacy replacement, while further source changes require reopening',async()=>{
  await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[formal,base]});
  expect(button('下载正式利润表')).toBeDefined();expect(button('预览正式利润表')).toBeUndefined();expect(button('更新扣款')).toBeUndefined();
  await act(async()=>root.unmount());container.remove();root=null;
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base],deduction:{...deduction,id:'NEW'}});
  expect(button('预览正式利润表').disabled).toBe(false);expect(button('下载正式利润表')).toBeUndefined();expect(container.textContent).not.toContain('正式版已保存');
+ expect(button('更新扣款')).toBeUndefined();expect(container.textContent).toContain('更正需先重开');
+});
+it('closes a stale deduction editor after the current base has a formal report',async()=>{
+ const onEdit=vi.fn();await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});
+ expect(onEdit).toHaveBeenCalledWith(null);expect(document.querySelector('[role=dialog]')).toBeNull();
+});
+it('keeps monthly summary deduction entry available before formal saving and after reopening only',async()=>{
+ await mount();const onEdit=vi.fn();
+ for(const [status,reports,editable] of [['finalized',[base],true],['finalized',[base,formal],false],['cost_pending',[base,formal],true],['locked',[base,formal],false]]){
+  const target={...ledger,status,currentBaseReportId:status==='cost_pending'?null:'B'};
+  const summary=monthlyProfitSummary({ledger:target,missingCostCount:0,productProfitExact:'93',reportState:{ledgerId:'L',workspaceId:'W',data:{ledger:target,stores:['甲'],dispatch,deduction,reports}}});
+  await act(async()=>root.render(<MonthlyProfitSummary summary={summary} ledger={target} onEdit={onEdit}/>));
+  expect(Boolean(button('更新扣款'))).toBe(editable);
+  if(status==='finalized'&&!editable)expect(container.textContent).toContain('已随报告保存');
+ }
 });
 it('reports stale preview failures without starting a download or claiming a formal save',async()=>{
  await mount();mock.save.mockRejectedValue(new Error('报告预览已过期，请重新核对。'));
