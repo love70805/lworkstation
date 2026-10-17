@@ -5,7 +5,7 @@ import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerC
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
-export const REPORT_TEMPLATE_VERSION = "profit-zebra@8-spaced-general-deductions";
+export const REPORT_TEMPLATE_VERSION = "profit-zebra@9-compact-neutral";
 export const REPORT_TABLES = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
 export const Exact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 export function exact(value, { nonnegative = false } = {}) {

@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { profitReportSheetWidths, writeReportArchive } from './profitReportWorkbook';
+import { reportThemeXml, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
 
 const attribute=(tag,name)=>tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1];
 const fail=()=>{throw new Error('报告样式信息不足，无法调整下载布局。原始存档保持不变。');};
@@ -12,17 +13,20 @@ export function formatSavedReportLayout(bytes){
   const styles=read('xl/styles.xml'),block=styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/);
   if(!block)return fail();
   const originals=[...block[1].matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map(match=>match[0]),variants=[],cache=new Map();
-  function style(index,horizontal,general){
+  function style(index,horizontal,general,numeric,identifier){
     const original=originals[index];if(!original)return fail();
     const opening=original.match(/^<xf\b[^>]*>/)?.[0];
-    if(attribute(opening,'fontId')==='2'&&attribute(opening,'fillId')==='2')horizontal='center';
-    const key=JSON.stringify([index,horizontal,general]);if(cache.has(key))return cache.get(key);
+    const header=attribute(opening,'fontId')==='2'&&attribute(opening,'fillId')==='2',band=attribute(opening,'fillId')==='4';
+    if(header)horizontal='center';
+    const key=JSON.stringify([index,horizontal,general,numeric,identifier]);if(cache.has(key))return cache.get(key);
     const alignment=`<alignment horizontal="${horizontal}" ${horizontal==='center'?'':'indent="1" '}vertical="center" wrapText="1"/>`;
     let changed=original.replace(/<alignment\b[^>]*?(?:\/>|>[\s\S]*?<\/alignment>)/g,'');
     changed=changed.replace(/^<xf\b[^>]*>/,tag=>{
       let next=tag.replace(/\sapplyAlignment="[^"]*"/,'');
+      next=next.replace(/\sborderId="[^"]*"/,'').replace(/\sapplyBorder="[^"]*"/,'');
+      if(identifier&&!header&&!band)next=next.replace(/\sfontId="[^"]*"/,' fontId="5"');
       if(general)next=next.replace(/\snumFmtId="[^"]*"/,'').replace(/\sapplyNumberFormat="[^"]*"/,'');
-      return next.replace(/\/?>(?=$)/,`${general?' numFmtId="0" applyNumberFormat="1"':''} applyAlignment="1">`);
+      return next.replace(/\/?>(?=$)/,`${general?' numFmtId="0" applyNumberFormat="1"':''} borderId="${reportBorder({header,band,number:numeric})}" applyBorder="1" applyAlignment="1">`);
     });
     if(!changed.endsWith('</xf>'))changed+='</xf>';
     changed=changed.replace('</xf>',alignment+'</xf>');
@@ -40,17 +44,23 @@ export function formatSavedReportLayout(bytes){
     const deductionRow=product?lastLabel('A','扣款'):0,summaryRow=name==='汇总表'?lastLabel('L','扣款'):0;
     const columns=`<cols>${widths.map((width,i)=>`<col min="${i+1}" max="${i+1}" width="${width}" customWidth="1"/>`).join('')}</cols>`;
     let xml=read(file);if(!/<cols\b[^>]*>[\s\S]*?<\/cols>/.test(xml))return fail();
-    xml=xml.replace(/<cols\b[^>]*>[\s\S]*?<\/cols>/,columns).replace(/<c\b[^>]*>/g,cell=>{
+    xml=xml.replace(/<cols\b[^>]*>[\s\S]*?<\/cols>/,columns).replace(/<row\b[^>]*>/g,tag=>tag.replace(/\sht="[^"]*"/,'').replace(/\scustomHeight="[^"]*"/,'').replace(/>$/,` ht="${attribute(tag,'r')==='1'?reportHeaderHeight:reportRowHeight}" customHeight="1">`)).replace(/<c\b[^>]*>/g,cell=>{
       const address=attribute(cell,'r'),matched=address?.match(/^([A-Z]+)(\d+)$/);if(!matched)return fail();
       const [,column,rowText]=matched,row=Number(rowText),numeric=sheet[address]?.t==='n';
       const quantity=numeric&&(dispatch?['C','G'].includes(column):product&&(column==='D'||name==='汇总表'&&column==='M'));
       const general=numeric&&(name==='扣款'&&['D',sheet.E1?.v==='实际店铺'?'H':'G'].includes(column)||product&&column==='J'&&row===deductionRow||name==='汇总表'&&column==='N'&&row===summaryRow);
       const horizontal=row===1||quantity?'center':numeric?'right':'left';
-      const id=style(Number(attribute(cell,'s')??0),horizontal,general);
+      const identifier=product?['A','B','F'].includes(column):dispatch?['A','B','D'].includes(column):name==='扣款'&&['A','B','C'].includes(column);
+      const id=style(Number(attribute(cell,'s')??0),horizontal,general,numeric,identifier);
       return /\bs="[^"]*"/.test(cell)?cell.replace(/\bs="[^"]*"/,`s="${id}"`):cell.replace(/\/?>(?=$)/,end=>` s="${id}"${end}`);
     });
     files.set(file,new TextEncoder().encode(xml));
   }
-  files.set('xl/styles.xml',new TextEncoder().encode(styles.replace(block[0],`<cellXfs count="${originals.length+variants.length}">${block[1]}${variants.join('')}</cellXfs>`)));
+  let themed=styles.replace(block[0],`<cellXfs count="${originals.length+variants.length}">${block[1]}${variants.join('')}</cellXfs>`);
+  for(const [tag,xml] of Object.entries(reportThemeXml)){
+    const pattern=new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`);if(!pattern.test(themed))return fail();
+    themed=themed.replace(pattern,xml);
+  }
+  files.set('xl/styles.xml',new TextEncoder().encode(themed));
   return writeReportArchive(files);
 }

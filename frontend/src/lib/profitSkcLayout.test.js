@@ -58,7 +58,7 @@ it.each(['pre_deduction', 'financial'])('adds merges when re-downloading frozen 
   }
   expect(literalNumbers(result)).toEqual(literalNumbers(original));
   const aStyles=new TextDecoder().decode(original.files['xl/styles.xml'].content),bStyles=new TextDecoder().decode(result.files['xl/styles.xml'].content);
-  const withoutCellStyles=xml=>xml.replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,'');
+  const withoutCellStyles=xml=>xml.replace(/<(cellXfs|fonts|fills|borders)\b[^>]*>[\s\S]*?<\/\1>/g,'');
   expect(withoutCellStyles(bStyles)).toBe(withoutCellStyles(aStyles));
   expect(bStyles).toContain(aStyles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1]);
   expect(archive).toEqual(before);

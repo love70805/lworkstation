@@ -28,7 +28,7 @@ it.each(['pre_deduction','financial'])('writes readable %s workbook with textual
  const styles=packageXml.match(/<cellXfs[^>]*>(.*?)<\/cellXfs>/s)[1];
  expect(styles.split('/>')[0]).toContain('fillId="0"');
  expect(styles.split('/>')[0]).toContain('fontId="0"');
- expect(book.Sheets['合成甲店'].B5.s.fgColor.rgb).toBe('EEF3F7');
+ expect(book.Sheets['合成甲店'].B5.s.fgColor.rgb).toBe('F0F6F6');
  expect(book.Sheets['汇总表'].K6).toBeUndefined();
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(book.Sheets['合成甲店'].B2).toMatchObject({t:'s',v:products[0].platformSku});
@@ -63,7 +63,7 @@ it.each(['pre_deduction','financial'])("exports one text order per SKU without a
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(new TextDecoder().decode(result.bytes)).not.toContain('name="核算采购"');
  expect(result.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
- expect(result.templateVersion).toBe("profit-zebra@8-spaced-general-deductions");
+ expect(result.templateVersion).toBe("profit-zebra@9-compact-neutral");
  const summaryRows=XLSX.utils.sheet_to_json(book.Sheets["汇总表"],{header:1});
  rows.forEach((row,index)=>{
   const summary=summaryRows.find(cells=>cells[1]===row.platformSku);
