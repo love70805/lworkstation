@@ -16,6 +16,7 @@ import {inspectSupplementSource,SUPPLEMENT_PARSER_VERSION} from '../domain/month
 import * as XLSX from 'xlsx';
 import {readSupplementWorkbook} from '../lib/monthlySupplementImport';
 import {prepareReportDownload,base64ToBytes} from '../lib/profitReportWorkbook';
+import {profitReportFileName} from '../domain/profitReportPresentation';
 const scope={workspaceId:"W",ledgerId:"L",period:"2026-08"};
 async function adopt(kind,patch={}){const input={...scope,kind,mode:"manual",...(kind==='dispatch'?{adoptedQuantityExact:'100',rows:[]}:{rows:[{kind,manual:true,store:'甲',signedAmountExact:'0.0009',sourceRow:1},{kind,manual:true,store:'乙',signedAmountExact:'-0.0001',sourceRow:1}]}),...patch};const preview=await previewMonthlySupplement(input);return adoptMonthlySupplement(input,preview);}
 async function report(kind='pre_deduction',baseReportId){const input={ledgerId:'L',kind,baseReportId};const preview=await previewProfitReport(input);return saveProfitReport(input,{expectedFingerprint:preview.fingerprint});}
@@ -27,6 +28,72 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('directly saves a complete formal report and frozen base together with the registrant and ledger month',async()=>{
+ await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'张三',quantityExact:'100'}]});
+ await adopt('deduction');
+ const saved=await report('financial'),state=await readMonthlyReportState('L'),base=state.reports.find(row=>row.id===saved.baseReportId);
+ expect(saved).toMatchObject({kind:'financial',registrantNames:['张三'],fileName:'张三2026年8月利润表.xlsx'});
+ expect(base).toMatchObject({kind:'pre_deduction',registrantNames:['张三']});
+ expect(state.ledger).toMatchObject({status:'finalized',currentBaseReportId:base.id});
+ expect(saved.totalsExact.profitExact).toBe('69.31719995');
+ expect((await withCurrentLedgerResults([state.ledger]))[0].currentResult).toMatchObject({state:'financial',label:'正式利润表'});
+ expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(2);
+ const before=JSON.stringify(await readSavedProfitReport(saved.id));
+ await db.monthlySupplementRows.filter(row=>row.kind==='dispatch').modify({ownerMarker:'新姓名'});
+ expect(profitReportFileName((await readProfitReportDownload(saved.id)).report)).toBe('张三2026年8月利润表.xlsx');
+ expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(before);
+ const backup=await createWorkspaceBackupPayload();await db.delete();await db.open();await restoreWorkspaceBackupPayload(backup);await setActiveMemberContext({workspaceId:'W',memberId:'finance',role:'finance'});
+ expect((await readMonthlyReportState('L')).ledger.currentBaseReportId).toBe(base.id);
+ expect((await readProfitReportDownload(saved.id)).report.fileName).toBe(saved.fileName);
+});
+it('rolls back both reports, finalization and report audits if the formal report write fails after the base',async()=>{
+ await adopt('dispatch');await adopt('deduction');
+ const input={ledgerId:'L',kind:'financial'},preview=await previewProfitReport(input),before=(await createWorkspaceBackupPayload()).tables;
+ const add=db.profitReports.add.bind(db.profitReports);
+ vi.spyOn(db.profitReports,'add').mockImplementation(row=>row.kind==='financial'?Promise.reject(new Error('formal disk failure')):add(row));
+ await expect(saveProfitReport(input,{expectedFingerprint:preview.fingerprint})).rejects.toThrow('formal disk failure');
+ expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
+});
+it('blocks direct formal saves for missing sources, partial stores, missing costs, stale previews and locked ledgers',async()=>{
+ await expect(report('financial')).rejects.toThrow('代发');await adopt('dispatch');
+ await expect(report('financial')).rejects.toThrow('扣款');
+ await adopt('deduction',{rows:[{kind:'deduction',manual:true,store:'甲',signedAmountExact:'0'}]});
+ await expect(report('financial')).rejects.toThrow('部分店铺');await adopt('deduction');
+ const input={ledgerId:'L',kind:'financial'},preview=await previewProfitReport(input);
+ await adopt('dispatch',{adoptedQuantityExact:'0'});
+ await expect(saveProfitReport(input,{expectedFingerprint:preview.fingerprint})).rejects.toThrow('过期');
+ await db.costApprovals.clear();await expect(report('financial')).rejects.toThrow('正式成本');
+ expect(await db.profitReports.count()).toBe(0);
+ await db.ledgers.update('L',{status:'locked'});await expect(report('financial')).rejects.toThrow('锁定');
+});
+it('uses explicit zero dispatch and deductions for a direct formal report',async()=>{
+ await adopt('dispatch',{adoptedQuantityExact:'0'});await adopt('deduction',{rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'0'}))});
+ const saved=await report('financial');expect(saved.totalsExact).toMatchObject({dispatchAmountExact:'0',deductionExact:'0',profitExact:'-0.68200005'});
+ expect(saved.fileName).toBe('2026年8月利润表.xlsx');
+});
+it('uses only verified frozen deduction rows for downloads after live deductions change and rejects tampering',async()=>{
+ await adopt('dispatch');await adopt('deduction');const saved=await report('financial');
+ const download=await readProfitReportDownload(saved.id),original=JSON.stringify(await readSavedProfitReport(saved.id));
+ expect(download.deductionRows.map(row=>row.signedAmountExact)).toEqual(['0.0009','-0.0001']);
+ await adopt('deduction',{rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'999'}))});
+ expect((await readProfitReportDownload(saved.id)).deductionRows).toEqual(download.deductionRows);
+ expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(original);
+ await db.profitReportLines.update(download.deductionRows[0].id,{signedAmountExact:'999'});
+ await expect(readProfitReportDownload(saved.id)).rejects.toThrow('冻结扣款校验失败');
+});
+it('derives legacy download names from the verified frozen dispatch after live sources change',async()=>{
+ await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'LEGACY-OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'旧登记人',quantityExact:'2'}]});
+ const base=await report();await adopt('deduction');const saved=await report('financial',base.id);
+ for(const item of [base,saved]){
+   const {registrantNames,payloadHash,...header}=item;
+   const lines=(await db.profitReportLines.where('reportId').equals(item.id).toArray()).sort((a,b)=>a.ordinal-b.ordinal);
+   await db.profitReports.put({...header,payloadHash:await sha256(canonicalJson({report:header,lines}))});
+ }
+ await db.monthlySupplementRows.filter(row=>row.kind==='dispatch').modify({ownerMarker:'当前来源'});
+ const original=JSON.stringify(await readSavedProfitReport(saved.id)),download=await readProfitReportDownload(saved.id);
+ expect(profitReportFileName(download.report,{dispatchRows:download.dispatchRows})).toBe('旧登记人2026年8月利润表.xlsx');
+ expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(original);
+});
 it('updates the whole-month projection after adoption and matches exact report previews without rewriting a frozen file',async()=>{
  const project=async()=>{
    const data=await readMonthlyReportState('L');

@@ -38,3 +38,11 @@ it('rejects stale, foreign and failed source state without displaying a healthy 
   expect(monthlyProfitSummary({ ...args, reportState: { ledgerId: 'L', workspaceId: 'W', error: '读取中断' } })).toEqual({ status: 'error', error: '读取中断' });
   expect(summary({ dispatch: batch({ workspaceId: 'OTHER', adoptedQuantityExact: '900' }), deduction: batch({ period: '2026-08', signedAmountExact: '99', coveredStores: ['甲', '乙'] }) })).toMatchObject({ dispatchAmountExact: null, deductionExact: null, profitExact: null });
 });
+it('marks the saved formal result current only while its adopted deduction still matches', () => {
+  const base=batch({id:'BASE',kind:'pre_deduction',warehouseRateExact:'0.7',totalsExact:{productProfitExact:'20',dispatchQuantityExact:'10',dispatchAmountExact:'7'}});
+  const deduction=batch({id:'K',signedAmountExact:'2',coveredStores:['甲','乙']});
+  const formal=batch({id:'F',kind:'financial',baseReportId:'BASE',adoptedBatchIds:['K'],displayTotals:{profit:'25.00'}});
+  const options={ledger:{...ledger,status:'finalized',currentBaseReportId:'BASE'},reports:[base,formal],deduction};
+  expect(summary(options).formalSaved).toBe(true);
+  expect(summary({...options,deduction:{...deduction,id:'REPLACEMENT'}}).formalSaved).toBe(false);
+});

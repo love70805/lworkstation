@@ -2,6 +2,7 @@ import { displayMoney, exactSum, REPORT_TEMPLATE_VERSION } from "../domain/profi
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 import { groupProfitExportProducts, mergeArchivedSkcSheet, mergeProfitSkcRows } from './profitSkcLayout';
 import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
+import { profitReportFileName } from '../domain/profitReportPresentation';
 
 // A small, deterministic OOXML writer for the approved fixed report template.
 // Numbers are computed by the report domain before export; identifier cells are text.
@@ -51,6 +52,10 @@ function column(index){let text="";for(let n=index+1;n>0;n=Math.floor((n-1)/26))
 const text = (value,format=0) => ({value,format});
 // Truncate the exported numeric value itself; formatting alone would round it.
 const number = (value,format=3) => ({value:format===2?value:displayMoney(value),format,number:true});
+// Deductions retain source precision in numeric cells; Excel formats them to
+// two decimals without discarding fractions before SUM or store subtotals.
+const deductionNumber = value => ({value,format:3,number:true,red:true});
+const byStore = (a,b) => String(a.store).localeCompare(String(b.store),'zh-CN',{numeric:true});
 const headers = values => values.map(value=>({value,header:true,format:0,align:'center'}));
 function sheetXml(rows,widths,registry,alignment=[],rowHeight=36){
   if(rows.length>1048576)throw new Error("报告明细超过 Excel 单页上限，请按账本范围核对来源。");
@@ -77,23 +82,33 @@ function groupedProductRows(products, stores) {
 function combine(left,right,start){return Array.from({length:Math.max(left.length,right.length)},(_,i)=>{const row=[...(left[i]??[])];if(right[i]){while(row.length<start)row.push(null);row.push(...right[i]);}return row;});}
 function safeSheet(name,used){const base=String(name).replace(/[\[\]:*?/\\\x00-\x1f]/g,"-").replace(/^'+|'+$/g,"").slice(0,31)||"店铺";let result=base,n=2;while(used.has(result.toLowerCase())){const suffix=`-${n++}`;result=base.slice(0,31-suffix.length)+suffix;}used.add(result.toLowerCase());return result;}
 
+function deductionSheet(report,rows) {
+  const stores=[...report.totalsExact.stores].sort(byStore);
+  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额','实际店铺']),...[...rows].sort(byStore).map(row=>detailRow([text(row.businessId??'',1),text(row.platformSkc??'',1),text(row.supplierNumber??''),deductionNumber(row.signedAmountExact),text(row.store)]))],[headers(['店铺','明细合计']),...stores.map(store=>[text(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],6),widths:[26,28,28,15,16,3,16,18],rowHeight:34,alignment:[null,null,null,'right',null,null,null,'right']};
+}
+// Saved downloads reuse their original styles while replacing this sheet only.
+export function buildProfitDeductionSheet(report,rows,registry) {
+  const sheet=deductionSheet(report,rows);
+  return sheetXml(sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight);
+}
+
 export function buildProfitReportWorkbook({report,products,dispatchRows=[],deductionRows=[]}) {
   const financial=report.kind==="financial",totals=report.totalsExact;
-  const right=[headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),number(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,{...number(totals.deductionExact),red:true}]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,number(financial?totals.profitExact:totals.preDeductionExact)])];
+  const right=[headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),number(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,deductionNumber(totals.deductionExact)]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,number(financial?totals.profitExact:totals.preDeductionExact)])];
   const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right,11),widths:[...productWidths,3,18,15,18],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"right","right"]}];
   // Reserve template names before sanitizing dynamic store tabs.
   const used=new Set(["汇总表","代发表","扣款","核算采购"]);
   for(const store of totals.stores){
     const rows=productRows(products.filter(row=>row.store===store.store));
-    if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,{...number(store.deductionExact),red:true}]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
+    if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,deductionNumber(store.deductionExact)]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
     sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','center','center','center','center','center']});
   }
   sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(dispatchOrderNumberForExport(row),1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:[27.5,26.25,11,26.25,3,3,16,16],rowHeight:34,alignment:[null,null,"right",null,null,null,"right","right"]});
-  if(financial)sheets.push({name:"扣款",rows:combine([headers(["补扣款单号","SKC","供方货号","扣款金额"]),...deductionRows.map(row=>detailRow([text(row.businessId??"",1),text(row.platformSkc??"",1),text(row.supplierNumber??""),{...number(row.signedAmountExact),red:true}]))],[headers(["店铺","明细合计"]),...totals.stores.map(store=>[text(store.store),{...number(store.deductionExact),red:true}]),bandRow([text("合计"),{...number(totals.deductionExact),red:true}])],5),widths:[26,28,28,15,3,16,18],rowHeight:34,alignment:[null,null,null,"right",null,null,"right"]});
+  if(financial)sheets.push(deductionSheet(report,deductionRows));
   const registry=createStyles();
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows[0]?.[1]?.value==='SKU'?mergeProfitSkcRows(sheet.rows):sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
   const files=[['[Content_Types].xml',`${declaration}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],['_rels/.rels',`${declaration}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],['xl/workbook.xml',`${declaration}<workbook xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet,i)=>`<sheet name="${xml(sheet.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets></workbook>`],['xl/_rels/workbook.xml.rels',`${declaration}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],['xl/styles.xml',registry.xml()],...sheetFiles];
-  return {bytes:zip(files),fileName:`${report.period.replace("-","年")}月利润表-${financial?"财务对账":"未扣款"}${report.revision>1?`-r${report.revision}`:""}.xlsx`,templateVersion:REPORT_TEMPLATE_VERSION};
+  return {bytes:zip(files),fileName:profitReportFileName(report,{dispatchRows}),templateVersion:REPORT_TEMPLATE_VERSION};
 }
 
 export function formatArchivedReportSkcs(files, sheets) {
@@ -108,11 +123,15 @@ export const writeReportArchive = files => zip([...files]);
 
 export function bytesToBase64(bytes){let text="";for(let i=0;i<bytes.length;i+=16384)text+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(text);}
 export function base64ToBytes(value){return Uint8Array.from(atob(value),char=>char.charCodeAt(0));}
-export async function prepareReportDownload(report, { dispatchRows = [] } = {}) {
+export async function prepareReportDownload(report, { dispatchRows = [], deductionRows } = {}) {
   const { simplifySavedReport } = await import('./savedReportDownload');
-  const bytes = await simplifySavedReport(report);
+  let bytes = await simplifySavedReport(report);
+  if(report.kind==='financial'&&deductionRows){
+    const { restoreSavedDeductions } = await import('./savedReportDeductions');
+    bytes=restoreSavedDeductions(bytes,report,deductionRows);
+  }
   if (!dispatchRows.some(row => dispatchOrderNumberForExport(row))) return bytes;
   const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
   return restoreSavedDispatchOrders(bytes, dispatchRows);
 }
-export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName.replace(/\.xlsx$/i,'-简化.xlsx');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=profitReportFileName(report,options);a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
