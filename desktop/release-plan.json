@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.37",
+  "version": "0.4.38",
   "candidateOnly": true,
-  "integrationBranch": "codex/deduction-once-0.4.37",
+  "integrationBranch": "codex/report-spacing-0.4.38",
   "requiredCommits": [
+    {
+      "module": "v0.4.38-spaced-exports-and-general-deductions",
+      "commit": "31c827906db5b56afa447f5e6bd914552d5a1b53"
+    },
+    {
+      "module": "v0.4.38-verified-main-baseline",
+      "commit": "52096940af8c9f000b99143bd6220725ac4b56a9"
+    },
     {
       "module": "v0.4.37-deductions-once-and-compact-exports",
       "commit": "e03a43acb3f51852a6d73610f06823dbb4f9c81d"
