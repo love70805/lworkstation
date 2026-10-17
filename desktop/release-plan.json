@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.33",
+  "version": "0.4.34",
   "candidateOnly": true,
-  "integrationBranch": "codex/monthly-supplements-0.4.33",
+  "integrationBranch": "codex/deduction-multiselect-0.4.34",
   "requiredCommits": [
+    {
+      "module": "v0.4.34-deduction-multiselect",
+      "commit": "0818313"
+    },
+    {
+      "module": "v0.4.34-verified-main-baseline",
+      "commit": "801b970f52184e3065184c53c963f4f1a8c0de36"
+    },
     {
       "module": "v0.4.33-monthly-supplements-and-dispatch-order-recovery",
       "commit": "08fcf4e76094c36a50756eefd5b04fffc6cecd11"
