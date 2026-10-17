@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.35",
+  "version": "0.4.36",
   "candidateOnly": true,
-  "integrationBranch": "codex/deduction-store-mapping-0.4.35",
+  "integrationBranch": "codex/monthly-formal-report",
   "requiredCommits": [
+    {
+      "module": "v0.4.36-formal-monthly-reports-and-registrant-filenames",
+      "commit": "fe6cf10"
+    },
+    {
+      "module": "v0.4.36-verified-main-baseline",
+      "commit": "adc2b331208eedeb465f13aa2e43584f889dd4dc"
+    },
     {
       "module": "v0.4.35-confirmed-SH-deduction-store-mapping",
       "commit": "f34437d02b7906ddd0d19f91a761dd610a2aff8c"
