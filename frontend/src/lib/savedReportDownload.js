@@ -3,7 +3,7 @@ import { sha256, Exact, exact, REPORT_TEMPLATE_VERSION } from '../domain/profitR
 import { base64ToBytes, buildProfitReportWorkbook, formatArchivedReportSkcs } from './profitReportWorkbook';
 import { profitOrderNumberForExport } from './profitOrderDisplay';
 
-const templates = new Set(['profit-zebra@1', 'profit-zebra@2-purchase-evidence', 'profit-zebra@3-single-order', 'profit-zebra@4-two-decimal-columns', 'profit-zebra@5-merged-skc', 'profit-zebra@6-exact-deductions-by-store', REPORT_TEMPLATE_VERSION]);
+const templates = new Set(['profit-zebra@1', 'profit-zebra@2-purchase-evidence', 'profit-zebra@3-single-order', 'profit-zebra@4-two-decimal-columns', 'profit-zebra@5-merged-skc', 'profit-zebra@6-exact-deductions-by-store', 'profit-zebra@7-deductions-compact', REPORT_TEMPLATE_VERSION]);
 const fail = () => { throw new Error('原报告信息不足或文件损坏，无法生成简化下载。原始审计存档未改变，请恢复完整报告备份后重试。'); };
 const decode = value => value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 const attrs = tag => Object.fromEntries([...tag.matchAll(/([\w:]+)="([^"]*)"/g)].map(match => [match[1], decode(match[2])]));
@@ -24,7 +24,7 @@ export async function simplifySavedReport(report) {
     if (report.fileSha256 && (await sha256(bytes)).toLowerCase() !== report.fileSha256.toLowerCase()) return fail();
     book = XLSX.read(bytes, { type: 'array', bookFiles: true });
   } catch { return fail(); }
-  if ([REPORT_TEMPLATE_VERSION,'profit-zebra@5-merged-skc','profit-zebra@6-exact-deductions-by-store'].includes(report.templateVersion)) {
+  if ([REPORT_TEMPLATE_VERSION,'profit-zebra@5-merged-skc','profit-zebra@6-exact-deductions-by-store','profit-zebra@7-deductions-compact'].includes(report.templateVersion)) {
     if (book.Sheets['汇总表']?.J1?.v !== '利润' || book.Sheets['汇总表']?.I1?.v !== '仓储成本') return fail();
     return bytes;
   }
