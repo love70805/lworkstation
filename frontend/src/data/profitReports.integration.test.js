@@ -55,6 +55,22 @@ it('reads download identifiers only from the verified frozen base and refuses ta
  await setActiveMemberContext({workspaceId:'OTHER',memberId:'foreign',role:'finance'});
  await expect(readProfitReportDownload(base.id)).rejects.toThrow('权限');
 });
+it('persists audited SH store mappings and exact per-store totals across reload and backup without changing frozen reports',async()=>{
+ const target={workspaceId:'W',ledgerId:'MAP-L',period:'2026-08'};await db.ledgers.put({id:target.ledgerId,workspaceId:'W',period:target.period,status:'cost_pending',warehouseRate:0.7});
+ for(const [index,store] of ['20店','27店'].entries()){
+  await db.salesRows.add({...target,store,platformSku:'MAP-'+index,platformSkc:'MAP-SKC-'+index,quantity:1,quantityExact:'1',amount:1,amountExact:'1'});
+  await saveManualCostOverride({ledgerId:target.ledgerId,store,platformSku:'MAP-'+index,unitCost:0,reason:'隔离真实零成本'});
+ }
+ const dispatch={...target,kind:'dispatch',mode:'manual',adoptedQuantityExact:'0',rows:[]};await adoptMonthlySupplement(dispatch,await previewMonthlySupplement(dispatch));
+ const baseInput={ledgerId:target.ledgerId,kind:'pre_deduction'},p=await previewProfitReport(baseInput),frozen=await saveProfitReport(baseInput,{expectedFingerprint:p.fingerprint}),before=JSON.stringify(frozen);
+ const parsed=['sh20','SH27'].map((name,index)=>inspectSupplementSource({fileHash:'MAPPING',fileName:'isolated.xlsx',sheetName:name,cells:[['货号','扣款单号','扣款金额'],['HHHX','D'+index,index?'2.002':'-0.0009']]},{kind:'deduction',supplierNumbers:['HHHX'],stores:['20店','27店']}));
+ const input={...target,kind:'deduction',mode:'files',rows:parsed.flatMap(result=>result.rows),sources:parsed.map(result=>result.source)},batch=await adoptMonthlySupplement(input,await previewMonthlySupplement(input));
+ expect(batch).toMatchObject({signedAmountExact:'2.0011',coveredStores:['20店','27店'],parserVersion:SUPPLEMENT_PARSER_VERSION});
+ db.close();await db.open();const rows=(await readMonthlyReportState(target.ledgerId)).adoptedRows.filter(row=>row.kind==='deduction');
+ expect(rows).toMatchObject([{store:'20店',originalStore:'sh20',signedAmountExact:'-0.0009',storeMapping:{target:'20店'}},{store:'27店',originalStore:'SH27',signedAmountExact:'2.002',storeMapping:{target:'27店'}}]);
+ const backup=await createWorkspaceBackupPayload();await db.delete();await db.open();await restoreWorkspaceBackupPayload(backup);await setActiveMemberContext({workspaceId:'W',memberId:'finance',role:'finance'});
+ expect((await readMonthlyReportState(target.ledgerId)).deduction.sources).toEqual(batch.sources);expect(JSON.stringify(await readSavedProfitReport(frozen.id))).toBe(before);
+});
 it('persists multiple exact deduction codes and cross-sheet amounts through reload and backup without changing a frozen base',async()=>{
  await adopt('dispatch');const frozen=await report(),before=JSON.stringify(frozen);
  const selected=['YW-20-HHHX','YW-27-HHHX'];

@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.34",
+  "version": "0.4.35",
   "candidateOnly": true,
-  "integrationBranch": "codex/deduction-multiselect-0.4.34",
+  "integrationBranch": "codex/deduction-store-mapping-0.4.35",
   "requiredCommits": [
+    {
+      "module": "v0.4.35-confirmed-SH-deduction-store-mapping",
+      "commit": "f34437d02b7906ddd0d19f91a761dd610a2aff8c"
+    },
+    {
+      "module": "v0.4.35-verified-main-baseline",
+      "commit": "b94b9c4e75de5b09d6d3c634635c0d62c48e75c3"
+    },
     {
       "module": "v0.4.34-deduction-multiselect",
       "commit": "0818313"

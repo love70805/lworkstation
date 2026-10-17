@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {inspectSupplementSource,normalizeSupplementCandidate,suggestSupplementMapping,suggestSupplementStore,supplementRowIdentity,supplementRowLabel,SUPPLEMENT_PARSER_VERSION} from './monthlySupplements';
+import {inspectSupplementSource,normalizeSupplementCandidate,suggestSupplementMapping,suggestSupplementStore,suggestDeductionStore,supplementRowIdentity,supplementRowLabel,SUPPLEMENT_PARSER_VERSION,DEDUCTION_STORE_RULE} from './monthlySupplements';
 const headers=['日期','登记人','店铺','skc','订单号','sku数量','特殊情况','1688订单号','网供名字',''];
 const source=cells=>({fileHash:'HASH',fileName:'synthetic.csv',sheetName:'CSV',headerRow:1,cells:[headers,...cells]});
 const context={ledger:{id:'L',workspaceId:'W',period:'2026-08'},stores:['甲']};
@@ -22,6 +22,23 @@ it('matches trimmed registrant names exactly and retains all remarks and source 
  expect(result.rows[1]).toMatchObject({ownerMarker:'李一',store:'甲',platformSkc:'SKC',order1688:'00000000000000000001',inheritedFrom:2,inheritedIdentifiers:{platformSkc:2,order1688:2},quantityExact:'3'});
  expect(result.rows[1].remarks.map(row=>row.value)).toEqual(['引流','尾列备注']);
  expect(candidate('dispatch',result.rows,{adoptedQuantityExact:'99'}).adoptedQuantityExact).toBe('5');
+});
+it.each([
+ ['sh20',['20店'],'20店'],['SH27',['27店'],'27店'],[' ｓｈ２０ ',['20店'],'20店'],
+ ['680',['680店'],'680店'],['EZ627',['627店'],''],['sh20',['27店'],''],
+ ['sh20',['20','20店'],''],['sh20',['sh20','20店'],'sh20'],['sh20',['sh20','SH20','20店'],''],
+])('maps deduction worksheet %s only to its unique actual store', (name,stores,expected)=>{
+ expect(suggestDeductionStore(name,stores)).toBe(expected);
+});
+it('audits source-column and worksheet aliases, preserves source-column precedence and rejects an explicitly cleared mapping',()=>{
+ const s={fileHash:'F',fileName:'synthetic.xlsx',sheetName:'SH27',cells:[['货号','店铺','扣款金额','扣款单号'],['C','sh20','-0.0009','A']]};
+ const result=inspectSupplementSource(s,{kind:'deduction',supplierNumbers:['C'],store:'27店',stores:['20店','27店']});
+ expect(result.errors).toEqual([]);expect(result.rows[0]).toMatchObject({store:'20店',originalStore:'sh20',signedAmountExact:'-0.0009',storeMapping:{rule:DEDUCTION_STORE_RULE,input:'sh20',target:'20店',source:'source_column'}});
+ const sheet={...s,sheetName:'sh20',cells:[['货号','扣款金额','扣款单号'],['C',0,'ZERO']]};
+ const auto=inspectSupplementSource(sheet,{kind:'deduction',supplierNumbers:['C'],stores:['20店']});
+ expect(auto.rows[0]).toMatchObject({store:'20店',originalStore:'sh20',signedAmountExact:'0',storeMapping:{source:'sheet_mapping'}});expect(auto.source.selection).toMatchObject({store:'20店',storeRule:DEDUCTION_STORE_RULE});
+ expect(inspectSupplementSource(sheet,{kind:'deduction',supplierNumbers:['C'],store:'',stores:['20店']}).errors).toMatchObject([{code:'missing_store',sourceRow:2}]);
+ expect(inspectSupplementSource(sheet,{kind:'deduction',supplierNumbers:['C'],store:'27店',stores:['20店','27店']}).rows[0].store).toBe('27店');
 });
 it('shares CSV purchase orders across SKCs while resetting at owner, date, store and blank boundaries',()=>{
  const result=inspectSupplementSource(source([

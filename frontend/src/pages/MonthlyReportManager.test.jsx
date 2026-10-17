@@ -111,6 +111,27 @@ it('shows the dispatch amount for manual, file and real zero quantities before a
  await change(field('采用总代发件数'),'');expect(container.querySelector('.report-dispatch-amount')).toBeNull();expect(button('导入本月来源').disabled).toBe(true);
  await change(field('来源方式'),'files');await upload([source()]);await change(field('登记人'),'甲人');expect(container.textContent).toContain('代发金额 ¥2.10');
 });
+it('automatically maps SH sheets, filters source cards and preserves source indexes when editing a visible mapping',async()=>{
+ const state={...base,stores:['20店','27店']};await mount(state,'deduction');
+ await upload([source('OTHER',[['货号','扣款金额'],['OTHER',9]]),{...source('F',[['货号','补扣款单号','扣款金额'],['HHHX-A','A','-0.0009']]),sheetName:'sh20'},{...source('F',[['货号','补扣款单号','扣款金额'],['HHHX-B','B','2']]),sheetName:'SH27'}]);
+ await change(field('搜索货号'),'HHHX');expect(container.querySelectorAll('.report-source')).toHaveLength(2);expect(container.textContent).toContain('涉及 2 / 3 个工作表');
+ const shop20=container.querySelector('[aria-label="sh20 实际店铺"]');expect(shop20.value).toBe('20店');expect(container.querySelector('[aria-label="SH27 实际店铺"]').value).toBe('27店');
+ expect(container.textContent).toContain('有符号扣款合计 1.9991 元');expect(mock.preview.mock.calls.at(-1)[0].rows.map(row=>row.store)).toEqual(['20店','27店']);
+ await change(shop20,'27店');expect(mock.preview.mock.calls.at(-1)[0].rows.map(row=>row.store)).toEqual(['27店','27店']);
+ const showAll=field('显示未涉及的工作表')??container.querySelector('.report-source-scope input');await act(async()=>Simulate.change(showAll,{target:{checked:true}}));
+ expect(container.querySelectorAll('.report-source')).toHaveLength(3);expect(container.querySelector('[aria-label="sh20 实际店铺"]').value).toBe('27店');
+ await act(async()=>button('导入本月来源').click());expect(mock.adopt.mock.calls[0][0].rows[0]).toMatchObject({originalStore:'sh20',store:'27店',storeMapping:{input:'sh20',target:'27店'}});
+});
+it('shows all unresolved selected sheets near the picker, locates their controls and prevents partial adoption until mapped',async()=>{
+ const state={...base,stores:['20','20店','27店']};await mount(state,'deduction');
+ const sheet=(name,rows)=>({...source(name,[['货号','扣款单号','扣款金额'],...rows]),sheetName:name});
+ await upload([sheet('sh20',[['HHHX-A','A',1],['HHHX-A','B',2]]),sheet('missing',[['HHHX-B','C',3]]),sheet('SH27',[['HHHX-C','D','-0.0009']])]);
+ await change(field('搜索货号'),'HHHX');expect(mock.preview).not.toHaveBeenCalled();expect(container.textContent).toContain('2 个涉及工作表、3 条选中记录缺少实际店铺');expect(button('导入本月来源').disabled).toBe(true);
+ await act(async()=>button('定位 sh20（2 条）').click());expect(document.activeElement).toBe(container.querySelector('[aria-label="sh20 实际店铺"]'));
+ await change(container.querySelector('[aria-label="sh20 实际店铺"]'),'20店');expect(mock.preview).not.toHaveBeenCalled();
+ await change(container.querySelector('[aria-label="missing 实际店铺"]'),'27店');expect(container.textContent).toContain('有符号扣款合计 5.9991 元');expect(button('导入本月来源').disabled).toBe(false);
+ await change(container.querySelector('[aria-label="sh20 实际店铺"]'),'');expect(button('导入本月来源').disabled).toBe(true);expect(container.textContent).toContain('1 个涉及工作表、2 条选中记录缺少实际店铺');
+});
 it('does not ask again about previously reviewed conflicts when adding unrelated records',async()=>{
  const row={kind:'dispatch',fileHash:'OLD-A',sourceName:'old-a.csv',sourceSheet:'CSV',sourceRow:2,store:'甲',businessId:'OLD-ORDER',quantityExact:'2'};
  await mount({...base,dispatch:{adoptedQuantityExact:'4',rowCount:2,revision:1,sources:[],reviewedCrossFileConflicts:true},adoptedRows:[row,{...row,fileHash:'OLD-B',sourceName:'old-b.csv'}]});
