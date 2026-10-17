@@ -162,17 +162,13 @@ it('keeps background adoption reports small and cached while refreshing voided s
  expect(first[0]).toMatchObject({deliveryId:envelope.deliveryId,status:'pending',adoption:{state:'partial',summary:{adoptedCount:1,anomalyCount:1}}});
  expect(first[0]).not.toHaveProperty('envelope');
  expect(first[0].adoption).not.toHaveProperty('items');
- const toArray=db.Collection.prototype.toArray;
- let inboxReads=0;
- vi.spyOn(db.Collection.prototype,'toArray').mockImplementation(function(...args){
-  if(this._ctx.table.name==='erpCostInbox')inboxReads++;
-  return toArray.apply(this,args);
- });
+ const inboxReads=vi.spyOn(db.erpCostInbox,'where');
  for(let cycle=0;cycle<3;cycle++)expect(await listErpCostAdoptionStates({workspaceId:ledger.workspaceId})).toEqual(first);
- expect(inboxReads).toBe(0);
+ expect(inboxReads).not.toHaveBeenCalled();
  await voidPublishedErpCostBatch({inboxId:receipt.id,reason:'合成撤回'});
+ inboxReads.mockClear();
  expect((await listErpCostAdoptionStates({workspaceId:ledger.workspaceId}))[0].status).toBe('voided');
- expect(inboxReads).toBeGreaterThan(0);
+ expect(inboxReads).toHaveBeenCalled();
  await setActiveMemberContext({workspaceId:'foreign',memberId:'other',role:'finance'});
  await expect(listErpCostAdoptionStates({workspaceId:ledger.workspaceId})).rejects.toThrow('工作区');
  expect(await listErpCostAdoptionStates({workspaceId:'foreign'})).toEqual([]);

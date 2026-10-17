@@ -4,6 +4,16 @@ import { expect, it } from 'vitest';
 import ErpCollectionProgress from './ErpCollectionProgress';
 import { isActiveErpCollection } from '../domain/erpCollectionStatus';
 
+it('ends cost timing at the last receipt and locates each unresolved platform mapping', () => {
+  const task = { status: 'partial', phase: 'cost', createdAt: '2026-10-17T17:48:00Z', updatedAt: '2026-10-17T20:19:00Z',
+    batches: [{ batchId: 'B', platformSkcs: ['SKC-A'], status: 'incomplete', deliveryId: 'D', deliveredAt: '2026-10-17T18:31:00Z', error: '已使用的平台规格映射未确认 1 项' }] };
+  const inboxes = [{ deliveryId: 'D', envelope: { batch: { sourceMeta: { mappingFailures: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', message: '目标平台 SKU/SKC 映射未确认' }] } } } }];
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={inboxes} />);
+  expect(html).toContain('成本采集历时 43 分钟'); expect(html).not.toContain('151 分钟');
+  expect(html).toContain('成本读取与送达已结束'); expect(html).toContain('当前阶段：成本证据核对');
+  expect(html).toContain('平台 SKU：SKU-A'); expect(html).toContain('SKC：SKC-A'); expect(html).toContain('目标平台 SKU/SKC 映射未确认');
+});
+
 it('does not count a collected idempotency key as a durable delivery or adoption', () => {
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'paused', batches: [{ platformSkcs: ['A'], status: 'collected', collectedAt: '2026-10-07T00:00:00Z', resultDeliveryId: 'WAITING-ACK' }] }} />);
   expect(html).toContain('已采集 <strong>1 / 1</strong>');

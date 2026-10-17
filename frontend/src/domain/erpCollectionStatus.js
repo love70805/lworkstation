@@ -2,6 +2,18 @@ export function hasPendingErpCatalog(task) {
   return (task?.batches ?? []).some(batch => batch.deliveryId && batch.catalogStatus !== 'completed');
 }
 
+// Adoption reports update the task long after procurement has stopped. Cost
+// timing ends at the durable receipt, independently of remaining exceptions.
+export function erpCostCollectionTiming(task) {
+  const batches = task?.batches ?? [];
+  const completed = batches.length > 0 && batches.every(batch => batch.deliveryId);
+  const deliveredAt = batches.map(batch => Date.parse(batch.deliveredAt ?? batch.collectedAt)).filter(Number.isFinite);
+  const end = completed ? (deliveredAt.length ? Math.max(...deliveredAt) : NaN) : Date.parse(task?.updatedAt ?? task?.createdAt);
+  const duration = end - Date.parse(task?.createdAt);
+  return { completed, endedAt: completed && Number.isFinite(end) ? new Date(end).toISOString() : null,
+    elapsedMinutes: Number.isFinite(duration) ? Math.max(0, Math.floor(duration / 60000)) : null };
+}
+
 export function isActiveErpCollection(task) {
   if (!task || ['stopped', 'completed', 'invalidated'].includes(task.status)) return false;
   if (task.status === 'cost_complete' && task.catalogMode === 'on_demand' && !task.runnerId) return false;
