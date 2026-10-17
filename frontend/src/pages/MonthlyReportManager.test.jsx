@@ -63,6 +63,23 @@ it('keeps signed deduction and supplier substring selection with automatic previ
  await change(container.querySelector('[aria-label="供方货号或标记"]'),'CODE');expect(button('导入本月来源').disabled).toBe(true);
  await change(field('货号匹配方式'),'contains');expect(container.textContent).toContain('有符号扣款合计 -0.899 元');expect(mock.preview.mock.calls.at(-1)[0].rows).toHaveLength(2);
 });
+it('searches source supplier codes with an explicit selector, keeps the selected code visible and ignores unrelated sheets with missing amounts',async()=>{
+ await mount(base,'deduction');
+ await upload([source('D',[['供方货号','店铺','订单号','扣款金额'],['CODE-X','甲','X','2.009'],['CODE-Y','甲','Y','-1']]),source('UNRELATED',[['货号','未知金额'],['OTHER',9]])]);
+ const selector=container.querySelector('select[aria-label="供方货号或标记"]');
+ expect(selector.value).toBe('');expect(mock.preview).not.toHaveBeenCalled();
+ await change(field('搜索货号'),'X');expect([...selector.options].map(option=>option.text)).toContain('CODE-X');expect([...selector.options].map(option=>option.text)).not.toContain('CODE-Y');
+ await change(selector,'CODE-X');expect(container.textContent).toContain('有符号扣款合计 2.009 元');
+ await change(field('搜索货号'),'not-found');expect([...selector.options].map(option=>option.text)).toContain('CODE-X');
+ await act(async()=>button('导入本月来源').click());expect(mock.adopt.mock.calls[0][0].rows).toMatchObject([{supplierNumber:'CODE-X',signedAmountExact:'2.009',sourceRow:2}]);
+});
+it('shows the dispatch amount for manual, file and real zero quantities before adoption',async()=>{
+ await mount();await change(field('来源方式'),'manual');await change(field('采用总代发件数'),'100');
+ expect(container.textContent).toContain('代发金额 ¥70.00');expect(container.textContent).toContain('采用后立即计入整月利润汇总');
+ await change(field('采用总代发件数'),'0');expect(container.textContent).toContain('代发金额 ¥0.00');expect(button('导入本月来源').disabled).toBe(false);
+ await change(field('采用总代发件数'),'');expect(container.querySelector('.report-dispatch-amount')).toBeNull();expect(button('导入本月来源').disabled).toBe(true);
+ await change(field('来源方式'),'files');await upload([source()]);await change(field('登记人'),'甲人');expect(container.textContent).toContain('代发金额 ¥2.10');
+});
 it('does not ask again about previously reviewed conflicts when adding unrelated records',async()=>{
  const row={kind:'dispatch',fileHash:'OLD-A',sourceName:'old-a.csv',sourceSheet:'CSV',sourceRow:2,store:'甲',businessId:'OLD-ORDER',quantityExact:'2'};
  await mount({...base,dispatch:{adoptedQuantityExact:'4',rowCount:2,revision:1,sources:[],reviewedCrossFileConflicts:true},adoptedRows:[row,{...row,fileHash:'OLD-B',sourceName:'old-b.csv'}]});

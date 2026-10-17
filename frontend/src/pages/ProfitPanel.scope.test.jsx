@@ -21,7 +21,8 @@ it('replaces profit scope through all → 甲 → 乙 and never renders sales an
  for(const [store,revenue] of [['all','40'],['甲','10'],['乙','30']]){
   if(store!=='all')await act(async()=>Simulate.change(container.querySelector('.profit-workspace-controls select'),{target:{value:store}}));
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,30));});
-  expect(container.querySelectorAll('.profit-summary-strip')).toHaveLength(1);
+  expect(container.querySelectorAll('.profit-summary-products')).toHaveLength(1);
+  expect(container.querySelectorAll('.profit-summary-monthly')).toHaveLength(1);
   expect(container.querySelectorAll('.sales-analytics')).toHaveLength(0);
   expect(container.querySelector('.profit-summary-item strong').textContent).toBe(`¥${revenue}.00`);
   expect(container.querySelector('.profit-workspace-controls select').value).toBe(store);

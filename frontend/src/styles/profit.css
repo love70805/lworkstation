@@ -261,6 +261,14 @@
 .profit-summary-total > strong { color: var(--success); }
 .profit-summary-total.is-pending { background: var(--warning-bg); }
 .profit-summary-total.is-pending > strong { color: var(--warning); font-size: 20px; }
+.profit-summary-strip.profit-summary-products { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.profit-summary-strip.profit-summary-monthly { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.profit-monthly-summary > p { display:flex; flex-wrap:wrap; gap:8px 16px; margin:0 0 8px; font-size:13px; color:var(--text-muted); }
+.profit-monthly-summary > p > span { color:var(--text-muted); font-size:12px; }
+.profit-monthly-summary .profit-summary-item { min-width:0; }
+.profit-monthly-summary .profit-summary-item > small { overflow-wrap:anywhere; color:var(--text-muted); font-size:12px; }
+.profit-monthly-summary .inline-link { align-self:flex-start; min-height:32px; }
+.report-dispatch-amount { color:var(--text); font-weight:600; }
 .profit-cost-alert { display: flex; min-height: 58px; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 14px; border: 1px solid var(--warning-border); border-radius: 6px; background: var(--warning-bg); color: var(--warning); }
 .profit-cost-alert > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
 .profit-cost-alert strong { font-size: 13px; }
@@ -323,6 +331,11 @@
   .profit-summary-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .profit-summary-item:nth-child(3) { border-right: 0; }
   .profit-summary-item:nth-child(-n + 3) { border-bottom: 1px solid var(--border); }
+  .profit-summary-strip.profit-summary-products { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .profit-summary-products .profit-summary-item { border-right:1px solid var(--border); border-bottom:0; }
+  .profit-summary-products .profit-summary-item:nth-child(even) { border-right:0; }
+  .profit-summary-products .profit-summary-item:nth-child(-n+2) { border-bottom:1px solid var(--border); }
+  .profit-summary-monthly .profit-summary-item { border-bottom:0; }
   .profit-filter-bar { flex-wrap: wrap; }
   .profit-filter-bar .search-input { max-width: none; }
   .profit-filter-count { width: 100%; margin-left: 0; }
@@ -336,8 +349,18 @@
   .profit-summary-item:nth-child(3) { border-right: 1px solid var(--border); }
   .profit-summary-item:nth-child(even) { border-right: 0; }
   .profit-summary-item:nth-child(-n + 4) { border-bottom: 1px solid var(--border); }
+  .profit-summary-strip.profit-summary-monthly { grid-template-columns:1fr; }
+  .profit-summary-monthly .profit-summary-item { border-right:0; border-bottom:1px solid var(--border); }
+  .profit-summary-monthly .profit-summary-item:last-child { border-bottom:0; }
+  .profit-summary-products .profit-summary-item:nth-child(n+3) { border-bottom:0; }
   .profit-filter-bar > * { flex: 1 1 100%; }
   .profit-filter-check { justify-content: flex-start; }
+}
+
+@media (max-width:600px) {
+  .profit-summary-strip.profit-summary-products { grid-template-columns:1fr; }
+  .profit-summary-products .profit-summary-item:nth-child(n) { border-right:0; border-top:0; border-bottom:1px solid var(--border); }
+  .profit-summary-products .profit-summary-item:last-child { border-bottom:0; }
 }
 
 /* Pagination bounds row counts; vertical browsing belongs to the page. */
