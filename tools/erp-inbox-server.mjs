@@ -47,11 +47,12 @@ async function persistTaskHeartbeat(task, revision) {
     kind: 'task-heartbeat', taskId: task.taskId, instanceId: task.instanceId,
     workspaceId: task.workspaceId, requestId: task.requestId, scopeHash: task.scopeHash,
     status: task.status, leaseExpiresAt: task.leaseExpiresAt, updatedAt: task.updatedAt,
+    runnerId: task.runnerId, runnerLeaseExpiresAt: task.runnerLeaseExpiresAt,
   };
   const operation = leaseWriteChain.catch(() => {}).then(async () => {
     const committed = await spoolStorage.read();
     if (resettingBusinessData || revision !== workspaceResetRevision
-      || !committed.some(record => record.kind === 'collection-task' && record.taskId === task.taskId)) {
+      || !committed.some(record => record.kind === 'collection-task' && record.taskId === task.taskId && record.runnerId === task.runnerId && record.status === task.status && !record.recoveryRequired)) {
       throw Object.assign(new Error('采集任务已清空，请新建任务。'), { code: 'ERP_TASK_NOT_FOUND', status: 404 });
     }
     const next = new Map(taskHeartbeats);
@@ -79,11 +80,12 @@ async function readSpool() {
   }
   for(const heartbeat of taskHeartbeats.values()) {
     const task=records.find(record=>record.kind==='collection-task' && record.taskId===heartbeat.taskId);
-    if(!task || task.instanceId!==heartbeat.instanceId || task.workspaceId!==heartbeat.workspaceId || task.requestId!==heartbeat.requestId || task.scopeHash!==heartbeat.scopeHash || task.status!==heartbeat.status || task.recoveryRequired) continue;
+    if(!task || task.instanceId!==heartbeat.instanceId || task.workspaceId!==heartbeat.workspaceId || task.requestId!==heartbeat.requestId || task.scopeHash!==heartbeat.scopeHash || task.status!==heartbeat.status || task.runnerId!==heartbeat.runnerId || task.recoveryRequired) continue;
     // A later durable task mutation already contains a newer renewal. Never
     // shorten it using an older journal entry left by the preceding heartbeat.
     if(Date.parse(heartbeat.updatedAt)<Date.parse(task.updatedAt||''))continue;
     task.leaseExpiresAt=heartbeat.leaseExpiresAt;
+    if (task.runnerId) task.runnerLeaseExpiresAt=heartbeat.runnerLeaseExpiresAt;
     if(Date.parse(task.updatedAt||'')<Date.parse(heartbeat.updatedAt))task.updatedAt=heartbeat.updatedAt;
     for(const request of records) {
       if(request.kind!=='request' || request.workspaceId!==task.workspaceId || !['registered','expired'].includes(request.status))continue;
@@ -99,7 +101,7 @@ async function writeSpool(records) {
   await spoolStorage.write(records);
   for(const [id, heartbeat] of taskHeartbeats) {
     const task=records.find(record=>record.kind==='collection-task' && record.taskId===id);
-    if(!task || task.status!==heartbeat.status || task.scopeHash!==heartbeat.scopeHash || task.recoveryRequired)taskHeartbeats.delete(id);
+    if(!task || task.status!==heartbeat.status || task.scopeHash!==heartbeat.scopeHash || task.runnerId!==heartbeat.runnerId || task.recoveryRequired)taskHeartbeats.delete(id);
   }
 }
 
@@ -1180,7 +1182,7 @@ const server = http.createServer(async (req, res) => {
       if (replaceLedgerScope && (!requestId || !workspaceId || !String(ledgerId ?? "").trim())) return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "替换账本关联必须提供工作区、账本与请求标识。" });
       const assertTaskNotActive = (targetRequestId) => {
         if (records.some(item => item.kind === 'collection-task' && item.requestId === targetRequestId && item.status !== 'stopped'
-          && !(item.status === 'cost_complete' && item.batches.every(batch => batch.catalogStatus === 'completed')))) {
+          && !(item.status === 'cost_complete' && !item.runnerId && (item.catalogMode === 'on_demand' || item.batches.every(batch => batch.catalogStatus === 'completed'))))) {
           throw Object.assign(new Error('该请求有未完成的采集任务，请先停止任务；展示筛选不能更改采集范围。'), { status: 409, code: 'ERP_TASK_ACTIVE' });
         }
       };

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { erpCollectionPresentation } from './erpCollectionStatus';
+import { erpCollectionPresentation, isActiveErpCollection } from './erpCollectionStatus';
 
 const delivered = { platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' };
 
@@ -45,4 +45,20 @@ it('shows durable ERP service pause separately from initial waiting and user pau
   expect(view.title).toContain('ERP 服务暂不可用');
   expect(view.description).toContain('服务恢复后');
   expect(erpCollectionPresentation({ ...task, status: 'running', batches: [{ status: 'running' }] }).state).toBe('cost_running');
+});
+
+it('distinguishes a queued continuation and a claimed executor from an actual read', () => {
+  const task = { executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost', status: 'ready', batches: [{ status: 'pending' }] };
+  expect(erpCollectionPresentation(task)).toMatchObject({ state: 'queued', running: false, canResume: false, canRetry: false });
+  expect(erpCollectionPresentation({ ...task, status: 'running', runnerId: 'RUNNER' })).toMatchObject({ state: 'queued', canResume: false });
+  expect(erpCollectionPresentation({ ...task, status: 'running', runnerId: 'RUNNER', batches: [{ status: 'running' }] })).toMatchObject({ state: 'cost_running', running: true });
+});
+
+it('finishes cost work without treating optional or stale material activity as running', () => {
+  const task = { executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost', status: 'cost_complete', batches: [delivered] };
+  expect(erpCollectionPresentation(task)).toMatchObject({ state: 'cost_completed', running: false, catalogOnly: true, canResume: true, canStop: false });
+  expect(isActiveErpCollection(task)).toBe(false);
+  expect(erpCollectionPresentation({ ...task, batches: [{ ...delivered, catalogStatus: 'running' }] })).toMatchObject({ state: 'cost_completed', running: false });
+  expect(erpCollectionPresentation({ ...task, runMode: 'catalog', runnerId: 'RUNNER', batches: [{ ...delivered, catalogStatus: 'running' }] })).toMatchObject({ state: 'catalog_running', running: true, canResume: false });
+  expect(erpCollectionPresentation({ ...task, status: 'partial', batches: [{ ...delivered, status: 'incomplete' }] })).toMatchObject({ canResume: false, canRetry: true });
 });

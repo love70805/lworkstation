@@ -196,9 +196,13 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const collection = useErpCollectionTasks(snapshot?.ledger?.workspaceId, snapshot?.ledger?.id);
   const collectionTask = collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
   const activeCollection = isActiveErpCollection(collectionTask) ? collectionTask : null;
-  const collectionRequest = activeCollection ? requestRecords.find(request => request.id === activeCollection.requestId) ?? null : null;
+  // Optional materials no longer count as active reads, but retain the original
+  // request so the registration timer cannot supersede a long cost run's link.
+  const scopeCollection = activeCollection ?? (collectionTask?.catalogMode === 'on_demand' && collectionTask.status === 'cost_complete'
+    && collectionTask.batches.some(batch => batch.catalogStatus !== 'completed') ? collectionTask : null);
+  const collectionRequest = scopeCollection ? requestRecords.find(request => request.id === scopeCollection.requestId) ?? null : null;
   const ledgerVersion = useMemo(() => erpLedgerVersion(snapshot?.batches), [snapshot?.batches]);
-  const collectionScopeChanged = Boolean(activeCollection && (activeCollection.ledgerVersion !== ledgerVersion || activeCollection.ledgerPeriod !== snapshot?.ledger?.period));
+  const collectionScopeChanged = Boolean(scopeCollection && (scopeCollection.ledgerVersion !== ledgerVersion || scopeCollection.ledgerPeriod !== snapshot?.ledger?.period));
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [collectionError, setCollectionError] = useState('');
   const locked = ["finalized", "locked"].includes(snapshot?.ledger?.status);
@@ -370,17 +374,17 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   }, [registrationScope, locked, scopeHasIdentityConflict]);
   useEffect(() => {
     if (collection.loading || collection.error) return;
-    if (activeCollection && (collectionScopeChanged || locked)) {
-      void controlErpCollectionTask(activeCollection.taskId, { workspaceId: activeCollection.workspaceId, action: 'stop' })
+    if (scopeCollection && (collectionScopeChanged || locked)) {
+      void controlErpCollectionTask(scopeCollection.taskId, { workspaceId: scopeCollection.workspaceId, action: 'stop' })
         .then(() => { setCollectionError(locked ? '账本已定稿，采集已停止。' : '台账已重新导入，旧任务已停止，请按当前范围重新采集。'); collection.refresh(); })
         .catch(error => setCollectionError(error.message));
       return;
     }
-    if (activeCollection && !collectionRequest) return;
-    if (activeCollection) {
+    if (scopeCollection && !collectionRequest) return;
+    if (scopeCollection) {
       previousRegistrationRef.current = { ledger: snapshot.ledger, scope: registrationScope };
-      setRegistrationState({ status: 'registered', scope: registrationScope, message: '活动任务范围已固定；查看筛选不改变采集范围。' });
-      if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(activeCollection.requestId); setCostRequest(collectionRequest); }
+      setRegistrationState({ status: 'registered', scope: registrationScope, message: '原任务范围已固定；查看筛选不改变采集范围。' });
+      if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(scopeCollection.requestId); setCostRequest(collectionRequest); }
       return;
     }
     const previous = previousRegistrationRef.current;
@@ -417,14 +421,17 @@ function CostMatchingBody({ validatedContext, onPublished }) {
     const timer = registrationStartedRef.current ? window.setTimeout(registerScope, 300) : null;
     if (timer === null) registerScope();
     return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
-  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, activeCollection?.taskId, collectionScopeChanged]);
+  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionScopeChanged]);
   const controlCollection = async action => {
     if (!collectionTask || collectionBusy) return;
     setCollectionBusy(true); setCollectionError('');
     try {
-      if (['resume', 'retry_failed'].includes(action) && (locked || collectionTask.ledgerVersion !== ledgerVersion || collectionTask.ledgerPeriod !== snapshot?.ledger?.period)) throw new Error('账本已定稿或导入范围已变化，请从当前账本重新准备采集。');
-      if (['resume', 'retry_failed'].includes(action) && !requestRecords.some(request => request.id === collectionTask.requestId)) throw new Error('本工作区缺少原任务请求，请停止此任务后从当前账本重新开始。');
-      await controlErpCollectionTask(collectionTask.taskId, { workspaceId: collectionTask.workspaceId, action, requestId: collectionTask.requestId, scopeHash: collectionTask.scopeHash, filters: collectionTask.filters });
+      const continuing = ['resume', 'retry_failed', 'catalog'].includes(action);
+      if (continuing && (locked || collectionTask.ledgerVersion !== ledgerVersion || collectionTask.ledgerPeriod !== snapshot?.ledger?.period)) throw new Error('账本已定稿或导入范围已变化，请从当前账本重新准备采集。');
+      if (continuing && !requestRecords.some(request => request.id === collectionTask.requestId)) throw new Error('本工作区缺少原任务请求，请停止此任务后从当前账本重新开始。');
+      await controlErpCollectionTask(collectionTask.taskId, { workspaceId: collectionTask.workspaceId,
+        action: continuing ? 'request_resume' : action, requestId: collectionTask.requestId, scopeHash: collectionTask.scopeHash, filters: collectionTask.filters,
+        ...(continuing ? { mode: action === 'catalog' ? 'catalog' : 'cost', retryFailed: action === 'retry_failed' } : {}) });
       collection.refresh();
     } catch (error) { setCollectionError(error.message); }
     finally { setCollectionBusy(false); }

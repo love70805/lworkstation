@@ -59,8 +59,8 @@ export function listErpCollectionTasks({ workspaceId, ledgerId, requestId, signa
   return requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId, ledgerId, requestId } }, { signal });
 }
 
-export function controlErpCollectionTask(taskId, { workspaceId, action, requestId, filters, scopeHash } = {}) {
-  return requestInbox({ route: `/erp/v1/collection-tasks/${encodeURIComponent(taskId)}/control`, method: 'POST', body: { workspaceId, action, requestId, filters, scopeHash } });
+export function controlErpCollectionTask(taskId, { workspaceId, action, requestId, filters, scopeHash, mode, retryFailed } = {}) {
+  return requestInbox({ route: `/erp/v1/collection-tasks/${encodeURIComponent(taskId)}/control`, method: 'POST', body: { workspaceId, action, requestId, filters, scopeHash, mode, retryFailed } });
 }
 
 export function reportErpCollectionAdoption(taskId, { workspaceId, deliveryId, adoption } = {}) {

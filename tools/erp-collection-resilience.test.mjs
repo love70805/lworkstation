@@ -83,8 +83,8 @@ async function scenario(mode) {
     const task = () => records.find(record => record.kind === 'collection-task');
     if (mode.startsWith('outage')) {
       await until(() => task()?.status === 'paused' && idle());
-      assert.equal(deliveries.length, 1); assert.equal(task().batches[0].status, 'delivered');
-      assert.equal(task().batches[1].status, 'pending'); assert.equal(task().pauseReason.code, 'ERP_SERVICE_UNAVAILABLE');
+      assert.equal(deliveries.length, 4); assert.equal(task().batches[0].status, 'delivered');
+      assert.equal(task().batches[4].status, 'pending'); assert.equal(task().pauseReason.code, 'ERP_SERVICE_UNAVAILABLE');
       assert.match(window.document.getElementById('erpa-task-status').textContent, /ERP 服务暂不可用.*恢复后继续/);
       assert.equal(counters.get('product-page:SKC-20'), mode === 'outage-html' || mode === 'outage-json' ? 1 : 3);
       assert.equal(counters.get('purchase-order-page:SKC-20') || 0, 0);
@@ -95,12 +95,12 @@ async function scenario(mode) {
       await until(() => releaseResume);
       assert.equal(window.document.querySelectorAll('.erpa-result-row').length, 20, 'resume preserves the completed preview while the next batch reads');
       releaseResume();
-      await until(() => deliveries.length === 2 && idle());
+      await until(() => deliveries.length === 5 && idle());
       assert.equal(task().pauseReason, undefined); assert.equal(task().batches[0].deliveryId, originalReceipt);
       assert.equal(counters.get('purchase-order-page:SKC-0'), 1, 'recovery does not reread the completed cost batch');
       assert.equal(task().summary.delivered, 21);
     } else {
-      await until(() => deliveries.length === 2 && idle());
+      await until(() => deliveries.length === 5 && idle());
       if (mode === 'persistent-directory') {
         assert.equal(task().batches[0].status, 'incomplete');
         assert.match(deliveries[0].sourceMeta.scopeDirectoryFailures[0].message, /product_count_mismatch/);
@@ -110,10 +110,10 @@ async function scenario(mode) {
         assert.doesNotMatch(window.document.getElementById('erpa-statusbar').textContent, /校验通过/);
         const old = deliveries[0]; healthy = true;
         window.document.getElementById('erpa-retry-batches').click();
-        await until(() => deliveries.length === 3 && idle());
+        await until(() => deliveries.length === 6 && idle());
         assert.equal(task().batches[0].status, 'delivered');
-        assert.notEqual(deliveries[2].collectionTask.attemptId, old.collectionTask.attemptId);
-        assert.notEqual(deliveries[2].resultDeliveryId, old.resultDeliveryId);
+        assert.notEqual(deliveries[5].collectionTask.attemptId, old.collectionTask.attemptId);
+        assert.notEqual(deliveries[5].resultDeliveryId, old.resultDeliveryId);
         assert.equal(counters.get('purchase-order-page:SKC-20'), 1, 'retry does not reread the successful second batch');
         assert.throws(() => validateCollectionDelivery(records, old), /新尝试/);
         assert.equal(old.sourceMeta.scopeDirectoryComplete, false, 'old evidence remains unchanged');

@@ -97,7 +97,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.41' }),
+        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.44' }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -192,6 +192,16 @@ export async function verifyErpCatalogTransport({
     for (let attempt = 0; attempt < 200 && !submitted.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(submitted.length, 1, window.document.body.textContent);
     assert.equal(submitted[0].response.ok, true, submitted[0].response.message);
+    const unresolvedTarget = !legacyScope && expectedSkus.some(sku => sku.platformSku === 'SKU-MISSING');
+    if (!legacyScope) {
+      for (let attempt = 0; attempt < 200 && (window.document.getElementById('erpa-recalculate').disabled || window.document.getElementById('erpa-supplement-catalog').hidden); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(catalogSubmitted.length, 0, 'current cost collection ends before any optional material delivery');
+      assert.equal(window.document.getElementById('erpa-recalculate').disabled, false, 'cost run releases the UI before explicit material collection');
+      assert.equal(window.document.getElementById('erpa-supplement-catalog').hidden, false, 'explicit material action is available');
+      assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, 1, 'cost completion performs only the registered SKC history read');
+      assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, unresolvedTarget ? 4 : 2, 'only unresolved used targets receive one mapping recheck before cost completion');
+      window.document.getElementById('erpa-supplement-catalog').click();
+    }
     for (let attempt = 0; attempt < 200 && !catalogSubmitted.length; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(catalogSubmitted.length, 1);
     assert.equal(catalogSubmitted[0].response.status, "success", catalogSubmitted[0].response.message);
@@ -202,10 +212,9 @@ export async function verifyErpCatalogTransport({
     assert.equal(catalogProgress.state, catalogSubmitted[0].response.envelope.catalog.status === 'completed' ? 'complete' : 'partial');
     assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
     assert.equal(new Set(requestedPaths).size, 4);
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, 1, 'complete original evidence does not trigger any optional history scan');
-    const unresolvedTarget = !legacyScope && expectedSkus.some(sku => sku.platformSku === 'SKU-MISSING');
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, unresolvedTarget ? 4 : 2,
-      unresolvedTarget ? 'an unresolved exact target gets one scoped mapping recheck' : 'complete original mappings are reused');
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, legacyScope ? 1 : 3, 'a separate explicit material attempt rereads current authoritative warehouse history');
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, legacyScope ? 2 : unresolvedTarget ? 6 : 4,
+      'a separate explicit material attempt reads its own mappings instead of assuming account continuity');
     if (!legacyScope) assert.equal(submitted[0].payload.meta.scopeRetrySkcCount, unresolvedTarget ? 1 : 0);
     const retryCatalog = await window.ShopeersErpDeliveryBridge.submitCatalog(catalogSubmitted[0].payload);
     assert.equal(retryCatalog.status, "success", 'same independently delivered catalog is retry-idempotent');

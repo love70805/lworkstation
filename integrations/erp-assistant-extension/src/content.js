@@ -20,7 +20,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.43';
+    const EXTENSION_VERSION = '8.0.44';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -68,6 +68,8 @@
     let checkpointMessage = '';
     let taskStage = '';
     let collectionTaskState = null;
+    let taskPollBusy = false;
+    let taskStartPending = false;
     let catalogAction = null;
     let catalogActionRevision = 0;
     const catalogGroupLabels = { directory: '商品目录', mappings: 'SKU 映射', images: '图片', suppliers: '供应商/1688 链接', purchaseEvidence: '采购证据' };
@@ -124,7 +126,11 @@
             status.appendChild(link);
         }
         const recalculate = document.getElementById('erpa-recalculate');
-        if (recalculate) recalculate.disabled = !available || !capturedListUrl || Boolean(activeRun);
+        if (recalculate) {
+            recalculate.disabled = !available || !capturedListUrl || Boolean(activeRun);
+            recalculate.classList.toggle('erpa-button-primary', !collectionTaskState && !resumableCheckpoint);
+            recalculate.title = '从头读取全部采购；暂停后请使用继续原任务';
+        }
         const supplement = document.getElementById('erpa-supplement-catalog');
         const catalogPending = catalogAction && ['pending', 'partial'].includes(catalogAction.state);
         if (supplement) {
@@ -143,18 +149,19 @@
         const retry = document.getElementById('erpa-retry-delivery');
         if (retry) retry.disabled = !available;
         const resume = document.getElementById('erpa-resume');
-        const pendingTaskWork = collectionTaskState && !['stopped', 'completed', 'invalidated'].includes(collectionTaskState.status)
+        const sharedTaskBusy = collectionTaskState?.executionProtocol === 2 && (collectionTaskState.status === 'ready' || collectionTaskState.runnerId && !['paused', 'stopped', 'invalidated'].includes(collectionTaskState.status));
+        const pendingTaskWork = collectionTaskState && !sharedTaskBusy && !['stopped', 'completed', 'invalidated'].includes(collectionTaskState.status)
             && collectionTaskState.batches?.some(batch => ['pending', 'running', 'collected'].includes(batch.status) || batch.deliveryId && batch.catalogStatus !== 'completed');
         const catalogOnlyTask = collectionTaskState?.batches?.length && collectionTaskState.batches.every(batch => batch.deliveryId && !['failed', 'incomplete'].includes(batch.status));
         const specificCatalogAction = catalogOnlyTask && catalogAction?.requestId === collectionTaskState.requestId + '-CATALOG';
         if (resume) {
             resume.hidden = Boolean(activeRun) || !resumableCheckpoint && !pendingTaskWork || Boolean(specificCatalogAction);
             resume.disabled = !available || Boolean(activeRun);
-            resume.textContent = catalogOnlyTask ? '继续补齐商品资料' : '继续未完成采集';
+            resume.textContent = catalogOnlyTask ? '按需补齐商品资料' : '继续原任务';
         }
         const task = document.getElementById('erpa-task-status');
         const failed = document.getElementById('erpa-retry-batches');
-        if (failed) { failed.hidden = !collectionTaskState?.batches?.some(batch => ['failed', 'incomplete'].includes(batch.status)); failed.disabled = Boolean(activeRun); }
+        if (failed) { failed.hidden = !collectionTaskState?.batches?.some(batch => ['failed', 'incomplete'].includes(batch.status)); failed.disabled = Boolean(activeRun) || Boolean(sharedTaskBusy); }
         if (task) task.textContent = taskStage || (resumableCheckpoint ? '待继续 · 列表进度 ' + resumableCheckpoint.completedTargets.length + '/' + resumableCheckpoint.platformSkcs.length + '；原账号未验证' : checkpointMessage);
     }
 
@@ -489,15 +496,20 @@
         }
     }
 
-    async function resumeCollection() {
-        if (activeRun || needsLogin()) return;
+    async function resumeCollection(mode = 'cost', retryFailed = false) {
+        if (typeof mode !== 'string') mode = 'cost';
+        if (activeRun || taskStartPending || needsLogin()) return;
         if (collectionTaskState) {
+            taskStartPending = true;
             try {
-                const task = (await taskOperation({ action: 'control', taskId: collectionTaskState.taskId, control: 'resume', filters: collectionTaskState.filters })).task;
+                const task = (await taskOperation({ action: 'control', taskId: collectionTaskState.taskId, control: 'request_resume', filters: collectionTaskState.filters, mode, retryFailed })).task;
+                updateTaskStatus(task);
+                if (task.status !== 'ready') return;
                 capturedListUrl = buildUrl(LIST_PATH, task.filters, { preserveEmpty: true });
                 capturedQueryCapturedAt = task.queryCapturedAt;
                 await calculate(task.requestId, false, null, null, null, task);
             } catch (error) { showError(error); }
+            finally { taskStartPending = false; }
             return;
         }
         if (!resumableCheckpoint) return;
@@ -1303,7 +1315,7 @@
         const scopedWarehouseSkus = new Set(scopedState.results.map(result => resultPolicy.canonical(result.warehouseSku)));
         if (!scopedWarehouseSkus.size) throw new CostError('目标平台规格未取得映射', missingTargets.map(target => target.platformSkc + ' / ' + target.platformSku).join('\n') + '\n请在 ERP 核对这些已使用规格的映射，不能用其他仓库档案代替。');
         beginReadProgress(run, '采购列表', querySkcs.length, '个 SKC');
-        const targetStates = await mapConcurrent(querySkcs, 2, async (skc, index, lane) => {
+        const targetStates = await mapConcurrent(querySkcs, run.task?.executionProtocol === 2 ? 4 : 2, async (skc, index, lane) => {
             const targetRun = { ...run, onPurchasePage: (completed, total, meta) => setReadLane(run, lane, { title: skc, completed, total, unit: '页', meta }) };
             try {
                 const state = await fetchAllOrders(completeHistoryFilters(filters, skc), targetRun);
@@ -1460,9 +1472,32 @@
     }
 
     async function taskOperation(input) {
+        if (activeRun?.runnerId && input.taskId === activeRun.task?.taskId && (input.action === 'batch' || ['heartbeat', 'release'].includes(input.control))) input = { ...input, runnerId: activeRun.runnerId };
         const response = await window.ShopeersErpDeliveryBridge.collectionTask(input);
         if (!response?.ok) throw Object.assign(new CostError('采集任务未保存', response?.message || '本机收件服务暂不可用，请重试。'), { code: response?.code });
         return response;
+    }
+
+    async function pollCollectionTask() {
+        if (taskPollBusy || activeRun || taskStartPending || !isPurchasePage() || needsLogin() || !window.ShopeersErpDeliveryBridge?.collectionTask) return;
+        taskPollBusy = true;
+        try {
+            const response = await taskOperation({ action: 'list' });
+            const tasks = response.tasks || [];
+            const queued = tasks.find(task => task.executionProtocol === 2 && task.status === 'ready' && !task.recoveryRequired);
+            const current = queued || tasks.find(task => !['stopped', 'completed', 'invalidated'].includes(task.status));
+            if (activeRun || taskStartPending) return;
+            if (current) updateTaskStatus(current);
+            if (!queued) return;
+            taskStartPending = true;
+            capturedListUrl = buildUrl(LIST_PATH, queued.filters, { preserveEmpty: true });
+            capturedQueryCapturedAt = queued.queryCapturedAt;
+            await calculate(queued.requestId, false, null, null, null, queued);
+        } catch (error) {
+            if (!['ERP_TASK_ALREADY_CLAIMED', 'ERP_TASK_OTHER_RUNNING'].includes(error.code)) {
+                taskStage = '任务连接暂未确认；已送达结果保留'; renderPageContext();
+            }
+        } finally { taskPollBusy = false; taskStartPending = false; }
     }
 
     function updateTaskStatus(task) {
@@ -1475,7 +1510,8 @@
         const failed = batches.filter(batch => ['failed','incomplete'].includes(batch.status));
         const stores = [...new Set((task.expectedSkus || task.requestSnapshot?.expectedSkus || []).map(item => item.store).filter(Boolean))];
         const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(task.createdAt || new Date().toISOString())) / 1000));
-        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '待继续' : activeRun?.catalogPhase ? '补充资料' : delivered === total && total ? '成本全部送达' : '分批采集')
+        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'ready' ? '继续请求已保存，等待 ERP 接续' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '已暂停 · 可在工作台继续原任务' : activeRun?.catalogPhase ? '补充资料' : delivered === total && total ? '成本全部送达 · 商品资料按需补齐' : '分批采集')
+            + ' · 任务 ' + task.taskId.slice(-8)
             + ' · 已采集 ' + collected + '/' + total + ' SKC · 已送达 ' + delivered + '/' + total
             + ' SKC · 已采用 ' + (task.summary?.adopted ?? 0) + ' SKU'
             + ' · 原范围 ' + (task.ledgerPeriod || '月份待关联') + (stores.length ? ' / ' + stores.join('、') : '')
@@ -1491,7 +1527,10 @@
     async function runBatchedCalculation(run) {
         taskCache.clear(); requestLimit = 8; throttleUntil = 0;
         const bridge = window.ShopeersErpDeliveryBridge;
-        let task = (await taskOperation({ action: 'control', taskId: run.task.taskId, control: 'resume', filters: run.filters })).task;
+        let task = run.task;
+        if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
+        run.runnerId = makeResultDeliveryId();
+        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId })).task;
         run.task = task;
         const snapshot = task.requestSnapshot;
         run.previewContext = { ...run.previewContext, requestId: task.requestId, ledgerPeriod: snapshot.ledgerPeriod,
@@ -1505,14 +1544,14 @@
                 let fresh = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                 if (!['paused','stopped','invalidated'].includes(fresh.status)) fresh = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'heartbeat' })).task;
                 task = fresh; run.task = fresh;
-                if (fresh.status === 'paused') run.pauseRequested = true;
+                if (fresh.status === 'paused') { run.pauseRequested = true; run.controller.abort(Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' })); }
                 if (['stopped','invalidated'].includes(fresh.status)) { run.cancelledByUser = true; run.controller.abort(); }
                 updateTaskStatus(task);
             } catch { taskStage = '进度续约暂未确认；已送达结果保留'; renderPageContext(); }
             finally { heartbeatBusy = false; }
         }, 3000);
         try {
-            for (const initial of task.batches) {
+            for (const initial of task.runMode === 'catalog' ? [] : task.batches) {
                 if (run.cancelledByUser || run.pauseRequested) break;
                 task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                 let batch = task.batches.find(item => item.batchId === initial.batchId);
@@ -1576,7 +1615,7 @@
                     deliveryAttempted = true;
                     const response = await bridge.submit({ ...deliveryState, ...state, resultDeliveryId: run.resultDeliveryId, querySkcs: batch.platformSkcs, collectionTask: identity });
                     if (response.status !== 'success' && !response.retained) throw new CostError('此批成本尚未送达', response.message || '请重试失败批次。');
-                    catalogStates.set(batch.batchId, state);
+                    if (task.runMode === 'catalog') catalogStates.set(batch.batchId, state);
                     task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                     updateTaskStatus(task); renderResults(); renderStatus(); updateActionState();
                 } catch (error) {
@@ -1595,8 +1634,8 @@
                     updateTaskStatus(task);
                 } finally { window.clearTimeout(budget); }
             }
-            if (!run.cancelledByUser && !run.pauseRequested) {
-                // Optional reads start only after every cost batch was attempted.
+            if (!run.cancelledByUser && !run.pauseRequested && task.runMode === 'catalog') {
+                // Material reads require an explicit shared task command.
                 run.controller = new AbortController();
                 task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                 for (const batch of task.batches) {
@@ -1664,7 +1703,7 @@
             if (window.ShopeersErpDeliveryBridge.collectionTask) {
                 const context = previewContext || await readPreviewContext(extractQuerySkcs(filters), run.queryCapturedAt);
                 if (context.requestId || restoredTask) {
-                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt });
+                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2 });
                     if (response.task) {
                         window.clearTimeout(budgetTimer); budgetTimer = null;
                         run.task = response.task; run.previewContext = context;
@@ -1716,6 +1755,10 @@
             }
         } finally {
             window.clearTimeout(budgetTimer);
+            if (run.task && run.runnerId) {
+                try { updateTaskStatus((await taskOperation({ action: 'control', taskId: run.task.taskId, control: 'release' })).task); }
+                catch { /* A newer execution or service recovery owns the task. */ }
+            }
             if (!run.task && resumableCheckpoint && !run.costReadComplete && !run.pauseReason) taskStage = '待继续 · 原账号未验证，继续时重读';
             if (activeRun === run) activeRun = null;
             renderPageContext();
@@ -2240,7 +2283,7 @@
                     const old = response.records?.find(item => item.requestId === context.requestId);
                     if (old) {
                         resumableCheckpoint = old.state === 'completed' ? null : old;
-                        taskStage = old.state === 'completed' ? '原任务已完成 · 按当前查询请点重新核算' : '原任务未完成 · 继续原任务或点重新核算';
+                        taskStage = old.state === 'completed' ? '原任务已完成 · 需要从头读取时选择重新采集全部' : '原任务未完成 · 请使用继续原任务保留进度';
                         renderPageContext();
                         return;
                     }
@@ -2303,9 +2346,9 @@
                 '<div class="erpa-toolbar">' +
                     '<input class="erpa-search" id="erpa-search" type="search" autocomplete="off" aria-label="搜索成本结果或异常原因" placeholder="搜索 SKU、SKC、名称、单号或异常原因">' +
                     '<select class="erpa-button" id="erpa-result-filter" aria-label="成本结果筛选"><option value="all">全部结果</option><option value="review">需核对</option></select>' +
-                    '<button class="erpa-button erpa-button-primary" id="erpa-recalculate" type="button"><b aria-hidden="true">↻</b><span>重新核算</span></button>' +
+                    '<button class="erpa-button erpa-button-primary" id="erpa-recalculate" type="button"><b aria-hidden="true">↻</b><span>重新采集全部</span></button>' +
                     '<button class="erpa-button" id="erpa-supplement-catalog" type="button" hidden><span>补取商品资料</span></button>' +
-                    '<button class="erpa-button" id="erpa-resume" type="button" hidden>继续未完成采集</button>' +
+                    '<button class="erpa-button erpa-button-primary" id="erpa-resume" type="button" hidden>继续原任务</button>' +
                     '<button class="erpa-button" id="erpa-retry-batches" type="button" hidden>重试失败批次</button>' +
                     '<button class="erpa-button" id="erpa-copy" type="button"><b aria-hidden="true">⎘</b><span>复制成本</span></button>' +
                     '<button class="erpa-button" id="erpa-retry-delivery" type="button"><span>重试回传</span></button>' +
@@ -2364,14 +2407,14 @@
             const batches = collectionTaskState?.batches || [];
             if (collectionTaskState && catalogAction?.requestId === collectionTaskState.requestId + '-CATALOG'
                 && !['stopped', 'completed', 'invalidated'].includes(collectionTaskState.status) && batches.length
-                && batches.every(batch => batch.deliveryId) && batches.some(batch => batch.catalogStatus !== 'completed')) void resumeCollection();
+                && batches.every(batch => batch.deliveryId) && batches.some(batch => batch.catalogStatus !== 'completed')) void resumeCollection('catalog');
             else void supplementCatalog();
         });
         document.getElementById('erpa-page-prev').addEventListener('click', () => { resultPage = Math.max(0, resultPage - 1); renderResults(); });
         document.getElementById('erpa-page-next').addEventListener('click', () => { resultPage += 1; renderResults(); });
-        document.getElementById('erpa-resume').addEventListener('click', resumeCollection);
-        document.getElementById('erpa-pause').addEventListener('click', () => { if (activeRun) { activeRun.pauseRequested = true; taskStage = '正在暂停 · 等待当前请求结束'; renderPageContext(); } });
-        document.getElementById('erpa-retry-batches').addEventListener('click', async () => { try { if (collectionTaskState && !activeRun) { const response = await taskOperation({ action: 'control', taskId: collectionTaskState.taskId, control: 'retry_failed' }); collectionTaskState = response.task; await resumeCollection(); } } catch (error) { showError(error); } });
+        document.getElementById('erpa-resume').addEventListener('click', () => { void resumeCollection(collectionTaskState?.batches?.every(batch => batch.deliveryId && !['failed', 'incomplete'].includes(batch.status)) ? 'catalog' : 'cost'); });
+        document.getElementById('erpa-pause').addEventListener('click', () => { if (activeRun) { activeRun.pauseRequested = true; activeRun.controller.abort(Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' })); taskStage = '正在暂停 · 已送达进度保留'; renderPageContext(); } });
+        document.getElementById('erpa-retry-batches').addEventListener('click', () => { void resumeCollection('cost', true); });
         void refreshCheckpoint();
         document.getElementById('erpa-copy').addEventListener('click', copyCosts);
         document.getElementById('erpa-retry-delivery').addEventListener('click', async () => {
@@ -2393,7 +2436,7 @@
             }
         });
         document.getElementById('erpa-error-close').addEventListener('click', hideError);
-        document.getElementById('erpa-error-retry').addEventListener('click', requestRecalculate);
+        document.getElementById('erpa-error-retry').addEventListener('click', () => { if (collectionTaskState) void resumeCollection('cost', true); else if (resumableCheckpoint) void resumeCollection(); else void requestRecalculate(); });
         document.getElementById('erpa-search').addEventListener('input', (event) => {
             searchText = event.target.value; resultPage = 0;
             renderResults();
@@ -2547,5 +2590,6 @@
     schedulePageSizeUpgrade();
     reportExtensionStatus();
     window.setInterval(reportExtensionStatus, 15000);
+    window.setInterval(pollCollectionTask, 3000);
     console.info(PREFIX, `v${EXTENSION_VERSION} 已在卓麟 ERP 启动`);
 }());

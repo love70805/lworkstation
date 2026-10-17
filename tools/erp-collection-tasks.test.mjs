@@ -192,6 +192,24 @@ try {
   await request(`${secondUrl}/control`,{action:'resume',scopeHash:expiredTask.scopeHash});
   await request(`${secondUrl}/control`,{action:'stop'});
   await request(secondBatchUrl,{state:'running'},409);
+  // Upgrade an existing task through the same workstation continuation API.
+  await request('requests',{request:{...scope,id:'R-coordinated',platformSkcs:['SKC-C'],replaceLedgerScope:true},expectedSkus:[{platformSku:'SKU-C',platformSkc:'SKC-C'}]},202);
+  const coordinated=(await request('collection-tasks',{requestId:'R-coordinated',executionProtocol:2,filters:{}},201)).task;
+  const coordinatedUrl=`collection-tasks/${coordinated.taskId}`;
+  const queued=(await request(`${coordinatedUrl}/control`,{action:'request_resume'})).task;
+  assert.equal(queued.status,'ready');
+  await request(`${coordinatedUrl}/control`,{action:'claim',runnerId:'HTTP-RUNNER',resumeRequestId:queued.resumeRequestId});
+  await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'OTHER-RUNNER'},409);
+  const coordinatedEvidence=await fs.readFile(spool,'utf8');
+  await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER'});
+  assert.equal(await fs.readFile(spool,'utf8'),coordinatedEvidence,'coordinated heartbeat also leaves evidence untouched');
+  const runnerLease=JSON.parse(await fs.readFile(`${spool}.leases.json`,'utf8')).find(item=>item.taskId===coordinated.taskId);
+  assert.equal(runnerLease.runnerId,'HTTP-RUNNER');
+  assert.ok(Date.parse(runnerLease.runnerLeaseExpiresAt)>Date.now());
+  await stop(); await start();
+  assert.equal((await request(coordinatedUrl)).task.status,'paused','service restart pauses a claimed executor');
+  await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER'},409);
+  await request(`${coordinatedUrl}/control`,{action:'stop'});
   await request('requests',{request:{...scope,id:'R-four',replaceLedgerScope:true},expectedSkus:[]},202);
   console.log('ERP task persistence, restart, batching scale, receipts, adoption, lease, scope, pause and attempt-fencing tests passed');
 } finally {
