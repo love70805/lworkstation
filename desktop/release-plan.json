@@ -5,6 +5,10 @@
   "integrationBranch": "codex/large-data-responsiveness",
   "requiredCommits": [
     {
+      "module": "v0.4.41-large-data-read-model-and-cost-timing",
+      "commit": "81cb6428077ad26603212ed8c4b2a72f157ca0ab"
+    },
+    {
       "module": "v0.4.41-verified-main-baseline",
       "commit": "76f6936f0ae135d3c146fa5aeeb86ec460a38d85"
     },
