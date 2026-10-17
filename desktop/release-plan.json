@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.38",
+  "version": "0.4.39",
   "candidateOnly": true,
-  "integrationBranch": "codex/report-spacing-0.4.38",
+  "integrationBranch": "codex/report-compact-0.4.39",
   "requiredCommits": [
+    {
+      "module": "v0.4.39-verified-main-baseline",
+      "commit": "acb62496d29b0dce8e8f37c1d24cb5f81fd36047"
+    },
     {
       "module": "v0.4.38-spaced-exports-and-general-deductions",
       "commit": "31c827906db5b56afa447f5e6bd914552d5a1b53"

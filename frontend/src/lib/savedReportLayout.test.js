@@ -16,12 +16,19 @@ function alignment(book,sheet,address){
  const styles=source(book,'xl/styles.xml').match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1];
  return [...styles.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)][id][0];
 }
-it('separates quantities and long text IDs with centered counts, padding and fitted widths across the report',()=>{
+it('keeps tables compact while separating counts, identifiers and amounts with padding, alignment and subtle borders',()=>{
  const book=read(buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}).bytes);
  expect(alignment(book,'代发表','C2')).toContain('horizontal="center"');
  expect(alignment(book,'代发表','D2')).toContain('horizontal="left" indent="1"');
  expect(alignment(book,'20店','E2')).toContain('horizontal="right" indent="1"');
- expect(book.Sheets['代发表']['!cols'][3].wch).toBeGreaterThanOrEqual(30);
+ expect(book.Sheets['代发表']['!cols'].reduce((sum,col)=>sum+col.width,0)).toBeLessThanOrEqual(140*0.85);
+ expect(book.Sheets['20店']['!cols'].reduce((sum,col)=>sum+col.width,0)).toBeLessThanOrEqual(205*0.85);
+ expect(alignment(book,'代发表','C2')).toContain('borderId="1"');
+ expect(alignment(book,'20店','E2')).toContain('borderId="1"');
+ expect(alignment(book,'代发表','D2')).toContain('fontId="5"');
+ expect(alignment(book,'代发表','C2')).toContain('fontId="0"');
+ expect(source(book,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');
+ expect(source(book,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
  expect(book.Sheets['代发表'].D2).toMatchObject({t:'s',v:dispatchRows[0].order1688});
  expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.152509999,z:'General'});
  expect(book.Sheets['扣款'].G3.z).toBe('General');
@@ -29,12 +36,12 @@ it('separates quantities and long text IDs with centered counts, padding and fit
  const summary=book.Sheets['汇总表'],row=Object.keys(summary).find(key=>/^L\d+$/.test(key)&&summary[key].v==='扣款').slice(1);
  expect(summary['N'+row].z).toBe('General');expect(book.Sheets['20店'].E2.z).toBe('0.00');
 });
-it('formats a frozen prior-template @7 archive without rewriting any text, numeric literals, row order, merges or non-style files',async()=>{
+it.each(['profit-zebra@7-deductions-compact','profit-zebra@8-spaced-general-deductions'])('formats frozen %s without rewriting text, numeric literals, row order, merges or non-style files',async templateVersion=>{
  const built=buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}),files=read(built.bytes);
  const archive=new Map(Object.entries(files.files).filter(([name,row])=>name&&row.type===2&&name!=='\u0001Sh33tJ5').map(([name,row])=>[name,new Uint8Array(row.content)]));
  // Emulate the old quantity/right and identifier/left edge alignment and two-decimal format.
- archive.set('xl/styles.xml',new TextEncoder().encode(source(files,'xl/styles.xml').replace(/numFmtId="0"(?=[^>]*fontId="[34]")/g,'numFmtId="168"').replace(/ indent="1"/g,'')));
- const bytes=writeReportArchive(archive),before=read(bytes),saved={...report,templateVersion:'profit-zebra@7-deductions-compact',fileBase64:bytesToBase64(bytes),fileSha256:await sha256(bytes)},snapshot=structuredClone(saved);
+ archive.set('xl/styles.xml',new TextEncoder().encode(source(files,'xl/styles.xml').replace(/numFmtId="0"(?=[^>]*fontId="[34]")/g,'numFmtId="168"').replace(/ indent="1"/g,'').replaceAll('FFE9EEF4','FF284B6B').replaceAll('FF344459','FFFFFFFF').replaceAll('fontId="5"','fontId="0"').replace(/borderId="[1-4]"/g,'borderId="0"')));
+ const bytes=writeReportArchive(archive),before=read(bytes),saved={...report,templateVersion,fileBase64:bytesToBase64(bytes),fileSha256:await sha256(bytes)},snapshot=structuredClone(saved);
  const after=read(await prepareReportDownload(saved));
  for(const name of before.SheetNames){
   expect(after.Sheets[name]['!merges']).toEqual(before.Sheets[name]['!merges']);
@@ -46,6 +53,9 @@ it('formats a frozen prior-template @7 archive without rewriting any text, numer
   else expect(new Uint8Array(after.files[file].content)).toEqual(row);
  }
  expect(after.Sheets['扣款'].D2.z).toBe('General');expect(alignment(after,'代发表','C2')).toContain('horizontal="center"');expect(alignment(after,'代发表','D2')).toContain('indent="1"');expect(saved).toEqual(snapshot);
+ expect(source(after,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');expect(alignment(after,'代发表','C2')).toContain('borderId="1"');
+ expect(after.Sheets['代发表']['!cols']).toEqual(files.Sheets['代发表']['!cols']);
+ expect(source(after,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
 });
 it('keeps zero and tiny signed deductions numeric and rejects missing styles instead of rewriting data',()=>{
  for(const amount of ['0','0.000000001','-0.000000001']){
