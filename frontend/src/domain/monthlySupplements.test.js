@@ -86,6 +86,16 @@ it('selects allocated amounts before source totals without adding semantic colum
  expect(suggestSupplementMapping(['金额','运费金额','扣款金额','分摊金额','分摊后运费']).amount).toBe('4');
  expect(suggestSupplementMapping(['数量','sku数量']).quantity).toBe('1');
 });
+it('matches an explicit normalized set exactly once and keeps case-distinct full codes and signed source positions',()=>{
+ const s={fileHash:'F',fileName:'synthetic.xlsx',sheetName:'甲',cells:[['货号','扣款金额','扣款单号'],['YW-sh27-HHHX','-1.001','A'],['YW-SH27-HHHX','2.002','B'],['YW-20-HHHX','0','C'],['YW-sh27-HHHX-more','8','D']]};
+ const result=inspectSupplementSource(s,{kind:'deduction',supplierNumbers:[' ＹＷ-sh27-HHHX ','YW-SH27-HHHX','YW-20-HHHX','YW-sh27-HHHX',''],ownerMarker:'HHHX',matchMode:'contains',store:'甲'});
+ expect(result.errors).toEqual([]);expect(result.rows.map(row=>row.sourceRow)).toEqual([2,3,4]);expect(candidate('deduction',result.rows).signedAmountExact).toBe('1.001');
+ expect(result.source.selection).toMatchObject({ownerMarker:'',supplierNumbers:['YW-20-HHHX','YW-sh27-HHHX','YW-SH27-HHHX'],matchMode:'exact'});
+ expect(result.ignored).toContainEqual(expect.objectContaining({sourceRow:5,reason:'owner_excluded'}));
+ expect(()=>inspectSupplementSource(s,{kind:'deduction',supplierNumbers:[],store:'甲'})).toThrow('请选择供方货号');
+ expect(()=>inspectSupplementSource(s,{kind:'deduction',supplierNumbers:'HHHX',store:'甲'})).toThrow('完整货号数组');
+ expect(()=>inspectSupplementSource(s,{kind:'dispatch',supplierNumbers:['HHHX']})).toThrow('扣款来源');
+});
 it('preserves equal legitimate allocations, rejects duplicate coordinates, and reports cross-file overlaps',()=>{
  const row={kind:'deduction',fileHash:'H',sourceSheet:'甲',sourceRow:2,store:'甲',businessId:'0001',platformSkc:'S',supplierNumber:'C',signedAmountExact:'0.899'};
  const rows=[row,{...row,sourceRow:3}];

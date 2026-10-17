@@ -8,13 +8,14 @@ import { downloadReportFile } from "../lib/profitReportWorkbook";
 import { Exact, displayMoney, exactSum } from "../domain/profitReports";
 import { currentLedgerResult, reportReadiness } from "../domain/ledgerWorkflow";
 import DispatchOrderDownload from './DispatchOrderDownload';
+import SupplementSupplierPicker, { ALL_SUPPLEMENT_MARKERS } from '../components/SupplementSupplierPicker';
 
 const fieldLabels={owner:'登记人',date:'日期',store:'实际店铺',platformSkc:'SKC',supplierNumber:'供方货号',businessId:'业务单号',order1688:'1688单号',quantity:'数量',amount:'采用金额列'};
-const ALL_MARKERS='__all_source_records__';
+const ALL_MARKERS=ALL_SUPPLEMENT_MARKERS;
 function missingSourceFields(source,kind) {
   return [kind==='dispatch'?'owner':'supplierNumber',kind==='dispatch'?'quantity':'amount'].filter(field=>!(Number(source.mapping[field])>=0));
 }
-function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}) {
+function buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}) {
   const input={kind,ledgerId:state.ledger.id,workspaceId:state.ledger.workspaceId,period:state.ledger.period,mode,rows:[],sources:[],reviewedCrossFileConflicts:reviewed};
   const stats={addedRows:[],retainedCount:0,skipped:0,duplicates:0,sourceCount:0,unassigned:[]};
   try {
@@ -22,7 +23,9 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMo
       if(kind==='dispatch') {if(!String(quantity).trim())return {ready:false,stats};input.adoptedQuantityExact=quantity;}
       else {input.rows=state.stores.filter(store=>String(amounts[store]??'').trim()!=='').map(store=>({kind,manual:true,store,signedAmountExact:amounts[store],sourceName:'人工录入',businessId:'',sourceRow:1}));if(!input.rows.length)return {ready:false,stats};}
     } else {
-      if(!selection&&!zeroStores.length)return {ready:false,stats};
+      const selectedCodes=Array.isArray(selection)?selection:null;
+      const hasSelection=selectedCodes?selectedCodes.length>0:Boolean(selection);
+      if(!hasSelection&&!zeroStores.length)return {ready:false,stats};
       const retained=retaining&&current?state.adoptedRows.filter(row=>row.kind===kind):[];
       // Preserve a previously explicit manual aggregate when adding source files.
       if(retaining&&current?.mode==='manual'&&kind==='dispatch'&&!retained.length)retained.push({kind,manual:true,store:'',quantityExact:current.adoptedQuantityExact,sourceName:'此前手工总代发',sourceRow:1});
@@ -30,12 +33,12 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMo
       const priorKeys=new Set(retained.map(supplementRowIdentity)),seen=new Set(priorKeys);
       for(const source of sources) {
         const includeAll=selection===ALL_MARKERS;
-        const matches=supplementMarkers(source,kind).some(marker=>kind==='deduction'&&matchMode==='contains'?marker.includes(selection.trim().normalize('NFKC')):marker===selection);
-        if(!selection||(!includeAll&&!matches&&Number(source.mapping[kind==='dispatch'?'owner':'supplierNumber'])>=0))continue;
+        const matches=supplementMarkers(source,kind).some(marker=>selectedCodes?selectedCodes.includes(marker):marker===selection);
+        if(!hasSelection||(!includeAll&&!matches&&Number(source.mapping[kind==='dispatch'?'owner':'supplierNumber'])>=0))continue;
         const missing=missingSourceFields(source,kind);
         if(missing.length)throw new Error(`${source.fileName} / ${source.sheetName}：未识别${missing.map(field=>fieldLabels[field]).join('、')}列，请展开此来源的高级设置。`);
         stats.sourceCount++;
-        const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll?'':selection,includeAll,matchMode,store:source.store,stores:state.stores});
+        const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll||selectedCodes?'':selection,supplierNumbers:selectedCodes??undefined,includeAll,store:source.store,stores:state.stores});
         stats.skipped+=parsed.ignored.filter(row=>row.reason==='missing_quantity').length;
         stats.unassigned.push(...parsed.ignored.filter(row=>row.reason==='unassigned_owner').map(row=>({...row,sourceName:source.fileName})));
         if(parsed.errors.length)throw new Error(`${source.fileName} / ${source.sheetName}：${parsed.errors.length} 条异常，${parsed.errors.slice(0,10).map(supplementRowLabel).join('；')}${parsed.errors.length>10?'等':''}。${parsed.errors[0].message}`);
@@ -66,11 +69,11 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,matchMo
 
 export function SupplementEditor({ state, kind, onClose }) {
   const {notify}=useToast(),current=state[kind];
-  const [selection,setSelection]=useState(''),[search,setSearch]=useState(''),[matchMode,setMatchMode]=useState('exact'),[reviewed,setReviewed]=useState(false),[excludedRows,setExcludedRows]=useState([]);
+  const [selection,setSelection]=useState(kind==='deduction'?[]:''),[search,setSearch]=useState(''),[reviewed,setReviewed]=useState(false),[excludedRows,setExcludedRows]=useState([]);
   const [mode,setMode]=useState('files'),[sources,setSources]=useState([]),[retaining,setRetaining]=useState(true),[quantity,setQuantity]=useState(current?.adoptedQuantityExact??''),[amounts,setAmounts]=useState({}),[zeroStores,setZeroStores]=useState([]);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[previewPending,setPreviewPending]=useState(false),[preview,setPreview]=useState(null),[retry,setRetry]=useState(0);
   const markers=useMemo(()=>[...new Set(sources.flatMap(source=>supplementMarkers(source,kind)))].sort((a,b)=>a.localeCompare(b,'zh-CN')),[sources,kind]);
-  const draft=useMemo(()=>buildSupplementDraft({state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}),[state,kind,current,mode,sources,selection,matchMode,retaining,quantity,amounts,zeroStores,reviewed,excludedRows]);
+  const draft=useMemo(()=>buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,quantity,amounts,zeroStores,reviewed,excludedRows}),[state,kind,current,mode,sources,selection,retaining,quantity,amounts,zeroStores,reviewed,excludedRows]);
   const activePreview=preview?.draft===draft?preview:null;
   const finalCandidate=activePreview?.candidate;
   useEffect(()=>{
@@ -90,7 +93,14 @@ export function SupplementEditor({ state, kind, onClose }) {
       const loaded=(await Promise.all([...files].map(file=>readSupplementWorkbook(file,kind)))).flat();
       const keys=new Set(sources.map(item=>`${item.fileHash}/${item.sheetName}`));
       const added=loaded.filter(source=>{const key=`${source.fileHash}/${source.sheetName}`;if(keys.has(key))return false;keys.add(key);return true;}).map(source=>({...source,headerRow:source.headerRow??1,mapping:suggestSupplementMapping(supplementHeaders(source,source.headerRow??1)),store:suggestSupplementStore(source.sheetName,state.stores)}));
-      if(added.length){invalidate();setSources(previous=>[...previous,...added]);}
+      if(added.length){
+        invalidate();setSources(previous=>[...previous,...added]);
+        const term=search.trim().normalize('NFKC');
+        if(kind==='deduction'&&term&&selection!==ALL_MARKERS){
+          const newMatches=added.flatMap(item=>supplementMarkers(item,kind)).filter(marker=>marker.includes(term)&&!markers.includes(marker));
+          setSelection(previous=>[...new Set([...previous,...newMatches])].sort((a,b)=>a.localeCompare(b,'zh-CN')));
+        }
+      }
       if(added.length<loaded.length)setNotice('重复文件/工作表已跳过，不会重复计数。');
       if(!loaded.length)setNotice('文件没有有效工作表，请检查来源。');
     }catch(failure){setError(failure.message);}finally{setBusy(false);}
@@ -101,7 +111,7 @@ export function SupplementEditor({ state, kind, onClose }) {
     try{await adoptMonthlySupplement(activePreview.input,activePreview);notify(`${state.ledger.period} ${kind==='dispatch'?'代发':'扣款'}已导入${draft.stats.skipped?`，已跳过 ${draft.stats.skipped} 条无数量记录`:''}`);onClose();}
     catch(failure){setError(failure.message);setPreview(null);}finally{setBusy(false);}
   }
-  const label=kind==='dispatch'?'登记人':'供方货号 / 标记',unit=kind==='dispatch'?'件':'元';
+  const label=kind==='dispatch'?'登记人':'供方货号',unit=kind==='dispatch'?'件':'元';
   const oldTotal=current?.adoptedQuantityExact??current?.signedAmountExact;
   const finalTotal=finalCandidate?.adoptedQuantityExact??finalCandidate?.signedAmountExact;
   const blocked=Boolean(finalCandidate?.conflicts?.length&&!finalCandidate.reviewedCrossFileConflicts);
@@ -116,10 +126,11 @@ export function SupplementEditor({ state, kind, onClose }) {
     {mode==='files'?<>
       <label className="report-upload">选择文件<input type="file" multiple accept={kind==='dispatch'?'.xlsx,.csv':'.xlsx'} disabled={busy} onChange={event=>{void upload(event.target.files);event.target.value='';}} /></label>
       {sources.length?<div className="report-selection">
-        <label>{kind==='dispatch'?'搜索登记人':'搜索货号'}<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder={kind==='dispatch'?'搜索源表姓名':'搜索来源表中的供方货号'} disabled={busy}/></label>
-        <label>{kind==='dispatch'?'登记人':label}{kind==='deduction'&&matchMode==='contains'?<input aria-label="供方货号或标记" value={selection===ALL_MARKERS?'':selection} disabled={busy} onChange={event=>{invalidate();setSelection(event.target.value);}}/>:<select aria-label={kind==='dispatch'?'登记人':'供方货号或标记'} value={selection} disabled={busy} onChange={event=>{invalidate();setSelection(event.target.value);}}><option value="">{kind==='dispatch'?'请选择登记人':'请选择供方货号'}</option><option value={ALL_MARKERS}>{kind==='dispatch'?'全部登记人（所有有效记录）':'全部货号（所有有效记录）'}</option>{markers.filter(marker=>marker===selection||marker.includes(search.trim().normalize('NFKC'))).map(marker=><option key={marker}>{marker}</option>)}</select>}</label>
-        {kind==='deduction'?<><label>货号匹配方式<select aria-label="货号匹配方式" value={matchMode} disabled={busy} onChange={event=>{invalidate();setMatchMode(event.target.value);}}><option value="exact">货号完整匹配</option><option value="contains">包含此标记</option></select></label><Button disabled={busy||selection===ALL_MARKERS} onClick={()=>{invalidate();setSelection(ALL_MARKERS);}}>采用全部货号</Button></>:null}
-        <p>{selection?`当前筛选：${selection===ALL_MARKERS?'全部记录':selection} · ${draft.stats.sourceCount} 个来源`:'先选择筛选范围，预览会自动更新'}。{kind==='dispatch'?'不发、退款等仅作备注，按有数量记录计入。':'保留源金额正负，分摊金额优先。'}</p>
+        {kind==='deduction'?<SupplementSupplierPicker markers={markers} selection={selection} search={search} onSearch={setSearch} onChange={value=>{invalidate();setSelection(value);}} disabled={busy}/>:<>
+          <label>搜索登记人<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="搜索源表姓名" disabled={busy}/></label>
+          <label>登记人<select aria-label="登记人" value={selection} disabled={busy} onChange={event=>{invalidate();setSelection(event.target.value);}}><option value="">请选择登记人</option><option value={ALL_MARKERS}>全部登记人（所有有效记录）</option>{markers.filter(marker=>marker===selection||marker.includes(search.trim().normalize('NFKC'))).map(marker=><option key={marker}>{marker}</option>)}</select></label>
+        </>}
+        <p>{(Array.isArray(selection)?selection.length:selection)?`当前筛选：${selection===ALL_MARKERS?'全部记录':Array.isArray(selection)?`已选 ${markers.filter(marker=>selection.includes(marker)).length} 个完整货号`:selection} · ${draft.stats.sourceCount} 个来源`:'先选择筛选范围，预览会自动更新'}。{kind==='dispatch'?'不发、退款等仅作备注，按有数量记录计入。':'保留源金额正负，分摊金额优先。'}</p>
       </div>:null}
       {current?<label className="report-mode">已有来源处理<select aria-label="已有来源处理" disabled={busy} value={retaining?'append':'replace'} onChange={event=>{invalidate();setRetaining(event.target.value==='append');}}><option value="append">保留已有来源，加入本次筛选</option><option value="replace">以本次筛选替换全部已有来源</option></select></label>:null}
       <div className="report-source-list">{sources.map((source,index)=>{
