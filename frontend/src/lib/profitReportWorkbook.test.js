@@ -8,7 +8,7 @@ import { REPORT_FORMULA_VERSION, REPORT_TEMPLATE_VERSION, displayMoney, reportTo
 const products=Array.from({length:6},(_,i)=>({lineKind:'product',store:i<3?'合成甲店':'合成乙店',platformSkc:`SKC-${i}`,groupSkc:`SKC-${i}`,platformSku:`000000000000000000${i}`,attribute:'合成属性',quantityExact:'2',revenueExact:'20.009',orderNumber:'12345678901234567890',unitCostExact:'0.009999',purchaseCostExact:'0.019998',warehouseCostExact:'1.4',profitExact:'18.589002'}));
 const dispatchRows=[{lineKind:'dispatch',platformSkc:'SKC-0',businessId:'00001234567890123456',quantityExact:'200',order1688:'12345678901234567890'}];
 const deductionRows=[{lineKind:'deduction',store:'合成甲店',businessId:'0000000000000001',platformSkc:'SKC-0',supplierNumber:'TEST',signedAmountExact:'0.0099'},{lineKind:'deduction',store:'合成乙店',businessId:'0000000000000002',platformSkc:'SKC-1',supplierNumber:'TEST',signedAmountExact:'-0.002'}];
-it('keeps product truncation while preserving deduction source precision in two-decimal numeric cells',()=>{
+it('keeps product truncation while displaying deductions as general numeric values with source precision',()=>{
  const rows=[{...products[0],unitCostExact:'24.7025',purchaseCostExact:'49.405',revenueExact:'3774.2863',warehouseCostExact:'1.4099',profitExact:'-4.1525'},{...products[1],profitExact:'-4.1525'}];
  const report={kind:'financial',period:'2026-08',revision:1,totalsExact:reportTotals(rows,'8344','0.7',[{...deductionRows[0],signedAmountExact:'-4.1525'}])};
  const book=XLSX.read(buildProfitReportWorkbook({report,products:rows,dispatchRows,deductionRows:[{...deductionRows[0],signedAmountExact:'-4.1525'}]}).bytes,{type:'array',cellStyles:true});
@@ -17,7 +17,7 @@ it('keeps product truncation while preserving deduction source precision in two-
  for(const [address,value] of Object.entries({E2:3774.28,G2:24.70,H2:49.40,I2:1.40,J2:-4.15,J4:-8.30}))expect(sheet[address]).toMatchObject({t:'n',v:value,z:'0.00'});
  expect(sheet.G2.w).toBe('24.70');expect(sheet.H2.w).toBe('49.40');
  expect(book.Sheets['代发表'].G1.v).toBe('汇总数量');expect(book.Sheets['代发表'].H1.v).toBe('总价');expect(book.Sheets['代发表'].H2).toMatchObject({t:'n',v:5840.8,w:'5840.80'});
- expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.1525,w:'-4.15',z:'0.00'});
+ expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.1525,w:'-4.1525',z:'General'});
  expect(book.Sheets['汇总表']['!merges'][0].e.c).toBe(9);
 });
 it.each(['pre_deduction','financial'])('writes readable %s workbook with textual IDs, dynamic sheets and approved report layout',kind=>{
@@ -63,7 +63,7 @@ it.each(['pre_deduction','financial'])("exports one text order per SKU without a
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(new TextDecoder().decode(result.bytes)).not.toContain('name="核算采购"');
  expect(result.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
- expect(result.templateVersion).toBe("profit-zebra@7-deductions-compact");
+ expect(result.templateVersion).toBe("profit-zebra@8-spaced-general-deductions");
  const summaryRows=XLSX.utils.sheet_to_json(book.Sheets["汇总表"],{header:1});
  rows.forEach((row,index)=>{
   const summary=summaryRows.find(cells=>cells[1]===row.platformSku);

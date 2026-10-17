@@ -21,7 +21,7 @@ it('sorts by actual store naturally, retains source order inside a store and mak
  expect([2,3,4].map(r=>sheet['F'+r].v)).toEqual(['3店','20店','627店']);
  expect([2,3,4,5,6].map(r=>sheet['A'+r].v)).toEqual(['0003','0002','0004','0001','0001']);
  expect([2,3,4,5,6].map(r=>sheet['C'+r].v)).toEqual(['YW-3-HHHX','YW-sh20-HHHX','YW-sh20-HHHX','YW-20-HHHX','YW-20-HHHX']);
- expect(sheet.D3).toMatchObject({t:'n',v:-0.002,z:'0.00'});
+ expect(sheet.D3).toMatchObject({t:'n',v:-0.002,z:'General'});
  expect([2,3,4,5,6].reduce((sum,r)=>sum+sheet['D'+r].v,0)).toBeCloseTo(sheet.G5.v,12);
  expect(sheet.G5.v).toBe(Number(data.report.totalsExact.deductionExact));
  for(const [i,store] of data.report.totalsExact.stores.entries())expect(book.Sheets[store.store].J4.v).toBe(Number(store.deductionExact));
@@ -42,7 +42,7 @@ it('restores a saved @5 truncated deduction sheet from frozen exact rows and cha
   const sheet=after.Sheets[name];
   for(const [address,cell] of Object.entries(original.Sheets[name]).filter(([address,cell])=>!address.startsWith('!')&&cell.t==='n'))expect(sheet[address].v).toBe(cell.v);
  }
- for(const [name,entry] of files)if(!/^xl\/worksheets\//.test(name))expect(new Uint8Array(after.files[name].content)).toEqual(entry);
+ for(const [name,entry] of files)if(!/^xl\/worksheets\//.test(name)&&name!=='xl/styles.xml')expect(new Uint8Array(after.files[name].content)).toEqual(entry);
  expect(report).toEqual(before);
 });
 it('removes the actual-store column from a verified saved @6 download, retaining sorting, exact numbers and the original archive',async()=>{

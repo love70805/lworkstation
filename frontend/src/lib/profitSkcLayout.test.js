@@ -57,7 +57,10 @@ it.each(['pre_deduction', 'financial'])('adds merges when re-downloading frozen 
     for (const address of Object.keys(a).filter(address => /^[L-Z]+\d+$/.test(address))) expect(b[address]?.v).toBe(a[address]?.v);
   }
   expect(literalNumbers(result)).toEqual(literalNumbers(original));
-  expect(new TextDecoder().decode(result.files['xl/styles.xml'].content)).toBe(new TextDecoder().decode(original.files['xl/styles.xml'].content));
+  const aStyles=new TextDecoder().decode(original.files['xl/styles.xml'].content),bStyles=new TextDecoder().decode(result.files['xl/styles.xml'].content);
+  const withoutCellStyles=xml=>xml.replace(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/,'');
+  expect(withoutCellStyles(bStyles)).toBe(withoutCellStyles(aStyles));
+  expect(bStyles).toContain(aStyles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1]);
   expect(archive).toEqual(before);
 });
 

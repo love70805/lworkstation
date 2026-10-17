@@ -33,12 +33,13 @@ function createStyles() {
     id(cell, row, align) {
       const font = cell.header ? 2 : cell.red ? (cell.bold ? 4 : 3) : cell.bold ? 1 : 0;
       const fill = cell.header ? 2 : cell.band ? 4 : cell.detail && (cell.stripeRow ?? row) % 2 === 0 ? 3 : 0;
-      const horizontal = cell.align ?? align;
+      const horizontal = cell.align ?? align ?? (cell.number ? 'right' : 'left');
+      const indent = ['left','right'].includes(horizontal) ? 1 : 0;
       const format = cell.format === 2 && /\.\d*[1-9]/.test(String(cell.value)) ? 6 : cell.format ?? 0;
       const key = JSON.stringify([font, fill, format, horizontal]);
       if (!keys.has(key)) {
         keys.set(key, definitions.length);
-        definitions.push(`<xf numFmtId="${formats[format]}" fontId="${font}" fillId="${fill}" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment ${horizontal ? `horizontal="${horizontal}" ` : ''}vertical="center" wrapText="1"/></xf>`);
+        definitions.push(`<xf numFmtId="${formats[format]}" fontId="${font}" fillId="${fill}" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="${horizontal}" ${indent?'indent="1" ':''}vertical="center" wrapText="1"/></xf>`);
       }
       return keys.get(key);
     },
@@ -52,9 +53,8 @@ function column(index){let text="";for(let n=index+1;n>0;n=Math.floor((n-1)/26))
 const text = (value,format=0) => ({value,format});
 // Truncate the exported numeric value itself; formatting alone would round it.
 const number = (value,format=3) => ({value:format===2?value:displayMoney(value),format,number:true});
-// Deductions retain source precision in numeric cells; Excel formats them to
-// two decimals without discarding fractions before SUM or store subtotals.
-const deductionNumber = value => ({value,format:3,number:true,red:true});
+// General display retains the source value and does not force two decimals.
+const deductionNumber = value => ({value,format:0,number:true,red:true});
 const byStore = (a,b) => String(a.store).localeCompare(String(b.store),'zh-CN',{numeric:true});
 const headers = values => values.map(value=>({value,header:true,format:0,align:'center'}));
 function sheetXml(rows,widths,registry,alignment=[],rowHeight=36){
@@ -67,7 +67,15 @@ function sheetXml(rows,widths,registry,alignment=[],rowHeight=36){
 const detailRow = cells => cells.map(cell=>cell?{...cell,detail:true}:null);
 const bandRow = cells => cells.map(cell=>({...cell,value:cell?.value??'',bold:true,band:true}));
 const productHeaders=["SKC","SKU","属性","件数","销售额","1688单号","单件平均成本","总件数成本","仓储成本","利润"];
-const productWidths=[25,20,24,9,14,24,15,15,14,15];
+const productWidths=[28,28,24,10,16,32,17,17,16,17];
+const dispatchWidths=[30,26,12,32,3,3,16,18];
+const deductionWidths=[28,30,32,24,3,16,24];
+export function profitReportSheetWidths(sheet,name){
+  if(sheet?.A1?.v==='SKC'&&sheet.B1?.v==='SKU'&&sheet.J1?.v==='利润')return name==='汇总表'?[...productWidths,3,18,15,24]:productWidths;
+  if(sheet?.A1?.v==='SKC'&&sheet.C1?.v==='数量'&&sheet.D1?.v==='1688订单号')return dispatchWidths;
+  if(name==='扣款'&&sheet?.D1?.v==='扣款金额')return sheet.E1?.v==='实际店铺'?[28,30,32,24,16,3,16,24]:deductionWidths;
+  return null;
+}
 function productRows(products) {return [headers(productHeaders),...groupProfitExportProducts(products).map(row=>detailRow([{...text(row.groupSkc??row.platformSkc),mergeSkc:String(row.platformSkc??row.groupSkc??'').trim()!==''},text(row.platformSku),text(row.attribute),number(row.quantityExact,2),number(row.revenueExact),text(row.exportOrderNumber??profitOrderNumberForExport(row),1),number(row.unitCostExact),number(row.purchaseCostExact),number(row.warehouseCostExact),number(row.profitExact)])),bandRow([text("合计"),null,null,number(exactSum(products,"quantityExact"),2),number(exactSum(products,"revenueExact")),null,null,number(exactSum(products,"purchaseCostExact")),number(exactSum(products,"warehouseCostExact")),number(exactSum(products,"profitExact"))])];}
 function groupedProductRows(products, stores) {
   const rows=[headers(productHeaders)];
@@ -84,7 +92,7 @@ function safeSheet(name,used){const base=String(name).replace(/[\[\]:*?/\\\x00-\
 
 function deductionSheet(report,rows) {
   const stores=[...report.totalsExact.stores].sort(byStore);
-  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额']),...[...rows].sort(byStore).map(row=>detailRow([text(row.businessId??'',1),text(row.platformSkc??'',1),text(row.supplierNumber??''),deductionNumber(row.signedAmountExact)]))],[headers(['店铺','明细合计']),...stores.map(store=>[text(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],5),widths:[26,28,28,15,3,16,18],rowHeight:34,alignment:[null,null,null,'right',null,null,'right']};
+  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额']),...[...rows].sort(byStore).map(row=>detailRow([text(row.businessId??'',1),text(row.platformSkc??'',1),text(row.supplierNumber??''),deductionNumber(row.signedAmountExact)]))],[headers(['店铺','明细合计']),...stores.map(store=>[text(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],5),widths:deductionWidths,rowHeight:34,alignment:[null,null,null,'right',null,null,'right']};
 }
 // Saved downloads reuse their original styles while replacing this sheet only.
 export function buildProfitDeductionSheet(report,rows,registry) {
@@ -95,15 +103,15 @@ export function buildProfitDeductionSheet(report,rows,registry) {
 export function buildProfitReportWorkbook({report,products,dispatchRows=[],deductionRows=[]}) {
   const financial=report.kind==="financial",totals=report.totalsExact;
   const right=[headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),number(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,deductionNumber(totals.deductionExact)]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,number(financial?totals.profitExact:totals.preDeductionExact)])];
-  const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right,11),widths:[...productWidths,3,18,15,18],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"right","right"]}];
+  const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right,11),widths:[...productWidths,3,18,15,24],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"center","right"]}];
   // Reserve template names before sanitizing dynamic store tabs.
   const used=new Set(["汇总表","代发表","扣款","核算采购"]);
   for(const store of totals.stores){
     const rows=productRows(products.filter(row=>row.store===store.store));
     if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,deductionNumber(store.deductionExact)]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
-    sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','center','center','center','center','center']});
+    sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','right',null,'right','right','right','right']});
   }
-  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(dispatchOrderNumberForExport(row),1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:[27.5,26.25,11,26.25,3,3,16,16],rowHeight:34,alignment:[null,null,"right",null,null,null,"right","right"]});
+  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(dispatchOrderNumberForExport(row),1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:dispatchWidths,rowHeight:34,alignment:[null,null,"center",null,null,null,"center","right"]});
   if(financial)sheets.push(deductionSheet(report,deductionRows));
   const registry=createStyles();
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows[0]?.[1]?.value==='SKU'?mergeProfitSkcRows(sheet.rows):sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
@@ -130,8 +138,12 @@ export async function prepareReportDownload(report, { dispatchRows = [], deducti
     const { restoreSavedDeductions } = await import('./savedReportDeductions');
     bytes=restoreSavedDeductions(bytes,report,deductionRows);
   }
-  if (!dispatchRows.some(row => dispatchOrderNumberForExport(row))) return bytes;
-  const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
-  return restoreSavedDispatchOrders(bytes, dispatchRows);
+  if (dispatchRows.some(row => dispatchOrderNumberForExport(row))) {
+    const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
+    bytes=restoreSavedDispatchOrders(bytes, dispatchRows);
+  }
+  if(report.templateVersion===REPORT_TEMPLATE_VERSION)return bytes;
+  const { formatSavedReportLayout } = await import('./savedReportLayout');
+  return formatSavedReportLayout(bytes);
 }
 export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=profitReportFileName(report,options);a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
