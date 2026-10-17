@@ -5,6 +5,10 @@
   "integrationBranch": "codex/report-compact-0.4.39",
   "requiredCommits": [
     {
+      "module": "v0.4.39-compact-neutral-exports",
+      "commit": "6fb4c27f518b11f533a411d1468abaec0ce98ddc"
+    },
+    {
       "module": "v0.4.39-verified-main-baseline",
       "commit": "acb62496d29b0dce8e8f37c1d24cb5f81fd36047"
     },
