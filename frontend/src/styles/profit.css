@@ -395,7 +395,7 @@
 .report-readiness span { font-size:12px; color:var(--text-muted); overflow-wrap:anywhere; }
 .report-readiness .button { align-self:flex-start; }
 .report-current { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 0; border-top:1px solid var(--border); }
-.report-current span { font-size:13px; color:var(--text-muted); }
+.report-current > div > span { font-size:13px; color:var(--text-muted); }
 .report-heading, .report-primary-actions, .report-download-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .report-heading { justify-content:space-between; }
 .report-heading h2, .report-primary-actions p { margin:0; }
