@@ -2,7 +2,8 @@ import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 import { dispatchOrderHeaders } from './dispatchOrderNumber';
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@7-deduction-multiselect";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@8-deduction-store-mapping";
+export const DEDUCTION_STORE_RULE = 'deduction-store@1-sh-number';
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
@@ -24,6 +25,15 @@ export function suggestSupplementStore(sourceName, stores=[]) {
   const matches=stores.filter(store=>/^\d+(?:店)?$/.test(normalized(store))&&normalized(store).replace(/店$/,'')===name.replace(/店$/,''));
   return matches.length===1?matches[0]:'';
 }
+export function suggestDeductionStore(sourceName, stores=[]) {
+  const name=normalized(sourceName).toUpperCase();
+  const exactMatches=stores.filter(store=>normalized(store).toUpperCase()===name);
+  if(exactMatches.length)return exactMatches.length===1?exactMatches[0]:'';
+  const match=/^(?:SH)?(\d+)(?:店)?$/.exec(name);
+  if(!match)return '';
+  const matches=stores.filter(store=>/^\d+(?:店)?$/.test(normalized(store))&&normalized(store).replace(/店$/,'')===match[1]);
+  return matches.length===1?matches[0]:'';
+}
 export function suggestSupplementMapping(headers) {
   return Object.fromEntries(Object.entries(supplementFields).map(([field, aliases]) => [field, String(aliases.map(alias=>headers.findIndex(header=>headerKey(header)===headerKey(alias))).find(index=>index>=0)??-1)]));
 }
@@ -41,7 +51,7 @@ export function supplementRowLabel(row) {
   const position=row.recordRow?`表格第 ${row.recordRow} 行${csv?`（CSV 物理第 ${row.sourceRow} 行）`:''}`:`${csv?'CSV 物理':'工作表'}第 ${row.sourceRow} 行`;
   return `${position}${row.businessId?` · 单号 ${row.businessId}`:''}`;
 }
-export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", supplierNumbers, ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store = "", stores = [], includeAll = false } = {}) {
+export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", supplierNumbers, ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store, stores = [], includeAll = false } = {}) {
   const cells = source.cells ?? [];
   const headerIndex=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;
   if(headerIndex<0||headerIndex>=cells.length)throw new Error("表头行不在来源记录中。");
@@ -51,6 +61,7 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
   if (supplierNumbers !== undefined && (kind !== 'deduction' || !Array.isArray(supplierNumbers))) throw new Error('多选货号须为扣款来源的完整货号数组。');
   const selectedNumbers = supplierNumbers === undefined ? null : [...new Set(supplierNumbers.map(normalized).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
   const selectedSet = selectedNumbers === null ? null : new Set(selectedNumbers);
+  const fallbackStore=store===undefined&&kind==='deduction'?suggestDeductionStore(source.sheetName,stores):normalized(store);
   if (!includeAll && !(selectedSet ? selectedSet.size : marker)) throw new Error(kind==='dispatch'?"请选择登记人或全部登记人。":"请选择供方货号或全部记录。");
   if (!includeAll && !(Number(fields[ownerField]) >= 0)) throw new Error(kind==='dispatch'?"未识别登记人列，请在高级设置中映射。":"未识别供方货号列，请在高级设置中映射。");
   if (!(Number(fields[kind === "dispatch" ? "quantity" : "amount"]) >= 0)) throw new Error(kind==='dispatch'?"未识别数量列，请在高级设置中映射。":"未识别扣款金额列，请在高级设置中映射。");
@@ -117,13 +128,13 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
     if (amount === null || (kind === "dispatch" && !/^\d+$/.test(exact(amount)))) { errors.push({ ...position, message:kind==='dispatch'?"数量须为非负整数，请核对源数量列。":"扣款金额须为有效数值，空金额不能按零计入。" }); continue; }
     const identifiers = ["businessId", "order1688", "platformSkc", "supplierNumber"];
     if (identifiers.some(field => typeof get(field) === "number" && (!Number.isSafeInteger(get(field)) || Math.abs(get(field)) >= 1e15))) { errors.push({ ...position, message:"源表数字标识符可能已丢失精度，请使用原始文本单号。" }); continue; }
-    const targetStore = sourceStore ? suggestSupplementStore(sourceStore,stores)||sourceStore : normalized(store);
-    if (kind === "deduction" && !targetStore) { errors.push({ ...position, message:"请按实际源列或工作表映射店铺。" }); continue; }
+    const targetStore = sourceStore ? (kind==='deduction'?suggestDeductionStore(sourceStore,stores):suggestSupplementStore(sourceStore,stores))||sourceStore : fallbackStore;
+    if (kind === "deduction" && !targetStore) { errors.push({ ...position, code:'missing_store', message:"请为此工作表选择实际店铺。" }); continue; }
     const mapped=new Set(Object.values(fields).map(Number).filter(value=>value>=0));
     const remarks=values.flatMap((value,col)=>!mapped.has(col)&&normalized(value)?[{column:col+1,header:normalized(headers[col]),value:normalized(value)}]:[]);
-    rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}), ...(position.sourceFormat === "xlsx" && typeof get("quantity") === "string" ? { quantityFromText: true } : {}) } : { signedAmountExact: exact(amount) }) });
+    rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}), ...(position.sourceFormat === "xlsx" && typeof get("quantity") === "string" ? { quantityFromText: true } : {}) } : { signedAmountExact: exact(amount),storeMapping:{rule:DEDUCTION_STORE_RULE,input:sourceStore||source.sheetName,target:targetStore,source:sourceStore?'source_column':'sheet_mapping'} }) });
   }
-  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:selectedSet?'':marker,ownerField,matchMode:selectedSet?'exact':matchMode,includeAll,store,...(selectedNumbers===null?{}:{supplierNumbers:selectedNumbers})}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
+  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:selectedSet?'':marker,ownerField,matchMode:selectedSet?'exact':matchMode,includeAll,store:fallbackStore,...(kind==='deduction'?{storeRule:DEDUCTION_STORE_RULE}:{}),...(selectedNumbers===null?{}:{supplierNumbers:selectedNumbers})}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
 }
 
 export function normalizeSupplementCandidate(input, { ledger, stores }) {
