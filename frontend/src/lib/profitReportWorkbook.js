@@ -2,6 +2,7 @@ import { displayMoney, exactSum, REPORT_TEMPLATE_VERSION } from "../domain/profi
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 import { groupProfitExportProducts, mergeArchivedSkcSheet, mergeProfitSkcRows } from './profitSkcLayout';
 import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
+import { profitReportFileName } from '../domain/profitReportPresentation';
 
 // A small, deterministic OOXML writer for the approved fixed report template.
 // Numbers are computed by the report domain before export; identifier cells are text.
@@ -93,7 +94,7 @@ export function buildProfitReportWorkbook({report,products,dispatchRows=[],deduc
   const registry=createStyles();
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows[0]?.[1]?.value==='SKU'?mergeProfitSkcRows(sheet.rows):sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
   const files=[['[Content_Types].xml',`${declaration}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],['_rels/.rels',`${declaration}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],['xl/workbook.xml',`${declaration}<workbook xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((sheet,i)=>`<sheet name="${xml(sheet.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets></workbook>`],['xl/_rels/workbook.xml.rels',`${declaration}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],['xl/styles.xml',registry.xml()],...sheetFiles];
-  return {bytes:zip(files),fileName:`${report.period.replace("-","年")}月利润表-${financial?"财务对账":"未扣款"}${report.revision>1?`-r${report.revision}`:""}.xlsx`,templateVersion:REPORT_TEMPLATE_VERSION};
+  return {bytes:zip(files),fileName:profitReportFileName(report,{dispatchRows}),templateVersion:REPORT_TEMPLATE_VERSION};
 }
 
 export function formatArchivedReportSkcs(files, sheets) {
@@ -115,4 +116,4 @@ export async function prepareReportDownload(report, { dispatchRows = [] } = {}) 
   const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
   return restoreSavedDispatchOrders(bytes, dispatchRows);
 }
-export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName.replace(/\.xlsx$/i,'-简化.xlsx');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=profitReportFileName(report,options);a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
