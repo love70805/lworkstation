@@ -4,8 +4,8 @@ import {reportTotals,sha256} from '../domain/profitReports';
 import {buildProfitReportWorkbook,bytesToBase64,prepareReportDownload,writeReportArchive} from './profitReportWorkbook';
 import {formatSavedReportLayout} from './savedReportLayout';
 
-const products=[{store:'20店',platformSku:'0000000000000000000123',groupSkc:'sh2606160071544156882',attribute:'长规格说明',quantityExact:'35',revenueExact:'3774.2863',unitCostExact:'0',purchaseCostExact:'0',warehouseCostExact:'24.5',profitExact:'3749.7863'}];
-const dispatchRows=[{platformSkc:products[0].groupSkc,businessId:'PB2609010247776',quantityExact:'35',order1688:'000331637621116011698'}];
+const products=[{store:'20店',platformSku:'0000000000000000000123',groupSkc:'sh2999999999999999999',attribute:'长规格说明',quantityExact:'35',revenueExact:'3774.2863',unitCostExact:'0',purchaseCostExact:'0',warehouseCostExact:'24.5',profitExact:'3749.7863'}];
+const dispatchRows=[{platformSkc:products[0].groupSkc,businessId:'PB2099010000001',quantityExact:'35',order1688:'000123456789012345678'}];
 const deductionRows=[{store:'20店',businessId:'0001',platformSkc:products[0].groupSkc,supplierNumber:'YW-20-HHHX',signedAmountExact:'-4.152509999'}];
 const report={kind:'financial',period:'2026-09',revision:1,totalsExact:reportTotals(products,'35','0.7',deductionRows)};
 const read=bytes=>XLSX.read(bytes,{type:'array',bookFiles:true,cellStyles:true});
