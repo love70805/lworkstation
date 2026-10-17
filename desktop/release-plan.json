@@ -5,6 +5,10 @@
   "integrationBranch": "codex/monthly-formal-report",
   "requiredCommits": [
     {
+      "module": "v0.4.36-exact-deduction-exports-and-frozen-download-recovery",
+      "commit": "ca2808961596b54becad138f1af4b30d9adb5cc8"
+    },
+    {
       "module": "v0.4.36-formal-monthly-reports-and-registrant-filenames",
       "commit": "fe6cf10"
     },
