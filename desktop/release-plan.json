@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.36",
+  "version": "0.4.37",
   "candidateOnly": true,
-  "integrationBranch": "codex/monthly-formal-report",
+  "integrationBranch": "codex/deduction-once-0.4.37",
   "requiredCommits": [
+    {
+      "module": "v0.4.37-deductions-once-and-compact-exports",
+      "commit": "e03a43acb3f51852a6d73610f06823dbb4f9c81d"
+    },
+    {
+      "module": "v0.4.37-verified-main-baseline",
+      "commit": "3d069d1a047253cf6a5eff66865375bce90baa03"
+    },
     {
       "module": "v0.4.36-exact-deduction-exports-and-frozen-download-recovery",
       "commit": "ca2808961596b54becad138f1af4b30d9adb5cc8"

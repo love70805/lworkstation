@@ -1,5 +1,5 @@
 import { Exact } from './profitReports';
-import { currentLedgerResult } from './ledgerWorkflow';
+import { currentLedgerResult, hasSavedFinancialReport } from './ledgerWorkflow';
 
 // A read-only, whole-ledger projection. Filtered product subtotals never enter it.
 export function monthlyProfitSummary({ ledger, reportState, productProfitExact, missingCostCount }) {
@@ -24,6 +24,6 @@ export function monthlyProfitSummary({ ledger, reportState, productProfitExact, 
   return {
     status: 'ready', dispatchQuantityExact, dispatchAmountExact, rateExact, deductionExact, missingStores, costsPending, profitExact,
     label: deductionExact === null ? '未扣款利润' : missingStores.length ? '暂计利润' : '本月利润',
-    frozen, formalSaved: currentLedgerResult(ledger, data.reports, deduction).state === 'financial',
+    frozen, formalSaved: currentLedgerResult(ledger, data.reports, deduction).state === 'financial', deductionSaved: hasSavedFinancialReport(ledger, data.reports),
   };
 }

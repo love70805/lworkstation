@@ -43,6 +43,7 @@ it('marks the saved formal result current only while its adopted deduction still
   const deduction=batch({id:'K',signedAmountExact:'2',coveredStores:['甲','乙']});
   const formal=batch({id:'F',kind:'financial',baseReportId:'BASE',adoptedBatchIds:['K'],displayTotals:{profit:'25.00'}});
   const options={ledger:{...ledger,status:'finalized',currentBaseReportId:'BASE'},reports:[base,formal],deduction};
-  expect(summary(options).formalSaved).toBe(true);
-  expect(summary({...options,deduction:{...deduction,id:'REPLACEMENT'}}).formalSaved).toBe(false);
+  expect(summary(options)).toMatchObject({formalSaved:true,deductionSaved:true});
+  expect(summary({...options,deduction:{...deduction,id:'REPLACEMENT'}})).toMatchObject({formalSaved:false,deductionSaved:true});
+  expect(summary({...options,ledger:{...ledger,status:'cost_pending',currentBaseReportId:null}}).deductionSaved).toBe(false);
 });

@@ -11,6 +11,7 @@ import { REPORT_FORMULA_VERSION, REPORT_TEMPLATE_VERSION, buildReportProducts, c
 import { buildProfitReportWorkbook, bytesToBase64 } from "../../lib/profitReportWorkbook";
 import { readLedgerReportHeaders } from './ledgerOverviewRepository';
 import { dispatchRegistrantNames } from '../../domain/profitReportPresentation';
+import { hasSavedFinancialReport } from '../../domain/ledgerWorkflow';
 
 const tables = () => [db.settings,db.ledgers,db.salesRows,db.erpCostBatches,db.erpCostRows,db.costApprovals,db.profitLines,db.auditEvents,db.monthlySupplementBatches,db.monthlySupplementRows,db.profitReports,db.profitReportLines];
 async function scope(ledgerId,write=false) {
@@ -65,10 +66,15 @@ export async function readProfitReportDownload(reportId) {
   }
   return { report, dispatchRows: lines.filter(line => line.lineKind === 'dispatch'), ...(report.kind==='financial'?{deductionRows:snapshot.deductionLines}:{}) };
 }
+function assertSupplementEditable(context,kind){
+  if(context.ledger.status==='locked')throw new Error('账本已锁定，不能修改代发或扣款。');
+  if(kind==='dispatch'&&context.ledger.status==='finalized')throw new Error('已定稿基础不能改代发，请显式重开。');
+  if(kind==='deduction'&&hasSavedFinancialReport(context.ledger,context.reports))throw new Error('扣款已随正式报告保存，如需更正请先显式重开本月核算。');
+}
 export async function previewMonthlySupplement(input){
   return db.transaction('r',tables(),async()=>{
     const context=await sourceContext(input.ledgerId,true);
-    if(context.ledger.status==='locked'||(input.kind==='dispatch'&&context.ledger.status==='finalized'))throw new Error("已定稿基础不能改代发，请显式重开。");
+    assertSupplementEditable(context,input.kind);
     const candidate=normalizeSupplementCandidate(input,{ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))]});
     return {candidate,expectedBatchId:context[input.kind]?.id??null,inputSignature:canonicalJson(candidate)};
   });
@@ -76,7 +82,7 @@ export async function previewMonthlySupplement(input){
 export async function adoptMonthlySupplement(input,{expectedBatchId,inputSignature}={}){
   return db.transaction('rw',tables(),async()=>{
     const context=await sourceContext(input.ledgerId,true);
-    if(context.ledger.status==='locked'||(input.kind==='dispatch'&&context.ledger.status==='finalized'))throw new Error("已定稿基础不能改代发，请显式重开。");
+    assertSupplementEditable(context,input.kind);
     const candidate=normalizeSupplementCandidate(input,{ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))]});
     const signature=canonicalJson(candidate);
     if(candidate.conflicts.length&&!candidate.reviewedCrossFileConflicts)throw new Error('跨文件相似业务记录尚未核对，请检查来源后重新预览。');
