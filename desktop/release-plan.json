@@ -5,6 +5,10 @@
   "integrationBranch": "codex/erp-task-continuation",
   "requiredCommits": [
     {
+      "module": "v0.4.40-coordinated-continuation-and-cost-first",
+      "commit": "980b675"
+    },
+    {
       "module": "v0.4.40-verified-main-baseline",
       "commit": "219846dc670ab593393fafbf8c4d122fea006417"
     },

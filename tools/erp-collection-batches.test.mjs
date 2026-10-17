@@ -36,7 +36,7 @@ async function scenario(size, mode = '') {
         const existing = deliveries.find(item=>item.resultDeliveryId===payload.resultDeliveryId);
         if(existing) return {ok:true,status:200,json:async()=>({deliveryId:existing.deliveryId,batchId:existing.batchId,resultDeliveryId:payload.resultDeliveryId})};
         body={deliveryId:`DEL-${deliveries.length}`,batchId:`IMPORT-${deliveries.length}`,resultDeliveryId:payload.resultDeliveryId};
-        recordCollectionDelivery(task,body); deliveries.push({...payload,...body,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
+        recordCollectionDelivery(task,body); deliveries.push({...payload,...body,elapsedMs:Date.now()-began,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
       } else throw Error(url.pathname);
       return {ok:true,status:200,json:async()=>structuredClone(body)};
     } catch(error) {return {ok:false,status:error.status||400,json:async()=>({code:error.code,message:error.message})};}
@@ -70,7 +70,8 @@ async function scenario(size, mode = '') {
       const data=endpoint==='product-page'?[{itemId:`WH-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
       return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
     };
-    for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(mode==='benchmark-serial'&&name==='content.js'?source[name].replace('run.task?.executionProtocol === 2 ? 4 : 2','run.task?.executionProtocol === 2 ? 1 : 2'):source[name]);
+    const lanes = mode==='benchmark-serial' ? 1 : mode==='benchmark-two-lanes' ? 2 : 4;
+    for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(mode.startsWith('benchmark')&&name==='content.js'?source[name].replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`):source[name]);
     window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0'}}));
   }
   const until=async predicate=>{const end=Date.now()+120000;while(!predicate()){if(Date.now()>end)throw Error(window.document.body.textContent.slice(0,2500));await delay(5);}};
@@ -107,7 +108,7 @@ async function scenario(size, mode = '') {
     assert.equal(records[1].summary.delivered,size);
     assert.equal(new Set(deliveries.map(item=>item.resultDeliveryId)).size,deliveries.length);
     assert.ok(deliveries[0].listCount<=(mode==='throttle'?6:5),'first five SKCs are durable before the remaining targets');
-    assert.equal(maxLists,mode==='benchmark-serial'?1:4);assert.ok(maxInflight<=8);
+    assert.equal(maxLists,mode==='benchmark-serial'?1:mode==='benchmark-two-lanes'?2:4);assert.ok(maxInflight<=8);
     assert.ok(deliveries.every(item=>item.querySkcs.length<=5&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
     assert.equal(records[1].catalogMode,'on_demand');
     assert.ok(records[1].batches.every(batch=>!batch.catalogStatus),'cost completion does not automatically start material requests');
@@ -136,7 +137,7 @@ async function scenario(size, mode = '') {
       assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,size*2,'explicit new task rereads authoritative history');
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
-    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
+    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
     return listMs;
   } finally {await Promise.all(windows.map(item=>item.happyDOM.close()));}
 }
@@ -152,9 +153,10 @@ await scenario(100,'shared-orders');
 await scenario(40,'recalculate');
 
 const serialMs=await scenario(100,'benchmark-serial');
+const previousTwoLaneMs=await scenario(100,'benchmark-two-lanes');
 const parallelMs=await scenario(100,'benchmark-parallel');
 assert.ok(parallelMs/serialMs<=0.7,`four-worker list phase must improve >=30% (${serialMs}→${parallelMs} ms)`);
-console.log(JSON.stringify({listImprovementPercent:Math.round((1-parallelMs/serialMs)*100)}));
+console.log(JSON.stringify({listImprovementPercent:Math.round((1-parallelMs/serialMs)*100),comparedWithTwoLanesPercent:Math.round((1-parallelMs/previousTwoLaneMs)*100)}));
 
 // Use the real optional collector with enough valid warehouse mappings to cross
 // the previous 500-request cap; retain bounded paging and evidence validation.
