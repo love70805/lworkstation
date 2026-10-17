@@ -2,7 +2,7 @@ import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 import { dispatchOrderHeaders } from './dispatchOrderNumber';
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@6-1688-header";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@7-deduction-multiselect";
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
@@ -41,14 +41,17 @@ export function supplementRowLabel(row) {
   const position=row.recordRow?`表格第 ${row.recordRow} 行${csv?`（CSV 物理第 ${row.sourceRow} 行）`:''}`:`${csv?'CSV 物理':'工作表'}第 ${row.sourceRow} 行`;
   return `${position}${row.businessId?` · 单号 ${row.businessId}`:''}`;
 }
-export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store = "", stores = [], includeAll = false } = {}) {
+export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", supplierNumbers, ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store = "", stores = [], includeAll = false } = {}) {
   const cells = source.cells ?? [];
   const headerIndex=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;
   if(headerIndex<0||headerIndex>=cells.length)throw new Error("表头行不在来源记录中。");
   const headers = cells[headerIndex] ?? [];
   const fields = mapping ?? suggestSupplementMapping(headers);
   const marker = normalized(ownerMarker);
-  if (!includeAll && !marker) throw new Error(kind==='dispatch'?"请选择登记人或全部登记人。":"请选择供方货号或全部记录。");
+  if (supplierNumbers !== undefined && (kind !== 'deduction' || !Array.isArray(supplierNumbers))) throw new Error('多选货号须为扣款来源的完整货号数组。');
+  const selectedNumbers = supplierNumbers === undefined ? null : [...new Set(supplierNumbers.map(normalized).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const selectedSet = selectedNumbers === null ? null : new Set(selectedNumbers);
+  if (!includeAll && !(selectedSet ? selectedSet.size : marker)) throw new Error(kind==='dispatch'?"请选择登记人或全部登记人。":"请选择供方货号或全部记录。");
   if (!includeAll && !(Number(fields[ownerField]) >= 0)) throw new Error(kind==='dispatch'?"未识别登记人列，请在高级设置中映射。":"未识别供方货号列，请在高级设置中映射。");
   if (!(Number(fields[kind === "dispatch" ? "quantity" : "amount"]) >= 0)) throw new Error(kind==='dispatch'?"未识别数量列，请在高级设置中映射。":"未识别扣款金额列，请在高级设置中映射。");
   const rows = [], errors = [], ignored = [];
@@ -108,7 +111,7 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
       if(order1688){group.order1688=order1688;group.order1688Row=mergedFrom.order1688??sourceRow;}
       else if(position.sourceFormat==='csv'&&group.order1688){order1688=group.order1688;inheritedIdentifiers.order1688=group.order1688Row;}
     }
-    if (!includeAll && !(kind==='deduction'&&matchMode==='contains'?owner.includes(marker):owner===marker)) { ignored.push({ ...position, reason:"owner_excluded" }); continue; }
+    if (!includeAll && !(selectedSet ? selectedSet.has(owner) : kind==='deduction'&&matchMode==='contains'?owner.includes(marker):owner===marker)) { ignored.push({ ...position, reason:"owner_excluded" }); continue; }
     if(missingQuantity){ignored.push({...position,reason:'missing_quantity',ownerMarker:owner,inheritedFrom,inheritedIdentifiers,mergedFrom});continue;}
     const amount = decimalSource(get(kind === "dispatch" ? "quantity" : "amount"), null);
     if (amount === null || (kind === "dispatch" && !/^\d+$/.test(exact(amount)))) { errors.push({ ...position, message:kind==='dispatch'?"数量须为非负整数，请核对源数量列。":"扣款金额须为有效数值，空金额不能按零计入。" }); continue; }
@@ -120,7 +123,7 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
     const remarks=values.flatMap((value,col)=>!mapped.has(col)&&normalized(value)?[{column:col+1,header:normalized(headers[col]),value:normalized(value)}]:[]);
     rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}), ...(position.sourceFormat === "xlsx" && typeof get("quantity") === "string" ? { quantityFromText: true } : {}) } : { signedAmountExact: exact(amount) }) });
   }
-  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:marker,ownerField,matchMode,includeAll,store}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
+  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:selectedSet?'':marker,ownerField,matchMode:selectedSet?'exact':matchMode,includeAll,store,...(selectedNumbers===null?{}:{supplierNumbers:selectedNumbers})}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
 }
 
 export function normalizeSupplementCandidate(input, { ledger, stores }) {
