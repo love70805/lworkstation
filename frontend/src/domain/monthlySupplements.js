@@ -1,7 +1,8 @@
 import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
+import { dispatchOrderHeaders } from './dispatchOrderNumber';
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@5-explicit-xlsx-owner";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@6-1688-header";
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
@@ -9,7 +10,7 @@ export const supplementFields = {
   platformSkc: ["SKC", "skc", "平台SKC"],
   supplierNumber: ["供方货号", "货号"],
   businessId: ["订单号", "补扣款单号", "扣款单号", "单号"],
-  order1688: ["1688订单号", "1688单号"],
+  order1688: dispatchOrderHeaders,
   quantity: ["sku数量", "件数", "数量", "采购数量", "发货数量"],
   amount: ["分摊后运费", "分摊金额", "扣款金额", "运费金额", "金额"],
 };

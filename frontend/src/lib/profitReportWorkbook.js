@@ -1,6 +1,7 @@
 import { displayMoney, exactSum, REPORT_TEMPLATE_VERSION } from "../domain/profitReports";
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 import { groupProfitExportProducts, mergeArchivedSkcSheet, mergeProfitSkcRows } from './profitSkcLayout';
+import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
 
 // A small, deterministic OOXML writer for the approved fixed report template.
 // Numbers are computed by the report domain before export; identifier cells are text.
@@ -87,7 +88,7 @@ export function buildProfitReportWorkbook({report,products,dispatchRows=[],deduc
     if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,{...number(store.deductionExact),red:true}]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
     sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','center','center','center','center','center']});
   }
-  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(row.order1688,1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:[27.5,26.25,11,26.25,3,3,16,16],rowHeight:34,alignment:[null,null,"right",null,null,null,"right","right"]});
+  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([text(row.platformSkc),text(row.businessId),number(row.quantityExact,2),text(dispatchOrderNumberForExport(row),1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:[27.5,26.25,11,26.25,3,3,16,16],rowHeight:34,alignment:[null,null,"right",null,null,null,"right","right"]});
   if(financial)sheets.push({name:"扣款",rows:combine([headers(["补扣款单号","SKC","供方货号","扣款金额"]),...deductionRows.map(row=>detailRow([text(row.businessId??"",1),text(row.platformSkc??"",1),text(row.supplierNumber??""),{...number(row.signedAmountExact),red:true}]))],[headers(["店铺","明细合计"]),...totals.stores.map(store=>[text(store.store),{...number(store.deductionExact),red:true}]),bandRow([text("合计"),{...number(totals.deductionExact),red:true}])],5),widths:[26,28,28,15,3,16,18],rowHeight:34,alignment:[null,null,null,"right",null,null,"right"]});
   const registry=createStyles();
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows[0]?.[1]?.value==='SKU'?mergeProfitSkcRows(sheet.rows):sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
@@ -103,11 +104,15 @@ export function formatArchivedReportSkcs(files, sheets) {
   }
   return zip([...files]);
 }
+export const writeReportArchive = files => zip([...files]);
 
 export function bytesToBase64(bytes){let text="";for(let i=0;i<bytes.length;i+=16384)text+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(text);}
 export function base64ToBytes(value){return Uint8Array.from(atob(value),char=>char.charCodeAt(0));}
-export async function prepareReportDownload(report) {
+export async function prepareReportDownload(report, { dispatchRows = [] } = {}) {
   const { simplifySavedReport } = await import('./savedReportDownload');
-  return simplifySavedReport(report);
+  const bytes = await simplifySavedReport(report);
+  if (!dispatchRows.some(row => dispatchOrderNumberForExport(row))) return bytes;
+  const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
+  return restoreSavedDispatchOrders(bytes, dispatchRows);
 }
-export async function downloadReportFile(report){const bytes=await prepareReportDownload(report);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName.replace(/\.xlsx$/i,'-简化.xlsx');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=report.fileName.replace(/\.xlsx$/i,'-简化.xlsx');a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}

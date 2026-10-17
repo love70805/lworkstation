@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.32",
+  "version": "0.4.33",
   "candidateOnly": true,
-  "integrationBranch": "codex/export-skc-0.4.32",
+  "integrationBranch": "codex/monthly-supplements-0.4.33",
   "requiredCommits": [
+    {
+      "module": "v0.4.33-verified-main-baseline",
+      "commit": "6d10ac3abc90fdded2040cff00f3ee7e7306b78f"
+    },
     {
       "module": "v0.4.32-final-reviewed-candidate",
       "commit": "e6621864d7c54ba0b89035de963f4c9043ef5aff"
