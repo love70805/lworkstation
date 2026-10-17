@@ -21,7 +21,7 @@ export default function DispatchOrderDownload({ saved, onClose }) {
   }
   async function download() {
     setBusy(true);setError('');
-    try { await downloadReportFile(saved.report,{dispatchRows:rows});onClose(); }
+    try { await downloadReportFile(saved.report,{dispatchRows:rows,deductionRows:saved.deductionRows});onClose(); }
     catch (failure) { setError(failure.message); }
     finally { setBusy(false); }
   }

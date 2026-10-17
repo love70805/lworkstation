@@ -54,11 +54,16 @@ export async function readProfitReportDownload(reportId) {
     const base = report.kind === 'financial' ? await db.profitReports.get(report.baseReportId) : report;
     if (!base || base.kind !== 'pre_deduction' || base.workspaceId !== report.workspaceId || base.ledgerId !== report.ledgerId || base.period !== report.period) throw new Error('报告冻结来源缺失，请检查完整报告备份。');
     const lines = (await db.profitReportLines.where('reportId').equals(base.id).toArray()).toSorted((a,b) => a.ordinal-b.ordinal);
-    return { report, base, lines };
+    const deductionLines=report.kind==='financial'?(await db.profitReportLines.where('reportId').equals(report.id).toArray()).toSorted((a,b)=>a.ordinal-b.ordinal):[];
+    return { report, base, lines, deductionLines };
   });
   const { report, base, lines } = snapshot, { payloadHash, ...header } = base;
   if (lines.length !== base.lineCount || lines.some((line,i) => line.ordinal !== i || line.workspaceId !== base.workspaceId || line.ledgerId !== base.ledgerId) || !payloadHash || await sha256(canonicalJson({ report:header, lines })) !== payloadHash) throw new Error('报告冻结来源校验失败，未修改原始报告。');
-  return { report, dispatchRows: lines.filter(line => line.lineKind === 'dispatch') };
+  if(report.kind==='financial'){
+    const {payloadHash:reportHash,...reportHeader}=report;
+    if(snapshot.deductionLines.length!==report.lineCount||snapshot.deductionLines.some((line,i)=>line.ordinal!==i||line.lineKind!=='deduction'||line.workspaceId!==report.workspaceId||line.ledgerId!==report.ledgerId)||!reportHash||await sha256(canonicalJson({report:reportHeader,lines:snapshot.deductionLines}))!==reportHash)throw new Error('报告冻结扣款校验失败，未修改原始报告。');
+  }
+  return { report, dispatchRows: lines.filter(line => line.lineKind === 'dispatch'), ...(report.kind==='financial'?{deductionRows:snapshot.deductionLines}:{}) };
 }
 export async function previewMonthlySupplement(input){
   return db.transaction('r',tables(),async()=>{

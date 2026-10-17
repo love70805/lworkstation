@@ -49,7 +49,7 @@ it('makes the saved formal download primary, hides duplicate generation and list
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
  expect(container.textContent).toContain('正式版已保存');expect(button('预览正式利润表')).toBeUndefined();expect(button('预览未扣款报告')).toBeUndefined();
  expect(button('下载正式利润表').classList.contains('button-primary')).toBe(true);expect(container.textContent).toContain('历史报告与基础（1）');
- await act(async()=>button('下载正式利润表').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}]});
+ await act(async()=>button('下载正式利润表').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined});
 });
 it('requires a new explicit formal save after deduction replacement and blocks changes while locked',async()=>{
  await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[formal,base]});

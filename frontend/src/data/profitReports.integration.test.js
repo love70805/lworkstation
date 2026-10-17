@@ -71,6 +71,16 @@ it('uses explicit zero dispatch and deductions for a direct formal report',async
  const saved=await report('financial');expect(saved.totalsExact).toMatchObject({dispatchAmountExact:'0',deductionExact:'0',profitExact:'-0.68200005'});
  expect(saved.fileName).toBe('2026年8月利润表.xlsx');
 });
+it('uses only verified frozen deduction rows for downloads after live deductions change and rejects tampering',async()=>{
+ await adopt('dispatch');await adopt('deduction');const saved=await report('financial');
+ const download=await readProfitReportDownload(saved.id),original=JSON.stringify(await readSavedProfitReport(saved.id));
+ expect(download.deductionRows.map(row=>row.signedAmountExact)).toEqual(['0.0009','-0.0001']);
+ await adopt('deduction',{rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'999'}))});
+ expect((await readProfitReportDownload(saved.id)).deductionRows).toEqual(download.deductionRows);
+ expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(original);
+ await db.profitReportLines.update(download.deductionRows[0].id,{signedAmountExact:'999'});
+ await expect(readProfitReportDownload(saved.id)).rejects.toThrow('冻结扣款校验失败');
+});
 it('derives legacy download names from the verified frozen dispatch after live sources change',async()=>{
  await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'LEGACY-OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'旧登记人',quantityExact:'2'}]});
  const base=await report();await adopt('deduction');const saved=await report('financial',base.id);
