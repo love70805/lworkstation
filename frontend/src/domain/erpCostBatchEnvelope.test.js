@@ -63,6 +63,17 @@ function buildFixture() {
 }
 
 describe("ERP cost batch envelope v2", () => {
+  it('preserves collection request diagnostics without promoting them to cost evidence', () => {
+    const fixture = buildFixture();
+    Object.assign(fixture.sourceMeta, { skuLookupCount: 8, recoveredMappingCount: 8, additionalWarehouseHistoryCount: 2,
+      requestCount: 72, requestRetryCount: 1, requestErrorCount: 1, rateLimitCount: 1, peakRequestConcurrency: 12, requestDurationMs: 4500 });
+    const parsed = validateErpCostBatchEnvelope(JSON.parse(JSON.stringify(fixture)));
+    expect(parsed.envelope.sourceMeta).toMatchObject({ skuLookupCount: 8, recoveredMappingCount: 8, additionalWarehouseHistoryCount: 2,
+      requestCount: 72, requestRetryCount: 1, requestErrorCount: 1, rateLimitCount: 1, peakRequestConcurrency: 12, requestDurationMs: 4500 });
+    expect(parsed.envelope.sourceMeta.evidenceComplete).toBe(true);
+    expect(parsed.rows[0].unitCost).toBe(6.2);
+  });
+
   it('preserves bounded directory diagnostics without treating them as financial decisions', () => {
     const fixture = buildFixture();
     fixture.sourceMeta.scopeDirectoryComplete = false;

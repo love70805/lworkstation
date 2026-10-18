@@ -116,13 +116,13 @@
                 return { catalogMappings, mappings: policy.normalizeMappings(catalogMappings), complete: false, reasons: [String(error?.message || error)], recordCount: safe.length };
             }
         }
-        async function directory(querySkcs, run, { refreshSkcs = [] } = {}) {
+        async function directory(querySkcs, run, { refreshSkcs = [], targetType = 'skc' } = {}) {
             const scope = unique((Array.isArray(querySkcs) ? querySkcs : []).map(value => String(value).trim())).filter(Boolean);
             if (!scope.length) throw new Error('资料请求缺少已确认平台 SKC。');
             const results = new Map(), reasons = [], refreshScope = new Set(refreshSkcs.map(key));
             let completed = 0, pageCount = 0, recordCount = 0;
             const states = await targets(scope, 2, async (skc, lane) => {
-                const report = (pagesDone, pagesTotal) => onProgress('目标商品档案', completed, scope.length, { lane, active: true, target: skc, unit: '个 SKC', pagesDone, pagesTotal });
+                const report = (pagesDone, pagesTotal) => onProgress('目标商品档案', completed, scope.length, { lane, active: true, target: skc, unit: targetType === 'sku' ? '个 SKU' : '个 SKC', pagesDone, pagesTotal });
                 report(0, null);
                 try {
                     const state = await products(skc, run, report, refreshScope.has(key(skc)));
@@ -138,10 +138,10 @@
                     results.set(key(product.warehouseSku), product);
                 }
             }
-            const targetStates = states.map((state, index) => ({ platformSkc: scope[index], complete: state.complete,
+            const targetStates = states.map((state, index) => ({ [targetType === 'sku' ? 'platformSku' : 'platformSkc']: scope[index], complete: state.complete,
                 warehouseSkus: state.records.map(record => String(record.itemId)), message: state.reasons.join(';') }));
             return { results: [...results.values()], complete: !reasons.length, reasons: unique(reasons), pageCount, recordCount,
-                targets: targetStates, failures: targetStates.filter(target => !target.complete).map(({ platformSkc, message }) => ({ platformSkc, message })) };
+                targets: targetStates, failures: targetStates.filter(target => !target.complete).map(({ platformSkc, platformSku, message }) => ({ ...(platformSkc ? { platformSkc } : { platformSku }), message })) };
         }
         async function collectScoped(querySkcs, run, initial = { results: [], warehouseEvidence: { warehouses: [] } }) {
             const scope = unique((Array.isArray(querySkcs) ? querySkcs : []).map(value => String(value).trim())).filter(Boolean);

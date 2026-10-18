@@ -15,6 +15,7 @@ const commands = [
   ["ERP 平台 SKU/SKC 精确采集范围", "node", ["../tools/erp-platform-scope.test.mjs"]],
   ["清空本机数据与 ERP 历史隔离", "node", ["../tools/local-workspace-reset.test.mjs"]],
   ["ERP 分批采集规模与性能", "node", ["../tools/erp-collection-batches.test.mjs"]],
+  ["ERP 实际读取流水线、限流恢复与精确 SKU 补查", "node", ["../tools/erp-collection-throughput.test.mjs"]],
   ["ERP 延长时限与取消", "node", ["../tools/erp-collection-time-budget.test.mjs"]],
   ["ERP 采集慢路径", "node", ["../tools/erp-collection-slow-paths.test.mjs"]],
   ["ERP 完整历史与取消采购", "node", ["../tools/erp-purchase-history.test.mjs"]],
