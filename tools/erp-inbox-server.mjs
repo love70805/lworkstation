@@ -530,7 +530,8 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
   expectedRows = null,
   expectedSkus = null,
 } = {}) {
-  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount"];
+  const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount",
+    "skuLookupCount", "recoveredMappingCount", "additionalWarehouseHistoryCount", "requestCount", "requestRetryCount", "requestErrorCount", "rateLimitCount", "peakRequestConcurrency", "requestDurationMs"];
   const topLevelWarnings = sourceWarningsContract(meta, { strict: strictSourceWarnings });
   const evidenceByRef = new Map(warehouseEvidence.map((entry) => [entry.evidenceRef, entry]));
   const expectedScope = normalizedExpectedSkus(expectedSkus);

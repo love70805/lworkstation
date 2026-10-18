@@ -616,6 +616,7 @@ try {
     querySkcs: ["SKC-EVIDENCE"],
     rows: [{ platformSku: "SKU-NOT-IN-REQUEST", platformSkc: "SKC-EVIDENCE", warehouseSku: "WH-EVIDENCE", unitCost: 2.5, sourceWarnings: ["raw-row-warning"] }],
     sourceMeta: { mappingFailures: [{ warehouseSku: "WH-EVIDENCE", message: "mapping unavailable" }], scopeDirectoryComplete: false, scopeRetrySkcCount: 1,
+      skuLookupCount: 8, recoveredMappingCount: 8, additionalWarehouseHistoryCount: 2, requestCount: 72, requestRetryCount: 1, requestErrorCount: 1, rateLimitCount: 1, peakRequestConcurrency: 12, requestDurationMs: 4500,
       scopeDirectoryFailures: [{ platformSkc: 'SKC-EVIDENCE', message: 'x'.repeat(700), cookie: 'discard', nested: { secret: 'discard' } }] },
     warehouseEvidence: {
       formatVersion: 1,
@@ -633,6 +634,7 @@ try {
   assert.equal(unknownEvidenceBatch.sourceMeta.mappingFailures[0].warehouseSku, "WH-EVIDENCE");
   assert.equal(unknownEvidenceBatch.sourceMeta.scopeDirectoryComplete, false);
   assert.equal(unknownEvidenceBatch.sourceMeta.scopeRetrySkcCount, 1);
+  for (const [field, value] of Object.entries({ skuLookupCount: 8, recoveredMappingCount: 8, additionalWarehouseHistoryCount: 2, requestCount: 72, requestRetryCount: 1, requestErrorCount: 1, rateLimitCount: 1, peakRequestConcurrency: 12, requestDurationMs: 4500 })) assert.equal(unknownEvidenceBatch.sourceMeta[field], value, field + ' survives the real HTTP receipt round trip');
   assert.deepEqual(unknownEvidenceBatch.sourceMeta.scopeDirectoryFailures, [{ platformSkc: 'SKC-EVIDENCE', message: 'x'.repeat(500) }]);
   assert.equal(unknownEvidenceBatch.sourceMeta.evidenceComplete, false);
   assert.ok(unknownEvidenceBatch.warehouseEvidence[0].sourceWarnings.some((warning) => warning.startsWith("mapping_failure:")));
