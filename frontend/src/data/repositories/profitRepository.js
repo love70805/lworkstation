@@ -39,6 +39,7 @@ import { makeId } from "../db/utils";
 import { ensureDefaultWorkspace, getActiveMemberContext, ensureLedgerCatalogDrafts } from "./selectionRepository";
 import { manualSnapshot, selectManualOverride, storeIdentity } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
+import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
 import { summarizeProfitRows } from "../../lib/profitPrecision";
 import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
@@ -77,15 +78,15 @@ async function readLedgerCostCoverage(ledgerId) {
   return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals, workspaceId: ledger?.workspaceId, ledgerId, period: ledger?.period });
 }
 
-export async function saveManualCostOverride({ ledgerId, store, platformSku, unitCost, reason }) {
-  return mutateManualCostOverride({ ledgerId, store, platformSku, unitCost, reason });
+export async function saveManualCostOverride({ ledgerId, store, platformSku, unitCost, reason, historyEvidence = null }) {
+  return mutateManualCostOverride({ ledgerId, store, platformSku, unitCost, reason, historyEvidence });
 }
 
 export async function revokeManualCostOverride({ ledgerId, approvalId }) {
   return mutateManualCostOverride({ ledgerId, approvalId, revoke: true });
 }
 
-async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost, reason, approvalId, revoke = false }) {
+async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost, reason, approvalId, revoke = false, historyEvidence = null }) {
   const amount = Number(unitCost);
   if (!revoke && (unitCost == null || String(unitCost).trim() === "" || !Number.isFinite(amount) || amount < 0)) throw new Error("人工更正成本必须是非负有限数值。");
   if (!revoke && !String(reason ?? "").trim()) throw new Error("请填写更正说明。");
@@ -117,7 +118,8 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
     if (!revoke) {
       const referenceId = makeId("MANUAL-COST");
       saved = { id: makeId("OVERRIDE"), workspaceId: ledger.workspaceId, ledgerId, platformSku: sku, canonicalPlatformSku: canonicalPlatformSku(sku), referenceCostId: referenceId, approvedAmount: amount, currency: "CNY", reason: String(reason).trim(), approvedBy: auditActor, approvedAt: now, status: "approved",
-        referenceCost: { id: referenceId, kind: "manual_override", store: scopedStore, unitCost: amount, currency: "CNY", previousUnitCost: oldDecision.unitCost, previousSource: oldDecision.source } };
+        referenceCost: { id: referenceId, kind: "manual_override", store: scopedStore, unitCost: amount, currency: "CNY", previousUnitCost: oldDecision.unitCost, previousSource: oldDecision.source,
+          ...(historyEvidence ? { historyEvidence: structuredClone(historyEvidence) } : {}) } };
       await db.costApprovals.add(saved);
     }
     const coverage = await readLedgerCostCoverage(ledgerId);
@@ -129,6 +131,48 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
       await db.auditEvents.update(event.id, { after: { snapshot: { ...await db.costApprovals.get(target.id), ledger: savedLedger } } });
     }
     return saved;
+  });
+}
+
+async function warehouseHistoryPlan({ ledgerId, history }) {
+  const member = await getActiveMemberContext();
+  const ledger = await db.ledgers.get(ledgerId);
+  if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
+  if (['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或锁定账本不能补齐成本，请先显式重开。');
+  const [rows, costs, approvals, batches] = await Promise.all([
+    db.salesRows.where('ledgerId').equals(ledgerId).toArray(), getLatestLedgerCosts(ledgerId),
+    db.costApprovals.where('ledgerId').equals(ledgerId).toArray(), db.erpCostBatches.where('workspaceId').equals(member.workspaceId).toArray(),
+  ]);
+  const identities = buildLedgerSkuIdentityIndex(rows);
+  const costBySku = new Map(costs.map(row => [canonicalPlatformSku(row.platformSku), row]));
+  const uniqueRows = new Map(rows.map(row => [JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)]), row]));
+  const targets = new Map();
+  for (const row of uniqueRows.values()) {
+    const scope = { workspaceId: member.workspaceId, ledgerId, store: row.store, platformSku: row.platformSku };
+    const decision = resolveLedgerCostDecision({ ...scope, period: ledger.period, identity: identities.get(canonicalPlatformSku(row.platformSku)), manualOverride: selectManualOverride(approvals, scope), erpCost: costBySku.get(canonicalPlatformSku(row.platformSku)) });
+    if (decision.eligibleForExactProfit) continue;
+    targets.set(JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)]), { store: row.store, platformSku: row.platformSku, platformSkc: row.platformSkc });
+  }
+  const trustedBatches = new Set(batches.filter(batch => batch.status === 'published').map(batch => batch.id));
+  const oldRows = targets.size ? await db.erpCostRows.where('canonicalPlatformSku').anyOf([...new Set([...targets.values()].map(row => canonicalPlatformSku(row.platformSku)))]).toArray() : [];
+  const knownMappings = oldRows.filter(row => row.workspaceId === member.workspaceId && trustedBatches.has(row.batchId) && row.platformSkc && row.warehouseSku && row.evidenceComplete === true && !row.mappingFallback);
+  return { ledger, ...planWarehouseHistoryCosts({ history, period: ledger.period, targets: [...targets.values()], knownMappings }) };
+}
+
+export async function previewWarehouseHistoryCosts(input) { return warehouseHistoryPlan(input); }
+
+export async function saveWarehouseHistoryCosts({ ledgerId, history, sourceName = '仓库历史采购证据' }) {
+  return db.transaction('rw', db.settings, db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+    const plan = await warehouseHistoryPlan({ ledgerId, history });
+    const saved = [];
+    for (const row of plan.ready) {
+      const evidence = { ...row.historyEvidence, sourceName: String(sourceName).slice(0, 250) };
+      // Re-evaluate from the preserved evidence; no imported proposed price is trusted.
+      if (evidence.format !== WAREHOUSE_HISTORY_FORMAT) throw new Error('历史采购证据来源无效。');
+      saved.push(await mutateManualCostOverride({ ledgerId, store: row.store, platformSku: row.platformSku, unitCost: row.unitCost,
+        reason: `历史仓库采购补齐：${row.warehouseSku}；${plan.ledger.period} 当月及以前最近三笔核价；来源 ${evidence.sourceName}；采购记录 ${row.selectedRecordIds.join('、')}。保留历史关联，不恢复当前 ERP 映射。`, historyEvidence: evidence }));
+    }
+    return { savedCount: saved.length, pending: plan.pending, savedIds: saved.map(row => row.id) };
   });
 }
 

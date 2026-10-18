@@ -44,6 +44,7 @@
         }
         const apiGet = (path, params, signal, context, run) => requestApi(path, params, signal, context);
         function list(response, label) {
+            if (response?.code === 0 && Number(response.count) === 0 && (response.data === '' || response.data == null)) return [];
             if (response?.code !== 0 || !Array.isArray(response.data)) throw new Error(label + ': invalid_response');
             return response.data;
         }
@@ -100,7 +101,6 @@
             let data = [];
             try {
                 const response = await bounded(() => apiGet(MAPPING_PATH, { productId: warehouseSku }, run.controller.signal, '仓库 SKU ' + warehouseSku + ' 平台映射'), run);
-                if (response?.code === 0 && Number(response.count) === 0 && !Array.isArray(response.data)) throw new Error('mapping_empty: ERP 返回空映射');
                 data = list(response, 'product-info-sku');
                 const reported = count(response);
                 if (reported == null || reported !== data.length) throw new Error('mapping_count_mismatch');

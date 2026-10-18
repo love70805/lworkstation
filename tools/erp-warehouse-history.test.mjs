@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import vm from 'node:vm';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const require=createRequire(path.join(root,'frontend/package.json'));
+const {Window}=await import(pathToFileURL(require.resolve('happy-dom')));
+const source=path.join(root,'integrations/erp-assistant-extension/src');
+const window=new Window({url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html'});
+const requests=[],messages=[],downloads=[];
+window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(message);callback({ok:false,message:'no active ledger task'});}}};
+window.URL.createObjectURL=blob=>{downloads.push(blob);return 'blob:isolated-history';};window.URL.revokeObjectURL=()=>{};
+window.HTMLAnchorElement.prototype.click=function(){};
+window.fetch=async raw=>{const url=new URL(raw);requests.push(url);let data;
+ if(url.pathname.endsWith('purchase-order-page')){assert.equal(url.searchParams.get('queryRange'),'0');assert.ok(['WH-A','WH-B'].includes(url.searchParams.get('sku')));data=[{purchaseOrderId:'ORDER-ONE',purchaseOrderNo:'PO-ONE',purchaseTime:'2026-09-20',purchaseStatus:'7'}];}
+ else if(url.pathname.endsWith('purchase-order-details'))data=['WH-A','WH-B'].map((itemId,index)=>({itemId,purchaseOrderDetailId:'DETAIL-'+index,purchaseOrderId:'ORDER-ONE',creationTime:'2026-09-20 10:00:00',purchaseQuantity:'10',purchaseUnitPrice:'2.5000',tradeName:'合成商品'}));
+ else throw Error('History review must not query current mappings: '+url.pathname);
+ return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
+};
+try{
+ for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(await readFile(path.join(source,name),'utf8'));
+ window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=WH-A&queryRange=1&createTimePeriod=2026-10'}}));
+ window.document.getElementById('erpa-history-trigger').click();
+ assert.equal(requests.length,0,'opening dedicated history review does not start the original cost task');
+ window.document.getElementById('erpa-history-skus').value='WH-A\nWH-B';window.document.getElementById('erpa-history-period').value='2026-09';
+ window.document.getElementById('erpa-history-export').click();
+ const until=Date.now()+5000;while(!downloads.length&&Date.now()<until)await new Promise(r=>setTimeout(r,10));
+ assert.equal(downloads.length,1,'all requested warehouses export in one evidence file');
+ const exported=JSON.parse(await downloads[0].text());
+ assert.equal(exported.format,'shopeers-erp-warehouse-history');assert.equal(exported.ledgerPeriod,'2026-09');assert.equal(exported.sourceMeta.complete,true);
+ assert.equal(exported.warehouseEvidence.warehouses.length,2);assert.ok(exported.warehouseEvidence.warehouses.every(x=>x.evidenceComplete&&x.purchaseRecords.length===1));
+ assert.equal(requests.filter(u=>u.pathname.endsWith('purchase-order-details')).length,1,'shared order detail is read once');
+ assert.equal(messages.some(x=>x.type==='shopeers.erp.submitCostResult'),false,'historical candidates cannot auto-submit as current mappings');
+}finally{await window.happyDOM.close();}
+const sandbox={window:{},URL,AbortController,setTimeout,clearTimeout};
+for(const name of ['result-policy.js','catalog-collector.js'])vm.runInNewContext(await readFile(path.join(source,name),'utf8'),sandbox);
+const reader=sandbox.window.ShopeersErpCatalogCollector.create({policy:sandbox.window.ShopeersErpResultPolicy,apiGet:async()=>({code:0,count:0,data:''})});
+const run={controller:new AbortController()};
+assert.equal((await reader.products('MISSING',run)).complete,true,'observed empty-string directory is a complete empty result');
+const mapping=await reader.mappings('MISSING',run);assert.equal(mapping.complete,true);assert.equal(mapping.catalogMappings.length,0);
+console.log('Directed warehouse history: no full restart, no current-map dependency, complete evidence export, shared detail reuse and empty ERP results passed');

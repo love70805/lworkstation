@@ -22,7 +22,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.46';
+    const EXTENSION_VERSION = '8.0.47';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -2364,7 +2364,7 @@
         if (csv) csv.disabled = disabled;
     }
 
-    async function openPanel() {
+    async function openPanel({ historyOnly = false } = {}) {
         const frame = activePurchaseFrame();
         if (frame) {
             closePanel();
@@ -2378,6 +2378,7 @@
         root.classList.add('erpa-open');
         renderAnomalyBanner();
         renderStatus();
+        if (historyOnly) { document.querySelector('#erpa-cost-root .erpa-history-review').open = true; document.getElementById('erpa-history-skus').focus(); return; }
         if (isPurchasePage() && !needsLogin() && capturedListUrl && lastResults.length === 0 && !activeRun) {
             try {
                 // Read authoritative tasks, including completed ones, before
@@ -2428,6 +2429,36 @@
         if (root) root.classList.remove('erpa-open');
     }
 
+    async function exportWarehouseHistory() {
+        if (activeRun || !isPurchasePage() || needsLogin()) return;
+        const warehouses = [...new Set(String(document.getElementById('erpa-history-skus').value).split(/[\s,，;；]+/).map(value => value.trim()).filter(Boolean))];
+        const period = resultPolicy.validLedgerPeriod(document.getElementById('erpa-history-period').value);
+        if (!warehouses.length || warehouses.length > 20 || !period || !capturedListUrl) { showToast('请先在采购页查询，再填写核价月份和 1 至 20 个准确仓库 SKU。', 'error'); return; }
+        const run = { controller: new AbortController(), filters: parseCapturedFilters(), ledgerPeriod: period, catalogPhase: true };
+        activeRun = run;
+        const button = document.getElementById('erpa-history-export'); button.disabled = true;
+        const evidence = [];
+        try {
+            taskCache.clear();
+            for (const warehouse of warehouses) {
+                setLoading('仓库历史核价', `只读取 ${warehouse} · ${evidence.length + 1}/${warehouses.length} 个仓库`);
+                evidence.push(await readWarehouseEvidence(warehouse, run));
+            }
+            if (run.controller.signal.aborted) throw new Error('本次仓库核价已取消。');
+            if (evidence.some(entry => !entry.evidenceComplete || entry.sourceWarnings.length)) throw new Error('采购证据尚未完整取得，请重试相关仓库；原任务和已采用成本保留。');
+            const cached = getResultCache();
+            const historicalMappings = (cached?.results || []).flatMap(row => (row.mappings || []).map(mapping => ({ platformSku: mapping.platformSku, platformSkc: mapping.platformSkc, warehouseSku: row.warehouseSku }))).filter(mapping => warehouses.some(warehouse => resultPolicy.canonical(warehouse) === resultPolicy.canonical(mapping.warehouseSku)));
+            const payload = { format: 'shopeers-erp-warehouse-history', formatVersion: 1, generatedAt: new Date().toISOString(), ledgerPeriod: period, warehouseSkus: warehouses,
+                historicalMappings, warehouseEvidence: { warehouses: evidence }, sourceMeta: { purpose: 'manual_warehouse_history', complete: true, detailFailureCount: 0 } };
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+            link.download = '仓库历史采购证据_' + period + '.json'; link.click();
+            window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+            showToast('已导出完整仓库采购证据；在工作台“历史仓库采购补齐”导入，合格缺项同批自动补齐。');
+        } catch (error) { showToast(error.message || String(error), 'error'); }
+        finally { activeRun = null; button.disabled = false; hideLoading(); renderPageContext(); }
+    }
+
     function createUi() {
         if (!document.body || (!isTopFrame && !isPurchasePage())) return false;
 
@@ -2435,6 +2466,7 @@
         const existingRoot = document.getElementById('erpa-cost-root');
         if ((existingTrigger || !isTopFrame) && existingRoot) return true;
         if (existingTrigger) existingTrigger.remove();
+        document.getElementById('erpa-history-trigger')?.remove();
         if (existingRoot) existingRoot.remove();
 
         const trigger = document.createElement('button');
@@ -2463,7 +2495,8 @@
                     '<button class="erpa-button" id="erpa-copy" type="button"><b aria-hidden="true">⎘</b><span>复制成本</span></button>' +
                     '<button class="erpa-button" id="erpa-retry-delivery" type="button"><span>重试回传</span></button>' +
                     '<button class="erpa-button" id="erpa-export" type="button"><b aria-hidden="true">⇩</b><span>导出 CSV</span></button></div>' +
-                '<div class="erpa-status-region"><div id="erpa-task-status" role="status" aria-live="polite"></div><div class="erpa-catalog-progress" id="erpa-catalog-progress" hidden><div><span id="erpa-catalog-message" role="status" aria-live="polite"></span><div id="erpa-catalog-meters"></div></div><button class="erpa-button" id="erpa-cancel-catalog" type="button">取消补充</button></div>' +
+                '<details class="erpa-history-review"><summary>映射缺失或解绑：仓库历史核价</summary><p>只读取输入仓库的完整采购历史，保留原任务进度。导出后由工作台自动核对唯一历史关联和采购价格。</p><label for="erpa-history-skus">仓库 SKU（每行一个，最多20个）</label><textarea class="erpa-search" id="erpa-history-skus" rows="2"></textarea><label for="erpa-history-period">核价月份</label><input id="erpa-history-period" type="month"><button class="erpa-button" id="erpa-history-export" type="button">定向读取并导出证据</button></details>' +
+                '<div class="erpa-status-region"><div id="erpa-task-status" role="status" aria-live="polite"></div><div class="erpa-catalog-progress" id="erpa-catalog-progress" hidden><div><span id="erpa-catalog-message" role="status" aria-live="polite"></span><div id="erpa-catalog-meters"></div></div><button class="erpa-button" id="erpa-cancel-catalog" type="button">取消本次补充</button></div>' +
                 '<div class="erpa-statusbar" id="erpa-statusbar"></div><p class="erpa-result-scope" id="erpa-result-scope"></p><p class="erpa-result-scope" id="erpa-catalog-state" hidden></p></div>' +
                 '<div class="erpa-table-wrap" id="erpa-table-wrap"><table class="erpa-table">' +
                     '<colgroup><col style="width:180px"><col style="width:175px"><col style="width:180px"><col style="width:220px">' +
@@ -2486,6 +2519,10 @@
 
         if (isTopFrame) document.body.appendChild(trigger);
         document.body.appendChild(root);
+        if (isPurchasePage()) {
+            const historyTrigger = document.createElement('button'); historyTrigger.id = 'erpa-history-trigger'; historyTrigger.type = 'button'; historyTrigger.textContent = '仓库历史核价';
+            historyTrigger.addEventListener('click', () => void openPanel({ historyOnly: true })); document.body.appendChild(historyTrigger);
+        }
 
         const cachedResult = getResultCache();
         if (cachedResult) {
@@ -2512,6 +2549,7 @@
         }
 
         document.getElementById('erpa-close').addEventListener('click', closePanel);
+        document.getElementById('erpa-history-export').addEventListener('click', () => void exportWarehouseHistory());
         document.getElementById('erpa-recalculate').addEventListener('click', requestRecalculate);
         document.getElementById('erpa-supplement-catalog').addEventListener('click', () => {
             const batches = collectionTaskState?.batches || [];
