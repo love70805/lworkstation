@@ -31,4 +31,9 @@
 - 最终包内真实 Chromium 扩展独立历史入口、只读两条指定仓库、共享订单明细一次、完整 JSON 下载和原任务保持通过。6 组隐藏原生 WebView 浅深色响应布局通过；隐藏窗口没有可截图显示表面，使用实际 DOM、固定 viewport 和尺寸测量验收，不替代可见窗口行为。
 - 100 秒后台保活、服务重启后自动重连与已送达保持通过；隐藏 packaged smoke 可见窗口 0。748 个安装文件、702 个生产输入逐字节一致。候选源码 `f7ad7ee0b6455d372f3b0fd635ea94addf2b6509`，安装包 SHA256 `D73062ABB2DC296B96BD0BF712AB767DD8CFFF5B0BDEA800C83D9409826DAAA8`。
 
-候选已登记 `releases/candidates/0.4.43/`；原始验收在 `archive/erp-unbound-history-20261019/`。后续同批完成 PR/主线 CI、合并和稳定发布；不安装或重启用户软件。
+候选已登记 `releases/candidates/0.4.43/`；原始验收在 `archive/erp-unbound-history-20261019/`。候选、PR/主线 CI、合并和稳定发布分别完成；不安装或重启用户软件。
+
+
+## 合并与发布
+
+[PR #251](https://github.com/love70805/lworkstation/pull/251) 已合并，PR 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/39153734389) 两项均通过。标签 v0.4.43 固定于 `a2e82127b582578e87f015e4b1cb37c00fe76ebb`，合并全部跟踪树与 PR 候选一致；相对安装包验收源码仅补充交付文档，生产输入保持一致。2026-10-18T18:31:45Z 已公开为稳定 Latest（非草稿、非预发布）。发布服务核对版本、标签、稳定通道及四资产上传状态、字节数与 SHA256 digest；公开下载无需验证。
