@@ -5,6 +5,10 @@
   "integrationBranch": "codex/erp-collection-speed",
   "requiredCommits": [
     {
+      "module": "v0.4.42-HTTP-request-diagnostics-preservation",
+      "commit": "a6997764280962fe05186deb4f15c777f479c6cb"
+    },
+    {
       "module": "v0.4.42-pipelined-authoritative-reads-and-exact-SKU-discovery",
       "commit": "26ff515749f8a4df988580f5f79082c6598f975e"
     },
