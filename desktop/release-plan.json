@@ -1,9 +1,21 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.41",
+  "version": "0.4.42",
   "candidateOnly": true,
-  "integrationBranch": "codex/large-data-responsiveness",
+  "integrationBranch": "codex/erp-collection-speed",
   "requiredCommits": [
+    {
+      "module": "v0.4.42-HTTP-request-diagnostics-preservation",
+      "commit": "a6997764280962fe05186deb4f15c777f479c6cb"
+    },
+    {
+      "module": "v0.4.42-pipelined-authoritative-reads-and-exact-SKU-discovery",
+      "commit": "26ff515749f8a4df988580f5f79082c6598f975e"
+    },
+    {
+      "module": "v0.4.42-verified-main-baseline",
+      "commit": "b3b5593d47fb6987c6fb8e3eaa3fdd7b6026a0a5"
+    },
     {
       "module": "v0.4.41-large-data-read-model-and-cost-timing",
       "commit": "81cb6428077ad26603212ed8c4b2a72f157ca0ab"

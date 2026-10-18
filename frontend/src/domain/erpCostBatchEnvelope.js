@@ -295,6 +295,8 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     "warehouseSkuCount", "platformSkuCount", "durationMs", "detailFailureCount",
     "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "costWarningCount",
     "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount",
+    "skuLookupCount", "recoveredMappingCount", "additionalWarehouseHistoryCount",
+    "requestCount", "requestRetryCount", "requestErrorCount", "rateLimitCount", "peakRequestConcurrency", "requestDurationMs",
   ];
   const result = {
     evidenceVersion: legacy ? 0 : (Number(meta.evidenceVersion) || ERP_COST_EVIDENCE_VERSION),

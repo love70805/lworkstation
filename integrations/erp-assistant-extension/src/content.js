@@ -10,7 +10,9 @@
     const SKU_PATH = '/purchase/product/v1/product-info-sku';
     const PURCHASE_PAGE_PATH = '/view/system/purchaseOrderModule/purchasingManagement.html';
     const MAX_RECORDS = 3;
-    const MAX_CONCURRENT_DETAIL = 8;
+    const MAX_CONCURRENT_DETAIL = 12;
+    const MAX_REQUEST_CONCURRENCY = 12;
+    const REQUEST_RECOVERY_DELAY_MS = 30000;
     const MAX_CONCURRENT_SKU = 5;
     const REQUEST_TIMEOUT = 120000;
     const COST_STAGE_BUDGET_MS = 60 * 60 * 1000;
@@ -20,7 +22,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.45';
+    const EXTENSION_VERSION = '8.0.46';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -77,6 +79,9 @@
     let requestTurns = 0;
     let requestLimit = 8;
     let throttleUntil = 0;
+    let requestRecoveryAt = 0;
+    let healthyRequests = 0;
+    let readProgressTimer = null;
     const isTopFrame = window.top === window;
     const expandedRows = new Set();
 
@@ -354,8 +359,11 @@
         }, REQUEST_TIMEOUT);
 
         try {
+            const metrics = parentSignal?.readMetrics;
+            if (metrics) { metrics.requestCount += 1; metrics.peakRequestConcurrency = Math.max(metrics.peakRequestConcurrency, requestSlots); }
             const response = await Promise.race([nativeFetch(buildUrl(path, params), {
                 credentials: 'include',
+                cache: 'no-store',
                 signal: controller.signal,
                 headers: {
                     Accept: 'application/json',
@@ -370,7 +378,7 @@
                     const value = response.headers?.get?.('Retry-After');
                     const delay = value && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
                     error.retryAfter = Number.isFinite(delay) ? Math.max(0, delay) : 1000;
-                    requestLimit = 2; throttleUntil = Math.max(throttleUntil, Date.now() + error.retryAfter);
+                    error.status = 429;
                 }
                 throw error;
             }
@@ -382,6 +390,7 @@
                     throw new CostError(context + '数据格式异常', 'ERP 返回了网页，未取得接口数据。');
                 }
                 const body = await Promise.race([response.json(), aborted]);
+                if (Number(body?.code) === 429) throw Object.assign(new CostError(context + '请求失败', 'HTTP 429 · ERP 请求过于频繁'), { status: 429, retryAfter: 1000 });
                 if (response.status === 401 || response.status === 403 || [401, 403].includes(Number(body?.code)) || /登录|login|session.*expired/i.test(String(body?.msg || body?.message || ''))) {
                     erpSessionState = 'login_required';
                     taskCache.clear();
@@ -438,14 +447,38 @@
                 }
                 if (activeRun?.pauseRequested) throw Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' });
                 requestSlots += 1;
+                const metrics = parentSignal?.readMetrics;
+                const requestedAt = Date.now();
                 renderReadProgress();
-                try { return await apiGet(path, params, parentSignal, context); }
-                finally { requestSlots -= 1; renderReadProgress(); }
+                try {
+                    const result = await apiGet(path, params, parentSignal, context);
+                    if (Number(result?.code) === 0 && ++healthyRequests >= 16 && Date.now() >= requestRecoveryAt) {
+                        requestLimit = Math.min(MAX_REQUEST_CONCURRENCY, requestLimit + 2);
+                        healthyRequests = 0;
+                        requestRecoveryAt = Date.now() + 1000;
+                    }
+                    return result;
+                } finally {
+                    if (metrics) metrics.requestDurationMs += Math.max(0, Date.now() - requestedAt);
+                    requestSlots -= 1; renderReadProgress();
+                }
             } catch (error) {
                 lastError = error;
+                const metrics = parentSignal?.readMetrics;
+                if (metrics) metrics.requestErrorCount += 1;
+                healthyRequests = 0;
+                if (error.status === 429) {
+                    requestLimit = 2;
+                    throttleUntil = Math.max(throttleUntil, Date.now() + Math.max(1000, error.retryAfter || 0));
+                    requestRecoveryAt = Math.max(throttleUntil, Date.now() + REQUEST_RECOVERY_DELAY_MS);
+                    if (metrics) metrics.rateLimitCount += 1;
+                }
                 if (parentSignal && parentSignal.aborted) throw error;
                 if (!isRetryableError(error)) throw error;
-                if (attempt < RETRY_COUNT) await wait(Math.min(1000, Math.max(500 * (attempt + 1), error.retryAfter || 0)), parentSignal);
+                if (attempt < RETRY_COUNT) {
+                    if (metrics) metrics.requestRetryCount += 1;
+                    await wait(Math.min(1000, Math.max(500 * (attempt + 1), error.retryAfter || 0)), parentSignal);
+                }
             }
         }
         throw serviceUnavailable(context, lastError?.details || lastError?.message || '有限重试后仍未取得响应');
@@ -839,6 +872,7 @@
         const snapshotKey = 'purchase_pages_v2_' + JSON.stringify([run.requestId || run.queryCapturedAt || '', run.ledgerPeriod || '', filters]);
         const complete = getCache(snapshotKey + ':complete');
         if (complete?.countMismatch === false && Array.isArray(complete.orders)) {
+            run.onPurchaseOrders?.(complete.orders);
             run.onPurchasePage?.(complete.pageCount, complete.pageCount, '复用已读齐采购 · ' + complete.orders.length + ' 个订单');
             return complete;
         }
@@ -918,6 +952,7 @@
             }
             if (hasReportedCount && uniqueOrders.size > reportedCount) throw new CostError('采购列表数量不一致', '返回订单超过接口声明总数，请重新查询；不能将变化中的记录作为完整证据。');
             setCache(snapshotKey + ':' + cacheRevision + ':' + page, pageResponse);
+            run.onPurchaseOrders?.(pageData);
             completedPageCount = page;
             run.onPurchasePage?.(page, reportedPageCount, '已读 ' + uniqueOrders.size + ' 个订单');
             if (hasReportedCount && uniqueOrders.size >= reportedCount) {
@@ -941,6 +976,54 @@
         return completed;
     }
 
+    function isCancelledOrder(order) {
+        return resultPolicy.cancelledPurchase(Object.fromEntries(Object.entries(order || {}).filter(([key]) => /(status|state|状态)/i.test(key))));
+    }
+
+    async function readOrderDetails(order, run) {
+        const id = String(order.purchaseOrderId || '').trim();
+        const cacheKey = 'detail_' + id;
+        const cached = getCache(cacheKey);
+        if (Array.isArray(cached)) return cached.map(detail => withOrderContext(detail, order, id));
+        run.detailReadPromises ??= new Map();
+        if (!run.detailReadPromises.has(id)) {
+            const reading = (async () => {
+                const response = await apiGetRetry(DETAIL_PATH, { purchaseOrderId: id, supplierId: order.supplierId || '' }, run.controller.signal,
+                    '采购单 ' + (order.purchaseOrderNo || order.purchaseOrderNo1688 || id) + ' 明细');
+                const data = requireApiList(response, '采购单 ' + (order.purchaseOrderNo || id) + ' 明细');
+                setCache(cacheKey, data);
+                return data;
+            })();
+            run.detailReadPromises.set(id, reading);
+            void reading.catch(() => {}); // Pagination can fail before the final drain.
+        }
+        return (await run.detailReadPromises.get(id)).map(detail => withOrderContext(detail, order, id));
+    }
+
+    function prefetchPurchaseDetails(run) {
+        const queued = [], seen = new Set();
+        const controller = run.controller;
+        let active = 0, closed = false;
+        const pump = () => {
+            // Four lanes remain available for ordered list pagination. The final
+            // detail drain uses the whole adaptive pool after all lists verify.
+            while (!closed && !controller.signal.aborted && active < 4 && queued.length) {
+                const order = queued.shift(); active += 1;
+                void readOrderDetails(order, run).catch(error => {
+                    if (['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error.code)) controller.abort(error);
+                }).finally(() => { active -= 1; pump(); });
+            }
+        };
+        return { enqueue(orders) {
+            for (const order of orders) {
+                const id = String(order.purchaseOrderId || '').trim();
+                if (!id || seen.has(id) || isCancelledOrder(order)) continue;
+                seen.add(id); queued.push(order);
+            }
+            pump();
+        }, close() { closed = true; queued.length = 0; } };
+    }
+
     async function fetchAllDetails(orders, run) {
         const orderStatusValues = (order) => {
             const values = [
@@ -957,9 +1040,6 @@
                 if (/(status|state|状态)/i.test(key)) values.push(order[key]);
             });
             return [...new Set(values.map((value) => String(value || '').normalize('NFKC').trim()).filter(Boolean))];
-        };
-        const isCancelledOrder = (order) => {
-            return resultPolicy.cancelledPurchase(Object.fromEntries(Object.entries(order || {}).filter(([key]) => /(status|state|状态)/i.test(key))));
         };
         const validOrders = orders.filter((order) => !isCancelledOrder(order));
         const excludedOrders = orders.filter(isCancelledOrder).map((order) => ({
@@ -983,21 +1063,9 @@
             MAX_CONCURRENT_DETAIL,
             async (order, index, lane) => {
                 const id = String(order.purchaseOrderId || '').trim();
-                const cacheKey = 'detail_' + id;
-                const cached = getCache(cacheKey);
-                if (Array.isArray(cached)) return cached.map((detail) => withOrderContext(detail, order, id));
                 if (!run.catalogPhase) setReadLane(run, lane, { title: '采购单 ' + (order.purchaseOrderNo || id) });
                 try {
-                    const response = await apiGetRetry(
-                        DETAIL_PATH,
-                        { purchaseOrderId: id, supplierId: order.supplierId || '' },
-                        run.controller.signal,
-                        '采购单 ' + (order.purchaseOrderNo || order.purchaseOrderNo1688 || id) + ' 明细'
-                    );
-                    const data = requireApiList(response, '采购单 ' + (order.purchaseOrderNo || id) + ' 明细');
-                    const normalized = data.map((detail) => withOrderContext(detail, order, id));
-                    setCache(cacheKey, normalized);
-                    return normalized;
+                    return await readOrderDetails(order, run);
                 } catch (error) {
                     if (run.controller.signal.aborted || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error.code)) throw error;
                     failedOrders.push({ id, no: order.purchaseOrderNo || order.purchaseOrderNo1688 || id, message: error.message || String(error) });
@@ -1273,6 +1341,9 @@
 
     async function runCalculation(filters, run) {
         const startedAt = Date.now();
+        run.detailReadPromises = new Map();
+        run.readMetrics = { requestCount: 0, requestRetryCount: 0, requestErrorCount: 0, rateLimitCount: 0, peakRequestConcurrency: 0, requestDurationMs: 0 };
+        run.controller.signal.readMetrics = run.readMetrics;
         const capturedSkcs = extractQuerySkcs(filters);
         const previewContext = run.previewContext || await readPreviewContext(capturedSkcs, run.queryCapturedAt);
         // Inbox identities are { platformSkc, canonicalPlatformSkc } objects.
@@ -1311,12 +1382,34 @@
             scopedState = resultPolicy.filterCatalogByPlatformScope(directoryState.results, run.expectedSkus, querySkcs, run.platformTargets);
             missingTargets = resultPolicy.missingPlatformTargets(scopedState.results, run.expectedSkus, querySkcs, run.platformTargets);
         }
+        const originalWarehouses = new Set(directoryState.results.map(result => resultPolicy.canonical(result.warehouseSku)));
+        const skuLookupCount = missingTargets.length;
+        if (missingTargets.length) {
+            setLoading('按缺失平台 SKU 精确核对档案', '只查询未匹配规格；仍需完整 SKU/SKC/仓库关系确认');
+            const lookup = await catalogCollector.directory(missingTargets.map(target => target.platformSku), run, { targetType: 'sku' });
+            const lookupMappingState = await fetchMappings(lookup.results, run);
+            directoryState = { ...directoryState, results: [...new Map([...directoryState.results, ...lookup.results].map(result => [resultPolicy.canonical(result.warehouseSku), result])).values()],
+                complete: directoryState.complete && lookup.complete, failures: [...directoryState.failures, ...lookup.failures] };
+            mappingState.failedMappings.push(...lookupMappingState.failedMappings);
+            scopedState = resultPolicy.filterCatalogByPlatformScope(directoryState.results, run.expectedSkus, querySkcs, run.platformTargets);
+            missingTargets = resultPolicy.missingPlatformTargets(scopedState.results, run.expectedSkus, querySkcs, run.platformTargets);
+            missingTargets = missingTargets.map(target => {
+                const state = lookup.targets.find(item => resultPolicy.canonical(item.platformSku) === resultPolicy.canonical(target.platformSku));
+                return { ...target, reason: !state?.complete ? 'sku_directory_incomplete' : !state.warehouseSkus.length ? 'sku_directory_empty' : 'sku_pair_not_confirmed',
+                    message: !state?.complete ? '平台 SKU 精确查询未完整返回，尚不能确认仓库映射' : !state.warehouseSkus.length
+                        ? '平台 SKU 精确查询没有返回仓库档案，请核对 ERP 当前关联' : '已查到 SKU 档案，但未返回一致的 SKU/SKC/仓库映射，请核对 ERP 当前关联' };
+            });
+        }
         mappingState.failedMappings.push(...missingTargets);
         const scopedWarehouseSkus = new Set(scopedState.results.map(result => resultPolicy.canonical(result.warehouseSku)));
         if (!scopedWarehouseSkus.size) throw new CostError('目标平台规格未取得映射', missingTargets.map(target => target.platformSkc + ' / ' + target.platformSku).join('\n') + '\n请在 ERP 核对这些已使用规格的映射，不能用其他仓库档案代替。');
-        beginReadProgress(run, '采购列表', querySkcs.length, '个 SKC');
-        const targetStates = await mapConcurrent(querySkcs, run.task?.executionProtocol === 2 ? 4 : 2, async (skc, index, lane) => {
-            const targetRun = { ...run, onPurchasePage: (completed, total, meta) => setReadLane(run, lane, { title: skc, completed, total, unit: '页', meta }) };
+        const additionalWarehouses = scopedState.results.filter(result => !originalWarehouses.has(resultPolicy.canonical(result.warehouseSku))).map(result => result.warehouseSku);
+        const historyTargets = [...new Set([...querySkcs, ...additionalWarehouses])];
+        const detailPipeline = run.task?.executionProtocol === 2 ? prefetchPurchaseDetails(run) : null;
+        beginReadProgress(run, '采购列表与明细', historyTargets.length, '个目标');
+        let targetStates;
+        try { targetStates = await mapConcurrent(historyTargets, run.task?.executionProtocol === 2 ? 4 : 2, async (skc, index, lane) => {
+            const targetRun = { ...run, onPurchaseOrders: detailPipeline?.enqueue, onPurchasePage: (completed, total, meta) => setReadLane(run, lane, { title: skc, completed, total, unit: '页', meta }) };
             try {
                 const state = await fetchAllOrders(completeHistoryFilters(filters, skc), targetRun);
                 if (!state.countMismatch) run.completedTargets.push(skc);
@@ -1325,8 +1418,8 @@
             } finally { run.readProgress.lanes.delete(lane); }
         }, run, completed => {
             run.readProgress.completed = completed;
-            setLoading('采购列表', '');
-        });
+            setLoading('采购列表与明细', '');
+        }); } finally { detailPipeline?.close(); }
         const orderState = { ...targetStates[0], orders: [...new Map(targetStates.flatMap(state => state.orders).map(order => [String(order.purchaseOrderId), order])).values()], pageCount: targetStates.reduce((sum, state) => sum + state.pageCount, 0), countMismatch: targetStates.some(state => state.countMismatch), pageRowCounts: targetStates.flatMap(state => state.pageRowCounts) };
         const orders = orderState.orders;
         const detailState = await fetchAllDetails(orders, run);
@@ -1380,6 +1473,10 @@
                 scopeDirectoryComplete: directoryState.complete,
                 scopeDirectoryFailures: directoryState.failures,
                 scopeRetrySkcCount: retrySkcs.length,
+                skuLookupCount,
+                recoveredMappingCount: skuLookupCount - missingTargets.length,
+                additionalWarehouseHistoryCount: additionalWarehouses.length,
+                ...run.readMetrics,
                 targetMappingFailureCount: missingTargets.length,
                 ignoredDetailCount: detailState.details.filter(detail => !scopedWarehouseSkus.has(resultPolicy.canonical(detail.itemId))).length,
                 mappingScopeApplied: scopedState.scoped,
@@ -1529,7 +1626,7 @@
     }
 
     async function runBatchedCalculation(run) {
-        taskCache.clear(); requestLimit = 8; throttleUntil = 0;
+        taskCache.clear(); requestLimit = 8; throttleUntil = 0; requestRecoveryAt = 0; healthyRequests = 0;
         const bridge = window.ShopeersErpDeliveryBridge;
         let task = run.task;
         if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
@@ -2156,6 +2253,14 @@
     }
 
     function renderReadProgress() {
+        if (!activeRun || readProgressTimer != null) return;
+        readProgressTimer = window.setTimeout(() => {
+            readProgressTimer = null;
+            paintReadProgress();
+        }, 100);
+    }
+
+    function paintReadProgress() {
         const run = activeRun;
         if (!run) return;
         const host = document.getElementById(run.catalogPhase ? 'erpa-catalog-meters' : 'erpa-loading-meters');
@@ -2201,6 +2306,7 @@
     }
 
     function hideLoading() {
+        window.clearTimeout(readProgressTimer); readProgressTimer = null;
         const catalog = document.getElementById('erpa-catalog-progress');
         if (catalog) catalog.hidden = true;
         const loading = document.getElementById('erpa-loading');

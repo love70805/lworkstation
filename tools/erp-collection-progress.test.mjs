@@ -43,9 +43,11 @@ try {
   window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=A,B,C' } }));
   window.document.getElementById('erpa-cost-trigger').click();
   await until(() => pending.size === 2);
+  await until(() => /正在处理 2 个目标/.test(window.document.getElementById('erpa-loading-meters').textContent));
   assert.match(window.document.getElementById('erpa-loading-meters').textContent, /正在处理 2 个目标.*实际读取 2 \/ 8 个请求/);
   for (const skc of skcs) await reply('product-page:' + skc + ':1', ids.filter(id => id[0] === skc).map(id => ({ itemId: 'W-' + id })), ids.filter(id => id[0] === skc).length);
   await until(() => pending.size === 5);
+  await until(() => /平台 SKU 映射/.test(stage().getAttribute('aria-label')));
   assert.match(stage().getAttribute('aria-label'), /平台 SKU 映射/); assert.equal(stage().value, 0); assert.equal(stage().max, 9);
   await reply('product-info-sku:W-A1:', '查询结果为空', 0);
   await until(() => stage().value === 1);
@@ -60,12 +62,15 @@ try {
   await until(() => pending.size === 5);
   await reply('product-info-sku:W-A1:', '查询结果为空', 0);
   for (const id of ids.filter(id => id[0] === 'A' && id !== 'A1')) await reply('product-info-sku:W-' + id + ':', [{ associatedProductId: 'W-' + id, barcodeSkuid: 'SKU-W-' + id, barcodeSkcid: 'A' }], 1);
+  await reply('product-page:SKU-W-A1:1', [], 0);
   await until(() => pending.size === 2 && [...pending.keys()].every(key => key.startsWith('purchase-order-page:')));
+  await until(() => stage().max === 3 && stage().value === 0);
   assert.equal(stage().getAttribute('value'), '0'); assert.equal(stage().max, 3);
   assert.equal(lane(0).hasAttribute('value'), false, 'total pages remain unknown until ERP responds');
   await reply('purchase-order-page:A:1', orders('A1', 'A2'), 5);
   await reply('purchase-order-page:B:1', orders('B1'), 3);
   await until(() => pending.has('purchase-order-page:B:2') && pending.has('purchase-order-page:A:2'));
+  await until(() => lane(0)?.value === 1 && lane(1)?.value === 1);
   assert.equal(lane(0).value, 1); assert.equal(lane(0).max, 3);
   assert.equal(lane(1).value, 1); assert.equal(stage().value, 0, 'started targets are not completed targets');
   await reply('purchase-order-page:B:2', orders('B2'), 3);
@@ -73,17 +78,19 @@ try {
   assert.equal(lane(0).value, 1, 'a faster worker cannot overwrite the slower worker page count');
   await reply('purchase-order-page:B:3', orders('B3'), 3);
   await until(() => pending.has('purchase-order-page:C:1'));
+  await until(() => stage().value === 1 && !lane(1)?.hasAttribute('value'));
   assert.equal(stage().value, 1); assert.equal(stage().max, 3);
   assert.equal(lane(1).hasAttribute('value'), false);
   await reply('purchase-order-page:C:1', orders('C1'));
   await until(() => pending.has('purchase-order-page:C:2'));
+  await until(() => /已读 1 页/.test(window.document.querySelector('[data-progress-lane="1"]')?.textContent));
   assert.equal(lane(1).hasAttribute('value'), false);
   assert.match(window.document.querySelector('[data-progress-lane="1"]').textContent, /已读 1 页.*总量待确认/);
   await reply('purchase-order-page:C:2', []);
   await until(() => stage().value === 2);
   await reply('purchase-order-page:A:2', orders('A3', 'A4'), 5);
   await reply('purchase-order-page:A:3', orders('A5'), 5);
-  await until(() => pending.size === 8);
+  await until(() => pending.size === 9 && /采购明细/.test(stage().getAttribute('aria-label')));
   assert.match(stage().getAttribute('aria-label'), /采购明细/); assert.equal(stage().max, 9); assert.equal(stage().value, 0);
   const details = id => [{ purchaseOrderDetailId: 'D-' + id, itemId: 'W-' + id, creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }];
   for (let i = 0; i < 7; i++) {

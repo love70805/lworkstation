@@ -29,7 +29,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, storageRoundTrip(structuredClone(values))); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.45' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.46' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -341,7 +341,11 @@ assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted:
 console.log('8.0.42 checkpoint retained under 8.0.43 catalog presentation update');
 storage[checkpointKey][0].extensionVersion = '8.0.43';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.43 checkpoint retained under 8.0.45 coordinated continuation');
+console.log('8.0.43 checkpoint retained under 8.0.46 coordinated continuation');
 storage[checkpointKey][0].extensionVersion = '8.0.44';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.44 checkpoint retained under 8.0.45 cost timing display update');
+console.log('8.0.44 checkpoint retained under 8.0.46 cost timing display update');
+
+storage[checkpointKey][0].extensionVersion = '8.0.45';
+assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
+console.log('8.0.45 checkpoint retained under 8.0.46 collection throughput update');

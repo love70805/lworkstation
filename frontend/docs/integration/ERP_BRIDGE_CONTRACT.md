@@ -88,3 +88,12 @@ v2 回传行必须包含 `ledgerScopeRole`：
 - 自动采用恢复只扫描待处理或已载入收件；采用状态轮询只保留轻量摘要。原始回传、审计和正式成本保持。
 - 全部成本批次取得 `deliveryId` 后，采集历时以最后有效 `deliveredAt`（旧数据兼容 `collectedAt`）结束；采用状态更新、按需资料补齐不能延长成本采集时长。缺少历史时间时显示暂无记录。
 - 任务中的映射缺项按已保存的 `sourceMeta.mappingFailures` 展示平台 SKU、SKC 与原因，仅用于定位，不猜测关系或自动升级为正式成本。助手内置与下载版本同步为 8.0.45。
+
+## 0.4.42 实际读取调度与精确 SKU 补查
+
+- 列表每页仍按顺序核对总数、重复页及终点；已验证页的订单可提前读取明细。并发中的同一订单共用一个读取 Promise，最后按完整列表汇总证据，缺页、明细失败和取消继续阻止完整采用。
+- 请求以 8 路起步，连续健康响应逐级扩至最多 12 路；HTTP/业务 429 遵守 Retry-After 并降为 2 路，稳定等待后逐步恢复。进度绘制合并为最多每 100 毫秒一次，不改变真实完成计数、取消或心跳。
+- SKC 目录未找到已登记目标时，复用已观察的 ERP 综合商品查询 `skuGroup` 字段按缺失平台 SKU 精确查档；仍需当前返回的准确 SKU/SKC/仓库关系。仅对确认的目录外仓库补读其完整采购历史，其他 SKU、错误 SKC、失败/缺页查询均不能借用成本。
+- 新读取明确绕过浏览器 HTTP 缓存，同次未中断任务仍可复用已完整读取的原始证据。历史缓存和 `temporary` 字段仅用于定位，不构成当前关联或正式成本证明。
+- `sourceMeta` 增加 `skuLookupCount`、`recoveredMappingCount`、`additionalWarehouseHistoryCount`，以及 `requestCount`、`requestRetryCount`、`requestErrorCount`、`rateLimitCount`、`peakRequestConcurrency`、`requestDurationMs`。请求次数记录 fetch 尝试，时长为各请求累计耗时（可重叠），不作金融判断或任务壁钟时间；不含 Cookie、Token、过滤条件或登录材料。
+- 助手 8.0.46，兼容 8.0.45 检查点。人工成本优先、工作区/月度身份及定稿保护保持。
