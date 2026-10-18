@@ -12,9 +12,9 @@
 
 ## 合并与公开发布
 
-候选通过；PR/主线 CI、合并和稳定发布待补录，当前稳定版仍为 0.4.42。
+[PR #251](https://github.com/love70805/lworkstation/pull/251) 已合并，PR 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/39153734389) 两项均通过。标签 v0.4.43 固定于 `a2e82127b582578e87f015e4b1cb37c00fe76ebb`，合并全部跟踪树与 PR 候选一致；相对安装包验收源码仅补充交付文档，生产输入保持一致。2026-10-18T18:31:45Z 已公开为稳定 Latest（非草稿、非预发布）。发布服务核对版本、标签、稳定通道及四资产上传状态、字节数与 SHA256 digest；公开下载无需验证。
 
-| 待发布资产 | 字节数 | SHA256 |
+| 公开资产 | 字节数 | SHA256 |
 | --- | --- | --- |
 | Lworkstation-Setup-0.4.43.exe | 120422348 | `D73062ABB2DC296B96BD0BF712AB767DD8CFFF5B0BDEA800C83D9409826DAAA8` |
 | Lworkstation-Setup-0.4.43.exe.blockmap | 127104 | `CED5F1DED75D8C432650713A170EE41B639D5F8C7B077CBB494F4959C0D46795` |
