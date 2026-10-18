@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.42",
+  "version": "0.4.43",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-collection-speed",
+  "integrationBranch": "codex/erp-unbound-history",
   "requiredCommits": [
+    {
+      "module": "v0.4.43-directed-history-and-one-batch-cost-recovery",
+      "commit": "6b43bff4a668726b469b8d2f5802a0c3b48ef3dd"
+    },
+    {
+      "module": "v0.4.43-verified-main-baseline",
+      "commit": "f7b37e05b19af0f610b3a340192a6e82cdc9da1d"
+    },
     {
       "module": "v0.4.42-HTTP-request-diagnostics-preservation",
       "commit": "a6997764280962fe05186deb4f15c777f479c6cb"
