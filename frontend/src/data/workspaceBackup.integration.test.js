@@ -49,16 +49,16 @@ it('round trips desktop receipts, exact manual rows and cost drafts using a comm
   expect(window.shopeersDesktopRuntime.finishInboxRestore).toHaveBeenCalledWith({id:'restore-synthetic'});
 });
 
-it('keeps a failed desktop completion blocked and finishes from its durable IndexedDB marker',async()=>{
+it.each([{ok:false,error:'synthetic desktop disk failure'},undefined])('keeps an unsuccessful desktop completion blocked and finishes from its durable marker: %j',async failure=>{
   const payload=await createWorkspaceBackupPayload();
   payload.desktopInbox={format:'lworkstation-desktop-inbox-backup',formatVersion:1,recordCount:0,leaseCount:0,records:[],leases:[]};
   payload.manifest={...payload.manifest,desktopInboxIncluded:true,desktopRecordCount:0,desktopLeaseCount:0};
   let failing=true;
   window.shopeersDesktopRuntime={desktop:true,prepareInboxRestore:vi.fn().mockResolvedValue({ok:true,id:'pending-synthetic'}),recoverInboxRestore:vi.fn().mockImplementation(async input=>{
-    if(input.committedId&&failing)return {ok:false,error:'synthetic desktop disk failure'};
+    if(input.committedId&&failing)return failure;
     return input.committedId?{ok:true,id:input.committedId}:{ok:true};
   }),finishInboxRestore:vi.fn().mockResolvedValue({ok:true})};
-  await expect(restoreWorkspaceBackupPayload(payload)).rejects.toThrow('synthetic desktop disk failure');
+  await expect(restoreWorkspaceBackupPayload(payload)).rejects.toThrow();
   expect((await db.settings.get('desktopInboxRestoreCommit')).value).toBe('pending-synthetic');
   expect(await runWorkspaceBackgroundTask(()=> 'must wait')).toBeNull();
   failing=false;await recoverWorkspacePreferenceRestore();

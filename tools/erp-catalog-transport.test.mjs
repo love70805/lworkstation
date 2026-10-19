@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {readInboxRecords} from './fixtures/inbox-persistence.mjs';
 
 const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
 const extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension", "src");
@@ -276,7 +277,7 @@ export async function verifyErpCatalogTransport({
     assert.equal(blue.totalPrice, 10, "2:1 procurement split must retain recorded warehouse-unit price");
     const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v7"));
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
-    const persisted = JSON.parse(await fs.readFile(spoolPath, "utf8"));
+    const persisted = await readInboxRecords(spoolPath);
     assert.deepEqual(persisted.find((record) => record.kind === "batch" && record.workspaceId === workspaceId).envelope.batch.rows, batch.rows);
     assert.doesNotMatch(JSON.stringify(batch), /999999999999|888888888888|777777777777/, "global DOM and order-level product links must never enter detail evidence");
 

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createInboxDisk} from './erp-inbox-disk.mjs';
 import {createInboxStorage,cloneInboxMetadata} from './erp-inbox-storage.mjs';
+import {erpCatalogRequestProgress} from '../frontend/src/domain/erpCatalogRequest.js';
 
 const directory=await fs.mkdtemp(path.join(os.tmpdir(),'erp-incremental-'));
 try {
@@ -43,7 +44,21 @@ try {
   await fs.appendFile(`${file}.journal`,'{"data":"{}","checksum":"invalid"}\n');
   await assert.rejects(createInboxDisk(file).load(),{code:'ERP_INBOX_CORRUPT'});
   await fs.writeFile(`${file}.journal`,committed);
+  await fs.rename(path.join(`${file}.evidence`,blob),path.join(`${file}.evidence`,blob+'.preserved'));
+  await assert.rejects(store.hydrate(cold[0]),{code:'ERP_INBOX_CORRUPT'});
+  await fs.rename(path.join(`${file}.evidence`,blob+'.preserved'),path.join(`${file}.evidence`,blob));
   await fs.writeFile(path.join(`${file}.evidence`,blob),'tampered');
   await assert.rejects(store.hydrate(cold[0]),{code:'ERP_INBOX_CORRUPT'});
+  const brokenIndex=JSON.parse(await fs.readFile(file,'utf8'));brokenIndex.entries[0].metadata.status='edited';
+  await fs.writeFile(file,JSON.stringify(brokenIndex));
+  await assert.rejects(createInboxDisk(file).load(),{code:'ERP_INBOX_CORRUPT'});
+  const catalog={type:'shopeers.erp.catalog.batch',catalog:{requestId:'R',workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-09',generatedAt:'2026-09-01T00:00:00Z',query:{platformSkcs:['A']},coverage:{images:{state:'complete'}},rows:[{image:'synthetic-'.repeat(100000)}]}};
+  const catalogStore=createInboxStorage(path.join(directory,'catalog.json'),{coldAcknowledged:true});
+  await catalogStore.write([{kind:'catalog-batch',status:'acknowledged',envelope:catalog}]);
+  const archivedCatalog=(await catalogStore.read())[0];
+  assert.ok(!archivedCatalog.envelope.catalog.rows);
+  const request={requestId:'R',workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-09',platformSkcs:['A'],missingGroups:['images']};
+  assert.deepEqual(erpCatalogRequestProgress(request,[archivedCatalog]),erpCatalogRequestProgress(request,[{envelope:catalog}]),'cold catalog preserves exact coverage progress');
+  assert.deepEqual((await catalogStore.hydrate(archivedCatalog)).envelope,catalog);
   console.log('Incremental inbox: legacy preservation, exact cold hydration/backup, bounded journal/checkpoint, unchanged evidence, torn tail and checksum rejection passed');
 } finally {await fs.rm(directory,{recursive:true,force:true});}
