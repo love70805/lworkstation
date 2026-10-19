@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {Worker} from 'node:worker_threads';
 import {createInboxDisk} from './erp-inbox-disk.mjs';
 import {createInboxStorage,cloneInboxMetadata} from './erp-inbox-storage.mjs';
 import {erpCatalogRequestProgress} from '../frontend/src/domain/erpCatalogRequest.js';
@@ -13,14 +14,22 @@ try {
   const original=JSON.stringify([{kind:'batch',deliveryId:'one',status:'pending',envelope}]);
   await fs.writeFile(file,original);
   const store=createInboxStorage(file,{coldAcknowledged:true,checkpointOperations:4,checkpointBytes:16384});
-  const pending=cloneInboxMetadata(await store.read());
+  let initialWorker,initialRecords;
+  const postMessage=Worker.prototype.postMessage;
+  Worker.prototype.postMessage=function(...args){initialWorker=this;return postMessage.apply(this,args);};
+  try {initialRecords=await store.read();} finally {Worker.prototype.postMessage=postMessage;}
+  const pending=cloneInboxMetadata(initialRecords);
   assert.deepEqual(pending[0].envelope,envelope);
   pending[0].status='acknowledged';await store.write(pending);
   const cold=await store.read();
   assert.ok(cold[0].envelope.__inboxArchive);
   assert.ok(JSON.stringify(cold).length<1024,'acknowledged evidence leaves the resident HTTP snapshot');
   assert.deepEqual((await store.hydrate(cold[0])).envelope,envelope,'duplicate response can restore the exact cold evidence');
-  assert.deepEqual((await store.exportRecords())[0].envelope,envelope,'backup exports full cold evidence');
+  await initialWorker.terminate();
+  assert.strictEqual(await store.read(),cold,'unchanged disk retains the HTTP preview after worker failure');
+  assert.deepEqual((await store.hydrate(cold[0])).envelope,envelope,'first hydration after worker failure restores exact evidence');
+  assert.deepEqual((await store.hydrate(cold[0])).envelope,envelope,'subsequent duplicate hydration retains the replacement index');
+  assert.deepEqual((await store.exportRecords())[0].envelope,envelope,'backup exports full cold evidence after worker failure');
   const backups=(await fs.readdir(directory)).filter(name=>name.includes('.legacy-'));
   assert.equal(backups.length,1);
   assert.equal(await fs.readFile(path.join(directory,backups[0]),'utf8'),original,'legacy source preserved byte-for-byte');
@@ -60,5 +69,5 @@ try {
   const request={requestId:'R',workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-09',platformSkcs:['A'],missingGroups:['images']};
   assert.deepEqual(erpCatalogRequestProgress(request,[archivedCatalog]),erpCatalogRequestProgress(request,[{envelope:catalog}]),'cold catalog preserves exact coverage progress');
   assert.deepEqual((await catalogStore.hydrate(archivedCatalog)).envelope,catalog);
-  console.log('Incremental inbox: legacy preservation, exact cold hydration/backup, bounded journal/checkpoint, unchanged evidence, torn tail and checksum rejection passed');
+  console.log('Incremental inbox: legacy preservation, exact cold hydration/backup after worker failure, bounded journal/checkpoint, unchanged evidence, torn tail and checksum rejection passed');
 } finally {await fs.rm(directory,{recursive:true,force:true});}
