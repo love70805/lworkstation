@@ -16,14 +16,22 @@ const mapping = warehouse => ({ associatedProductId: warehouse, barcodeSkuid: 'S
 const detail = (id, warehouse = 'WH-A') => ({ purchaseOrderDetailId: 'D-' + id, itemId: warehouse, tradeName: '合成商品', creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4, supplierName: '合成供应商' });
 async function fixture(mode, realClock = false) {
  const window = new Window({ url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html' });
- const messages = [], calls = []; let optional = false, fail = true;
+ const messages = [], calls = []; let optional = false, fail = true, expireHugeCatalog;
  const started = Date.now();
  if (!realClock) {
   const schedule = window.setTimeout.bind(window);
   // Separate the overall material deadline from exhausted request retries:
   // 160 ms previously raced three 40 ms timeouts plus backoff/runner overhead.
   const catalogDeadline = mode === 'optional-history-hang' ? 60 : mode === 'optional-service-hang' ? 5000 : 160;
-  window.setTimeout = (fn, ms, ...args) => schedule(fn, ms === 30 * 60 * 1000 ? catalogDeadline : ms === 120000 ? 40 : ms === 8000 ? 15 : ms === 5000 ? 100 : ms === 500 ? 5 : ms === 1000 ? 10 : ms, ...args);
+  window.setTimeout = (fn, ms, ...args) => {
+   // This scenario checks behavior at the material deadline, not CPU speed.
+   // A fast runner can finish all 2,000 synthetic pages within 160 ms.
+   if (mode === 'huge' && ms === 30 * 60 * 1000) {
+    expireHugeCatalog = () => fn(...args);
+    return schedule(fn, ms, ...args);
+   }
+   return schedule(fn, ms === 30 * 60 * 1000 ? catalogDeadline : ms === 120000 ? 40 : ms === 8000 ? 15 : ms === 5000 ? 100 : ms === 500 ? 5 : ms === 1000 ? 10 : ms, ...args);
+  };
  }
  window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
@@ -42,6 +50,11 @@ async function fixture(mode, realClock = false) {
      assert.equal(url.searchParams.get('queryRange'), '0');
      assert.equal(url.searchParams.get('storeId'), 'STORE-A');
      if (optional && ['optional-history-hang', 'optional-service-hang', 'cancel-optional'].includes(mode)) return new Promise(() => {});
+     if (optional && mode === 'huge' && Number(url.searchParams.get('page')) === 12) {
+      assert.equal(typeof expireHugeCatalog, 'function');
+      expireHugeCatalog();
+      return new Promise(() => {});
+     }
      if (optional && mode === 'huge') body = response(Array.from({ length: 50 }, (_, i) => ({ purchaseOrderId: 'H-' + url.searchParams.get('page') + '-' + i })), 100000);
      else body = response([{ purchaseOrderId: 'PO-A' }]);
    } else if (endpoint === 'purchase-order-details') body = response([detail(url.searchParams.get('purchaseOrderId'))]);
@@ -75,11 +88,12 @@ for (const mode of ['optional-history-hang', 'huge']) {
   if (mode === 'huge') {
    const lists = f.calls.filter(c => c.endpoint === 'purchase-order-page');
    assert.ok(lists.length > 11 && lists.length <= 2001, 'history continues past ten pages until the optional time budget, without a fixed order cap');
+   assert.equal(lists.filter(c => c.params.sku === 'WH-UNSOLD').length, 12, 'controlled deadline fires after reading beyond ten optional pages');
    assert.equal(f.calls.filter(c => c.endpoint === 'purchase-order-details').length, 1, 'huge optional history stops before high fan-out details');
    assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial');
    assert.equal(cost(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);
   }
-  checks.push({ mode, clock: 'accelerated deadlines only; unchanged production code', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length });
+  checks.push({ mode, clock: mode === 'huge' ? 'catalog deadline after 12 optional pages; unchanged production code' : 'accelerated deadlines only; unchanged production code', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length });
  } finally { await f.close(); }
 }
 {
