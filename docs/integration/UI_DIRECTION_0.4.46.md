@@ -53,3 +53,10 @@
 ## 回滚
 
 纯前端表现层，无数据库迁移和不可回退写入。回滚方式：安装 0.4.45 稳定包，或 revert 本批 PR；不影响本机数据。
+
+## 交付与候选验收
+
+- [PR #263](https://github.com/love70805/lworkstation/pull/263) 已合并，PR 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/39276509073) 两项均通过；标签 `v0.4.46` 固定于合并提交 `dd1234ecf5513a33982f39c429510c7587319755`，PR 头和合并提交跟踪树一致。
+- 候选 `releases/candidates/0.4.46/`：`Lworkstation Setup 0.4.46.exe` 120432125 字节，SHA256 `3D2D15094D03E9C11B29D5C657D7FC2F92A5E1A2DA2EB7C327D458B85097E86B`；`release:check` 通过。
+- 隐藏 packaged smoke：ok、packaged、version 0.4.46、hiddenMode、可见窗口 0、updater current；包内 `resources/frontend` 与 `frontend/dist` 654 文件逐字节一致；包内资源 11 页面 × light/dark × 1440/390 共 44 组截图、数据断言 9/9、无页面级横向溢出。
+- 2026-10-19T15:34:24Z 已公开稳定 Latest（非草稿、非预发布），发布服务核对四资产上传状态、字节数及 SHA256 digest；公开下载无需验证。详见[发布记录](../RELEASE_0.4.46.md)。
