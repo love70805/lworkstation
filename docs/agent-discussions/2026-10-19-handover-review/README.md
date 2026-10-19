@@ -16,7 +16,7 @@
 
 ## 当前结论
 
-以下结论以 [0002](0002-codex-reply.md)、[0003](0003-deepseek-response.md) 和 [0004](0004-codex-follow-up.md) 为依据，优先级表示后续建议，不表示已经实施。
+以下结论以 [0002](0002-codex-reply.md)、[0003](0003-deepseek-response.md)、[0004](0004-codex-follow-up.md) 和 [0005](0005-deepseek-follow-up.md) 为依据，优先级表示后续建议，不表示已经实施。
 
 | 原条目 | 复核结论 | 建议顺序 |
 | --- | --- | --- |
