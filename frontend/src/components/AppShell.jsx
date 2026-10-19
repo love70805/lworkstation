@@ -355,7 +355,9 @@ export default function AppShell({ children, pageClass = "" }) {
             );
           })}
         </nav>
-        <nav className="sidebar-bottom" aria-label="系统与帮助"><Link className={`nav-item ${pathname === "/diagnostics" || pathname === "/data-security" ? "active" : ""}`} to="/diagnostics" title="系统与备份" aria-current={pathname === "/diagnostics" || pathname === "/data-security" ? "page" : undefined}><ShieldCheck size={18} /><span>系统与备份</span></Link></nav>
+        <nav className="sidebar-bottom" aria-label="系统与帮助">
+          {effectiveSidebarCollapsed ? <button type="button" className="nav-item sidebar-expand" onClick={toggleSidebar} title="展开导航" aria-label="展开导航" aria-expanded={false}><PanelLeftOpen size={18} /><span>展开导航</span></button> : null}
+          <Link className={`nav-item ${pathname === "/diagnostics" || pathname === "/data-security" ? "active" : ""}`} to="/diagnostics" title="系统与备份" aria-current={pathname === "/diagnostics" || pathname === "/data-security" ? "page" : undefined}><ShieldCheck size={18} /><span>系统与备份</span></Link></nav>
       </aside>
 
       {mobileOpen ? <button className="sidebar-scrim" aria-label="关闭导航" onClick={() => setMobileOpen(false)} /> : null}
