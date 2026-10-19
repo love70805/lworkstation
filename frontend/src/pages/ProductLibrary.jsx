@@ -659,7 +659,7 @@ function ProductLibraryView({ workspaceId, view }) {
         title={pageTitle}
         description={pageDescription}
         actions={view === "reference" ? (
-          <><Button icon={Download} loading={exporting} disabled={exporting || filteredReferences.length === 0} onClick={exportReferences}>导出参考</Button><Button variant="primary" icon={WalletCards} onClick={() => navigate("/ledger")}>月度账本</Button></>
+          <><Button icon={Download} loading={exporting} disabled={exporting || filteredReferences.length === 0} onClick={exportReferences}>导出参考</Button><Button icon={WalletCards} onClick={() => navigate("/ledger")}>月度账本</Button></>
         ) : view === "official" ? (
           <><Button icon={Download} loading={exporting} disabled={exporting || filteredProducts.length === 0} onClick={exportProducts}>导出</Button><Button variant="primary" icon={Plus} onClick={() => navigate("/products/edit")}>新建商品</Button></>
         ) : null}
@@ -761,7 +761,9 @@ function ProductLibraryView({ workspaceId, view }) {
               data={tableProducts}
               getRowId={catalogRowId}
               getRowProps={catalogRowProps}
-              emptyState="没有符合当前筛选条件的商品，请清除部分筛选条件。"
+              emptyState={catalogProducts.length === 0
+                ? "还没有商品档案。新建商品，或先在预存区、历史采集中补齐资料。"
+                : "没有符合当前筛选条件的商品，请清除部分筛选条件。"}
             />}
           </Panel>
         </>

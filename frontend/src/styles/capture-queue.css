@@ -50,7 +50,7 @@
 .batch-summary span,
 .batch-columns {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 14px;
   font-weight: 700;
   text-transform: uppercase;
@@ -83,7 +83,7 @@
 }
 
 .queue-item:last-child { border-bottom: 0; }
-.queue-item-blocking { background: #fff8f6; }
+.queue-item-blocking { background: color-mix(in srgb, var(--danger-bg) 55%, var(--surface)); }
 
 .queue-product {
   display: flex;
@@ -104,7 +104,7 @@
 
 .queue-product span { display: flex; min-width: 0; flex-direction: column; }
 .queue-product strong { overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.queue-product small { margin-top: 3px; color: var(--text-muted); font-size: 10px; }
+.queue-product small { margin-top: 3px; color: var(--text-muted); font-size: 11px; }
 .queue-cost { font-size: 12px; }
 .warning-stack { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; }
 .warning-stack .badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
@@ -130,7 +130,7 @@
 .queue-actions > button:not(.button):hover { background: var(--surface-muted); color: var(--primary); }
 .queue-actions .button { min-height: 34px; padding: 5px 11px; font-size: 12px; }
 .queue-empty { display: flex; min-height: 320px; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--primary); text-align: center; }
-.queue-empty h2 { color: var(--text); font-size: 17px; }
+.queue-empty h2 { color: var(--text); font-size: 16px; line-height: 24px; font-weight: 600; }
 .queue-empty p { max-width: 520px; color: var(--text-muted); }
 .queue-empty .button { margin-top: 8px; }
 .confirm-record { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-bg); }

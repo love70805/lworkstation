@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.45",
+  "version": "0.4.46",
   "candidateOnly": true,
-  "integrationBranch": "codex/inbox-worker-recovery",
+  "integrationBranch": "codex/ui-direction-20261019",
   "requiredCommits": [
+    {
+      "module": "v0.4.46-ui-direction-foundation",
+      "commit": "627df3124856e1fd00458c9a86d516ace70b68e2"
+    },
+    {
+      "module": "v0.4.46-verified-main-baseline",
+      "commit": "d16a2d724a1b1ec4322ef2480fde077a0b7a32f8"
+    },
     {
       "module": "v0.4.45-cold-evidence-worker-recovery",
       "commit": "bbac9745cb8155fcb1e0cc873f063f7f2ea43fbc"

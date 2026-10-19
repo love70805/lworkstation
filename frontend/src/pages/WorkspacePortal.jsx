@@ -169,7 +169,16 @@ export default function WorkspacePortal() {
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="每日销售趋势">
-            {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} stores={ledgerScope.context.stores} /> : <Panel><h2>每日销售趋势</h2><div className="dashboard-chart-empty">{ledgerScope.ready ? '选择或导入月度账本后查看每日销售趋势。' : '正在读取账本范围…'}</div></Panel>}
+            {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} stores={ledgerScope.context.stores} /> : <Panel>
+              <div className="panel-header"><div className="panel-title"><BarChart3 size={19} /><h2>每日销售趋势</h2></div></div>
+              <div className="dashboard-chart-empty">
+                <div>
+                  <strong>{ledgerScope.ready ? "还没有可展示的销售趋势" : "正在读取账本范围…"}</strong>
+                  <small>{ledgerScope.ready ? "选择或导入月度账本后，这里会按日期展示销售额与销量。" : "正在读取当前工作区账本。"}</small>
+                </div>
+                {ledgerScope.ready ? <Button variant="primary" onClick={() => navigate("/import-preview", { state: { importReturnTo: "/workspace" } })}>导入月度台账</Button> : null}
+              </div>
+            </Panel>}
           </section>
 
           <details className="activity-panel dashboard-widget workspace-disclosure">

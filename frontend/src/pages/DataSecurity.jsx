@@ -527,7 +527,7 @@ export default function DataSecurity() {
             <span className="export-icon"><DatabaseBackup size={29} /></span>
             <h2>手动导出</h2>
             <p>生成包含商品、采集、供应商、ERP 成本、账本、利润与审计记录的 JSON 备份。</p>
-            <Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出完整备份</Button>
+            <Button icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出完整备份</Button>
             <small className="mono">{lastBackup ? `最近备份：${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : check.status === 'ready' ? "尚未导出本机备份" : '备份状态未读取'}</small>
           </Panel>
           <Panel className="storage-panel">

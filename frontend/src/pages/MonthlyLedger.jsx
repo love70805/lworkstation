@@ -117,7 +117,7 @@ export default function MonthlyLedger() {
       <PageHeader
         title="月度账本"
         description="每个自然月保存独立的销售数据、成本来源和利润结果，人工可以随时补充或修正。"
-        actions={<><Button icon={Download} loading={exporting} disabled={exporting || items.length === 0} onClick={exportArchive}>导出归档</Button><Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>新建或导入账本</Button></>}
+        actions={<><Button icon={Download} loading={exporting} disabled={exporting || items.length === 0} onClick={exportArchive}>导出归档</Button><Button variant={items.length > 0 ? "primary" : "secondary"} icon={Plus} onClick={() => navigate("/import-preview")}>新建或导入账本</Button></>}
       />
 
       <div className="ledger-filter-bar">
@@ -125,7 +125,7 @@ export default function MonthlyLedger() {
         <span className="ledger-filter-count">{!result ? '正在读取账本…' : result.error ? '读取失败' : `显示 ${filteredItems.length} / ${items.length} 个账本`}</span>
       </div>
 
-      {result && !result.error ? <div className="ledger-stat-grid">
+      {result && !result.error && items.length > 0 ? <div className="ledger-stat-grid">
         <Panel className="ledger-stat"><CalendarDays size={18} /><span>已建立月份</span><strong>{items.length}</strong></Panel>
         <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年已保存利润</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{baseMonths ? `含 ${baseMonths} 个未扣款或历史定稿月份` : '采用各月当前财务报告'}</small></Panel>
         <Panel className="ledger-stat"><BarChart3 size={18} /><span>{currentYear} 年导入销量</span><strong>{yearQuantity.toLocaleString("zh-CN")}</strong></Panel>
