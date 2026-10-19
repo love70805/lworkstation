@@ -5,6 +5,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { performance } = require('node:perf_hooks');
+const {pathToFileURL}=require('node:url');
 const root = path.resolve(__dirname, '..');
 const resources = process.env.ERP_NATIVE_RESOURCES || root;
 const runtime = process.env.ERP_NATIVE_RESOURCES ? path.join(resources, 'app.asar') : __dirname;
@@ -88,7 +89,8 @@ app.whenReady().then(async () => {
     assert.equal(delivered.envelope.batch.rows[0].unitCost, 4);
     assert.equal(delivered.envelope.batch.rows[0].platformSku, 'SKU-A');
     assert.equal(delivered.envelope.batch.evidenceStatus, 'complete');
-    const persisted = JSON.parse(await fs.readFile(path.join(profile, 'inbox.json'), 'utf8'));
+    const {createInboxDisk}=await import(pathToFileURL(path.join(resources,process.env.ERP_NATIVE_RESOURCES?'runtime/erp-inbox-disk.mjs':'tools/erp-inbox-disk.mjs')).href);
+    const persisted=(await createInboxDisk(path.join(profile,'inbox.json')).load()).map(entry=>entry.metadata);
     assert.ok(persisted.some(item => item.kind === 'batch' && item.deliveryId === delivered.deliveryId));
     checks.push({ name: 'real MAIN query hook, procurement reads, SKU mapping, native chrome.storage checkpoint, native background delivery, durable v2 evidence', unitCost: 4 });
     // Selecting another workspace detaches the remote view in the real shell.

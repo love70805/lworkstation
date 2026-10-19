@@ -415,14 +415,14 @@ export default function DataSecurity() {
       setDangerOpen(false);
       setDangerText("");
       const message=`本机业务数据已清空，完整回滚备份已保存：${clearedBackup.filePath}。`;
-      setOperationNotice(message);notify(message,'success');
+      setOperationNotice(message);notify('本机数据已清空，完整回滚备份已保存。备份位置见页面提示。','success');
       await refreshStorageEstimate();
     } catch (error) {
       const message=clearedBackup?`本机数据已清空，备份保留在 ${clearedBackup.filePath}；状态刷新失败：${error.message}。无需重复清空。`
         :error.backup?`完整备份已保存：${error.backup.filePath}；清理未全部完成：${error.message}。请保留该文件。`
         :`未执行清空：${error.message}`;
       if(clearedBackup||error.backup)setOperationNotice(message);
-      setClearError(message);notify(message,clearedBackup?'warning':'error');
+      setClearError(message);notify(clearedBackup?'本机数据已清空，状态刷新失败。无需重复清空。':error.backup?'完整备份已保存，清理未全部完成。请查看页面提示。':message,clearedBackup?'warning':'error');
     } finally {
       clearPendingRef.current=false;setClearing(false);setClearProgress('');
     }

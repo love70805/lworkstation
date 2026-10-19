@@ -1,4 +1,4 @@
-import {captureCostDrafts,validateCostDraftBackup} from './costMatchingDraft';
+import {captureCostDrafts,validateCostDraftBackup} from './costMatchingDraft.js';
 // Only these business preferences may cross a backup boundary. Never enumerate
 // or export arbitrary localStorage values (authentication and device state live there).
 export const BUSINESS_PREFERENCE_FIELDS = Object.freeze({
