@@ -1350,7 +1350,7 @@ async function createWindow() {
 
 registerWorkspaceSystemIpc({ ipcMain, getContents: () => views.get('workspace')?.webContents,
   getWindow: () => mainWindow, getLifecycle: () => desktopLifecycle, dialog, devUrl: DEV_URL,
-  backupDirectory: path.join(app.getPath('documents'),'Lworkstation 备份'),getInboxService:()=>inboxService });
+  backupDirectory: smokeUserDataPath?path.join(smokeUserDataPath,'backups'):path.join(app.getPath('documents'),'Lworkstation 备份'),getInboxService:()=>inboxService });
 ipcMain.handle("desktop:get-state", () => publicState());
 ipcMain.handle('desktop:startup-action', (event, action) => {
   if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };

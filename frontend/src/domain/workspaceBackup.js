@@ -5,7 +5,7 @@ import {validateCostDraftBackup} from '../lib/costMatchingDraft.js';
 import {validateDesktopInboxBackup} from '../../../integrations/contracts/desktop-inbox-backup.mjs';
 
 export const WORKSPACE_BACKUP_FORMAT = "shopeers-local-backup";
-export const WORKSPACE_BACKUP_VERSION = 1;
+export const WORKSPACE_BACKUP_VERSION = 2;
 
 export function createWorkspaceBackupManifest(payload) {
   return { version: 1, databaseVersion: payload.databaseVersion,
@@ -19,7 +19,8 @@ export function createWorkspaceBackupManifest(payload) {
 export function validateWorkspaceBackupPayload(payload, { tableNames = [], schemas } = {}) {
   if (!payload || typeof payload !== "object") throw new Error("备份文件内容无效。");
   if (payload.format !== WORKSPACE_BACKUP_FORMAT) throw new Error("这不是 Lworkstation 本机备份文件。");
-  if (Number(payload.formatVersion) !== WORKSPACE_BACKUP_VERSION) throw new Error("备份格式版本不受支持。");
+  if (![1,WORKSPACE_BACKUP_VERSION].includes(Number(payload.formatVersion))) throw new Error("备份格式版本不受支持。");
+  if(payload.desktopInbox!==undefined&&Number(payload.formatVersion)<2)throw new Error('完整桌面备份需要新版备份格式。');
   if (!payload.tables || typeof payload.tables !== "object" || Array.isArray(payload.tables)) {
     throw new Error("备份文件缺少数据表。");
   }

@@ -9,6 +9,12 @@ export function validateDesktopInboxBackup(value) {
     ||value.recordCount!==value.records.length||value.leaseCount!==value.leases.length)fail();
   for(const record of value.records) {
     if(!record||typeof record!=='object'||!businessKinds.has(record.kind)||record.envelope?.__inboxArchive)fail();
+    if(record.kind==='collection-task') {
+      if(typeof record.taskId!=='string'||typeof record.status!=='string'||!Array.isArray(record.batches))fail();
+      for(const batch of record.batches)if(!batch||typeof batch!=='object'||!Array.isArray(batch.platformSkcs)||batch.platformSkcs.some(skc=>typeof skc!=='string'))fail();
+    }
+    const query=record.envelope?.catalog?.query?.platformSkcs;
+    if(query!==undefined&&!Array.isArray(query))fail();
   }
   for(const lease of value.leases)if(!lease||lease.kind!=='task-heartbeat'||typeof lease.taskId!=='string')fail();
   return value;

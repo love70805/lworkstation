@@ -12,6 +12,7 @@ export function validateCostDraftBackup(payload) {
   }
 }
 export function captureCostDrafts(storage=browserStorage()) {
+  if(!storage)return undefined;
   const entries=[];
   for(let index=0;index<(storage?.length??0);index++) {
     const key=storage.key(index);

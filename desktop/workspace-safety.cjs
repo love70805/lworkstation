@@ -18,6 +18,7 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
   }
   async function saveCombined(input,snapshot,prefix) {
     const workspace=JSON.parse(validateBackupRequest(input).json);
+    workspace.formatVersion=2;
     workspace.desktopInbox=snapshot;
     workspace.manifest={...workspace.manifest,desktopInboxIncluded:true,desktopRecordCount:snapshot.recordCount,desktopLeaseCount:snapshot.leaseCount};
     const json=JSON.stringify(workspace),fileName=`${prefix}-${new Date().toISOString().replace(/[:.]/g,'-')}-${crypto.randomUUID()}.json`;
@@ -76,15 +77,16 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     if(receipt)await end(receipt.maintenanceId);
     return {ok:true};
   }
-  async function prepareRestore({snapshot,currentWorkspace}={}) {
+  async function prepareRestore({snapshot,currentWorkspace,targetWorkspace}={}) {
     return locked(async()=>{
       validateBackupRequest(currentWorkspace);
+      if(targetWorkspace)validateBackupRequest(targetWorkspace);
       if(await readJournal())throw new Error('上次恢复尚未完成，请先重试恢复检查。');
       await maintain({action:'validate',snapshot});
       const session=await maintain({action:'begin'});
       try {
         const backup=await saveCombined(currentWorkspace,session.snapshot,'Lworkstation-before-restore');
-        const journal={version:1,id:crypto.randomUUID(),maintenanceId:session.maintenanceId,phase:'prepared',target:snapshot,backup};
+        const journal={version:1,id:crypto.randomUUID(),maintenanceId:session.maintenanceId,phase:'prepared',target:snapshot,targetWorkspace:targetWorkspace??currentWorkspace,backup};
         await writeJournal(journal);
         return {ok:true,id:journal.id,backupFilePath:backup.filePath};
       }catch(e){await end(session.maintenanceId);throw e;}
@@ -97,7 +99,12 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
       if(committedId&&committedId!==journal.id)throw new Error('桌面与工作区恢复记录不一致，请保留回滚备份。');
       if(committedId) {
         try {await maintain({action:'hold',maintenanceId:journal.maintenanceId});}
-        catch {const session=await maintain({action:'begin'});journal.maintenanceId=session.maintenanceId;await writeJournal(journal);}
+        catch {
+          const session=await maintain({action:'begin'});journal.maintenanceId=session.maintenanceId;await writeJournal(journal);
+          // If the service restarted, preserve anything delivered since the
+          // previous process before completing the committed database restore.
+          await saveCombined(journal.targetWorkspace,session.snapshot,'Lworkstation-recovery-current');
+        }
         await maintain({action:'restore',maintenanceId:journal.maintenanceId,snapshot:journal.target});
         journal.phase='committed';await writeJournal(journal);
       }

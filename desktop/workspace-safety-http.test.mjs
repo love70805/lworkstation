@@ -24,6 +24,7 @@ try {
   assert.equal(denied.statusCode,403,'the renderer/extension capability cannot export or replace local histories');
   const safety=createWorkspaceSafety(options),saved=await safety.saveBeforeClear(input);
   const backup=JSON.parse(await fs.readFile(saved.filePath,'utf8'));
+  assert.equal(backup.formatVersion,2,'old applications must not silently import only the IndexedDB part');
   assert.deepEqual(backup.desktopInbox.records,initial,'backup contains exact archived purchase evidence and request metadata');
   assert.ok(!JSON.stringify(backup).includes(capability));
   const blocked=await requestJson({port,capability,path:'/erp/v1/requests',method:'POST',body:{request:{id:'must-wait'}}});

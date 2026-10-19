@@ -180,7 +180,7 @@ export default function DataSecurity() {
   };
 
   const exportBackup = async ({ prefix = "shopeers-backup", successMessage } = {}) => {
-    if (exportPendingRef.current) return null;
+    if (exportPendingRef.current || clearPendingRef.current || restorePendingRef.current) return null;
     exportPendingRef.current = true;
     setOperationNotice('');
     let savedBackup = null;
@@ -366,7 +366,7 @@ export default function DataSecurity() {
   };
 
   const restoreBackup = async () => {
-    if (!restoreCandidate || restorePendingRef.current) return;
+    if (!restoreCandidate || restorePendingRef.current || clearPendingRef.current || exportPendingRef.current) return;
     restorePendingRef.current = true;
     setOperationNotice('');
     let restoredCount = null;
@@ -406,7 +406,7 @@ export default function DataSecurity() {
   };
 
   const clearWorkspace = async () => {
-    if (dangerText !== "清空本机数据" || clearPendingRef.current) return;
+    if (dangerText !== "清空本机数据" || clearPendingRef.current || restorePendingRef.current || exportPendingRef.current) return;
     clearPendingRef.current=true;setClearError('');
     setClearing(true);
     let clearedBackup;

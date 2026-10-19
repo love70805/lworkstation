@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld("shopeersDesktopRuntime", Object.freeze({
   clearInboxData: ({backupToken}={}) => ipcRenderer.invoke('workspace:clear-inbox-data',{backupToken}),
   saveClearBackup: ({fileName,json}={}) => ipcRenderer.invoke('workspace:save-clear-backup',{fileName,json}),
   cancelClearBackup: ({backupToken}={}) => ipcRenderer.invoke('workspace:cancel-clear-backup',{backupToken}),
-  prepareInboxRestore: ({snapshot,currentWorkspace}={}) => ipcRenderer.invoke('workspace:prepare-inbox-restore',{snapshot,currentWorkspace}),
+  prepareInboxRestore: ({snapshot,currentWorkspace,targetWorkspace}={}) => ipcRenderer.invoke('workspace:prepare-inbox-restore',{snapshot,currentWorkspace,targetWorkspace}),
   recoverInboxRestore: ({committedId}={}) => ipcRenderer.invoke('workspace:recover-inbox-restore',{committedId}),
   finishInboxRestore: ({id}={}) => ipcRenderer.invoke('workspace:finish-inbox-restore',{id}),
   getCloseBehavior: () => ipcRenderer.invoke('workspace:get-close-behavior'),

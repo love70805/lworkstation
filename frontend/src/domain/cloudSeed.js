@@ -120,7 +120,7 @@ function inspectTables(tables, workspaceId) {
 
 export function buildCloudSeedPayload(backupPayload, { generatedAt = new Date().toISOString() } = {}) {
   if (!backupPayload || typeof backupPayload !== "object") throw new Error("本机备份内容无效。不能生成云端种子包。");
-  if (backupPayload.format !== WORKSPACE_BACKUP_FORMAT || Number(backupPayload.formatVersion) !== WORKSPACE_BACKUP_VERSION) {
+  if (backupPayload.format !== WORKSPACE_BACKUP_FORMAT || ![1,WORKSPACE_BACKUP_VERSION].includes(Number(backupPayload.formatVersion))) {
     throw new Error("只能从受支持的 Lworkstation 本机备份生成云端种子包。");
   }
   const localReportTables = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];

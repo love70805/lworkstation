@@ -7,6 +7,7 @@ import { clearDesktopInboxData } from "../../lib/clearDesktopInboxData";
 import { clearAllCostDrafts,captureCostDrafts } from "../../lib/costMatchingDraft";
 import {saveClearBackup,callWorkspaceSafety,prepareDesktopRestore} from '../../lib/workspaceSafety';
 import {DESKTOP_RESTORE_COMMIT} from '../../../../integrations/contracts/desktop-inbox-backup.mjs';
+import applicationPackage from '../../../package.json';
 import { withWorkspaceReset, setWorkspaceRecoveryError } from "../../lib/workspaceBackgroundTasks";
 import { captureBusinessPreferences, preparePreferenceRestore, applyPreferenceRestore, finishPreferenceRestore,
   readPreferenceRestoreJournal, PREFERENCE_RESTORE_COMMIT } from '../../lib/businessPreferencesBackup';
@@ -99,6 +100,7 @@ async function readWorkspaceOperationalSummary(context, observable) {
 
 export async function createWorkspaceBackupPayload() {
   if (readPreferenceRestoreJournal()) throw new Error('上次业务筛选配置恢复尚未完成，请先重试恢复检查。');
+  if(await db.settings.get(DESKTOP_RESTORE_COMMIT))throw new Error('上次完整恢复尚未完成，请先重试恢复检查。');
   await ensureDefaultWorkspace();
   const generatedAt = new Date().toISOString();
   const tableEntries = await db.transaction("r", db.tables, () => Promise.all(db.tables.map(async (table) => [table.name, await table.toArray()])));
@@ -108,7 +110,7 @@ export async function createWorkspaceBackupPayload() {
   const payload = {
     format: WORKSPACE_BACKUP_FORMAT,
     formatVersion: WORKSPACE_BACKUP_VERSION,
-    applicationVersion: "0.1.0",
+    applicationVersion: applicationPackage.version,
     databaseName: db.name,
     databaseVersion: db.verno,
     workspaceId: DEFAULT_WORKSPACE_ID,
@@ -264,12 +266,12 @@ export async function restoreWorkspaceBackupPayload(payload, restoredBy = "local
     const restoredAt = new Date().toISOString();
     let journal, committed = false;
     try {
-      const desktop=payload.desktopInbox?await prepareDesktopRestore(payload.desktopInbox,await createWorkspaceBackupPayload()):null;
+      const desktop=payload.desktopInbox?await prepareDesktopRestore(payload.desktopInbox,await createWorkspaceBackupPayload(),payload):null;
       journal = preparePreferenceRestore(payload.businessPreferences,globalThis.localStorage,{costDrafts:payload.localCostDrafts});
       await db.transaction("rw", db.tables, async () => {
         for (const table of db.tables) await table.clear();
         for (const table of db.tables) {
-          const rows = payload.tables[table.name] ?? [];
+          const rows = (payload.tables[table.name] ?? []).filter(row=>table.name!=='settings'||row.key!==DESKTOP_RESTORE_COMMIT);
           if (rows.length > 0) await table.bulkAdd(rows);
         }
         if (await db.workspaces.count() === 0) {
