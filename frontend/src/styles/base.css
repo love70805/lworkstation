@@ -215,7 +215,7 @@ kbd {
   display: flex;
   width: var(--sidebar-width);
   flex-direction: column;
-  padding: 6px 10px 14px;
+  padding: 0 10px 14px;
   border-right: 1px solid var(--border);
   background: var(--surface);
   /* Match the main canvas and topbar geometry immediately when collapsing.
@@ -279,12 +279,12 @@ html[data-appearance="dark"] .brand-logo-dark { display: block; }
 }
 
 .sidebar-collapsed .brand {
-  height: 96px;
-  flex: 0 0 96px;
-  flex-direction: column;
+  height: var(--topbar-height);
+  flex: 0 0 var(--topbar-height);
+  flex-direction: row;
   justify-content: center;
-  gap: 6px;
-  padding: 8px 0;
+  gap: 0;
+  padding: 0;
 }
 
 .sidebar-collapsed .brand-mark {
@@ -294,11 +294,9 @@ html[data-appearance="dark"] .brand-logo-dark { display: block; }
 .sidebar-collapsed .brand-logo,
 html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: none; }
 
-.sidebar-collapsed .brand > .sidebar-collapse-toggle {
-  position: static;
-  margin: 0;
-  padding-right: 0;
-}
+/* The expand control lives above 系统与备份 so the collapsed header row keeps the
+   same height as the topbar; otherwise the button hangs below the header line. */
+.sidebar-collapsed .brand > .sidebar-collapse-toggle { display: none; }
 
 .sidebar-collapsed .nav-item > span,
 .sidebar-collapsed .nav-count,
@@ -393,6 +391,15 @@ html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: none
   border-top: 1px solid var(--border);
 }
 
+.sidebar-expand {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .sidebar-bottom > button.nav-item {
   width: 100%;
   border: 0;
@@ -482,7 +489,12 @@ textarea::placeholder {
   gap: 10px;
 }
 
-.topbar-control { position: relative; display: flex; align-items: center; }
+.topbar-control {
+  position: relative;
+  display: flex;
+  height: var(--topbar-height);
+  align-items: center;
+}
 
 .environment-chip {
   display: inline-flex;
@@ -538,7 +550,7 @@ textarea::placeholder {
 .topbar-popover {
   position: absolute;
   z-index: 90;
-  top: calc(100% + 12px);
+  top: calc(100% + 8px);
   right: 0;
   width: 300px;
   overflow: hidden;
@@ -1408,7 +1420,8 @@ textarea::placeholder {
 
   .sidebar-open { transform: translateX(0); }
   .sidebar-close { display: inline-flex !important; margin-left: auto; }
-  .sidebar-collapse-toggle { display: none !important; }
+  .sidebar-collapse-toggle,
+  .sidebar-expand { display: none !important; }
 
   .sidebar-scrim {
     position: fixed;

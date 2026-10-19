@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.46",
+  "version": "0.4.47",
   "candidateOnly": true,
-  "integrationBranch": "codex/ui-direction-20261019",
+  "integrationBranch": "codex/desktop-alignment-20261020",
   "requiredCommits": [
+    {
+      "module": "v0.4.47-desktop-alignment-fix",
+      "commit": "9c9cedac9d390953a735712669dad026e3767a4b"
+    },
+    {
+      "module": "v0.4.47-verified-main-baseline",
+      "commit": "6181ca0abf855de3263007826d959d0efd01568d"
+    },
     {
       "module": "v0.4.46-ui-direction-foundation",
       "commit": "627df3124856e1fd00458c9a86d516ace70b68e2"
