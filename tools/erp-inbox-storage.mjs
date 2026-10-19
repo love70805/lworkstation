@@ -124,6 +124,9 @@ export function createInboxStorage(file,options={}) {
   async function hydrate(record) {
     if(!record?.envelope?.__inboxArchive)return record;
     const envelopeId=evidenceIds.get(record.envelope);
+    // Cached previews outlive a failed worker; rebuild its reference index
+    // before the first on-demand read in the replacement worker.
+    if(!worker)await operation('read');
     const result=await operation('hydrate',{envelopeId});
     return {...record,envelope:result.envelope};
   }
