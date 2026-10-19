@@ -25,7 +25,7 @@
     "smoke:memory": "node memory-smoke.cjs"
   },
   "devDependencies": {
-    "electron": "44.2.0",
+    "electron": "44.8.0",
     "electron-builder": "26.15.3"
   },
   "build": {
