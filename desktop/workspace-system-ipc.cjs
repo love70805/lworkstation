@@ -1,5 +1,6 @@
 const { isAllowedWorkspaceUrl } = require('./workspace-navigation.cjs');
 const { createBackupSaver } = require('./workspace-backup.cjs');
+const { createWorkspaceSafety } = require('./workspace-safety.cjs');
 
 function isTrustedWorkspaceSender(event, contents, devUrl) {
   return Boolean(contents && !contents.isDestroyed() && event.sender === contents
@@ -7,18 +8,32 @@ function isTrustedWorkspaceSender(event, contents, devUrl) {
     && isAllowedWorkspaceUrl(event.senderFrame?.url, devUrl));
 }
 
-function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecycle, dialog, devUrl, operations, clearInboxData }) {
+function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecycle, dialog, devUrl, operations, backupDirectory, getInboxService }) {
   let activeEvent;
   const trusted = event => isTrustedWorkspaceSender(event, getContents(), devUrl);
-  ipcMain.handle('workspace:clear-inbox-data', async event => {
-    if (!trusted(event)) return { ok: false, error: '无效的工作站请求。' };
+  let safetyEvent;
+  const safety=backupDirectory&&getInboxService?createWorkspaceSafety({directory:backupDirectory,getInboxService,operations,isTrusted:()=>trusted(safetyEvent||{})}):null;
+  async function runSafety(event,method,input) {
+    if(!trusted(event))return {ok:false,status:'failed',error:'无效的工作站请求。'};
+    if(safetyEvent)return {ok:false,status:'failed',error:'已有本机备份或恢复正在进行。'};
+    safetyEvent=event;
     try {
-      if (!clearInboxData) throw new Error('桌面收件清理接口尚未就绪。');
-      return await clearInboxData();
-    } catch (error) {
-      return { ok: false, error: error.message };
-    }
+      if(!safety)throw new Error('完整备份接口尚未就绪，请升级并重启工作站。');
+      const result=await safety[method](input);
+      if(!trusted(event)) {if(result?.backupToken)await safety.cancelClear(result);throw new Error('工作站已离开当前页面，请保留回滚备份并重试恢复检查。');}
+      return result;
+    }catch(e){return {ok:false,status:'failed',error:e.message};}
+    finally{safetyEvent=null;}
+  }
+  ipcMain.handle('workspace:clear-inbox-data', async (event,input) => {
+    if (!trusted(event)) return { ok: false, error: '无效的工作站请求。' };
+    return runSafety(event,'clear',input);
   });
+  for(const [channel,method] of Object.entries({'save-clear-backup':'saveBeforeClear','cancel-clear-backup':'cancelClear','prepare-inbox-restore':'prepareRestore','recover-inbox-restore':'recoverRestore','finish-inbox-restore':'finishRestore'})) {
+    ipcMain.handle(`workspace:${channel}`,async(event,input)=>{
+      return runSafety(event,method,input);
+    });
+  }
   const save = createBackupSaver({
     showSaveDialog: options => dialog.showSaveDialog(getWindow(), options),
     isTrusted: () => trusted(activeEvent || {}), operations,

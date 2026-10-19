@@ -3,6 +3,15 @@ import { validateWorkspaceBackupPayload, WORKSPACE_BACKUP_FORMAT } from "./works
 import { encodeSalesRowsAuditSnapshot, SALES_ROWS_AUDIT_MIN_ROWS } from "./salesRowsAuditSnapshot";
 
 describe("workspace backup validation", () => {
+  it('accepts both backup generations but rejects full desktop fields under the legacy format',()=>{
+    for(const formatVersion of [1,2])expect(validateWorkspaceBackupPayload({format:WORKSPACE_BACKUP_FORMAT,formatVersion,tables:{}},{tableNames:[]}).recordCount).toBe(0);
+    expect(()=>validateWorkspaceBackupPayload({format:WORKSPACE_BACKUP_FORMAT,formatVersion:3,tables:{}},{tableNames:[]})).toThrow('格式版本');
+    expect(()=>validateWorkspaceBackupPayload({format:WORKSPACE_BACKUP_FORMAT,formatVersion:1,tables:{},desktopInbox:{}},{tableNames:[]})).toThrow('新版备份格式');
+  });
+  it('rejects malformed task recovery data before a database restore can start',()=>{
+    const desktopInbox={format:'lworkstation-desktop-inbox-backup',formatVersion:1,recordCount:1,leaseCount:0,records:[{kind:'collection-task',taskId:'broken',status:'running'}],leases:[]};
+    expect(()=>validateWorkspaceBackupPayload({format:WORKSPACE_BACKUP_FORMAT,formatVersion:2,tables:{},desktopInbox},{tableNames:[]})).toThrow('桌面收件备份');
+  });
   it("validates compact imported audit snapshots while accepting legacy summary events", () => {
     const salesRows = encodeSalesRowsAuditSnapshot(Array.from({ length: SALES_ROWS_AUDIT_MIN_ROWS }, (_, index) => ({ id: index, raw: { 金额: "0.000001" } })));
     const payload = { format: WORKSPACE_BACKUP_FORMAT, formatVersion: 1, tables: { auditEvents: [

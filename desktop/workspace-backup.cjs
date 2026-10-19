@@ -10,7 +10,7 @@ function validateBackupRequest(input) {
   if (sizeBytes > 512 * 1024 * 1024) throw Error('备份超过单文件保存上限（512 MB）。');
   const payload = JSON.parse(input.json);
   if (!['shopeers-local-backup', 'shopeers-cloud-seed'].includes(payload?.format)
-    || payload.formatVersion !== 1 || !payload.tables || typeof payload.tables !== 'object'
+    || !(payload.formatVersion===1||payload.format==='shopeers-local-backup'&&payload.formatVersion===2) || !payload.tables || typeof payload.tables !== 'object'
     || Array.isArray(payload.tables)) throw Error('只能保存 Lworkstation JSON 备份或种子包。');
   return { fileName: input.fileName, json: input.json, sizeBytes };
 }

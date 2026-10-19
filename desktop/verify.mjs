@@ -260,7 +260,7 @@ for (const file of [
   assert.equal(read(file).includes(legacyPrivateRepo), false, `${file} must not target the archived private repository`);
 }
 assert.ok(pkg.build.extraResources.some((resource) => resource.to === "runtime/erp-inbox-server.mjs"));
-for (const file of ['erp-inbox-storage.mjs', 'erp-inbox-storage-worker.mjs']) {
+for (const file of ['erp-inbox-disk.mjs','erp-inbox-storage.mjs', 'erp-inbox-storage-worker.mjs']) {
   assert.ok(pkg.build.extraResources.some(resource => resource.to === `runtime/${file}`), file);
 }
 assert.ok(pkg.build.files.includes("extension-runtime.cjs"));

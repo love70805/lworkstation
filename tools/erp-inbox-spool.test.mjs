@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createValidDirectV2Envelope } from "./fixtures/erp-direct-v2-contract.mjs";
+import {createInboxDisk} from './erp-inbox-disk.mjs';
 
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), "erp-spool-atomic-"));
 const spool = path.join(directory, "inbox.json");
@@ -35,6 +36,7 @@ const request = (route, payload) => fetch(base + route, {
   signal: AbortSignal.timeout(5000),
 });
 const register = (id) => ({ request: { id, workspaceId: "qa", ledgerId: "ledger", platformSkcs: ["SKC"] }, expectedSkus: [{ platformSku: id, platformSkc: "SKC" }] });
+async function persistedRecords() {const disk=createInboxDisk(spool),entries=await disk.load();return Promise.all(entries.map(async e=>({...e.metadata,...(e.ref?{envelope:await disk.evidence(e.ref)}:{})})));}
 
 try {
   // Fault injection lives exclusively in the child test preload. No production switches.
@@ -57,7 +59,7 @@ fs.readFile=async function(file,...args) {
   } finally { readers--; }
 };
 fs.rename=async function(from,to) {
-  if(String(to)!==spool) return rename(from,to);
+  if(!String(to).startsWith(spool+'.evidence'+${JSON.stringify(path.sep)})) return rename(from,to);
   const config=JSON.parse(await read(control,'utf8'));
   if(config.mode!==previousMode) { attempt=0; previousMode=config.mode; }
   attempt++; await append(trace,JSON.stringify({kind:'rename',from,attempt,mode:config.mode})+'\\n');
@@ -84,7 +86,7 @@ fs.rename=async function(from,to) {
     request("/erp/v1/status"), request("/erp/v1/requests", register(`Q${index}`)),
   ])));
   assert.ok(concurrent.flat().every((response) => response.ok));
-  let records = JSON.parse(await fs.readFile(spool, "utf8"));
+  let records = await persistedRecords();
   assert.equal(records.find((row) => row.requestId === "OLD").status, "expired");
   assert.equal(records.filter((row) => /^Q\d+$/.test(row.requestId)).length, 12, "GET expiry must not overwrite POST registrations");
   assert.ok((await events()).filter((event) => event.kind === "read").every((event) => event.readers === 1));
@@ -113,8 +115,11 @@ fs.rename=async function(from,to) {
   assert.equal((await waiting).status, 202);
 
   for (const code of ["EPERM", "EACCES", "EBUSY"]) {
+    const delivery=createValidDirectV2Envelope(),batch=delivery.batch;
+    delivery.deliveryId+=code;batch.batchId+=code;batch.requestId+=code;
+    assert.equal((await request('/erp/v1/requests',{request:{id:batch.requestId,workspaceId:batch.workspaceId,ledgerId:batch.ledgerId,platformSkcs:batch.query.platformSkcs},expectedSkus:batch.rows.filter(row=>row.ledgerScopeRole!=='auxiliary').map(row=>({platformSku:row.platformSku,platformSkc:row.platformSkc}))})).status,202);
     await configure({ mode: code, failures: 2, code });
-    assert.equal((await request("/erp/v1/requests", register(code))).status, 202);
+    assert.equal((await request('/erp/v1/cost-batches',delivery)).status,202);
     assert.equal((await events()).filter((event) => event.mode === code).length, 3);
   }
 
@@ -141,7 +146,7 @@ fs.rename=async function(from,to) {
   assert.equal(retried.status, 202);
   assert.equal((await retried.json()).idempotent, false);
   assert.equal((await (await request("/erp/v1/cost-batches", delivery)).json()).idempotent, true);
-  records = JSON.parse(await fs.readFile(spool, "utf8"));
+  records = await persistedRecords();
   assert.equal(records.filter((row) => row.kind === "batch" && row.batchId === batch.batchId).length, 1);
   assert.equal(records.find((row) => row.requestId === batch.requestId && row.kind === "request").status, "registered");
   assert.ok(records.find((row) => row.requestId === batch.requestId && row.kind === "request").lastCompletedAt);
@@ -149,7 +154,7 @@ fs.rename=async function(from,to) {
   assert.deepEqual((await fs.readdir(directory)).filter((name) => name.endsWith(".tmp")), ["inbox.json.tmp"]);
   const names = (await events()).filter((event) => event.kind === "rename" && event.attempt === 1).map((event) => event.from);
   assert.equal(new Set(names).size, names.length);
-  assert.ok(names.every((name) => path.dirname(name) === directory && name !== `${spool}.tmp`));
+  assert.ok(names.every((name) => path.dirname(name) === `${spool}.evidence` && name !== `${spool}.tmp`));
   console.log("ERP spool concurrency, Windows lock recovery, atomic failure and HTTP queue tests passed");
 } finally {
   if (child && child.exitCode == null) { const exit = once(child, "exit"); child.kill("SIGTERM"); await exit; }

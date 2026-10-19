@@ -8,7 +8,7 @@ import { ToastProvider } from '../components/UI';
 
 const mocks = vi.hoisted(() => ({
   snapshot: { status: 'ready', data: { security: { summary: { recordCount: 3 }, securityEvents: [] }, storage: { usage: 12, quota: 100 } }, checkedAt: '2026-09-22T00:00:00Z', refreshing: false, refresh: vi.fn() },
-  create: vi.fn(), record: vi.fn(), restore: vi.fn(), applied: vi.fn(), cloudRestore: vi.fn(), save: vi.fn(),
+  create: vi.fn(), record: vi.fn(), restore: vi.fn(), applied: vi.fn(), cloudRestore: vi.fn(), save: vi.fn(),clear:vi.fn(),
 }));
 vi.mock('../components/AppShell', () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock('../hooks/useSystemSnapshot', () => ({ useSystemSnapshot: () => mocks.snapshot }));
@@ -17,7 +17,7 @@ vi.mock('../data/database', () => ({
   createWorkspaceBackupPayload: mocks.create, recordWorkspaceBackupExport: mocks.record,
   restoreWorkspaceBackupPayload: mocks.restore, restoreWorkspaceSyncRecoveryPayload: mocks.cloudRestore,
   inspectWorkspaceBackupPayload: () => ({ recordCount: 1 }),
-  clearLocalWorkspaceData: vi.fn(), createWorkspaceCloudSeedPayload: vi.fn(), recordCloudSeedImportReceipt: vi.fn(),
+  clearLocalWorkspaceData: mocks.clear, createWorkspaceCloudSeedPayload: vi.fn(), recordCloudSeedImportReceipt: vi.fn(),
 }));
 vi.mock('../domain/workspaceBackup', () => ({ validateWorkspaceBackupPayload: () => ({ recordCount: 1 }) }));
 vi.mock('../data/cloudSeedProvider', () => ({ createCloudSeedProvider: vi.fn() }));
@@ -36,6 +36,7 @@ beforeEach(async () => {
   mocks.create.mockResolvedValue({ format: 'shopeers-local-backup', formatVersion: 1, tables: {}, recordCount: 3 });
   mocks.restore.mockImplementation(async (_payload, _actor, options) => { await options?.beforeRestore?.(); mocks.applied(); return { recordCount: 1 }; });
   mocks.record.mockResolvedValue({});
+  mocks.clear.mockResolvedValue({filePath:'synthetic-backup.json'});
   mocks.snapshot.refresh.mockResolvedValue({ status: 'ready' });
   window.shopeersDesktopRuntime = { desktop: true, saveBackup: mocks.save };
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -115,3 +116,30 @@ describe('backup workflow save protection', () => {
   await act(async () => finish({ status: 'saved', fileName: 'rollback.json', sizeBytes: 20 }));
   expect(mocks.applied).toHaveBeenCalledOnce();
  });
+
+async function confirmClear() {
+  await act(async()=>button('清空数据').click());
+  const input=container.querySelector('#clear-workspace-confirmation');
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,'清空本机数据');
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+}
+it('shows backup progress, prevents same-event duplicate clears and retains the saved location',async()=>{
+  let finish;
+  mocks.clear.mockImplementation((_actor,options)=>{options.onProgress('正在保存并校验清空前完整备份…');return new Promise(resolve=>{finish=resolve;});});
+  await confirmClear();
+  await act(async()=>{button('永久清空').click();button('永久清空').click();});
+  expect(mocks.clear).toHaveBeenCalledOnce();
+  expect(container.querySelector('[role=dialog]').textContent).toContain('正在保存并校验');
+  await act(async()=>finish({filePath:'synthetic-backup.json'}));
+  expect(container.querySelector('[role=dialog]')).toBeNull();
+  expect(container.querySelector('.system-operation-warning').textContent).toContain('synthetic-backup.json');
+});
+it('reports a completed clear accurately even when its status refresh fails',async()=>{
+  mocks.snapshot.refresh.mockRejectedValueOnce(new Error('synthetic refresh error'));
+  await confirmClear();await act(async()=>button('永久清空').click());
+  expect(container.querySelector('[role=dialog]')).toBeNull();
+  expect(container.querySelector('.toast-warning').textContent).toContain('无需重复清空');
+  expect(mocks.clear).toHaveBeenCalledOnce();
+});

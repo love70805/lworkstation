@@ -7,6 +7,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
 import {createInboxStorage, cloneInboxMetadata} from './erp-inbox-storage.mjs';
+import {DESKTOP_INBOX_BACKUP_FORMAT,INBOX_RUNTIME_KINDS,validateDesktopInboxBackup} from '../integrations/contracts/desktop-inbox-backup.mjs';
 
 const port = Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790);
 const bindHost = "127.0.0.1";
@@ -27,7 +28,7 @@ const LEDGER_SCOPE_EXPECTED = "expected";
 const LEDGER_SCOPE_AUXILIARY = "auxiliary";
 let spoolWriteChain = Promise.resolve();
 let latestTransportError = null;
-const spoolStorage = createInboxStorage(spoolPath);
+const spoolStorage = createInboxStorage(spoolPath,{coldAcknowledged:true});
 const leaseStorage = createInboxStorage(`${spoolPath}.leases.json`);
 const extensionHeartbeats = new Map();
 let taskHeartbeats = new Map();
@@ -35,6 +36,38 @@ let leaseLoading;
 let leaseWriteChain = Promise.resolve();
 let workspaceResetRevision = 0;
 let resettingBusinessData = false;
+let maintenance = null;
+
+async function maintainBusinessData(payload,records) {
+  if(payload?.action==='validate') {validateDesktopInboxBackup(payload.snapshot);if(!payload.snapshot)throw new Error('缺少桌面收件备份。');return {ok:true};}
+  if(payload?.action==='begin') {
+    if(maintenance)throw Object.assign(new Error('已有数据备份或恢复正在进行。'),{status:409});
+    resettingBusinessData=true;workspaceResetRevision++;
+    try {
+      await leaseWriteChain.catch(()=>{});
+      const business=(await spoolStorage.exportRecords()).filter(record=>!INBOX_RUNTIME_KINDS.has(record.kind));
+      const leases=await leaseStorage.exportRecords();
+      const snapshot={format:DESKTOP_INBOX_BACKUP_FORMAT,formatVersion:1,generatedAt:new Date().toISOString(),records:business,leases,recordCount:business.length,leaseCount:leases.length};
+      validateDesktopInboxBackup(snapshot);
+      maintenance={id:crypto.randomUUID(),expiresAt:Date.now()+15*60*1000};
+      return {ok:true,maintenanceId:maintenance.id,snapshot};
+    } catch(e) {resettingBusinessData=false;throw e;}
+  }
+  if(!maintenance||payload?.maintenanceId!==maintenance.id)throw Object.assign(new Error('收件备份保护已失效，请重新备份后重试。'),{status:409});
+  if(payload.action==='hold') {maintenance.expiresAt=Date.now()+15*60*1000;return {ok:true};}
+  if(payload.action==='end') {maintenance=null;resettingBusinessData=false;return {ok:true};}
+  if(payload.action==='restore') {
+    validateDesktopInboxBackup(payload.snapshot);
+    if(!payload.snapshot)throw new Error('缺少桌面收件备份。');
+    const restored=structuredClone(payload.snapshot.records);
+    recoverCollectionTasks(restored,crypto.randomUUID());
+    await writeSpool([...records.filter(record=>INBOX_RUNTIME_KINDS.has(record.kind)),...restored]);
+    await leaseStorage.write([]);taskHeartbeats.clear();leaseLoading=Promise.resolve();
+    latestTransportError=null;
+    return {ok:true,restoredCount:restored.length};
+  }
+  throw Object.assign(new Error('无效的收件维护请求。'),{status:400});
+}
 
 function loadTaskHeartbeats() {
   return leaseLoading ??= leaseStorage.read().then(records => {
@@ -154,13 +187,13 @@ async function clearBusinessRecords(records) {
   }
 }
 
-function readBody(req) {
+function readBody(req,limit=maxBytes) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on("data", (chunk) => {
       size += chunk.length;
-      if (size > maxBytes) {
+      if (size > limit) {
         reject(Object.assign(new Error("ERP 收件请求体过大。"), { status: 413 }));
         req.destroy();
         return;
@@ -697,6 +730,7 @@ function publicRequest(record) {
 function publicBatch(record) {
   if (!record) return null;
   const envelope = record.envelope ?? {};
+  if(envelope.__inboxArchive)return {...publicRequest(record),deliveryId:record.deliveryId,batchId:record.batchId,receivedAt:record.receivedAt,acknowledgedAt:record.acknowledgedAt??null,...envelope.__inboxArchive};
   const batch = envelope.batch ?? {};
   const sourceFormatVersion = Number(envelope.sourceFormatVersion ?? batch.sourceFormatVersion ?? envelope.formatVersion ?? batch.formatVersion) === 1 ? 1 : 2;
   return {
@@ -1002,11 +1036,12 @@ const server = http.createServer(async (req, res) => {
   try {
     // Receive the bounded body before reserving the spool; a slow sender must
     // not block status polling or other completed requests.
-    const payload = req.method === "POST" ? JSON.parse(await readBody(req)) : null;
     const route = new URL(req.url, `http://${bindHost}:${port}`).pathname;
-    if (route === '/erp/v1/workspace-reset' && !authorizedReset(req)) {
+    const protectedRoute=['/erp/v1/workspace-reset','/erp/v1/workspace-maintenance'].includes(route);
+    if (protectedRoute && !authorizedReset(req)) {
       return json(res, 403, { error: 'WORKSPACE_RESET_FORBIDDEN', message: '仅允许桌面工作站清理本机收件数据。' });
     }
+    const payload = req.method === "POST" ? JSON.parse(await readBody(req,protectedRoute?512*1024*1024:maxBytes)) : null;
     const resetRevision = workspaceResetRevision;
     const extensionHeartbeat = req.method==='POST' && ['/erp/v1/extension-status','/selection/v1/extension-status'].includes(route);
     const taskHeartbeat = req.method==='POST' && /^\/erp\/v1\/collection-tasks\/[^/]+\/control$/.test(route) && payload?.action==='heartbeat';
@@ -1016,13 +1051,17 @@ const server = http.createServer(async (req, res) => {
       spoolWriteChain = new Promise((resolve) => { releaseSpool = resolve; });
       await previousWrite;
     }
+    if(maintenance?.expiresAt<Date.now()) {maintenance=null;resettingBusinessData=false;}
+    if(maintenance&&!protectedRoute&&req.method!=='GET')throw Object.assign(new Error('正在保存或恢复本机备份，请稍后重试。'),{status:503,code:'WORKSPACE_MAINTENANCE'});
     // Status reads and validated leases use a committed snapshot. Historical
     // evidence is serialized/fsynced in a worker; it cannot block heartbeats.
     const records = await readSpool();
+    if(route==='/erp/v1/workspace-maintenance'&&req.method==='POST')return json(res,200,await maintainBusinessData(payload,records));
     const expiredChanged = expireRegisteredRequests(records);
     const recoveredTasks = recoverCollectionTasks(records, inboxInstanceId);
     if (!runtimeOnly && (expiredChanged || recoveredTasks)) await writeSpool(records);
     if (route === '/erp/v1/workspace-reset' && req.method === 'POST') {
+      if(!maintenance||payload?.maintenanceId!==maintenance.id)throw Object.assign(new Error('必须先成功保存清空前备份。'),{status:409});
       return json(res, 200, await clearBusinessRecords(records));
     }
     const taskResponse = handleCollectionTaskRequest(records, { method: req.method, url: new URL(req.url, `http://${bindHost}:${port}`), payload: payload ?? {}, instanceId: inboxInstanceId });
@@ -1131,7 +1170,7 @@ const server = http.createServer(async (req, res) => {
       const duplicate = records.find(item => item.kind === 'catalog-batch' && item.resultDeliveryId === resultDeliveryId);
       if (duplicate) {
         if (duplicate.resultInputHash !== inputHash) return json(res, 409, { error: 'ERP_RESULT_DELIVERY_CONFLICT', message: '资料投递标识已绑定不同内容。' });
-        return json(res, 200, { accepted: true, idempotent: true, deliveryId: duplicate.deliveryId, batchId: duplicate.batchId, envelope: duplicate.envelope });
+        return json(res, 200, { accepted: true, idempotent: true, deliveryId: duplicate.deliveryId, batchId: duplicate.batchId, envelope: (await spoolStorage.hydrate(duplicate)).envelope });
       }
       const request = records.find(item => item.kind === 'request' && item.requestKind === 'catalog' && item.status === 'registered' && !requestExpired(item) && item.requestId === payload?.requestId && item.workspaceId === payload?.workspaceId);
       if (!request) return json(res, 409, { error: 'ERP_REQUEST_NOT_FOUND', message: '没有匹配且有效的已登记资料请求。' });
@@ -1324,7 +1363,7 @@ const server = http.createServer(async (req, res) => {
           deliveryId: duplicate.deliveryId,
           batchId: duplicate.batchId,
           requestId: duplicate.requestId,
-          envelope: duplicate.envelope,
+          envelope: (await spoolStorage.hydrate(duplicate)).envelope,
         });
       }
       const request = chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs });

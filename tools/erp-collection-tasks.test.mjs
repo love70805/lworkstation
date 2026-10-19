@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readInboxRecords} from './fixtures/inbox-persistence.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -160,12 +161,12 @@ try {
   const evidenceBeforeHeartbeat = await fs.readFile(spool, 'utf8');
   await request(`${secondUrl}/control`,{action:'heartbeat'});
   assert.equal(await fs.readFile(spool, 'utf8'), evidenceBeforeHeartbeat, 'heartbeat must not rewrite historical evidence');
-  const leases = JSON.parse(await fs.readFile(`${spool}.leases.json`, 'utf8'));
+  const leases = await readInboxRecords(`${spool}.leases.json`);
   assert.equal(leases.find(item => item.taskId === second.taskId).scopeHash, second.scopeHash);
   assert.ok((await fs.stat(`${spool}.leases.json`)).size < 5000, 'lease durability uses bounded metadata');
   assert.equal((await request('requests?workspaceId=W-http&includeHistory=true')).records.find(item=>item.requestId==='R-two').registeredAt,before);
   await stop();
-  const persisted=JSON.parse(await fs.readFile(spool,'utf8'));
+  const persisted=await readInboxRecords(spool);
   const longRequest=persisted.find(item=>item.kind==='request'&&item.requestId==='R-two');
   longRequest.registeredAt=new Date(Date.now()-3*60*60*1000).toISOString();
   const longCatalog=persisted.find(item=>item.kind==='request'&&item.requestId==='R-two-CATALOG');
@@ -175,13 +176,13 @@ try {
   assert.equal((await request('requests?workspaceId=W-http')).records.find(item=>item.requestId==='R-two').status,'registered','independent lease survives original two hour deadline');
   assert.equal((await request('requests?workspaceId=W-http')).records.find(item=>item.requestId==='R-two-CATALOG').status,'registered','companion catalog lease survives long cost stage');
   await stop();
-  const expiredRecords=JSON.parse(await fs.readFile(spool,'utf8'));
+  const expiredRecords=await readInboxRecords(spool);
   const expired=expiredRecords.find(item=>item.kind==='request'&&item.requestId==='R-two');
   expired.leaseExpiresAt=new Date(Date.now()-1000).toISOString();
   await fs.writeFile(spool,JSON.stringify(expiredRecords));
   // Expiry includes the latest durable heartbeat, rather than the older lease
   // in the evidence snapshot. Restart still requires explicit task recovery.
-  const expiredLeases = JSON.parse(await fs.readFile(`${spool}.leases.json`, 'utf8'));
+  const expiredLeases = await readInboxRecords(`${spool}.leases.json`);
   expiredLeases.find(item => item.taskId === second.taskId).leaseExpiresAt = expired.leaseExpiresAt;
   await fs.writeFile(`${spool}.leases.json`, JSON.stringify(expiredLeases));
   await start();
@@ -203,7 +204,7 @@ try {
   const coordinatedEvidence=await fs.readFile(spool,'utf8');
   await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER'});
   assert.equal(await fs.readFile(spool,'utf8'),coordinatedEvidence,'coordinated heartbeat also leaves evidence untouched');
-  const runnerLease=JSON.parse(await fs.readFile(`${spool}.leases.json`,'utf8')).find(item=>item.taskId===coordinated.taskId);
+  const runnerLease=(await readInboxRecords(`${spool}.leases.json`)).find(item=>item.taskId===coordinated.taskId);
   assert.equal(runnerLease.runnerId,'HTTP-RUNNER');
   assert.ok(Date.parse(runnerLease.runnerLeaseExpiresAt)>Date.now());
   await stop(); await start();

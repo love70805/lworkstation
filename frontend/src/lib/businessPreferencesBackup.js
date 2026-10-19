@@ -1,3 +1,4 @@
+import {captureCostDrafts,validateCostDraftBackup} from './costMatchingDraft.js';
 // Only these business preferences may cross a backup boundary. Never enumerate
 // or export arbitrary localStorage values (authentication and device state live there).
 export const BUSINESS_PREFERENCE_FIELDS = Object.freeze({
@@ -84,13 +85,19 @@ function writeEntries(entries, storage) {
     if (storage.getItem(key) !== value) throw new Error('业务筛选配置未完整写入。');
   }
 }
-export function preparePreferenceRestore(payload, storage = globalThis.localStorage) {
-  if (payload === undefined) return null;
+export function preparePreferenceRestore(payload, storage = globalThis.localStorage, {costDrafts}={}) {
+  if (payload === undefined && costDrafts===undefined) return null;
   if (!storage) throw new Error('本机业务筛选配置存储不可用，未恢复数据。');
   if (storage.getItem(PREFERENCE_RESTORE_JOURNAL) !== null) throw new Error('上次恢复尚未完成，请先重试恢复检查。');
-  const after = payload.workspaces.flatMap(workspace => Object.entries(BUSINESS_PREFERENCE_FIELDS).map(([field, prefix]) => ({
+  const after = (payload?.workspaces??[]).flatMap(workspace => Object.entries(BUSINESS_PREFERENCE_FIELDS).map(([field, prefix]) => ({
     key: `${prefix}${workspace.workspaceId}`, value: workspace[field] === null ? null : JSON.stringify(workspace[field]),
   })));
+  if(costDrafts!==undefined) {
+    validateCostDraftBackup(costDrafts);
+    const next=new Map(costDrafts.entries.map(entry=>[entry.key,entry.value]));
+    const keys=new Set([...captureCostDrafts(storage).entries.map(entry=>entry.key),...next.keys()]);
+    for(const key of keys)after.push({key,value:next.get(key)??null});
+  }
   const journal = { version: 1, id: crypto.randomUUID(), after,
     before: after.map(({ key }) => ({ key, value: storage.getItem(key) })),
   };
@@ -119,7 +126,7 @@ export function readPreferenceRestoreJournal(storage = globalThis.localStorage) 
     const seen = new Set();
     for (const entry of entries) {
       keys(entry, ['key', 'value']); text(entry.key);
-      if (!Object.values(BUSINESS_PREFERENCE_FIELDS).some(prefix => entry.key.startsWith(prefix) && entry.key.length > prefix.length)
+      if (!(entry.key.startsWith('shopeers:erp-cost-draft:')||Object.values(BUSINESS_PREFERENCE_FIELDS).some(prefix => entry.key.startsWith(prefix) && entry.key.length > prefix.length))
         || seen.has(entry.key) || !(entry.value === null || typeof entry.value === 'string')) fail();
       seen.add(entry.key);
     }
@@ -127,6 +134,7 @@ export function readPreferenceRestoreJournal(storage = globalThis.localStorage) 
   };
   if (JSON.stringify(valid(journal.before)) !== JSON.stringify(valid(journal.after))) fail();
   for (const entry of journal.after) {
+    if(entry.key.startsWith('shopeers:erp-cost-draft:'))continue;
     const [field] = Object.entries(BUSINESS_PREFERENCE_FIELDS).find(([, prefix]) => entry.key.startsWith(prefix));
     validateValue(field, entry.value === null ? null : JSON.parse(entry.value));
   }

@@ -9,6 +9,10 @@
 - 当前开发入口、源码与本机材料的边界见 [开发工作区说明](DEVELOPMENT_WORKSPACE.md)。一个版本在一个执行对话内端到端交付，代码模块仍保持职责分离。
 - 新任务先运行 `node tools/development-context.mjs` 查看只读摘要，再按本批目标读取实现和选择验证；摘要不代表已联网核对最新主线。
 
+## 0.4.44 清空前备份与收件存储（实施中）
+
+用户明确授权第 8、9 项修复，减少人工确认，双方直接在仓库沟通。实际远端基线 `0e56deba77cf770d1a4a5cb9ad32e8e7ed51eadb`；范围、跨模块契约和完成信号见 [本批记录](integration/BACKUP_AND_INBOX_STORAGE_0.4.44.md)，对方审查入口见 [0006](agent-discussions/2026-10-19-handover-review/0006-codex-implementation-scope.md)。候选与公开发布分别验收记录；真实数据不做破坏性试验。
+
 ## 2026-10-19 AI 仓库讨论入口（纯文档）
 
 用户授权双方直接在仓库交换回复。固定入口为 [AI 协作讨论区](agent-discussions/README.md)，本次 [交接审查](agent-discussions/2026-10-19-handover-review/README.md) 保存双方往来、撤回项、建议优先级及共享依赖补丁的环境限制。实际联网核对基线 `46a039e9c31963a6916383ec817fe7a79ae843a6`；范围为讨论文档和规则入口。本地 8 份 Markdown、70 个本地链接及公开材料检查通过，必需 CI 与主线集成状态以本批 PR 结果为准；通过 CI 并合入即完成本批交付。不修改软件源码、真实业务数据或版本，本机原稿保留，详细私有日志不提交。

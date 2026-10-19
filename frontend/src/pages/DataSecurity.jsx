@@ -129,6 +129,9 @@ export default function DataSecurity() {
   const restoreInputRef = useRef(null);
   const exportPendingRef = useRef(false);
   const restorePendingRef = useRef(false);
+  const clearPendingRef = useRef(false);
+  const [clearProgress,setClearProgress]=useState('');
+  const [clearError,setClearError]=useState('');
   const cloudSeedInputRef = useRef(null);
   const check = useSystemSnapshot(readSecurityState);
   const security = check.data?.security;
@@ -177,7 +180,7 @@ export default function DataSecurity() {
   };
 
   const exportBackup = async ({ prefix = "shopeers-backup", successMessage } = {}) => {
-    if (exportPendingRef.current) return null;
+    if (exportPendingRef.current || clearPendingRef.current || restorePendingRef.current) return null;
     exportPendingRef.current = true;
     setOperationNotice('');
     let savedBackup = null;
@@ -363,7 +366,7 @@ export default function DataSecurity() {
   };
 
   const restoreBackup = async () => {
-    if (!restoreCandidate || restorePendingRef.current) return;
+    if (!restoreCandidate || restorePendingRef.current || clearPendingRef.current || exportPendingRef.current) return;
     restorePendingRef.current = true;
     setOperationNotice('');
     let restoredCount = null;
@@ -372,7 +375,7 @@ export default function DataSecurity() {
     try {
       let rollback = null;
       const inspection = await restoreWorkspaceBackupPayload(restoreCandidate.payload, 'local-user', { beforeRestore: async () => {
-        if (rollbackBeforeRestore) {
+        if (rollbackBeforeRestore && !restoreCandidate.payload.desktopInbox) {
           const currentPayload = await createWorkspaceBackupPayload();
           const download = requireSavedWorkspaceBackup(await downloadWorkspaceBackup(currentPayload, { prefix: "shopeers-before-restore" }));
           rollback = {
@@ -403,18 +406,25 @@ export default function DataSecurity() {
   };
 
   const clearWorkspace = async () => {
-    if (dangerText !== "清空本机数据") return;
+    if (dangerText !== "清空本机数据" || clearPendingRef.current || restorePendingRef.current || exportPendingRef.current) return;
+    clearPendingRef.current=true;setClearError('');
     setClearing(true);
+    let clearedBackup;
     try {
-      await clearLocalWorkspaceData();
-      await refreshStorageEstimate();
+      clearedBackup=await clearLocalWorkspaceData('local-user',{onProgress:setClearProgress});
       setDangerOpen(false);
       setDangerText("");
-      notify("本机业务数据已清空，并已创建空白默认工作区。", "success");
+      const message=`本机业务数据已清空，完整回滚备份已保存：${clearedBackup.filePath}。`;
+      setOperationNotice(message);notify('本机数据已清空，完整回滚备份已保存。备份位置见页面提示。','success');
+      await refreshStorageEstimate();
     } catch (error) {
-      notify(`清空数据失败：${error.message}`, "error");
+      const message=clearedBackup?`本机数据已清空，备份保留在 ${clearedBackup.filePath}；状态刷新失败：${error.message}。无需重复清空。`
+        :error.backup?`完整备份已保存：${error.backup.filePath}；清理未全部完成：${error.message}。请保留该文件。`
+        :`未执行清空：${error.message}`;
+      if(clearedBackup||error.backup)setOperationNotice(message);
+      setClearError(message);notify(clearedBackup?'本机数据已清空，状态刷新失败。无需重复清空。':error.backup?'完整备份已保存，清理未全部完成。请查看页面提示。':message,clearedBackup?'warning':'error');
     } finally {
-      setClearing(false);
+      clearPendingRef.current=false;setClearing(false);setClearProgress('');
     }
   };
 
@@ -589,18 +599,21 @@ export default function DataSecurity() {
           <span>待写入记录 <strong className="mono">{restoreCandidate?.inspection?.recordCount?.toLocaleString("zh-CN") ?? "--"}</strong></span>
         </div>
         {restoreError ? <p className="system-check-error" role="alert">{restoreError}</p> : null}
-        <p className="modal-note">{restoreCandidate?.inspection.businessPreferencesIncluded ? '同时恢复备份中各工作区的货号组和导入筛选。' : '旧备份未包含业务筛选配置，现有货号组和导入筛选将保留。'}{rollbackBeforeRestore ? "请先在保存窗口中保存当前状态作为回滚备份，保存成功后才执行恢复。" : "恢复前回滚备份已关闭，当前状态不会自动保存。"}</p>
+        <p className="modal-note">{restoreCandidate?.inspection.businessPreferencesIncluded ? '同时恢复备份中各工作区的货号组和导入筛选。' : '旧备份未包含业务筛选配置，现有货号组和导入筛选将保留。'}{restoreCandidate?.payload.desktopInbox?'该文件还包含桌面收件和任务；恢复前将自动保存当前完整回滚备份，恢复中的采集会暂停待继续。':rollbackBeforeRestore ? "请先在保存窗口中保存当前状态作为回滚备份，保存成功后才执行恢复。" : "恢复前回滚备份已关闭，当前状态不会自动保存。"}</p>
       </Modal>
 
       <Modal
         open={dangerOpen}
         title="清空当前本机工作区"
-        description="此操作无法在应用内撤销。请输入“清空本机数据”以继续。"
+        description="清空前会自动保存并校验完整回滚备份，包含桌面收件和任务；备份失败不会清空。请输入“清空本机数据”以继续。"
         tone="danger"
         onClose={() => { if (!clearing) { setDangerOpen(false); setDangerText(""); } }}
         footer={<><Button disabled={clearing} onClick={() => { setDangerOpen(false); setDangerText(""); }}>取消</Button><Button variant="danger" loading={clearing} disabled={dangerText !== "清空本机数据" || clearing} onClick={clearWorkspace}>永久清空</Button></>}
       >
         <div className="form-field"><label className="required" htmlFor="clear-workspace-confirmation">确认文字</label><input id="clear-workspace-confirmation" className="text-input mono" value={dangerText} onChange={(event) => setDangerText(event.target.value)} placeholder="清空本机数据" /></div>
+        {clearProgress?<p role="status">{clearProgress}</p>:null}
+        {clearError?<p className="system-check-error" role="alert">{clearError}</p>:null}
+        <p className="modal-note">自动备份保存在“文档 / Lworkstation 备份”，不会随本机数据清空。以后可在本页导入该 JSON 文件恢复；运行中的采集恢复为暂停待继续。</p>
       </Modal>
     </AppShell>
   );

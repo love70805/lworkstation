@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {createInboxDisk} from './erp-inbox-disk.mjs';
 import {
   createInvalidDirectV2Fixtures,
   createValidDirectV2Envelope,
@@ -14,6 +15,10 @@ const spoolPath = path.join(os.tmpdir(), `shopeers-erp-inbox-test-${process.pid}
 const serverPath = fileURLToPath(new URL("./erp-inbox-server.mjs", import.meta.url));
 const base = `http://127.0.0.1:${port}`;
 const capability = "erp-inbox-test-capability-0123456789abcdef";
+async function persistedRecords() {
+  const disk=createInboxDisk(spoolPath),entries=await disk.load();
+  return Promise.all(entries.map(async entry=>({...entry.metadata,...(entry.ref?{envelope:await disk.evidence(entry.ref)}:{})})));
+}
 
 const selectionCapture = {
   schemaVersion: 1,
@@ -822,7 +827,7 @@ try {
     request: { id: "SERVER-AMB", workspaceId: "workspace-server-amb", ledgerId: "ledger-server-amb", platformSkcs: [{ platformSkc: "SKC-SERVER-AMB" }] },
     expectedSkus: [{ platformSku: "SKU-SERVER-AMB", platformSkc: "SKC-SERVER-AMB" }],
   });
-  const ambiguousSpool = JSON.parse(await fs.readFile(spoolPath, "utf8"));
+  const ambiguousSpool = await persistedRecords();
   const registeredAmbiguousRequest = ambiguousSpool.find((item) => item.kind === "request" && item.requestId === "SERVER-AMB");
   ambiguousSpool.push({ ...registeredAmbiguousRequest, duplicateFixture: true, registeredAt: new Date(Date.now() - 1).toISOString() });
   await fs.writeFile(spoolPath, JSON.stringify(ambiguousSpool, null, 2), "utf8");
@@ -1349,7 +1354,7 @@ try {
   response = await fetch(base + '/erp/v1/requests?workspaceId=workspace-independent'); assert.equal((await response.json()).records.length, 0);
 
   await post("/erp/v1/requests", request("EXPIRED", "SKU-EXPIRED"));
-  const spool = JSON.parse(await fs.readFile(spoolPath, "utf8"));
+  const spool = await persistedRecords();
   const expired = spool.find((item) => item.kind === "request" && item.requestId === "EXPIRED");
   expired.registeredAt = "2020-01-01T00:00:00.000Z";
   await fs.writeFile(spoolPath, JSON.stringify(spool, null, 2), "utf8");

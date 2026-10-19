@@ -17,7 +17,7 @@ try {
   assert.deepEqual(await emptyStorage.read(),[]);
   assert.equal(transfers.length,0,'a missing queue does not start a storage worker');
   await emptyStorage.write([{kind:'batch',status:'pending',envelope:{zero:0}}]);
-  assert.deepEqual(JSON.parse(await fs.readFile(emptyFile,'utf8')),[{kind:'batch',status:'pending',envelope:{zero:0}}],'first delivery after empty startup is durable');
+  assert.deepEqual(await emptyStorage.exportRecords(),[{kind:'batch',status:'pending',envelope:{zero:0}}],'first delivery after empty startup is durable');
   await worker.terminate();
   const appearedFile=path.join(directory,'appeared.json'),appearedStorage=createInboxStorage(appearedFile);
   assert.deepEqual(await appearedStorage.read(),[]);
@@ -31,7 +31,7 @@ try {
   records[0].status='acknowledged';await storage.write(records);
   assert.equal(transfers.at(-1).additions,0,'existing evidence stays in its storage worker');
   assert.ok(transfers.at(-1).bytes<1000,'metadata writes do not transfer historical evidence');
-  assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8'))[0].envelope,envelope);
+  assert.deepEqual((await storage.exportRecords())[0].envelope,envelope);
   const before=await fs.stat(file),count=transfers.length;
   await storage.write(cloneInboxMetadata(await storage.read()));
   assert.equal((await fs.stat(file)).mtimeMs,before.mtimeMs,'idempotent writes leave the durable file untouched');
@@ -39,15 +39,15 @@ try {
   records=cloneInboxMetadata(await storage.read());
   records.push({kind:'batch',status:'pending',envelope:{batch:{rows:[{sku:'new',unitCost:0}]}}});
   await storage.write(records);assert.equal(transfers.at(-1).additions,1,'new evidence transfers once');
-  const committed=JSON.parse(await fs.readFile(file,'utf8'));
+  const committed=await storage.exportRecords();
   assert.deepEqual(committed,records);
   const exited=once(worker,'exit');await worker.terminate();await exited;
   records=cloneInboxMetadata(await storage.read());records[1].status='acknowledged';
   await storage.write(records);
-  assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),records,'replacement worker recovers all evidence before committing');
+  assert.deepEqual(await storage.exportRecords(),records,'replacement worker recovers all evidence before committing');
   await fs.writeFile(file,JSON.stringify([{kind:'batch',status:'pending',envelope:{external:true}}]));
   const replaced=await storage.read();assert.equal(replaced[0].envelope.external,true);
   const replacement=cloneInboxMetadata(replaced);replacement[0].status='acknowledged';await storage.write(replacement);
-  assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),replacement,'external replacement cannot use old evidence references');
+  assert.deepEqual(await storage.exportRecords(),replacement,'external replacement cannot use old evidence references');
   console.log('ERP persistent storage worker: metadata-only transfer, immutable/new evidence, no-op, worker recovery and external replacement passed');
 }finally{Worker.prototype.postMessage=original;await worker?.terminate();await fs.rm(directory,{recursive:true,force:true});}

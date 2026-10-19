@@ -70,9 +70,10 @@ try {
   assert.equal(handlers.get('workspace:set-close-behavior')(event, 'quit').closeBehavior, 'quit');
   assert.equal(handlers.get('workspace:set-close-behavior')(event, 'invalid').ok, false);
   assert.equal(closeBehavior, 'quit');
-  assert.deepEqual(await handlers.get('workspace:clear-inbox-data')(event), { ok: true, clearedCount: 4 });
+  assert.equal((await handlers.get('workspace:clear-inbox-data')(event)).ok,false,'legacy direct clear cannot bypass a verified full backup');
   resetFailure = true;
-  assert.deepEqual(await handlers.get('workspace:clear-inbox-data')(event), { ok: false, error: 'fixture inbox disk full' });
+  assert.equal((await handlers.get('workspace:clear-inbox-data')(event)).ok,false);
+  assert.equal(resetCalls,0);
 
   let trusted = true;
   const navigated = createBackupSaver({ isTrusted: () => trusted, showSaveDialog: async () => {

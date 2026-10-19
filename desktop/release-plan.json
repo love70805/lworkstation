@@ -1,9 +1,21 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.43",
+  "version": "0.4.44",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-unbound-history",
+  "integrationBranch": "codex/backup-spool-performance",
   "requiredCommits": [
+    {
+      "module": "v0.4.44-verified-backup-and-incremental-inbox",
+      "commit": "81270354f185c8e84cdbffe066bdd0fb574de56a"
+    },
+    {
+      "module": "v0.4.44-full-recovery-and-legacy-compatibility",
+      "commit": "4bbdc307c62146bd59a05012c7816726cfbe97a9"
+    },
+    {
+      "module": "v0.4.44-verified-main-baseline",
+      "commit": "0e56deba77cf770d1a4a5cb9ad32e8e7ed51eadb"
+    },
     {
       "module": "v0.4.43-directed-history-and-one-batch-cost-recovery",
       "commit": "6b43bff4a668726b469b8d2f5802a0c3b48ef3dd"

@@ -1,5 +1,5 @@
-import fs from 'node:fs/promises';
 import {Worker} from 'node:worker_threads';
+import {inboxDiskRevision} from './erp-inbox-disk.mjs';
 
 function freezeEvidence(value) {
   if(!value || typeof value!=='object' || Object.isFrozen(value)) return value;
@@ -17,15 +17,15 @@ export function cloneInboxMetadata(records) {
   });
 }
 
-export function createInboxStorage(file) {
+export function createInboxStorage(file,options={}) {
   let snapshot=null,revision=null,loading=null,writing=false;
   let worker=null,sequence=0,evidenceSequence=0,evidenceIds=new WeakMap(),committedSignature=null;
   let writeChain=Promise.resolve();
   const pending=new Map();
   function operation(action, payload={}) {
     if(!worker) {
-      evidenceIds=new WeakMap();committedSignature=null;
-      const current=new Worker(new URL('./erp-inbox-storage-worker.mjs',import.meta.url),{workerData:{file}});
+      committedSignature=null;
+      const current=new Worker(new URL('./erp-inbox-storage-worker.mjs',import.meta.url),{workerData:{file,options}});
       worker=current;
       const fail=error=>{
         if(worker!==current)return;
@@ -67,8 +67,7 @@ export function createInboxStorage(file) {
     });
   }
   async function fileRevision() {
-    try {const stats=await fs.stat(file);return `${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}:${stats.ino}`;}
-    catch(error){if(error.code==='ENOENT')return 'missing';throw error;}
+    return inboxDiskRevision(file);
   }
   async function read() {
     // Readers see the last fully committed snapshot while a write is pending.
@@ -80,7 +79,7 @@ export function createInboxStorage(file) {
       // Fresh profiles and unused lease queues have no file to parse. Do not
       // keep a storage isolate alive just to cache an empty array. A later
       // first write or externally created file still takes the worker path.
-      if(current==='missing' && !worker) {
+      if(current==='missing|missing' && !worker) {
         snapshot=[];revision=current;committedSignature='[]';
         return snapshot;
       }
@@ -99,6 +98,7 @@ export function createInboxStorage(file) {
     if(loading) await loading;
     // Start the worker before resolving references: a replacement worker has
     // no cached evidence and must receive it again after a process failure.
+    if(!snapshot)await read();
     if(!worker)await operation('read');
     const additions=[],entries=entriesFor(records,additions),signature=JSON.stringify(entries);
     if(!additions.length && signature===committedSignature && await fileRevision()===revision)return;
@@ -106,17 +106,31 @@ export function createInboxStorage(file) {
     try {
       // Immutable historical envelopes remain in the worker. A task/acknowledgement
       // sends only metadata; a newly delivered envelope is transferred once.
-      const result=await operation('write',{entries,additions});
-      additions.forEach(({envelopeId,envelope})=>{
-        if(envelope && typeof envelope==='object')evidenceIds.set(envelope,envelopeId);
+      const result=await operation('write',{entries,additions,expectedRevision:revision});
+      snapshot=records.map((record,index)=>{
+        const envelope=result.previews[index]??record.envelope;
+        if(record.envelope && typeof record.envelope==='object')evidenceIds.set(record.envelope,result.envelopeIds[index]);
+        if(envelope && typeof envelope==='object')evidenceIds.set(envelope,result.envelopeIds[index]);
+        return envelope===record.envelope?record:{...record,envelope};
       });
-      snapshot=seal(records);revision=result.revision;
-      committedSignature=signature;
+      seal(snapshot);revision=result.revision;
+      committedSignature=JSON.stringify(entriesFor(snapshot,[]));
     } finally {writing=false;}
   }
   function write(records) {
     const result=writeChain.catch(()=>{}).then(()=>writeNow(records));
     writeChain=result;return result;
   }
-  return {read,write};
+  async function hydrate(record) {
+    if(!record?.envelope?.__inboxArchive)return record;
+    const envelopeId=evidenceIds.get(record.envelope);
+    const result=await operation('hydrate',{envelopeId});
+    return {...record,envelope:result.envelope};
+  }
+  async function exportRecords() {
+    await writeChain;
+    const result=await operation('snapshot');
+    return result.records;
+  }
+  return {read,write,hydrate,exportRecords};
 }

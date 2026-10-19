@@ -1,6 +1,25 @@
 export const COST_DRAFT_TTL = 2 * 60 * 60 * 1000;
 export const COST_DRAFT_STORAGE_PREFIX = "shopeers:erp-cost-draft:v12:";
 const LEGACY_COST_DRAFT_PREFIX = "shopeers:erp-cost-draft:";
+export function validateCostDraftBackup(payload) {
+  if(payload===undefined)return;
+  if(payload?.formatVersion!==1||!Array.isArray(payload.entries))throw new Error('成本草稿备份校验失败。');
+  const keys=new Set();
+  for(const entry of payload.entries) {
+    if(typeof entry?.key!=='string'||!entry.key.startsWith(LEGACY_COST_DRAFT_PREFIX)||entry.key.length<=LEGACY_COST_DRAFT_PREFIX.length
+      ||typeof entry.value!=='string'||keys.has(entry.key)||Object.keys(entry).some(key=>!['key','value'].includes(key)))throw new Error('成本草稿备份校验失败。');
+    keys.add(entry.key);
+  }
+}
+export function captureCostDrafts(storage=browserStorage()) {
+  if(!storage)return undefined;
+  const entries=[];
+  for(let index=0;index<(storage?.length??0);index++) {
+    const key=storage.key(index);
+    if(key?.startsWith(LEGACY_COST_DRAFT_PREFIX))entries.push({key,value:storage.getItem(key)});
+  }
+  const payload={formatVersion:1,entries};validateCostDraftBackup(payload);return payload;
+}
 
 function browserStorage() {
   try { return globalThis.localStorage ?? null; } catch { return null; }
