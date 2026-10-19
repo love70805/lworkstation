@@ -2,9 +2,9 @@
 
 面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、ERP 成本核对和利润核算放在同一个本机工作区。
 
-**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.46 更新说明](docs/RELEASE_0.4.46.md)
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.47 更新说明](docs/RELEASE_0.4.47.md)
 
-当前稳定版为 **v0.4.46**：统一工作台视觉方向与基础层，收敛字体、间距、圆角、控件、面板、表格与页头，重设浅深色语义令牌并修复深色可读性问题。工作台成本优先、商品资料按需补齐；ERP 正式成本、人工更正优先和月度定稿口径保持。当前为本机 Windows 桌面版，无需云端数据库，下载和安装更新由用户操作。
+当前稳定版为 **v0.4.47**：修复桌面主界面折叠侧栏与顶栏、账户下拉与顶栏的对齐问题，其余基础层与配色沿用 0.4.46。工作台成本优先、商品资料按需补齐；ERP 正式成本、人工更正优先和月度定稿口径保持。当前为本机 Windows 桌面版，无需云端数据库，下载和安装更新由用户操作。
 
 ## 主要功能
 
