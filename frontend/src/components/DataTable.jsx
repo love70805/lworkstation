@@ -74,7 +74,7 @@ function StandardBody({ table, rows, emptyState, getRowProps }) {
           </tr>
         );
       })}
-      {!rows.length ? <tr><td colSpan={table.getAllLeafColumns().length} className="no-results">{emptyState}</td></tr> : null}
+      {!rows.length ? <tr><td colSpan={table.getAllLeafColumns().length} className="no-results"><span className="no-results-message">{emptyState}</span></td></tr> : null}
     </tbody>
   );
 }
