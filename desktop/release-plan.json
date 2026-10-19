@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.44",
+  "version": "0.4.45",
   "candidateOnly": true,
-  "integrationBranch": "codex/backup-spool-performance",
+  "integrationBranch": "codex/inbox-worker-recovery",
   "requiredCommits": [
+    {
+      "module": "v0.4.45-cold-evidence-worker-recovery",
+      "commit": "bbac9745cb8155fcb1e0cc873f063f7f2ea43fbc"
+    },
+    {
+      "module": "v0.4.45-verified-main-baseline",
+      "commit": "efe255701f99cb3167f4b6b9eaccd2483c3c87bb"
+    },
     {
       "module": "v0.4.44-verified-backup-and-incremental-inbox",
       "commit": "81270354f185c8e84cdbffe066bdd0fb574de56a"
