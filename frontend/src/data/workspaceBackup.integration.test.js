@@ -18,7 +18,7 @@ const group = name => saveSupplierGroup(workspace, { id: 'group', name, aliases:
 const count = tables => Object.values(tables).reduce((sum, rows) => sum + rows.length, 0);
 beforeEach(async () => {
   const values = new Map();
-  vi.stubGlobal('localStorage', { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)),
+  vi.stubGlobal('localStorage', { get length(){return values.size;},key:index=>[...values.keys()][index]??null,getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)),
     removeItem: key => values.delete(key), clear: () => values.clear() });
   setWorkspaceRecoveryError();
   await db.delete(); await db.open();
@@ -28,6 +28,43 @@ afterEach(async () => {
   vi.restoreAllMocks(); localStorage.clear(); setWorkspaceRecoveryError();
   db.close(); await db.delete();
   vi.unstubAllGlobals();
+  delete window.shopeersDesktopRuntime;
+});
+
+it('round trips desktop receipts, exact manual rows and cost drafts using a commit marker',async()=>{
+  const draftKey='shopeers:erp-cost-draft:v12:fixture';
+  localStorage.setItem(draftKey,'{"sourceText":"synthetic raw evidence"}');
+  await db.erpCostRows.add({ledgerId:'fixture',platformSku:'synthetic',unitCost:0.0000001,source:'manual_override'});
+  const payload=await createWorkspaceBackupPayload();
+  payload.desktopInbox={format:'lworkstation-desktop-inbox-backup',formatVersion:1,recordCount:1,leaseCount:0,records:[{kind:'batch',deliveryId:'synthetic',status:'pending',envelope:{zero:0}}],leases:[]};
+  payload.manifest={...payload.manifest,desktopInboxIncluded:true,desktopRecordCount:1,desktopLeaseCount:0};
+  const recover=vi.fn().mockImplementation(async input=>input.committedId?{ok:true,id:input.committedId,phase:'committed'}:{ok:true});
+  window.shopeersDesktopRuntime={desktop:true,prepareInboxRestore:vi.fn().mockResolvedValue({ok:true,id:'restore-synthetic'}),recoverInboxRestore:recover,finishInboxRestore:vi.fn().mockResolvedValue({ok:true})};
+  await db.erpCostRows.clear();localStorage.removeItem(draftKey);
+  await restoreWorkspaceBackupPayload(payload);
+  expect((await db.erpCostRows.toArray())[0].unitCost).toBe(0.0000001);
+  expect(localStorage.getItem(draftKey)).toContain('synthetic raw evidence');
+  expect(recover).toHaveBeenCalledWith({committedId:'restore-synthetic'});
+  expect(await db.settings.get('desktopInboxRestoreCommit')).toBeUndefined();
+  expect(window.shopeersDesktopRuntime.finishInboxRestore).toHaveBeenCalledWith({id:'restore-synthetic'});
+});
+
+it('keeps a failed desktop completion blocked and finishes from its durable IndexedDB marker',async()=>{
+  const payload=await createWorkspaceBackupPayload();
+  payload.desktopInbox={format:'lworkstation-desktop-inbox-backup',formatVersion:1,recordCount:0,leaseCount:0,records:[],leases:[]};
+  payload.manifest={...payload.manifest,desktopInboxIncluded:true,desktopRecordCount:0,desktopLeaseCount:0};
+  let failing=true;
+  window.shopeersDesktopRuntime={desktop:true,prepareInboxRestore:vi.fn().mockResolvedValue({ok:true,id:'pending-synthetic'}),recoverInboxRestore:vi.fn().mockImplementation(async input=>{
+    if(input.committedId&&failing)return {ok:false,error:'synthetic desktop disk failure'};
+    return input.committedId?{ok:true,id:input.committedId}:{ok:true};
+  }),finishInboxRestore:vi.fn().mockResolvedValue({ok:true})};
+  await expect(restoreWorkspaceBackupPayload(payload)).rejects.toThrow('synthetic desktop disk failure');
+  expect((await db.settings.get('desktopInboxRestoreCommit')).value).toBe('pending-synthetic');
+  expect(await runWorkspaceBackgroundTask(()=> 'must wait')).toBeNull();
+  failing=false;await recoverWorkspacePreferenceRestore();
+  expect(await db.settings.get('desktopInboxRestoreCommit')).toBeUndefined();
+  expect(await runWorkspaceBackgroundTask(()=> 'resumed')).toBe('resumed');
+  expect(window.shopeersDesktopRuntime.prepareInboxRestore).toHaveBeenCalledOnce();
 });
 
 it('derives required tables from all declared schemas and accepts genuine earlier versions', () => {

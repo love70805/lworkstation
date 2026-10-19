@@ -1,6 +1,8 @@
 import { assertUniquePlatformSkus } from "./identifiers.js";
 import { validateSalesRowsAuditSnapshot } from "./salesRowsAuditSnapshot.js";
 import { validateBusinessPreferences } from '../lib/businessPreferencesBackup.js';
+import {validateCostDraftBackup} from '../lib/costMatchingDraft.js';
+import {validateDesktopInboxBackup} from '../../../integrations/contracts/desktop-inbox-backup.mjs';
 
 export const WORKSPACE_BACKUP_FORMAT = "shopeers-local-backup";
 export const WORKSPACE_BACKUP_VERSION = 1;
@@ -9,6 +11,8 @@ export function createWorkspaceBackupManifest(payload) {
   return { version: 1, databaseVersion: payload.databaseVersion,
     tableCounts: Object.fromEntries(Object.entries(payload.tables).map(([name, rows]) => [name, rows.length])),
     businessPreferencesIncluded: payload.businessPreferences !== undefined,
+    ...(payload.localCostDrafts===undefined?{}:{localCostDraftsIncluded:true}),
+    ...(payload.desktopInbox===undefined?{}:{desktopInboxIncluded:true,desktopRecordCount:payload.desktopInbox.recordCount,desktopLeaseCount:payload.desktopInbox.leaseCount}),
   };
 }
 
@@ -58,11 +62,14 @@ export function validateWorkspaceBackupPayload(payload, { tableNames = [], schem
     if (manifest?.version !== 1 || manifest.databaseVersion !== payload.databaseVersion || payload.recordCount === undefined
       || manifest.businessPreferencesIncluded !== expected.businessPreferencesIncluded
       || names.length !== Object.keys(payload.tables).length
-      || names.some(name => manifest.tableCounts[name] !== expected.tableCounts[name])) {
+      || names.some(name => manifest.tableCounts[name] !== expected.tableCounts[name])
+      || ['localCostDraftsIncluded','desktopInboxIncluded','desktopRecordCount','desktopLeaseCount'].some(key=>manifest[key]!==expected[key])) {
       throw new Error('备份完整清单与数据内容校验失败。');
     }
   }
   validateBusinessPreferences(payload.businessPreferences, (payload.tables.workspaces ?? []).map(workspace => workspace.id));
+  validateCostDraftBackup(payload.localCostDrafts);
+  validateDesktopInboxBackup(payload.desktopInbox);
   return {
     recordCount,
     tableCount: Object.keys(payload.tables).length,

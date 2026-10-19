@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createInboxDisk} from './erp-inbox-disk.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -44,7 +45,8 @@ try {
   const durableWrite = call('requests', { request: { id: 'QA-WRITE', workspaceId: 'qa', ledgerId: 'qa-ledger', ledgerPeriod: '2026-09', platformSkcs: ['QA-SKC'] }, expectedSkus: [{ platformSku: 'QA-SKU', platformSkc: 'QA-SKC' }] });
   await Promise.all(Array.from({ length: 20 }, (_, i) => i % 4 === 0 ? heartbeat(i) : call('status')));
   await durableWrite;
-  const persisted = JSON.parse(await fs.readFile(spool, 'utf8'));
+  const disk=createInboxDisk(spool),entries=await disk.load();
+  const persisted=await Promise.all(entries.map(async entry=>({...entry.metadata,...(entry.ref?{envelope:await disk.evidence(entry.ref)}:{})})));
   assert.equal(evidenceHash(persisted.filter(item => item.kind === 'catalog-batch').map(item => item.envelope)), expectedEvidence, 'raw evidence remains unchanged');
   assert.ok(persisted.some(item => item.kind === 'request' && item.requestId === 'QA-WRITE'), 'business receipt follows durable write');
   const hot = measurements.slice(warmStart).filter(item => item.route !== 'requests');

@@ -5,11 +5,12 @@ import { db, clearLocalWorkspaceData, DEFAULT_WORKSPACE_ID, createOrGetMonthlyLe
 import { costDraftKey } from '../lib/costMatchingDraft';
 import { runWorkspaceBackgroundTask } from '../lib/workspaceBackgroundTasks';
 
-let clearInboxData;
+let clearInboxData,saveClearBackup;
 beforeEach(async () => {
   await db.delete(); await db.open(); localStorage.clear();
   clearInboxData = vi.fn().mockResolvedValue({ ok: true, clearedCount: 5 });
-  window.shopeersDesktopRuntime = { desktop: true, clearInboxData };
+  saveClearBackup=vi.fn().mockResolvedValue({status:'saved',filePath:'synthetic-backup.json',backupToken:'synthetic-token',sha256:'synthetic-sha'});
+  window.shopeersDesktopRuntime = { desktop: true, clearInboxData,saveClearBackup,cancelClearBackup:vi.fn().mockResolvedValue({ok:true}) };
   await db.workspaces.put({ id: DEFAULT_WORKSPACE_ID, name: '旧工作区' });
   await db.ledgers.put({ id: 'OLD-LEDGER', workspaceId: DEFAULT_WORKSPACE_ID, period: '2026-09', status: 'finalized' });
   await db.erpCostRequests.put({ id: 'OLD-REQUEST', workspaceId: DEFAULT_WORKSPACE_ID, ledgerId: 'OLD-LEDGER' });
@@ -74,11 +75,43 @@ it('drains an in-flight delivery before reset and prevents another recovery cycl
   expect(await runWorkspaceBackgroundTask(() => 'new cycle')).toBe('new cycle');
 });
 
-it('clears browser-only data without requiring a desktop service', async () => {
+it('keeps browser-only data when a verified complete file cannot be saved', async () => {
   delete window.shopeersDesktopRuntime;
-  await clearLocalWorkspaceData();
+  await expect(clearLocalWorkspaceData()).rejects.toThrow('完整备份保护');
   expect(clearInboxData).not.toHaveBeenCalled();
-  expect(await db.profitReports.count()).toBe(0);
+  expect(await db.profitReports.count()).toBe(1);
+});
+
+it.each([{status:'canceled'},{status:'failed',error:'ENOSPC synthetic'},{status:'requested'},undefined])('does not clear any store without a verified save: %j',async receipt=>{
+  saveClearBackup.mockResolvedValue(receipt);
+  await expect(clearLocalWorkspaceData()).rejects.toThrow();
+  expect(clearInboxData).not.toHaveBeenCalled();
+  expect(await db.erpCostRows.count()).toBe(1);
+  expect(localStorage.getItem(costDraftKey('OLD-LEDGER'))).not.toBeNull();
+});
+
+it('waits for backup success with reports and both generations of drafts captured before clearing',async()=>{
+  let release;
+  saveClearBackup.mockImplementation(input=>new Promise(resolve=>{release=()=>resolve({status:'saved',filePath:'saved.json',backupToken:'verified',sha256:'hash'});}));
+  const clear=clearLocalWorkspaceData();
+  await vi.waitFor(()=>expect(saveClearBackup).toHaveBeenCalledOnce());
+  expect(clearInboxData).not.toHaveBeenCalled();expect(await db.profitReports.count()).toBe(1);
+  const payload=JSON.parse(saveClearBackup.mock.calls[0][0].json);
+  expect(payload.tables.profitReports).toHaveLength(1);
+  expect(payload.localCostDrafts.entries.map(entry=>entry.key)).toContain(costDraftKey('OLD-LEDGER'));
+  release();const receipt=await clear;
+  expect(receipt.filePath).toBe('saved.json');
+  expect(clearInboxData).toHaveBeenCalledWith({backupToken:'verified'});
+  expect((await db.auditEvents.toArray())[0].after.backupFilePath).toBe('saved.json');
+});
+
+it('stops before desktop deletion if a business write arrived after the backup snapshot',async()=>{
+  saveClearBackup.mockImplementation(async()=>{
+    await db.erpCostRows.add({ledgerId:'OLD-LEDGER',platformSku:'CONCURRENT',unitCost:0});
+    return {status:'saved',filePath:'saved.json',backupToken:'verified',sha256:'hash'};
+  });
+  await expect(clearLocalWorkspaceData()).rejects.toThrow('数据发生变化');
+  expect(clearInboxData).not.toHaveBeenCalled();expect(await db.erpCostRows.count()).toBe(2);
 });
 
 it('does not erase the database or claim success when cost-draft storage cannot be cleared', async () => {

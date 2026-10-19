@@ -27,6 +27,7 @@ const commands = [
   ["ERP 收件协议", "pnpm", ["erp:inbox:test"]],
   ["ERP 大队列并发响应与证据持久化", "node", ["../tools/erp-inbox-responsiveness.test.mjs"]],
   ["ERP 存储复用与证据引用恢复", "node", ["../tools/erp-inbox-storage.test.mjs"]],
+  ["ERP 增量日志与冷证据完整恢复", "node", ["../tools/erp-inbox-disk.test.mjs"]],
   ["同步服务冒烟", "pnpm", ["sync:check"]],
   ["云端种子合同", "pnpm", ["seed:check"]],
   ["PostgreSQL Schema 合同", "pnpm", ["schema:check"]],

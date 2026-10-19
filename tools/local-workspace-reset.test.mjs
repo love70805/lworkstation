@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import {createInboxDisk} from './erp-inbox-disk.mjs';
 
 const require = createRequire(import.meta.url);
 const { createInboxServiceController } = require('../desktop/inbox-service.cjs');
@@ -39,6 +40,7 @@ async function call(route, body, expected = 200, extraHeaders = {}) {
 const request = { id: 'RESET-REQUEST', workspaceId: 'W', ledgerId: 'LEDGER-W-2026-09', ledgerPeriod: '2026-09',
   ledgerVersion: 'OLD-IMPORT', platformSkcs: ['SKC-A'] };
 const expectedSkus = [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', store: '680店' }];
+async function readRecords(file) {return (await createInboxDisk(file).load()).map(entry=>entry.metadata);}
 try {
   await assert.rejects(service.clearBusinessData(), /尚未就绪/);
   assert.equal((await service.start()).ok, true);
@@ -59,19 +61,22 @@ try {
   };
   await call('/erp/v1/cost-results', result, 202);
   await call(`${taskUrl}/control`, { workspaceId: 'W', action: 'heartbeat' });
-  assert.ok(JSON.parse(await fs.readFile(`${spoolPath}.leases.json`, 'utf8')).length);
+  assert.ok((await readRecords(`${spoolPath}.leases.json`)).length);
   const before = await fs.readFile(spoolPath, 'utf8');
   await call('/erp/v1/workspace-reset', {}, 403);
   await call('/erp/v1/workspace-reset', {}, 403, { 'x-shopeers-reset-capability': capability });
   assert.equal(await fs.readFile(spoolPath, 'utf8'), before, 'extension capability cannot clear history');
 
   // Runtime-only heartbeat writes racing the reset cannot leave stale leases.
-  const renewals = Array.from({ length: 12 }, () => call(`${taskUrl}/control`, { workspaceId: 'W', action: 'heartbeat' }, [200, 404]));
-  const receipt = await service.clearBusinessData();
+  await assert.rejects(service.clearBusinessData(),/必须先成功保存/);
+  const session=await service.maintenanceRequest({action:'begin'});
+  const renewals = Array.from({ length: 12 }, () => call(`${taskUrl}/control`, { workspaceId: 'W', action: 'heartbeat' }, [200, 404,503]));
+  const receipt = await service.clearBusinessData({maintenanceId:session.maintenanceId});
+  await service.maintenanceRequest({action:'end',maintenanceId:session.maintenanceId});
   await Promise.all(renewals);
   assert.equal(receipt.ok, true); assert.ok(receipt.clearedCount >= 6);
-  assert.deepEqual(JSON.parse(await fs.readFile(`${spoolPath}.leases.json`, 'utf8')), []);
-  assert.deepEqual(JSON.parse(await fs.readFile(spoolPath, 'utf8')), runtime);
+  assert.deepEqual(await readRecords(`${spoolPath}.leases.json`), []);
+  assert.deepEqual(await readRecords(spoolPath), runtime);
   assert.equal((await call('/erp/v1/requests?workspaceId=W&includeHistory=true')).records.length, 0);
   assert.equal((await call('/erp/v1/collection-tasks?workspaceId=W')).tasks.length, 0);
   await call(`${taskUrl}/control`, { workspaceId: 'W', action: 'resume' }, 404);
@@ -85,7 +90,9 @@ try {
   const next = await call('/erp/v1/collection-tasks', { workspaceId: 'W', requestId: newRequest.id }, 201);
   assert.notEqual(next.task.taskId, task.taskId);
   assert.equal(next.task.summary.delivered, 0);
-  assert.equal((await service.clearBusinessData()).ok, true, 'reset is retryable');
+  const retry=await service.maintenanceRequest({action:'begin'});
+  assert.equal((await service.clearBusinessData({maintenanceId:retry.maintenanceId})).ok,true,'reset is retryable after a new full snapshot');
+  await service.maintenanceRequest({action:'end',maintenanceId:retry.maintenanceId});
   console.log('local reset: owner-only IPC service capability, all business histories, heartbeat race, durable restart, old-result rejection and fresh same-month task passed');
 } finally {
   await service.stop({ wait: true });

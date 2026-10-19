@@ -310,16 +310,22 @@ function createInboxServiceController({
     if (wait) await Promise.race([exited, delay(timeoutMs)]);
   }
 
-  async function clearBusinessData() {
+  async function maintenanceRequest(body) {
+    if (!child || child.exitCode !== null || state.ownership !== 'managed' || state.status !== 'online')throw new Error('本机收件服务尚未就绪，请重试。');
+    const result=await requestJson({port,path:'/erp/v1/workspace-maintenance',method:'POST',body,capability,timeoutMs:120_000,extraHeaders:{'x-shopeers-reset-capability':resetCapability}});
+    if(!result.reachable||result.statusCode!==200||result.payload?.ok!==true)throw new Error(result.payload?.message||'桌面收件备份或恢复失败。');
+    return result.payload;
+  }
+  async function clearBusinessData({maintenanceId}={}) {
     if (!child || child.exitCode !== null || state.ownership !== "managed" || state.status !== "online") {
       throw new Error("本机收件服务尚未就绪，ERP 历史任务未清空，请重试。");
     }
-    const result = await requestJson({ port, path: "/erp/v1/workspace-reset", method: "POST", body: {},
+    const result = await requestJson({ port, path: "/erp/v1/workspace-reset", method: "POST", body: {maintenanceId},
       capability, timeoutMs: 60_000, extraHeaders: { "x-shopeers-reset-capability": resetCapability } });
     if (!result.reachable || result.statusCode !== 200 || result.payload?.ok !== true) {
       throw new Error(result.payload?.message || "ERP 历史任务及回传记录清理失败，请重试。");
     }
-    await refresh();
+    await refresh().catch(()=>{});
     return result.payload;
   }
 
@@ -329,6 +335,7 @@ function createInboxServiceController({
     retry,
     refresh,
     clearBusinessData,
+    maintenanceRequest,
     getState: () => ({ ...state }),
     getOwnedPid: () => child?.pid ?? null,
   };
