@@ -60,7 +60,7 @@ export function planWarehouseHistoryCosts({ history, period, targets = [], known
       selectedRecordIds: warehouse.decision.selectedRecordIds, historyEvidence: {
         format: WAREHOUSE_HISTORY_FORMAT, formatVersion: 1, ledgerPeriod: period, generatedAt: parsed.generatedAt,
         warehouseSku: warehouse.warehouseSku, historicalMapping: { platformSku: target.platformSku, platformSkc: target.platformSkc, store: target.store, warehouseSku: warehouse.warehouseSku },
-        historicalMappingSources: candidates.map(row => ({ sourceRecordId: row.id ?? null, sourceBatchId: row.batchId ?? row.sourceBatchId ?? null,
+        historicalMappingSources: candidates.map(row => ({ sourceRecordId: row.sourceRecordId ?? row.id ?? null, sourceBatchId: row.batchId ?? row.sourceBatchId ?? null,
           observedAt: row.observedAt ?? row.publishedAt ?? null, source: row.source ?? row.historyOrigin, historyOrigin: row.historyOrigin })),
         warehouseEvidence: warehouse, selectedRecordIds: warehouse.decision.selectedRecordIds,
       } });

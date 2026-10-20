@@ -14,6 +14,7 @@ import {
   normalizeWorkspaceId,
 } from "./identifiers";
 import { normalizeErpCatalogFields, normalizeErpCatalogCoverage } from "./erpCatalogFields";
+import { normalizeErpHistoryMappings } from '../../../integrations/contracts/erp-history-mappings.mjs';
 
 export const ERP_COST_BATCH_FORMAT = "shopeers-erp-cost-batch";
 export const ERP_COST_BATCH_VERSION = 2;
@@ -335,6 +336,7 @@ export function validateErpCostBatchEnvelope(payload, {
   expectedRequestId = null,
   expectedPlatformSkcs = null,
   expectedSkus = null,
+  expectedHistoryMappings = null,
 } = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("ERP 成本批次包内容无效。");
   if (payload.format !== ERP_COST_BATCH_FORMAT) throw new Error("ERP 成本批次包格式不受支持。");
@@ -386,9 +388,16 @@ export function validateErpCostBatchEnvelope(payload, {
     expectedScopeBySku,
     queriedSkcs,
   }));
+  const historyMappings = normalizeErpHistoryMappings(payload.historyMappings, expectedSkus ?? []);
+  if (expectedHistoryMappings != null) {
+    const registeredHistory = new Set(normalizeErpHistoryMappings(expectedHistoryMappings, expectedSkus ?? []).map(row => JSON.stringify(row)));
+    if (historyMappings.some(row => !registeredHistory.has(JSON.stringify(row)))) throw new Error('历史仓库关联与已登记请求不一致。');
+  }
+  const historicalWarehouses = new Set(historyMappings.filter(row => queriedSkcs.has(canonicalPlatformSkc(row.platformSkc))).map(row => canonicalWarehouseSku(row.warehouseSku)));
   if (payload.sourceMeta?.platformScopePolicy === 'ledger_platform_pair') {
     if (!expectedScopeBySku?.size) throw new Error('ERP 精确采集缺少已登记的平台 SKU/SKC 范围。');
     for (const row of rows) {
+      if (!row.platformSku && !row.platformSkc && !(row.catalogMappings || []).length && historicalWarehouses.has(row.canonicalWarehouseSku)) continue;
       const target = expectedScopeBySku.get(row.canonicalPlatformSku);
       if (!target || target.canonicalPlatformSkc !== row.canonicalPlatformSkc) throw new Error('ERP 精确采集返回了已登记平台 SKU/SKC 之外的规格。');
       for (const mapping of row.catalogMappings || []) {
@@ -470,6 +479,7 @@ export function validateErpCostBatchEnvelope(payload, {
         ? { ...payload.sourceMeta, sourceWarnings: topLevelWarnings.warnings }
         : payload.sourceMeta, { evidenceComplete, legacy, scopedIncomplete }),
       warehouseEvidence,
+      ...(historyMappings.length ? { historyMappings } : {}),
       rows,
     },
     rows: reconciliationRows,

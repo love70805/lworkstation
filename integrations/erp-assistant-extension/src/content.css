@@ -54,9 +54,6 @@
 
 #erpa-cost-trigger:hover { background: var(--erpa-primary-hover); }
 #erpa-cost-trigger:focus-visible { outline: 3px solid var(--erpa-focus); outline-offset: 2px; }
-#erpa-history-trigger { position: fixed; right: 24px; bottom: 84px; z-index: 2147483646; min-height: 40px; padding: 0 15px; border: 1px solid #64748b; border-radius: 7px; background: #fff; color: #182230; cursor: pointer; font: 600 14px 'Microsoft YaHei', sans-serif; }
-#erpa-history-trigger:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
-@media (prefers-color-scheme: dark) { #erpa-history-trigger { background: #18212c; color: #f2f5f8; border-color: #64748b; } }
 #erpa-cost-trigger .erpa-trigger-icon { font-size: 16px; line-height: 1; }
 
 #erpa-cost-root {

@@ -7,6 +7,24 @@ function dependencies() {
   return { latest: vi.fn(async () => saved), save: vi.fn(async (request) => { saved = request; }), register: vi.fn(async () => ({ accepted: true, status: "registered" })) };
 }
 describe("automatic ERP request lifecycle", () => {
+  it('binds historical read hints once without replacing an active legacy task', async () => {
+    const scope = input(), deps = dependencies();
+    const old = await ensureAutoErpRequest(scope, deps);
+    const prepareHistory = vi.fn(async () => [{ platformSku: 'SKU', platformSkc: 'A', warehouseSku: 'WH' }]);
+    const active = await ensureAutoErpRequest(scope, { ...deps, prepareHistory, activeRequest: old });
+    expect(active.id).toBe(old.id); expect(prepareHistory).not.toHaveBeenCalled();
+    const current = await ensureAutoErpRequest(scope, { ...deps, prepareHistory });
+    expect(current.id).not.toBe(old.id);
+    expect(current).toMatchObject({ historyRecoveryVersion: 1, historyMappings: [{ warehouseSku: 'WH' }] });
+    expect((await ensureAutoErpRequest(scope, { ...deps, prepareHistory })).id).toBe(current.id);
+    expect(prepareHistory).toHaveBeenCalledOnce();
+  });
+  it('does not register a stale scope after historical hints finish loading', async () => {
+    const scope = input(), deps = dependencies(); let current = true;
+    const result = await ensureAutoErpRequest(scope, { ...deps, isCurrent: () => current,
+      prepareHistory: async () => { current = false; return []; } });
+    expect(result).toBeNull(); expect(deps.save).not.toHaveBeenCalled(); expect(deps.register).not.toHaveBeenCalled();
+  });
   it('keeps a long-running request identity but replaces it for a new import version', async () => {
     const scope = { ...input(), ledgerVersion: 'import-A' }; const deps = dependencies();
     const a = await ensureAutoErpRequest(scope, deps);

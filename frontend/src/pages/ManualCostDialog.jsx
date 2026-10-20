@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Modal } from "../components/UI";
 import { saveManualCostOverride, revokeManualCostOverride } from "../data/repositories/profitRepository";
 import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
+import { previewRecoveredWarehouseCost, saveRecoveredWarehouseCost } from '../data/repositories/warehouseHistoryRecoveryRepository';
 
 export default function ManualCostDialog({ ledger, row, onClose, onNext, children, open = true, readOnly = false, hasEffectiveErpCost = false, className = "", title = "人工更正成本", formFirst = false, queueProgress = null, saveLabel = "保存更正" }) {
   const identityIssue = row.decision?.identityIssue ?? row.costIdentityIssue;
@@ -10,17 +11,31 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [historyCandidate, setHistoryCandidate] = useState(null);
+  const editedRef = useRef(false);
   const amountRef = useRef(null);
   useEffect(() => {
     if (!open || readOnly || identityConflict || !formFirst) return;
     const timer = window.setTimeout(() => amountRef.current?.focus({ preventScroll: true }), 0);
     return () => window.clearTimeout(timer);
   }, [open, readOnly, identityConflict, formFirst]);
+  useEffect(() => {
+    if (!open || readOnly || identityConflict || hasEffectiveErpCost || row.manualOverride) return;
+    let canceled = false;
+    void previewRecoveredWarehouseCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku }).then(candidate => {
+      if (canceled || !candidate) return;
+      setHistoryCandidate(candidate);
+      if (!editedRef.current) { setAmount(String(candidate.unitCost)); setReason(candidate.reason); }
+    }).catch(() => { /* Ordinary manual correction remains available. */ });
+    return () => { canceled = true; };
+  }, [open, readOnly, identityConflict, hasEffectiveErpCost, ledger.id, row.store, row.platformSku, row.manualOverride]);
   const act = async (revoke, next = false) => {
     if (saving || readOnly || (!revoke && identityConflict)) return;
     setSaving(true); setError("");
     try {
       if (revoke) await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: row.manualOverride.id });
+      else if (historyCandidate && Number(amount) === historyCandidate.unitCost) await saveRecoveredWarehouseCost({
+        ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, inboxId: historyCandidate.inboxId, expectedUnitCost: amount, reason });
       else await saveManualCostOverride({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount, reason });
       if (next && onNext) onNext();
       else onClose();
@@ -32,8 +47,9 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
     {queueProgress ? <p className="cost-correction-progress" role="status">待补成本 · 第 {queueProgress.index} / {queueProgress.total} 项</p> : null}
     {!formFirst ? children : null}
     {identityConflict ? <p role="alert">{describeLedgerCostIdentityIssue(identityIssue)}</p> : null}
-    {!readOnly && !identityConflict ? <><div className="form-field"><label htmlFor="manual-cost-value">单件成本（CNY，可为 0）</label><input ref={amountRef} id="manual-cost-value" className="text-input" type="number" min="0" step="any" disabled={saving} value={amount} onChange={(event) => setAmount(event.target.value)} /></div>
-    <div className="form-field"><label htmlFor="manual-cost-reason">更正说明</label><textarea id="manual-cost-reason" className="text-input" disabled={saving} value={reason} onChange={(event) => setReason(event.target.value)} /></div></> : null}
+    {historyCandidate ? <div className="cost-correction-help" role="status"><strong>已自动补查历史仓库采购</strong><p>{historyCandidate.warehouseSku} · ¥{historyCandidate.unitCost}/件。当前映射缺失，保存后按可撤销人工更正生效。</p><details><summary>核对采购证据</summary>{historyCandidate.historyEvidence.warehouseEvidence.decision.selectedRecords.map(record => <p key={record.recordId}>{record.purchaseDate} · 数量 {record.quantity} · 单价 ¥{record.unitPrice}</p>)}</details></div> : null}
+    {!readOnly && !identityConflict ? <><div className="form-field"><label htmlFor="manual-cost-value">单件成本（CNY，可为 0）</label><input ref={amountRef} id="manual-cost-value" className="text-input" type="number" min="0" step="any" disabled={saving} value={amount} onChange={(event) => { editedRef.current = true; setAmount(event.target.value); }} /></div>
+    <div className="form-field"><label htmlFor="manual-cost-reason">更正说明</label><textarea id="manual-cost-reason" className="text-input" disabled={saving} value={reason} onChange={(event) => { editedRef.current = true; setReason(event.target.value); }} /></div></> : null}
     {error ? <p role="alert">{error}</p> : null}
     {formFirst ? children : null}
   </Modal>;

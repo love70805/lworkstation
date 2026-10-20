@@ -27,7 +27,7 @@
     'paymentType', 'paymentStatus', 'purchaseStatus', 'exceptionSheetStatus',
     'tradeName', 'inTransitTime', 'exceptionHandlingStatus', 'emergencySign',
     'purchasingPersonnel', 'accountName1688', 'storeAssociatedAccountName1688',
-    'suggestedPayment', 'orderType', 'buildType', 'mineableType',
+    'suggestedPayment', 'orderType', 'buildType', 'mineableType', 'changePrice',
     'adjacentToTheSameSupplier', 'sort',
   ]);
   let checkpointWrites = Promise.resolve();
@@ -42,26 +42,32 @@
   // persist login responses, credentials or an attacker supplied endpoint.
   function checkpointFilters(input) {
     const entries = Object.entries(input || {}).filter(([key]) => !/(token|authorization|cookie|password|secret|capability|endpoint|base.?url)/i.test(key));
-    if (entries.some(([key, value]) => !QUERY_FIELDS.has(key) || !['string', 'number'].includes(typeof value) || String(value).length > 128000)) throw loopbackError('ERP_CHECKPOINT_QUERY_UNSUPPORTED', '查询包含尚未验证的条件，不能保存不完整的恢复范围；请更新 ERP 扩展并重新查询。', 409);
+    const unsupported = entries.filter(([key, value]) => !QUERY_FIELDS.has(key) || !['string', 'number'].includes(typeof value) || String(value).length > 128000);
+    if (unsupported.length) {
+      const names = unsupported.slice(0, 8).map(([key]) => String(key).slice(0, 80)).join('、');
+      throw loopbackError('ERP_CHECKPOINT_QUERY_UNSUPPORTED', `采购查询条件尚不支持或超出长度限制：${names}。任务尚未保存；请保留此字段名供检查，参数不变时重试无效。`, 409);
+    }
     return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, String(value)]));
   }
   function sameCheckpointFilters(filters, storedFilters) {
     // chrome.storage.local reads dictionaries in a different key order (e.g.
     // createTimePeriod/createdBy). Compare both through the same normalization;
     // property insertion order is not a change to the captured query scope.
-    return JSON.stringify(checkpointFilters(filters)) === JSON.stringify(checkpointFilters(storedFilters));
+    const comparable = value => ({ changePrice: '', ...checkpointFilters(value) });
+    return JSON.stringify(comparable(filters)) === JSON.stringify(comparable(storedFilters));
   }
   function checkpointBinding(request) {
     return JSON.stringify({ workspaceId: request.workspaceId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId,
       registeredAt: request.registeredAt, version: request.version ?? null, platformSkcs: normalizedSkcs(request.platformSkcs),
+      ...(request.historyMappings?.length ? { historyMappings: request.historyMappings } : {}),
       expectedSkus: (request.expectedSkus || []).map(item => [canonical(item.platformSkc), canonical(item.platformSku)]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) });
   }
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
     const currentVersion = chrome.runtime.getManifest().version;
-    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46'];
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -464,6 +470,7 @@
       ledgerId: String(request.ledgerId || '').trim(),
       workspaceId: String(request.workspaceId || '').trim(),
       expectedSkus: normalizedExpectedSkus(request.expectedSkus),
+      historyMappings: request.historyMappings ?? [],
     };
   }
 
@@ -482,12 +489,15 @@
     });
   }
 
-  function assertExactPlatformRows(rows, expectedSkus, querySkcs, policy) {
+  function assertExactPlatformRows(rows, expectedSkus, querySkcs, policy, historyMappings = []) {
     if (policy !== 'ledger_platform_pair') return;
     const skcs = new Set(normalizedSkcs(querySkcs));
     const expected = new Map(normalizedExpectedSkus(expectedSkus).filter(item => skcs.has(canonical(item.platformSkc))).map(item => [canonical(item.platformSku), canonical(item.platformSkc)]));
+    const historicalWarehouses = new Set(historyMappings.filter(row => skcs.has(canonical(row.platformSkc))
+      && expected.get(canonical(row.platformSku)) === canonical(row.platformSkc)).map(row => canonical(row.warehouseSku)));
     if (!expected.size) throw loopbackError('ERP_PLATFORM_SCOPE_MISSING', '采集请求缺少本批平台 SKU/SKC 范围。', 409);
     for (const row of rows) {
+      if (!row.platformSku && !row.platformSkc && !(row.catalogMappings || []).length && historicalWarehouses.has(canonical(row.warehouseSku))) continue;
       if (expected.get(canonical(row.platformSku)) !== canonical(row.platformSkc)) throw loopbackError('ERP_PLATFORM_SCOPE_MISMATCH', '采集结果包含未登记的平台 SKU/SKC，请按原范围重新采集。', 409);
       for (const mapping of row.catalogMappings || []) if (expected.get(canonical(mapping.platformSku)) !== canonical(mapping.platformSkc)) throw loopbackError('ERP_PLATFORM_SCOPE_MISMATCH', '档案映射超出已登记的平台 SKU/SKC 范围。', 409);
     }
@@ -703,7 +713,7 @@
       querySkcs: batch.platformSkcs, rows: assignLedgerScopeRoles(buildRows(stripUntrustedControl(input.results), evidence), expectedSkus, batch.platformSkcs),
       sourceMeta: stripUntrustedControl(input.meta), warehouseEvidence: evidence };
     if (!record.rows.length) throw loopbackError('EMPTY_COST_RESULTS', '没有可识别仓库 SKU 的成本或排除证据。', 400);
-    assertExactPlatformRows(record.rows, expectedSkus, batch.platformSkcs, record.sourceMeta.platformScopePolicy);
+    assertExactPlatformRows(record.rows, expectedSkus, batch.platformSkcs, record.sourceMeta.platformScopePolicy, request.historyMappings);
     await savePending(record);
     return { record };
   }
@@ -758,7 +768,7 @@
       warehouseEvidence,
     };
     const bytes = new TextEncoder().encode(JSON.stringify([record.querySkcs, record.rows, record.sourceMeta, record.warehouseEvidence]));
-    assertExactPlatformRows(record.rows, expectedSkus, querySkcs, record.sourceMeta.platformScopePolicy);
+    assertExactPlatformRows(record.rows, expectedSkus, querySkcs, record.sourceMeta.platformScopePolicy, bound.historyMappings);
     record.payloadHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
     if (checkpoint.state === 'completed' && checkpoint.submittedHash === record.payloadHash && checkpoint.receipt) return { response: { ok: true, status: 'success', resultDeliveryId, ...checkpoint.receipt } };
     if (checkpoint.state !== 'pending' || checkpoint.submittedHash && checkpoint.submittedHash !== record.payloadHash) throw loopbackError('ERP_CHECKPOINT_STATE_CHANGED', '原采集已完成或证据身份已变化，不能覆盖原回传。请重新采集。', 409);
@@ -857,7 +867,7 @@
     if (typeof request.ledgerPeriod !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(request.ledgerPeriod)) {
       throw loopbackError('ERP_LEDGER_PERIOD_INVALID', '关联请求的核算月份无效，请返回工作台重新查询。', 409);
     }
-    return { ok: true, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId, platformSkcs: request.platformSkcs, expectedSkus: normalizedExpectedSkus(request.expectedSkus), requestSnapshot: checkpointBinding(request) };
+    return { ok: true, ledgerPeriod: request.ledgerPeriod, requestId: request.requestId, platformSkcs: request.platformSkcs, expectedSkus: normalizedExpectedSkus(request.expectedSkus), historyMappings: request.historyMappings ?? [], requestSnapshot: checkpointBinding(request) };
   }
 
   async function retryPending(input, sender) {

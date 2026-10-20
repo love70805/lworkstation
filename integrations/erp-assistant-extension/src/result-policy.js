@@ -606,7 +606,23 @@
         }).map(mapping => 'platform_identity_conflict:' + mapping.platformSku))];
     }
 
+    function historicalWarehouseTargets(missingTargets, hints, expectedSkus) {
+        const result = [];
+        for (const target of missingTargets || []) {
+            const expected = (expectedSkus || []).find(row => canonical(row.platformSku) === canonical(target.platformSku) && canonical(row.platformSkc) === canonical(target.platformSkc));
+            const candidates = (hints || []).filter(row => canonical(row.platformSku) === canonical(target.platformSku)
+                && canonical(row.platformSkc) === canonical(target.platformSkc)
+                && (!row.store || !expected?.store || canonical(row.store) === canonical(expected.store)));
+            if (!candidates.length || candidates.some(row => !row.sourceRecordId || !Number.isFinite(Date.parse(row.observedAt))
+                || row.unitConversion && (Number(row.unitConversion.warehouseUnits) !== Number(row.unitConversion.platformUnits) || !(Number(row.unitConversion.warehouseUnits) > 0)))) continue;
+            const warehouses = [...new Map(candidates.filter(row => row.warehouseSku).map(row => [canonical(row.warehouseSku), row.warehouseSku])).values()];
+            if (warehouses.length === 1) result.push({ ...target, warehouseSku: warehouses[0] });
+        }
+        return result;
+    }
+
     global.ShopeersErpResultPolicy = Object.freeze({
+        historicalWarehouseTargets,
         purchaseStatusFields,
         cancelledPurchase,
         catalogProduct,

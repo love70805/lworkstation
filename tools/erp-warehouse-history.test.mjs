@@ -21,9 +21,11 @@ window.fetch=async raw=>{const url=new URL(raw);requests.push(url);let data;
 };
 try{
  for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(await readFile(path.join(source,name),'utf8'));
+ assert.equal(window.document.getElementById('erpa-history-trigger'),null,'history recovery uses the existing assistant, without another floating button');
+ window.document.getElementById('erpa-cost-trigger').click();
+ window.document.querySelector('.erpa-history-review').open=true;
  window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=WH-A&queryRange=1&createTimePeriod=2026-10'}}));
- window.document.getElementById('erpa-history-trigger').click();
- assert.equal(requests.length,0,'opening dedicated history review does not start the original cost task');
+ assert.equal(requests.length,0,'opening the advanced evidence form does not start procurement reads');
  window.document.getElementById('erpa-history-skus').value='WH-A\nWH-B';window.document.getElementById('erpa-history-period').value='2026-09';
  window.document.getElementById('erpa-history-export').click();
  const until=Date.now()+5000;while(!downloads.length&&Date.now()<until)await new Promise(r=>setTimeout(r,10));

@@ -46,7 +46,7 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
     assert.equal(url.searchParams.get('queryRange'),'0', 'cost collection must expand the captured month to complete scoped history');
     assert.equal(url.searchParams.get('sku'),'SKC-TARGET');
     assert.equal(url.searchParams.get('storeId'),'STORE-TARGET');
-    for (const field of ['createTimePeriod', 'supplierName', 'orderNo', 'purchaseStatus']) assert.equal(url.searchParams.get(field),null, 'display filters cannot truncate history');
+    for (const field of ['createTimePeriod', 'supplierName', 'orderNo', 'purchaseStatus', 'changePrice']) assert.equal(url.searchParams.get(field),null, 'display filters cannot truncate history');
     const orders = orderRows.map(row => row.purchaseOrderId === 'ORDER-02' ? { ...row, purchaseOrderStatus1688: status } : row);
     count = incomplete ? orders.length + 1 : orders.length;
     const page = Number(url.searchParams.get('page'));
@@ -60,7 +60,7 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
  };
  try {
   for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(await readFile(path.join(process.env.ERP_TEST_SOURCE_ROOT || path.join(root,'integrations/erp-assistant-extension/src'),name),'utf8'));
-  window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku='+ (emptyScope ? '' : 'SKC-TARGET') +'&storeId=STORE-TARGET&createTimePeriod=2026-09&supplierName=display-filter&orderNo=display-filter&purchaseStatus=7&queryRange='+queryRange}}));
+  window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured',{detail:{url:'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku='+ (emptyScope ? '' : 'SKC-TARGET') +'&storeId=STORE-TARGET&createTimePeriod=2026-09&supplierName=display-filter&orderNo=display-filter&purchaseStatus=7&changePrice=1&queryRange='+queryRange}}));
   window.document.getElementById('erpa-cost-trigger').click();
   const until=Date.now()+8000;while(!messages.some(m=>m.type==='shopeers.erp.submitCostResult')){if(emptyScope && window.document.getElementById('erpa-error').classList.contains('erpa-visible')) { assert.equal(requests.length,0);return { emptyScopeRejected: true }; } if(Date.now()>until)throw new Error(window.document.body.textContent);await new Promise(r=>setTimeout(r,10));}
   const payload=messages.find(m=>m.type==='shopeers.erp.submitCostResult').payload;

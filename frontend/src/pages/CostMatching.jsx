@@ -11,6 +11,7 @@ import { selectManualOverride } from "../domain/manualCostOverride";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import ManualCostDialog from "./ManualCostDialog";
 import WarehouseHistoryDialog from './WarehouseHistoryDialog';
+import { readErpHistoryMappings } from '../data/repositories/profitRepository';
 import CostMatchGroupRows, { CostMatchTableHeader } from "./CostMatchGroupRows";
 import { ErpPendingSkuList } from './ErpInboxReviewPanel';
 import { buildErpInboxReview } from '../lib/erpInboxReview';
@@ -227,6 +228,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const [erpAssistantOpen, setErpAssistantOpen] = useState(false);
   const [manualInputOpen, setManualInputOpen] = useState(false);
   const [warehouseHistoryOpen, setWarehouseHistoryOpen] = useState(false);
+  const [warehouseHistoryFile, setWarehouseHistoryFile] = useState(null);
   const [inboxQueueOpen, setInboxQueueOpen] = useState(false);
   const [inboxOverviewRevision, setInboxOverviewRevision] = useState(0);
   const openInboxOverview = () => { setInboxOverviewRevision(value => value + 1); setInboxQueueOpen(true); };
@@ -410,7 +412,7 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       registrationStartedRef.current = true;
       previousRegistrationRef.current = { ledger: snapshot.ledger, scope: registrationScope };
       void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs: registrationSkcs, expectedSkus: registrationExpected, ledgerVersion }, {
-        latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest,
+        latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest, prepareHistory: readErpHistoryMappings,
         activeRequest: collectionRequest,
         isCurrent: () => !cancelled && currentRegistrationScopeRef.current === registrationScope,
       }).then((request) => {
@@ -647,6 +649,14 @@ function CostMatchingBody({ validatedContext, onPublished }) {
 
   const parseSource = () => {
     try {
+      if (sourceText.trim().startsWith('{')) {
+        const legacyHistory = JSON.parse(sourceText);
+        if (legacyHistory.format === 'shopeers-erp-warehouse-history') {
+          setWarehouseHistoryFile(new File([sourceText], sourceName || 'warehouse-history.json', { type: 'application/json' }));
+          setWarehouseHistoryOpen(true); setManualInputOpen(false); setParseError('');
+          return;
+        }
+      }
       const result = parseErpCostInput(sourceText, {
         expectedWorkspaceId: snapshot?.ledger?.workspaceId,
         expectedLedgerId: snapshot?.ledger?.id,
@@ -1082,8 +1092,8 @@ function CostMatchingBody({ validatedContext, onPublished }) {
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters filter={profitFilter} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={formalSalesLines} onChange={changeScope} /> : null}
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
-      {!locked && missingReviewRows.length ? <div className="cost-correction-help"><Button variant="ghost" onClick={() => setWarehouseHistoryOpen(true)}>历史仓库采购补齐</Button><span>映射已解绑或查空时，只查相关仓库；唯一关联和合格采购同批自动补齐，冲突项单独处理。</span></div> : null}
-      {warehouseHistoryOpen ? <WarehouseHistoryDialog key={snapshot.ledger.id} ledger={snapshot.ledger} onClose={() => setWarehouseHistoryOpen(false)} onSaved={result => notify(`已补齐 ${result.savedCount} 项成本，剩余待处理 ${result.pending.length} 项。`, 'success')} /> : null}
+      {!locked && missingReviewRows.length ? <p className="cost-correction-help">采集时会为映射缺失项补查有可靠历史关联的仓库。可用核价显示在原“人工更正”中，核对后保存；旧历史证据文件可通过“手动导入”读取。</p> : null}
+      {warehouseHistoryOpen ? <WarehouseHistoryDialog key={snapshot.ledger.id} ledger={snapshot.ledger} initialFile={warehouseHistoryFile} onClose={() => { setWarehouseHistoryOpen(false); setWarehouseHistoryFile(null); }} onSaved={result => notify(`已补齐 ${result.savedCount} 项成本，剩余待处理 ${result.pending.length} 项。`, 'success')} /> : null}
       {scopeHasIdentityConflict ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>当前 SKU 在完整台账中对应多个平台 SKC</strong><small>请先核对台账映射；缩小查看范围不会确定父级关系，冲突成本不能用于新报告，暂不登记 ERP 采集。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
       {!locked && filteredSalesLines.some(row => row.costIdentityIssue?.code === 'erp_cost_skc_mismatch') ? <div className="cost-skc-warning" role="alert"><AlertCircle size={18} /><span><strong>已有 ERP 成本与当前台账归属不一致</strong><small>这些成本暂不计入正式利润。展开对应明细核对原始 SKC，重新采集当前归属，或按店铺人工更正。</small></span><Button variant="ghost" onClick={openLedgerImport}>检查导入映射</Button></div> : null}
 

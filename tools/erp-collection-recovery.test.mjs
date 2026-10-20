@@ -29,7 +29,7 @@ function background() {
   const chrome = { storage: { local: {
     async get(keys) { return Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => Object.hasOwn(storage, key)).map(key => [key, structuredClone(storage[key])])); },
     async set(values) { Object.assign(storage, storageRoundTrip(structuredClone(values))); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.47' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
+  } }, runtime: { getManifest: () => ({ version: '8.0.48' }), onMessage: { addListener: fn => runtimeListeners.push(fn) }, onInstalled: { addListener() {} }, onStartup: { addListener() {} } }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, AbortController, TextEncoder, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout, Date, Math, Promise, console, fetch: async raw => {
     if (new URL(raw).pathname === '/erp/v1/cost-results') return { ok: true, status: 202, json: async () => ({ deliveryId: 'SYN-DELIVERY', batchId: 'SYN-BATCH' }) };
     assert.equal(new URL(raw).pathname, '/erp/v1/requests');
@@ -49,7 +49,7 @@ const currentQueryFilters = {
   tradeName: 'SYNTHETIC PRODUCT', inTransitTime: '3', exceptionHandlingStatus: '',
   emergencySign: '', purchasingPersonnel: '', accountName1688: '',
   storeAssociatedAccountName1688: '', suggestedPayment: '', orderType: '',
-  buildType: '', mineableType: '', adjacentToTheSameSupplier: '0', sort: '0',
+  buildType: '', mineableType: '', changePrice: '', adjacentToTheSameSupplier: '0', sort: '0',
 };
 const capturedQueryUrl = 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?' + new URLSearchParams({ ...currentQueryFilters, page: '1' });
 const input = async () => ({ requestSnapshot: (await api.previewContext({ querySkcs: [request.platformSkcs[0]], queryCapturedAt: '2026-09-01T00:00:00.000Z' }, sender)).requestSnapshot, action: 'save', requestId: request.requestId, filters: { ...currentQueryFilters, token: 'NEVER-PERSIST', password: 'NEVER-PERSIST', endpoint: 'https://invalid.example' }, queryCapturedAt: '2026-09-01T00:00:00.000Z', completedTargets: ['SKC-A', 'OTHER-SKC'], account: { cookie: 'NEVER-PERSIST' } });
@@ -68,7 +68,16 @@ const sameQueryRestore = await api.collectionCheckpoint({ action: 'restore', req
 assert.equal(sameQueryRestore.checkpoint.resultDeliveryId, saved.checkpoint.resultDeliveryId, 'identical live query restores the persisted attempt');
 await assert.rejects(api.collectionCheckpoint({ ...(await input()), resultDeliveryId: saved.checkpoint.resultDeliveryId, filters: { ...currentQueryFilters, createdBy: 'CHANGED' } }, sender), /查询条件已变化/);
 await assert.rejects(api.collectionCheckpoint({ ...(await input()), resultDeliveryId: saved.checkpoint.resultDeliveryId, filters: { ...currentQueryFilters, createTimePeriod: '' } }, sender), /查询条件已变化/);
-await assert.rejects(api.collectionCheckpoint({ ...(await input()), filters: { sku: 'SKC-A', unknownScope: 'cannot-silently-drop' } }, sender), /尚未验证的条件/);
+await assert.rejects(api.collectionCheckpoint({ ...(await input()), filters: { sku: 'SKC-A', unknownScope: 'PRIVATE-VALUE-MUST-NOT-LEAK' } }, sender), error => {
+  assert.equal(error.code, 'ERP_CHECKPOINT_QUERY_UNSUPPORTED');
+  assert.match(error.message, /unknownScope/);
+  assert.doesNotMatch(error.message, /PRIVATE-VALUE-MUST-NOT-LEAK/);
+  return true;
+});
+await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, changePrice: '1' } }, sender), /查询条件已变化/);
+delete storage[checkpointKey][0].filters.changePrice;
+assert.equal((await api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: currentQueryFilters }, sender)).checkpoint.resultDeliveryId, saved.checkpoint.resultDeliveryId, 'new empty default preserves an older checkpoint with no changePrice');
+storage[checkpointKey][0].filters.changePrice = '';
 await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, tradeName: 'CHANGED' } }, sender), /查询条件已变化/);
 await assert.rejects(api.collectionCheckpoint({ action: 'restore', requestId: request.requestId, filters: { ...currentQueryFilters, sort: '1' } }, sender), /查询条件已变化/);
 
@@ -341,11 +350,16 @@ assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted:
 console.log('8.0.42 checkpoint retained under 8.0.43 catalog presentation update');
 storage[checkpointKey][0].extensionVersion = '8.0.43';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.43 checkpoint retained under 8.0.47 coordinated continuation');
+console.log('8.0.43 checkpoint retained under 8.0.48 coordinated continuation');
 storage[checkpointKey][0].extensionVersion = '8.0.44';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.44 checkpoint retained under 8.0.47 cost timing display update');
+console.log('8.0.44 checkpoint retained under 8.0.48 cost timing display update');
 
 storage[checkpointKey][0].extensionVersion = '8.0.45';
 assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
-console.log('8.0.45 checkpoint retained under 8.0.47 collection throughput update');
+console.log('8.0.45 checkpoint retained under 8.0.48 collection throughput update');
+for (const previousVersion of ['8.0.46', '8.0.47']) {
+  storage[checkpointKey][0].extensionVersion = previousVersion;
+  assert.equal((await api.collectionCheckpoint({ action: 'list', includeCompleted: true }, sender)).records[0].resultDeliveryId, storage[checkpointKey][0].resultDeliveryId);
+}
+console.log('8.0.46/8.0.47 checkpoints retained under 8.0.48 query compatibility');
