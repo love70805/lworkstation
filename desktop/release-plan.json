@@ -5,6 +5,10 @@
   "integrationBranch": "codex/erp-query-history-fix",
   "requiredCommits": [
     {
+      "module": "v0.4.49-query-and-integrated-history",
+      "commit": "19950f553842991f27758c4407f4102c8a1f66ec"
+    },
+    {
       "module": "v0.4.49-verified-main-baseline",
       "commit": "2eb3e8bd111c5301f9fe1202d60589a1ea547ef9"
     },
