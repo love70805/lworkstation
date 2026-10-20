@@ -37,9 +37,10 @@ import {
 } from "../db/constants";
 import { makeId } from "../db/utils";
 import { ensureDefaultWorkspace, getActiveMemberContext, ensureLedgerCatalogDrafts } from "./selectionRepository";
-import { manualSnapshot, selectManualOverride, storeIdentity } from "../../domain/manualCostOverride";
+import { manualSnapshot, selectManualOverride, storeIdentity, validManualOverride } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
 import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
+import { normalizeErpHistoryMappings } from '../../../../integrations/contracts/erp-history-mappings.mjs';
 import { summarizeProfitRows } from "../../lib/profitPrecision";
 import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
@@ -157,6 +158,43 @@ async function warehouseHistoryPlan({ ledgerId, history }) {
   const oldRows = targets.size ? await db.erpCostRows.where('canonicalPlatformSku').anyOf([...new Set([...targets.values()].map(row => canonicalPlatformSku(row.platformSku)))]).toArray() : [];
   const knownMappings = oldRows.filter(row => row.workspaceId === member.workspaceId && trustedBatches.has(row.batchId) && row.platformSkc && row.warehouseSku && row.evidenceComplete === true && !row.mappingFallback);
   return { ledger, ...planWarehouseHistoryCosts({ history, period: ledger.period, targets: [...targets.values()], knownMappings }) };
+}
+
+export async function readErpHistoryMappings({ ledgerId, expectedSkus = [] }) {
+  const member = await getActiveMemberContext(), ledger = await db.ledgers.get(ledgerId);
+  if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务权限。');
+  const skus = [...new Set(expectedSkus.map(row => canonicalPlatformSku(row.platformSku)).filter(Boolean))];
+  if (!skus.length) return [];
+  const [batches, rows, approvals] = await Promise.all([
+    db.erpCostBatches.where('workspaceId').equals(member.workspaceId).toArray(),
+    db.erpCostRows.where('canonicalPlatformSku').anyOf(skus).toArray(),
+    db.costApprovals.where('workspaceId').equals(member.workspaceId).toArray(),
+  ]);
+  const published = new Map(batches.filter(batch => batch.status === 'published').map(batch => [batch.id, batch]));
+  const pairs = new Set(expectedSkus.map(row => JSON.stringify([canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)])));
+  const hints = rows.filter(row => row.workspaceId === member.workspaceId && published.has(row.batchId)
+    && row.evidenceComplete === true && !row.mappingFallback && row.warehouseSku
+    && pairs.has(JSON.stringify([canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)])))
+    .map(row => ({
+      platformSku: row.platformSku, platformSkc: row.platformSkc, warehouseSku: row.warehouseSku,
+      sourceRecordId: String(row.id), sourceBatchId: row.batchId,
+      observedAt: row.publishedAt ?? published.get(row.batchId).publishedAt,
+      ...(row.store ? { store: row.store } : {}),
+      ...(row.unitConversion ? { unitConversion: row.unitConversion } : {}),
+    })).filter(row => Number.isFinite(Date.parse(row.observedAt)));
+  for (const approval of approvals) {
+    const snapshot = manualSnapshot(approval), history = snapshot?.historyEvidence, mapping = history?.historicalMapping;
+    if (!mapping?.platformSku || !mapping.platformSkc || !mapping.warehouseSku
+      || !validManualOverride(approval, { workspaceId: member.workspaceId, ledgerId: approval.ledgerId, store: snapshot.store, platformSku: mapping.platformSku })
+      || history.format !== WAREHOUSE_HISTORY_FORMAT || history.formatVersion !== 1
+      || !pairs.has(JSON.stringify([canonicalPlatformSku(mapping.platformSku), canonicalPlatformSkc(mapping.platformSkc)]))
+      || !history.warehouseEvidence?.warehouseSku || canonicalWarehouseSku(history.warehouseEvidence.warehouseSku) !== canonicalWarehouseSku(mapping.warehouseSku)
+      || history.warehouseEvidence.evidenceComplete !== true || !Array.isArray(history.warehouseEvidence.sourceWarnings) || history.warehouseEvidence.sourceWarnings.length) continue;
+    hints.push({ platformSku: mapping.platformSku, platformSkc: mapping.platformSkc, warehouseSku: mapping.warehouseSku,
+      store: snapshot.store, sourceRecordId: `approval:${approval.id}`, sourceBatchId: history.sourceBatchId ?? '',
+      observedAt: approval.approvedAt, ...(mapping.unitConversion ? { unitConversion: mapping.unitConversion } : {}) });
+  }
+  return normalizeErpHistoryMappings(hints, expectedSkus);
 }
 
 export async function previewWarehouseHistoryCosts(input) { return warehouseHistoryPlan(input); }
@@ -548,7 +586,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     const legacyScope = request.expectedSkus?.length ? null : legacyExpectedSkusForRequest({ request, salesRows: ownedSales, workspaceId: ledger.workspaceId });
     if (legacyScope?.reason) return persistResult([], 'blocked', legacyScope.reason);
     const expectedSkus = legacyScope?.expectedSkus ?? request.expectedSkus;
-    const validated = validateErpCostInboxEnvelope(inbox.envelope, { expectedWorkspaceId: ledger.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus });
+    const validated = validateErpCostInboxEnvelope(inbox.envelope, { expectedWorkspaceId: ledger.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus, expectedHistoryMappings: request.historyMappings ?? [] });
     const batch = validated.batch;
     if (batch.batchId !== inbox.batchId || batch.requestId !== inbox.requestId) throw new Error('ERP 收件记录与原始封装不一致。');
     const boundary = erpBatchAdoptionBoundary(batch);
@@ -707,6 +745,7 @@ async function publishVerifiedErpCostBatch({
     expectedRequestId: effectiveRequestId,
     expectedPlatformSkcs: recordedRequest.platformSkcs,
     expectedSkus: verifiedExpectedSkus,
+    expectedHistoryMappings: recordedRequest.historyMappings ?? [],
   });
   const verifiedSourceEnvelope = validatedSource.envelope;
   if (verifiedSourceEnvelope.formatVersion !== ERP_COST_BATCH_VERSION || (!adoptionContext && verifiedSourceEnvelope.evidenceStatus !== "complete")) {
@@ -1271,7 +1310,8 @@ export async function saveErpCostRequest(request) {
     if (request.ledgerVersion != null && ledger && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) throw new Error('台账导入已变化，请重新准备 ERP 请求。');
     const existing = await db.erpCostRequests.get(request.id);
     if (existing) {
-      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || (existing.ledgerPeriod ?? null) !== ledgerPeriod || (existing.ledgerVersion ?? null) !== (request.ledgerVersion ?? null) || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
+      if (existing.workspaceId !== request.workspaceId || existing.ledgerId !== request.ledgerId || (existing.ledgerPeriod ?? null) !== ledgerPeriod || (existing.ledgerVersion ?? null) !== (request.ledgerVersion ?? null) || JSON.stringify(existing.platformSkcs) !== JSON.stringify(request.platformSkcs) || JSON.stringify(existing.expectedSkus ?? []) !== JSON.stringify(request.expectedSkus ?? [])
+        || JSON.stringify(existing.historyMappings ?? []) !== JSON.stringify(request.historyMappings ?? [])) throw new Error("ERP 请求 ID 已被不同范围使用。");
       return;
     }
 
@@ -1303,7 +1343,7 @@ export async function receiveErpCostInboxEnvelope({ envelope, receivedVia = 'bro
   let result;
   await db.transaction('rw', db.erpCostRequests, db.erpCostInbox, db.auditEvents, async () => {
     const request = await db.erpCostRequests.get(String(envelope?.batch?.requestId ?? ''));
-    const validated = validateErpCostInboxEnvelope(envelope, request ? { expectedWorkspaceId: request.workspaceId, expectedLedgerId: request.ledgerId, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus?.length ? request.expectedSkus : null } : {});
+    const validated = validateErpCostInboxEnvelope(envelope, request ? { expectedWorkspaceId: request.workspaceId, expectedLedgerId: request.ledgerId, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus?.length ? request.expectedSkus : null, expectedHistoryMappings: request.historyMappings ?? [] } : {});
     const batch = validated.batch;
     if (batch.workspaceId !== member.workspaceId) throw new Error('ERP 收件不属于当前工作区。');
     const byDelivery = await db.erpCostInbox.where('deliveryId').equals(validated.deliveryId).first();
@@ -1311,7 +1351,7 @@ export async function receiveErpCostInboxEnvelope({ envelope, receivedVia = 'bro
     const existing = byDelivery ?? byBatch;
     if (existing) {
       if (byDelivery && byBatch && byDelivery.id !== byBatch.id) throw new Error('ERP 投递和源批次标识冲突。');
-      const previous = validateErpCostInboxEnvelope(existing.envelope, request ? { expectedWorkspaceId: request.workspaceId, expectedLedgerId: request.ledgerId, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus?.length ? request.expectedSkus : null } : {}).batch;
+      const previous = validateErpCostInboxEnvelope(existing.envelope, request ? { expectedWorkspaceId: request.workspaceId, expectedLedgerId: request.ledgerId, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus?.length ? request.expectedSkus : null, expectedHistoryMappings: request.historyMappings ?? [] } : {}).batch;
       if (JSON.stringify(previous) !== JSON.stringify(batch)) throw new Error('ERP 投递或源批次 ID 已被不同证据使用。');
       result = { id: existing.id, deliveryId: existing.deliveryId, batchId: existing.batchId, status: existing.status, idempotent: true };
       return;

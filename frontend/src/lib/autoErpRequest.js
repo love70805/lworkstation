@@ -8,7 +8,7 @@ export function erpRequestScopeKey({ ledger, platformSkcs, expectedSkus, ledgerV
 }
 
 const chains = new Map();
-export function ensureAutoErpRequest(input, { latest, save, register, isCurrent = () => true, now = () => Date.now(), activeRequest = null }) {
+export function ensureAutoErpRequest(input, { latest, save, register, prepareHistory, isCurrent = () => true, now = () => Date.now(), activeRequest = null }) {
   const key = `${input.ledger.workspaceId}:${input.ledger.id}`;
   const previous = chains.get(key) ?? Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
@@ -16,15 +16,20 @@ export function ensureAutoErpRequest(input, { latest, save, register, isCurrent 
     const existing = activeRequest ?? await latest(input.ledger.id);
     if (!isCurrent()) return null;
     const sameScope = existing && erpRequestScopeKey({ ...existing, ledger: input.ledger }) === erpRequestScopeKey(input);
-    const reusable = sameScope && (existing.ledgerPeriod ?? null) === (input.ledger.period ?? null) && (activeRequest || now() - Date.parse(existing.requestedAt) < 90 * 60 * 1000);
-    let request = { ...(reusable ? existing : { ...buildLedgerErpCostRequest(input), supersedesRequestId: existing?.id ?? null }), replaceLedgerScope: true };
+    const reusable = sameScope && (existing.ledgerPeriod ?? null) === (input.ledger.period ?? null)
+      && (activeRequest || (!prepareHistory || existing.historyRecoveryVersion === 1) && now() - Date.parse(existing.requestedAt) < 90 * 60 * 1000);
+    const freshRequest = async previousId => ({ ...buildLedgerErpCostRequest(input), supersedesRequestId: previousId,
+      ...(prepareHistory ? { historyRecoveryVersion: 1, historyMappings: await prepareHistory({ ledgerId: input.ledger.id, expectedSkus: input.expectedSkus }) } : {}) });
+    let request = { ...(reusable ? existing : await freshRequest(existing?.id ?? null)), replaceLedgerScope: true };
+    if (!isCurrent()) return null;
     await save(request);
     if (!isCurrent()) return null;
     let response = await register({ request, expectedSkus: input.expectedSkus });
     if (!response?.accepted) throw new Error("本机服务尚未确认登记请求");
     if (!isCurrent()) { await register({ request: { ...request, cancel: true } }); return null; }
     if (response.status && response.status !== "registered") {
-      request = { ...buildLedgerErpCostRequest(input), supersedesRequestId: request.id, replaceLedgerScope: true };
+      request = { ...await freshRequest(request.id), replaceLedgerScope: true };
+      if (!isCurrent()) return null;
       await save(request);
       if (!isCurrent()) return null;
       response = await register({ request, expectedSkus: input.expectedSkus });

@@ -49,6 +49,7 @@ export function validateErpCostInboxEnvelope(payload, {
   expectedRequestId = null,
   expectedPlatformSkcs = null,
   expectedSkus = null,
+  expectedHistoryMappings = null,
 } = {}) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("ERP 收件包内容无效。");
   if (payload.type !== ERP_INBOX_MESSAGE_TYPE || payload.source !== ERP_INBOX_SOURCE) throw new Error("ERP 收件包来源不受支持。");
@@ -90,6 +91,7 @@ export function validateErpCostInboxEnvelope(payload, {
     expectedRequestId,
     expectedPlatformSkcs,
     expectedSkus,
+    expectedHistoryMappings,
   });
   return {
     envelope: {

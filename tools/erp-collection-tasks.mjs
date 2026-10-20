@@ -13,6 +13,7 @@ const hash = value => crypto.createHash('sha256').update(stable(value)).digest('
 export function collectionScopeHash(request) {
   return hash({ workspaceId: request.workspaceId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod,
     ledgerVersion: request.ledgerVersion ?? null,
+    ...(request.historyMappings?.length ? { historyMappings: request.historyMappings } : {}),
     skcs: [...new Set((request.platformSkcs ?? []).map(item => canonical(item?.platformSkc ?? item)))].sort(),
     skus: (request.expectedSkus ?? []).map(item => [canonical(item.platformSku), canonical(item.platformSkc), canonical(item.store ?? item.storeName)]).sort((a,b) => stable(a).localeCompare(stable(b))),
   });

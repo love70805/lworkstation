@@ -50,6 +50,10 @@ export function erpBatchAdoptionBoundary(batch) {
   const expectedRows = batch.rows.filter(row => row.ledgerScopeRole === 'expected');
   const counts = new Map();
   for (const row of expectedRows) {
+    if (!row.platformSku) {
+      if (row.warehouseSku) blockedWarehouses.add(canonicalWarehouseSku(row.warehouseSku));
+      continue;
+    }
     const sku = canonicalPlatformSku(row.platformSku);
     counts.set(sku, (counts.get(sku) ?? 0) + 1);
     if (row.mappingFallback || row.sourceWarnings?.length) blockedSkus.add(sku);

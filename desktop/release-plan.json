@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.48",
+  "version": "0.4.49",
   "candidateOnly": true,
-  "integrationBranch": "codex/sidebar-brand-048",
+  "integrationBranch": "codex/erp-query-history-fix",
   "requiredCommits": [
+    {
+      "module": "v0.4.49-verified-main-baseline",
+      "commit": "2eb3e8bd111c5301f9fe1202d60589a1ea547ef9"
+    },
     {
       "module": "v0.4.48-brand-toggle-avatar",
       "commit": "919e3b6"

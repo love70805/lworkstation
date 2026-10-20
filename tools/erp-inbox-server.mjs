@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
 import {createInboxStorage, cloneInboxMetadata} from './erp-inbox-storage.mjs';
 import {DESKTOP_INBOX_BACKUP_FORMAT,INBOX_RUNTIME_KINDS,validateDesktopInboxBackup} from '../integrations/contracts/desktop-inbox-backup.mjs';
+import { normalizeErpHistoryMappings } from '../integrations/contracts/erp-history-mappings.mjs';
 
 const port = Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790);
 const bindHost = "127.0.0.1";
@@ -234,10 +235,13 @@ function assertExactPlatformScope(rows, request, querySkcs, policy) {
   if (policy !== "ledger_platform_pair") return;
   const expected = normalizedExpectedSkus(request?.expectedSkus);
   const skcs = querySkcSet(querySkcs);
+  const historicalWarehouses = new Set((request?.historyMappings || []).filter(row => skcs.has(canonicalSku(row.platformSkc))
+    && expected.get(canonicalSku(row.platformSku))?.canonicalPlatformSkc === canonicalSku(row.platformSkc)).map(row => canonicalSku(row.warehouseSku)));
   if (!expected.size) throw invalidInbox("ERP 精确采集缺少已登记的平台 SKU/SKC 范围。");
   const matches = row => expected.get(canonicalSku(row?.platformSku))?.canonicalPlatformSkc === canonicalSku(row?.platformSkc) && skcs.has(canonicalSku(row?.platformSkc));
   for (const row of rows) {
     if (row.catalogMappings != null && !Array.isArray(row.catalogMappings)) throw invalidInbox("ERP 精确采集的档案映射必须为数组。");
+    if (!row.platformSku && !row.platformSkc && !(row.catalogMappings || []).length && historicalWarehouses.has(canonicalSku(row.warehouseSku))) continue;
     if (!matches(row) || (row.catalogMappings || []).some(mapping => !matches(mapping))) throw invalidInbox("ERP 精确采集包含范围外平台 SKU/SKC 或档案映射。");
   }
 }
@@ -702,6 +706,7 @@ function sanitizeDirectBatch(batch, {
       mappingFallbackCount: rows.filter((row) => row.mappingFallback).length,
       querySkcCount: querySkcSet(querySkcs).size,
     },
+    ...(request?.historyMappings?.length ? { historyMappings: request.historyMappings.filter(row => querySkcSet(querySkcs).has(canonicalSku(row.platformSkc))) } : {}),
     sourceMeta,
     warehouseEvidence,
     rows,
@@ -986,7 +991,7 @@ function chooseRequest(records, { requestId, ledgerId, workspaceId, querySkcs })
   return null;
 }
 
-function requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledgerVersion, platformSkcs, expectedSkus }) {
+function requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledgerVersion, platformSkcs, expectedSkus, historyMappings = [] }) {
   const normalizedExpectedScope = normalizedExpectedSkus(expectedSkus);
   const input = {
     requestId: String(requestId ?? "").trim(),
@@ -994,6 +999,7 @@ function requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledg
     ledgerId: String(ledgerId ?? "").trim(),
     ...(ledgerPeriod == null ? {} : { ledgerPeriod }),
     ...(ledgerVersion == null ? {} : { ledgerVersion }),
+    ...(historyMappings.length ? { historyMappings: normalizeErpHistoryMappings(historyMappings, expectedSkus) } : {}),
     querySkcs: [...querySkcSet(platformSkcs)].sort(),
     expectedSkus: [...normalizedExpectedScope.values()]
       .map((item) => ({
@@ -1256,7 +1262,8 @@ const server = http.createServer(async (req, res) => {
       if ([...normalizedExpectedScope.values()].some((item) => !queryScope.has(item.canonicalPlatformSkc))) {
         return json(res, 400, { error: "INVALID_ERP_REQUEST", message: "expectedSkus 包含不在完整平台 SKC 查询范围内的项目。" });
       }
-      const inputHash = requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledgerVersion, platformSkcs, expectedSkus: [...normalizedExpectedScope.values()] });
+      const historyMappings = normalizeErpHistoryMappings(payload?.request?.historyMappings, [...normalizedExpectedScope.values()]);
+      const inputHash = requestInputHash({ requestId, workspaceId, ledgerId, ledgerPeriod, ledgerVersion, platformSkcs, expectedSkus: [...normalizedExpectedScope.values()], historyMappings });
       const existingRequest = records.find((item) => item.kind === "request" && item.requestId === requestId);
       if (existingRequest) {
         const existingInputHash = existingRequest.requestInputHash || requestInputHash(existingRequest);
@@ -1284,6 +1291,7 @@ const server = http.createServer(async (req, res) => {
         ledgerPeriod,
         ...(ledgerVersion == null ? {} : { ledgerVersion }),
         expectedSkus: [...normalizedExpectedScope.values()].map(({ platformSku, platformSkc, store }) => ({ platformSku, platformSkc, ...(store ? { store } : {}) })),
+        ...(payload?.request?.historyRecoveryVersion === 1 ? { historyRecoveryVersion: 1, historyMappings } : historyMappings.length ? { historyMappings } : {}),
         requestInputHash: inputHash,
         requestedAt: payload?.request?.requestedAt ?? new Date().toISOString(),
         registeredAt: new Date().toISOString(),
@@ -1459,6 +1467,7 @@ const server = http.createServer(async (req, res) => {
           querySkcCount: platformSkcs.length,
         },
         ...(payload?.sourceMeta?.catalogCoverage ? { catalogVersion: 1, catalogCoverage: normalizeErpCatalogCoverage(payload.sourceMeta.catalogCoverage) } : {}),
+        ...(request.historyMappings?.length ? { historyMappings: request.historyMappings.filter(row => querySkcSet(querySkcs).has(canonicalSku(row.platformSkc))) } : {}),
         sourceMeta: { ...sourceMeta, sourceFormat: "erp-v8-http-bridge" },
         warehouseEvidence,
         evidenceStatus: sourceMeta.evidenceComplete ? "complete" : "legacy_partial",

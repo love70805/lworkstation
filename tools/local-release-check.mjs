@@ -20,6 +20,7 @@ const commands = [
   ["ERP 采集慢路径", "node", ["../tools/erp-collection-slow-paths.test.mjs"]],
   ["ERP 完整历史与取消采购", "node", ["../tools/erp-purchase-history.test.mjs"]],
   ["ERP 解绑仓库定向历史核价与空结果", "node", ["../tools/erp-warehouse-history.test.mjs"]],
+  ["ERP 查询兼容与原流程历史采购补查", "node", ["../tools/erp-integrated-history.test.mjs"]],
   ["ERP 大范围采集与续取", "node", ["../tools/erp-collection-scale.test.mjs"]],
   ["ERP 本机检查点与重启恢复", "node", ["../tools/erp-collection-recovery.test.mjs"]],
   ["ERP 首次发送请求绑定", "node", ["../tools/erp-collection-binding.test.mjs"]],

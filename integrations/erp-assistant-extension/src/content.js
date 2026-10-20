@@ -22,7 +22,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.47';
+    const EXTENSION_VERSION = '8.0.48';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -864,7 +864,7 @@
         // selected store, expand time/status restrictions, and bound pagination.
         return { ...filters, sku, queryRange: '0', createTimePeriod: '', orderNo: '', supplierName: '', organizationName: '', createdBy: '', warehouseId: '0', paymentType: '0', paymentStatus: '0', purchaseStatus: '',
             exceptionSheetStatus: '', tradeName: '', inTransitTime: '', exceptionHandlingStatus: '', emergencySign: '', purchasingPersonnel: '',
-            accountName1688: '', storeAssociatedAccountName1688: '', suggestedPayment: '', orderType: '', buildType: '', mineableType: '', adjacentToTheSameSupplier: '0', sort: '' };
+            accountName1688: '', storeAssociatedAccountName1688: '', suggestedPayment: '', orderType: '', buildType: '', mineableType: '', changePrice: '', adjacentToTheSameSupplier: '0', sort: '' };
     }
 
     async function fetchAllOrders(filters, run) {
@@ -1402,9 +1402,14 @@
         }
         mappingState.failedMappings.push(...missingTargets);
         const scopedWarehouseSkus = new Set(scopedState.results.map(result => resultPolicy.canonical(result.warehouseSku)));
-        if (!scopedWarehouseSkus.size) throw new CostError('目标平台规格未取得映射', missingTargets.map(target => target.platformSkc + ' / ' + target.platformSku).join('\n') + '\n请在 ERP 核对这些已使用规格的映射，不能用其他仓库档案代替。');
+        const historicalTargets = resultPolicy.historicalWarehouseTargets(missingTargets,
+            run.task?.requestSnapshot?.historyMappings ?? previewContext.historyMappings, run.expectedSkus);
+        const historicalWarehouses = [...new Set(historicalTargets.map(target => target.warehouseSku))]
+            .filter(warehouse => !scopedWarehouseSkus.has(resultPolicy.canonical(warehouse)));
+        if (!scopedWarehouseSkus.size && !historicalWarehouses.length) throw new CostError('目标平台规格未取得映射', missingTargets.map(target => target.platformSkc + ' / ' + target.platformSku).join('\n') + '\n当前也没有可核实的唯一历史仓库关联，请核对 ERP 关联；不能用其他仓库档案代替。');
+        const evidenceWarehouseSkus = new Set([...scopedWarehouseSkus, ...historicalWarehouses.map(resultPolicy.canonical)]);
         const additionalWarehouses = scopedState.results.filter(result => !originalWarehouses.has(resultPolicy.canonical(result.warehouseSku))).map(result => result.warehouseSku);
-        const historyTargets = [...new Set([...querySkcs, ...additionalWarehouses])];
+        const historyTargets = [...new Set([...(scopedWarehouseSkus.size ? querySkcs : []), ...additionalWarehouses, ...historicalWarehouses])];
         const detailPipeline = run.task?.executionProtocol === 2 ? prefetchPurchaseDetails(run) : null;
         beginReadProgress(run, '采购列表与明细', historyTargets.length, '个目标');
         let targetStates;
@@ -1425,15 +1430,15 @@
         const detailState = await fetchAllDetails(orders, run);
         run.readProgress = null;
         setLoading('正在整理采购证据', previewContext.ledgerPeriod ? `台账月份：${previewContext.ledgerPeriod}` : '未取得台账月份，继续采集完整证据');
-        const aggregateState = aggregateDetails(detailState.details.filter(detail => scopedWarehouseSkus.has(resultPolicy.canonical(detail.itemId))), { allowEmpty: true });
+        const aggregateState = aggregateDetails(detailState.details.filter(detail => evidenceWarehouseSkus.has(resultPolicy.canonical(detail.itemId))), { allowEmpty: true });
         const costsByWarehouse = new Map(aggregateState.results.map(result => [resultPolicy.canonical(result.warehouseSku), result]));
         aggregateState.results = scopedState.results.map(product => ({ ...product, ...costsByWarehouse.get(resultPolicy.canonical(product.warehouseSku)), mappings: product.mappings, catalogMappings: product.catalogMappings, catalogMappingsComplete: product.catalogMappingsComplete }));
-        for (const product of scopedState.results) {
+        for (const product of [...scopedState.results, ...historicalWarehouses.map(warehouseSku => ({ warehouseSku }))]) {
             if (!aggregateState.warehouseEvidence.warehouses.some(warehouse => resultPolicy.canonical(warehouse.warehouseSku) === resultPolicy.canonical(product.warehouseSku))) aggregateState.warehouseEvidence.warehouses.push({ warehouseSku: product.warehouseSku, purchaseRecords: [], excludedRecords: [], sourceWarnings: [], evidenceComplete: true });
         }
         for (const warehouse of aggregateState.warehouseEvidence.warehouses) {
             const product = scopedState.results.find(result => resultPolicy.canonical(result.warehouseSku) === resultPolicy.canonical(warehouse.warehouseSku));
-            warehouse.sourceWarnings = [...(warehouse.sourceWarnings || []), ...(!directoryState.complete ? ['target_directory_incomplete'] : []), ...(product.catalogMappingsComplete !== true ? ['target_mapping_incomplete'] : [])];
+            warehouse.sourceWarnings = [...(warehouse.sourceWarnings || []), ...(product && !directoryState.complete ? ['target_directory_incomplete'] : []), ...(product && product.catalogMappingsComplete !== true ? ['target_mapping_incomplete'] : [])];
             warehouse.evidenceComplete = !orderState.countMismatch && !detailState.failedOrders.length && !warehouse.sourceWarnings.length;
         }
         const catalogState = { coverage: Object.fromEntries(['directory','mappings','images','suppliers','purchaseEvidence'].map(group => [group, { state: 'unavailable', reasons: ['catalog_supplement_pending'] }])) };
@@ -1443,7 +1448,7 @@
             warehouses: aggregateState.warehouseEvidence.warehouses,
             excludedOrders: detailState.excludedOrders,
             excludedDetails: aggregateState.warehouseEvidence.excludedDetails.filter((item) => (
-                !item.warehouseSku || scopedWarehouseSkus.has(resultPolicy.canonical(item.warehouseSku))
+                !item.warehouseSku || evidenceWarehouseSkus.has(resultPolicy.canonical(item.warehouseSku))
             )),
             detailFailures: detailState.failedOrders,
             mappingFailures: mappingState.failedMappings
@@ -2320,6 +2325,8 @@
         panel.classList.add('erpa-visible');
         document.getElementById('erpa-error-title').textContent = error && error.message ? error.message : '核算失败';
         document.getElementById('erpa-error-message').textContent = error && error.details ? error.details : '';
+        document.getElementById('erpa-error-retry').hidden = error?.code === 'ERP_CHECKPOINT_QUERY_UNSUPPORTED'
+            || String(error?.details || '').includes('ERP_CHECKPOINT_QUERY_UNSUPPORTED');
     }
 
     function hideError() {
@@ -2364,7 +2371,7 @@
         if (csv) csv.disabled = disabled;
     }
 
-    async function openPanel({ historyOnly = false } = {}) {
+    async function openPanel() {
         const frame = activePurchaseFrame();
         if (frame) {
             closePanel();
@@ -2378,7 +2385,6 @@
         root.classList.add('erpa-open');
         renderAnomalyBanner();
         renderStatus();
-        if (historyOnly) { document.querySelector('#erpa-cost-root .erpa-history-review').open = true; document.getElementById('erpa-history-skus').focus(); return; }
         if (isPurchasePage() && !needsLogin() && capturedListUrl && lastResults.length === 0 && !activeRun) {
             try {
                 // Read authoritative tasks, including completed ones, before
@@ -2495,7 +2501,7 @@
                     '<button class="erpa-button" id="erpa-copy" type="button"><b aria-hidden="true">⎘</b><span>复制成本</span></button>' +
                     '<button class="erpa-button" id="erpa-retry-delivery" type="button"><span>重试回传</span></button>' +
                     '<button class="erpa-button" id="erpa-export" type="button"><b aria-hidden="true">⇩</b><span>导出 CSV</span></button></div>' +
-                '<details class="erpa-history-review"><summary>映射缺失或解绑：仓库历史核价</summary><p>只读取输入仓库的完整采购历史，保留原任务进度。导出后由工作台自动核对唯一历史关联和采购价格。</p><label for="erpa-history-skus">仓库 SKU（每行一个，最多20个）</label><textarea class="erpa-search" id="erpa-history-skus" rows="2"></textarea><label for="erpa-history-period">核价月份</label><input id="erpa-history-period" type="month"><button class="erpa-button" id="erpa-history-export" type="button">定向读取并导出证据</button></details>' +
+                '<details class="erpa-history-review"><summary>高级：按仓库补充采购证据</summary><p>正常采集会自动补查已知历史仓库，并在工作台原成本核对流程确认。仅在缺少可靠历史关联时，按明确仓库补充完整证据；保留原任务进度。</p><label for="erpa-history-skus">仓库 SKU（每行一个，最多20个）</label><textarea class="erpa-search" id="erpa-history-skus" rows="2"></textarea><label for="erpa-history-period">核价月份</label><input id="erpa-history-period" type="month"><button class="erpa-button" id="erpa-history-export" type="button">定向读取并导出证据</button></details>' +
                 '<div class="erpa-status-region"><div id="erpa-task-status" role="status" aria-live="polite"></div><div class="erpa-catalog-progress" id="erpa-catalog-progress" hidden><div><span id="erpa-catalog-message" role="status" aria-live="polite"></span><div id="erpa-catalog-meters"></div></div><button class="erpa-button" id="erpa-cancel-catalog" type="button">取消本次补充</button></div>' +
                 '<div class="erpa-statusbar" id="erpa-statusbar"></div><p class="erpa-result-scope" id="erpa-result-scope"></p><p class="erpa-result-scope" id="erpa-catalog-state" hidden></p></div>' +
                 '<div class="erpa-table-wrap" id="erpa-table-wrap"><table class="erpa-table">' +
@@ -2519,10 +2525,6 @@
 
         if (isTopFrame) document.body.appendChild(trigger);
         document.body.appendChild(root);
-        if (isPurchasePage()) {
-            const historyTrigger = document.createElement('button'); historyTrigger.id = 'erpa-history-trigger'; historyTrigger.type = 'button'; historyTrigger.textContent = '仓库历史核价';
-            historyTrigger.addEventListener('click', () => void openPanel({ historyOnly: true })); document.body.appendChild(historyTrigger);
-        }
 
         const cachedResult = getResultCache();
         if (cachedResult) {
