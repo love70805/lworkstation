@@ -2108,7 +2108,7 @@
             tableWrap.style.display = 'none';
             empty.style.display = 'grid';
             empty.textContent = lastResults.length === 0 ? collectionTaskState?.summary?.delivered > 0
-                ? '成本已送达，当前没有本地预览。请在工作台成本核对查看；证据缺项需重试失败批次。' : '暂无核算结果' : '没有匹配的结果';
+                ? '成本证据已送达，请在工作台原成本核对页查看。历史补查项在“人工更正”中确认；读取失败或证据缺项才需重试。' : '暂无核算结果' : '没有匹配的结果';
             return;
         }
 
@@ -2193,7 +2193,7 @@
                 + '<span class="erpa-status-item">已送达 <strong>' + batches.filter(batch => batch.deliveryId).length + '/' + batches.length + ' 批</strong></span>'
                 + '<span class="erpa-status-item">已采用 <strong>' + (collectionTaskState.summary?.adopted || 0) + ' SKU</strong></span>'
                 + '<span class="erpa-status-item">当前预览 <strong>' + lastResults.length + ' 个仓库 SKU / ' + lastResults.reduce((count, row) => count + row.mappings.length, 0) + ' 个平台映射</strong></span>';
-            footerLeft.textContent = issues.length ? '证据缺项请重试失败批次；补充资料不会替代成本核验。' : '范围：原工作区、台账月份、店铺及平台 SKU/SKC';
+            footerLeft.textContent = issues.length ? '历史补查项回工作台确认；读取失败或证据缺项才需重试。' : '范围：原工作区、台账月份、店铺及平台 SKU/SKC';
             footerRight.textContent = previewScopeLabel() + ' · 按时间最近三笔，数量加权';
             return;
         }
