@@ -233,8 +233,74 @@ kbd {
   height: 56px;
   flex: 0 0 56px;
   align-items: center;
-  padding-right: 36px;
+  gap: 4px;
+  padding-right: 0;
 }
+
+/* The logo itself is the collapse/expand control: expanded shows the wordmark
+   with a fold hint, collapsed shows only the mark with a small expand hint. */
+.brand-toggle {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.brand-toggle:hover { background: var(--surface-muted); }
+.brand-toggle:focus-visible { outline: 2px solid var(--primary-bright); outline-offset: 2px; }
+
+.brand-toggle-hint {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-soft);
+  opacity: 0.7;
+  transition: opacity var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.brand-toggle:hover .brand-toggle-hint,
+.brand-toggle:focus-visible .brand-toggle-hint { opacity: 1; color: var(--primary); }
+
+.brand-toggle-collapsed {
+  justify-content: center;
+  padding: 0;
+}
+
+.brand-toggle-collapsed .brand-assets { justify-content: center; }
+
+.brand-toggle-collapsed .brand-toggle-hint {
+  position: absolute;
+  right: -3px;
+  bottom: 5px;
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+}
+
+.brand-toggle-collapsed:hover .brand-toggle-hint,
+.brand-toggle-collapsed:focus-visible .brand-toggle-hint { opacity: 1; }
 
 .brand-assets {
   display: flex;
@@ -262,12 +328,6 @@ kbd {
 html[data-appearance="dark"] .brand-logo-light { display: none; }
 html[data-appearance="dark"] .brand-logo-dark { display: block; }
 
-.brand > .sidebar-collapse-toggle {
-  position: absolute;
-  top: 10px;
-  right: 0;
-}
-
 .sidebar-close,
 .mobile-menu {
   display: none !important;
@@ -293,10 +353,6 @@ html[data-appearance="dark"] .brand-logo-dark { display: block; }
 
 .sidebar-collapsed .brand-logo,
 html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: none; }
-
-/* The expand control lives above 系统与备份 so the collapsed header row keeps the
-   same height as the topbar; otherwise the button hangs below the header line. */
-.sidebar-collapsed .brand > .sidebar-collapse-toggle { display: none; }
 
 .sidebar-collapsed .nav-item > span,
 .sidebar-collapsed .nav-count,
@@ -391,14 +447,6 @@ html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: none
   border-top: 1px solid var(--border);
 }
 
-.sidebar-expand {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
 
 .sidebar-bottom > button.nav-item {
   width: 100%;
@@ -564,7 +612,7 @@ textarea::placeholder {
 .popover-title { display: flex; min-height: 48px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 700; }
 .popover-title small { color: var(--text-muted); font-size: 11px; font-weight: 500; }
 .popover-heading { display: flex; align-items: center; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
-.popover-heading > span:last-child, .account-summary span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.popover-heading > span:last-child, .account-summary > span:last-child { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .popover-heading small, .account-summary small { color: var(--text-muted); font-size: 11px; }
 .popover-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border-radius: 50%; }
 .popover-icon.success { background: var(--success-bg); color: var(--success); }
@@ -586,8 +634,11 @@ textarea::placeholder {
 .popover-empty { display: flex; min-height: 78px; align-items: center; justify-content: center; gap: 8px; padding: 16px; color: var(--text-muted); font-size: 12px; }
 
 .account-popover { width: 250px; padding-bottom: 6px; }
-.account-summary { display: flex; align-items: center; gap: 11px; padding: 16px; border-bottom: 1px solid var(--border); }
-.account-summary .avatar { width: 40px; height: 40px; }
+.account-summary { display: flex; min-height: 76px; align-items: center; gap: 12px; padding: 16px; border-bottom: 1px solid var(--border); }
+.account-summary > span { gap: 4px; }
+.account-summary strong { font-size: 15px; line-height: 22px; }
+.account-summary small { line-height: 18px; }
+.account-summary .avatar { width: 44px; height: 44px; flex: 0 0 44px; font-size: 17px; }
 .account-popover > button { display: grid; grid-template-columns: 24px minmax(0, 1fr) 18px; align-items: center; gap: 7px; min-height: 44px; padding: 9px 14px; }
 
 .main-canvas {
@@ -1397,8 +1448,6 @@ textarea::placeholder {
   html[data-appearance="dark"] .sidebar-collapsed .brand-logo-light { display: none; }
   html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: block; }
 
-  .sidebar-collapsed .brand > .sidebar-collapse-toggle { position: absolute; margin: 0; }
-
   .sidebar-collapsed .nav-count { display: grid; }
 
   .sidebar-collapsed .nav-item > span {
@@ -1420,8 +1469,7 @@ textarea::placeholder {
 
   .sidebar-open { transform: translateX(0); }
   .sidebar-close { display: inline-flex !important; margin-left: auto; }
-  .sidebar-collapse-toggle,
-  .sidebar-expand { display: none !important; }
+  .brand-toggle-hint { display: none; }
 
   .sidebar-scrim {
     position: fixed;
