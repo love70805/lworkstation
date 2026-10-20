@@ -14,6 +14,7 @@ import {
   LayoutGrid,
   Menu,
   Moon,
+  PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
   Settings,
@@ -244,6 +245,16 @@ export default function AppShell({ children, pageClass = "" }) {
     setSidebarCollapsed((current) => !current);
   };
 
+  // The brand row is the single collapse/expand affordance on desktop; on the
+  // mobile drawer it closes the drawer instead of toggling the desktop rail.
+  const onBrandToggle = () => {
+    if (typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 820px)").matches) {
+      setMobileOpen(false);
+      return;
+    }
+    toggleSidebar();
+  };
+
   const showDialog = (dialog) => {
     setOpenMenu("");
     setMobileOpen(false);
@@ -328,18 +339,23 @@ export default function AppShell({ children, pageClass = "" }) {
       <a className="skip-link" href="#main-content">跳到主内容</a>
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
-          <span className="brand-assets" aria-label={`${PRODUCT_NAME} 经营管理中心`}>
-            <img className="brand-logo brand-logo-light" src="/assets/brand/lworkstation-wordmark-light.svg" alt="" aria-hidden="true" draggable="false" />
-            <img className="brand-logo brand-logo-dark" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
-            <img className="brand-mark" src="/assets/brand/l7-app-icon-master.svg" alt="" aria-hidden="true" draggable="false" />
-          </span>
-          <IconButton
-            icon={effectiveSidebarCollapsed ? PanelLeftOpen : Menu}
-            label={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
-            className="sidebar-collapse-toggle"
+          <button
+            type="button"
+            className={`brand-toggle ${effectiveSidebarCollapsed ? "brand-toggle-collapsed" : "brand-toggle-expanded"}`}
+            onClick={onBrandToggle}
+            aria-label={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
             aria-expanded={!effectiveSidebarCollapsed}
-            onClick={toggleSidebar}
-          />
+            title={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
+          >
+            <span className="brand-assets" aria-hidden="true">
+              <img className="brand-logo brand-logo-light" src="/assets/brand/lworkstation-wordmark-light.svg" alt="" aria-hidden="true" draggable="false" />
+              <img className="brand-logo brand-logo-dark" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
+              <img className="brand-mark" src="/assets/brand/l7-app-icon-master.svg" alt="" aria-hidden="true" draggable="false" />
+            </span>
+            <span className="brand-toggle-hint" aria-hidden="true">
+              {effectiveSidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+            </span>
+          </button>
           <IconButton icon={X} label="关闭导航" className="sidebar-close" onClick={() => setMobileOpen(false)} />
         </div>
 
@@ -356,7 +372,6 @@ export default function AppShell({ children, pageClass = "" }) {
           })}
         </nav>
         <nav className="sidebar-bottom" aria-label="系统与帮助">
-          {effectiveSidebarCollapsed ? <button type="button" className="nav-item sidebar-expand" onClick={toggleSidebar} title="展开导航" aria-label="展开导航" aria-expanded={false}><PanelLeftOpen size={18} /><span>展开导航</span></button> : null}
           <Link className={`nav-item ${pathname === "/diagnostics" || pathname === "/data-security" ? "active" : ""}`} to="/diagnostics" title="系统与备份" aria-current={pathname === "/diagnostics" || pathname === "/data-security" ? "page" : undefined}><ShieldCheck size={18} /><span>系统与备份</span></Link></nav>
       </aside>
 

@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.47",
+  "version": "0.4.48",
   "candidateOnly": true,
-  "integrationBranch": "codex/desktop-alignment-20261020",
+  "integrationBranch": "codex/sidebar-brand-048",
   "requiredCommits": [
+    {
+      "module": "v0.4.48-brand-toggle-avatar",
+      "commit": "919e3b6"
+    },
+    {
+      "module": "v0.4.48-verified-main-baseline",
+      "commit": "74772740baca1bd18a250832d3d94cbb2a3743ba"
+    },
     {
       "module": "v0.4.47-desktop-alignment-fix",
       "commit": "9c9cedac9d390953a735712669dad026e3767a4b"
