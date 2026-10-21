@@ -18,6 +18,7 @@ const toolsRoot = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.join(toolsRoot, "..");
 const generator = path.join(toolsRoot, "build-erpa-shopeers-bridge.mjs");
 const extensionRoot = path.join(workspaceRoot, "integrations", "erp-assistant-extension");
+const extensionVersion = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8")).version;
 const sourcePath = (name) => path.join(extensionRoot, "src", name);
 const capability = "test-capability-0123456789-abcdefghijklmnopqrstuvwxyz";
 const freshCreatedAt = () => new Date(Date.now() - 60_000).toISOString();
@@ -80,7 +81,7 @@ async function loadBackground({ fetchImpl, storageSeed = {}, timeoutMs = 25, com
       },
     },
     runtime: {
-      getManifest: () => ({ version: "8.0.48" }),
+      getManifest: () => ({ version: extensionVersion }),
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
@@ -200,9 +201,10 @@ async function startCollection(background, input = resultInput()) {
 
 async function verifyManifestAndGenerator() {
   const manifest = JSON.parse(await readFile(path.join(extensionRoot, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, "8.0.48");
+  assert.equal(manifest.version, extensionVersion);
   const setupSource = await readFile(path.join(workspaceRoot, "frontend", "src", "components", "ErpAssistantSetup.jsx"), "utf8");
-  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = "8\.0\.48";/, "the download action must recommend the patched package");
+  assert.match(setupSource, /import erpAssistantManifest from ["'].*erp-assistant-extension\/manifest\.json["']/);
+  assert.match(setupSource, /export const ERP_ASSISTANT_VERSION = erpAssistantManifest\.version;/, "the download must follow the canonical manifest");
   assert.deepEqual(manifest.permissions.sort(), ["alarms", "storage"]);
   assert.equal(manifest.content_scripts.length, 2);
   const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
@@ -253,13 +255,13 @@ async function verifyManifestAndGenerator() {
 }
 
 async function verifyPublishedPackage() {
-  const packageName = "ERP-Assistant-v8.0.48-shopeers-bridge";
+  const version = extensionVersion;
+  const packageName = `ERP-Assistant-v${version}-shopeers-bridge`;
   const publicRoot = path.join(workspaceRoot, "frontend", "public", "integrations", "erp-assistant");
-  const publicDir = path.join(publicRoot, packageName);
   const publicZip = path.join(publicRoot, `${packageName}.zip`);
   const verifyRoot = async (root) => {
     const manifest = JSON.parse(await readFile(path.join(root, "manifest.json"), "utf8"));
-    assert.equal(manifest.version, "8.0.48");
+    assert.equal(manifest.version, version);
     const main = manifest.content_scripts.find((entry) => entry.world === "MAIN");
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
@@ -271,7 +273,7 @@ async function verifyPublishedPackage() {
     const canonicalContent = await readFile(sourcePath("content.js"), "utf8");
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
     assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v7';/);
-    assert.match(content, /const EXTENSION_VERSION = '8\.0\.48';/);
+    assert.ok(content.includes(`const EXTENSION_VERSION = '${version}';`));
     for (const file of ["background.js", "catalog-collector.js", "content.css", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
       assert.equal(
         (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
@@ -291,7 +293,7 @@ async function verifyPublishedPackage() {
     await verifyCsvExport(root);
   };
 
-  await verifyRoot(publicDir);
+  await verifyRoot(extensionRoot);
   const extractRoot = await mkdtemp(path.join(os.tmpdir(), "shopeers-erpa-public-zip-"));
   try {
     if (process.platform === "win32") {

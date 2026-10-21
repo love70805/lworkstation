@@ -22,7 +22,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.48';
+    const EXTENSION_VERSION = '8.0.49';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -81,6 +81,8 @@
     let throttleUntil = 0;
     let requestRecoveryAt = 0;
     let healthyRequests = 0;
+    const requestWaiters = [];
+    let requestWakePending = false, requestThrottleTimer = null;
     let readProgressTimer = null;
     const isTopFrame = window.top === window;
     const expandedRows = new Set();
@@ -431,6 +433,44 @@
         });
     }
 
+    function wakeRequestWaiters() {
+        if (requestWakePending) return;
+        requestWakePending = true;
+        // Releases and 429 handling finish in the current turn before a new
+        // request can start. Queueing avoids polling every occupied slot.
+        Promise.resolve().then(() => {
+            requestWakePending = false;
+            if (requestThrottleTimer != null) window.clearTimeout(requestThrottleTimer);
+            requestThrottleTimer = null;
+            if (!requestWaiters.length) return;
+            if (Date.now() < throttleUntil) {
+                requestThrottleTimer = window.setTimeout(wakeRequestWaiters, throttleUntil - Date.now());
+                return;
+            }
+            while (requestWaiters.length && requestSlots < requestLimit) {
+                const pending = requestWaiters.shift();
+                pending.detach();
+                if (pending.signal?.aborted) pending.reject(pending.signal.reason || new DOMException('请求已中止', 'AbortError'));
+                else { requestSlots += 1; pending.resolve(); }
+            }
+        });
+    }
+
+    function acquireRequestSlot(signal) {
+        return new Promise((resolve, reject) => {
+            if (signal?.aborted) { reject(signal.reason || new DOMException('请求已中止', 'AbortError')); return; }
+            const pending = { signal, resolve, reject, detach: () => signal?.removeEventListener('abort', aborted) };
+            const aborted = () => {
+                const index = requestWaiters.indexOf(pending);
+                if (index >= 0) requestWaiters.splice(index, 1);
+                pending.detach(); reject(signal.reason || new DOMException('请求已中止', 'AbortError'));
+                wakeRequestWaiters();
+            };
+            signal?.addEventListener('abort', aborted, { once: true });
+            requestWaiters.push(pending); wakeRequestWaiters();
+        });
+    }
+
     async function apiGetRetry(path, params, parentSignal, context) {
         // Fast/cache-backed responses must still allow stop controls and budget
         // timers to run; an unbroken promise chain can starve browser events.
@@ -440,17 +480,13 @@
             if (parentSignal?.aborted) throw parentSignal.reason || new DOMException('核算已取消', 'AbortError');
             if (attempt) setLoading('请求较慢，正在重试', context + ' · 第 ' + attempt + '/' + RETRY_COUNT + ' 次重试（每次最多120秒，可取消）');
             try {
-                while (requestSlots >= requestLimit || Date.now() < throttleUntil) {
-                    if (parentSignal?.aborted) throw parentSignal.reason || new DOMException('请求已中止', 'AbortError');
-                    if (activeRun?.pauseRequested) throw Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' });
-                    await wait(Math.min(100, Math.max(10, throttleUntil - Date.now())), parentSignal);
-                }
                 if (activeRun?.pauseRequested) throw Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' });
-                requestSlots += 1;
+                await acquireRequestSlot(parentSignal);
                 const metrics = parentSignal?.readMetrics;
                 const requestedAt = Date.now();
                 renderReadProgress();
                 try {
+                    if (parentSignal?.aborted) throw parentSignal.reason || new DOMException('请求已中止', 'AbortError');
                     const result = await apiGet(path, params, parentSignal, context);
                     if (Number(result?.code) === 0 && ++healthyRequests >= 16 && Date.now() >= requestRecoveryAt) {
                         requestLimit = Math.min(MAX_REQUEST_CONCURRENCY, requestLimit + 2);
@@ -460,7 +496,7 @@
                     return result;
                 } finally {
                     if (metrics) metrics.requestDurationMs += Math.max(0, Date.now() - requestedAt);
-                    requestSlots -= 1; renderReadProgress();
+                    requestSlots -= 1; renderReadProgress(); wakeRequestWaiters();
                 }
             } catch (error) {
                 lastError = error;
@@ -1007,7 +1043,7 @@
         const pump = () => {
             // Four lanes remain available for ordered list pagination. The final
             // detail drain uses the whole adaptive pool after all lists verify.
-            while (!closed && !controller.signal.aborted && active < 4 && queued.length) {
+            while (!closed && !controller.signal.aborted && active < Math.max(1, requestLimit - 4) && queued.length) {
                 const order = queued.shift(); active += 1;
                 void readOrderDetails(order, run).catch(error => {
                     if (['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error.code)) controller.abort(error);

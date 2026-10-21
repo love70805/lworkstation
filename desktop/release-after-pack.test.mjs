@@ -35,7 +35,7 @@ assert.equal(isRcVersion("0.3.0-rc.1"), true);
 assert.equal(isRcVersion("0.3.0-beta.10"), false);
 writeReleaseBetaConfig({ appOutDir, packager: { appInfo: { version: "0.3.0-rc.1" } } }, { root: configRoot });
 assert.deepEqual(JSON.parse(fs.readFileSync(target, "utf8")), EXPECTED_RC_CONFIG);
-assert.deepEqual(EXPECTED_RC_CONFIG, { enabled: false, channel: "rc" });
+assert.deepEqual(EXPECTED_RC_CONFIG, { ...EXPECTED_BETA_CONFIG, channel: "rc" });
 
 fs.writeFileSync(target, "{\n  \"enabled\": false\n}\n", "utf8");
 assert.throws(() => writeReleaseBetaConfig({

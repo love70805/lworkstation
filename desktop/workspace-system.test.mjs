@@ -43,7 +43,7 @@ try {
     ipcMain: { handle: (name, callback) => handlers.set(name, callback) },
     getContents: () => contents, getWindow: () => ({}),
     backupDirectory: root,
-    getInboxService: () => ({maintenanceRequest: async request => ({ok:true,maintenanceId:'fixture-clear-lock'}),clearBusinessData: async () => {
+    getInboxService: () => ({maintenanceRequest: async request => ({ok:true,maintenanceId:'fixture-clear-lock',snapshot:{format:'lworkstation-desktop-inbox-backup',formatVersion:1,records:[],leases:[],recordCount:0,leaseCount:0}}),clearBusinessData: async () => {
       resetCalls++;
       if (resetFailure) throw new Error('fixture inbox disk full');
       return { ok: true, clearedCount: 4 };

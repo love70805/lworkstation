@@ -13,7 +13,7 @@ class ChannelGitHubProvider extends GitHubProvider {
     let tag;
     if (channel === "latest") {
       tag = await this.getLatestTagName(token);
-    } else if (channel === "beta") {
+    } else if (["beta", "rc"].includes(channel)) {
       const xml = await this.httpRequest(new URL(`${this.basePath}.atom`, this.baseUrl), { accept: "application/atom+xml" }, token);
       const tags = parseXml(xml).getElements("entry").map((entry) => {
         const match = /\/tag\/(v?[^/]+)$/.exec(entry.element("link").attribute("href"));

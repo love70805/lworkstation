@@ -53,5 +53,35 @@ try {
   const status=await requestJson({port,capability});
   assert.equal(status.payload.latestBatch.rowCount,1);
   assert.equal(status.payload.latestBatch.evidenceStatus,'complete','cold summary preserves desktop evidence status');
+  const manualFile=path.join(directory,'manual-complete.json');
+  const manual=createWorkspaceSafety({...options,saveBackup:async request=>{
+    await fs.writeFile(manualFile,request.json);
+    return {status:'saved',fileName:path.basename(manualFile),sizeBytes:Buffer.byteLength(request.json)};
+  }});
+  assert.equal((await manual.exportBackup(input)).status,'saved');
+  const manualPayload=JSON.parse(await fs.readFile(manualFile,'utf8'));
+  assert.deepEqual(manualPayload.desktopInbox.records,initial);
+  assert.equal(manualPayload.manifest.desktopRecordCount,initial.length);
+  const interrupted=await safety.prepareRestore({snapshot:backup.desktopInbox,currentWorkspace:input});
+  await controller.retry();
+  const arrived=await requestJson({port,capability,path:'/erp/v1/requests',method:'POST',body:{
+    request:{id:'DURING-RESTART',workspaceId:'fixture',ledgerId:'fixture-ledger',ledgerPeriod:'2026-09',ledgerVersion:'fixture',platformSkcs:['SKC-NEW']},
+    expectedSkus:[{platformSku:'SKU-NEW',platformSkc:'SKC-NEW'}],
+  }});
+  assert.equal(arrived.statusCode,202);
+  let backupFailure=true;
+  const retrying=createWorkspaceSafety({...options,operations:{...fs,open:async(file,...args)=>{
+    if(backupFailure&&String(file).includes('Lworkstation-recovery-current'))throw new Error('ENOSPC actual recovery fixture');
+    return fs.open(file,...args);
+  }}});
+  for(let i=0;i<2;i++)await assert.rejects(retrying.recoverRestore({committedId:interrupted.id}),/ENOSPC actual recovery/);
+  const pendingRetry=JSON.parse(await fs.readFile(path.join(options.directory,'pending-inbox-restore.json'),'utf8'));
+  assert.equal(pendingRetry.backupRequired,true);
+  const beforeRetry=await controller.maintenanceRequest({action:'snapshot',maintenanceId:pendingRetry.maintenanceId});
+  assert.ok(beforeRetry.snapshot.records.some(record=>record.requestId==='DURING-RESTART'));
+  backupFailure=false;await retrying.recoverRestore({committedId:interrupted.id});
+  const finished=JSON.parse(await fs.readFile(path.join(options.directory,'pending-inbox-restore.json'),'utf8'));
+  assert.ok(JSON.parse(await fs.readFile(finished.recoveryBackup.filePath,'utf8')).desktopInbox.records.some(record=>record.requestId==='DURING-RESTART'));
+  await retrying.finishRestore({id:interrupted.id});
   console.log('Native controller HTTP: no-snapshot clear without backup or evidence hydration, physical archive purge, protected freeze, child restart and complete restore passed');
 }finally{await controller.stop({wait:true});await fs.rm(directory,{recursive:true,force:true});}

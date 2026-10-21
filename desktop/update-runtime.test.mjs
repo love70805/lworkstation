@@ -25,6 +25,9 @@ assert.deepEqual(
   { ...PRODUCTION_FEED_CONFIG, channel: "beta" },
 );
 assert.equal(normalizeFeedConfig({ ...PRODUCTION_FEED_CONFIG, channel: "beta" }), null);
+assert.equal(normalizeFeedConfig({ ...PRODUCTION_FEED_CONFIG, channel: "rc" }), null);
+assert.deepEqual(normalizeFeedConfig({ ...PRODUCTION_FEED_CONFIG, channel: "rc" }, { allowPrerelease: true }), { ...PRODUCTION_FEED_CONFIG, channel: "rc" });
+assert.equal(normalizeFeedConfig({ ...PRODUCTION_FEED_CONFIG, channel: "rc", token: "secret" }, { allowPrerelease: true }), null);
 assert.equal(normalizeFeedConfig({ ...PRODUCTION_FEED_CONFIG, token: "secret" }), null);
 assert.equal(normalizeFeedConfig({ provider: "github", owner: "other", repo: "lworkstation" }), null);
 assert.equal(normalizeFeedConfig({ provider: "github", owner: "love70805", repo: legacyPrivateRepo }), null);
@@ -128,6 +131,23 @@ const disabledProductionRuntime = createUpdateRuntime({
   enabled: false,
   feedConfig: PRODUCTION_FEED_CONFIG,
 });
+{
+  const rcUpdater = new FakeUpdater();
+  const rcRuntime = createUpdateRuntime({ updater: rcUpdater, CancellationToken, currentVersion: "1.0.0-rc.1", enabled: true,
+    feedConfig: { ...PRODUCTION_FEED_CONFIG, channel: "rc" } });
+  assert.equal(rcRuntime.snapshot().status, "idle");
+  assert.equal(rcUpdater.feed.channel, "rc");
+  assert.equal(rcUpdater.allowPrerelease, true);
+  assert.equal(rcUpdater.allowDowngrade, false);
+  for (const version of ["1.0.0", "1.1.0-beta.1", "1.0.0-rc.1"]) {
+    rcUpdater.emit("update-available", { version });
+    assert.equal(rcRuntime.snapshot().status, "error");
+    assert.equal(rcRuntime.canInstall(), false);
+  }
+  rcUpdater.emit("update-available", { version: "1.0.0-rc.2" });
+  assert.equal(rcRuntime.snapshot().availableVersion, "1.0.0-rc.2");
+  assert.equal(rcRuntime.canInstall(), false);
+}
 assert.equal(productionUpdater.feed.provider, "custom");
 assert.equal(disabledProductionRuntime.snapshot().status, "disabled");
 assert.equal(productionUpdater.allowPrerelease, false);

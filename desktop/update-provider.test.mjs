@@ -45,8 +45,11 @@ function fixture(current, { channel = versionChannel(current), tags = ["0.3.0", 
     { platform: "win32", executor: f.updater.httpExecutor });
   assert.equal((await upstream.getLatestVersion()).version, "0.3.0");
 }
-for (const [current, target] of [["0.2.6", "0.3.0"], ["0.2.6-beta.7", "0.2.7-beta.2"]]) {
-  const f = fixture(current);
+for (const [current, target, options] of [
+  ["0.2.6", "0.3.0"], ["0.2.6-beta.7", "0.2.7-beta.2"],
+  ["1.0.0-rc.1", "1.0.0-rc.10", { tags: ["1.1.0", "1.0.0-rc.2", "1.0.0-rc.10", "2.0.0-beta.99"] }],
+]) {
+  const f = fixture(current, options);
   assert.equal(f.updater.allowDowngrade, false, "reset channel setter side effect");
   assert.equal(f.updater.autoDownload, false);
   assert.equal(f.updater.autoInstallOnAppQuit, false);
@@ -64,13 +67,16 @@ for (const [current, target] of [["0.2.6", "0.3.0"], ["0.2.6-beta.7", "0.2.7-bet
   assert.equal(f.updater.autoInstallOnAppQuit, false);
   f.updater.updateInfoAndProvider.info.version = current;
   assert.equal(f.runtime.canInstall(), false, "install rechecks internal target");
-  if (current.includes("beta")) assert.ok(f.requests.every(p => !p.includes("latest")));
+  if (versionChannel(current) !== "latest") assert.ok(f.requests.every(p => !p.includes("latest")));
 }
 
 for (const [current, target] of [
   ["0.2.6", "0.2.7-beta.1"], ["0.2.6-beta.7", "0.3.0"],
   ["0.2.6", "0.2.6"], ["0.2.6", "0.2.5"],
   ["0.2.6-beta.7", "0.2.6-beta.7"], ["0.2.6-beta.7", "0.2.6-beta.6"],
+  ["0.4.54", "1.0.0-rc.1"], ["1.0.0-rc.1", "1.0.0"],
+  ["1.0.0-rc.2", "1.0.0-rc.1"], ["1.0.0-rc.1", "1.0.0-rc.1"],
+  ["1.0.0-rc.1", "2.0.0-beta.1"], ["0.4.54-beta.1", "1.0.0-rc.1"],
 ]) {
   const f = fixture(current, { latest: target, tags: [target] });
   await f.runtime.check();
@@ -118,7 +124,24 @@ assert.equal(canUpdate("0.2.6-beta.9", "0.2.6-beta.10", "beta"), true);
 assert.equal(canUpdate("0.2.6+one", "0.2.6+two", "latest"), false);
 assert.equal(versionChannel("0.2.6-beta.01"), null);
 assert.equal(versionChannel("v0.2.6"), null);
-assert.equal(versionChannel("0.2.6-rc.1"), null);
+assert.equal(versionChannel("1.0.0-rc.1"), "rc");
+assert.equal(canUpdate("1.0.0-rc.9", "1.0.0-rc.10", "rc"), true);
+for (const value of ["1.0.0-rc.0", "1.0.0-rc.01", "1.0.0-rc", "1.0.0-rc.1.more"]) assert.equal(versionChannel(value), null);
+for (const options of [
+  { tags: ["1.0.0", "2.0.0-beta.1"] }, { missing: true, tags: ["1.0.0-rc.2"] },
+  { metadata: "1.0.0", tags: ["1.0.0-rc.2"] }, { metadata: "1.0.0-rc.3", tags: ["1.0.0-rc.2"] },
+]) {
+  const f = fixture("1.0.0-rc.1", options);
+  assert.equal((await f.runtime.check()).ok, false);
+  assert.equal((await f.runtime.download()).ok, false);
+  assert.ok(f.requests.every(p => !p.includes("latest") && !p.includes("beta.yml")), "RC never falls back across channels");
+}
+for (const [current, channel] of [["1.0.0-rc.1", "latest"], ["1.0.0-rc.1", "beta"], ["0.4.54", "rc"], ["1.0.0-beta.1", "rc"]]) {
+  const f = fixture(current, { channel });
+  assert.equal((await f.runtime.check()).ok, false);
+  assert.equal(f.runtime.snapshot().status, "disabled");
+  assert.equal(f.requests.length, 0);
+}
 {
   const f = fixture("0.2.6");
   f.updater.app.onQuit = () => assert.fail("must not register an automatic installer");

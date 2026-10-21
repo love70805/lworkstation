@@ -28,6 +28,7 @@ import { createWorkspaceBackupPayload, db, getActiveMemberContext, getWorkspaceO
 import { runtimeConfig } from "../config/runtimeConfig";
 import { useCloudAuth } from "../hooks/useCloudAuth";
 import { backupSaveMessage, downloadWorkspaceBackup } from "../lib/workspaceBackupDownload";
+import { withWorkspaceReset } from '../lib/workspaceBackgroundTasks';
 import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
 import { toggleAppearance } from "../lib/uiState";
 import { applyAppearance, readAppearance } from '../lib/appearance';
@@ -313,8 +314,10 @@ export default function AppShell({ children, pageClass = "" }) {
     let savedBackup = null;
     setBackingUp(true);
     try {
-      const payload = await createWorkspaceBackupPayload();
-      const download = await downloadWorkspaceBackup(payload);
+      const {payload,download}=await withWorkspaceReset(async()=>{
+        const payload=await createWorkspaceBackupPayload();
+        return {payload,download:await downloadWorkspaceBackup(payload)};
+      });
       const notice = backupSaveMessage(download);
       if (notice) { notify(notice, 'info'); return; }
       savedBackup = download;

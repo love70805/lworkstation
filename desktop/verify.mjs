@@ -127,11 +127,11 @@ const releaseAfterPack = createRequire(import.meta.url)("./release-after-pack.cj
 assert.deepEqual(releaseAfterPack.loadReleaseBetaConfig(root), betaUpdateConfig);
 const releaseChannel = createRequire(import.meta.url)("./update-policy.cjs").versionChannel(releasePlan.version);
 const localRc = releaseAfterPack.isRcVersion(releasePlan.version);
-assert.ok(localRc || ["latest", "beta"].includes(releaseChannel), "release version must use a supported channel or a local RC");
+assert.ok(["latest", "beta", "rc"].includes(releaseChannel), "release version must use a supported channel");
 assert.equal(releaseAfterPack.isPrereleaseVersion(releasePlan.version), localRc || releaseChannel === "beta");
 if (localRc) {
-  assert.equal(releaseChannel, null, "local RC must not introduce a public update channel");
-  assert.deepEqual(releaseAfterPack.EXPECTED_RC_CONFIG, { enabled: false, channel: "rc" });
+  assert.equal(releaseChannel, "rc");
+  assert.deepEqual(releaseAfterPack.EXPECTED_RC_CONFIG, { ...betaUpdateConfig, channel: "rc" });
 }
 assert.match(read("release-after-pack.cjs"), /Refusing to enable beta updates for non-prerelease/);
 assert.match(read("release-build.mjs"), /--config\.afterPack=\.\/release-after-pack\.cjs/);
@@ -165,7 +165,7 @@ assert.equal(loadedFixtureConfig.targetArtifactName, "Lworkstation-Setup-0.2.6-b
 assert.equal(pkg.build.files.includes("update-beta-config.json"), false, "beta config must not enter stable app.asar");
 assert.equal(pkg.build.extraResources.some((resource) => resource.from === "update-beta-config.json"), false, "stable packages must not embed beta config");
 assert.match(main, /allowLoopback && process\.env\.SHOPEERS_DESKTOP_UPDATE_URL/);
-assert.match(main, /SHOPEERS_DESKTOP_UPDATE_CHANNEL === "beta"/);
+assert.match(main, /\["beta", "rc"\]\.includes\(process\.env\.SHOPEERS_DESKTOP_UPDATE_CHANNEL\)/);
 assert.match(main, /enabled: app\.isPackaged && settings\.enabled/);
 assert.match(main, /updateState = updateRuntime\.snapshot\(\)/);
 assert.match(main, /protocol\.registerSchemesAsPrivileged/);

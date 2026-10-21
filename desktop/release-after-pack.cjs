@@ -10,8 +10,8 @@ const EXPECTED_BETA_CONFIG = Object.freeze({
   channel: "beta",
 });
 
-// RC builds are local candidates. This does not enable an updater channel.
-const EXPECTED_RC_CONFIG = Object.freeze({ enabled: false, channel: "rc" });
+// Public release candidates use their own feed; stable and beta never select it.
+const EXPECTED_RC_CONFIG = Object.freeze({ ...EXPECTED_BETA_CONFIG, channel: "rc" });
 const isRcVersion = value => /^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$/.test(String(value || ""));
 
 function isPrereleaseVersion(value) {

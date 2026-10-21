@@ -36,6 +36,7 @@ import { runtimeConfig } from "../config/runtimeConfig";
 import { validateCloudSeedPayload } from "../domain/cloudSeed";
 import { replaySyncRecoveryPayload, validateSyncRecoveryPayload } from "../domain/syncRecovery";
 import { backupSaveMessage, downloadWorkspaceBackup, requireSavedWorkspaceBackup } from "../lib/workspaceBackupDownload";
+import { withWorkspaceReset } from '../lib/workspaceBackgroundTasks';
 
 const ROLLBACK_BEFORE_RESTORE_KEY = "shopeers-rollback-before-restore";
 
@@ -186,8 +187,10 @@ export default function DataSecurity() {
     let savedBackup = null;
     setExporting(true);
     try {
-      const payload = await createWorkspaceBackupPayload();
-      const download = await downloadWorkspaceBackup(payload, { prefix });
+      const {payload,download} = await withWorkspaceReset(async()=>{
+        const payload=await createWorkspaceBackupPayload();
+        return {payload,download:await downloadWorkspaceBackup(payload,{prefix})};
+      });
       const notice = backupSaveMessage(download);
       if (notice) { notify(notice, 'info'); return null; }
       savedBackup = download;
@@ -527,7 +530,7 @@ export default function DataSecurity() {
           <Panel className="manual-export">
             <span className="export-icon"><DatabaseBackup size={29} /></span>
             <h2>手动导出</h2>
-            <p>生成包含商品、采集、供应商、ERP 成本、账本、利润与审计记录的 JSON 备份。</p>
+            <p>生成包含商品、采集、供应商、ERP 成本、账本、利润与审计记录的 JSON 备份。桌面版同时保存本机收件和采集任务。</p>
             <Button icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出完整备份</Button>
             <small className="mono">{lastBackup ? `最近备份：${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : check.status === 'ready' ? "尚未导出本机备份" : '备份状态未读取'}</small>
           </Panel>

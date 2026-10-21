@@ -21,7 +21,9 @@ it('reuses a persisted sales count after catalog edits but invalidates ledger wr
   const originalCount = db.Collection.prototype.count;
   let countReads = 0;
   vi.spyOn(db.Collection.prototype, 'count').mockImplementation(function (...args) {
-    if (this._ctx.table.name === 'salesRows') countReads++;
+    // Count indexed workspace scans; the cheap primary-key count remains an
+    // independent live-query dependency when the revision sidecar is absent.
+    if (this._ctx.table.name === 'salesRows' && this._ctx.index === 'workspaceId') countReads++;
     return originalCount.apply(this, args);
   });
   const initial = await getWorkspaceOperationalSummary();

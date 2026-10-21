@@ -140,6 +140,17 @@ it('reuses immutable ledger facts after a real product save, including after pro
   expect(read).not.toHaveBeenCalled();
 });
 
+it('reuses reference calculations for audit-only writes while keeping the source-version contract',async()=>{
+  const first=await getSelectionReferenceSnapshot({compact:true});
+  const compute=vi.spyOn(computations,'runDerivedComputation');
+  await db.auditEvents.add({workspaceId:'W',objectType:'fixture',createdAt:new Date().toISOString(),after:{raw:'large'.repeat(10000)}});
+  const second=await getSelectionReferenceSnapshot({compact:true});
+  expect(second.computedReferenceRows).toEqual(first.computedReferenceRows);
+  expect(second.dataVersion).toBe(sourceRevision());
+  expect(second.dataVersion).not.toBe(first.dataVersion);
+  expect(compute).not.toHaveBeenCalled();
+});
+
 it('refreshes final financial/context projections while reusing unchanged sales facts and rejecting aborted source writes', async () => {
   await getSelectionReferenceSnapshot({ compact: true });
   const mutations = [

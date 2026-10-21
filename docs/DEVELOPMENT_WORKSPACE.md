@@ -11,7 +11,7 @@
 
 只读环境摘要使用 `node tools/development-context.mjs`；在其它目录运行时可指定 `--repo "<仓库路径>"`。摘要不访问远端、不更新索引和配置，缓存的主线只作比较；未联网核对时明确保留未知状态，不把 Git 干净当成忽略目录无数据。
 
-当前桌面开发启动命令是 `pnpm --dir desktop dev`。`tools/launch-shopeers.ps1` 是会打开可见浏览器的历史前端入口，不能作为 Electron 候选或正式桌面验收入口；本机后台验收沿用现行规则。
+当前桌面开发启动命令是 `pnpm --dir desktop dev`。旧的可见浏览器启动脚本 `tools/launch-shopeers.ps1` 已在 1.0 RC 整理中移除，历史版本可由 Git 标签追溯；本机后台验收沿用现行规则。
 
 ## 每批工作记录与验证
 

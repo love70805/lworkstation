@@ -37,6 +37,13 @@ const salesFactsRevision = () => {
   const revisions = salesFactReaders.map(read => read());
   return revisions.every(Boolean) ? JSON.stringify(revisions) : null;
 };
+// Audit payloads do not contribute product/reference facts. All other present
+// and future business tables remain conservative dependencies, including the
+// active member context and formal finance sources.
+function selectionReferenceRevision() {
+  const revisions=db.tables.filter(table=>table.name!=='auditEvents').map(table=>tableRevisionReader(table.name)());
+  return revisions.every(Boolean)?JSON.stringify(revisions):sourceRevision();
+}
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -1882,9 +1889,9 @@ async function readSelectionSalesProjection(workspaceId, ledgerId = null) {
 
 async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [], store = "all" } = {}) {
   const observable = await observeSourceRevision();
-  const revision = sourceRevision();
+  const revision = selectionReferenceRevision();
   const context = await getActiveMemberContext();
-  assertSourceRevision(revision);
+  assertSourceRevision(revision, selectionReferenceRevision);
   const compute = async () => {
     const factsRevision = salesFactsRevision();
     const [ledgers, importBatches] = await Promise.all([db.ledgers.where("workspaceId").equals(context.workspaceId).toArray(), db.importBatches.where("workspaceId").equals(context.workspaceId).toArray()]);
@@ -1904,22 +1911,22 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
     }
     if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
     const selectionSalesFacts = { workspaceId: context.workspaceId, packedParts: parts, ledgerIdentityRows: parts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)) };
-    assertSourceRevision(revision);
+    assertSourceRevision(revision, selectionReferenceRevision);
     const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts });
-    assertSourceRevision(revision);
+    assertSourceRevision(revision, selectionReferenceRevision);
     if (snapshot.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
     const rows = await runDerivedComputation("selection", { ...snapshot, store });
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
   const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@5-store-tags", revision, compute,
+    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@5-store-tags", revision, revisionReader:selectionReferenceRevision, compute,
   }) : await compute();
-  assertSourceRevision(revision);
+  assertSourceRevision(revision, selectionReferenceRevision);
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));
   const skcs = new Set(platformSkc ? [canonicalPlatformSkc(platformSkc)] : []);
   for (const row of result.computedReferenceRows) if (skus.has(row.canonicalPlatformSku) && row.platformSkc) skcs.add(canonicalPlatformSkc(row.platformSkc));
-  if (!skus.size && !skcs.size) return result;
-  return { ...result, computedReferenceRows: result.computedReferenceRows.filter(row => skus.has(row.canonicalPlatformSku)
+  if (!skus.size && !skcs.size) return {...result,dataVersion:sourceRevision()};
+  return { ...result, dataVersion:sourceRevision(), computedReferenceRows: result.computedReferenceRows.filter(row => skus.has(row.canonicalPlatformSku)
     || row.platformSkc && skcs.has(canonicalPlatformSkc(row.platformSkc))
     || row.erpCatalogSources?.some(source => source.platformSkc && skcs.has(canonicalPlatformSkc(source.platformSkc)))
     || row.platformSkcEvidence?.some(source => skcs.has(canonicalPlatformSkc(source.value)))) };

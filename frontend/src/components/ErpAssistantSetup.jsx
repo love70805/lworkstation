@@ -5,8 +5,9 @@ import { Badge, Button, PageHeader, Panel, useToast } from "./UI";
 import { isDesktopRuntime } from "../lib/desktopRuntime";
 import { getErpExtensionStatus, getErpRequestHistory } from "../lib/erpInboxTransport";
 import { getActiveMemberContext } from "../data/database";
+import erpAssistantManifest from '../../../integrations/erp-assistant-extension/manifest.json';
 
-export const ERP_ASSISTANT_VERSION = "8.0.48";
+export const ERP_ASSISTANT_VERSION = erpAssistantManifest.version;
 export const extensionDownload = `/integrations/erp-assistant/ERP-Assistant-v${ERP_ASSISTANT_VERSION}-shopeers-bridge.zip`;
 export const extensionManagerUrl = "chrome://extensions/";
 

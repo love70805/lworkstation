@@ -1178,7 +1178,7 @@ function readUpdateSettings({ allowLoopback = false } = {}) {
       feedConfig: {
         provider: "generic",
         url: process.env.SHOPEERS_DESKTOP_UPDATE_URL,
-        channel: process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL === "beta" ? "beta" : "latest",
+        channel: ["beta", "rc"].includes(process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL) ? process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL : "latest",
       },
     };
   }
