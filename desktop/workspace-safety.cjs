@@ -40,8 +40,41 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     }finally{await operations.unlink(staging).catch(()=>{});}
   }
   async function readJournal() {
-    try {const value=JSON.parse(await operations.readFile(journalPath,'utf8'));if(value?.version!==1||typeof value.id!=='string'||!value.target)throw Error('恢复保护记录无效，请保留备份。');return value;}
+    try {const value=JSON.parse(await operations.readFile(journalPath,'utf8'));if(![1,2].includes(value?.version)||typeof value.id!=='string'||(value.version===1?!value.target:!value.targetFile))throw Error('恢复保护记录无效，请保留备份。');return value;}
     catch(e){if(e.code==='ENOENT')return null;throw e;}
+  }
+  function payloadPath(reference) {
+    if(!reference||!/^restore-data-[a-f0-9-]+\.json$/.test(reference.name)||!/^[a-f0-9]{64}$/.test(reference.sha256))throw Error('恢复载荷索引无效，请保留备份。');
+    return path.join(directory,reference.name);
+  }
+  async function writePayload(json) {
+    const reference={name:`restore-data-${crypto.randomUUID()}.json`,sha256:digest(json)};
+    const file=payloadPath(reference),handle=await operations.open(file,'wx',0o600);
+    try {
+      try {await handle.writeFile(json,'utf8');await handle.sync();}finally{await handle.close();}
+      if(await fileDigest(file)!==reference.sha256)throw Error('恢复载荷回读校验失败。');
+      return reference;
+    }catch(error){await operations.unlink(file).catch(()=>{});throw error;}
+  }
+  async function readPayload(reference) {
+    const file=payloadPath(reference);
+    if(await fileDigest(file)!==reference.sha256)throw Error('恢复载荷校验失败，请保留备份。');
+    return operations.readFile(file,'utf8');
+  }
+  async function compactJournal(journal) {
+    if(journal.version===2)return journal;
+    const {target,targetWorkspace,...metadata}=journal;
+    return writeRestoreJournal(metadata,target,targetWorkspace);
+  }
+  async function writeRestoreJournal(metadata,snapshot,workspace) {
+    const references=[];
+    try {
+      const targetFile=await writePayload(JSON.stringify(snapshot));references.push(targetFile);
+      const targetWorkspaceFile=workspace?{...await writePayload(workspace.json),fileName:workspace.fileName}:null;
+      if(targetWorkspaceFile)references.push(targetWorkspaceFile);
+      const next={...metadata,version:2,targetFile,targetWorkspaceFile};
+      await writeJournal(next);return next;
+    }catch(error){for(const reference of references)await operations.unlink(payloadPath(reference)).catch(()=>{});throw error;}
   }
   async function locked(run) {
     if(busy)throw new Error('已有本机备份或恢复正在进行。');
@@ -83,17 +116,21 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
       const session=await maintain({action:'begin'});
       try {
         const backup=await saveCombined(currentWorkspace,session.snapshot,'Lworkstation-before-restore');
-        const journal={version:1,id:crypto.randomUUID(),maintenanceId:session.maintenanceId,phase:'prepared',target:snapshot,targetWorkspace:targetWorkspace??currentWorkspace,backup};
-        await writeJournal(journal);
+        // Keep immutable payloads outside the frequently rewritten journal.
+        // Escaping a 200 MB workspace JSON into every phase update can exhaust
+        // Electron's main-process heap and break startup recovery as well.
+        const workspace=targetWorkspace??currentWorkspace;
+        const journal=await writeRestoreJournal({id:crypto.randomUUID(),maintenanceId:session.maintenanceId,phase:'prepared',backup},snapshot,workspace);
         return {ok:true,id:journal.id,backupFilePath:backup.filePath};
       }catch(e){await end(session.maintenanceId);throw e;}
     });
   }
   async function recoverRestore({committedId}={}) {
     return locked(async()=>{
-      const journal=await readJournal();
+      let journal=await readJournal();
       if(!journal) {if(committedId)throw new Error('缺少桌面恢复保护记录，请保留回滚备份并重试。');return {ok:true};}
       if(committedId&&committedId!==journal.id)throw new Error('桌面与工作区恢复记录不一致，请保留回滚备份。');
+      journal=await compactJournal(journal);
       if(committedId) {
         try {await maintain({action:'hold',maintenanceId:journal.maintenanceId});}
         catch {
@@ -105,10 +142,12 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
         }
         if(journal.backupRequired) {
           const current=await maintain({action:'snapshot',maintenanceId:journal.maintenanceId});
-          journal.recoveryBackup=await saveCombined(journal.targetWorkspace,current.snapshot,'Lworkstation-recovery-current');
+          const reference=journal.targetWorkspaceFile;
+          if(!reference)throw Error('缺少当前工作区保全载荷，请保留备份。');
+          journal.recoveryBackup=await saveCombined({fileName:reference.fileName,json:await readPayload(reference)},current.snapshot,'Lworkstation-recovery-current');
           journal.backupRequired=false;await writeJournal(journal);
         }
-        await maintain({action:'restore',maintenanceId:journal.maintenanceId,snapshot:journal.target});
+        await maintain({action:'restore',maintenanceId:journal.maintenanceId,snapshot:JSON.parse(await readPayload(journal.targetFile))});
         journal.phase='committed';await writeJournal(journal);
       }
       await end(journal.maintenanceId).catch(e=>{if(committedId)throw e;});
@@ -119,7 +158,12 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     return locked(async()=>{
       const journal=await readJournal();
       if(journal&&journal.id!==id)throw new Error('桌面恢复记录不一致。');
-      if(journal)await operations.unlink(journalPath);
+      if(journal) {
+        await operations.unlink(journalPath);
+        if(journal.version===2)for(const reference of [journal.targetFile,journal.targetWorkspaceFile].filter(Boolean)) {
+          await operations.unlink(payloadPath(reference)).catch(()=>{});
+        }
+      }
       return {ok:true};
     });
   }
