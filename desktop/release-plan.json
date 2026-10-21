@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.50",
+  "version": "0.4.51",
   "candidateOnly": true,
-  "integrationBranch": "codex/cost-interaction-performance",
+  "integrationBranch": "codex/large-data-background-performance",
   "requiredCommits": [
+    {
+      "module": "v0.4.51-background-recovery-and-sales-cache",
+      "commit": "48fe22dc739c48057afa4b292fffa53ccaf0336a"
+    },
+    {
+      "module": "v0.4.51-verified-main-baseline",
+      "commit": "47988a74645f7b53725b3caac3649d1770b493dc"
+    },
     {
       "module": "v0.4.50-scoped-cost-interaction-performance",
       "commit": "7578d503d89ed416a5bbc7dd4949b9f5b787d563"
