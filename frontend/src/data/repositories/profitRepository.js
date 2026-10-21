@@ -27,6 +27,7 @@ import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
+import { readErpRecoveryProbe, cachedErpRecoveryResult, rememberErpRecoveryResult, loadErpRecoveryMemo, persistErpRecoveryMemo } from './erpRecoveryReadCache';
 import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
@@ -671,15 +672,37 @@ export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = nul
   // still checks durable receipts. Never cache a pass that wrote/changed data.
   if (lastStableErpRecovery?.key === key) return structuredClone(lastStableErpRecovery.results);
   lastStableErpRecovery = null;
-  const inboxes = await db.erpCostInbox.where('status').anyOf(['pending', 'loaded'])
-    .filter(row => row.workspaceId === workspaceId && (!ledgerId || row.ledgerId === ledgerId)).sortBy('id');
+  await loadErpRecoveryMemo(member);
+  // Intersect index keys before reading any multi-megabyte receipt body.
+  const [pendingIds, workspaceIds, ledgerIds] = await Promise.all([
+    db.erpCostInbox.where('status').anyOf(['pending', 'loaded']).primaryKeys(),
+    db.erpCostInbox.where('workspaceId').equals(workspaceId).primaryKeys(),
+    ledgerId ? db.erpCostInbox.where('ledgerId').equals(ledgerId).primaryKeys() : null,
+  ]);
+  const owned = new Set(workspaceIds), scoped = ledgerIds ? new Set(ledgerIds) : null;
+  const inboxIds = pendingIds.filter(id => owned.has(id) && (!scoped || scoped.has(id))).sort();
   const results = [];
-  for (const inbox of inboxes) {
-    try { results.push(await processErpCostInboxAdoption({ inboxId: inbox.id })); }
-    catch (error) { results.push({ id: inbox.id, status: inbox.status, error: error.message }); }
+  let yieldedAt = performance.now();
+  for (const inboxId of inboxIds) {
+    let probe;
+    try {
+      try { probe = await readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext: getActiveMemberContext }); }
+      catch { /* Optional read cache failures retain the authoritative path. */ }
+      if (probe?.ignored) continue;
+      const cached = probe && cachedErpRecoveryResult(probe);
+      const result = cached ?? await processErpCostInboxAdoption({ inboxId });
+      if (!cached && probe) rememberErpRecoveryResult(probe, result);
+      results.push(result);
+    } catch (error) { results.push({ id: inboxId, status: probe?.metadata?.status ?? 'pending', error: error.message }); }
+    if (performance.now() - yieldedAt > 25) {
+      if (globalThis.scheduler?.yield) await globalThis.scheduler.yield();
+      else await new Promise(resolve => setTimeout(resolve, 0));
+      yieldedAt = performance.now();
+    }
   }
   if (selectionFactsRevision() === revision && !results.some(result => result.error)) {
     lastStableErpRecovery = { key, results: structuredClone(results) };
+    await persistErpRecoveryMemo(member);
   }
   return results;
 }

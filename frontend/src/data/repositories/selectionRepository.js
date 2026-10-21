@@ -29,9 +29,14 @@ import {
 } from "../../domain/selectionStatuses";
 import { db } from "../db/clientDatabase";
 import Dexie from "dexie";
-import { cachedDerived, sourceRevision, selectionFactsRevision, observeSourceRevision, retrySourceRead, assertSourceRevision } from "../db/derivedCache";
+import { cachedDerived, sourceRevision, tableRevisionReader, observeSourceRevision, retrySourceRead, assertSourceRevision } from "../db/derivedCache";
 import { runDerivedComputation } from "./derivedComputationService";
 import { unpackSelectionFactIdentities } from "../../domain/selectionSalesFactsCodec";
+const salesFactReaders = ['salesRows', 'importBatches'].map(tableRevisionReader);
+const salesFactsRevision = () => {
+  const revisions = salesFactReaders.map(read => read());
+  return revisions.every(Boolean) ? JSON.stringify(revisions) : null;
+};
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -1881,20 +1886,23 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
   const context = await getActiveMemberContext();
   assertSourceRevision(revision);
   const compute = async () => {
-    const factsRevision = selectionFactsRevision();
+    const factsRevision = salesFactsRevision();
     const [ledgers, importBatches] = await Promise.all([db.ledgers.where("workspaceId").equals(context.workspaceId).toArray(), db.importBatches.where("workspaceId").equals(context.workspaceId).toArray()]);
     const parts = [];
     for (const ledger of ledgers) {
       const computeFacts = async () => {
         const salesRows = await readSelectionSalesProjection(context.workspaceId, ledger.id);
-        assertSourceRevision(factsRevision, selectionFactsRevision);
-        const facts = await runDerivedComputation("selection-facts", { salesRows, ledgers: [ledger], importBatches: importBatches.filter(batch => batch.ledgerId === ledger.id), workspaceId: context.workspaceId });
-        assertSourceRevision(factsRevision, selectionFactsRevision);
+        if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
+        // Facts consume identity/period, sales and import coverage only. Formal
+        // cost/status changes still invalidate the final reference projection.
+        const factsLedger = { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period };
+        const facts = await runDerivedComputation("selection-facts", { salesRows, ledgers: [factsLedger], importBatches: importBatches.filter(batch => batch.ledgerId === ledger.id), workspaceId: context.workspaceId });
+        if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
         return facts;
       };
-      parts.push(observable ? await cachedDerived({ scope: [context.workspaceId, ledger.id], formula: "selection-ledger-facts@4", revision: factsRevision, revisionReader: selectionFactsRevision, compute: computeFacts }) : await computeFacts());
+      parts.push(observable && factsRevision ? await cachedDerived({ scope: [context.workspaceId, ledger.id, ledger.period], formula: "selection-ledger-facts@5-sales-inputs", revision: factsRevision, revisionReader: salesFactsRevision, boundedMemory: true, compute: computeFacts }) : await computeFacts());
     }
-    assertSourceRevision(factsRevision, selectionFactsRevision);
+    if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
     const selectionSalesFacts = { workspaceId: context.workspaceId, packedParts: parts, ledgerIdentityRows: parts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)) };
     assertSourceRevision(revision);
     const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts });

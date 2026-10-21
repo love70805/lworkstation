@@ -331,7 +331,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     writeCostDraft(currentLedgerId, { sourceText, sourceName, parsedRows, batchEnvelope, resolutions, loadedInboxId });
   }, [batchEnvelope, loadedInboxId, parsedRows, resolutions, snapshot?.ledger?.id, sourceName, sourceText]);
 
-  const salesLines = useMemo(() => snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot]);
+  const salesLines = useMemo(() => snapshot?.rows ? groupImportedSales(snapshot.rows) : [], [snapshot?.rows]);
   const ledgerIdentities = useMemo(() => buildLedgerSkuIdentityIndex(snapshot?.rows), [snapshot?.rows]);
   const formalCostsBySku = useMemo(() => new Map((snapshot?.costs ?? []).map(row => [
     canonicalPlatformSku(row.platformSku), row,
@@ -1129,7 +1129,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
         <Panel className={`match-stat match-correction ${missingReviewRows.length ? "match-danger" : "match-success"}`}><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{missingReviewRows.length}<small> 条店铺 SKU</small></strong><div className="cost-correction-entry"><small>按当前月份与查看范围</small>{!locked && correctableMissingRows.length ? <Button onClick={openMissingCorrection}>逐项更正</Button> : null}</div></Panel>
       </div>
 
-      <ErpPendingSkuList entries={pendingReviewEntries} batchCount={inboxReview.batches.length} onOverview={openInboxOverview} onReviewItem={(entry, mode) => openReviewItem(entry, mode)} locked={locked} title="当前范围待处理 SKU" />
+      <ErpPendingSkuList entries={pendingReviewEntries} batchCount={inboxReview.batches.length} onOverview={openInboxOverview} onReviewItem={(entry, mode) => openReviewItem(entry, mode)} locked={locked} title="当前范围待处理 SKU" paginationResetKey={profitHref} />
 
       <div className="cost-workflow">
         <Panel className={`cost-preview-panel ${resultHighlighted ? "cost-preview-highlight" : ""}`}>
