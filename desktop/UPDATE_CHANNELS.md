@@ -1,8 +1,17 @@
+# 1.0 RC 通道
+
+从 `1.0.0-rc.1` 开始，公开候选使用 GitHub prerelease 与独立 `rc.yml`。稳定通道继续使用 `latest.yml`，Beta 使用 `beta.yml`；三者只接受同通道更高语义版本。RC 不自动转入正式版，首次安装 RC 由用户选择安装包。缺失元数据、标签不匹配或跨通道结果会阻断下载与安装。
+
+客户端保持用户点击下载、显式重启安装，不退出自动安装；包内不包含凭据。本轮以真实 electron-updater 的隔离 provider 测试及最终候选 loopback smoke 验证，不把合成下载当作真实公开网络或安装验收。
+
+以下记录保留历史通道验收背景。
+
+
 # 桌面更新通道隔离
 
 基线：`72d21e9c06f6c18904d067b5603184ba6faa5588`。仅桌面内部策略，未改变业务、数据库、IPC 或同步 contract。版本元数据、最终候选构建及发布由项目主线负责。
 
-## 当前策略
+## 0.2.7 历史策略（RC 扩展以前）
 
 - 新 stable 包默认启用 `latest` 检查；公开 beta 包继续由 release afterPack 写入启用的 `beta` 配置。开发运行关闭检查；QA 包必须继续打入 `enabled: false`，保留独立身份、目录与数据。
 - 当前版本必须为合法 SemVer stable 或 beta，且必须与配置通道一致；alpha/rc/未知通道及配置错配禁用。候选必须同通道且 SemVer 严格递增；build metadata 不算升级，beta.10 大于 beta.9。

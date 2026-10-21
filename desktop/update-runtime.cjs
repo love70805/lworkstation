@@ -34,7 +34,7 @@ function normalizeFeedConfig(value, { allowLoopback = false, allowPrerelease = f
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const channel = value.channel == null ? "latest" : value.channel;
-  if (channel !== "latest" && !(allowPrerelease && channel === "beta")) return null;
+  if (channel !== "latest" && !(allowPrerelease && ["beta", "rc"].includes(channel))) return null;
   if (value.provider === "generic") {
     const url = normalizeFeedUrl(value.url, { allowLoopback });
     return url ? { provider: "generic", url, channel } : null;
@@ -141,12 +141,12 @@ function createUpdateRuntime({
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
 }) {
-  const currentIsPrerelease = versionChannel(currentVersion) === "beta";
+  const channel = versionChannel(currentVersion);
+  const currentIsPrerelease = ["beta", "rc"].includes(channel);
   let safeFeedConfig = normalizeFeedConfig(feedConfig ?? feedUrl, {
     allowLoopback,
     allowPrerelease: currentIsPrerelease,
   });
-  const channel = versionChannel(currentVersion);
   if (!channel || safeFeedConfig?.channel !== channel) safeFeedConfig = null;
   let state = createInitialUpdateState({ currentVersion, enabled: enabled && Boolean(safeFeedConfig) });
   let checkPromise = null;
@@ -172,7 +172,7 @@ function createUpdateRuntime({
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.autoRunAppAfterInstall = true;
-  updater.allowPrerelease = currentIsPrerelease && safeFeedConfig?.channel === "beta";
+  updater.allowPrerelease = currentIsPrerelease && safeFeedConfig?.channel === channel;
   updater.disableDifferentialDownload = allowLoopback;
   updater.channel = safeFeedConfig?.channel || "latest";
   updater.allowDowngrade = false; // channel's setter enables it implicitly.

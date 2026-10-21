@@ -21,14 +21,14 @@ const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf
 const channel = updatePolicy.versionChannel(version);
 const localRc = releaseAfterPack.isRcVersion(version);
 const hiddenMode = process.env.SHOPEERS_DESKTOP_SMOKE_HIDDEN === "1";
-if (!channel && !localRc) throw new Error(`Unsupported smoke update channel for ${version}`);
+if (!channel) throw new Error(`Unsupported smoke update channel for ${version}`);
 if (localRc) {
   const configPath = path.join(path.dirname(executable), "resources", "update-config.json");
   const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  if (JSON.stringify(config) !== JSON.stringify(releaseAfterPack.EXPECTED_RC_CONFIG)) throw new Error("Local RC must have disabled packaged update configuration");
+  if (JSON.stringify(config) !== JSON.stringify(releaseAfterPack.EXPECTED_RC_CONFIG)) throw new Error("RC must have the isolated public RC update configuration");
 }
 
-const updateServer = localRc ? null : http.createServer((request, response) => {
+const updateServer = http.createServer((request, response) => {
   const requestPath = new URL(request.url, "http://127.0.0.1").pathname;
   if (requestPath !== `/${channel}.yml`) {
     response.writeHead(404).end();
@@ -56,9 +56,9 @@ const child = spawn(executable, [], {
   env: {
     ...process.env,
     SHOPEERS_DESKTOP_SMOKE_REPORT: reportPath,
-    SHOPEERS_DESKTOP_SMOKE_REQUIRE_UPDATE_CHECK: localRc ? "0" : "1",
+    SHOPEERS_DESKTOP_SMOKE_REQUIRE_UPDATE_CHECK: "1",
     SHOPEERS_DESKTOP_SMOKE_ERP_V2: "1",
-    SHOPEERS_DESKTOP_UPDATE_SMOKE: localRc ? "0" : "1",
+    SHOPEERS_DESKTOP_UPDATE_SMOKE: "1",
     SHOPEERS_DESKTOP_UPDATE_URL: updateUrl,
     SHOPEERS_DESKTOP_UPDATE_CHANNEL: channel || "",
     SHOPEERS_ERP_INBOX_PORT: String(inboxPort),
@@ -139,8 +139,8 @@ if (!validationError) {
       || !report.packagedResources?.shell
       || !report.packagedResources?.workspacePreload
       || report.version !== version
-      || report.update.status !== (localRc ? "disabled" : "current")
-      || (localRc && (report.updateFeedConfig !== null || report.updateInstallInvocationCount !== 0))
+      || report.update.status !== "current"
+      || report.updateInstallInvocationCount !== 0
       || report.hiddenMode !== hiddenMode
       || (hiddenMode && (report.visibleWindowCount !== 0 || report.updatePopoverDomClickSmoke?.skipped !== true))
       || (!hiddenMode && report.updatePopoverDomClickSmoke?.ok !== true)
