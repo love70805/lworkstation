@@ -33,15 +33,22 @@ function activeTransport() {
 
 async function waitForTransport(operation, signal) {
   if (!signal) return operation;
-  if (signal.aborted) throw signal.reason ?? new DOMException("请求已取消。", "AbortError");
-  return Promise.race([
-    operation,
-    new Promise((_, reject) => signal.addEventListener(
-      "abort",
-      () => reject(signal.reason ?? new DOMException("请求已取消。", "AbortError")),
-      { once: true },
-    )),
-  ]);
+  let onAbort;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        onAbort = () => reject(signal.reason ?? new DOMException("请求已取消。", "AbortError"));
+        signal.addEventListener("abort", onAbort, { once: true });
+        // The transport can synchronously abort while starting the operation.
+        if (signal.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    // One controller is reused by every poll until the page unmounts. Leaving
+    // settled race handlers attached also retains each completed response.
+    signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export async function requestInbox(request, { signal } = {}) {
@@ -51,6 +58,7 @@ export async function requestInbox(request, { signal } = {}) {
       code: "INBOX_TRANSPORT_UNAVAILABLE",
     });
   }
+  if (signal?.aborted) throw signal.reason ?? new DOMException("请求已取消。", "AbortError");
   const result = await waitForTransport(Promise.resolve(transport(normalizeRequest(request))), signal);
   if (!result || typeof result !== "object") {
     throw transportError("本机收件接口返回了无效响应。", { code: "INVALID_INBOX_RESPONSE" });

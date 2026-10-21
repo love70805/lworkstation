@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.51",
+  "version": "0.4.52",
   "candidateOnly": true,
-  "integrationBranch": "codex/large-data-background-performance",
+  "integrationBranch": "codex/inbox-poll-memory",
   "requiredCommits": [
+    {
+      "module": "v0.4.52-poll-response-lifetime",
+      "commit": "9847251a88674d756a3a59aed8f0fb0f396ea791"
+    },
+    {
+      "module": "v0.4.52-verified-main-baseline",
+      "commit": "a3e838e641d374b35e2b23631b3394a1271ee3dd"
+    },
     {
       "module": "v0.4.51-background-recovery-and-sales-cache",
       "commit": "48fe22dc739c48057afa4b292fffa53ccaf0336a"
