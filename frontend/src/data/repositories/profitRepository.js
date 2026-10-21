@@ -27,6 +27,7 @@ import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
+import { readErpRecoveryProbe, cachedErpRecoveryResult, rememberErpRecoveryResult, loadErpRecoveryMemo, persistErpRecoveryMemo } from './erpRecoveryReadCache';
 import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
@@ -640,7 +641,8 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     }
     let appliedBatchId = inbox.appliedBatchId;
     if (candidates.length) {
-      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts: (await getLatestLedgerCosts(ledger.id)).filter(cost => candidates.some(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(cost.platformSku))) } });
+      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts: (await getLatestLedgerCosts(ledger.id)).filter(cost => candidates.some(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(cost.platformSku))) } },
+        { transaction: Dexie.currentTransaction, ledgerId: ledger.id, workspaceId: ledger.workspaceId, salesRows });
       appliedBatchId = saved.batchId;
       const persisted = await db.erpCostRows.where('batchId').equals(appliedBatchId).toArray();
       for (const item of items) if (['adopted', 'manual_effective'].includes(item.state)) item.costRowId = persisted.find(row => canonicalPlatformSku(row.platformSku) === item.canonicalPlatformSku)?.id;
@@ -671,15 +673,37 @@ export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = nul
   // still checks durable receipts. Never cache a pass that wrote/changed data.
   if (lastStableErpRecovery?.key === key) return structuredClone(lastStableErpRecovery.results);
   lastStableErpRecovery = null;
-  const inboxes = await db.erpCostInbox.where('status').anyOf(['pending', 'loaded'])
-    .filter(row => row.workspaceId === workspaceId && (!ledgerId || row.ledgerId === ledgerId)).sortBy('id');
+  await loadErpRecoveryMemo(member);
+  // Intersect index keys before reading any multi-megabyte receipt body.
+  const [pendingIds, workspaceIds, ledgerIds] = await Promise.all([
+    db.erpCostInbox.where('status').anyOf(['pending', 'loaded']).primaryKeys(),
+    db.erpCostInbox.where('workspaceId').equals(workspaceId).primaryKeys(),
+    ledgerId ? db.erpCostInbox.where('ledgerId').equals(ledgerId).primaryKeys() : null,
+  ]);
+  const owned = new Set(workspaceIds), scoped = ledgerIds ? new Set(ledgerIds) : null;
+  const inboxIds = pendingIds.filter(id => owned.has(id) && (!scoped || scoped.has(id))).sort();
   const results = [];
-  for (const inbox of inboxes) {
-    try { results.push(await processErpCostInboxAdoption({ inboxId: inbox.id })); }
-    catch (error) { results.push({ id: inbox.id, status: inbox.status, error: error.message }); }
+  let yieldedAt = performance.now();
+  for (const inboxId of inboxIds) {
+    let probe;
+    try {
+      try { probe = await readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext: getActiveMemberContext }); }
+      catch { /* Optional read cache failures retain the authoritative path. */ }
+      if (probe?.ignored) continue;
+      const cached = probe && cachedErpRecoveryResult(probe);
+      const result = cached ?? await processErpCostInboxAdoption({ inboxId });
+      if (!cached && probe) rememberErpRecoveryResult(probe, result);
+      results.push(result);
+    } catch (error) { results.push({ id: inboxId, status: probe?.metadata?.status ?? 'pending', error: error.message }); }
+    if (performance.now() - yieldedAt > 25) {
+      if (globalThis.scheduler?.yield) await globalThis.scheduler.yield();
+      else await new Promise(resolve => setTimeout(resolve, 0));
+      yieldedAt = performance.now();
+    }
   }
   if (selectionFactsRevision() === revision && !results.some(result => result.error)) {
     lastStableErpRecovery = { key, results: structuredClone(results) };
+    await persistErpRecoveryMemo(member);
   }
   return results;
 }
@@ -719,7 +743,14 @@ async function publishVerifiedErpCostBatch({
   workspaceId = DEFAULT_WORKSPACE_ID,
   publishedBy = "local-user",
   adoptionContext = null,
-}) {
+}, transactionReads = null) {
+  // Only our enclosing adoption transaction can supply this snapshot. The
+  // public/UI argument object cannot provide it, and no sales writes occur
+  // between these reads and publication/coverage within this transaction.
+  const sharedSales = transactionReads?.transaction === Dexie.currentTransaction
+    && Dexie.currentTransaction?.mode === 'readwrite'
+    && transactionReads?.ledgerId === ledgerId && transactionReads?.workspaceId === workspaceId
+    ? transactionReads.salesRows : null;
   const batchId = adoptionContext?.batchId ?? makeId("COST");
   const publishedAt = new Date().toISOString();
   const auditActor = await resolveProfitAuditActor(publishedBy);
@@ -740,7 +771,7 @@ async function publishVerifiedErpCostBatch({
     throw new Error("找不到与当前账本和工作区匹配的 ERP 成本请求，不能发布正式成本。");
   }
   const legacyScope = adoptionContext && !recordedRequest.expectedSkus?.length
-    ? legacyExpectedSkusForRequest({ request: recordedRequest, salesRows: await db.salesRows.where('ledgerId').equals(ledgerId).toArray(), workspaceId })
+    ? legacyExpectedSkusForRequest({ request: recordedRequest, salesRows: sharedSales ?? await db.salesRows.where('ledgerId').equals(ledgerId).toArray(), workspaceId })
     : null;
   if (legacyScope?.reason) throw new Error(`旧 ERP 请求范围无法安全恢复：${legacyScope.reason}`);
   const verifiedExpectedSkus = Array.isArray(recordedRequest.expectedSkus) && recordedRequest.expectedSkus.length > 0
@@ -866,7 +897,7 @@ async function publishVerifiedErpCostBatch({
     if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能直接更新成本。");
     if (String(workspaceId) !== String(ledger.workspaceId)) throw new Error("ERP 成本发布工作区与账本不一致。");
     const [salesRows, approvals] = await Promise.all([
-      db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
+      sharedSales ?? db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
       db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     ]);
     const identities = buildLedgerSkuIdentityIndex(salesRows);
@@ -1023,7 +1054,7 @@ async function publishVerifiedErpCostBatch({
       await db.erpCostRows.bulkAdd(storedRows);
     }
 
-    const coverage = await readLedgerCostCoverage(ledgerId);
+    const coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows });
     const savedLedger = {
       ...ledger,
       ...buildLedgerCoveragePatch(

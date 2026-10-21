@@ -1,9 +1,15 @@
 import { db } from "../db/clientDatabase";
 import { getActiveMemberContext } from "./selectionRepository";
-import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
+import { cachedDerived, sourceRevision, tableRevisionReader, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { runDerivedComputation } from './derivedComputationService';
 import { canonicalStore } from "../../domain/batchSalesImport";
+
+const salesRevision = tableRevisionReader('salesRows');
+function cachedSales(options) {
+  const revision = salesRevision();
+  return revision ? cachedDerived({ ...options, revision, revisionReader: salesRevision }) : cachedDerived(options);
+}
 
 function readScopedSales(scope, aggregate) {
   return retrySourceRead(() => readScopedSalesOnce(scope, aggregate));
@@ -27,20 +33,20 @@ export async function readLedgerSalesAnalytics(scope) {
   // clicks can reuse it without cloning the full ledger from IndexedDB again.
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
   const store = scope.store ?? 'all';
-  return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today], formula: 'daily-sales@4-grouped', revision: sourceRevision(), compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
+  return readScopedSales(scope, async (rows, period) => ({ ...await cachedSales({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today], formula: 'daily-sales@4-grouped', compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
 }
 
 export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store = "all", date }) {
   const scope = { workspaceId, ledgerId, store, date };
-  return readScopedSales(scope, async (rows, period) => ({ ...await cachedDerived({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date], formula: 'daily-details@1', revision: sourceRevision(), compute: () => runDerivedComputation('day', { rows, period, date }) }), scope }));
+  return readScopedSales(scope, async (rows, period) => ({ ...await cachedSales({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date], formula: 'daily-details@1', compute: () => runDerivedComputation('day', { rows, period, date }) }), scope }));
 }
 
 export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, store = 'all', date = null }) {
   const scope = { workspaceId, ledgerId, store, date };
   return readScopedSales({ ...scope, allowMissingStore: true }, async (rows, period) => ({
-    ...await cachedDerived({
+    ...await cachedSales({
       scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date],
-      formula: 'period-skc-details@1', revision: sourceRevision(),
+      formula: 'period-skc-details@1',
       compute: () => runDerivedComputation('period-detail', { rows, period, date }),
     }), scope,
   }));
@@ -58,9 +64,9 @@ export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
     // Historical plotting retains compact summaries only. Read each cold ledger
     // transiently instead of filling the shared raw-row cache with up to 600k rows.
     for (const ledger of ledgers.sort((a, b) => a.period.localeCompare(b.period) || a.id.localeCompare(b.id))) {
-      const chartMonth = await cachedDerived({
+      const chartMonth = await cachedSales({
         scope: [workspaceId, ledger.id, store === 'all' ? null : canonicalStore(store), ledger.period, today],
-        formula: 'monthly-chart@1', revision,
+        formula: 'monthly-chart@1',
         compute: async () => {
           const rows = await db.salesRows.where('ledgerId').equals(ledger.id).filter(row => row.workspaceId === workspaceId && (store === 'all' || canonicalStore(row.store) === canonicalStore(store))).toArray();
           assertSourceRevision(revision);

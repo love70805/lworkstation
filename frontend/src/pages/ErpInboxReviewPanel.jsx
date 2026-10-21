@@ -1,17 +1,36 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Inbox, RotateCcw, Trash2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Inbox, RotateCcw, Trash2 } from 'lucide-react';
 import { Badge, Button, Modal, Panel } from '../components/UI';
 import { formatErpUnitCost } from '../lib/profitPrecision';
 
-export function ErpPendingSkuList({ entries = [], onReviewItem, onOverview, batchCount = 0, locked = false, title = '待处理 SKU', showOverview = true }) {
+export function ErpPendingSkuList({ entries = [], onReviewItem, onOverview, batchCount = 0, locked = false, title = '待处理 SKU', showOverview = true, paginationResetKey = title }) {
+  const [pagination, setPagination] = useState({ key: paginationResetKey, page: 0 });
+  const listRef = useRef(null), pageRequested = useRef(false);
+  const pageSize = 30, pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
+  const page = Math.min(pagination.key === paginationResetKey ? pagination.page : 0, pageCount - 1);
+  const visible = entries.slice(page * pageSize, (page + 1) * pageSize);
+  const pageNumbers = [...new Set([0, page - 1, page, page + 1, pageCount - 1])].filter(value => value >= 0 && value < pageCount).sort((a, b) => a - b);
+  const changePage = next => { if (next === page) return; pageRequested.current = true; setPagination({ key: paginationResetKey, page: next }); };
+  useLayoutEffect(() => {
+    if (!pageRequested.current) return;
+    pageRequested.current = false;
+    listRef.current?.scrollIntoView?.({ block: 'start' });
+    listRef.current?.focus({ preventScroll: true });
+  }, [page, pagination]);
   return <Panel className="erp-review-panel">
     <div className="erp-review-heading"><div><h2>{title} · {entries.length} 条店铺 SKU</h2><p>{new Set(entries.map(entry => entry.canonicalPlatformSku ?? entry.platformSku)).size} 个平台 SKU · {showOverview ? '汇总全部回传，按当前筛选范围显示；' : ''}仅列当前缺少有效成本的店铺 SKU。查看证据可直接核价，合格成本自动采用。</p></div>{showOverview ? <Button icon={Inbox} onClick={onOverview}>全部 {batchCount} 批回传</Button> : null}</div>
-    {entries.length ? <div className="erp-review-skus">{entries.map(entry => <article className="erp-review-sku" key={entry.id} data-platform-sku={entry.platformSku} data-inbox-id={entry.inboxId}>
+    {entries.length ? <div ref={listRef} tabIndex={-1} role="region" aria-label={`${title}，第 ${page + 1} 页`} className="erp-review-skus">{visible.map(entry => <article className="erp-review-sku" key={entry.id} data-platform-sku={entry.platformSku} data-inbox-id={entry.inboxId}>
       <div className="erp-review-identity"><strong className="mono">{entry.platformSku}</strong><span>{entry.store} · {entry.attribute || entry.productName || '属性未提供'}</span><small>SKC <code>{entry.platformSkc || '待核对'}</code></small></div>
       <div className="erp-review-reason"><strong>待核对原因</strong><p>{entry.reasonText}</p></div>
       <div className="erp-review-candidate"><small>ERP 候选成本</small><strong className="mono">{entry.unitCost == null ? '暂无候选价' : formatErpUnitCost(entry.unitCost)}</strong><small>{entry.batchIndex ? '第 ' + entry.batchIndex + ' 批' : '尚无可用回传'}</small></div>
       <div className="erp-review-actions"><Button aria-label={entry.store + ' · ' + entry.platformSku + ' · 查看异常详情'} onClick={() => onReviewItem(entry, 'details')}>查看证据</Button>{!locked && entry.canCorrect !== false ? <Button variant="ghost" aria-label={entry.store + ' · ' + entry.platformSku + ' · 直接人工更正'} onClick={() => onReviewItem(entry, 'edit')}>人工更正</Button> : null}</div>
     </article>)}</div> : <div className="erp-review-empty"><CheckCircle2 size={18} aria-hidden="true" /><span>当前没有待补成本。原始采购异常仍保留在批次记录中。</span></div>}
+    {pageCount > 1 ? <div className="table-footer"><span role="status" aria-live="polite">显示第 {page * pageSize + 1} 至 {Math.min((page + 1) * pageSize, entries.length)} 条，共 {entries.length} 条</span>
+      <nav className="pagination" aria-label={`${title}分页`}>
+        <button aria-label="上一页" disabled={page === 0} onClick={() => changePage(page - 1)}><ChevronLeft size={17} /></button>
+        {pageNumbers.map((number, index) => <span className="pagination-slot" key={number}>{index > 0 && number - pageNumbers[index - 1] > 1 ? <i>...</i> : null}<button aria-label={`第 ${number + 1} 页`} aria-current={page === number ? 'page' : undefined} className={page === number ? 'active' : ''} onClick={() => changePage(number)}>{number + 1}</button></span>)}
+        <button aria-label="下一页" disabled={page === pageCount - 1} onClick={() => changePage(page + 1)}><ChevronRight size={17} /></button>
+      </nav></div> : null}
   </Panel>;
 }
 
@@ -40,7 +59,7 @@ export default function ErpInboxReviewDialog({ open, review, overviewRevision, i
     {selected ? <div ref={contentRef} className="erp-review-batch-detail" data-inbox-id={selected.id}>
       <div className="erp-review-detail-nav"><Button icon={ArrowLeft} onClick={() => setSelectedId(null)}>返回全部 {batches.length} 批次</Button><span>第 {selected.index} / {batches.length} 批 · {selected.skcCount} 个 SKC</span></div>
       <div className="erp-review-batch-summary"><Badge tone={selected.currentMissingCount ? 'warning' : 'success'}>{batchLabel(selected)}</Badge><p>原回传自动采用 {selected.automaticCount} 个 SKU · 原待核验 {selected.historicalExceptionCount} 个 SKU{selected.coveredCount ? ' · 当前已补齐 ' + selected.coveredCount + ' 条店铺 SKU' : ''}</p><small className="mono">批次 {selected.batchId}</small>{batchActions(selected)}</div>
-      <ErpPendingSkuList entries={selected.entries.filter(entry => entry.currentMissing)} onReviewItem={onReviewItem} showOverview={false} locked={accountingReadOnly} title="本批待处理 SKU" />
+      <ErpPendingSkuList key={selected.id} entries={selected.entries.filter(entry => entry.currentMissing)} onReviewItem={onReviewItem} showOverview={false} locked={accountingReadOnly} title="本批待处理 SKU" />
       {selected.entries.some(entry => !entry.currentMissing) ? <details className="erp-review-covered"><summary>已补齐与原始异常记录 · {selected.entries.filter(entry => !entry.currentMissing).length} 项</summary>{selected.entries.filter(entry => !entry.currentMissing).map(entry => <article key={entry.id}><strong className="mono">{entry.platformSku}</strong><span>{entry.reviewRowId == null ? '本月无对应店铺明细' : entry.store + ' · 当前成本有效'}</span><p>原核验原因：{entry.reasonText}</p></article>)}</details> : null}
     </div> : <div ref={contentRef} className="erp-review-overview">
       <div className="erp-review-overview-summary" role="status"><strong>{batches.length} 批回传</strong><span>{missingBatches} 批当前有待补成本</span><span>{review.exceptions.length} 条店铺 SKU待处理</span></div>

@@ -59,3 +59,24 @@ it('explains missing evidence without inventing a source batch and prevents amou
  expect(container.textContent).toContain('尚无可用回传');expect(container.textContent).not.toContain('第 null 批');expect(button('人工更正')).toBeUndefined();
 });
 
+it('bounds large pending lists, keeps all pages accessible and resets only when the filter scope changes', async () => {
+ const entries=Array.from({length:101},(_,index)=>entry(index+1));
+ const render=async(items=entries,key='all')=>act(async()=>root.render(<ErpPendingSkuList entries={items} paginationResetKey={key} onReviewItem={onReview}/>));
+ await render();
+ expect(container.querySelectorAll('.erp-review-sku')).toHaveLength(30);
+ expect(container.textContent).toContain('共 101 条');
+ await act(async()=>container.querySelector('button[aria-label="第 4 页"]').click());
+ expect(container.querySelectorAll('.erp-review-sku')).toHaveLength(11);
+ expect(container.querySelector('.erp-review-sku').dataset.platformSku).toBe('SKU-91');
+ expect(document.activeElement).toBe(container.querySelector('.erp-review-skus'));
+ await act(async()=>container.querySelector('button[aria-label="甲店 · SKU-91 · 查看异常详情"]').click());
+ expect(onReview).toHaveBeenLastCalledWith(entries[90],'details');
+ await render(entries.slice(0,65));
+ expect(container.querySelector('.erp-review-sku').dataset.platformSku).toBe('SKU-61');
+ await render(entries.slice(0,65),'other-filter');
+ expect(container.querySelector('.erp-review-sku').dataset.platformSku).toBe('SKU-1');
+ await render(entries.slice(0,29),'small');
+ expect(container.querySelectorAll('.erp-review-sku')).toHaveLength(29);
+ expect(container.querySelector('.pagination')).toBeNull();
+});
+

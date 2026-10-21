@@ -136,28 +136,29 @@ it('reuses immutable ledger facts after a real product save, including after pro
   }
   const keys = await derivedCacheDb.entries.toCollection().primaryKeys();
   expect(keys.filter(key => key.includes('selection-reference@5-store-tags'))).toHaveLength(1);
-  expect(keys.filter(key => key.includes('selection-ledger-facts@4'))).toHaveLength(1);
+  expect(keys.filter(key => key.includes('selection-ledger-facts@5-sales-inputs'))).toHaveLength(1);
   expect(read).not.toHaveBeenCalled();
 });
 
-it('rejects fact reuse after each financial/context dependency and transaction abort', async () => {
+it('refreshes final financial/context projections while reusing unchanged sales facts and rejecting aborted source writes', async () => {
   await getSelectionReferenceSnapshot({ compact: true });
   const mutations = [
-    () => db.importBatches.update('B', { fileHash: 'changed' }),
-    () => db.salesRows.toCollection().modify({ unitPrice: 0 }),
-    () => db.ledgers.update('L', { status: 'finalized' }),
-    () => db.erpCostRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU-A', unitCost: 1 }),
-    () => db.catalogManualCosts.put({ id: 'MANUAL', workspaceId: 'W', platformSku: 'SKU-A', amount: 0 }),
-    () => db.settings.put({ key: 'any-setting', value: true }),
+    [() => db.importBatches.update('B', { fileHash: 'changed' }), true],
+    [() => db.salesRows.toCollection().modify({ unitPrice: 0 }), true],
+    [() => db.ledgers.update('L', { status: 'finalized' }), false],
+    [() => db.erpCostRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU-A', unitCost: 1 }), false],
+    [() => db.catalogManualCosts.put({ id: 'MANUAL', workspaceId: 'W', platformSku: 'SKU-A', amount: 0 }), false],
+    [() => db.settings.put({ key: 'any-setting', value: true }), false],
   ];
   const reads = vi.spyOn(db.salesRows, 'bulkGet');
-  for (const mutation of mutations) {
+  for (const [mutation, salesChanged] of mutations) {
     const revision = selectionFactsRevision();
     await mutation();
     expect(selectionFactsRevision()).not.toBe(revision);
     reads.mockClear();
-    await getSelectionReferenceSnapshot({ compact: true });
-    expect(reads).toHaveBeenCalled();
+    const snapshot = await getSelectionReferenceSnapshot({ compact: true });
+    expect(snapshot.dataVersion).toBe(sourceRevision());
+    expect(reads.mock.calls.length > 0).toBe(salesChanged);
   }
   const revision = selectionFactsRevision();
   await expect(db.transaction('rw', db.products, db.salesRows, async () => {
@@ -178,7 +179,7 @@ it('rejects a cross-tab version rotation while facts are computing and falls bac
     if (kind === 'selection-facts' && !changed) {
       changed = true;
       // Same storage channel used by another tab's mutation middleware.
-      localStorage.setItem('shopeers-selection-facts-revision-v1', crypto.randomUUID());
+      localStorage.setItem('shopeers-table-source-revision-v1:salesRows', crypto.randomUUID());
       localStorage.setItem('shopeers-derived-source-revision-v1', crypto.randomUUID());
     }
     return value;

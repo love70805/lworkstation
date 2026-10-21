@@ -11,6 +11,8 @@ const SELECTION_FACTS_REVISION_KEY = 'shopeers-selection-facts-revision-v1';
 let volatileRevision = crypto.randomUUID();
 let volatileFactsRevision = crypto.randomUUID();
 let durable = true;
+let sourceClockAvailable = true, factsClockAvailable = true;
+const failedTableClocks = new Set();
 const memory = new Map();
 const pending = new Map();
 const memoryReaders = new Map();
@@ -20,37 +22,70 @@ const MAX_MEMORY_ROWS = 600000;
 const MAX_DISK = 24;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_DISK_BYTES = 64 * 1024 * 1024;
+const tableReaders = new Map();
+const memoryNamespaces = new Map();
+
+// These clocks serve disposable read caches only. A table edit, including an
+// equal-count update or an aborted transaction, must invalidate its old values.
+export function tableRevisionReader(table) {
+  if (!tableReaders.has(table)) tableReaders.set(table, () => {
+    if (failedTableClocks.has(table)) return null;
+    try {
+      const key = `shopeers-table-source-revision-v1:${table}`;
+      let value = localStorage.getItem(key);
+      if (!value) { value = crypto.randomUUID(); localStorage.setItem(key, value); }
+      return value;
+    } catch { return null; } // Without a shared clock, read the source directly.
+  });
+  return tableReaders.get(table);
+}
+function invalidateTableRevision(table) {
+  const value = crypto.randomUUID();
+  try { localStorage.setItem(`shopeers-table-source-revision-v1:${table}`, value); failedTableClocks.delete(table); }
+  catch { failedTableClocks.add(table); }
+  const reader = tableReaders.get(table);
+  if (reader) clearMemoryFor(reader);
+}
 
 export function sourceRevision() {
+  if (!sourceClockAvailable) return volatileRevision;
   try {
     let revision = localStorage.getItem(REVISION_KEY);
     if (!revision) { revision = crypto.randomUUID(); localStorage.setItem(REVISION_KEY, revision); }
     return revision;
-  } catch { durable = false; return volatileRevision; }
+  } catch { sourceClockAvailable = false; durable = false; return volatileRevision; }
 }
 // Only these catalog-only tables are independent of immutable ledger facts.
 // Everything else (including settings/context, all finance and future tables)
 // conservatively changes the facts version. Counts/timestamps are never keys.
 const CATALOG_ONLY_TABLES = new Set(['products', 'platformSkus', 'supplierOffers', 'captures', 'auditEvents']);
 export function selectionFactsRevision() {
+  if (!factsClockAvailable) return volatileFactsRevision;
   try {
     let revision = localStorage.getItem(SELECTION_FACTS_REVISION_KEY);
     if (!revision) { revision = crypto.randomUUID(); localStorage.setItem(SELECTION_FACTS_REVISION_KEY, revision); }
     return revision;
-  } catch { durable = false; return volatileFactsRevision; }
+  } catch { factsClockAvailable = false; durable = false; return volatileFactsRevision; }
 }
-function removeMemory(key) { memory.delete(key); memoryReaders.delete(key); memoryBytes.delete(key); }
+function removeMemory(key) { memory.delete(key); memoryReaders.delete(key); memoryBytes.delete(key); memoryNamespaces.delete(key); }
 function clearMemoryFor(reader) {
   for (const [key, entryReader] of memoryReaders) if (entryReader === reader) removeMemory(key);
 }
 function invalidateSelectionFacts() {
   volatileFactsRevision = crypto.randomUUID();
-  try { localStorage.setItem(SELECTION_FACTS_REVISION_KEY, volatileFactsRevision); } catch { durable = false; }
+  try { localStorage.setItem(SELECTION_FACTS_REVISION_KEY, volatileFactsRevision); factsClockAvailable = true; }
+  catch { factsClockAvailable = false; }
+  durable = sourceClockAvailable && factsClockAvailable;
   clearMemoryFor(selectionFactsRevision);
 }
-export function invalidateDerivedCache(notify = true) {
+export function invalidateDerivedCache(notify = true, tables = null) {
+  // Explicit recovery/reset invalidates every registered table cache. Ordinary
+  // mutations pass [] and invalidate their own table separately below.
+  if (tables === null) for (const table of tableReaders.keys()) invalidateTableRevision(table);
   volatileRevision = crypto.randomUUID();
-  try { localStorage.setItem(REVISION_KEY, volatileRevision); } catch { durable = false; }
+  try { localStorage.setItem(REVISION_KEY, volatileRevision); sourceClockAvailable = true; }
+  catch { sourceClockAvailable = false; }
+  durable = sourceClockAvailable && factsClockAvailable;
   clearMemoryFor(sourceRevision);
   // A cheap observable value makes every live-query consumer rerun for value
   // edits, which an IndexedDB count() dependency alone does not observe.
@@ -87,10 +122,19 @@ export async function retrySourceRead(read) {
 export function installDerivedInvalidation(database) {
   const observed = new WeakSet();
   const factsObserved = new WeakSet();
+  const tablesObserved = new WeakMap();
   database.use({ stack: 'dbcore', name: 'derived-cache-revision', create(down) {
     return { ...down, table(name) {
       const table = down.table(name);
       return { ...table, mutate(request) {
+        let changedTables = tablesObserved.get(request.trans);
+        if (!changedTables) { changedTables = new Set(); tablesObserved.set(request.trans, changedTables); }
+        if (!changedTables.has(name)) {
+          changedTables.add(name);
+          invalidateTableRevision(name);
+          request.trans.addEventListener('complete', () => invalidateTableRevision(name));
+          request.trans.addEventListener('abort', () => invalidateTableRevision(name));
+        }
         // Separate transaction tracking matters when a transaction writes a
         // catalog row first and a financial/context table later.
         if (!CATALOG_ONLY_TABLES.has(name) && !factsObserved.has(request.trans)) {
@@ -103,9 +147,9 @@ export function installDerivedInvalidation(database) {
           observed.add(request.trans);
           // Before writing prevents crash reuse; after commit prevents a reader
           // during the transaction from publishing pre-commit rows as current.
-          invalidateDerivedCache(false);
-          request.trans.addEventListener('complete', invalidateDerivedCache);
-          request.trans.addEventListener('abort', invalidateDerivedCache);
+          invalidateDerivedCache(false, []);
+          request.trans.addEventListener('complete', () => invalidateDerivedCache(true, []));
+          request.trans.addEventListener('abort', () => invalidateDerivedCache(true, []));
         }
         return table.mutate(request);
       } };
@@ -113,7 +157,7 @@ export function installDerivedInvalidation(database) {
   } });
 }
 
-export function clearDerivedMemory() { memory.clear(); memoryReaders.clear(); memoryBytes.clear(); pending.clear(); }
+export function clearDerivedMemory() { memory.clear(); memoryReaders.clear(); memoryBytes.clear(); memoryNamespaces.clear(); pending.clear(); }
 
 function persistEntry(entry, revision, revisionReader) {
   // A native timer starts a separate task outside Dexie's liveQuery scope.
@@ -147,7 +191,7 @@ function persistEntry(entry, revision, revisionReader) {
   });
 }
 
-export async function cachedDerived({ scope, formula, revisionReader = sourceRevision, revision = revisionReader(), compute, persist = true, onStatus = () => {} }) {
+export async function cachedDerived({ scope, formula, revisionReader = sourceRevision, revision = revisionReader(), compute, persist = true, boundedMemory = false, onStatus = () => {} }) {
   assertSourceRevision(revision, revisionReader);
   const key = JSON.stringify([formula, scope, revision]);
   if (memory.has(key)) { onStatus('ready'); return memory.get(key); }
@@ -173,13 +217,17 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
     assertSourceRevision(revision, revisionReader);
     // Facts are bounded on both disk and heap. Structured-clone Maps must not
     // appear as empty objects in the size estimate.
-    if (revisionReader !== selectionFactsRevision || derivedValueBytes(value) <= MAX_ENTRY_BYTES) {
+    const memorySize = boundedMemory || revisionReader === selectionFactsRevision ? derivedValueBytes(value) : null;
+    if (memorySize === null || memorySize <= MAX_ENTRY_BYTES) {
+      const namespace = JSON.stringify([formula, scope]);
+      for (const [prior, existing] of memoryNamespaces) if (existing === namespace && prior !== key) removeMemory(prior);
       memory.set(key, value);
+      memoryNamespaces.set(key, namespace);
       memoryReaders.set(key, revisionReader);
-      if (revisionReader === selectionFactsRevision) memoryBytes.set(key, derivedValueBytes(value));
+      if (memorySize !== null) memoryBytes.set(key, memorySize);
     }
     const rowCount = () => [...memory.values()].reduce((count, item) => count + (Array.isArray(item) ? item.length : item?.rows?.length ?? item?.computedReferenceRows?.length ?? 0), 0);
-    const normalKeys = () => [...memory.keys()].filter(item => memoryReaders.get(item) !== selectionFactsRevision);
+    const normalKeys = () => [...memory.keys()].filter(item => !memoryBytes.has(item));
     while (normalKeys().length > MAX_MEMORY || rowCount() > MAX_MEMORY_ROWS) removeMemory(normalKeys()[0] ?? memory.keys().next().value);
     while (memoryBytes.size > MAX_DISK || [...memoryBytes.values()].reduce((sum, bytes) => sum + bytes, 0) > MAX_DISK_BYTES) removeMemory(memoryBytes.keys().next().value);
     return value;

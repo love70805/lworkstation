@@ -74,6 +74,39 @@ it('shares one raw snapshot and persists consumed sales summaries', async () => 
   expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('0.009');
 });
 
+it('does not reuse an old clock when storage remains readable but rejects revision writes', async () => {
+  const first = await readLedgerSalesRows('W', 'L');
+  const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage full'); });
+  try {
+    await db.salesRows.toCollection().modify({ amountExact: '5', amount: 5 });
+    const current = await readLedgerSalesRows('W', 'L');
+    expect(current).not.toBe(first); expect(current[0].amountExact).toBe('5');
+    expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('5');
+  } finally { write.mockRestore(); }
+  await db.salesRows.toCollection().modify({ amountExact: '6', amount: 6 });
+  expect((await readLedgerSalesRows('W', 'L'))[0].amountExact).toBe('6');
+});
+
+it('keeps sales reads and charts warm across cost/status edits while isolating rolled-back sales', async () => {
+  const first = await readLedgerSalesRows('W', 'L');
+  await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' });
+  const compute = vi.spyOn(computation, 'runDerivedComputation');
+  await db.costApprovals.put({ id: 'MANUAL-PROBE', workspaceId: 'W', ledgerId: 'L', platformSku: 'A', approvedAmount: 0 });
+  await db.ledgers.update('L', { status: 'cost_pending', updatedAt: '2026-10-21T00:00:00Z' });
+  expect(await readLedgerSalesRows('W', 'L')).toBe(first);
+  expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('0.009');
+  expect(compute).not.toHaveBeenCalled();
+  await expect(db.transaction('rw', db.salesRows, async () => {
+    await db.salesRows.toCollection().modify({ amountExact: '900' });
+    expect((await readLedgerSalesRows('W', 'L'))[0].amountExact).toBe('900');
+    throw new Error('rollback');
+  })).rejects.toThrow('rollback');
+  expect((await readLedgerSalesRows('W', 'L'))[0].amountExact).toBe('0.009');
+  await db.salesRows.toCollection().modify({ amountExact: '2', amount: 2 });
+  expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('2');
+  compute.mockRestore();
+});
+
 it('persists real live-query sales results and reuses them without computation after memory clear and restart', async () => {
   const compute = vi.spyOn(computation, 'runDerivedComputation');
   const query = async () => readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' });
