@@ -1,5 +1,6 @@
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { erpLedgerVersion } from '../domain/erpLedgerVersion';
+import { runDerivedComputation } from '../data/repositories/derivedComputationService';
 import { isActiveErpCollection } from '../domain/erpCollectionStatus';
 import { useErpCollectionTasks } from '../hooks/useErpCollectionTasks';
 import ErpCollectionProgress from '../components/ErpCollectionProgress';
@@ -338,8 +339,10 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   ])), [snapshot?.costs]);
   const formalSalesLines = useMemo(() => salesLines.map((row) => {
       const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
-      const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost: formalCostsBySku.get(row.canonicalPlatformSku), manualOverride: manualFor(scope) });
-      return { ...row, finalizable: decision.eligibleForExactProfit, costIdentityIssue: decision.identityIssue ?? null };
+      const erpCost = formalCostsBySku.get(row.canonicalPlatformSku);
+      const manualOverride = manualFor(scope);
+      const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost, manualOverride });
+      return { ...row, erpCost, manualOverride, decision, finalizable: decision.eligibleForExactProfit, costIdentityIssue: decision.identityIssue ?? null };
     }), [formalCostsBySku, salesLines, ledgerIdentities, snapshot?.ledger, manualFor]);
   const supplierSelectionKey = JSON.stringify(profitFilter.supplierSelection);
   const scopedSalesLines = useMemo(() => filterProfitRowsByScope(formalSalesLines, profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly]);
@@ -618,8 +621,31 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     }
   }, [notify, voidDraft]);
 
+  const [persistedReconciliation, setPersistedReconciliation] = useState(null);
+  const renderedCostScope = useRef(null);
+  const [reconciliationRetry, setReconciliationRetry] = useState(0);
+  useEffect(() => {
+    if (!snapshot?.ledger || parsedRows !== null || sourceText.trim() || effectiveCostRows === null) return;
+    let active = true;
+    const controller = new AbortController();
+    runDerivedComputation('cost-reconciliation', { workspaceId: snapshot.ledger.workspaceId, period: snapshot.ledger.period,
+      expectedSkus, costRows: effectiveCostRows, batchId: 'preview', resolutions }, { signal: controller.signal }).then(value => {
+      if (active) setPersistedReconciliation({ snapshot, expectedSkus, effectiveCostRows, resolutions, value });
+    }).catch(error => {
+      if (active) setPersistedReconciliation({ snapshot, expectedSkus, effectiveCostRows, resolutions, error: error.message });
+    });
+    return () => { active = false; controller.abort(); };
+  }, [snapshot, expectedSkus, effectiveCostRows, resolutions, parsedRows, sourceText, reconciliationRetry]);
+  const usePersistedReconciliation = parsedRows === null && !sourceText.trim() && effectiveCostRows !== null;
+  const persistedReconciliationReady = persistedReconciliation?.snapshot === snapshot
+    && persistedReconciliation?.expectedSkus === expectedSkus && persistedReconciliation?.effectiveCostRows === effectiveCostRows
+    && persistedReconciliation?.resolutions === resolutions;
   const reconciliation = useMemo(() => {
     if (!snapshot?.ledger || effectiveCostRows === null) return null;
+    if (usePersistedReconciliation) return persistedReconciliationReady
+      ? persistedReconciliation.value ?? null
+      : persistedReconciliation?.snapshot?.ledger?.id === snapshot.ledger.id
+        && persistedReconciliation?.snapshot?.ledger?.workspaceId === snapshot.ledger.workspaceId ? persistedReconciliation.value ?? null : null;
     return reconcileErpCostRows({
       workspaceId: snapshot.ledger.workspaceId,
       period: snapshot.ledger.period,
@@ -628,7 +654,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       batchId: "preview",
       resolutions,
     });
-  }, [effectiveCostRows, expectedSkus, resolutions, snapshot]);
+  }, [effectiveCostRows, expectedSkus, resolutions, snapshot, usePersistedReconciliation, persistedReconciliationReady, persistedReconciliation]);
   const publicationReconciliation = useMemo(() => parsedRows == null || !snapshot?.ledger ? null : reconcileErpCostRows({ workspaceId: snapshot.ledger.workspaceId, period: snapshot.ledger.period, expectedSkus: requestForImport?.expectedSkus ?? expectedSkus, costRows: parsedRows, batchId: "preview", resolutions }), [parsedRows, expectedSkus, requestForImport, resolutions, snapshot?.ledger]);
   const adoption = useMemo(() => erpAdoptionReadiness({ ledger: snapshot?.ledger, salesRows: snapshot?.rows, approvals: snapshot?.approvals, reconciliation: publicationReconciliation }), [snapshot, publicationReconciliation]);
   const hasNewBatch = Boolean(parsedRows && batchEnvelope?.formatVersion === ERP_COST_BATCH_VERSION && batchEnvelope.evidenceStatus === "complete");
@@ -802,13 +828,10 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
 
   const reviewMatchBySku = useMemo(() => new Map((reconciliation?.matches ?? []).map(row => [row.canonicalPlatformSku, row])), [reconciliation]);
   const allReviewRows = useMemo(() => formalSalesLines.map(row => {
-    const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
-    const manualOverride = manualFor(scope);
-    const erpCost = formalCostsBySku.get(row.canonicalPlatformSku);
-    const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost, manualOverride });
+    const { manualOverride, decision } = row;
     const match = reviewMatchBySku.get(row.canonicalPlatformSku);
-    return { ...row, manualOverride, erpCost, decision, match, unitCost: manualOverride?.approvedAmount ?? decision.unitCost ?? match?.unitCost };
-  }), [formalSalesLines, formalCostsBySku, reviewMatchBySku, ledgerIdentities, snapshot?.ledger, manualFor]);
+    return { ...row, match, unitCost: manualOverride?.approvedAmount ?? decision.unitCost ?? match?.unitCost };
+  }), [formalSalesLines, reviewMatchBySku]);
   const inboxReview = useMemo(() => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows, includeEvidence: false }), [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
   const viewedEvidenceBatch = inboxReview.batches.find(batch => batch.id === currentInbox?.id);
   const filteredReviewRowIds = useMemo(() => new Set(filteredSalesLines.map(row => row.id)), [filteredSalesLines]);
@@ -1079,6 +1102,17 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     );
   }
 
+  const costScope = `${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`;
+  if (usePersistedReconciliation && (persistedReconciliationReady && persistedReconciliation.error
+    || !reconciliation && renderedCostScope.current !== costScope)) {
+    return <Panel role={persistedReconciliationReady && persistedReconciliation.error ? 'alert' : 'status'}>
+      {persistedReconciliationReady && persistedReconciliation.error
+        ? <><p>成本列表读取失败：{persistedReconciliation.error}</p><Button onClick={() => { setPersistedReconciliation(null); setReconciliationRetry(value => value + 1); }}>重新读取成本列表</Button></>
+        : '正在后台整理成本列表，可以继续切换页面…'}
+    </Panel>;
+  }
+  renderedCostScope.current = costScope;
+
   const targetDetails = targetRow ? <>
         <div className="cost-detail-current"><strong>当前采用：{targetRow.decision.eligibleForExactProfit ? targetRow.manualOverride ? `${formatManualUnitCost(targetRow.decision.unitCost)} · 人工更正` : `${formatErpUnitCost(targetRow.decision.unitCost)} · ERP` : "缺少有效成本"}</strong><small>{targetCostExplanation}</small></div>
         <section className="cost-detail-evidence"><h3>ERP 采购证据</h3>
@@ -1097,6 +1131,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   return (
     <>
       {!locked && platformSkcs.length > 0 && registrationState.message ? <p className="cost-registration-status" role="status">{registrationState.message}{registrationState.status === "failed" ? <Button onClick={() => setRegistrationRetry((value) => value + 1)}>重试登记</Button> : null}</p> : null}
+      {usePersistedReconciliation && !persistedReconciliationReady ? <p role="status" className="cost-correction-help">正在后台更新成本证据列表，当前保留上次列表；已保存成本按最新结果核算。</p> : null}
       {viewedEvidenceBatch ? <Panel className="erp-review-current-batch"><div><strong>当前采购证据 · 第 {viewedEvidenceBatch.index} / {inboxReview.batches.length} 批</strong><p>当前核对草稿保留。全部批次与待处理 SKU可随时返回查看。</p></div><Button onClick={openInboxOverview}>返回全部 {inboxReview.batches.length} 批次</Button></Panel> : null}
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>

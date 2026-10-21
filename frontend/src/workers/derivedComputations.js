@@ -5,8 +5,12 @@ import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 import { buildSelectionReferenceRows } from '../lib/selectionReferences';
 import { prepareSelectionSalesFacts } from '../domain/selectionSalesFacts';
 import { packSelectionSalesFacts } from '../domain/selectionSalesFactsCodec';
+import { calculateLedgerCostCoverage } from '../domain/costCoverage';
+import { reconcileErpCostRows } from '../domain/erpCosts';
 
 export function computeDerived(kind, input) {
+  if (kind === 'cost-coverage') return calculateLedgerCostCoverage(input);
+  if (kind === 'cost-reconciliation') return reconcileErpCostRows(input);
   if (kind === 'selection-facts') return packSelectionSalesFacts(prepareSelectionSalesFacts(input), input.ledgers[0]);
   if (kind === 'selection') return buildSelectionReferenceRows({ ...input, compactEvidence: true, includeStoreTags: true });
   if (kind === 'period-detail') return aggregatePeriodSalesDetails(input.rows, input);

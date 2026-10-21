@@ -63,6 +63,22 @@ it('rechecks the edited SKU receipt without revalidating unrelated pending evide
   validate.mockClear(); await recover(); expect(validate).not.toHaveBeenCalled();
 });
 
+it('reads an oversized ledger once per sweep without keeping it in the bounded cache', async () => {
+  await db.erpCostRows.add({ workspaceId, ledgerId, platformSku: 'UNRELATED', canonicalPlatformSku: 'UNRELATED', diagnosticPadding: 'x'.repeat(9 * 1024 * 1024) });
+  const seen = [];
+  const reading = row => { seen.push(row.platformSku); return row; };
+  db.erpCostRows.hook('reading', reading);
+  try {
+    await recover();
+    expect(seen.filter(sku => sku === 'UNRELATED')).toHaveLength(1);
+    seen.length = 0;
+    // A new source revision starts a fresh sweep and never reuses stale rows.
+    await db.costApprovals.put({ id: 'UNRELATED-APPROVAL', workspaceId, ledgerId, platformSku: 'UNRELATED', approvedAmount: 0 });
+    await recover();
+    expect(seen.filter(sku => sku === 'UNRELATED')).toHaveLength(1);
+  } finally { db.erpCostRows.hook('reading').unsubscribe(reading); }
+});
+
 it('invalidates same-count source edits and does not hide forged raw evidence', async () => {
   const inbox = await db.erpCostInbox.get(receipts[1].id);
   inbox.envelope.batch.summary.outputRowCount = 999;

@@ -2,14 +2,27 @@ import { computeDerived } from '../../workers/derivedComputations';
 import { REPORT_FORMULA_VERSION } from '../../domain/profitReports';
 import { cachedDerived, assertSourceRevision } from '../db/derivedCache';
 
-export function runDerivedComputation(kind, input) {
+export function runDerivedComputation(kind, input, { signal } = {}) {
+  const cancelled = () => Object.assign(new Error('后台计算已取消。'), { name: 'AbortError' });
+  if (signal?.aborted) return Promise.reject(cancelled());
   // Tests and unsupported browsers retain precisely the same domain functions.
   if (typeof Worker === 'undefined') return Promise.resolve().then(() => computeDerived(kind, input));
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../../workers/derived.worker.js', import.meta.url), { type: 'module' });
-    worker.onmessage = ({ data }) => { worker.terminate(); data.error ? reject(new Error(data.error)) : resolve(data.value); };
-    worker.onerror = () => { worker.terminate(); reject(new Error('后台计算失败，请重新读取。')); };
-    worker.postMessage({ kind, input });
+    let finished = false;
+    const finish = (error, value) => {
+      if (finished) return;
+      finished = true;
+      signal?.removeEventListener('abort', onAbort);
+      worker.terminate();
+      error ? reject(error) : resolve(value);
+    };
+    const onAbort = () => finish(cancelled());
+    worker.onmessage = ({ data }) => finish(data.error ? new Error(data.error) : null, data.value);
+    worker.onerror = () => finish(new Error('后台计算失败，请重新读取。'));
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) return onAbort();
+    try { worker.postMessage({ kind, input }); } catch (error) { finish(error); }
   });
 }
 

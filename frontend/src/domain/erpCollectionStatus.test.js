@@ -28,7 +28,15 @@ it('distinguishes active cost reads, durable delivery confirmation and preparati
   expect(erpCollectionPresentation({ status: 'running', batches: [{ status: 'running' }] })).toMatchObject({ state: 'cost_running', running: true });
   expect(erpCollectionPresentation({ status: 'running', batches: [{ status: 'collected' }] }).title).toBe('正在后台确认成本送达');
   expect(erpCollectionPresentation({ status: 'running', batches: [{ status: 'pending' }] })).toMatchObject({ state: 'waiting', running: false, canResume: false });
-  expect(erpCollectionPresentation({ status: 'cost_complete', phase: 'cost', batches: [delivered] })).toMatchObject({ state: 'catalog_running', running: true, canResume: false });
+  expect(erpCollectionPresentation({ status: 'cost_complete', phase: 'cost', batches: [delivered] })).toMatchObject({ state: 'cost_completed', running: false, canResume: true });
+});
+
+it('does not infer material execution from a legacy durable delivery or cost exceptions', () => {
+  const legacy = { status: 'partial', phase: 'cost', batches: [{ ...delivered, status: 'incomplete' }] };
+  expect(erpCollectionPresentation(legacy)).toMatchObject({ state: 'attention', running: false, canRetry: true });
+  expect(erpCollectionPresentation({ ...legacy, executionProtocol: 2, runMode: 'cost' }).running).toBe(false);
+  expect(erpCollectionPresentation({ ...legacy, executionProtocol: 2, runMode: 'catalog', runnerId: 'R' }))
+    .toMatchObject({ state: 'catalog_running', running: true, canResume: false });
 });
 
 it('does not claim interrupted reads are still running and keeps continuation available', () => {
