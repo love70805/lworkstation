@@ -37,7 +37,7 @@ import {
 } from "../db/constants";
 import { makeId } from "../db/utils";
 import { ensureDefaultWorkspace, getActiveMemberContext, ensureLedgerCatalogDrafts } from "./selectionRepository";
-import { manualSnapshot, selectManualOverride, storeIdentity, validManualOverride } from "../../domain/manualCostOverride";
+import { manualSnapshot, selectManualOverride, createManualOverrideLookup, storeIdentity, validManualOverride } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
 import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
 import { normalizeErpHistoryMappings } from '../../../../integrations/contracts/erp-history-mappings.mjs';
@@ -69,13 +69,13 @@ async function resolveProfitAuditActor(requestedActor) {
     cloudConfigured: runtimeConfig.cloudConfigured,
   });
 }
-async function readLedgerCostCoverage(ledgerId) {
+async function readLedgerCostCoverage(ledgerId, current = {}) {
   const [salesRows, erpCosts, approvals] = await Promise.all([
-    db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
-    getLatestLedgerCosts(ledgerId),
+    current.salesRows ?? db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
+    current.erpCosts ?? getLatestLedgerCosts(ledgerId),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  const ledger = await db.ledgers.get(ledgerId);
+  const ledger = current.ledger ?? await db.ledgers.get(ledgerId);
   return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals, workspaceId: ledger?.workspaceId, ledgerId, period: ledger?.period });
 }
 
@@ -106,7 +106,8 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
     const now = new Date().toISOString();
     const scope = { workspaceId: ledger.workspaceId, ledgerId, store: scopedStore, platformSku: sku };
     const previous = selectManualOverride(approvals, scope);
-    const erpCost = (await getLatestLedgerCosts(ledgerId)).find((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(sku));
+    const erpCosts = await getLatestLedgerCosts(ledgerId);
+    const erpCost = erpCosts.find((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(sku));
     const oldDecision = resolveLedgerCostDecision({ ...scope, identity: buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(sku)), period: ledger.period, manualOverride: previous, erpCost });
     const auditActor = await resolveProfitAuditActor();
     const revokedRecords = approvals.filter((item) => item.status === "approved" && manualSnapshot(item)?.kind === "manual_override" && storeIdentity(manualSnapshot(item).store) === scopedStore && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(sku));
@@ -123,7 +124,7 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
           ...(historyEvidence ? { historyEvidence: structuredClone(historyEvidence) } : {}) } };
       await db.costApprovals.add(saved);
     }
-    const coverage = await readLedgerCostCoverage(ledgerId);
+    const coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows: rows, erpCosts });
     const savedLedger = { ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, now) };
     await db.ledgers.put(savedLedger);
     if (saved) await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: "cost_approval", objectId: saved.id, action: "manual_override_saved", actorId: auditActor, createdAt: now, before: { unitCost: oldDecision.unitCost, source: oldDecision.source, store: scopedStore }, after: { snapshot: { ...saved, ledger: savedLedger } } });
@@ -608,12 +609,21 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
       if (adopted && !(adopted.resolutions ?? []).some(verified => sameResolution(verified, resolution))) throw new Error('本笔采购已用于正式成本，请使用人工更正调整。');
     }
     costResolutions = verifiedResolutions;
+    const storesBySku = new Map(), manualFor = createManualOverrideLookup(approvals);
+    for (const sale of ownedSales) {
+      if (!sale.platformSkc) continue;
+      const sku = canonicalPlatformSku(sale.platformSku ?? sale.sku), skc = canonicalPlatformSkc(sale.platformSkc);
+      if (!storesBySku.has(sku)) storesBySku.set(sku, new Map());
+      const pairs = storesBySku.get(sku);
+      if (!pairs.has(skc)) pairs.set(skc, new Set());
+      pairs.get(skc).add(storeIdentity(sale.store));
+    }
     const candidates = [], items = [];
     for (const row of reconciliation.matches) {
       const sku = canonicalPlatformSku(row.platformSku);
       const item = { platformSku: row.platformSku, canonicalPlatformSku: sku };
-      const stores = [...new Set(ownedSales.filter(sale => sale.platformSkc && canonicalPlatformSku(sale.platformSku ?? sale.sku) === sku && canonicalPlatformSkc(sale.platformSkc) === canonicalPlatformSkc(row.platformSkc)).map(sale => storeIdentity(sale.store)))];
-      const manualStores = stores.filter(store => selectManualOverride(approvals, { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store, platformSku: sku }));
+      const stores = [...(storesBySku.get(sku)?.get(canonicalPlatformSkc(row.platformSkc)) ?? [])];
+      const manualStores = stores.filter(store => manualFor({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, store, platformSku: sku }));
       item.manualStores = manualStores;
       const previous = existingRows.find(cost => canonicalPlatformSku(cost.platformSku) === sku);
       if (previous) { items.push({ ...item, state: manualStores.length ? 'manual_effective' : 'adopted', costRowId: previous.id }); continue; }

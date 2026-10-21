@@ -10,7 +10,7 @@ import { ToastProvider } from '../components/UI';
 const state=vi.hoisted(()=>({snapshot:{ledger:{id:'L',workspaceId:'W',period:'2026-08',status:'draft',warehouseRate:0.7},rows:[{store:'甲',supplierNumber:'货号A',platformSku:'A',platformSkc:'S',quantity:2,amount:10,sourceAddedDate:'2026-08-01'},{store:'乙',supplierNumber:'货号B',platformSku:'B',platformSkc:'T',quantity:3,amount:30,sourceAddedDate:'2026-08-01'}],costs:[],approvals:[],profitLines:[]}}));
 vi.mock('../hooks/useLatestSalesImport',()=>({useLatestSalesImport:()=>state.snapshot}));
 vi.mock('./MonthlyReportManager',()=>({default:()=>null}));
-vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext})=><div data-testid="cost-scope">{validatedContext.store}</div>}));
+vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext,suppliedSnapshot})=>{state.costSnapshot=suppliedSnapshot;return <div data-testid="cost-scope">{validatedContext.store}</div>;}}));
 let root,container;
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.restoreAllMocks();});
 it('replaces profit scope through all → 甲 → 乙 and never renders sales analytics',async()=>{
@@ -52,6 +52,7 @@ it('exposes supplier and SKU scope outside collapsed details and keeps it across
  await act(async()=>[...scope.querySelectorAll('button')].find(button=>button.textContent==='完成选择').click());
  await act(async()=>[...container.querySelectorAll('button')].find(button=>button.textContent==='成本核对').click());
  expect(container.querySelector('[data-testid="cost-scope"]').textContent).toBe('乙');
+ expect(state.costSnapshot).toBe(state.snapshot);
  expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('T');
  expect(container.querySelector('[aria-label="按供方货号筛选"]').textContent).toBe('货号B');
 });
