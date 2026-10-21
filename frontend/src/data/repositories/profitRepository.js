@@ -641,7 +641,8 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     }
     let appliedBatchId = inbox.appliedBatchId;
     if (candidates.length) {
-      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts: (await getLatestLedgerCosts(ledger.id)).filter(cost => candidates.some(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(cost.platformSku))) } });
+      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts: (await getLatestLedgerCosts(ledger.id)).filter(cost => candidates.some(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(cost.platformSku))) } },
+        { transaction: Dexie.currentTransaction, ledgerId: ledger.id, workspaceId: ledger.workspaceId, salesRows });
       appliedBatchId = saved.batchId;
       const persisted = await db.erpCostRows.where('batchId').equals(appliedBatchId).toArray();
       for (const item of items) if (['adopted', 'manual_effective'].includes(item.state)) item.costRowId = persisted.find(row => canonicalPlatformSku(row.platformSku) === item.canonicalPlatformSku)?.id;
@@ -742,7 +743,14 @@ async function publishVerifiedErpCostBatch({
   workspaceId = DEFAULT_WORKSPACE_ID,
   publishedBy = "local-user",
   adoptionContext = null,
-}) {
+}, transactionReads = null) {
+  // Only our enclosing adoption transaction can supply this snapshot. The
+  // public/UI argument object cannot provide it, and no sales writes occur
+  // between these reads and publication/coverage within this transaction.
+  const sharedSales = transactionReads?.transaction === Dexie.currentTransaction
+    && Dexie.currentTransaction?.mode === 'readwrite'
+    && transactionReads?.ledgerId === ledgerId && transactionReads?.workspaceId === workspaceId
+    ? transactionReads.salesRows : null;
   const batchId = adoptionContext?.batchId ?? makeId("COST");
   const publishedAt = new Date().toISOString();
   const auditActor = await resolveProfitAuditActor(publishedBy);
@@ -763,7 +771,7 @@ async function publishVerifiedErpCostBatch({
     throw new Error("找不到与当前账本和工作区匹配的 ERP 成本请求，不能发布正式成本。");
   }
   const legacyScope = adoptionContext && !recordedRequest.expectedSkus?.length
-    ? legacyExpectedSkusForRequest({ request: recordedRequest, salesRows: await db.salesRows.where('ledgerId').equals(ledgerId).toArray(), workspaceId })
+    ? legacyExpectedSkusForRequest({ request: recordedRequest, salesRows: sharedSales ?? await db.salesRows.where('ledgerId').equals(ledgerId).toArray(), workspaceId })
     : null;
   if (legacyScope?.reason) throw new Error(`旧 ERP 请求范围无法安全恢复：${legacyScope.reason}`);
   const verifiedExpectedSkus = Array.isArray(recordedRequest.expectedSkus) && recordedRequest.expectedSkus.length > 0
@@ -889,7 +897,7 @@ async function publishVerifiedErpCostBatch({
     if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能直接更新成本。");
     if (String(workspaceId) !== String(ledger.workspaceId)) throw new Error("ERP 成本发布工作区与账本不一致。");
     const [salesRows, approvals] = await Promise.all([
-      db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
+      sharedSales ?? db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
       db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     ]);
     const identities = buildLedgerSkuIdentityIndex(salesRows);
@@ -1046,7 +1054,7 @@ async function publishVerifiedErpCostBatch({
       await db.erpCostRows.bulkAdd(storedRows);
     }
 
-    const coverage = await readLedgerCostCoverage(ledgerId);
+    const coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows });
     const savedLedger = {
       ...ledger,
       ...buildLedgerCoveragePatch(

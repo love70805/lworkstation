@@ -21,6 +21,17 @@ async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:0
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:i===1&&recordsB?recordsB:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
+it('reads sales once when confirming and independently publishing a purchase inside the same transaction', async () => {
+ const {ledger,envelope}=await seed({prices:[5,1]});const receipt=await receiveErpCostInboxEnvelope({envelope});
+ let readCount=0;const count=row=>{readCount++;return row;};db.salesRows.hook('reading').subscribe(count);
+ let result;
+ try{result=await processErpCostInboxAdoption({inboxId:receipt.id,resolutions:[{warehouseSku:'WH-B',recordId:'R-B',action:'confirm_true_price',originalUnitPrice:1,resolvedUnitPrice:1,reason:'真实采购价',resolvedBy:'finance',resolvedAt:new Date().toISOString()}]});}
+ finally{db.salesRows.hook('reading').unsubscribe(count);}
+ expect(readCount).toBe(2); // Two ledger rows, one source read instead of three.
+ expect(result.adoption.summary.adoptedCount).toBe(2);
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.unitCost).sort()).toEqual([1,5]);
+ expect((await db.ledgers.get(ledger.id)).status).toBe('ready');
+});
 it('preserves the receipt but never adopts a batch bound to an earlier ledger import', async () => {
  const {ledger,request,envelope}=await seed({prices:[5,8],id:'changed-import'});
  await db.erpCostRequests.update(request.id,{ledgerVersion:'[]'});
