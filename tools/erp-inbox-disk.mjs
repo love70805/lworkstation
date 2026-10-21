@@ -207,7 +207,7 @@ export function createInboxDisk(file, {checkpointBytes=512*1024, checkpointOpera
     const directory=path.dirname(path.resolve(file)),base=path.basename(file);
     for(const name of await fs.readdir(directory)) {
       const suffix=name.startsWith(base)?name.slice(base.length):'';
-      if(/^\.legacy-[a-f0-9]{64}\.json$/.test(suffix)
+      if(/^\.legacy-[a-f0-9]{64}\.json(?:\.[a-f0-9-]{36}\.tmp)?$/.test(suffix)
         ||/^\.(?:journal\.)?[a-f0-9-]{36}\.tmp$/.test(suffix))await fs.rm(path.join(directory,name),{force:true});
     }
     revision=await inboxDiskRevision(file);

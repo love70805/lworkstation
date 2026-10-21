@@ -176,8 +176,9 @@ async function clearBusinessRecords(records) {
   resettingBusinessData = true;
   workspaceResetRevision++;
   try {
-    const runtimeKinds = new Set(['extension-status', 'selection-extension-status', 'selection-active-context']);
-    const retained = records.filter(record => runtimeKinds.has(record.kind));
+    // Only the active ERP transport heartbeat survives. Retired selection
+    // contexts contain old workspace/member scope and must be erased too.
+    const retained = records.filter(record => record.kind === 'extension-status');
     await spoolStorage.reset(retained);
     const clearLeases = leaseWriteChain.catch(() => {}).then(async () => {
       await leaseStorage.reset([]);

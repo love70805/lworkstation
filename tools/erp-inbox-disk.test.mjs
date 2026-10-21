@@ -75,6 +75,8 @@ try {
   const oldJournal=await fs.readFile(clearFile+'.journal');
   assert.ok((await fs.readdir(directory)).some(name=>name.startsWith('clear.json.legacy-')));
   await fs.writeFile(path.join(directory,'manual-export.json'),original);
+  const interruptedBackup=clearFile+'.legacy-'+('a'.repeat(64))+'.json.00000000-0000-4000-8000-000000000000.tmp';
+  await fs.writeFile(interruptedBackup,original);
   for(const blob of await fs.readdir(clearFile+'.evidence'))await fs.writeFile(path.join(clearFile+'.evidence',blob),'damaged evidence');
   await clearStore.reset([]);
   assert.deepEqual(await clearStore.read(),[]);

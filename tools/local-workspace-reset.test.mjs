@@ -79,7 +79,7 @@ try {
   assert.equal(await fs.readFile(spoolPath+'.journal','utf8'),'');
   assert.equal(receipt.ok, true); assert.ok(receipt.clearedCount >= 6);
   assert.deepEqual(await readRecords(`${spoolPath}.leases.json`), []);
-  assert.deepEqual(await readRecords(spoolPath), runtime);
+  assert.deepEqual(await readRecords(spoolPath), runtime.filter(record=>record.kind==='extension-status'));
   assert.equal((await call('/erp/v1/requests?workspaceId=W&includeHistory=true')).records.length, 0);
   assert.equal((await call('/erp/v1/collection-tasks?workspaceId=W')).tasks.length, 0);
   await call(`${taskUrl}/control`, { workspaceId: 'W', action: 'resume' }, 404);
