@@ -2,7 +2,17 @@
 
 更新时间：2026-10-21
 
-## 当前公开稳定 Latest：0.4.49
+## 当前公开稳定 Latest：0.4.50
+
+共享利润页与成本页账本快照，回传按当前账本查询；列表先投影状态、打开详情再核验证据。人工更正建立本次计算索引、保存事务复用销售与 ERP 成本，历史补查只读取目标 SKU 的可靠来源。成本优先、档案按需补齐保持，完整证据与保存校验保留。
+
+[PR #272](https://github.com/love70805/lworkstation/pull/272) 已合并，[PR CI](https://github.com/love70805/lworkstation/actions/runs/39530319171) 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/39530959236) 均通过。软件 PR 头与合并提交的跟踪树一致。标签 `v0.4.50` 固定于 `321731590feb2604128a583b803d1328d68e2c27`；2026-10-21T02:10:39Z 已公开稳定 Latest（非草稿、非预发布），发布服务已核对四资产上传状态、字节数及 SHA256 digest。公开下载无需验证。
+
+基线 `9c00019ba21df19d19bf45acc4941d062580debf`，最终候选源码 `5180a9fdf7392dc6cb73fb240cc46836fc35a1c2`。安装包 120613492 字节，SHA256 `22DA931595FA5179A5C3CB6AB5B25097A3E80F824EDCF276DE91A64ABFB1D78B`。候选 `releases/candidates/0.4.50/`，原始私有证据 `archive/cost-interaction-performance-20261021/`。
+
+详见[0.4.50 发布记录](RELEASE_0.4.50.md)。
+
+## 0.4.49（历史公开稳定）
 
 [v0.4.49](https://github.com/love70805/lworkstation/releases/tag/v0.4.49)：修复 ERP 采购查询新增 `changePrice` 后无法保存采集任务；正常采集遇到映射缺失时，自动补查可靠历史关联的唯一仓库，证据随原批次回传，在原成本核对页的“逐项更正 / 人工更正”中确认采用。移除独立“仓库历史核价”悬浮按钮，旧证据 JSON 经原“手动导入”继续使用。内置助手 8.0.48；历史关联不自动升级为正式 ERP 成本，人工优先、零值/微小值、撤销和定稿保护保持。
 
