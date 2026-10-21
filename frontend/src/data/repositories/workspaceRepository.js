@@ -5,12 +5,12 @@ import { validateReportBackup } from "../../domain/profitReportBackup";
 import { replaySyncRecoveryPayload } from "../../domain/syncRecovery";
 import { clearDesktopInboxData } from "../../lib/clearDesktopInboxData";
 import { clearAllCostDrafts,captureCostDrafts } from "../../lib/costMatchingDraft";
-import {saveClearBackup,callWorkspaceSafety,prepareDesktopRestore} from '../../lib/workspaceSafety';
-import {DESKTOP_RESTORE_COMMIT} from '../../../../integrations/contracts/desktop-inbox-backup.mjs';
+import {callWorkspaceSafety,prepareDesktopRestore} from '../../lib/workspaceSafety';
+import {DESKTOP_RESTORE_COMMIT,WORKSPACE_CLEAR_CONFIRMATION} from '../../../../integrations/contracts/desktop-inbox-backup.mjs';
 import applicationPackage from '../../../package.json';
 import { withWorkspaceReset, setWorkspaceRecoveryError } from "../../lib/workspaceBackgroundTasks";
 import { captureBusinessPreferences, preparePreferenceRestore, applyPreferenceRestore, finishPreferenceRestore,
-  readPreferenceRestoreJournal, PREFERENCE_RESTORE_COMMIT } from '../../lib/businessPreferencesBackup';
+  readPreferenceRestoreJournal, PREFERENCE_RESTORE_COMMIT, clearBusinessPreferences } from '../../lib/businessPreferencesBackup';
 import {
   validateWorkspaceBackupPayload,
   WORKSPACE_BACKUP_FORMAT,
@@ -369,33 +369,23 @@ export async function restoreWorkspaceSyncRecoveryPayload(payload, restoredBy = 
 
 export async function clearLocalWorkspaceData(clearedBy = "local-user",{onProgress}={}) {
   return withWorkspaceReset(async () => {
-    await resolvePreferenceJournal();
-    let backup,desktopCleared=false;
+    if(readPreferenceRestoreJournal()||await db.settings.get(DESKTOP_RESTORE_COMMIT))throw new Error('上次恢复尚未完成，请先重试恢复检查。');
+    let desktopCleared=false;
     try {
-      onProgress?.('正在保存并校验清空前完整备份…');
-      const payload=await createWorkspaceBackupPayload();
-      backup=await saveClearBackup(payload);
-      // No data store is cleared until the verified file covers all of them.
-      await assertWorkspaceUnchanged(payload);
-      onProgress?.('备份已保存，正在清空本机数据…');
-      await clearDesktopInboxData(undefined,{backupToken:backup.backupToken});
+      onProgress?.('正在清空本机数据…');
+      await clearDesktopInboxData(undefined,{confirmation:WORKSPACE_CLEAR_CONFIRMATION});
       desktopCleared=true;
       clearAllCostDrafts();
-      await clearWorkspaceTables(clearedBy,backup,payload);
-      return backup;
-    }catch(error){if(backup)error.backup=backup;throw error;}
-    finally {if(backup&&!desktopCleared)await callWorkspaceSafety('cancelClearBackup',{backupToken:backup.backupToken});}
+      clearBusinessPreferences();
+      await clearWorkspaceTables(clearedBy);
+      return {ok:true};
+    }catch(error){error.clearStarted=desktopCleared||error.clearStarted===true;throw error;}
   });
 }
 
-async function assertWorkspaceUnchanged(payload,{drafts=true}={}) {
-  for(const table of db.tables)if(JSON.stringify(await table.toArray())!==JSON.stringify(payload.tables[table.name]))throw new Error('保存备份期间工作区数据发生变化，已停止清空，请重试。');
-  if(drafts&&JSON.stringify(captureCostDrafts())!==JSON.stringify(payload.localCostDrafts))throw new Error('保存备份期间成本草稿发生变化，已停止清空，请重试。');
-}
-async function clearWorkspaceTables(clearedBy,backup,payload) {
+async function clearWorkspaceTables(clearedBy) {
   const clearedAt = new Date().toISOString();
   await db.transaction("rw", db.tables, async () => {
-    await assertWorkspaceUnchanged(payload,{drafts:false});
     for (const table of db.tables) await table.clear();
     await db.workspaces.put({
       id: DEFAULT_WORKSPACE_ID,
@@ -412,7 +402,7 @@ async function clearWorkspaceTables(clearedBy,backup,payload) {
       action: "workspace_reset",
       actorId: clearedBy,
       createdAt: clearedAt,
-      after: { status: "empty", currency: "CNY",backupFilePath:backup.filePath,backupSha256:backup.sha256 },
+      after: { status: "empty", currency: "CNY", automaticBackup: false },
     });
   });
 }

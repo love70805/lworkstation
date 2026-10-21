@@ -35,7 +35,7 @@ async function replace(file, text) {
 }
 
 // Only metadata is checkpointed. Immutable evidence is written once by content hash.
-// No retention rule deletes original purchase evidence, including after a reset.
+// Routine compaction preserves evidence; an explicitly confirmed reset erases it.
 export function createInboxDisk(file, {checkpointBytes=512*1024, checkpointOperations=64}={}) {
   const blobs = `${file}.evidence`, log = `${file}.journal`;
   let state, revision, validLogBytes=0, operations=0, legacyText;
@@ -191,5 +191,27 @@ export function createInboxDisk(file, {checkpointBytes=512*1024, checkpointOpera
     revision=await inboxDiskRevision(file);
     return {revision,writtenBytes:Buffer.byteLength(line)};
   }
-  return {load,write,evidence,saveEvidence,get revision(){return revision;}};
+  async function reset(entries, expectedRevision) {
+    if(!state)await load();
+    if(expectedRevision!==undefined&&expectedRevision!==await inboxDiskRevision(file))throw Object.assign(new Error('ERP 收件文件已被外部修改，请重试清空。'),{code:'ERP_INBOX_SPOOL_CHANGED'});
+    if(entries.some(entry=>entry.ref!==undefined))throw new Error('清空后的运行状态不能包含业务证据。');
+    // Same generation + a newer sequence makes the old journal harmless if the
+    // process stops after publishing the checkpoint and before rotating the log.
+    const next={format:FORMAT,version:2,generation:state.generation,sequence:state.sequence+1,entries:keyEntries(entries)};
+    await replace(file,JSON.stringify({...next,checksum:digest(JSON.stringify(next))}));
+    state=next;legacyText=undefined;
+    await replace(log,'');validLogBytes=0;operations=0;
+    const evidenceDirectory=path.resolve(blobs);
+    if(evidenceDirectory!==`${path.resolve(file)}.evidence`)throw new Error('无效的收件证据清理目录。');
+    await fs.rm(evidenceDirectory,{recursive:true,force:true});
+    const directory=path.dirname(path.resolve(file)),base=path.basename(file);
+    for(const name of await fs.readdir(directory)) {
+      const suffix=name.startsWith(base)?name.slice(base.length):'';
+      if(/^\.legacy-[a-f0-9]{64}\.json(?:\.[a-f0-9-]{36}\.tmp)?$/.test(suffix)
+        ||/^\.(?:journal\.)?[a-f0-9-]{36}\.tmp$/.test(suffix))await fs.rm(path.join(directory,name),{force:true});
+    }
+    revision=await inboxDiskRevision(file);
+    return {revision};
+  }
+  return {load,write,reset,evidence,saveEvidence,get revision(){return revision;}};
 }

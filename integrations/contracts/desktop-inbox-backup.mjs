@@ -1,5 +1,7 @@
 export const DESKTOP_INBOX_BACKUP_FORMAT='lworkstation-desktop-inbox-backup';
 export const DESKTOP_RESTORE_COMMIT='desktopInboxRestoreCommit';
+export const WORKSPACE_CLEAR_CONFIRMATION='清空本机数据';
+export const INBOX_CLEAR_MAINTENANCE_ACTION='begin-clear';
 export const INBOX_RUNTIME_KINDS=new Set(['extension-status','selection-extension-status','selection-active-context']);
 const businessKinds=new Set(['request','batch','catalog-batch','collection-task','selection-capture']);
 export function validateDesktopInboxBackup(value) {

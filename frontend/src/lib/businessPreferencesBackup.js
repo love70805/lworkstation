@@ -8,6 +8,16 @@ export const BUSINESS_PREFERENCE_FIELDS = Object.freeze({
 });
 export const PREFERENCE_RESTORE_JOURNAL = 'lworkstation:backup-preferences-transaction:v1';
 export const PREFERENCE_RESTORE_COMMIT = 'businessPreferenceRestoreCommit';
+export function clearBusinessPreferences(storage = globalThis.localStorage, session = globalThis.sessionStorage) {
+  const prefixes=[...Object.values(BUSINESS_PREFERENCE_FIELDS),'shopeers:profit-filter:','shopeers-product-library-filters-v1'];
+  for (const target of [storage,session]) {
+    if (!target) continue;
+    const keys = Array.from({length:target.length}, (_, index) => target.key(index));
+    for (const key of keys) {
+      if (prefixes.some(prefix => key?.startsWith(prefix))) target.removeItem(key);
+    }
+  }
+}
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fail = () => { throw new Error('备份业务筛选配置校验失败。'); };
 function keys(value, allowed) {

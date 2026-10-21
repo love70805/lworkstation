@@ -7,7 +7,7 @@ export async function clearDesktopInboxData(runtime = getDesktopRuntime(),input)
   }
   const result = await runtime.clearInboxData(input);
   if (result?.ok !== true) {
-    throw new Error(result?.error || 'ERP 历史任务及回传记录未清空，请重试。');
+    throw Object.assign(new Error(result?.error || 'ERP 历史任务及回传记录未清空，请重试。'),{clearStarted:result?.clearStarted===true});
   }
   return result;
 }

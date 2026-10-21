@@ -7,13 +7,7 @@ export async function callWorkspaceSafety(method,input,{optional=false}={}) {
     throw new Error('完整备份保护需要新版桌面工作站，请升级并重启后重试。');
   }
   const receipt=await runtime[method](input);
-  if(receipt?.ok!==true&&!(method==='saveClearBackup'&&receipt?.status==='saved'))throw new Error(receipt?.error||'完整备份或恢复未完成。');
-  return receipt;
-}
-export async function saveClearBackup(payload) {
-  const {json}=serializeWorkspaceBackup(payload);
-  const receipt=await callWorkspaceSafety('saveClearBackup',{fileName:'before-clear.json',json});
-  if(receipt?.status!=='saved'||!receipt.backupToken||!receipt.filePath||!receipt.sha256)throw new Error('清空前备份未成功保存并校验，未执行清空。');
+  if(receipt?.ok!==true)throw new Error(receipt?.error||'完整备份或恢复未完成。');
   return receipt;
 }
 export async function prepareDesktopRestore(snapshot,currentPayload,targetPayload) {
