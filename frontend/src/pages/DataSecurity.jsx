@@ -36,6 +36,7 @@ import { runtimeConfig } from "../config/runtimeConfig";
 import { validateCloudSeedPayload } from "../domain/cloudSeed";
 import { replaySyncRecoveryPayload, validateSyncRecoveryPayload } from "../domain/syncRecovery";
 import { backupSaveMessage, downloadWorkspaceBackup, requireSavedWorkspaceBackup } from "../lib/workspaceBackupDownload";
+import { withWorkspaceReset } from '../lib/workspaceBackgroundTasks';
 
 const ROLLBACK_BEFORE_RESTORE_KEY = "shopeers-rollback-before-restore";
 
@@ -186,8 +187,10 @@ export default function DataSecurity() {
     let savedBackup = null;
     setExporting(true);
     try {
-      const payload = await createWorkspaceBackupPayload();
-      const download = await downloadWorkspaceBackup(payload, { prefix });
+      const {payload,download} = await withWorkspaceReset(async()=>{
+        const payload=await createWorkspaceBackupPayload();
+        return {payload,download:await downloadWorkspaceBackup(payload,{prefix})};
+      });
       const notice = backupSaveMessage(download);
       if (notice) { notify(notice, 'info'); return null; }
       savedBackup = download;

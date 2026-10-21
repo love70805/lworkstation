@@ -39,6 +39,13 @@ let workspaceResetRevision = 0;
 let resettingBusinessData = false;
 let maintenance = null;
 
+async function businessSnapshot() {
+  const business=(await spoolStorage.exportRecords()).filter(record=>!INBOX_RUNTIME_KINDS.has(record.kind));
+  const leases=await leaseStorage.exportRecords();
+  const snapshot={format:DESKTOP_INBOX_BACKUP_FORMAT,formatVersion:1,generatedAt:new Date().toISOString(),records:business,leases,recordCount:business.length,leaseCount:leases.length};
+  validateDesktopInboxBackup(snapshot);
+  return snapshot;
+}
 async function maintainBusinessData(payload,records) {
   if(payload?.action==='validate') {validateDesktopInboxBackup(payload.snapshot);if(!payload.snapshot)throw new Error('缺少桌面收件备份。');return {ok:true};}
   if(payload?.action==='begin'||payload?.action===INBOX_CLEAR_MAINTENANCE_ACTION) {
@@ -50,16 +57,14 @@ async function maintainBusinessData(payload,records) {
         maintenance={id:crypto.randomUUID(),expiresAt:Date.now()+15*60*1000};
         return {ok:true,maintenanceId:maintenance.id};
       }
-      const business=(await spoolStorage.exportRecords()).filter(record=>!INBOX_RUNTIME_KINDS.has(record.kind));
-      const leases=await leaseStorage.exportRecords();
-      const snapshot={format:DESKTOP_INBOX_BACKUP_FORMAT,formatVersion:1,generatedAt:new Date().toISOString(),records:business,leases,recordCount:business.length,leaseCount:leases.length};
-      validateDesktopInboxBackup(snapshot);
+      const snapshot=await businessSnapshot();
       maintenance={id:crypto.randomUUID(),expiresAt:Date.now()+15*60*1000};
       return {ok:true,maintenanceId:maintenance.id,snapshot};
     } catch(e) {resettingBusinessData=false;throw e;}
   }
   if(!maintenance||payload?.maintenanceId!==maintenance.id)throw Object.assign(new Error('收件备份保护已失效，请重新备份后重试。'),{status:409});
   if(payload.action==='hold') {maintenance.expiresAt=Date.now()+15*60*1000;return {ok:true};}
+  if(payload.action==='snapshot')return {ok:true,snapshot:await businessSnapshot()};
   if(payload.action==='end') {maintenance=null;resettingBusinessData=false;return {ok:true};}
   if(payload.action==='restore') {
     validateDesktopInboxBackup(payload.snapshot);

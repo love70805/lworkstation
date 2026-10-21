@@ -4,7 +4,7 @@ const crypto=require('node:crypto');
 const {createBackupSaver,validateBackupRequest}=require('./workspace-backup.cjs');
 const digest=text=>crypto.createHash('sha256').update(text).digest('hex');
 
-function createWorkspaceSafety({directory,getInboxService,operations=fs,isTrusted=()=>true}) {
+function createWorkspaceSafety({directory,getInboxService,operations=fs,isTrusted=()=>true,saveBackup:saveManualBackup}) {
   let busy=false;
   const journalPath=path.join(directory,'pending-inbox-restore.json');
   const service=()=>{const value=getInboxService();if(!value)throw new Error('本机收件服务尚未就绪。');return value;};
@@ -15,12 +15,15 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     try {for(;;){const {bytesRead}=await handle.read(buffer,0,buffer.length,null);if(!bytesRead)break;hash.update(buffer.subarray(0,bytesRead));}}finally{await handle.close();}
     return hash.digest('hex');
   }
-  async function saveCombined(input,snapshot,prefix) {
+  function combinedBackup(input,snapshot) {
     const workspace=JSON.parse(validateBackupRequest(input).json);
     workspace.formatVersion=2;
     workspace.desktopInbox=snapshot;
     workspace.manifest={...workspace.manifest,desktopInboxIncluded:true,desktopRecordCount:snapshot.recordCount,desktopLeaseCount:snapshot.leaseCount};
-    const json=JSON.stringify(workspace),fileName=`${prefix}-${new Date().toISOString().replace(/[:.]/g,'-')}-${crypto.randomUUID()}.json`;
+    return {fileName:input.fileName,json:JSON.stringify(workspace)};
+  }
+  async function saveCombined(input,snapshot,prefix) {
+    const {json}=combinedBackup(input,snapshot),fileName=`${prefix}-${new Date().toISOString().replace(/[:.]/g,'-')}-${crypto.randomUUID()}.json`;
     await operations.mkdir(directory,{recursive:true});
     const receipt=await saver({fileName,json});
     if(receipt.status!=='saved')throw new Error(receipt.error||'恢复前备份未保存，未执行恢复。');
@@ -46,6 +49,16 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     busy=true;try{return await run();}finally{busy=false;}
   }
   async function end(maintenanceId) {if(maintenanceId)await maintain({action:'end',maintenanceId});}
+  async function exportBackup(input) {
+    return locked(async()=>{
+      const workspace=JSON.parse(validateBackupRequest(input).json);
+      if(workspace.format!=='shopeers-local-backup'||typeof saveManualBackup!=='function')throw new Error('完整本机导出接口尚未就绪。');
+      if(await readJournal())throw new Error('上次恢复尚未完成，请先重试恢复检查。');
+      const session=await maintain({action:'begin'});
+      try {return await saveManualBackup(combinedBackup(input,session.snapshot));}
+      finally{await end(session.maintenanceId);}
+    });
+  }
   async function clear({confirmation}={}) {
     return locked(async()=>{
       if(confirmation!=='清空本机数据')throw new Error('请输入“清空本机数据”确认永久清空。');
@@ -84,10 +97,16 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
       if(committedId) {
         try {await maintain({action:'hold',maintenanceId:journal.maintenanceId});}
         catch {
+          // Persist this obligation before acquiring a replacement lock. A
+          // failed save must remain mandatory on every retry, even when hold()
+          // succeeds against the replacement service process.
+          journal.backupRequired=true;await writeJournal(journal);
           const session=await maintain({action:'begin'});journal.maintenanceId=session.maintenanceId;await writeJournal(journal);
-          // If the service restarted, preserve anything delivered since the
-          // previous process before completing the committed database restore.
-          await saveCombined(journal.targetWorkspace,session.snapshot,'Lworkstation-recovery-current');
+        }
+        if(journal.backupRequired) {
+          const current=await maintain({action:'snapshot',maintenanceId:journal.maintenanceId});
+          journal.recoveryBackup=await saveCombined(journal.targetWorkspace,current.snapshot,'Lworkstation-recovery-current');
+          journal.backupRequired=false;await writeJournal(journal);
         }
         await maintain({action:'restore',maintenanceId:journal.maintenanceId,snapshot:journal.target});
         journal.phase='committed';await writeJournal(journal);
@@ -104,6 +123,6 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
       return {ok:true};
     });
   }
-  return {clear,prepareRestore,recoverRestore,finishRestore};
+  return {clear,exportBackup,prepareRestore,recoverRestore,finishRestore};
 }
 module.exports={createWorkspaceSafety};

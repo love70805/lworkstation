@@ -15,6 +15,7 @@ const service={
     if(['begin','begin-clear'].includes(request.action)){assert.equal(active,null);active='lock-'+calls.length;return {ok:true,maintenanceId:active,snapshot:structuredClone(snapshot)};}
     if(request.action==='validate'){assert.equal(request.snapshot.format,snapshot.format);return {ok:true};}
     assert.equal(request.maintenanceId,active,'all destructive steps require the held maintenance lock');
+    if(request.action==='snapshot')return {ok:true,snapshot:structuredClone(snapshot)};
     if(request.action==='end')active=null;
     if(request.action==='restore')restored=structuredClone(request.snapshot);
     return {ok:true};
@@ -44,5 +45,23 @@ try {
   assert.equal(restored,null,'a rolled-back IndexedDB transaction never imports target desktop receipts');
   await resumed.finishRestore({id:aborted.id});assert.equal(active,null);
   assert.ok((await fs.readdir(directory)).some(name=>name.includes('before-restore')),'rollback backups survive journal cleanup');
+  const interrupted=await resumed.prepareRestore({snapshot,currentWorkspace:input});
+  active=null;restored=null;
+  let preserveFailure=true;
+  const recovering=createWorkspaceSafety({...options,operations:{...fs,open:async(file,...args)=>{
+    if(preserveFailure&&String(file).includes('Lworkstation-recovery-current'))throw new Error('ENOSPC recovery fixture');
+    return fs.open(file,...args);
+  }}});
+  await assert.rejects(recovering.recoverRestore({committedId:interrupted.id}),/ENOSPC recovery/);
+  await assert.rejects(recovering.recoverRestore({committedId:interrupted.id}),/ENOSPC recovery/,'retry must preserve new receipts before replacing them');
+  assert.equal(restored,null,'failed recovery backups never import the target');
+  preserveFailure=false;await recovering.recoverRestore({committedId:interrupted.id});
+  assert.deepEqual(restored,snapshot);await recovering.finishRestore({id:interrupted.id});
+  let exported;
+  const manual=createWorkspaceSafety({...options,saveBackup:async request=>{exported=JSON.parse(request.json);return {status:'saved',fileName:request.fileName,sizeBytes:Buffer.byteLength(request.json)};}});
+  const manualReceipt=await manual.exportBackup(input);
+  assert.equal(manualReceipt.status,'saved');assert.equal(exported.formatVersion,2);
+  assert.deepEqual(exported.desktopInbox,snapshot);assert.equal(exported.manifest.desktopRecordCount,1);
+  assert.equal(active,null,'manual export always releases its maintenance lock');
   console.log('Workspace safety: confirmed direct clear without backup, restore backup failure, restart commit and abort recovery passed');
 }finally{await fs.rm(directory,{recursive:true,force:true});}

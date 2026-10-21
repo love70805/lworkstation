@@ -1,5 +1,10 @@
 export function serializeWorkspaceBackup(payload) {
-  const json = JSON.stringify(payload, null, 2);
+  let json;
+  try { json = JSON.stringify(payload); }
+  catch(error) {
+    if(error instanceof RangeError)throw new Error('备份数据超过当前单个 JSON 可生成的大小，文件未保存。');
+    throw error;
+  }
   return {
     json,
     sizeBytes: new Blob([json]).size,

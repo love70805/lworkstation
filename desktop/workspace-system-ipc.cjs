@@ -1,5 +1,5 @@
 const { isAllowedWorkspaceUrl } = require('./workspace-navigation.cjs');
-const { createBackupSaver } = require('./workspace-backup.cjs');
+const { createBackupSaver,validateBackupRequest } = require('./workspace-backup.cjs');
 const { createWorkspaceSafety } = require('./workspace-safety.cjs');
 
 function isTrustedWorkspaceSender(event, contents, devUrl) {
@@ -12,7 +12,7 @@ function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecy
   let activeEvent;
   const trusted = event => isTrustedWorkspaceSender(event, getContents(), devUrl);
   let safetyEvent;
-  const safety=backupDirectory&&getInboxService?createWorkspaceSafety({directory:backupDirectory,getInboxService,operations,isTrusted:()=>trusted(safetyEvent||{})}):null;
+  const safety=backupDirectory&&getInboxService?createWorkspaceSafety({directory:backupDirectory,getInboxService,operations,isTrusted:()=>trusted(safetyEvent||{}),saveBackup:input=>save(input)}):null;
   async function runSafety(event,method,input) {
     if(!trusted(event))return {ok:false,status:'failed',error:'无效的工作站请求。'};
     if(safetyEvent)return {ok:false,status:'failed',error:'已有本机备份或恢复正在进行。'};
@@ -43,7 +43,11 @@ function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecy
     // A single sender can have only one active native save dialog.
     if (activeEvent) return { status: 'failed', error: '已有备份正在保存，请完成后再试。' };
     activeEvent = event;
-    try { return await save(input); } finally { activeEvent = null; }
+    try {
+      const payload=JSON.parse(validateBackupRequest(input).json);
+      return payload.format==='shopeers-local-backup'?await runSafety(event,'exportBackup',input):await save(input);
+    }catch(error){return {status:'failed',error:error.message};}
+    finally { activeEvent = null; }
   });
   ipcMain.handle('workspace:get-close-behavior', event => {
     if (!trusted(event)) return { ok: false, error: '无效的工作站请求。' };
