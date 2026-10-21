@@ -1,3 +1,5 @@
+> 历史兼容资料：当前产品为纯本机 Windows 桌面版，账号云端方案已取消。云部署入口已移至 docs/retired-cloud-deployment/，不用于本轮运行、发布或验收。以下保留旧协议与迁移背景。
+
 # Lworkstation 开发与部署指南
 
 当前版本默认是本机 IndexedDB 模式。未配置云端变量时，应用不会上传业务数据；`sync:dev` 只提供本机开发合同服务。

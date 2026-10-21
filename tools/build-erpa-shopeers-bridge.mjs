@@ -4,11 +4,15 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const sourceDir = path.resolve(process.argv[2] || "");
-const outputDir = path.resolve(process.argv[3] || "");
-if (!sourceDir || !outputDir) {
+if (!process.argv[2]?.trim() || !process.argv[3]?.trim()) {
   console.error("用法：node tools/build-erpa-shopeers-bridge.mjs <v8.0扩展目录> <输出目录>");
   process.exit(2);
+}
+const sourceDir = path.resolve(process.argv[2]);
+const outputDir = path.resolve(process.argv[3]);
+const relativeOutput = path.relative(sourceDir, outputDir);
+if (!relativeOutput || (!relativeOutput.startsWith(`..${path.sep}`) && relativeOutput !== '..' && !path.isAbsolute(relativeOutput))) {
+  throw new Error('输出目录不能等于或位于来源目录内。');
 }
 
 const manifestPath = path.join(outputDir, "manifest.json");
@@ -19,7 +23,12 @@ const canonicalManifest = JSON.parse(await fs.readFile(path.join(canonicalExtens
 const frontendRequire = createRequire(path.join(toolsRoot, "..", "frontend", "package.json"));
 const esbuild = createRequire(frontendRequire.resolve("vite/package.json"))("esbuild");
 const catalogBundle = await esbuild.build({ entryPoints: [path.join(toolsRoot, "..", "frontend", "src", "domain", "erpCatalogRequest.js")], bundle: true, absWorkingDir: path.join(toolsRoot, ".."), format: "esm", platform: "node", write: false, legalComments: "none" });
-await fs.writeFile(path.join(toolsRoot, "erp-inbox-server-catalog-contract.mjs"), catalogBundle.outputFiles[0].text, "utf8");
+const contractPath=path.join(toolsRoot,'erp-inbox-server-catalog-contract.mjs');
+const generatedContract=catalogBundle.outputFiles[0].text;
+const previousContract=await fs.readFile(contractPath,'utf8').catch(error=>{if(error.code==='ENOENT')return null;throw error;});
+if(previousContract===null||previousContract.replace(/\r\n/g,'\n')!==generatedContract.replace(/\r\n/g,'\n')) {
+  await fs.writeFile(contractPath,previousContract?.includes('\r\n')?generatedContract.replace(/\r?\n/g,'\r\n'):generatedContract,'utf8');
+}
 const secureModules = [
   "background.js",
   "catalog-collector.js",

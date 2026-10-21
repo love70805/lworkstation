@@ -38,7 +38,7 @@ export async function verifyErpCatalogTransport({
   syntheticSpoolBytes = 0,
   expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }],
 } = {}) {
-  const sourceRoot = legacyScope ? path.join(workspaceRoot, 'frontend/public/integrations/erp-assistant/ERP-Assistant-v8.0.37-shopeers-bridge/src') : extensionRoot;
+  const sourceRoot = legacyScope ? path.join(workspaceRoot, 'tools/__fixtures__/erp-assistant-v8.0.37') : extensionRoot;
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lworkstation-erp-catalog-"));
   const spoolPath = path.join(temporaryRoot, "isolated-inbox.json");
   if (syntheticSpoolBytes > 0) {

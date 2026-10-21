@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const workspaceRoot = fileURLToPath(new URL("../", import.meta.url));
+const extensionVersion = JSON.parse(await readFile(path.join(workspaceRoot, "integrations/erp-assistant-extension/manifest.json"), "utf8")).version;
 const frontendRequire = createRequire(path.join(workspaceRoot, "frontend", "package.json"));
 const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
 const Papa = frontendRequire("papaparse");
@@ -229,7 +230,7 @@ async function verifyCalculatedCsv(extensionRoot) {
     assert.equal(extension.deliveries.length, 1, "the real ERP calculation must reach evidence delivery");
     assert.equal(requests.length, 4, "cost verifies directory and mapping before reading scoped purchase evidence");
     const delivery = extension.deliveries[0];
-    assert.equal(delivery.meta.extensionVersion, "8.0.48");
+    assert.equal(delivery.meta.extensionVersion, extensionVersion);
     assert.equal(delivery.meta.previewScope, "ledger_month");
     const originalDelivery = JSON.stringify(delivery);
     const originalCache = window.localStorage.getItem(cacheKey);

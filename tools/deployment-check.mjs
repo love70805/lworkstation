@@ -13,7 +13,7 @@ const execFile = promisify(execFileCallback);
 const requiredFiles = [
   join(frontendRoot, "package.json"),
   join(frontendRoot, ".env.example"),
-  join(frontendRoot, "vercel.json"),
+  join(workspaceRoot, "docs", "retired-cloud-deployment", "vercel.json"),
   join(frontendRoot, "supabase", "migrations", "0001_shopeers_core.sql"),
   join(frontendRoot, "docs", "DEPLOYMENT_GUIDE.md"),
   join(workspaceRoot, "docs", "CLOUD_UPLOAD_GUIDE.md"),
@@ -21,8 +21,8 @@ const requiredFiles = [
   join(workspaceRoot, "tools", "build-erpa-shopeers-bridge.mjs"),
   join(workspaceRoot, "tools", "cloud-preflight.mjs"),
   join(workspaceRoot, ".github", "workflows", "quality.yml"),
-  join(workspaceRoot, ".github", "workflows", "deploy-cloud.yml"),
-  join(workspaceRoot, "render.yaml"),
+  join(workspaceRoot, "docs", "retired-cloud-deployment", "github-workflow.yml"),
+  join(workspaceRoot, "docs", "retired-cloud-deployment", "render.yaml"),
 ];
 
 async function exists(path) {
@@ -63,13 +63,13 @@ async function main() {
   const [packageText, envText, vercelText, runtimeText, guideText, serverText, workflowText, deployWorkflowText, renderText] = await Promise.all([
     readFile(join(frontendRoot, "package.json"), "utf8"),
     readFile(join(frontendRoot, ".env.example"), "utf8"),
-    readFile(join(frontendRoot, "vercel.json"), "utf8"),
+    readFile(join(workspaceRoot, "docs", "retired-cloud-deployment", "vercel.json"), "utf8"),
     readFile(join(frontendRoot, "src", "config", "runtimeConfig.js"), "utf8"),
     readFile(join(frontendRoot, "docs", "DEPLOYMENT_GUIDE.md"), "utf8"),
     readFile(join(workspaceRoot, "tools", "sync-production-server.mjs"), "utf8"),
     readFile(join(workspaceRoot, ".github", "workflows", "quality.yml"), "utf8"),
-    readFile(join(workspaceRoot, ".github", "workflows", "deploy-cloud.yml"), "utf8"),
-    readFile(join(workspaceRoot, "render.yaml"), "utf8"),
+    readFile(join(workspaceRoot, "docs", "retired-cloud-deployment", "github-workflow.yml"), "utf8"),
+    readFile(join(workspaceRoot, "docs", "retired-cloud-deployment", "render.yaml"), "utf8"),
   ]);
   const packageJson = JSON.parse(packageText);
   const requiredScripts = ["test", "build", "erp:bridge:test", "sync:check", "sync:postgres", "seed:check", "schema:check", "deploy:check", "cloud:check"];
@@ -85,7 +85,9 @@ async function main() {
     SHOPEERS_JWT_ISSUER: "",
     SHOPEERS_SYNC_CORS_ORIGINS: "",
   });
+  const activeCloudConfigPresent=(await Promise.all([join(workspaceRoot,".github/workflows/deploy-cloud.yml"),join(workspaceRoot,"render.yaml"),join(frontendRoot,"vercel.json")].map(exists))).some(Boolean);
   const checks = {
+    activeCloudDeploymentRetired: !activeCloudConfigPresent,
     requiredFiles: true,
     requiredScripts: missingScripts.length === 0,
     localDefault: /VITE_SYNC_PROVIDER=local/.test(envText),
