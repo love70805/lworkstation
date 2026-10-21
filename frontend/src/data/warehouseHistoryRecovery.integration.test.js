@@ -35,6 +35,15 @@ beforeEach(async () => {
   receipt = await receiveErpCostInboxEnvelope({ envelope });
 });
 afterEach(async () => { await db.delete(); });
+it('does not load historical receipt bodies when the target has no reliable historical mapping', async () => {
+  await db.erpCostBatches.update('OLD-BATCH', { status: 'voided' });
+  let reads = 0;
+  const recordRead = row => { reads++; return row; };
+  db.erpCostInbox.hook('reading').subscribe(recordRead);
+  try { expect(await previewRecoveredWarehouseCost(input)).toBeNull(); }
+  finally { db.erpCostInbox.hook('reading').unsubscribe(recordRead); }
+  expect(reads).toBe(0);
+});
 it('collects evidence through the usual inbox without adopting a historical mapping as formal ERP', async () => {
   expect(receipt.adoptionError).toBeUndefined();
   expect(await getLatestLedgerCosts(ledgerId)).toEqual([]);

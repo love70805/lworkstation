@@ -3,7 +3,7 @@ import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope } from "../domain/erpInboxContract";
 import { ERP_ADOPTION_VERSION, summarizeErpAdoption } from "../domain/erpAutomaticAdoption";
-import { buildErpInboxReview } from "./erpInboxReview";
+import { buildErpInboxReview, readErpInboxReviewEvidence } from "./erpInboxReview";
 
 const ledger = { id: "LEDGER", workspaceId: "WORKSPACE", period: "2026-09", status: "cost_pending" };
 const record = (id, price, date = "2026-09-01", quantity = 10) => ({ recordId: id, unitPrice: price, purchaseDate: date, quantity, eligible: true, exclusionReasons: [] });
@@ -50,6 +50,36 @@ function lowHistory() {
 }
 
 describe("ERP inbox review display projection", () => {
+  it('summarizes statuses without reading procurement bodies, then validates only the opened receipt', () => {
+    const first = receipt(1, [{ sku: 'A', price: 1 }]), other = receipt(2, [{ sku: 'B', price: 1 }]);
+    let firstReads = 0, otherReads = 0;
+    for (const [item, count] of [[first, () => firstReads++], [other, () => otherReads++]]) {
+      const evidence = item.inbox.envelope.batch.warehouseEvidence;
+      Object.defineProperty(item.inbox.envelope.batch, 'warehouseEvidence', { enumerable: true, get() { count(); return evidence; } });
+    }
+    const summary = review([first, other], [row('A'), row('B')], { includeEvidence: false });
+    expect(summary.exceptions).toHaveLength(2);
+    expect(summary.exceptions.every(item => item.match === null)).toBe(true);
+    expect(firstReads + otherReads).toBe(0);
+    const detail = readErpInboxReviewEvidence({ ...first, ledger, platformSku: 'A' });
+    expect(detail.error).toBeNull(); expect(detail.match.status).toBe('anomaly_pending');
+    expect(firstReads).toBeGreaterThan(0); expect(otherReads).toBe(0);
+  });
+  it('does not let lazy summaries authorize tampered or foreign evidence', () => {
+    const item = receipt(1, [{ sku: 'A', price: 1 }]);
+    item.inbox.envelope.batch.batchId = 'FORGED';
+    const detail = readErpInboxReviewEvidence({ ...item, ledger, platformSku: 'A' });
+    expect(detail.match).toBeNull(); expect(detail.error).toBeTruthy();
+    expect(readErpInboxReviewEvidence({ ...item, ledger: { ...ledger, workspaceId: 'FOREIGN' }, platformSku: 'A' }).match).toBeNull();
+    expect(readErpInboxReviewEvidence({ ...item, ledger, platformSku: 'UNREGISTERED' }).match).toBeNull();
+  });
+  it('does not describe deferred legacy evidence as absent', () => {
+    const item = receipt(1, [{ sku: 'A', price: 4.59 }], { status: 'pending', inboxFields: { adoption: null } });
+    const summary = review([item], [row('A')], { includeEvidence: false });
+    expect(summary.exceptions[0].reasonText).toContain('展开核对采购证据');
+    expect(summary.exceptions[0].reasonText).not.toContain('重新采集');
+    expect(readErpInboxReviewEvidence({ ...item, ledger, platformSku: 'A' }).match.status).toBe('matched');
+  });
   it("shows all six receipts and combines their 1 + 2 + 4 exceptions, without including healthy SKC siblings", () => {
     const specs = [1, 2, 4, 0, 0, 0].map((count, batch) => [
       { sku: `NORMAL-${batch}`, price: 4.59 },

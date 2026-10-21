@@ -7,14 +7,14 @@ import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision"
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
 import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
-import { selectManualOverride } from "../domain/manualCostOverride";
+import { createManualOverrideLookup } from "../domain/manualCostOverride";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import ManualCostDialog from "./ManualCostDialog";
 import WarehouseHistoryDialog from './WarehouseHistoryDialog';
 import { readErpHistoryMappings } from '../data/repositories/profitRepository';
 import CostMatchGroupRows, { CostMatchTableHeader } from "./CostMatchGroupRows";
 import { ErpPendingSkuList } from './ErpInboxReviewPanel';
-import { buildErpInboxReview } from '../lib/erpInboxReview';
+import { buildErpInboxReview, readErpInboxReviewEvidence } from '../lib/erpInboxReview';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -48,11 +48,11 @@ import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchi
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 const costViewCache = new Map();
 
-export function CostMatchingContent({ validatedContext, onPublished }) {
-  const snapshot = useLatestSalesImport(validatedContext?.ledgerId);
+export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot }) {
+  const snapshot = useLatestSalesImport(validatedContext?.ledgerId, suppliedSnapshot);
   if (snapshot === undefined) return <Panel>正在验证成本核对范围...</Panel>;
   if (!validatedContext?.ledgerId || snapshot?.ledger?.id !== validatedContext.ledgerId || snapshot?.ledger?.workspaceId !== validatedContext.workspaceId || (validatedContext.store !== "all" && !snapshot.rows.some((row) => row.store === validatedContext.store))) return <Panel><p role="alert">账本或店铺不属于当前工作区，请重新选择。</p></Panel>;
-  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} />;
+  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} />;
 }
 
 export default function CostMatching() {
@@ -167,7 +167,7 @@ function SelectedPurchaseEvidence({ match }) {
   </details>;
 }
 
-function CostMatchingBody({ validatedContext, onPublished }) {
+function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const desktop = isDesktopRuntime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -175,7 +175,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const fileInputRef = useRef(null);
   const ledgerId = validatedContext?.ledgerId ?? searchParams.get("ledger");
   const filterSearchKey = searchParams.toString();
-  const snapshot = useLatestSalesImport(ledgerId);
+  const snapshot = useLatestSalesImport(ledgerId, suppliedSnapshot);
+  const manualFor = useMemo(() => createManualOverrideLookup(snapshot?.approvals), [snapshot?.approvals]);
+  const queryLedgerId = ledgerId ?? snapshot?.ledger?.id;
   const profitFilter = useMemo(() => ({ ...readProfitFilter(searchParams, ledgerId || snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId }), ...(validatedContext ? { storeFilter: validatedContext.store } : {}) }), [filterSearchKey, ledgerId, validatedContext, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const profitHref = useMemo(() => buildProfitHref({ ledgerId, workspaceId: snapshot?.ledger?.workspaceId, ...profitFilter }), [ledgerId, profitFilter, snapshot?.ledger?.workspaceId]);
   const importSearch = useMemo(() => {
@@ -192,9 +194,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const tableHandleRef = useRef(null);
   const rememberTable = useCallback(handle => { if (handle) tableHandleRef.current = handle; }, []);
   const viewStateRef = useRef(null);
-  const latestRequest = useLiveQuery(() => getLatestErpCostRequest(ledgerId), [ledgerId], null);
-  const allInboxRecords = useLiveQuery(() => listErpCostInbox({ statuses: ["pending", "loaded", "applied", "rejected", "voided"] }), [], []);
-  const requestRecords = useLiveQuery(() => listErpCostRequests(), [], []);
+  const latestRequest = useLiveQuery(() => queryLedgerId ? getLatestErpCostRequest(queryLedgerId) : null, [queryLedgerId], null);
+  const allInboxRecords = useLiveQuery(() => queryLedgerId ? listErpCostInbox({ ledgerId: queryLedgerId, statuses: ["pending", "loaded", "applied", "rejected", "voided"] }) : [], [queryLedgerId], []);
+  const requestRecords = useLiveQuery(() => queryLedgerId ? listErpCostRequests(queryLedgerId) : [], [queryLedgerId], []);
   const collection = useErpCollectionTasks(snapshot?.ledger?.workspaceId, snapshot?.ledger?.id);
   const collectionTask = collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
   const activeCollection = isActiveErpCollection(collectionTask) ? collectionTask : null;
@@ -336,9 +338,9 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   ])), [snapshot?.costs]);
   const formalSalesLines = useMemo(() => salesLines.map((row) => {
       const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
-      const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost: formalCostsBySku.get(row.canonicalPlatformSku), manualOverride: selectManualOverride(snapshot?.approvals, scope) });
+      const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost: formalCostsBySku.get(row.canonicalPlatformSku), manualOverride: manualFor(scope) });
       return { ...row, finalizable: decision.eligibleForExactProfit, costIdentityIssue: decision.identityIssue ?? null };
-    }), [formalCostsBySku, salesLines, ledgerIdentities, snapshot?.ledger, snapshot?.approvals]);
+    }), [formalCostsBySku, salesLines, ledgerIdentities, snapshot?.ledger, manualFor]);
   const supplierSelectionKey = JSON.stringify(profitFilter.supplierSelection);
   const scopedSalesLines = useMemo(() => filterProfitRowsByScope(formalSalesLines, profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly]);
   const filteredSalesLines = useMemo(() => searchProfitRows(scopedSalesLines, profitFilter.query), [scopedSalesLines, profitFilter.query]);
@@ -801,13 +803,13 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   const reviewMatchBySku = useMemo(() => new Map((reconciliation?.matches ?? []).map(row => [row.canonicalPlatformSku, row])), [reconciliation]);
   const allReviewRows = useMemo(() => formalSalesLines.map(row => {
     const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
-    const manualOverride = selectManualOverride(snapshot?.approvals, scope);
+    const manualOverride = manualFor(scope);
     const erpCost = formalCostsBySku.get(row.canonicalPlatformSku);
     const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost, manualOverride });
     const match = reviewMatchBySku.get(row.canonicalPlatformSku);
     return { ...row, manualOverride, erpCost, decision, match, unitCost: manualOverride?.approvedAmount ?? decision.unitCost ?? match?.unitCost };
-  }), [formalSalesLines, formalCostsBySku, reviewMatchBySku, ledgerIdentities, snapshot?.ledger, snapshot?.approvals]);
-  const inboxReview = useMemo(() => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows }), [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
+  }), [formalSalesLines, formalCostsBySku, reviewMatchBySku, ledgerIdentities, snapshot?.ledger, manualFor]);
+  const inboxReview = useMemo(() => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows, includeEvidence: false }), [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
   const viewedEvidenceBatch = inboxReview.batches.find(batch => batch.id === currentInbox?.id);
   const filteredReviewRowIds = useMemo(() => new Set(filteredSalesLines.map(row => row.id)), [filteredSalesLines]);
   const reviewRows = useMemo(() => allReviewRows.filter(row => filteredReviewRowIds.has(row.id)), [allReviewRows, filteredReviewRowIds]);
@@ -832,7 +834,15 @@ function CostMatchingBody({ validatedContext, onPublished }) {
   };
   const closeCostDetails = () => { if (manualTarget?.returnToBatches) setInboxQueueOpen(true); setManualTarget(null); };
   const baseTargetRow = manualTarget ? allReviewRows.find(row => row.id === manualTarget.id) ?? null : null;
-  const targetReviewEntry = manualTarget?.inboxId ? inboxReview.batches.find(batch => batch.id === manualTarget.inboxId)?.entries.find(entry => entry.reviewRowId === manualTarget.id) : inboxReview.exceptions.find(entry => entry.reviewRowId === manualTarget?.id);
+  const targetReviewSummary = manualTarget?.inboxId ? inboxReview.batches.find(batch => batch.id === manualTarget.inboxId)?.entries.find(entry => entry.reviewRowId === manualTarget.id) : inboxReview.exceptions.find(entry => entry.reviewRowId === manualTarget?.id);
+  const targetReviewEntry = useMemo(() => {
+    if (!targetReviewSummary) return null;
+    const inbox = workspaceInboxRecords.find(record => record.id === targetReviewSummary.inboxId);
+    if (!inbox) return targetReviewSummary;
+    const request = requestRecords.find(record => record.id === inbox.requestId);
+    const evidence = readErpInboxReviewEvidence({ inbox, request, ledger: snapshot?.ledger, platformSku: targetReviewSummary.platformSku, reviewRow: baseTargetRow });
+    return { ...targetReviewSummary, match: evidence.match, reasonText: evidence.error || evidence.reasonText || targetReviewSummary.reasonText };
+  }, [targetReviewSummary, baseTargetRow, workspaceInboxRecords, requestRecords, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId, snapshot?.ledger?.period]);
   const targetRow = baseTargetRow ? { ...baseTargetRow, match: targetReviewEntry?.inboxId === currentInbox?.id && baseTargetRow.match?.status !== 'missing' ? baseTargetRow.match ?? targetReviewEntry?.match : targetReviewEntry?.match ?? baseTargetRow.match } : null;
   const targetIdentityConflict = targetRow?.decision.identityIssue?.code === 'ledger_sku_skc_conflict';
   const targetAdoptionItem = targetRow ? adoptionItemsBySku.get(targetRow.canonicalPlatformSku) : null;

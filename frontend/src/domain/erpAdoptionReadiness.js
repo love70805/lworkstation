@@ -1,10 +1,11 @@
 import { canonicalPlatformSku } from "./identifiers";
-import { selectManualOverride, storeIdentity } from "./manualCostOverride";
+import { createManualOverrideLookup, storeIdentity } from "./manualCostOverride";
 
 // ERP rows are shared by a ledger SKU, while manual costs belong to a store.
 // A manual exception therefore requires coverage of every selling store in
 // this ledger, including stores hidden by the current page filter.
 export function erpAdoptionReadiness({ ledger, salesRows = [], approvals = [], reconciliation } = {}) {
+  const manualFor = createManualOverrideLookup(approvals);
   const storesBySku = new Map();
   for (const row of salesRows) {
     if (row.workspaceId !== ledger?.workspaceId || row.ledgerId !== ledger?.id) continue;
@@ -17,7 +18,7 @@ export function erpAdoptionReadiness({ ledger, salesRows = [], approvals = [], r
   for (const row of reconciliation?.matches ?? []) {
     if (row.status === "matched") { matchedRows.push(row); continue; }
     const stores = [...(storesBySku.get(canonicalPlatformSku(row.platformSku)) ?? [])];
-    const manual = stores.map(store => selectManualOverride(approvals, {
+    const manual = stores.map(store => manualFor({
       workspaceId: ledger?.workspaceId, ledgerId: ledger?.id, store, platformSku: row.platformSku,
     }));
     if (stores.length && stores.every(Boolean) && manual.every(Boolean)) {

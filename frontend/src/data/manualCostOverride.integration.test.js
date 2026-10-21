@@ -20,6 +20,15 @@ const save = (store, unitCost) => saveManualCostOverride({ ledgerId, store, plat
 async function lines() { const snapshot = await getLedgerSnapshot(ledgerId); return calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals }); }
 
 describe("manual exact cost overrides", () => {
+  it('uses the same transaction sales snapshot for audit and coverage instead of rereading every ledger row', async () => {
+    let reads = 0;
+    const recordRead = row => { reads++; return row; };
+    db.salesRows.hook('reading').subscribe(recordRead);
+    try { await save('甲', 0.0000001); }
+    finally { db.salesRows.hook('reading').unsubscribe(recordRead); }
+    expect(reads).toBe(2);
+    expect((await db.ledgers.get(ledgerId)).costSummary).toMatchObject({ manualOverrideCount: 1, missingCount: 1 });
+  });
   it("isolates same SKU across stores and preserves zero versus missing and tiny positive values", async () => {
     const zero = await save("甲", 0);
     expect(zero).toMatchObject({ approvedBy: "finance-test", approvedAmount: 0, referenceCost: { kind: "manual_override", store: "甲", previousUnitCost: null } });

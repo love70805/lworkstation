@@ -1,5 +1,5 @@
 import { canonicalPlatformSku } from "./identifiers";
-import { manualSnapshot, selectManualOverride, storeSkuKey } from "./manualCostOverride";
+import { manualSnapshot, createManualOverrideLookup, storeSkuKey } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
 import { buildLedgerSkuIdentityIndex, ledgerCostIdentityIssue, LEDGER_COST_IDENTITY_VERSION } from './ledgerCostIdentity';
 
@@ -22,6 +22,7 @@ function collectSkus(items, predicate = () => true) {
 }
 
 export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId, period = null }) {
+  const manualFor = createManualOverrideLookup(approvals);
   const identities = buildLedgerSkuIdentityIndex(salesRows);
   const expectedRows = new Map(salesRows.map((row) => [storeSkuKey(row.store, row.platformSku ?? row.sku), row]));
   const expectedSkus = new Set(expectedRows.keys());
@@ -33,7 +34,7 @@ export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], app
 
   const matchedErpSkus = new Set([...expectedRows].filter(([, row]) => erpSkus.has(canonicalPlatformSku(row.platformSku ?? row.sku))).map(([key]) => key));
   const manualKeys = new Set([...expectedRows].filter(([, row]) => !ledgerCostIdentityIssue(identities.get(canonicalPlatformSku(row.platformSku ?? row.sku)))
-    && selectManualOverride(approvals, { workspaceId: row.workspaceId ?? workspaceId, ledgerId: row.ledgerId ?? ledgerId, store: row.store, platformSku: row.platformSku ?? row.sku })).map(([key]) => key));
+    && manualFor({ workspaceId: row.workspaceId ?? workspaceId, ledgerId: row.ledgerId ?? ledgerId, store: row.store, platformSku: row.platformSku ?? row.sku })).map(([key]) => key));
   const matchedApprovalSkus = new Set([...expectedRows].filter(([key, row]) => approvedSkus.has(canonicalPlatformSku(row.platformSku ?? row.sku)) && !matchedErpSkus.has(key) && !manualKeys.has(key)).map(([key]) => key));
   // Reviewed 1688 values remain a traceable fallback reference. They do not
   // satisfy ERP coverage and cannot make a formal monthly profit finalizable.

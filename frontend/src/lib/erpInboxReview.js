@@ -87,6 +87,7 @@ function matchesForReview(inbox, request, ledger, scope, wantedSkus) {
       expectedRequestId: inbox.requestId,
       expectedPlatformSkcs: request?.platformSkcs ?? null,
       expectedSkus: request?.expectedSkus?.length ? request.expectedSkus : null,
+      expectedHistoryMappings: request?.historyMappings ?? [],
     });
     if (result.batch.batchId !== inbox.batchId || result.batch.requestId !== inbox.requestId) {
       throw new Error("回传记录与原始批次或请求不一致。");
@@ -116,7 +117,7 @@ function anomalyReason(match) {
   return descriptions;
 }
 
-function reasonForEntry({ inbox, request, ledger, item, row, match, boundary, error }) {
+function reasonForEntry({ inbox, request, ledger, item, row, match, boundary, error, evidenceDeferred = false }) {
   const reasons = [];
   if (inbox.status === "voided") reasons.push("本次 ERP 采用已撤回，原始证据仅供历史查看");
   if (inbox.status === "rejected") reasons.push("本次 ERP 回传已拒绝，原始证据仅供历史查看");
@@ -149,12 +150,12 @@ function reasonForEntry({ inbox, request, ledger, item, row, match, boundary, er
     if (match?.status === "missing" || item?.state === "missing") reasons.push("本次回传未取得该平台 SKU 的可用 ERP 成本");
     else if (item?.state === "anomaly_pending") reasons.push("原始采购异常仍需核对");
     else if (match?.status === "matched") reasons.push("本次已生成 ERP 候选价格，但当前尚无有效采用成本");
-    else reasons.push("当前尚无可用 ERP 采购证据，请重新采集或人工更正");
+    else reasons.push(evidenceDeferred ? "已收到 ERP 回传，请展开核对采购证据" : "当前尚无可用 ERP 采购证据，请重新采集或人工更正");
   }
   return unique(reasons).join("；");
 }
 
-function reviewEntry({ batch, request, ledger, item, row, match, boundary, error, sourceRow }) {
+function reviewEntry({ batch, request, ledger, item, row, match, boundary, error, sourceRow, evidenceDeferred }) {
   const sku = skuOf(row ?? item ?? sourceRow);
   return {
     id: JSON.stringify([batch.id, row ? storeSkuKey(row.store, sku) : sku]),
@@ -170,7 +171,7 @@ function reviewEntry({ batch, request, ledger, item, row, match, boundary, error
     attribute: row?.attribute ?? match?.attribute ?? sourceRow?.attribute ?? "",
     productName: match?.productName ?? sourceRow?.productName ?? "",
     unitCost: finiteAmount(match?.unitCost ?? match?.previewUnitCost ?? sourceRow?.previewUnitCost ?? sourceRow?.unitCost),
-    reasonText: reasonForEntry({ inbox: batch.inbox, request, ledger, item, row, match, boundary, error }),
+    reasonText: reasonForEntry({ inbox: batch.inbox, request, ledger, item, row, match, boundary, error, evidenceDeferred }),
     state: item?.state ?? (match?.status === "anomaly_pending" ? "anomaly_pending" : "missing"),
     currentMissing: Boolean(row && currentMissing(row)),
     canCorrect: Boolean(row && row.id != null && row.decision?.identityIssue?.code !== "ledger_sku_skc_conflict"),
@@ -193,7 +194,7 @@ function missingWithoutEvidence(row, latest = null) {
 
 // Display-only projection. Decisions supplied by the parent remain authoritative;
 // historical receipts and their adoption states are never edited or re-adopted.
-export function buildErpInboxReview({ inboxes = [], requests = [], ledger, reviewRows = [] } = {}) {
+export function buildErpInboxReview({ inboxes = [], requests = [], ledger, reviewRows = [], includeEvidence = true } = {}) {
   if (!ledger?.workspaceId || !ledger?.id || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledger.period ?? "")) return { batches: [], exceptions: [] };
   const requestById = new Map(requests.map(request => [text(request.id ?? request.requestId), request]));
   const currentRows = scopedReviewRows(reviewRows, ledger);
@@ -212,14 +213,16 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
     const scope = expectedScope(inbox, request);
     const historical = new Map(list(inbox.adoption?.items).filter(item => EXCEPTION_STATES.has(item.state) && skuOf(item)).map(item => [skuOf(item), item]));
     const wantedSkus = new Set([...historical.keys(), ...[...scope.keys()].filter(sku => (rowsBySku.get(sku) ?? []).some(currentMissing))]);
-    const { matches, boundary, error } = matchesForReview(inbox, request, ledger, scope, wantedSkus);
+    const { matches, boundary, error } = includeEvidence
+      ? matchesForReview(inbox, request, ledger, scope, wantedSkus)
+      : { matches: new Map(), boundary: null, error: null };
     const summary = inbox.adoption?.summary;
     const automaticCount = RETIRED_STATUSES.has(inbox.status) ? 0 : summary ? Math.max(0, Number(summary.adoptedCount ?? 0) - Number(summary.manualEffectiveCount ?? 0))
       : list(inbox.adoption?.items).filter(item => item.state === "adopted").length;
     const batch = { id: inbox.id, inbox, batchId: inbox.batchId, index: index + 1, total: scoped.length,
       skcCount: new Set(list(source.query?.platformSkcs).map(skcOf).filter(Boolean)).size,
       automaticCount, currentMissingCount: 0, coveredCount: 0, historicalExceptionCount: historical.size, entries: [] };
-    const sourceOrder = erpSourceOrder(request ?? { requestedAt: inbox.receivedAt ?? inbox.envelope?.sentAt }, { ...source, batchId: inbox.batchId });
+    const sourceOrder = erpSourceOrder(request ?? { requestedAt: inbox.receivedAt ?? inbox.envelope?.sentAt }, { generatedAt: source.generatedAt, batchId: inbox.batchId });
     for (const sku of wantedSkus) {
       const item = historical.get(sku) ?? list(inbox.adoption?.items).find(candidate => skuOf(candidate) === sku);
       const sourceRow = list(source.rows).find(row => skuOf(row) === sku && row.ledgerScopeRole !== "auxiliary");
@@ -227,7 +230,7 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
       const relevantRows = historical.has(sku) ? rows : rows.filter(currentMissing);
       if (!rows.length && historical.has(sku)) relevantRows.push(null);
       for (const row of relevantRows) {
-        const entry = reviewEntry({ batch, request, ledger, item, row, match: matches.get(sku), boundary, error, sourceRow });
+        const entry = reviewEntry({ batch, request, ledger, item, row, match: matches.get(sku), boundary, error, sourceRow, evidenceDeferred: !includeEvidence });
         batch.entries.push(entry);
         if (entry.currentMissing) {
           const key = storeSkuKey(row.store, sku);
@@ -245,4 +248,16 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
     return latest && !RETIRED_STATUSES.has(latest.inbox.status) ? latest.entry : missingWithoutEvidence(row, latest);
   });
   return { batches, exceptions };
+}
+
+// A summary never authorizes a cost. Opened details validate just their selected
+// receipt, and every write still goes through the authoritative repository.
+export function readErpInboxReviewEvidence({ inbox, request, ledger, platformSku, reviewRow = null }) {
+  if (!ledger || !inbox || !belongsToLedger(inbox, request, ledger)) return { match: null, error: '回传不属于当前账本。' };
+  const sku = skuOf({ platformSku }), scope = expectedScope(inbox, request);
+  if (!sku || !scope.has(sku)) return { match: null, error: '当前 SKU 不属于本批登记范围。' };
+  const { matches, boundary, error } = matchesForReview(inbox, request, ledger, scope, new Set([sku]));
+  const match = matches.get(sku) ?? null;
+  return { match, error, reasonText: reasonForEntry({ inbox, request, ledger, row: reviewRow,
+    item: list(inbox.adoption?.items).find(item => skuOf(item) === sku), match, boundary, error }) };
 }

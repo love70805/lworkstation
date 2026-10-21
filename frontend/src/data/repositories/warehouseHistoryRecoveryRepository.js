@@ -22,9 +22,8 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
   if (!target) return null;
   const identity = buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(platformSku));
   if (identity?.platformSkcs.size !== 1) return null;
-  const [costs, approvals, imports, inboxes] = await Promise.all([
+  const [costs, approvals] = await Promise.all([
     getLatestLedgerCosts(ledgerId), db.costApprovals.where('ledgerId').equals(ledgerId).toArray(),
-    db.importBatches.where('ledgerId').equals(ledgerId).toArray(), db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray(),
   ]);
   const scope = { workspaceId: ledger.workspaceId, ledgerId, store, platformSku };
   const decision = resolveLedgerCostDecision({ ...scope, period: ledger.period, identity,
@@ -32,8 +31,13 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
   if (decision.eligibleForExactProfit) return null;
   // Re-read current published identities so a subsequently voided or conflicting
   // source cannot be adopted merely because a request once carried it.
-  const expectedSkus = rows.map(row => ({ platformSku: row.platformSku, platformSkc: row.platformSkc }));
+  const expectedSkus = [{ platformSku: target.platformSku, platformSkc: target.platformSkc }];
   const known = await readErpHistoryMappings({ ledgerId, expectedSkus });
+  if (!known.length) return null;
+  const [imports, inboxes] = await Promise.all([
+    db.importBatches.where('ledgerId').equals(ledgerId).toArray(),
+    inboxId ? db.erpCostInbox.bulkGet([inboxId]).then(rows => rows.filter(Boolean)) : db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray(),
+  ]);
   const sources = inboxes.filter(inbox => inbox.workspaceId === ledger.workspaceId && ['pending', 'loaded', 'applied'].includes(inbox.status)
     && (!inboxId || inbox.id === inboxId)).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
   for (const inbox of sources) {
