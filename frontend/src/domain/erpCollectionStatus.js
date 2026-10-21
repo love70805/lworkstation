@@ -30,7 +30,8 @@ export function erpCollectionPresentation(task) {
   const catalogRunning = !inactive && catalogExecution && batches.some(batch => batch.catalogStatus === 'running');
   const costRunning = !inactive && batches.some(batch => batch.status === 'running');
   const delivering = !inactive && batches.some(batch => batch.status === 'collected' && !batch.deliveryId);
-  const preparingCatalog = !inactive && (task.catalogMode !== 'on_demand' || task.runMode === 'catalog' && task.runnerId) && ['cost_complete', 'partial'].includes(task.status)
+  const preparingCatalog = !inactive && (task.runMode === 'catalog' && task.runnerId
+    || task.executionProtocol !== 2 && task.status === 'running' && task.phase === 'catalog')
     && batches.some(batch => batch.deliveryId && !batch.catalogStatus);
   const running = catalogRunning || costRunning || delivering || preparingCatalog || task?.status === 'pausing';
   const terminal = !task || ['stopped', 'completed', 'invalidated'].includes(task.status);

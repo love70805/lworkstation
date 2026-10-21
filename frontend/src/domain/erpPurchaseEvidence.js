@@ -1,6 +1,6 @@
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
 import { parseSalesAddedDate } from "./salesAnalytics";
-import { purchaseTimestamp } from "./erpPurchaseSelection";
+import { purchaseDateFacts } from "./erpPurchaseSelection";
 import { normalizeErpCatalogFields } from "./erpCatalogFields";
 
 const text = value => String(value ?? "").trim() || null;
@@ -25,7 +25,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const totalPriceValue = finiteNumber(record?.totalPrice ?? record?.price);
   const exclusionReasons = [...new Set((Array.isArray(record?.exclusionReasons) ? record.exclusionReasons : []).map(text).filter(Boolean))];
   const purchaseDate = text(record?.purchaseDate ?? record?.date);
-  const purchasePeriod = purchaseRecordPeriod(record);
+  const { period: purchasePeriod, timestamp } = purchaseDateFacts(record);
   const recordId = text(record?.recordId ?? record?.id) ?? `record-${index + 1}`;
   const statusFields = record?.statusFields && typeof record.statusFields === "object" && !Array.isArray(record.statusFields)
     ? { ...record.statusFields } : {};
@@ -35,7 +35,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const ledgerExclusions = new Set(["on_or_after_ledger_period", "after_ledger_period"]);
   const hasOnlyLedgerExclusions = exclusionReasons.length > 0 && exclusionReasons.every(reason => ledgerExclusions.has(reason));
   const derivedExclusionReasons = period == null ? [...exclusionReasons] : exclusionReasons.filter(reason => !ledgerExclusions.has(reason));
-  if (!warehouseSku || !purchaseDate || !purchasePeriod || purchaseTimestamp(record) <= 0
+  if (!warehouseSku || !purchaseDate || !purchasePeriod || timestamp <= 0
     || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) {
     derivedExclusionReasons.push("invalid_purchase_detail");
   }
@@ -53,7 +53,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const normalizedExclusionReasons = [...new Set(derivedExclusionReasons)];
   return {
     recordId, warehouseSku, canonicalWarehouseSku: warehouseSku ? canonicalWarehouseSku(warehouseSku) : null,
-    purchaseDate, timestamp: purchaseTimestamp(record), quantity, unitPrice,
+    purchaseDate, timestamp, quantity, unitPrice,
     totalPrice: totalPriceValue ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
     order1688: text(record?.order1688), purchaseOrderNo: text(record?.purchaseOrderNo), purchaseOrderId: text(record?.purchaseOrderId),
     supplierName: text(record?.supplierName), supplier1688Url: text(record?.supplier1688Url), statusFields,

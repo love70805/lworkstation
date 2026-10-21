@@ -1,9 +1,21 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.52",
+  "version": "0.4.53",
   "candidateOnly": true,
-  "integrationBranch": "codex/inbox-poll-memory",
+  "integrationBranch": "codex/cost-profit-responsiveness",
   "requiredCommits": [
+    {
+      "module": "v0.4.53-financial-source-refresh",
+      "commit": "fa7b964afbc9c9b54732c9b0b49184646ffeb0c8"
+    },
+    {
+      "module": "v0.4.53-evidence-responsiveness",
+      "commit": "2c8605c0935358cfcaa7ca65f60a7d1f9ff5b239"
+    },
+    {
+      "module": "v0.4.53-verified-main-baseline",
+      "commit": "36842047d9310c13a156de03fee7db6673a788ae"
+    },
     {
       "module": "v0.4.52-poll-response-lifetime",
       "commit": "9847251a88674d756a3a59aed8f0fb0f396ea791"

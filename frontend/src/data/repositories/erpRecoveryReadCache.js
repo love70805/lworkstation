@@ -66,17 +66,24 @@ async function readSalesIdentities(ledgerId) {
     revision, revisionReader: salesRevision, persist: false, boundedMemory: true, compute }) : compute();
 }
 
-async function readLedgerInputs(ledgerId) {
+async function readLedgerInputs(ledgerId, readScope) {
   const compute = async () => {
     const rows = await Promise.all(inputTables.map(table => db.table(table).where('ledgerId').equals(ledgerId).toArray()));
     return Object.fromEntries(inputTables.map((table, index) => [table, rows[index]]));
   };
   const revision = inputRevision();
-  return revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-inputs@1',
-    revision, revisionReader: inputRevision, persist: false, boundedMemory: true, compute }) : compute();
+  if (revision && readScope?.inputs?.ledgerId === ledgerId && readScope.inputs.revision === revision) return readScope.inputs.value;
+  const value = await (revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-inputs@1',
+    revision, revisionReader: inputRevision, persist: false, boundedMemory: true, compute }) : compute());
+  // A large ledger exceeds the persistent read cache's size limit. Retain only
+  // the current ledger for this sweep so every pending receipt does not clone
+  // the entire history again. A table edit forces a fresh read; ending the
+  // sweep releases this temporary owner, including oversized values.
+  if (revision && revision === inputRevision() && readScope) readScope.inputs = { ledgerId, revision, value };
+  return value;
 }
 
-export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext }) {
+export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext, readScope }) {
   const snapshot = await db.transaction('r', db.settings, db.ledgers, db.erpCostInbox, db.erpCostRequests,
     db.salesRows, db.costApprovals, db.erpCostRows, db.erpCostBatches, db.importBatches, async () => {
       const inbox = await db.erpCostInbox.get(inboxId), member = await getContext();
@@ -87,7 +94,7 @@ export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, get
       const [ledger, request] = await Promise.all([db.ledgers.get(inbox.ledgerId), db.erpCostRequests.get(inbox.requestId)]);
       // Legacy request inference has broader dependencies; keep its full path.
       if (!ledger || !request?.expectedSkus?.length) return { metadata };
-      const [sales, inputs] = await Promise.all([readSalesIdentities(inbox.ledgerId), readLedgerInputs(inbox.ledgerId)]);
+      const [sales, inputs] = await Promise.all([readSalesIdentities(inbox.ledgerId), readLedgerInputs(inbox.ledgerId, readScope)]);
       const queried = new Set((inbox.envelope?.batch?.query?.platformSkcs ?? []).map(row => skcOf(typeof row === 'string' ? { platformSkc: row } : row)).filter(Boolean));
       const wanted = new Set(request.expectedSkus.filter(row => queried.has(skcOf(row))).map(skuOf).filter(Boolean));
       const costs = inputs.erpCostRows.filter(row => !skuOf(row) || wanted.has(skuOf(row)) || row.sourceEnvelopeBatchId === inbox.batchId);
