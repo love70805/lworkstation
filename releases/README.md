@@ -1,3 +1,13 @@
+## 0.4.52 — 已验收并公开稳定（2026-10-21）
+
+基线 `a3e838e641d374b35e2b23631b3394a1271ee3dd`，候选源码 `9f6d3e405a5cb76f3fcfbb7ddb97d87a1d8b4f89`。安装包 120615692 字节，SHA256 `E6D24937D045BFDD00B2CEC2BB2EFBBAA55815AAF469E1C113600325D3FE0415`。候选 `releases/candidates/0.4.52/`，原始私有证据 `archive/memory-growth-20261021/`。
+
+215 个文件 / 1,724 项本机完整前端回归通过；共享传输和收件路径定向 3 文件 / 26 项通过。生产构建、CI 全部 30 项发布门禁及 19 组桌面检查通过。最终安装包 764 个安装文件、719 个生产输入和 667 个前端文件逐字节一致；隐藏启动、内置助手 8.0.48、更新状态 current、原生确认采购价、人工微小值更正、审计和 60 个回传记录核对通过。最终原生包连续观察及六轮更正/切页通过，可见窗口 0。
+
+[PR #276](https://github.com/love70805/lworkstation/pull/276) 已合并，[PR CI](https://github.com/love70805/lworkstation/actions/runs/39550820634) 与[软件主线质量 CI](https://github.com/love70805/lworkstation/actions/runs/39551510034) 均通过，PR 头与合并提交的跟踪树一致。标签 `v0.4.52` 固定于 `b536bd67a2b5a2013070971a210041fbe0a87111`；2026-10-21T05:51:37Z 已公开稳定 Latest（非草稿、非预发布），发布服务核对四资产上传状态、字节数及 SHA256 digest，公开下载无需验证。
+
+本机未安装。内存复现、正常轮询观察和限制见[发布记录](../docs/RELEASE_0.4.52.md)。
+
 ## 0.4.51 — 已验收并公开稳定（2026-10-21）
 
 基线 `47988a74645f7b53725b3caac3649d1770b493dc`，最终候选源码 `c117e0fda4942d14cbd61d30f39c309fe6204a74`。安装包 120615773 字节，SHA256 `44980E1607EC0D0620FA5AE0118BF037F6CD6A2207D8AAF229130BF25B858203`。候选 `releases/candidates/0.4.51/`，原始私有证据 `archive/large-data-background-20261021/`。
