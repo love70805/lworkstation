@@ -1,9 +1,17 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.49",
+  "version": "0.4.50",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-query-history-fix",
+  "integrationBranch": "codex/cost-interaction-performance",
   "requiredCommits": [
+    {
+      "module": "v0.4.50-scoped-cost-interaction-performance",
+      "commit": "7578d503d89ed416a5bbc7dd4949b9f5b787d563"
+    },
+    {
+      "module": "v0.4.50-verified-main-baseline",
+      "commit": "9c00019ba21df19d19bf45acc4941d062580debf"
+    },
     {
       "module": "v0.4.49-query-and-integrated-history",
       "commit": "19950f553842991f27758c4407f4102c8a1f66ec"
