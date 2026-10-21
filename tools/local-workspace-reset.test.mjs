@@ -68,12 +68,15 @@ try {
   assert.equal(await fs.readFile(spoolPath, 'utf8'), before, 'extension capability cannot clear history');
 
   // Runtime-only heartbeat writes racing the reset cannot leave stale leases.
-  await assert.rejects(service.clearBusinessData(),/必须先成功保存/);
-  const session=await service.maintenanceRequest({action:'begin'});
+  await assert.rejects(service.clearBusinessData(),/维护锁未就绪/);
+  const session=await service.maintenanceRequest({action:'begin-clear'});
   const renewals = Array.from({ length: 12 }, () => call(`${taskUrl}/control`, { workspaceId: 'W', action: 'heartbeat' }, [200, 404,503]));
   const receipt = await service.clearBusinessData({maintenanceId:session.maintenanceId});
   await service.maintenanceRequest({action:'end',maintenanceId:session.maintenanceId});
   await Promise.all(renewals);
+  assert.equal(session.snapshot,undefined);
+  assert.equal((await fs.readdir(root)).some(name=>name.includes('.legacy-')||name.endsWith('.evidence')),false);
+  assert.equal(await fs.readFile(spoolPath+'.journal','utf8'),'');
   assert.equal(receipt.ok, true); assert.ok(receipt.clearedCount >= 6);
   assert.deepEqual(await readRecords(`${spoolPath}.leases.json`), []);
   assert.deepEqual(await readRecords(spoolPath), runtime);
@@ -90,8 +93,8 @@ try {
   const next = await call('/erp/v1/collection-tasks', { workspaceId: 'W', requestId: newRequest.id }, 201);
   assert.notEqual(next.task.taskId, task.taskId);
   assert.equal(next.task.summary.delivered, 0);
-  const retry=await service.maintenanceRequest({action:'begin'});
-  assert.equal((await service.clearBusinessData({maintenanceId:retry.maintenanceId})).ok,true,'reset is retryable after a new full snapshot');
+  const retry=await service.maintenanceRequest({action:'begin-clear'});
+  assert.equal((await service.clearBusinessData({maintenanceId:retry.maintenanceId})).ok,true,'reset is retryable after a fresh maintenance lock');
   await service.maintenanceRequest({action:'end',maintenanceId:retry.maintenanceId});
   console.log('local reset: owner-only IPC service capability, all business histories, heartbeat race, durable restart, old-result rejection and fresh same-month task passed');
 } finally {

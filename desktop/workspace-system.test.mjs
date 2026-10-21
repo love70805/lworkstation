@@ -42,11 +42,12 @@ try {
   registerWorkspaceSystemIpc({
     ipcMain: { handle: (name, callback) => handlers.set(name, callback) },
     getContents: () => contents, getWindow: () => ({}),
-    clearInboxData: async () => {
+    backupDirectory: root,
+    getInboxService: () => ({maintenanceRequest: async request => ({ok:true,maintenanceId:'fixture-clear-lock'}),clearBusinessData: async () => {
       resetCalls++;
       if (resetFailure) throw new Error('fixture inbox disk full');
       return { ok: true, clearedCount: 4 };
-    },
+    }}),
     dialog: { showSaveDialog: async () => { dialogCalls++; return { canceled: true }; } },
     getLifecycle: () => ({ getState: () => ({ closeBehavior, trayAvailable: true }), setCloseBehavior: value => {
       if (!['tray', 'quit'].includes(value)) throw Error('invalid behavior');
@@ -70,10 +71,13 @@ try {
   assert.equal(handlers.get('workspace:set-close-behavior')(event, 'quit').closeBehavior, 'quit');
   assert.equal(handlers.get('workspace:set-close-behavior')(event, 'invalid').ok, false);
   assert.equal(closeBehavior, 'quit');
-  assert.equal((await handlers.get('workspace:clear-inbox-data')(event)).ok,false,'legacy direct clear cannot bypass a verified full backup');
+  assert.equal((await handlers.get('workspace:clear-inbox-data')(event)).ok,false,'clear requires explicit confirmation');
+  assert.equal((await handlers.get('workspace:clear-inbox-data')(event,{confirmation:'清空本机数据'})).ok,true);
+  assert.equal(resetCalls,1);
   resetFailure = true;
-  assert.equal((await handlers.get('workspace:clear-inbox-data')(event)).ok,false);
-  assert.equal(resetCalls,0);
+  const failedClear=await handlers.get('workspace:clear-inbox-data')(event,{confirmation:'清空本机数据'});
+  assert.equal(failedClear.ok,false);assert.equal(failedClear.clearStarted,true);
+  assert.equal(resetCalls,2);
 
   let trusted = true;
   const navigated = createBackupSaver({ isTrusted: () => trusted, showSaveDialog: async () => {

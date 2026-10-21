@@ -69,5 +69,25 @@ try {
   const request={requestId:'R',workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-09',platformSkcs:['A'],missingGroups:['images']};
   assert.deepEqual(erpCatalogRequestProgress(request,[archivedCatalog]),erpCatalogRequestProgress(request,[{envelope:catalog}]),'cold catalog preserves exact coverage progress');
   assert.deepEqual((await catalogStore.hydrate(archivedCatalog)).envelope,catalog);
+  const clearFile=path.join(directory,'clear.json'),clearStore=createInboxStorage(clearFile,{coldAcknowledged:true});
+  await fs.writeFile(clearFile,original);
+  const old=cloneInboxMetadata(await clearStore.read());old[0].status='acknowledged';await clearStore.write(old);
+  const oldJournal=await fs.readFile(clearFile+'.journal');
+  assert.ok((await fs.readdir(directory)).some(name=>name.startsWith('clear.json.legacy-')));
+  await fs.writeFile(path.join(directory,'manual-export.json'),original);
+  for(const blob of await fs.readdir(clearFile+'.evidence'))await fs.writeFile(path.join(clearFile+'.evidence',blob),'damaged evidence');
+  await clearStore.reset([]);
+  assert.deepEqual(await clearStore.read(),[]);
+  await assert.rejects(fs.access(clearFile+'.evidence'),{code:'ENOENT'});
+  assert.equal((await fs.readdir(directory)).some(name=>name.startsWith('clear.json.legacy-')),false);
+  assert.equal(await fs.readFile(path.join(directory,'manual-export.json'),'utf8'),original);
+  // Simulate interruption after the new checkpoint but before log rotation.
+  await fs.writeFile(clearFile+'.journal',oldJournal);
+  assert.deepEqual(await createInboxDisk(clearFile).load(),[]);
+  await clearStore.read();
+  await clearStore.reset([]);
+  assert.equal(await fs.readFile(clearFile+'.journal','utf8'),'');
+  await clearStore.write([{kind:'request',requestId:'fresh',status:'registered'}]);
+  assert.equal((await clearStore.read())[0].requestId,'fresh');
   console.log('Incremental inbox: legacy preservation, exact cold hydration/backup after worker failure, bounded journal/checkpoint, unchanged evidence, torn tail and checksum rejection passed');
 } finally {await fs.rm(directory,{recursive:true,force:true});}

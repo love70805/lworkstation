@@ -7,7 +7,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
 import {createInboxStorage, cloneInboxMetadata} from './erp-inbox-storage.mjs';
-import {DESKTOP_INBOX_BACKUP_FORMAT,INBOX_RUNTIME_KINDS,validateDesktopInboxBackup} from '../integrations/contracts/desktop-inbox-backup.mjs';
+import {DESKTOP_INBOX_BACKUP_FORMAT,INBOX_RUNTIME_KINDS,INBOX_CLEAR_MAINTENANCE_ACTION,validateDesktopInboxBackup} from '../integrations/contracts/desktop-inbox-backup.mjs';
 import { normalizeErpHistoryMappings } from '../integrations/contracts/erp-history-mappings.mjs';
 
 const port = Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790);
@@ -41,11 +41,15 @@ let maintenance = null;
 
 async function maintainBusinessData(payload,records) {
   if(payload?.action==='validate') {validateDesktopInboxBackup(payload.snapshot);if(!payload.snapshot)throw new Error('缺少桌面收件备份。');return {ok:true};}
-  if(payload?.action==='begin') {
+  if(payload?.action==='begin'||payload?.action===INBOX_CLEAR_MAINTENANCE_ACTION) {
     if(maintenance)throw Object.assign(new Error('已有数据备份或恢复正在进行。'),{status:409});
     resettingBusinessData=true;workspaceResetRevision++;
     try {
       await leaseWriteChain.catch(()=>{});
+      if(payload.action===INBOX_CLEAR_MAINTENANCE_ACTION) {
+        maintenance={id:crypto.randomUUID(),expiresAt:Date.now()+15*60*1000};
+        return {ok:true,maintenanceId:maintenance.id};
+      }
       const business=(await spoolStorage.exportRecords()).filter(record=>!INBOX_RUNTIME_KINDS.has(record.kind));
       const leases=await leaseStorage.exportRecords();
       const snapshot={format:DESKTOP_INBOX_BACKUP_FORMAT,formatVersion:1,generatedAt:new Date().toISOString(),records:business,leases,recordCount:business.length,leaseCount:leases.length};
@@ -174,9 +178,9 @@ async function clearBusinessRecords(records) {
   try {
     const runtimeKinds = new Set(['extension-status', 'selection-extension-status', 'selection-active-context']);
     const retained = records.filter(record => runtimeKinds.has(record.kind));
-    await writeSpool(retained);
+    await spoolStorage.reset(retained);
     const clearLeases = leaseWriteChain.catch(() => {}).then(async () => {
-      await leaseStorage.write([]);
+      await leaseStorage.reset([]);
       taskHeartbeats.clear();
     });
     leaseWriteChain = clearLeases;
@@ -1063,13 +1067,13 @@ const server = http.createServer(async (req, res) => {
     // evidence is serialized/fsynced in a worker; it cannot block heartbeats.
     const records = await readSpool();
     if(route==='/erp/v1/workspace-maintenance'&&req.method==='POST')return json(res,200,await maintainBusinessData(payload,records));
+    if (route === '/erp/v1/workspace-reset' && req.method === 'POST') {
+      if(!maintenance||payload?.maintenanceId!==maintenance.id)throw Object.assign(new Error('本机数据清空维护锁未就绪，请重试。'),{status:409});
+      return json(res, 200, await clearBusinessRecords(records));
+    }
     const expiredChanged = expireRegisteredRequests(records);
     const recoveredTasks = recoverCollectionTasks(records, inboxInstanceId);
     if (!runtimeOnly && (expiredChanged || recoveredTasks)) await writeSpool(records);
-    if (route === '/erp/v1/workspace-reset' && req.method === 'POST') {
-      if(!maintenance||payload?.maintenanceId!==maintenance.id)throw Object.assign(new Error('必须先成功保存清空前备份。'),{status:409});
-      return json(res, 200, await clearBusinessRecords(records));
-    }
     const taskResponse = handleCollectionTaskRequest(records, { method: req.method, url: new URL(req.url, `http://${bindHost}:${port}`), payload: payload ?? {}, instanceId: inboxInstanceId });
     if (taskResponse) {
       if(taskHeartbeat) {

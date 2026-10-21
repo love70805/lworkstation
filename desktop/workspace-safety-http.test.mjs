@@ -22,14 +22,21 @@ try {
   assert.equal(controller.getState().status,'online');
   const denied=await requestJson({port,capability,path:'/erp/v1/workspace-maintenance',method:'POST',body:{action:'begin'}});
   assert.equal(denied.statusCode,403,'the renderer/extension capability cannot export or replace local histories');
-  const safety=createWorkspaceSafety(options),saved=await safety.saveBeforeClear(input);
-  const backup=JSON.parse(await fs.readFile(saved.filePath,'utf8'));
-  assert.equal(backup.formatVersion,2,'old applications must not silently import only the IndexedDB part');
-  assert.deepEqual(backup.desktopInbox.records,initial,'backup contains exact archived purchase evidence and request metadata');
-  assert.ok(!JSON.stringify(backup).includes(capability));
+  const safety=createWorkspaceSafety(options);
+  const exported=await controller.maintenanceRequest({action:'begin'});
+  const backup={desktopInbox:exported.snapshot};
+  assert.deepEqual(backup.desktopInbox.records,initial);
+  await controller.maintenanceRequest({action:'end',maintenanceId:exported.maintenanceId});
+  const held=await controller.maintenanceRequest({action:'begin-clear'});
+  assert.equal(held.snapshot,undefined,'clear locks never export historical evidence');
   const blocked=await requestJson({port,capability,path:'/erp/v1/requests',method:'POST',body:{request:{id:'must-wait'}}});
   assert.equal(blocked.statusCode,503,'desktop snapshot remains frozen until deletion/abort');
-  await safety.clear(saved);
+  await controller.maintenanceRequest({action:'end',maintenanceId:held.maintenanceId});
+  for(const blob of await fs.readdir(spoolPath+'.evidence'))await fs.writeFile(path.join(spoolPath+'.evidence',blob),'corrupt fixture');
+  await safety.clear({confirmation:'清空本机数据'});
+  await assert.rejects(fs.access(options.directory),{code:'ENOENT'});
+  await assert.rejects(fs.access(spoolPath+'.evidence'),{code:'ENOENT'});
+  assert.equal((await fs.readdir(directory)).some(name=>name.includes('.legacy-')),false);
   let session=await controller.maintenanceRequest({action:'begin'});
   assert.equal(session.snapshot.recordCount,0);await controller.maintenanceRequest({action:'end',maintenanceId:session.maintenanceId});
   const prepared=await safety.prepareRestore({snapshot:backup.desktopInbox,currentWorkspace:input});
@@ -46,5 +53,5 @@ try {
   const status=await requestJson({port,capability});
   assert.equal(status.payload.latestBatch.rowCount,1);
   assert.equal(status.payload.latestBatch.evidenceStatus,'complete','cold summary preserves desktop evidence status');
-  console.log('Native controller HTTP: full archived evidence backup, protected freeze/reset, child restart and complete restore passed');
+  console.log('Native controller HTTP: no-snapshot clear without backup or evidence hydration, physical archive purge, protected freeze, child restart and complete restore passed');
 }finally{await controller.stop({wait:true});await fs.rm(directory,{recursive:true,force:true});}

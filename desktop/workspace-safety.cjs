@@ -6,7 +6,6 @@ const digest=text=>crypto.createHash('sha256').update(text).digest('hex');
 
 function createWorkspaceSafety({directory,getInboxService,operations=fs,isTrusted=()=>true}) {
   let busy=false;
-  const clearTokens=new Map();
   const journalPath=path.join(directory,'pending-inbox-restore.json');
   const service=()=>{const value=getInboxService();if(!value)throw new Error('本机收件服务尚未就绪。');return value;};
   const maintain=body=>service().maintenanceRequest(body);
@@ -24,9 +23,9 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     const json=JSON.stringify(workspace),fileName=`${prefix}-${new Date().toISOString().replace(/[:.]/g,'-')}-${crypto.randomUUID()}.json`;
     await operations.mkdir(directory,{recursive:true});
     const receipt=await saver({fileName,json});
-    if(receipt.status!=='saved')throw new Error(receipt.error||'清空前备份未保存，未执行清空。');
+    if(receipt.status!=='saved')throw new Error(receipt.error||'恢复前备份未保存，未执行恢复。');
     const filePath=path.join(directory,fileName),sha256=await fileDigest(filePath);
-    if(sha256!==digest(json))throw new Error('备份回读校验失败，未执行清空。');
+    if(sha256!==digest(json))throw new Error('备份回读校验失败，未执行恢复。');
     return {...receipt,filePath,sha256};
   }
   async function writeJournal(value) {
@@ -47,35 +46,20 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
     busy=true;try{return await run();}finally{busy=false;}
   }
   async function end(maintenanceId) {if(maintenanceId)await maintain({action:'end',maintenanceId});}
-  async function saveBeforeClear(input) {
+  async function clear({confirmation}={}) {
     return locked(async()=>{
-      validateBackupRequest(input);
+      if(confirmation!=='清空本机数据')throw new Error('请输入“清空本机数据”确认永久清空。');
       if(await readJournal())throw new Error('上次恢复尚未完成，请先重试恢复检查。');
-      const session=await maintain({action:'begin'});
+      const session=await maintain({action:'begin-clear'});
+      let clearStarted=false;
       try {
-        const receipt=await saveCombined(input,session.snapshot,'Lworkstation-before-clear');
-        if(!isTrusted())throw new Error('工作站已离开当前页面，未执行清空。');
-        const backupToken=crypto.randomUUID();
-        clearTokens.set(backupToken,{...receipt,maintenanceId:session.maintenanceId});
-        return {...receipt,backupToken};
-      } catch(e) {await end(session.maintenanceId);throw e;}
+        try {
+          if(!isTrusted())throw new Error('工作站已离开当前页面，未执行清空。');
+          clearStarted=true;
+          return await service().clearBusinessData({maintenanceId:session.maintenanceId});
+        }finally{await end(session.maintenanceId);}
+      }catch(error){error.clearStarted=clearStarted;throw error;}
     });
-  }
-  async function clear({backupToken}={}) {
-    return locked(async()=>{
-      const receipt=clearTokens.get(backupToken);
-      if(!receipt)throw new Error('必须先成功保存并校验清空前备份。');
-      try {
-        if(await fileDigest(receipt.filePath)!==receipt.sha256)throw new Error('清空前备份已变化，未执行清空。');
-        const result=await service().clearBusinessData({maintenanceId:receipt.maintenanceId});
-        return {...result,backupFilePath:receipt.filePath};
-      }finally{clearTokens.delete(backupToken);await end(receipt.maintenanceId);}
-    });
-  }
-  async function cancelClear({backupToken}={}) {
-    const receipt=clearTokens.get(backupToken);clearTokens.delete(backupToken);
-    if(receipt)await end(receipt.maintenanceId);
-    return {ok:true};
   }
   async function prepareRestore({snapshot,currentWorkspace,targetWorkspace}={}) {
     return locked(async()=>{
@@ -120,6 +104,6 @@ function createWorkspaceSafety({directory,getInboxService,operations=fs,isTruste
       return {ok:true};
     });
   }
-  return {saveBeforeClear,clear,cancelClear,prepareRestore,recoverRestore,finishRestore};
+  return {clear,prepareRestore,recoverRestore,finishRestore};
 }
 module.exports={createWorkspaceSafety};

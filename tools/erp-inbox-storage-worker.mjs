@@ -19,6 +19,9 @@ parentPort.on('message',message=>{
         const entries=await disk.load();
         evidence=new Map(entries.filter(e=>e.ref!==undefined).map(e=>[e.ref,{ref:e.ref,preview:e.preview}]));
         result={records:await recordsFor(entries,message.action==='snapshot'),envelopeIds:entries.map(e=>e.ref??null),revision:disk.revision};
+      } else if(message.action==='reset') {
+        result=await disk.reset(message.records.map(metadata=>({metadata})),message.expectedRevision);
+        evidence.clear();
       } else if(message.action==='hydrate') {
         const entry=evidence.get(message.envelopeId);
         if(!entry)throw Object.assign(new Error('ERP 原始证据引用已失效，请重新读取。'),{code:'ERP_INBOX_EVIDENCE_MISSING'});

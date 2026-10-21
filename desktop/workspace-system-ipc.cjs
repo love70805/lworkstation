@@ -20,16 +20,16 @@ function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecy
     try {
       if(!safety)throw new Error('完整备份接口尚未就绪，请升级并重启工作站。');
       const result=await safety[method](input);
-      if(!trusted(event)) {if(result?.backupToken)await safety.cancelClear(result);throw new Error('工作站已离开当前页面，请保留回滚备份并重试恢复检查。');}
+      if(!trusted(event))throw Object.assign(new Error('工作站已离开当前页面，请重新打开并检查操作结果。'),{clearStarted:method==='clear'});
       return result;
-    }catch(e){return {ok:false,status:'failed',error:e.message};}
+    }catch(e){return {ok:false,status:'failed',error:e.message,clearStarted:e.clearStarted===true};}
     finally{safetyEvent=null;}
   }
   ipcMain.handle('workspace:clear-inbox-data', async (event,input) => {
     if (!trusted(event)) return { ok: false, error: '无效的工作站请求。' };
     return runSafety(event,'clear',input);
   });
-  for(const [channel,method] of Object.entries({'save-clear-backup':'saveBeforeClear','cancel-clear-backup':'cancelClear','prepare-inbox-restore':'prepareRestore','recover-inbox-restore':'recoverRestore','finish-inbox-restore':'finishRestore'})) {
+  for(const [channel,method] of Object.entries({'prepare-inbox-restore':'prepareRestore','recover-inbox-restore':'recoverRestore','finish-inbox-restore':'finishRestore'})) {
     ipcMain.handle(`workspace:${channel}`,async(event,input)=>{
       return runSafety(event,method,input);
     });

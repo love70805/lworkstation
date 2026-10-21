@@ -36,7 +36,7 @@ beforeEach(async () => {
   mocks.create.mockResolvedValue({ format: 'shopeers-local-backup', formatVersion: 1, tables: {}, recordCount: 3 });
   mocks.restore.mockImplementation(async (_payload, _actor, options) => { await options?.beforeRestore?.(); mocks.applied(); return { recordCount: 1 }; });
   mocks.record.mockResolvedValue({});
-  mocks.clear.mockResolvedValue({filePath:'synthetic-backup.json'});
+  mocks.clear.mockResolvedValue({ok:true});
   mocks.snapshot.refresh.mockResolvedValue({ status: 'ready' });
   window.shopeersDesktopRuntime = { desktop: true, saveBackup: mocks.save };
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -125,16 +125,16 @@ async function confirmClear() {
     input.dispatchEvent(new Event('input',{bubbles:true}));
   });
 }
-it('shows backup progress, prevents same-event duplicate clears and retains the saved location',async()=>{
+it('shows direct clear progress and prevents same-event duplicate clears without saving a backup',async()=>{
   let finish;
-  mocks.clear.mockImplementation((_actor,options)=>{options.onProgress('正在保存并校验清空前完整备份…');return new Promise(resolve=>{finish=resolve;});});
+  mocks.clear.mockImplementation((_actor,options)=>{options.onProgress('正在清空本机数据…');return new Promise(resolve=>{finish=resolve;});});
   await confirmClear();
   await act(async()=>{button('永久清空').click();button('永久清空').click();});
   expect(mocks.clear).toHaveBeenCalledOnce();
-  expect(container.querySelector('[role=dialog]').textContent).toContain('正在保存并校验');
-  await act(async()=>finish({filePath:'synthetic-backup.json'}));
+  expect(container.querySelector('[role=dialog]').textContent).toContain('正在清空本机数据');
+  await act(async()=>finish({ok:true}));
   expect(container.querySelector('[role=dialog]')).toBeNull();
-  expect(container.querySelector('.system-operation-warning').textContent).toContain('synthetic-backup.json');
+  expect(container.querySelector('.system-operation-warning').textContent).toContain('未创建自动备份');
 });
 it('reports a completed clear accurately even when its status refresh fails',async()=>{
   mocks.snapshot.refresh.mockRejectedValueOnce(new Error('synthetic refresh error'));
@@ -142,4 +142,20 @@ it('reports a completed clear accurately even when its status refresh fails',asy
   expect(container.querySelector('[role=dialog]')).toBeNull();
   expect(container.querySelector('.toast-warning').textContent).toContain('无需重复清空');
   expect(mocks.clear).toHaveBeenCalledOnce();
+});
+
+it('requires exact confirmation and explains permanent deletion without automatic backup',async()=>{
+  await act(async()=>button('清空数据').click());
+  expect(button('永久清空').disabled).toBe(true);
+  expect(container.querySelector('[role=dialog]').textContent).toContain('不会自动备份，无法撤销');
+  expect(mocks.clear).not.toHaveBeenCalled();
+});
+it('keeps the dialog open and accurately reports partial deletion for retry',async()=>{
+  mocks.clear.mockRejectedValueOnce(Object.assign(new Error('fixture disk error'),{clearStarted:true}));
+  await confirmClear();await act(async()=>button('永久清空').click());
+  expect(container.querySelector('[role=dialog] [role=alert]').textContent).toContain('部分本机数据可能已删除');
+  expect(button('永久清空').disabled).toBe(false);
+  expect(mocks.save).not.toHaveBeenCalled();
+  await act(async()=>button('永久清空').click());
+  expect(container.querySelector('[role=dialog]')).toBeNull();
 });

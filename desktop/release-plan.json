@@ -1,9 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "0.4.53",
+  "version": "0.4.54",
   "candidateOnly": true,
-  "integrationBranch": "codex/cost-profit-responsiveness",
+  "integrationBranch": "codex/clear-without-backup",
   "requiredCommits": [
+    {
+      "module": "v0.4.54-verified-main-baseline",
+      "commit": "11b5ab9fd00190a4d89fa7a345679b8869630ee1"
+    },
     {
       "module": "v0.4.53-financial-source-refresh",
       "commit": "fa7b964afbc9c9b54732c9b0b49184646ffeb0c8"

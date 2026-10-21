@@ -409,20 +409,21 @@ export default function DataSecurity() {
     if (dangerText !== "清空本机数据" || clearPendingRef.current || restorePendingRef.current || exportPendingRef.current) return;
     clearPendingRef.current=true;setClearError('');
     setClearing(true);
-    let clearedBackup;
+    let cleared=false;
     try {
-      clearedBackup=await clearLocalWorkspaceData('local-user',{onProgress:setClearProgress});
+      await clearLocalWorkspaceData('local-user',{onProgress:setClearProgress});
+      cleared=true;
       setDangerOpen(false);
       setDangerText("");
-      const message=`本机业务数据已清空，完整回滚备份已保存：${clearedBackup.filePath}。`;
-      setOperationNotice(message);notify('本机数据已清空，完整回滚备份已保存。备份位置见页面提示。','success');
+      const message='本机业务数据已永久清空，未创建自动备份。';
+      setOperationNotice(message);notify(message,'success');
       await refreshStorageEstimate();
     } catch (error) {
-      const message=clearedBackup?`本机数据已清空，备份保留在 ${clearedBackup.filePath}；状态刷新失败：${error.message}。无需重复清空。`
-        :error.backup?`完整备份已保存：${error.backup.filePath}；清理未全部完成：${error.message}。请保留该文件。`
-        :`未执行清空：${error.message}`;
-      if(clearedBackup||error.backup)setOperationNotice(message);
-      setClearError(message);notify(clearedBackup?'本机数据已清空，状态刷新失败。无需重复清空。':error.backup?'完整备份已保存，清理未全部完成。请查看页面提示。':message,clearedBackup?'warning':'error');
+      const message=cleared?`本机数据已永久清空，未创建自动备份；状态刷新失败：${error.message}。无需重复清空。`
+        :error.clearStarted?`清空未全部完成，部分本机数据可能已删除：${error.message}。未创建自动备份，请重试完成清空。`
+        :`清空未完成：${error.message}`;
+      if(cleared||error.clearStarted)setOperationNotice(message);
+      setClearError(message);notify(cleared?'本机数据已清空，状态刷新失败。无需重复清空。':message,cleared?'warning':'error');
     } finally {
       clearPendingRef.current=false;setClearing(false);setClearProgress('');
     }
@@ -544,9 +545,9 @@ export default function DataSecurity() {
 
       <Panel className="danger-zone">
         <div className="danger-title"><AlertTriangle size={23} /><h2>危险操作</h2></div>
-        <p>清空会删除当前本机工作区中的正式商品、采集、供应商、账本、成本、利润和审计记录。已保存到文件系统的备份不会被删除。</p>
+        <p>清空会永久删除本机商品、采集、供应商、账本、成本、利润、历史审计、桌面收件和任务及其证据文件，以及成本草稿、货号组和店铺筛选。不会自动备份，无法撤销。</p>
         <div className="danger-action">
-          <div><strong>清空当前本机工作区</strong><span>操作后仅保留空白默认工作区，需从备份文件恢复才能找回数据。</span></div>
+          <div><strong>清空当前本机工作区</strong><span>操作后仅保留空白默认工作区和本次清空记录；既有手动导出文件不受影响。</span></div>
           <Button variant="danger" onClick={() => setDangerOpen(true)}>清空数据</Button>
         </div>
       </Panel>
@@ -605,15 +606,15 @@ export default function DataSecurity() {
       <Modal
         open={dangerOpen}
         title="清空当前本机工作区"
-        description="清空前会自动保存并校验完整回滚备份，包含桌面收件和任务；备份失败不会清空。请输入“清空本机数据”以继续。"
+        description="此操作会永久删除本机业务数据，不会自动备份，无法撤销。请输入“清空本机数据”以继续。"
         tone="danger"
         onClose={() => { if (!clearing) { setDangerOpen(false); setDangerText(""); } }}
         footer={<><Button disabled={clearing} onClick={() => { setDangerOpen(false); setDangerText(""); }}>取消</Button><Button variant="danger" loading={clearing} disabled={dangerText !== "清空本机数据" || clearing} onClick={clearWorkspace}>永久清空</Button></>}
       >
-        <div className="form-field"><label className="required" htmlFor="clear-workspace-confirmation">确认文字</label><input id="clear-workspace-confirmation" className="text-input mono" value={dangerText} onChange={(event) => setDangerText(event.target.value)} placeholder="清空本机数据" /></div>
+        <div className="form-field"><label className="required" htmlFor="clear-workspace-confirmation">确认文字</label><input id="clear-workspace-confirmation" className="text-input mono" disabled={clearing} value={dangerText} onChange={(event) => setDangerText(event.target.value)} placeholder="清空本机数据" /></div>
         {clearProgress?<p role="status">{clearProgress}</p>:null}
         {clearError?<p className="system-check-error" role="alert">{clearError}</p>:null}
-        <p className="modal-note">自动备份保存在“文档 / Lworkstation 备份”，不会随本机数据清空。以后可在本页导入该 JSON 文件恢复；运行中的采集恢复为暂停待继续。</p>
+        <p className="modal-note">桌面收件、采集任务和证据文件将一并删除，旧任务不能继续。既有手动导出文件、账号登录和外观设置不受影响。</p>
       </Modal>
     </AppShell>
   );

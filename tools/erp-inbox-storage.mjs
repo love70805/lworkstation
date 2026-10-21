@@ -135,5 +135,20 @@ export function createInboxStorage(file,options={}) {
     const result=await operation('snapshot');
     return result.records;
   }
-  return {read,write,hydrate,exportRecords};
+  function reset(records) {
+    const result=writeChain.catch(()=>{}).then(async()=>{
+      if(loading)await loading;
+      if(!snapshot)await read();
+      if(records.some(record=>record.envelope!==undefined))throw new Error('清空后的运行状态不能包含业务证据。');
+      writing=true;
+      try {
+        const receipt=await operation('reset',{records,expectedRevision:revision});
+        snapshot=records;revision=receipt.revision;evidenceIds=new WeakMap();
+        committedSignature=JSON.stringify(entriesFor(snapshot,[]));
+      }catch(error){snapshot=null;revision=null;committedSignature=null;throw error;}
+      finally{writing=false;}
+    });
+    writeChain=result;return result;
+  }
+  return {read,write,reset,hydrate,exportRecords};
 }
