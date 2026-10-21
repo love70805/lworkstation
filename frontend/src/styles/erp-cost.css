@@ -461,7 +461,7 @@
 .erp-review-heading h2 { margin: 0; font-size: 16px; }
 .erp-review-heading p, .erp-review-current-batch p { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .erp-review-heading .button { flex-shrink: 0; }
-.erp-review-skus { display: grid; gap: 10px; }
+.erp-review-skus { display: grid; gap: 10px; scroll-margin-top: calc(var(--topbar-height) + 12px); }
 .erp-review-sku { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) 100px auto; align-items: start; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-bg); }
 .erp-review-identity, .erp-review-reason, .erp-review-candidate { min-width: 0; overflow-wrap: anywhere; }
 .erp-review-identity strong, .erp-review-identity span, .erp-review-identity small, .erp-review-candidate strong, .erp-review-candidate small { display: block; }
