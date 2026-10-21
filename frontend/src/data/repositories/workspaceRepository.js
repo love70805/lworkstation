@@ -20,7 +20,7 @@ import {
 import { buildWorkspaceOperationalSummary } from "../../domain/workspaceSummary";
 import { db, CLIENT_DATABASE_BACKUP_SCHEMAS } from "../db/clientDatabase";
 import { withVerifiedLedgerCostSummaries } from "./profitRepository";
-import { cachedDerived, observeSourceRevision, sourceRevision, selectionFactsRevision, assertSourceRevision, retrySourceRead } from "../db/derivedCache";
+import { cachedDerived, observeSourceRevision, sourceRevision, observeTableRevision, tableRevisionReader, assertSourceRevision, retrySourceRead } from "../db/derivedCache";
 import {
   DEFAULT_WORKSPACE_ID,
   DEFAULT_WORKSPACE_NAME,
@@ -38,11 +38,46 @@ export async function getWorkspaceOperationalSummary() {
     assertSourceRevision(revision);
     const compute = () => readWorkspaceOperationalSummary(context, observable);
     const summary = observable ? await cachedDerived({
-      scope: [context.workspaceId, context.memberId, context.role], formula: "workspace-operational-summary@2", revision, compute,
+      scope: [context.workspaceId, context.memberId, context.role], formula: "workspace-operational-summary@3", revision, compute,
     }) : await compute();
     assertSourceRevision(revision);
     return summary;
   });
+}
+
+// These counters never need images, product drafts or immutable purchase
+// evidence. Cache compact projections against the actual table revision so
+// unrelated audit/receipt updates do not clone the catalog on every page.
+async function summaryProjection(name) {
+  const table=db.table(name),revisionReader=tableRevisionReader(name);
+  await observeTableRevision(name);
+  await table.count(); // Independent live-query dependency if the sidecar fails.
+  const compute=async()=>{
+    const rows=[];
+    await table.each(row=>{
+      const fields=['id','workspaceId','status','visibility','ownerId','productId','capturedAt','updatedAt','createdAt'];
+      const value=Object.fromEntries(fields.filter(key=>row[key]!==undefined).map(key=>[key,row[key]]));
+      if(name==='captures')value.validation={blockingCount:Number(row.validation?.blockingCount??0),blocking:row.validation?.blocking?.length?[true]:[]};
+      if(name==='captures'&&row.blockingIssues?.length)value.blockingIssues=[true];
+      rows.push(value);
+    });
+    return rows;
+  };
+  const revision=revisionReader();
+  return revision?cachedDerived({scope:[],formula:`workspace-summary-projection@1:${name}`,revision,revisionReader,boundedMemory:true,compute}):compute();
+}
+
+async function cachedWorkspaceCount(table,context,ledgerIds) {
+  const revisionReader=tableRevisionReader(table.name);
+  await observeTableRevision(table.name);
+  // Counting primary keys observes equal-count value changes without reading
+  // large records. Ledger ownership remains part of the legacy cost key.
+  await table.count();
+  const compute=()=>table.name==='erpCostRows'
+    ?table.where('ledgerId').anyOf(ledgerIds).filter(row=>!row.workspaceId||row.workspaceId===context.workspaceId).count()
+    :table.where('workspaceId').equals(context.workspaceId).count();
+  const revision=revisionReader();
+  return revision?cachedDerived({scope:[context.workspaceId,...(table.name==='erpCostRows'?[ledgerIds.toSorted()]:[])],formula:`workspace-summary-count@1:${table.name}`,revision,revisionReader,boundedMemory:true,compute}):compute();
 }
 
 async function readWorkspaceOperationalSummary(context, observable) {
@@ -50,9 +85,9 @@ async function readWorkspaceOperationalSummary(context, observable) {
   const ledgers = await db.ledgers.where("workspaceId").equals(context.workspaceId).toArray();
   const ledgerIds = ledgers.map((ledger) => ledger.id);
   const [captures, products, platformSkus, latestActivity, tableCountEntries] = await Promise.all([
-    db.captures.toArray(),
-    db.products.toArray(),
-    db.platformSkus.toArray(),
+    summaryProjection('captures'),
+    summaryProjection('products'),
+    summaryProjection('platformSkus'),
     // The shell displays one timestamp, not the immutable audit payloads.
     db.auditEvents.orderBy("createdAt").reverse().filter(inWorkspace).first(),
     Promise.all(db.tables.map(async (table) => {
@@ -63,14 +98,12 @@ async function readWorkspaceOperationalSummary(context, observable) {
         // Indexed workspace counts still walk a million index entries. Catalog
         // saves cannot change this count; all ledger/context writes invalidate
         // the conservative financial-source version before and after commit.
-        const revision = selectionFactsRevision();
-        const count = await cachedDerived({ scope: [context.workspaceId], formula: "workspace-sales-row-count@1",
-          revision, revisionReader: selectionFactsRevision, compute: () => table.where("workspaceId").equals(context.workspaceId).count() });
+        const count = await cachedWorkspaceCount(table,context,ledgerIds);
         return [table.name, count];
       }
       if (table.schema.idxByName.workspaceId) return [table.name, await table.where("workspaceId").equals(context.workspaceId).count()];
       // Legacy ERP rows have no workspace index; derive ownership through their ledger.
-      if (table.name === "erpCostRows") return [table.name, await table.where("ledgerId").anyOf(ledgerIds).filter((row) => !row.workspaceId || inWorkspace(row)).count()];
+      if (table.name === "erpCostRows") return [table.name, await cachedWorkspaceCount(table,context,ledgerIds)];
       return [table.name, 0];
     })),
   ]);
@@ -208,7 +241,7 @@ export async function getDataSecuritySnapshot() {
     db.settings.get("lastCloudSeedExport"),
     db.settings.get("lastCloudSeedImport"),
     db.settings.get("lastSyncRecovery"),
-    db.auditEvents.toArray(),
+    db.auditEvents.where('objectType').anyOf(['backup','cloud_migration','cloud_recovery','workspace']).toArray(),
     Promise.all(db.tables.map(async (table) => [table.name, await table.count()])),
   ]);
   const securityEvents = auditEvents
