@@ -1,13 +1,25 @@
 import Dexie from 'dexie';
 import { db } from '../db/clientDatabase';
-import { cachedDerived, sourceRevision, tableRevisionReader, observeSourceRevision } from '../db/derivedCache';
+import { cachedDerived, sourceRevision, tableRevisionReader, observeTableRevision } from '../db/derivedCache';
 
 const salesRevision = tableRevisionReader('salesRows');
+const ledgerSourceTables = ['settings', 'ledgers', 'salesRows', 'importBatches', 'erpCostRows', 'erpCostBatches', 'costApprovals', 'profitLines'];
+const ledgerSources = ledgerSourceTables.map(tableRevisionReader);
+export async function observeLedgerSnapshotRevision() {
+  // Primary-key counts observe each table's value mutations in Dexie without
+  // cloning evidence bodies. An indexed ledgerId count has narrower semantics.
+  await Promise.all(ledgerSourceTables.flatMap(table => [db.table(table).count(), observeTableRevision(table)]));
+}
+export function ledgerSnapshotRevision() {
+  const revisions = ledgerSources.map(read => read());
+  return revisions.every(Boolean) ? JSON.stringify(revisions) : sourceRevision();
+}
 
 // Every consumer establishes its own live-query dependency even on a shared hit.
 export async function readLedgerSalesRows(workspaceId, ledgerId, { strict = false } = {}) {
   const writing = Dexie.currentTransaction?.mode === 'readwrite';
-  const observable = !writing && await observeSourceRevision();
+  const observable = !writing;
+  if (observable) await Promise.all([db.salesRows.count(), observeTableRevision('salesRows')]);
   const read = () => db.salesRows.where('ledgerId').equals(ledgerId).toArray();
   const revision = salesRevision();
   // Never publish uncommitted transaction rows into a shared cache. Cost and

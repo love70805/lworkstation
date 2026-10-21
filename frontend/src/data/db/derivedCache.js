@@ -39,12 +39,16 @@ export function tableRevisionReader(table) {
   });
   return tableReaders.get(table);
 }
-function invalidateTableRevision(table) {
+function invalidateTableRevision(table, notify = false) {
   const value = crypto.randomUUID();
   try { localStorage.setItem(`shopeers-table-source-revision-v1:${table}`, value); failedTableClocks.delete(table); }
   catch { failedTableClocks.add(table); }
   const reader = tableReaders.get(table);
   if (reader) clearMemoryFor(reader);
+  if (notify) Dexie.ignoreTransaction(() => derivedCacheDb.revisions.put({ key: `table:${table}`, revision: value })).catch(async () => {
+    try { await derivedCacheDb.entries.clear(); await derivedCacheDb.revisions.put({ key: `table:${table}`, revision: value }); }
+    catch { /* Business primary-key counts retain value-change observation. */ }
+  });
 }
 
 export function sourceRevision() {
@@ -81,7 +85,7 @@ function invalidateSelectionFacts() {
 export function invalidateDerivedCache(notify = true, tables = null) {
   // Explicit recovery/reset invalidates every registered table cache. Ordinary
   // mutations pass [] and invalidate their own table separately below.
-  if (tables === null) for (const table of tableReaders.keys()) invalidateTableRevision(table);
+  if (tables === null) for (const table of tableReaders.keys()) invalidateTableRevision(table, notify);
   volatileRevision = crypto.randomUUID();
   try { localStorage.setItem(REVISION_KEY, volatileRevision); sourceClockAvailable = true; }
   catch { sourceClockAvailable = false; }
@@ -98,6 +102,10 @@ export function invalidateDerivedCache(notify = true, tables = null) {
 export async function observeSourceRevision() {
   try { await Dexie.ignoreTransaction(() => derivedCacheDb.revisions.get('source')); return true; }
   catch { return false; }
+}
+export async function observeTableRevision(table) {
+  try { await Dexie.ignoreTransaction(() => derivedCacheDb.revisions.get(`table:${table}`)); }
+  catch { /* Business primary-key counts are the independent fallback. */ }
 }
 export class StaleDerivedResultError extends Error {
   constructor() { super('来源数据已变化，正在重新读取。'); this.name = 'StaleDerivedResultError'; }
@@ -132,8 +140,8 @@ export function installDerivedInvalidation(database) {
         if (!changedTables.has(name)) {
           changedTables.add(name);
           invalidateTableRevision(name);
-          request.trans.addEventListener('complete', () => invalidateTableRevision(name));
-          request.trans.addEventListener('abort', () => invalidateTableRevision(name));
+          request.trans.addEventListener('complete', () => invalidateTableRevision(name, true));
+          request.trans.addEventListener('abort', () => invalidateTableRevision(name, true));
         }
         // Separate transaction tracking matters when a transaction writes a
         // catalog row first and a financial/context table later.

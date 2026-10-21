@@ -49,6 +49,39 @@ it('keeps durable cache across identical startup identity initialization but inv
   expect(compute).toHaveBeenCalledTimes(2);
 });
 
+it('does not reread a live ledger for receipt or audit updates, but observes same-count sales edits', async () => {
+  await db.salesRows.where('ledgerId').equals('L').modify({ platformSkc: 'SKC-A' });
+  const snapshots = [];
+  const subscription = liveQuery(() => getLedgerSnapshot('L')).subscribe(value => snapshots.push(value));
+  try {
+    await vi.waitFor(() => expect(snapshots.at(-1)?.rows[0].amountExact).toBe('0.009'));
+    await new Promise(resolve => setTimeout(resolve, 40));
+    const before = snapshots.length, snapshot = snapshots.at(-1);
+    const first = await readCachedReportProducts({ snapshot });
+    await db.auditEvents.add({ workspaceId: 'W', action: 'receipt_reported' });
+    await db.erpCostInbox.put({ id: 'RECEIPT', workspaceId: 'W', ledgerId: 'L', status: 'pending', adoption: { state: 'partial' } });
+    await new Promise(resolve => setTimeout(resolve, 40));
+    expect(snapshots).toHaveLength(before);
+    expect(await readCachedReportProducts({ snapshot })).toBe(first);
+    await db.salesRows.where('ledgerId').equals('L').modify({ amount: 2, amountExact: '2' });
+    await vi.waitFor(() => expect(snapshots.at(-1)?.rows[0].amountExact).toBe('2'));
+    expect(snapshots.at(-1).dataVersion).not.toBe(snapshot.dataVersion);
+    const sidecarFailure = vi.spyOn(derivedCacheDb.revisions, 'put').mockRejectedValue(new Error('synthetic sidecar notification failure'));
+    try {
+      await db.salesRows.where('ledgerId').equals('L').modify({ amount: 3, amountExact: '3' });
+      await vi.waitFor(() => expect(snapshots.at(-1)?.rows[0].amountExact).toBe('3'));
+    } finally { sidecarFailure.mockRestore(); }
+    await db.costApprovals.put({ id: 'MANUAL', workspaceId: 'W', ledgerId: 'L', platformSku: 'A', approvedAmount: 0 });
+    await vi.waitFor(() => expect(snapshots.at(-1)?.approvals).toHaveLength(1));
+    const beforeOtherLedger = snapshots.at(-1).dataVersion;
+    await db.erpCostRows.add({ workspaceId: 'W', ledgerId: 'OTHER-MONTH', platformSku: 'OTHER', unitCost: 3 });
+    await vi.waitFor(() => expect(snapshots.at(-1).dataVersion).not.toBe(beforeOtherLedger));
+    await expect(readCachedReportProducts({ snapshot: snapshots.at(-1) })).resolves.toHaveLength(1);
+    await setActiveMemberContext({ workspaceId: 'OTHER', memberId: 'M' });
+    await vi.waitFor(() => expect(snapshots.at(-1)).toBeNull());
+  } finally { subscription.unsubscribe(); }
+});
+
 it('reuses persisted exact results after closing databases and discarding process memory', async () => {
   const compute = vi.fn(async () => ({ exact: '0.00000001' }));
   const options = { scope: ['W', 'L', '甲'], formula: 'test@1', compute };

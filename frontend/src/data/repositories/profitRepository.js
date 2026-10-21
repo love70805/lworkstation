@@ -26,7 +26,7 @@ import { purchaseOrderSummary } from "../../domain/erpPurchaseSelection";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
-import { readLedgerSalesRows } from './ledgerReadCache';
+import { readLedgerSalesRows, ledgerSnapshotRevision, observeLedgerSnapshotRevision } from './ledgerReadCache';
 import { runDerivedComputation } from './derivedComputationService';
 import { readErpRecoveryProbe, cachedErpRecoveryResult, rememberErpRecoveryResult, loadErpRecoveryMemo, persistErpRecoveryMemo } from './erpRecoveryReadCache';
 import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
@@ -1821,7 +1821,8 @@ export async function getLedgerSnapshot(ledgerId) {
 }
 
 async function readLedgerSnapshot(ledgerId) {
-  const dataVersion = sourceRevision();
+  await observeLedgerSnapshotRevision();
+  const dataVersion = ledgerSnapshotRevision();
   const ledger = await db.ledgers.get(ledgerId);
   if (!ledger) return null;
   const member = await getActiveMemberContext();
@@ -1833,19 +1834,19 @@ async function readLedgerSnapshot(ledgerId) {
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  assertSourceRevision(dataVersion);
+  assertSourceRevision(dataVersion, ledgerSnapshotRevision);
   // Older live ledgers may have a ready summary written before parent identity
   // checks existed. Project current readiness without mutating business data or
   // touching any frozen report/snapshot during an upgrade or ordinary read.
   const frozen = ['finalized', 'locked'].includes(ledger.status);
   const coverage = frozen ? null : await runDerivedComputation('cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
     workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: ledger.period });
-  assertSourceRevision(dataVersion);
+  assertSourceRevision(dataVersion, ledgerSnapshotRevision);
   const snapshotLedger = frozen ? ledger : {
     ...ledger,
     ...buildLedgerCoveragePatch(ledger, coverage, ledger.updatedAt),
   };
-  return { ledger: snapshotLedger, rows, batches, costs, approvals, profitLines, dataVersion };
+  return { ledger: snapshotLedger, rows, batches, costs, approvals, profitLines, dataVersion, revisionKind: 'ledger' };
 }
 
 export async function getLatestLedgerSnapshot() {
