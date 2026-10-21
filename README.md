@@ -2,9 +2,9 @@
 
 面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、ERP 成本核对和利润核算放在同一个本机工作区。
 
-**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.52 更新说明](docs/RELEASE_0.4.52.md)
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v0.4.53 更新说明](docs/RELEASE_0.4.53.md)
 
-当前稳定版为 **v0.4.52**：修复成本核对页长时间停留时，轮询结束仍保留旧响应导致的内存持续累积；继承 0.4.51 的大数据读取、后台恢复与列表分页优化。保持成本优先、档案按需补齐、人工更正优先和月度定稿口径。当前为本机 Windows 桌面版，无需云端数据库，下载和安装更新由用户操作。
+当前稳定版为 **v0.4.53**：优化已采用成本较多时的确认采购价与利润切页响应，重型只读计算移入独立线程，回传状态与审计更新不再反复触发整月证据重读，并修正旧任务的资料准备提示。人工优先、定稿保护、成本优先和资料按需补齐保持。当前为本机 Windows 桌面版，无需云端数据库；大账本首次读取仍需等待，下载和安装更新由用户操作。
 
 ## 主要功能
 
