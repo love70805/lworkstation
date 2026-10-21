@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acknowledgeErpInbox, getErpRequestHistory, pollErpInbox, registerErpBridgeRequest } from "./erpInboxTransport";
 import { requestInbox, setInboxTransportForTests } from "./inboxTransport";
@@ -122,5 +123,62 @@ describe("desktop runtime inbox transport", () => {
     await expect(requestInbox({ route: "/erp/v1/status", method: "DELETE" })).rejects.toMatchObject({
       code: "INVALID_INBOX_METHOD",
     });
+  });
+});
+
+describe("poll cancellation lifetime", () => {
+  const request = { route: "/erp/v1/collection-tasks" };
+  it("releases every completed response from a controller reused by repeated polls", async () => {
+    const controller = new AbortController();
+    setInboxTransportForTests(async () => ({ status: 200, body: { tasks: [{ id: "task-a" }] } }));
+    for (let index = 0; index < 200; index++) {
+      expect(await requestInbox(request, { signal: controller.signal })).toEqual({ tasks: [{ id: "task-a" }] });
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    }
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it.each(["transport rejection", "HTTP rejection", "invalid response"])("releases the listener after %s", async mode => {
+    const controller = new AbortController();
+    setInboxTransportForTests(async () => {
+      if (mode === "transport rejection") throw new Error("offline");
+      return mode === "HTTP rejection" ? { status: 503, body: { error: "OFFLINE" } } : null;
+    });
+    await expect(requestInbox(request, { signal: controller.signal })).rejects.toBeInstanceOf(Error);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+  });
+
+  it("removes only the completed poll and still cancels other requests sharing the signal", async () => {
+    const controller = new AbortController();
+    let completeFirst, rejectSecond;
+    setInboxTransportForTests(() => new Promise(resolve => { completeFirst = resolve; }));
+    const first = requestInbox(request, { signal: controller.signal });
+    setInboxTransportForTests(() => new Promise((_resolve, reject) => { rejectSecond = reject; }));
+    const second = requestInbox(request, { signal: controller.signal });
+    const cancelled = expect(second).rejects.toMatchObject({ name: "AbortError" });
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(2);
+    completeFirst({ status: 200, body: { tasks: [] } });
+    await expect(first).resolves.toEqual({ tasks: [] });
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(1);
+    controller.abort(); await cancelled;
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    rejectSecond(new Error("late transport failure"));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  it("does not start a transport for an already cancelled request", async () => {
+    const controller = new AbortController(); const reason = new Error("left page");
+    controller.abort(reason);
+    const transport = vi.fn(); setInboxTransportForTests(transport);
+    await expect(requestInbox(request, { signal: controller.signal })).rejects.toBe(reason);
+    expect(transport).not.toHaveBeenCalled();
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+  });
+
+  it("handles a transport that aborts synchronously and then rejects", async () => {
+    const controller = new AbortController(); const reason = new Error("scope changed");
+    setInboxTransportForTests(() => { controller.abort(reason); return Promise.reject(reason); });
+    await expect(requestInbox(request, { signal: controller.signal })).rejects.toBe(reason);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 });
