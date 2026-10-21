@@ -38,7 +38,7 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
     db.importBatches.where('ledgerId').equals(ledgerId).toArray(),
     inboxId ? db.erpCostInbox.bulkGet([inboxId]).then(rows => rows.filter(Boolean)) : db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray(),
   ]);
-  const sources = inboxes.filter(inbox => inbox.workspaceId === ledger.workspaceId && ['pending', 'loaded', 'applied'].includes(inbox.status)
+  const sources = inboxes.filter(inbox => inbox.workspaceId === ledger.workspaceId && inbox.ledgerId === ledgerId && ['pending', 'loaded', 'applied'].includes(inbox.status)
     && (!inboxId || inbox.id === inboxId)).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
   for (const inbox of sources) {
     const request = await db.erpCostRequests.get(inbox.requestId);

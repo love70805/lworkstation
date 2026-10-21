@@ -35,6 +35,12 @@ beforeEach(async () => {
   receipt = await receiveErpCostInboxEnvelope({ envelope });
 });
 afterEach(async () => { await db.delete(); });
+it('rejects a direct receipt lookup whose stored ledger differs even if its request and envelope match', async () => {
+  await db.erpCostInbox.update(receipt.id, { ledgerId: 'OTHER-LEDGER' });
+  expect(await previewRecoveredWarehouseCost({ ...input, inboxId: receipt.id })).toBeNull();
+  await expect(saveRecoveredWarehouseCost({ ...input, inboxId: receipt.id, expectedUnitCost: 0.35 })).rejects.toThrow('来源或当前成本已变化');
+  expect(await db.costApprovals.count()).toBe(0);
+});
 it('does not load historical receipt bodies when the target has no reliable historical mapping', async () => {
   await db.erpCostBatches.update('OLD-BATCH', { status: 'voided' });
   let reads = 0;
