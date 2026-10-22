@@ -13,6 +13,7 @@ export async function syncErpCatalogPublications({ workspaceId, tasks }) {
         && batches.length > 0 && batches.every(batch => batch.status === 'delivered' && batch.deliveryId && batch.adoptionReportedAt);
       const record = { key: keyFor(workspaceId, task.taskId), kind: 'erp_catalog_publication', workspaceId,
         taskId: task.taskId, requestId: task.requestId, ledgerId: task.ledgerId, allowed,
+        createdAt: task.createdAt ?? '',
         attempts: allowed ? batches.map(batch => [batch.batchId, batch.attemptId]) : [] };
       const previous = await db.settings.get(record.key);
       if (JSON.stringify(previous) !== JSON.stringify(record)) await db.settings.put(record);
@@ -23,9 +24,15 @@ export async function syncErpCatalogPublications({ workspaceId, tasks }) {
 export async function readErpCatalogPublicationGate(workspaceId) {
   const records = await db.settings.where('key').startsWith(`erp-catalog:publication:${workspaceId}:`).toArray();
   const byTask = new Map(records.map(record => [record.taskId, record]));
+  const byRequest = new Map();
+  for (const record of records) {
+    const key = JSON.stringify([record.requestId, record.ledgerId]);
+    const previous = byRequest.get(key);
+    if (!previous || record.createdAt > previous.createdAt) byRequest.set(key, record);
+  }
   return source => {
     const binding = source?.sourceMeta?.catalogPublication;
-    if (binding?.mode !== 'after_costs') return true;
+    if (binding?.mode !== 'after_costs') return byRequest.get(JSON.stringify([source?.requestId, source?.ledgerId]))?.allowed ?? true;
     const record = byTask.get(binding.taskId);
     return Boolean(record?.allowed && record.workspaceId === workspaceId && record.requestId === source.requestId
       && record.ledgerId === source.ledgerId && record.attempts.some(([batchId, attemptId]) => batchId === binding.batchId && attemptId === binding.attemptId));

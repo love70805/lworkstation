@@ -18,6 +18,17 @@ export async function syncErpCollectionAdoptions({ workspaceId, listTasks = list
   if (!tasks.length) return;
   const inboxes = await listInboxes({ workspaceId });
   const byDelivery = new Map(inboxes.filter(inbox => inbox.workspaceId === workspaceId).map(inbox => [inbox.deliveryId, inbox]));
+  // Withdraw stale outcomes before reporting newly settled batches. Otherwise
+  // a previous adoption timestamp can open the last-batch barrier while an
+  // earlier local calculation is pending or failed.
+  for (const task of tasks) for (const batch of task.batches ?? []) {
+    const inbox = byDelivery.get(batch.deliveryId);
+    if (task.catalogMode !== 'after_costs' || !batch.adoptionReportedAt
+      || inbox?.adoption && !inbox.adoptionPending && !inbox.adoptionFailure) continue;
+    const response = await report(task.taskId, { workspaceId, deliveryId: batch.deliveryId, adoption: { state: 'pending', summary: {} } });
+    if (response?.task) Object.assign(task, response.task);
+    reported.delete(`${workspaceId}/${task.taskId}/${batch.deliveryId}`);
+  }
   for (const task of tasks) for (const batch of task.batches ?? []) {
     const inbox = byDelivery.get(batch.deliveryId);
     if (!inbox?.adoption || inbox.adoptionPending || inbox.adoptionFailure) continue;

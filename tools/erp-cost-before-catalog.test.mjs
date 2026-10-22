@@ -30,6 +30,9 @@ for (const batch of [first, second]) {
 // prices; these outcomes settle the barrier without inventing adopted costs.
 call(`/${task.taskId}/adoption`, { deliveryId: second.deliveryId, adoptedCount: 1, manualEffectiveCount: 1, protectedCount: 1, missingCount: 1, anomalyCount: 1 });
 assert.equal(seed(first).catalogSeedReceipt, 'D1');
+call(`/${task.taskId}/adoption`, { deliveryId: first.deliveryId, state: 'pending' });
+rejects(() => seed(first), 'ERP_TASK_COST_FIRST');
+call(`/${task.taskId}/adoption`, { deliveryId: first.deliveryId, adoptedCount: 5 });
 batchCall(first, 'catalog_running');
 rejects(() => call(`/${task.taskId}/batches/${encodeURIComponent(first.batchId)}/catalog-seed?runnerId=OTHER&attemptId=${first.attemptId}`), 'ERP_TASK_RUNNER_CHANGED');
 rejects(() => call(`/${task.taskId}/batches/${encodeURIComponent(first.batchId)}/catalog-seed?runnerId=${runnerId}&attemptId=STALE`), 'ERP_TASK_STALE_ATTEMPT');
@@ -50,4 +53,5 @@ assert.equal(restored.warehouseEvidence.warehouses[0].evidenceComplete, true);
 await verifyErpCatalogTransport({ legacyScope: false, afterCosts: true, includeConflict: false,
   expectedSkus: ['RED', 'BLUE'].map(id => ({ platformSku: `SKU-${id}`, platformSkc: 'SKC-CATALOG' })) });
 await scenario(10, 'cost-before-catalog', { afterCosts: true });
+await scenario(10, 'continue-legacy-with-barrier', { afterCosts: true, resumeLegacy: true });
 console.log('All-batch cost/adoption barrier, pause/restart/identity rejection and durable metadata reuse passed.');

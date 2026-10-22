@@ -1672,7 +1672,7 @@
         let task = run.task;
         if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
         run.runnerId = makeResultDeliveryId();
-        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId })).task;
+        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs' })).task;
         run.task = task;
         const snapshot = task.requestSnapshot;
         run.previewContext = { ...run.previewContext, requestId: task.requestId, ledgerPeriod: snapshot.ledgerPeriod,

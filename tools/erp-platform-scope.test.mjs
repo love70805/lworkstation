@@ -97,6 +97,9 @@ for (const mode of ['normal', 'scope-missing', 'target-conflict', 'directory-sho
    assert.equal(sent.warehouseEvidence.warehouses[0].evidenceComplete, false, 'real scope discovery faults cannot silently become formal cost');
    assert.equal(sent.results[0].previewStatus, 'evidence_incomplete');
   }
+  assert.equal(catalogs.length, 0, 'uncoordinated preview cannot start automatic catalog before durable adoption');
+  await until(() => !window.document.getElementById('erpa-supplement-catalog').hidden);
+  window.document.getElementById('erpa-supplement-catalog').click();
   await until(() => catalogs.length);
   assert.equal(catalogs[0].platformScopePolicy, 'ledger_platform_pair');
   assert.equal(catalogs[0].results[0].mappings.length, 1);

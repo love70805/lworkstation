@@ -208,6 +208,9 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         if (typeof payload.runnerId !== 'string' || payload.runnerId.length < 8 || payload.runnerId.length > 200) fail('ERP_TASK_RUNNER_INVALID', '缺少有效执行者标识。', 400);
         if (records.some(item => item.kind === 'collection-task' && item.taskId !== task.taskId && item.workspaceId === task.workspaceId
           && item.runnerId && !['paused', 'stopped', 'completed', 'invalidated'].includes(item.status) && Date.parse(item.runnerLeaseExpiresAt) > now)) fail('ERP_TASK_OTHER_RUNNING', '当前工作区已有任务正在采集，本任务等待执行。');
+        // The upgraded helper can continue an older task without rereading its
+        // durable cost batches. Older helpers keep their existing protocol.
+        if (payload.catalogMode === 'after_costs') task.catalogMode = 'after_costs';
         task.runnerId = payload.runnerId; task.status = 'running';
       }
       renew(task, request, records, now);
@@ -275,6 +278,10 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   if (parts[1] === 'adoption') {
     const batch = task.batches.find(item => item.deliveryId === payload.deliveryId);
     if (!batch) fail('ERP_TASK_RECEIPT_NOT_FOUND', '采用报告没有对应的已送达批次。');
+    if (payload.state === 'pending') {
+      batch.adoption = null; delete batch.adoptionReportedAt; task.updatedAt = timestamp(now);
+      return { status: 200, body: { task: refresh(task) } };
+    }
     const adoption = {};
     for (const key of ['adoptedCount','protectedCount','evidenceIncompleteCount','missingCount','anomalyCount','manualEffectiveCount','expectedCount','supersededCount']) {
       const value = Number(payload[key] ?? 0);

@@ -68,6 +68,10 @@ async function slowCollection(cancel) {
       assert.equal(messages.some(message => message.type === 'shopeers.erp.submitCostResult'), false);
       assert.equal(window.document.getElementById('erpa-recalculate').disabled, false);
     } else {
+      for (let i = 0; i < 30 && !messages.some(message => message.type === 'shopeers.erp.submitCostResult'); i++) await advance(80000);
+      for (let i = 0; i < 100 && window.document.getElementById('erpa-recalculate').disabled; i++) await pause();
+      assert.equal(messages.some(message => message.type === 'shopeers.erp.submitCatalogResult'), false, 'preview has no automatic materials before local adoption');
+      window.document.getElementById('erpa-supplement-catalog').click();
       for (let i = 0; i < 30 && !messages.some(message => message.type === 'shopeers.erp.submitCatalogResult'); i++) await advance(80000);
       const cost = messages.find(message => message.type === 'shopeers.erp.submitCostResult');
       const catalog = messages.find(message => message.type === 'shopeers.erp.submitCatalogResult');

@@ -87,6 +87,7 @@ export async function scenario(size, mode = '', options = {}) {
     for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
       let script=options.sources?.[name]??source[name];
       if(!options.afterCosts&&name==='content.js')script=script.replace("executionProtocol: 2, catalogMode: 'after_costs'", "executionProtocol: 2, catalogMode: 'on_demand'");
+      if(!options.afterCosts&&name==='content.js')script=script.replace("resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs'", "resumeRequestId: task.resumeRequestId, catalogMode: 'on_demand'");
       if(mode.startsWith('benchmark')&&name==='content.js')script=script.replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`);
       if(mode==='speed-recovery'&&name==='content.js')script=script.replace('const REQUEST_RECOVERY_DELAY_MS = 30000;','const REQUEST_RECOVERY_DELAY_MS = 100;');
       window.eval(script);
@@ -96,9 +97,9 @@ export async function scenario(size, mode = '', options = {}) {
   const until=async predicate=>{const end=Date.now()+120000;while(!predicate()){if(Date.now()>end)throw Error(window.document.body.textContent.slice(0,2500));await delay(5);}};
   const began=Date.now();
   try {
-    if(mode==='two-pages') {
+    if(mode==='two-pages'||options.resumeLegacy) {
       const task=handleCollectionTaskRequest(records,{method:'POST',url:new URL('http://localhost/erp/v1/collection-tasks'),payload:{workspaceId:'WS',requestId:'REQ',filters:{sku:'SKC-0'},executionProtocol:2},instanceId:'test'}).body.task;
-      await open(); await open();
+      await open(); if(mode==='two-pages')await open();
       assert.equal(calls.length,0,'paused tasks do not restart merely because ERP pages open');
       handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${task.taskId}/control`),payload:{workspaceId:'WS',action:'request_resume',scopeHash:task.scopeHash},instanceId:'test'});
     } else { await open(); window.document.getElementById('erpa-cost-trigger').click(); }

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { verifyErpCatalogTransport } from "../../../tools/erp-catalog-transport.test.mjs";
 import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
-import { syncErpCatalogPublications } from './repositories/erpCatalogPublicationRepository';
+import { syncErpCatalogPublications, readErpCatalogPublicationGate } from './repositories/erpCatalogPublicationRepository';
 import { createOrGetMonthlyLedger, db, getProductEditorSnapshot, getSelectionReferenceSnapshot, receiveErpCostInboxEnvelope, saveErpCostRequest, saveProductCatalogRecord, setActiveMemberContext, voidPublishedErpCostBatch } from "./database";
 
 beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemberContext({ workspaceId: "workspace-default" }); });
@@ -37,6 +37,7 @@ it('stages received and published metadata across reopen until every cost batch 
     ] };
   const sync = () => syncErpCatalogPublications({ workspaceId: ledger.workspaceId, tasks: [task] });
   await sync();
+  expect((await readErpCatalogPublicationGate(ledger.workspaceId))({ requestId: request.id, ledgerId: ledger.id })).toBe(false);
   db.close(); await db.open();
   for (const batch of [task.batches[1], { ...task.batches[1], status: 'delivered', deliveryId: 'DEL-2' }]) {
     task.batches[1] = batch; await sync();
@@ -48,6 +49,7 @@ it('stages received and published metadata across reopen until every cost batch 
   }
   task.status = 'cost_complete'; task.batches[1].adoptionReportedAt = '2026-10-22T00:01:00Z';
   await sync();
+  expect((await readErpCatalogPublicationGate(ledger.workspaceId))({ requestId: request.id, ledgerId: ledger.id })).toBe(true);
   expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toHaveLength(2);
   expect((await getProductEditorSnapshot({ platformSku: 'SKU-RED', platformSkc: 'SKC-CATALOG' })).draft.name).toBe('ERP 合成商品');
   expect(await db.erpCostRows.toArray()).toEqual(financialBefore);
