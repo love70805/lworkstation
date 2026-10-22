@@ -1781,7 +1781,15 @@
                 while (!task.batches.every(batch => batch.adoptionReportedAt)) {
                     setLoading('成本已送达，等待本机核算完成', '全部批次处理完成后统一整理暂存资料');
                     await new Promise(resolve => window.setTimeout(resolve, 1000));
-                    task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
+                    try { task = (await taskOperation({ action: 'get', taskId: task.taskId })).task; }
+                    catch {
+                        // A receiver restart during local adoption is neither a
+                        // failed ERP read nor permission to begin catalog work.
+                        // Its durable lease recovery owns the next continuation.
+                        run.costReadComplete = true;
+                        taskStage = '成本已送达 · 本机核算连接暂未确认，恢复后继续原任务';
+                        return;
+                    }
                     run.task = task;
                     if (run.cancelledByUser || run.pauseRequested || ['paused','stopped','invalidated'].includes(task.status) || task.recoveryRequired) break;
                 }

@@ -54,4 +54,5 @@ await verifyErpCatalogTransport({ legacyScope: false, afterCosts: true, includeC
   expectedSkus: ['RED', 'BLUE'].map(id => ({ platformSku: `SKU-${id}`, platformSkc: 'SKC-CATALOG' })) });
 await scenario(10, 'cost-before-catalog', { afterCosts: true });
 await scenario(10, 'continue-legacy-with-barrier', { afterCosts: true, resumeLegacy: true });
+await scenario(10, 'receiver-restart-during-adoption', { afterCosts: true, receiverRestart: true });
 console.log('All-batch cost/adoption barrier, pause/restart/identity rejection and durable metadata reuse passed.');

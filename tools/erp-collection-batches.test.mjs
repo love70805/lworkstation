@@ -18,7 +18,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function scenario(size, mode = '', options = {}) {
   const skcs = Array.from({length:size},(_,i) => `SKC-${i}`);
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
-  const records = [request], deliveries = [], catalogs = [], calls = [], listTimes = new Map(), windows = [], claims = [];
+  const records = [request], deliveries = [], catalogs = [], calls = [], errors = [], listTimes = new Map(), windows = [], claims = [];
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
   let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
@@ -27,6 +27,7 @@ export async function scenario(size, mode = '', options = {}) {
     const url = new URL(raw), payload = init.body ? JSON.parse(init.body) : {};
     let body;
     try {
+      if(options.receiverRestart && url.pathname.endsWith('/'+records[1]?.taskId) && window.document.body.textContent.includes('等待本机核算完成')) throw Object.assign(new Error('isolated receiver restart'),{status:503});
       const result = handleCollectionTaskRequest(records,{method:init.method||'GET',url,payload,instanceId:'test'});
       if (result) {
         body=result.body; if(payload.action==='claim')claims.push(payload.runnerId);
@@ -56,6 +57,7 @@ export async function scenario(size, mode = '', options = {}) {
   vm.runInContext(source['background.js'],context);
   async function open() {
     window = new Window({url:sender.url});
+    window.console.error=(...args)=>errors.push(args.map(String).join(' '));
     windows.push(window);
     window.confirm=()=>true;
     const schedule=window.setTimeout.bind(window);
@@ -127,6 +129,13 @@ export async function scenario(size, mode = '', options = {}) {
     if(options.afterCosts) {
       await until(()=>deliveries.length===Math.ceil(size/5));
       assert.equal(catalogs.length,0);assert.ok(records[1].batches.every(batch=>!batch.catalogStatus));
+      if(options.receiverRestart) {
+        await until(()=>!window.document.getElementById('erpa-recalculate').disabled);
+        assert.equal(catalogs.length,0);assert.deepEqual(errors,[]);
+        assert.equal(deliveries.length,2);assert.equal(calls.length,size*4);
+        console.log(JSON.stringify({mode,size,receiverRestart:true,retainedBatches:deliveries.length,catalogs:0,errors:0}));
+        return;
+      }
       const before=calls.length;
       for(const batch of records[1].batches) {
         assert.equal(catalogs.length,0,'no material delivery while any calculation remains');
