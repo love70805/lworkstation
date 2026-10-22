@@ -22,7 +22,7 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.49';
+    const EXTENSION_VERSION = '8.0.50';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1610,7 +1610,7 @@
     }
 
     async function taskOperation(input) {
-        if (activeRun?.runnerId && input.taskId === activeRun.task?.taskId && (input.action === 'batch' || ['heartbeat', 'release'].includes(input.control))) input = { ...input, runnerId: activeRun.runnerId };
+        if (activeRun?.runnerId && input.taskId === activeRun.task?.taskId && (['batch','catalogSeed'].includes(input.action) || ['heartbeat', 'release'].includes(input.control))) input = { ...input, runnerId: activeRun.runnerId };
         const response = await window.ShopeersErpDeliveryBridge.collectionTask(input);
         if (!response?.ok) throw Object.assign(new CostError('采集任务未保存', response?.message || '本机收件服务暂不可用，请重试。'), { code: response?.code });
         return response;
@@ -1652,7 +1652,7 @@
         const costEnd = costFinished ? (receiptTimes.length ? Math.max(...receiptTimes) : NaN) : Date.now();
         const duration = costEnd - Date.parse(task.createdAt || new Date().toISOString());
         const elapsed = Number.isFinite(duration) ? Math.max(0, Math.floor(duration / 1000)) + ' 秒' : '暂无记录';
-        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'ready' ? '继续请求已保存，等待 ERP 接续' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '已暂停 · 可在工作台继续原任务' : activeRun?.catalogPhase ? '补充资料' : delivered === total && total ? '成本全部送达 · 商品资料按需补齐' : '分批采集')
+        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'ready' ? '继续请求已保存，等待 ERP 接续' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '已暂停 · 可在工作台继续原任务' : activeRun?.catalogPhase ? '统一整理商品资料' : delivered === total && total ? task.catalogMode === 'after_costs' ? task.phase === 'cost_adoption' ? '成本全部送达 · 等待本机核算' : '成本核算已完成 · 统一整理暂存资料' : '成本全部送达 · 商品资料按需补齐' : '分批采集成本 · 顺带资料暂存')
             + ' · 任务 ' + task.taskId.slice(-8)
             + ' · 已采集 ' + collected + '/' + total + ' SKC · 已送达 ' + delivered + '/' + total
             + ' SKC · 已采用 ' + (task.summary?.adopted ?? 0) + ' SKU'
@@ -1672,12 +1672,11 @@
         let task = run.task;
         if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
         run.runnerId = makeResultDeliveryId();
-        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId })).task;
+        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs' })).task;
         run.task = task;
         const snapshot = task.requestSnapshot;
         run.previewContext = { ...run.previewContext, requestId: task.requestId, ledgerPeriod: snapshot.ledgerPeriod,
             platformSkcs: snapshot.platformSkcs, requestSnapshot: run.previewContext?.requestSnapshot || JSON.stringify(snapshot) };
-        const catalogStates = new Map();
         let heartbeatBusy = false;
         const heartbeat = window.setInterval(async () => {
             if (heartbeatBusy || activeRun !== run) return;
@@ -1757,7 +1756,6 @@
                     deliveryAttempted = true;
                     const response = await bridge.submit({ ...deliveryState, ...state, resultDeliveryId: run.resultDeliveryId, querySkcs: batch.platformSkcs, collectionTask: identity });
                     if (response.status !== 'success' && !response.retained) throw new CostError('此批成本尚未送达', response.message || '请重试失败批次。');
-                    if (task.runMode === 'catalog') catalogStates.set(batch.batchId, state);
                     task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                     updateTaskStatus(task); renderResults(); renderStatus(); updateActionState();
                 } catch (error) {
@@ -1776,8 +1774,30 @@
                     updateTaskStatus(task);
                 } finally { window.clearTimeout(budget); }
             }
-            if (!run.cancelledByUser && !run.pauseRequested && task.runMode === 'catalog') {
-                // Material reads require an explicit shared task command.
+            if (!run.cancelledByUser && !run.pauseRequested && task.catalogMode === 'after_costs'
+                && task.batches.every(batch => batch.status === 'delivered')) {
+                // Wait for durable local calculation outcomes, not just HTTP
+                // delivery. Heartbeats/pause stay active while the app adopts.
+                while (!task.batches.every(batch => batch.adoptionReportedAt)) {
+                    setLoading('成本已送达，等待本机核算完成', '全部批次处理完成后统一整理暂存资料');
+                    await new Promise(resolve => window.setTimeout(resolve, 1000));
+                    try { task = (await taskOperation({ action: 'get', taskId: task.taskId })).task; }
+                    catch {
+                        // A receiver restart during local adoption is neither a
+                        // failed ERP read nor permission to begin catalog work.
+                        // Its durable lease recovery owns the next continuation.
+                        run.costReadComplete = true;
+                        taskStage = '成本已送达 · 本机核算连接暂未确认，恢复后继续原任务';
+                        return;
+                    }
+                    run.task = task;
+                    if (run.cancelledByUser || run.pauseRequested || ['paused','stopped','invalidated'].includes(task.status) || task.recoveryRequired) break;
+                }
+            }
+            if (!run.cancelledByUser && !run.pauseRequested && !task.recoveryRequired
+                && !['paused','stopped','invalidated'].includes(task.status)
+                && (task.runMode === 'catalog' || task.catalogMode === 'after_costs'
+                    && task.batches.every(batch => batch.status === 'delivered' && batch.adoptionReportedAt))) {
                 run.controller = new AbortController();
                 task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                 for (const batch of task.batches) {
@@ -1786,7 +1806,12 @@
                     const identity = { taskId: task.taskId, batchId: batch.batchId, attemptId: batch.attemptId };
                     task = (await taskOperation({ action: 'batch', ...identity, state: 'catalog_running', phase: 'catalog' })).task;
                     run.task = task; run.batchSkcs = batch.platformSkcs; run.batchId = batch.batchId;
-                    const state = catalogStates.get(batch.batchId) || { meta: { querySkcs: batch.platformSkcs } };
+                    let seed;
+                    if (task.catalogMode === 'after_costs') {
+                        seed = (await taskOperation({ action: 'catalogSeed', ...identity })).seed;
+                        if (!seed) throw new CostError('暂存资料尚未就绪', '成本收件缺少可复用资料，请继续原任务重试。');
+                    }
+                    const state = { meta: { querySkcs: batch.platformSkcs }, catalogInitial: seed };
                     const response = await completeOptionalCatalog(state, run);
                     if (run.cancelledByUser) break;
                     task = (await taskOperation({ action: 'batch', ...identity, state: response?.status === 'success' && response.coverageComplete ? 'catalog_completed' : 'catalog_failed', error: response?.message || '资料尚未确认送达，可继续补充。' })).task;
@@ -1845,7 +1870,7 @@
             if (window.ShopeersErpDeliveryBridge.collectionTask) {
                 const context = previewContext || await readPreviewContext(extractQuerySkcs(filters), run.queryCapturedAt);
                 if (context.requestId || restoredTask) {
-                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2 });
+                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2, catalogMode: 'after_costs' });
                     if (response.task) {
                         window.clearTimeout(budgetTimer); budgetTimer = null;
                         run.task = response.task; run.previewContext = context;
@@ -1881,8 +1906,8 @@
             updateActionState();
             hideLoading();
             showToast('成本采集完成，共 ' + lastResults.length + ' 个仓库 SKU；送达状态以回传提示为准');
-            // Cost cache, dispatch and rendering precede every optional ERP request.
-            if (catalogCollector) await completeOptionalCatalog(state, run);
+            // Uncoordinated preview has no durable all-batch adoption barrier.
+            // Only shared tasks can start automatic material completion.
         } catch (error) {
             if (rememberServicePause(run, error)) {
                 taskStage = 'ERP 服务暂不可用 · 已暂停，服务恢复后继续原任务';

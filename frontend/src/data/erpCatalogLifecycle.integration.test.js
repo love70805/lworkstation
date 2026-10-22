@@ -7,6 +7,7 @@ import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope } from "../domain/erpInboxContract";
+import { syncErpCatalogPublications } from './repositories/erpCatalogPublicationRepository';
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import vm from "node:vm";
@@ -65,6 +66,28 @@ async function fixture() {
     warehouseEvidence: [{ warehouseSku: "WH", evidenceComplete: true, evidenceRef: "warehouse:WH", purchaseRecords: [{ recordId: "P1", warehouseSku: "WH", quantity: 4, unitPrice: 0.000001, purchaseDate: "2026-08-28", supplierName: "关联供应商", supplier1688Url: "https://detail.1688.com/offer/12345678901.html" }] }] } }, { request });
   return { product, request, envelope };
 }
+
+it('holds an older companion catalog receipt when its cost task is continued with the all-cost barrier', async () => {
+  const { product, envelope } = await fixture();
+  const ledger = await createOrGetMonthlyLedger({ period: '2026-08' });
+  const source = buildErpCostRequest({ id: 'OLD-COST', workspaceId: product.workspaceId, ledgerId: ledger.id, ledgerPeriod: ledger.period,
+    platformSkcs: ['SKC-A'], expectedSkus: [{ platformSku: 'SOLD-A', platformSkc: 'SKC-A' }], requestedBy: 'local-user', requestedAt: '2026-09-01T00:00:00Z' });
+  await saveErpCostRequest(source);
+  const request = buildErpCatalogRequest({ id: 'OLD-COST-CATALOG', workspaceId: product.workspaceId, ledgerId: ledger.id, ledgerPeriod: ledger.period,
+    platformSkcs: ['SKC-A'], confirmedSkus: source.expectedSkus, sourceRequestId: source.id, sourceProductIds: [], idempotencyKey: 'old-companion' });
+  await saveErpCatalogRequest(request);
+  const received = buildErpCatalogInboxEnvelope({ deliveryId: 'OLD-COMPANION', catalog: { ...envelope.catalog, requestId: request.id, ledgerId: ledger.id } }, { request });
+  await receiveErpCatalogInboxEnvelope({ envelope: received });
+  const task = { taskId: 'CONTINUED', workspaceId: product.workspaceId, ledgerId: ledger.id, requestId: source.id, catalogMode: 'after_costs', status: 'running',
+    batches: [{ batchId: 'B1', attemptId: 'A1', status: 'delivered', deliveryId: 'D1', adoptionReportedAt: 'now' }, { batchId: 'B2', attemptId: 'A2', status: 'pending' }] };
+  await syncErpCatalogPublications({ workspaceId: product.workspaceId, tasks: [task] });
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toEqual([]);
+  db.close(); await db.open();
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toEqual([]);
+  Object.assign(task.batches[1], { status: 'delivered', deliveryId: 'D2', adoptionReportedAt: 'now' }); task.status = 'cost_complete';
+  await syncErpCatalogPublications({ workspaceId: product.workspaceId, tasks: [task] });
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toHaveLength(2);
+});
 
 describe("independent trusted catalog lifecycle", () => {
   it("carries production extension catalog output through receipt, save and reopen without inventing a platform unit conversion", async () => {

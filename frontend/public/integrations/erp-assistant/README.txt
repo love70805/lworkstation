@@ -1,4 +1,4 @@
-当前 ERP Assistant：8.0.49
+当前 ERP Assistant：8.0.50
 
 唯一源码位于 integrations/erp-assistant-extension/。
 桌面版直接加载内置助手；外部 Chrome 用户解压当前 ZIP 后，加载包含 manifest.json 的目录并刷新 ERP。

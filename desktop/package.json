@@ -1,6 +1,6 @@
 {
   "name": "shopeers-desktop",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "private": true,
   "description": "Lworkstation Windows desktop shell",
   "author": "Lworkstation Team",
@@ -25,7 +25,7 @@
     "smoke:memory": "node memory-smoke.cjs"
   },
   "devDependencies": {
-    "electron": "44.2.0",
+    "electron": "44.3.0",
     "electron-builder": "26.15.3"
   },
   "build": {

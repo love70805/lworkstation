@@ -46,7 +46,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
       <div className="page-actions">
         {view.running || view.state === 'queued' ? <Button disabled={busy || Boolean(statusError) || task.status === 'pausing'} onClick={() => onControl('pause')}>暂停采集</Button> : null}
         {view.canStop && (!view.catalogOnly || view.running) ? <Button disabled={busy || Boolean(statusError)} onClick={() => onControl('stop')}>停止采集</Button> : null}
-        {view.canResume ? <Button disabled={busy || locked} onClick={() => onControl(view.catalogOnly ? 'catalog' : 'resume')}>{view.catalogOnly ? '按需补齐商品资料' : '继续原任务'}</Button> : null}
+        {view.canResume ? <Button disabled={busy || locked} onClick={() => onControl(view.catalogOnly ? 'catalog' : 'resume')}>{view.catalogOnly ? task.catalogMode === 'after_costs' ? '继续整理商品资料' : '按需补齐商品资料' : '继续原任务'}</Button> : null}
         {failures.length ? <Button disabled={busy || locked || !view.canRetry} onClick={() => onControl('retry_failed')}>重试失败批次</Button> : null}
       </div>
     </div>
@@ -57,7 +57,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
     <div className="erp-collection-counts" role="status"><span>已采集 <strong>{count(collected)} / {total}</strong> SKC</span><span>已送达 <strong>{count(delivered)} / {total}</strong> SKC</span><span>已采用 <strong>{adopted.size}</strong> SKU{manual.size ? ` · 人工有效 ${manual.size}` : ''}</span></div>
     {stores.length ? <p>原任务店铺：{stores.join('、')} · 剩余 {batches.length - delivered.length} 批成本待读取或送达</p> : null}
     <div className="erp-collection-meter"><span>成本回传 · 已送达 {delivered.length} / {batches.length} 批</span><progress max={Math.max(1, batches.length)} value={delivered.length} aria-label="ERP 批次送达进度" /></div>
-    <div className="erp-collection-meter"><span>商品资料{task.catalogMode === 'on_demand' ? '（按需补齐）' : ''} · 已检查 {catalogChecked.length} / {batches.length} 批 · 资料齐全 {catalogComplete.length} 批{catalogIssues.length ? ` · 待补齐 ${catalogIssues.length} 批` : ''}</span><progress max={Math.max(1, batches.length)} value={catalogChecked.length} aria-label="ERP 资料检查进度" /></div>
+    <div className="erp-collection-meter"><span>商品资料{task.catalogMode === 'on_demand' ? '（按需补齐）' : task.catalogMode === 'after_costs' ? '（全部核算后统一整理）' : ''} · 已检查 {catalogChecked.length} / {batches.length} 批 · 资料齐全 {catalogComplete.length} 批{catalogIssues.length ? ` · 待补齐 ${catalogIssues.length} 批` : ''}</span><progress max={Math.max(1, batches.length)} value={catalogChecked.length} aria-label="ERP 资料检查进度" /></div>
     <p>已送达 {delivered.length} / {batches.length} 批 · 成本采集历时 {timing.elapsedMinutes == null ? '暂无记录' : `${timing.elapsedMinutes} 分钟`}{timing.endedAt ? ` · 成本送达完成 ${new Date(timing.endedAt).toLocaleTimeString('zh-CN')}` : ''} · 最近活动 {task.updatedAt ? new Date(task.updatedAt).toLocaleTimeString('zh-CN') : '等待采集'}</p>
     {timing.completed ? <p>成本读取与送达已结束；后续采用同步和异常核对不计入采集历时。</p> : null}
     <p>查看筛选不改变此任务；已送达结果按证据核验后采用。继续原任务保留已送达进度；重新采集会从头读取。</p>

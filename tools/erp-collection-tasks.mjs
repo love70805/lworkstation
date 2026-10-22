@@ -50,7 +50,40 @@ function refresh(task) {
   if (task.status === 'running' && task.batches.every(batch => ['delivered', 'failed', 'incomplete'].includes(batch.status))) {
     task.status = task.batches.every(batch => batch.status === 'delivered') ? 'cost_complete' : 'partial';
   }
+  if (task.catalogMode === 'after_costs' && task.status === 'cost_complete' && !task.batches.some(batch => batch.catalogStatus)) {
+    task.phase = task.batches.every(batch => batch.adoptionReportedAt) ? 'catalog_ready' : 'cost_adoption';
+  }
   return task;
+}
+
+export function collectionCostsSettled(task) {
+  return !task.recoveryRequired && !['paused', 'stopped', 'invalidated'].includes(task.status)
+    && task.batches.length > 0 && task.batches.every(batch => batch.status === 'delivered' && batch.deliveryId && batch.adoptionReportedAt);
+}
+
+// Reconstruct metadata from the durable cost receipt, never from a fresh ERP
+// lookup or a different attempt. Financial values are not sent back as catalog.
+export function collectionCatalogSeed(batch) {
+  const results = new Map();
+  for (const row of batch.rows ?? []) {
+    if (!row.platformSku || !row.platformSkc || !row.warehouseSku) continue;
+    const key = canonical(row.warehouseSku);
+    let result = results.get(key);
+    if (!result) {
+      result = { warehouseSku: row.warehouseSku, name: row.productName ?? row.name, imageUrl: row.imageUrl,
+        supplierName: row.supplierName, supplierNames: row.supplierNames,
+        supplier1688Links: row.supplier1688Links, purchaseCatalog: row.purchaseCatalog,
+        mappings: [], catalogMappings: [], catalogMappingsComplete: batch.sourceMeta?.scopeDirectoryComplete === true
+          && !batch.sourceMeta?.mappingFailureCount };
+      results.set(key, result);
+    }
+    const mapping = { platformSku: row.platformSku, platformSkc: row.platformSkc, warehouseSku: row.warehouseSku,
+      productName: row.productName ?? row.name, imageUrl: row.imageUrl, attribute: row.attribute };
+    result.mappings.push(mapping);
+    result.catalogMappings.push(...(row.catalogMappings?.length ? row.catalogMappings : [mapping]));
+  }
+  return { results: [...results.values()], warehouseEvidence: { formatVersion: 1, warehouses: Array.isArray(batch.warehouseEvidence) ? batch.warehouseEvidence : batch.warehouseEvidence?.warehouses ?? [] },
+    directoryComplete: batch.sourceMeta?.scopeDirectoryComplete === true };
 }
 
 export function recoverCollectionTasks(records, instanceId, now = Date.now()) {
@@ -114,7 +147,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       requestSnapshot: structuredClone(request), expectedSkus: structuredClone(request.expectedSkus ?? []), scopeHash: collectionScopeHash(request),
       filters: structuredClone(filters), queryCapturedAt: payload.queryCapturedAt ?? timestamp(now), status: 'paused', phase: 'cost',
       createdAt: timestamp(now), updatedAt: timestamp(now), instanceId, batches: [] };
-    if (coordinated) Object.assign(task, { executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost' });
+    if (coordinated) Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: 'cost' });
     const batchSize = coordinated ? COST_BATCH_SIZE : 20;
     for (let i = 0; i < skcs.length; i += batchSize) task.batches.push({ batchId: `${task.taskId}:${i / batchSize + 1}`, platformSkcs: skcs.slice(i,i+batchSize), status: 'pending', attemptId: null });
     records.push(refresh(task));
@@ -124,6 +157,17 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   if (!task) fail('ERP_TASK_NOT_FOUND', '采集任务不存在。', 404);
   if (requestedWorkspace !== task.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
   if (method === 'GET' && parts.length === 1) return { status: 200, body: { task: refresh(structuredClone(task)) } };
+  if (method === 'GET' && parts[1] === 'batches' && parts[3] === 'catalog-seed') {
+    if (collectionScopeHash(requestFor(records, task.requestId)) !== task.scopeHash) fail('ERP_TASK_SCOPE_CHANGED', '任务账本范围已变化。');
+    const batch = task.batches.find(item => item.batchId === parts[2]);
+    if (!batch || batch.attemptId !== url.searchParams.get('attemptId')) fail('ERP_TASK_STALE_ATTEMPT', '资料种子的批次尝试已变化。');
+    if (!task.runnerId || task.runnerId !== url.searchParams.get('runnerId')) fail('ERP_TASK_RUNNER_CHANGED', '执行者已变化。');
+    if (!collectionCostsSettled(task)) fail('ERP_TASK_COST_FIRST', '全部成本采集和本机核算完成后才能统一整理资料。');
+    const receipt = records.find(item => item.kind === 'batch' && item.deliveryId === batch.deliveryId
+      && item.workspaceId === task.workspaceId && item.requestId === task.requestId);
+    if (!receipt) fail('ERP_TASK_RECEIPT_NOT_FOUND', '资料种子没有对应的持久成本收件。');
+    return { status: 200, body: { catalogSeedReceipt: receipt.deliveryId } };
+  }
   if (method !== 'POST') fail('METHOD_NOT_ALLOWED', '不支持的任务操作。', 405);
   if (parts[1] === 'control') {
     const action = payload.action;
@@ -133,6 +177,12 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         delete task.runnerId; delete task.runnerLeaseExpiresAt;
         refresh(task);
         if (task.status === 'running') { task.status = 'paused'; task.recoveryRequired = true; }
+        if (task.catalogMode === 'after_costs' && task.batches.some(batch => batch.catalogStatus === 'running')) {
+          task.status = 'paused'; task.recoveryRequired = true;
+          for (const batch of task.batches) if (batch.catalogStatus === 'running') {
+            batch.catalogStatus = 'failed'; batch.catalogError = '资料整理已中断；成本保留，可继续原任务复用暂存资料。';
+          }
+        }
         task.updatedAt = timestamp(now);
         return { status: 200, body: { task: refresh(task) } };
       }
@@ -145,11 +195,12 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         const mode = payload.mode ?? 'cost';
         if (!['cost', 'catalog'].includes(mode) || payload.retryFailed != null && typeof payload.retryFailed !== 'boolean') fail('ERP_TASK_MODE_INVALID', '任务继续方式无效。', 400);
         if (mode === 'catalog' && task.batches.some(batch => !batch.deliveryId)) fail('ERP_TASK_COST_FIRST', '请先完成成本采集，再按需补齐商品资料。');
+        if (mode === 'catalog' && task.catalogMode === 'after_costs' && task.batches.some(batch => batch.status !== 'delivered')) fail('ERP_TASK_COST_FIRST', '成本证据尚未完整，请先重试失败批次。');
         if (task.runnerId && Date.parse(task.runnerLeaseExpiresAt) > now && task.status !== 'paused'
           || task.status === 'ready' && task.runMode === mode && !payload.retryFailed) return { status: 200, body: { task: refresh(task), idempotent: true } };
         for (const batch of task.batches) if (batch.status === 'running' || payload.retryFailed && ['failed', 'incomplete'].includes(batch.status)) resetAttempt(batch);
         if (mode === 'cost') splitPendingBatches(task);
-        Object.assign(task, { executionProtocol: 2, catalogMode: 'on_demand', runMode: mode, status: 'ready', recoveryRequired: false,
+        Object.assign(task, { executionProtocol: 2, catalogMode: task.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: mode, status: 'ready', recoveryRequired: false,
           resumeRequestId: crypto.randomUUID(), resumeRequestedAt: timestamp(now), instanceId });
         delete task.runnerId; delete task.runnerLeaseExpiresAt; delete task.pauseReason;
       } else {
@@ -157,6 +208,9 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         if (typeof payload.runnerId !== 'string' || payload.runnerId.length < 8 || payload.runnerId.length > 200) fail('ERP_TASK_RUNNER_INVALID', '缺少有效执行者标识。', 400);
         if (records.some(item => item.kind === 'collection-task' && item.taskId !== task.taskId && item.workspaceId === task.workspaceId
           && item.runnerId && !['paused', 'stopped', 'completed', 'invalidated'].includes(item.status) && Date.parse(item.runnerLeaseExpiresAt) > now)) fail('ERP_TASK_OTHER_RUNNING', '当前工作区已有任务正在采集，本任务等待执行。');
+        // The upgraded helper can continue an older task without rereading its
+        // durable cost batches. Older helpers keep their existing protocol.
+        if (payload.catalogMode === 'after_costs') task.catalogMode = 'after_costs';
         task.runnerId = payload.runnerId; task.status = 'running';
       }
       renew(task, request, records, now);
@@ -194,6 +248,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
     if (task.executionProtocol === 2 && (!task.runnerId || payload.runnerId !== task.runnerId)) fail('ERP_TASK_RUNNER_CHANGED', '执行者已变化，旧页面不能继续写入任务。');
     requestFor(records, task.requestId);
     if (['catalog_running','catalog_completed','catalog_failed'].includes(payload.state)) {
+      if (task.catalogMode === 'after_costs' && !collectionCostsSettled(task)) fail('ERP_TASK_COST_FIRST', '全部成本采集和本机核算完成后才能统一整理资料。');
       if (!payload.attemptId || payload.attemptId !== batch.attemptId) fail('ERP_TASK_STALE_ATTEMPT', '旧尝试不能更新当前资料批次。');
       if (!batch.deliveryId || !['delivered','incomplete'].includes(batch.status)) fail('ERP_TASK_COST_FIRST', '成本批次送达后才能补充资料。');
       if (payload.state === 'catalog_running' && task.status === 'paused') fail('ERP_TASK_NOT_RUNNING', '任务已暂停。');
@@ -223,6 +278,10 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   if (parts[1] === 'adoption') {
     const batch = task.batches.find(item => item.deliveryId === payload.deliveryId);
     if (!batch) fail('ERP_TASK_RECEIPT_NOT_FOUND', '采用报告没有对应的已送达批次。');
+    if (payload.state === 'pending') {
+      batch.adoption = null; delete batch.adoptionReportedAt; task.updatedAt = timestamp(now);
+      return { status: 200, body: { task: refresh(task) } };
+    }
     const adoption = {};
     for (const key of ['adoptedCount','protectedCount','evidenceIncompleteCount','missingCount','anomalyCount','manualEffectiveCount','expectedCount','supersededCount']) {
       const value = Number(payload[key] ?? 0);

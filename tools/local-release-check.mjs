@@ -9,6 +9,7 @@ const commands = [
   ["ERP Assistant 桥接生成", "pnpm", ["erp:bridge:test"]],
   ["ERP 分批任务持久化与恢复", "node", ["../tools/erp-collection-tasks.test.mjs"]],
   ["ERP 统一继续与成本优先", "node", ["../tools/erp-task-continuation.test.mjs"]],
+  ["全部成本核算后统一整理资料与持久复用", "node", ["../tools/erp-cost-before-catalog.test.mjs"]],
   ["ERP 真实进度与并发任务", "node", ["../tools/erp-collection-progress.test.mjs"]],
   ["ERP 资料目标实际并发", "node", ["../tools/erp-catalog-concurrency.test.mjs"]],
   ["ERP 服务维护、缺项复核与批次恢复", "node", ["../tools/erp-collection-resilience.test.mjs"]],

@@ -76,7 +76,10 @@ async function scenario(mode) {
     return { ok: true, status: 200, json: async () => body };
   };
   try {
-    for (const name of ['catalog-collector.js', 'result-policy.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) window.eval(sources[name]);
+    // These recovery scenarios exercise the retained on-demand task contract.
+    // The after-costs automatic policy has its own end-to-end release gate.
+    for (const name of ['catalog-collector.js', 'result-policy.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) window.eval(name === 'content.js'
+      ? sources[name].replace("executionProtocol: 2, catalogMode: 'after_costs'", "executionProtocol: 2, catalogMode: 'on_demand'").replace("resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs'", "resumeRequestId: task.resumeRequestId, catalogMode: 'on_demand'") : sources[name]);
     window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-0' } }));
     window.document.getElementById('erpa-cost-trigger').click();
     const idle = () => !window.document.getElementById('erpa-recalculate').disabled;

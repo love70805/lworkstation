@@ -37,7 +37,7 @@ async function fixture(mode, realClock = false) {
    messages.push({ ...JSON.parse(JSON.stringify(message)), at: Date.now() - started });
    if (mode === 'context-hang' && message.type === 'shopeers.erp.previewContext') return;
    if (message.type === 'shopeers.erp.catalogContext' && messages.some(item => item.type === 'shopeers.erp.submitCostResult')) optional = true;
-   callback(collectionReply(message, { expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }] }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', platformSkcs: ['SKC-A'], expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }, { platformSku: 'SKU-WH-UNSOLD', platformSkc: 'SKC-A' }] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }));
+   callback(collectionReply(message, { expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }] }) || (message.type === 'shopeers.erp.catalogContext' ? { ok: true, request: { requestId: 'CAT-A', ledgerPeriod: '2026-08', platformSkcs: ['SKC-A'], expectedSkus: [{ platformSku: 'SKU-WH-A', platformSkc: 'SKC-A' }, { platformSku: 'SKU-WH-UNSOLD', platformSkc: 'SKC-A' }] } } : { ok: true, status: 'success', resultDeliveryId: message.payload?.resultDeliveryId }));
  } } };
  window.fetch = async (raw, options) => {
    const url = new URL(raw), endpoint = url.pathname.split('/').at(-1); calls.push({ endpoint, params: Object.fromEntries(url.searchParams), at: Date.now() - started });
@@ -46,16 +46,16 @@ async function fixture(mode, realClock = false) {
    if ((mode === 'login' || (mode === 'login-detail' && endpoint === 'purchase-order-details')) && fail) return { ok: false, status: 401, statusText: 'Unauthorized', json: async () => ({}) };
    let body;
    if (endpoint === 'purchase-order-page') {
-     assert.equal(url.searchParams.get('sku'), optional ? 'WH-UNSOLD' : 'SKC-A', 'history reads stay in the captured target or its verified warehouse mapping');
+     assert.ok((optional ? ['WH-A', 'WH-UNSOLD'] : ['SKC-A']).includes(url.searchParams.get('sku')), 'history reads stay in the captured target or its verified warehouse mapping');
      assert.equal(url.searchParams.get('queryRange'), '0');
      assert.equal(url.searchParams.get('storeId'), 'STORE-A');
-     if (optional && ['optional-history-hang', 'optional-service-hang', 'cancel-optional'].includes(mode)) return new Promise(() => {});
-     if (optional && mode === 'huge' && Number(url.searchParams.get('page')) === 12) {
+     if (optional && url.searchParams.get('sku') === 'WH-UNSOLD' && ['optional-history-hang', 'optional-service-hang', 'cancel-optional'].includes(mode)) return new Promise(() => {});
+     if (optional && url.searchParams.get('sku') === 'WH-UNSOLD' && mode === 'huge' && Number(url.searchParams.get('page')) === 12) {
       assert.equal(typeof expireHugeCatalog, 'function');
       expireHugeCatalog();
       return new Promise(() => {});
      }
-     if (optional && mode === 'huge') body = response(Array.from({ length: 50 }, (_, i) => ({ purchaseOrderId: 'H-' + url.searchParams.get('page') + '-' + i })), 100000);
+     if (optional && url.searchParams.get('sku') === 'WH-UNSOLD' && mode === 'huge') body = response(Array.from({ length: 50 }, (_, i) => ({ purchaseOrderId: 'H-' + url.searchParams.get('page') + '-' + i })), 100000);
      else body = response([{ purchaseOrderId: 'PO-A' }]);
    } else if (endpoint === 'purchase-order-details') body = response([detail(url.searchParams.get('purchaseOrderId'))]);
    else if (endpoint === 'product-info-sku') body = response([{ ...mapping(url.searchParams.get('productId')), barcodeSkcid: 'SKC-A' }]);
@@ -74,23 +74,30 @@ async function fixture(mode, realClock = false) {
 }
 const cost = f => f.messages.find(m => m.type === 'shopeers.erp.submitCostResult');
 const catalog = f => f.messages.find(m => m.type === 'shopeers.erp.submitCatalogResult');
+async function startExplicitCatalog(f) {
+ await until(() => cost(f) && !f.window.document.getElementById('erpa-recalculate').disabled);
+ assert.equal(catalog(f), undefined, 'uncoordinated preview never automatically starts materials');
+ await until(() => !f.window.document.getElementById('erpa-supplement-catalog').hidden);
+ f.window.document.getElementById('erpa-supplement-catalog').click();
+}
 for (const mode of ['optional-history-hang', 'huge']) {
  const f = await fixture(mode);
  try {
   await until(() => cost(f));
   assert.equal(cost(f).payload.results[0].unitCost, '4.0000');
+  await startExplicitCatalog(f);
   if (mode === 'optional-history-hang') await until(() => !f.window.document.getElementById('erpa-catalog-progress').hidden);
   assert.equal(f.window.document.getElementById('erpa-loading').classList.contains('erpa-visible'), false, 'optional phase cannot obscure completed table');
   assert.match(f.window.document.getElementById('erpa-table-body').textContent, /WH-A/);
   await until(() => catalog(f));
   assert.ok(cost(f).at <= catalog(f).at);
-  if (mode === 'optional-history-hang') assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial');
+  if (mode === 'optional-history-hang') assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial', JSON.stringify({coverage:catalog(f).payload.catalogCoverage,calls:f.calls}));
   if (mode === 'huge') {
    const lists = f.calls.filter(c => c.endpoint === 'purchase-order-page');
    assert.ok(lists.length > 11 && lists.length <= 2001, 'history continues past ten pages until the optional time budget, without a fixed order cap');
    assert.equal(lists.filter(c => c.params.sku === 'WH-UNSOLD').length, 12, 'controlled deadline fires after reading beyond ten optional pages');
-   assert.equal(f.calls.filter(c => c.endpoint === 'purchase-order-details').length, 1, 'huge optional history stops before high fan-out details');
-   assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial');
+   assert.equal(f.calls.filter(c => c.endpoint === 'purchase-order-details').length, 2, 'independent manual supplement rechecks the known warehouse, but huge history stops before high fan-out details');
+   assert.equal(catalog(f).payload.catalogCoverage.purchaseEvidence.state, 'partial', JSON.stringify({coverage:catalog(f).payload.catalogCoverage,calls:f.calls}));
    assert.equal(cost(f).payload.warehouseEvidence.warehouses.find(w => w.warehouseSku === 'WH-A').evidenceComplete, true);
   }
   checks.push({ mode, clock: mode === 'huge' ? 'catalog deadline after 12 optional pages; unchanged production code' : 'accelerated deadlines only; unchanged production code', costMs: cost(f).at, catalogMs: catalog(f).at, requests: f.calls.length });
@@ -100,6 +107,8 @@ for (const mode of ['optional-history-hang', 'huge']) {
  const f = await fixture('optional-service-hang');
  try {
   await until(() => cost(f));
+  await startExplicitCatalog(f);
+  await until(() => f.calls.some(call => call.endpoint === 'purchase-order-page' && call.params.sku === 'WH-UNSOLD'));
   await until(() => !f.window.document.getElementById('erpa-recalculate').disabled);
   assert.equal(catalog(f), undefined, 'exhausted optional service retries must not deliver incomplete material as completed');
   assert.equal(f.calls.filter(call => call.endpoint === 'purchase-order-page' && call.params.sku === 'WH-UNSOLD').length, 3);
@@ -144,7 +153,7 @@ for (const mode of ['first-hang', 'json-hang', 'login', 'login-detail']) {
 for (const mode of ['first-hang', 'cancel-optional']) {
  const f = await fixture(mode);
  try {
-  if (mode === 'cancel-optional') { await until(() => !f.window.document.getElementById('erpa-catalog-progress').hidden); f.window.document.getElementById('erpa-cancel-catalog').click(); }
+  if (mode === 'cancel-optional') { await startExplicitCatalog(f); await until(() => !f.window.document.getElementById('erpa-catalog-progress').hidden); f.window.document.getElementById('erpa-cancel-catalog').click(); }
   else { await until(() => f.calls.length > 0); f.window.document.getElementById('erpa-cancel').click(); }
   const count = f.calls.length; await pause(250); assert.equal(f.calls.length, count, 'cancel stops new requests even when fetch ignores AbortSignal');
   assert.equal(catalog(f), undefined);
@@ -155,7 +164,7 @@ for (const mode of ['first-hang', 'cancel-optional']) {
 if (process.env.ERP_REAL_DEADLINE_QA === '1') {
  const f = await fixture('optional-service-hang', true);
  const started = Date.now();
- try { await until(() => cost(f)); await until(() => !f.window.document.getElementById('erpa-recalculate').disabled, 365000); const elapsedMs = Date.now() - started; assert.ok(elapsedMs >= 359000 && elapsedMs < 365000); assert.equal(catalog(f), undefined); assert.match(f.window.document.body.textContent, /ERP 服务暂不可用/); checks.push({ mode: 'optional-service-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, elapsedMs, requests: f.calls.length }); }
+ try { await startExplicitCatalog(f); await until(() => f.calls.some(call => call.endpoint === 'purchase-order-page' && call.params.sku === 'WH-UNSOLD')); await until(() => !f.window.document.getElementById('erpa-recalculate').disabled, 365000); const elapsedMs = Date.now() - started; assert.ok(elapsedMs >= 359000 && elapsedMs < 365000); assert.equal(catalog(f), undefined); assert.match(f.window.document.body.textContent, /ERP 服务暂不可用/); checks.push({ mode: 'optional-service-hang', clock: 'real 120-second request timeout with two retries', costMs: cost(f).at, elapsedMs, requests: f.calls.length }); }
  finally { await f.close(); }
 }
 await mkdir(path.join(root, 'archive/release-0.3.4'), { recursive: true });

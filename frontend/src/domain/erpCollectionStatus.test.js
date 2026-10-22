@@ -83,3 +83,12 @@ it('finishes cost work without treating optional or stale material activity as r
   expect(erpCollectionPresentation({ ...task, runMode: 'catalog', runnerId: 'RUNNER', batches: [{ ...delivered, catalogStatus: 'running' }] })).toMatchObject({ state: 'catalog_running', running: true, canResume: false });
   expect(erpCollectionPresentation({ ...task, status: 'partial', batches: [{ ...delivered, status: 'incomplete' }] })).toMatchObject({ canResume: false, canRetry: true });
 });
+
+it('shows local calculation before automatic catalog and keeps pause available', () => {
+  const task = { executionProtocol: 2, catalogMode: 'after_costs', runMode: 'cost', runnerId: 'R', status: 'cost_complete', phase: 'cost_adoption', batches: [delivered] };
+  expect(erpCollectionPresentation(task)).toMatchObject({ state: 'cost_adoption', running: true, canResume: false, canStop: true });
+  expect(erpCollectionPresentation({ ...task, phase: 'catalog_ready' })).toMatchObject({ state: 'catalog_running', running: true });
+  const paused = erpCollectionPresentation({ ...task, status: 'paused', runnerId: null });
+  expect(paused.description).toContain('全部成本核算回执');
+  expect(paused.canResume).toBe(true);
+});

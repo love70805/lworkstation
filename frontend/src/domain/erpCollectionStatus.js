@@ -31,9 +31,11 @@ export function erpCollectionPresentation(task) {
   const costRunning = !inactive && batches.some(batch => batch.status === 'running');
   const delivering = !inactive && batches.some(batch => batch.status === 'collected' && !batch.deliveryId);
   const preparingCatalog = !inactive && (task.runMode === 'catalog' && task.runnerId
+    || task.catalogMode === 'after_costs' && task.runnerId && task.phase === 'catalog_ready'
     || task.executionProtocol !== 2 && task.status === 'running' && task.phase === 'catalog')
     && batches.some(batch => batch.deliveryId && !batch.catalogStatus);
-  const running = catalogRunning || costRunning || delivering || preparingCatalog || task?.status === 'pausing';
+  const awaitingAdoption = !inactive && task?.catalogMode === 'after_costs' && Boolean(task.runnerId) && task.phase === 'cost_adoption';
+  const running = catalogRunning || costRunning || delivering || preparingCatalog || awaitingAdoption || task?.status === 'pausing';
   const terminal = !task || ['stopped', 'completed', 'invalidated'].includes(task.status);
   const costIssues = batches.some(batch => ['failed', 'incomplete'].includes(batch.status));
   const costDelivered = batches.length > 0 && batches.every(batch => batch.deliveryId);
@@ -55,12 +57,17 @@ export function erpCollectionPresentation(task) {
   } else if (task?.status === 'pausing') {
     state = 'pausing'; title = '正在暂停后台采集';
     description = '等待当前操作结束；已送达结果保留。';
+  } else if (awaitingAdoption) {
+    state = 'cost_adoption'; title = '成本已送达，正在完成本机核算';
+    description = '全部批次处理完成后，统一复用暂存资料补全商品并自动建档；无需再次请求已取得的 ERP 资料。';
   } else if (queued || claimed && !running) {
     state = 'queued'; title = queued ? '继续请求已保存，等待 ERP 接续' : 'ERP 已接续，正在准备读取';
     description = '无需重复点击。请保持 ERP 采购管理页已打开且已登录；连接恢复后会接续这个任务。';
   } else if (catalogOnly && !running) {
     state = 'cost_completed'; title = '成本采集已完成';
-    description = '商品图片、链接等资料可按需补齐；已采用成本可以继续核算利润，无需重新采集成本。'; tone = 'success';
+    description = task.catalogMode === 'after_costs'
+      ? '继续原任务后，待全部成本核算回执确认，再统一复用暂存资料补全商品并自动建档。'
+      : '商品图片、链接等资料可按需补齐；已采用成本可以继续核算利润，无需重新采集成本。'; tone = 'success';
   } else if (task?.status === 'paused' && task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') {
     state = 'paused'; title = 'ERP 服务暂不可用，采集已暂停';
     description = '有限重试后仍未取得完整响应。已送达结果和已采用成本保留；服务恢复后点击继续原任务，成本证据缺项需重试失败批次。'; tone = 'warning';
