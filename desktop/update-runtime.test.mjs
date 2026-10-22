@@ -229,6 +229,18 @@ assert.equal(updater.downloadCalls, 2);
 assert.equal(runtime.canInstall(), true);
 assert.equal(runtime.postpone().ok, true);
 assert.match(runtime.snapshot().message, /稍后/);
+runtime.beginInstall();
+assert.equal(runtime.snapshot().status, 'installing');
+assert.equal(runtime.canInstall(), false);
+assert.equal((await runtime.check()).ok, false);
+runtime.installFailed(Object.assign(new Error('已取消管理员授权，请重试'), { code: '1223' }));
+assert.equal(runtime.snapshot().retryAction, 'install');
+assert.equal(runtime.canInstall(), true);
+assert.equal((await runtime.check()).ok, false);
+runtime.beginInstall();
+runtime.installFailed(Object.assign(new Error('安装包校验失败，请重新下载'), { code: 'CHECKSUM' }));
+assert.equal(runtime.snapshot().retryAction, 'check');
+assert.equal(runtime.canInstall(), false);
 
 runtime.start();
 assert.equal(scheduledInterval.delay, UPDATE_INTERVAL_MS);

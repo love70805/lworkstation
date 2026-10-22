@@ -28,6 +28,7 @@ const statusLabels = {
   downloading: "下载中",
   canceled: "已取消",
   downloaded: "待安装",
+  installing: "准备安装",
   error: "异常",
 };
 
@@ -57,7 +58,7 @@ function render(state) {
   const update = state.update;
   const release = update.release || {};
   currentVersion.textContent = update.currentVersion ? `v${String(update.currentVersion).replace(/^v/i, "")}` : "--";
-  document.querySelector("#update-channel").textContent = /-beta(?:[.+]|$)/.test(update.currentVersion || "") ? "Beta" : "稳定版";
+  document.querySelector("#update-channel").textContent = /-rc(?:[.+]|$)/.test(update.currentVersion || "") ? "RC" : /-beta(?:[.+]|$)/.test(update.currentVersion || "") ? "Beta" : "稳定版";
   message.textContent = actionError || update.message || "更新状态不可用";
   stateBadge.textContent = statusLabels[update.status] || "未知";
   stateBadge.dataset.tone = update.status === "error" ? "danger" : ["available", "downloading", "downloaded"].includes(update.status) ? "primary" : "muted";
@@ -90,6 +91,10 @@ function render(state) {
   if (update.status === "downloading") show("cancel");
   if (update.status === "canceled") show("retry");
   if (update.status === "error") show("retry");
+  if (update.status === "installing") {
+    show("install");
+    actions.find(entry => entry.dataset.updateAction === 'install').disabled = true;
+  }
   if (update.status === "downloaded") show("postpone", "install");
   requestResize();
 }
@@ -106,6 +111,7 @@ async function runAction(name) {
     if (name === "cancel") result = await window.updatePopover.cancel();
     if (name === "retry") {
       if (latestState?.update?.retryAction === "download") result = await window.updatePopover.download();
+      else if (latestState?.update?.retryAction === "install") result = await window.updatePopover.install();
       else result = await window.updatePopover.retry();
     }
     if (name === "install") result = await window.updatePopover.install();

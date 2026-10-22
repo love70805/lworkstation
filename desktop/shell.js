@@ -44,7 +44,7 @@ function render(state) {
   appVersion.textContent = version === "浏览器环境" ? version : `v${String(version).replace(/^v/i, "")}`;
   const update = state.update || {};
   const updateStatus = update.status || "disabled";
-  const hasUpdate = ["available", "downloading", "downloaded", "canceled", "error"].includes(updateStatus);
+  const hasUpdate = ["available", "downloading", "downloaded", "installing", "canceled", "error"].includes(updateStatus);
   updateAction.dataset.status = updateStatus;
   updateAction.classList.toggle("has-update", hasUpdate);
   updateAction.setAttribute("aria-expanded", String(Boolean(state.updatePopoverOpen)));
