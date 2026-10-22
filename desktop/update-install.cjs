@@ -109,7 +109,9 @@ function createUpdateInstaller({ executable, userDataPath, parentPid = process.p
           // /D must be last: NSIS reads the complete remainder as the directory.
           const args = ['--updated', '--force-run', scope === 'machine' ? '/allusers' : '/currentuser',
             `--lworkstation-pipe=${pipe}`, `--lworkstation-parent=${parentPid}`, `/D=${directory}`];
-          child = spawnInstaller(file, args, { detached: true, stdio: 'ignore', windowsHide: true });
+          // This is an assisted installer, not a background helper: keep its
+          // progress and Finish page visible after the workbench exits.
+          child = spawnInstaller(file, args, { detached: true, stdio: 'ignore', windowsHide: false });
           child.once('error', error => finish(error.code || 'SPAWN'));
           child.once('exit', code => finish(code === 1223 ? '1223' : `EXIT_${code ?? 'UNKNOWN'}`));
           child.unref();

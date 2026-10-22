@@ -23,7 +23,7 @@ const options = { executable: path.join(root, 'Lworkstation.exe'), userDataPath:
   resolveScope: async () => 'machine', record: entry => records.push(entry),
   spawnInstaller(exe, args, spawnOptions) {
     calls++; lastArgs = args;
-    assert.equal(exe, file); assert.equal(spawnOptions.windowsHide, true);
+    assert.equal(exe, file); assert.equal(spawnOptions.windowsHide, false, 'assisted installer must remain visible');
     const child = new EventEmitter(); child.unref = () => {};
     if (mode === 'spawn-failed') { setImmediate(() => child.emit('error', Object.assign(new Error('private path'), { code: 'EACCES' }))); return child; }
     if (mode === 'timeout') return child;
