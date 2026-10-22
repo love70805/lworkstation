@@ -183,10 +183,12 @@ export async function receiveErpCatalogInboxEnvelope({ envelope } = {}) {
 
 export async function readTrustedErpCatalogRecords(context, snapshot = null) {
   const settings = await db.settings.toArray(), records = [];
+  const catalogAllowed = await readErpCatalogPublicationGate(context.workspaceId);
   let local;
   for (const record of settings.filter(item => item.kind === "erp_catalog_result" && item.workspaceId === context.workspaceId)) {
     const stored = settings.find(item => item.key === requestKey(context.workspaceId, record.requestId));
     if (!stored?.request) continue;
+    if (stored.request.sourceRequestId && !catalogAllowed({ requestId: stored.request.sourceRequestId, ledgerId: stored.request.ledgerId })) continue;
     try {
       local ??= await confirmedIdentities(context, snapshot);
       await assertConfirmedRequest(stored.request, context, local);

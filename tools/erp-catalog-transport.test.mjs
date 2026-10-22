@@ -357,6 +357,16 @@ export async function verifyErpCatalogTransport({
     const explicitAttributeRows = worker.__SHOPEERS_ERP_BACKGROUND_TEST_API__.buildRows(shared.results, shared.warehouseEvidence);
     assert.equal(explicitAttributeRows.find((row) => row.platformSku === "SKU-BLUE").attribute, "蓝色/M", "an explicit optional platform attribute remains compatible");
     assert.equal(explicitAttributeRows.find((row) => row.platformSku === "SKU-RED").attribute, "");
+    if (afterCosts) {
+      const headers = { authorization: `Bearer ${capability}`, 'content-type': 'application/json' };
+      const { tasks } = await (await fetch(`${base}/erp/v1/collection-tasks?workspaceId=${encodeURIComponent(workspaceId)}`, { headers })).json();
+      const task = tasks[0];
+      await fetch(`${base}/erp/v1/collection-tasks/${task.taskId}/adoption`, { method: 'POST', headers, body: JSON.stringify({ workspaceId, deliveryId: task.batches[0].deliveryId, state: 'pending' }) });
+      await fetch(`${base}/erp/v1/collection-tasks/${task.taskId}/control`, { method: 'POST', headers, body: JSON.stringify({ workspaceId, action: 'stop' }) });
+      const late = await fetch(`${base}/erp/v1/catalog-results`, { method: 'POST', headers, body: JSON.stringify({ workspaceId, requestId: `${requestId}-CATALOG`, resultDeliveryId: 'ERP-RESULT-LATE-STOPPED', querySkcs: ['SKC-CATALOG'], rows: [] }) });
+      assert.equal(late.status, 409, 'stopping a task cannot release a queued companion result before all calculations');
+      assert.equal((await late.json()).error, 'ERP_TASK_COST_FIRST');
+    }
     return { batch, envelope };
   } finally {
     await window?.happyDOM.close();

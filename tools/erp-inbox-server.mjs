@@ -1195,8 +1195,8 @@ const server = http.createServer(async (req, res) => {
       }
       const request = records.find(item => item.kind === 'request' && item.requestKind === 'catalog' && item.status === 'registered' && !requestExpired(item) && item.requestId === payload?.requestId && item.workspaceId === payload?.workspaceId);
       if (!request) return json(res, 409, { error: 'ERP_REQUEST_NOT_FOUND', message: '没有匹配且有效的已登记资料请求。' });
-      const sourceTask = records.find(item => item.kind === 'collection-task' && item.requestId === request.sourceRequestId && item.workspaceId === request.workspaceId && item.catalogMode === 'after_costs' && item.status !== 'stopped');
-      if (sourceTask && !collectionCostsSettled(sourceTask)) return json(res, 409, { error: 'ERP_TASK_COST_FIRST', message: '全部成本采集和本机核算完成后才能统一整理资料。' });
+      const sourceTask = records.findLast(item => item.kind === 'collection-task' && item.requestId === request.sourceRequestId && item.workspaceId === request.workspaceId);
+      if (sourceTask?.catalogMode === 'after_costs' && !collectionCostsSettled(sourceTask)) return json(res, 409, { error: 'ERP_TASK_COST_FIRST', message: '全部成本采集和本机核算完成后才能统一整理资料。' });
       const rawEvidence = normalizeErpCatalogPurchaseEvidence(stripExtensionDecisions(payload?.warehouseEvidence ?? []));
       const warehouseScope = new Set((payload?.rows ?? []).map(row => canonicalSku(row?.warehouseSku)).filter(Boolean));
       if (rawEvidence.some(entry => !warehouseScope.has(entry.canonicalWarehouseSku))) return json(res, 400, { error: 'INVALID_ERP_EVIDENCE', message: '资料采购证据超出已确认仓库映射。' });
