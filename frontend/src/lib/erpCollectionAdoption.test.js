@@ -3,6 +3,20 @@ vi.mock('../data/database', () => ({ listErpCostAdoptionStates: vi.fn() }));
 import { syncErpCollectionAdoptions } from './erpCollectionAdoption';
 import { readErpCollectionActivity } from './erpCollectionActivity';
 
+it('publishes catalog only after every durable calculation report succeeds and uses the returned task state', async () => {
+  const task = { workspaceId: 'BARRIER-W', taskId: 'T', catalogMode: 'after_costs', batches: [{ deliveryId: 'D1' }, { deliveryId: 'D2' }] };
+  const report = vi.fn().mockResolvedValueOnce({ task: { ...task, batches: [{ deliveryId: 'D1', adoptionReportedAt: 'now' }, { deliveryId: 'D2' }] } })
+    .mockRejectedValueOnce(new Error('lost final report'));
+  const publishCatalog = vi.fn();
+  const deps = { workspaceId: 'BARRIER-W', listTasks: async () => ({ tasks: [task] }), report, publishCatalog,
+    listInboxes: async () => ['D1', 'D2'].map(deliveryId => ({ workspaceId: 'BARRIER-W', deliveryId, status: 'applied', adoption: { summary: { adoptedCount: 1 } } })) };
+  await expect(syncErpCollectionAdoptions(deps)).rejects.toThrow('lost final report');
+  expect(publishCatalog).not.toHaveBeenCalled();
+  report.mockResolvedValue({ task: { ...task, batches: task.batches.map(batch => ({ ...batch, adoptionReportedAt: 'confirmed' })) } });
+  await syncErpCollectionAdoptions(deps);
+  expect(publishCatalog.mock.calls[0][0].tasks[0].batches.every(batch => batch.adoptionReportedAt)).toBe(true);
+});
+
 it('reports only durable adoption, distinguishes manual costs and retries a lost report', async () => {
   const task = { taskId: 'TASK', batches: [{ deliveryId: 'D' }, { deliveryId: 'PENDING' }] };
   const report = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue({});

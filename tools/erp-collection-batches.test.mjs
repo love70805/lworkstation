@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { webcrypto } from 'node:crypto';
 import path from 'node:path';
 import vm from 'node:vm';
-import { handleCollectionTaskRequest, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
+import { handleCollectionTaskRequest, validateCollectionDelivery, recordCollectionDelivery, collectionCatalogSeed } from './erp-collection-tasks.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(path.join(root, 'frontend/package.json'));
@@ -18,7 +18,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function scenario(size, mode = '', options = {}) {
   const skcs = Array.from({length:size},(_,i) => `SKC-${i}`);
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
-  const records = [request], deliveries = [], calls = [], listTimes = new Map(), windows = [], claims = [];
+  const records = [request], deliveries = [], catalogs = [], calls = [], listTimes = new Map(), windows = [], claims = [];
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
   let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
@@ -28,15 +28,27 @@ export async function scenario(size, mode = '', options = {}) {
     let body;
     try {
       const result = handleCollectionTaskRequest(records,{method:init.method||'GET',url,payload,instanceId:'test'});
-      if (result) { body=result.body; if(payload.action==='claim')claims.push(payload.runnerId); }
-      else if(url.pathname==='/erp/v1/requests') body={records:[request]};
+      if (result) {
+        body=result.body; if(payload.action==='claim')claims.push(payload.runnerId);
+        if(body.catalogSeedReceipt) {
+          const delivery=deliveries.find(item=>item.deliveryId===body.catalogSeedReceipt);
+          body={seed:collectionCatalogSeed({rows:delivery.rows,sourceMeta:delivery.sourceMeta,warehouseEvidence:delivery.warehouseEvidence})};
+        }
+      }
+      else if(url.pathname==='/erp/v1/requests') body={records:[request,...(options.afterCosts?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[])]};
       else if(url.pathname==='/erp/v1/extension-status') body={ok:true};
+      else if(url.pathname==='/erp/v1/catalog-results') {
+        assert.equal(deliveries.length,Math.ceil(size/5));
+        assert.ok(records[1].batches.every(batch=>batch.adoptionReportedAt),'no materials before every local calculation outcome');
+        catalogs.push(payload);body={deliveryId:`CAT-${catalogs.length}`,batchId:`CAT-B-${catalogs.length}`,resultDeliveryId:payload.resultDeliveryId};
+      }
       else if(url.pathname==='/erp/v1/cost-results') {
         const task = validateCollectionDelivery(records,payload);
         const existing = deliveries.find(item=>item.resultDeliveryId===payload.resultDeliveryId);
         if(existing) return {ok:true,status:200,json:async()=>({deliveryId:existing.deliveryId,batchId:existing.batchId,resultDeliveryId:payload.resultDeliveryId})};
         body={deliveryId:`DEL-${deliveries.length}`,batchId:`IMPORT-${deliveries.length}`,resultDeliveryId:payload.resultDeliveryId};
         recordCollectionDelivery(task,body); deliveries.push({...payload,...body,elapsedMs:Date.now()-began,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
+        if(options.afterCosts)records.push({kind:'batch',deliveryId:body.deliveryId,workspaceId:'WS',requestId:'REQ'});
       } else throw Error(url.pathname);
       return {ok:true,status:200,json:async()=>structuredClone(body)};
     } catch(error) {return {ok:false,status:error.status||400,json:async()=>({code:error.code,message:error.message})};}
@@ -74,6 +86,7 @@ export async function scenario(size, mode = '', options = {}) {
     const lanes = mode==='benchmark-serial' ? 1 : mode==='benchmark-two-lanes' ? 2 : 4;
     for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
       let script=options.sources?.[name]??source[name];
+      if(!options.afterCosts&&name==='content.js')script=script.replace("executionProtocol: 2, catalogMode: 'after_costs'", "executionProtocol: 2, catalogMode: 'on_demand'");
       if(mode.startsWith('benchmark')&&name==='content.js')script=script.replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`);
       if(mode==='speed-recovery'&&name==='content.js')script=script.replace('const REQUEST_RECOVERY_DELAY_MS = 30000;','const REQUEST_RECOVERY_DELAY_MS = 100;');
       window.eval(script);
@@ -110,6 +123,18 @@ export async function scenario(size, mode = '', options = {}) {
         assert.equal(records[1].status,'ready','workstation persists intent before the ERP page starts');
       } else window.document.getElementById('erpa-resume').click();
     }
+    if(options.afterCosts) {
+      await until(()=>deliveries.length===Math.ceil(size/5));
+      assert.equal(catalogs.length,0);assert.ok(records[1].batches.every(batch=>!batch.catalogStatus));
+      const before=calls.length;
+      for(const batch of records[1].batches) {
+        assert.equal(catalogs.length,0,'no material delivery while any calculation remains');
+        handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${records[1].taskId}/adoption`),
+          payload:{workspaceId:'WS',deliveryId:batch.deliveryId,adoptedCount:batch.platformSkcs.length},instanceId:'test'});
+      }
+      await until(()=>catalogs.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(calls.length,before,'durable seeds reuse directory, mapping and complete history even after the task cache is gone');
+    }
     await until(()=>{
       if(options.fixture && records[1]?.batches.some(batch=>batch.status==='failed') && !window.document.getElementById('erpa-recalculate').disabled)throw Error(JSON.stringify(records[1].batches));
       return deliveries.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled;
@@ -119,8 +144,8 @@ export async function scenario(size, mode = '', options = {}) {
     assert.ok(deliveries[0].listCount<=(options.firstBatchListLimit??(mode==='throttle'?6:5)),'first five SKCs are durable before the remaining targets');
     assert.equal(maxLists,mode==='benchmark-serial'?1:mode==='benchmark-two-lanes'?2:4);assert.ok(maxInflight<=12);
     assert.ok(deliveries.every(item=>item.querySkcs.length<=5&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
-    assert.equal(records[1].catalogMode,'on_demand');
-    assert.ok(records[1].batches.every(batch=>!batch.catalogStatus),'cost completion does not automatically start material requests');
+    assert.equal(records[1].catalogMode,options.afterCosts?'after_costs':'on_demand');
+    assert.ok(records[1].batches.every(batch=>options.afterCosts?['completed','failed'].includes(batch.catalogStatus):!batch.catalogStatus),'material execution follows the task policy');
     if(mode==='two-pages') {
       assert.equal(claims.length,1,'two ERP pages can claim the workstation command only once');
       assert.equal(calls.length,size*4,'a second page does not duplicate any authoritative ERP read');
@@ -147,7 +172,7 @@ export async function scenario(size, mode = '', options = {}) {
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
     console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
-    return options.returnMetrics ? {listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries} : listMs;
+    return options.returnMetrics ? {listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries,catalogs} : listMs;
   } finally {await Promise.all(windows.map(item=>item.happyDOM.close()));}
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

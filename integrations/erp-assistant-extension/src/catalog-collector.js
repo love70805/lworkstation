@@ -122,13 +122,14 @@
             const results = new Map(), reasons = [], refreshScope = new Set(refreshSkcs.map(key));
             let completed = 0, pageCount = 0, recordCount = 0;
             const states = await targets(scope, 2, async (skc, lane) => {
-                const report = (pagesDone, pagesTotal) => onProgress('目标商品档案', completed, scope.length, { lane, active: true, target: skc, unit: targetType === 'sku' ? '个 SKU' : '个 SKC', pagesDone, pagesTotal });
+                const label = run.catalogPhase ? '补全商品目录' : '成本范围身份核验';
+                const report = (pagesDone, pagesTotal) => onProgress(label, completed, scope.length, { lane, active: true, target: skc, unit: targetType === 'sku' ? '个 SKU' : '个 SKC', pagesDone, pagesTotal });
                 report(0, null);
                 try {
                     const state = await products(skc, run, report, refreshScope.has(key(skc)));
                     completed += 1;
                     return state;
-                } finally { onProgress('目标商品档案', completed, scope.length, { lane, active: false, unit: '个 SKC' }); }
+                } finally { onProgress(run.catalogPhase ? '补全商品目录' : '成本范围身份核验', completed, scope.length, { lane, active: false, unit: '个 SKC' }); }
             }, run);
             for (const state of states) {
                 pageCount += state.pageCount; recordCount += state.records.length;
@@ -152,7 +153,9 @@
             const mark = (group, reason, missing = 1) => { coverage[group].state = 'partial'; coverage[group].reasons.push(reason); coverage[group].missingCount += missing; };
             const results = new Map((initial.results || []).map(result => [key(result.warehouseSku), { ...result }]));
             const evidence = new Map((initial.warehouseEvidence?.warehouses || []).map(entry => [key(entry.warehouseSku), entry]));
-            const catalogDirectory = await directory(scope, run);
+            const catalogDirectory = initial.directoryComplete === true
+                ? { results: [], complete: true, reasons: [], pageCount: 0, recordCount: results.size }
+                : await directory(scope, run);
             coverage.directory.pageCount = catalogDirectory.pageCount;
             coverage.directory.recordCount = catalogDirectory.recordCount;
             if (!catalogDirectory.complete) for (const reason of catalogDirectory.reasons) mark('directory', reason);

@@ -65,9 +65,9 @@
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
     const currentVersion = chrome.runtime.getManifest().version;
-    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48'];
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -686,13 +686,16 @@
     const base = '/erp/v1/collection-tasks';
     const id = encodeURIComponent(String(input.taskId || ''));
     const action = input.action || 'list';
-    const paths = { list: base, create: base, get: base + '/' + id, control: base + '/' + id + '/control', batch: base + '/' + id + '/batches/' + encodeURIComponent(String(input.batchId || '')) };
+    const paths = { list: base, create: base, get: base + '/' + id, control: base + '/' + id + '/control', batch: base + '/' + id + '/batches/' + encodeURIComponent(String(input.batchId || '')),
+      catalogSeed: base + '/' + id + '/batches/' + encodeURIComponent(String(input.batchId || '')) + '/catalog-seed' };
     if (!paths[action]) throw loopbackError('ERP_TASK_ACTION_INVALID', '未知任务操作。', 400);
     const body = { ...input, workspaceId: config.workspaceId };
     delete body.action; delete body.taskId; delete body.batchId;
     if (input.filters) body.filters = checkpointFilters(input.filters);
     if (action === 'control') body.action = input.control;
-    const result = await fetchLoopbackJson(paths[action], { config, method: ['list','get'].includes(action) ? 'GET' : 'POST', ...(['list','get'].includes(action) ? { query: { workspaceId: config.workspaceId, ...(input.requestId ? { requestId: input.requestId } : {}) } } : { body }) });
+    const reading = ['list', 'get', 'catalogSeed'].includes(action);
+    const result = await fetchLoopbackJson(paths[action], { config, method: reading ? 'GET' : 'POST', ...(reading ? { query: { workspaceId: config.workspaceId, ...(input.requestId ? { requestId: input.requestId } : {}),
+      ...(action === 'catalogSeed' ? { attemptId: input.attemptId, runnerId: input.runnerId } : {}) } } : { body }) });
     assertRecordWorkspace({ workspaceId: config.workspaceId }, await runtimeConfig());
     return { ...result, ok: true };
   }

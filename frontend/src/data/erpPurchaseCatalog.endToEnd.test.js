@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { verifyErpCatalogTransport } from "../../../tools/erp-catalog-transport.test.mjs";
 import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
+import { syncErpCatalogPublications } from './repositories/erpCatalogPublicationRepository';
 import { createOrGetMonthlyLedger, db, getProductEditorSnapshot, getSelectionReferenceSnapshot, receiveErpCostInboxEnvelope, saveErpCostRequest, saveProductCatalogRecord, setActiveMemberContext, voidPublishedErpCostBatch } from "./database";
 
 beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemberContext({ workspaceId: "workspace-default" }); });
@@ -20,6 +21,40 @@ async function nativeCatalogDelivery(options = {}) {
   const { batch, envelope } = await verifyErpCatalogTransport({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, expectedSkus, includeConflict: false, ...options });
   return { ledger, request, batch, envelope };
 }
+
+it('stages received and published metadata across reopen until every cost batch calculation settles', async () => {
+  const { envelope, ledger, request } = await nativeCatalogDelivery();
+  const binding = { mode: 'after_costs', taskId: 'STAGED-TASK', batchId: 'COST-1', attemptId: 'ATTEMPT-1' };
+  envelope.batch.sourceMeta.catalogPublication = binding;
+  const receipt = await receiveErpCostInboxEnvelope({ envelope, receivedVia: 'isolated-staging-test' });
+  expect(receipt.status, receipt.adoptionError).toBe('applied');
+  const financialBefore = await db.erpCostRows.toArray();
+  expect(financialBefore[0].unitCost).toBe(5);
+  const task = { taskId: binding.taskId, workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id,
+    catalogMode: 'after_costs', status: 'running', batches: [
+      { batchId: 'COST-1', attemptId: 'ATTEMPT-1', status: 'delivered', deliveryId: envelope.deliveryId, adoptionReportedAt: '2026-10-22T00:00:00Z' },
+      { batchId: 'COST-2', attemptId: 'ATTEMPT-2', status: 'running' },
+    ] };
+  const sync = () => syncErpCatalogPublications({ workspaceId: ledger.workspaceId, tasks: [task] });
+  await sync();
+  db.close(); await db.open();
+  for (const batch of [task.batches[1], { ...task.batches[1], status: 'delivered', deliveryId: 'DEL-2' }]) {
+    task.batches[1] = batch; await sync();
+    const snapshot = await getSelectionReferenceSnapshot();
+    expect(snapshot.erpCatalogRows).toEqual([]);
+    expect(snapshot.erpCatalogReferences).toEqual([]);
+    expect(snapshot.erpCosts.every(row => row.catalogEligible === false)).toBe(true);
+    expect((await getProductEditorSnapshot({ platformSku: 'SKU-RED', platformSkc: 'SKC-CATALOG' })).draft.imageUrl).toBe('');
+  }
+  task.status = 'cost_complete'; task.batches[1].adoptionReportedAt = '2026-10-22T00:01:00Z';
+  await sync();
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toHaveLength(2);
+  expect((await getProductEditorSnapshot({ platformSku: 'SKU-RED', platformSkc: 'SKC-CATALOG' })).draft.name).toBe('ERP 合成商品');
+  expect(await db.erpCostRows.toArray()).toEqual(financialBefore);
+  task.batches[0].attemptId = 'RETRY-ATTEMPT'; delete task.batches[0].adoptionReportedAt;
+  await sync();
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toEqual([]);
+}, 20000);
 
 it('preserves historical broad-scope deliveries through cancellation, persisted reopen and formal/reference selection', async () => {
   const { envelope } = await nativeCatalogDelivery({ includeCancelled: true });

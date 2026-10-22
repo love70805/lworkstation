@@ -126,7 +126,7 @@ try {
   assert.equal(updates.at(-1).completed, 0);
   productReply({ code: 0, count: 1, data: [{ itemId: 'W-A' }] });
   await until(() => mappingReply);
-  assert.ok(updates.some(update => update.label === '目标商品档案' && update.completed === 1));
+  assert.ok(updates.some(update => update.label === '成本范围身份核验' && update.completed === 1));
   assert.equal(updates.at(-1).label, '资料与采购证据'); assert.equal(updates.at(-1).completed, 0);
   mappingReply({ code: 0, count: 1, data: [{ associatedProductId: 'W-A', barcodeSkuid: 'SKU-A', barcodeSkcid: 'A' }] });
   await until(() => evidenceReply);

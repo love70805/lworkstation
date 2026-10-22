@@ -36,6 +36,7 @@ export async function verifyErpCatalogTransport({
   includeConflict = true,
   includeCancelled = false,
   syntheticSpoolBytes = 0,
+  afterCosts = false,
   expectedSkus = [{ platformSku: "SKU-RED", platformSkc: "SKC-CATALOG" }],
 } = {}) {
   const sourceRoot = legacyScope ? path.join(workspaceRoot, 'tools/__fixtures__/erp-assistant-v8.0.37') : extensionRoot;
@@ -187,14 +188,30 @@ export async function verifyErpCatalogTransport({
       if (url.pathname === "/purchase/product/v1/product-info-sku") data = data.map(item => ({ ...item, associatedProductId: url.searchParams.get("productId") }));
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     };
-    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) window.eval(await fs.readFile(path.join(sourceRoot, file), "utf8"));
+    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
+      let script = await fs.readFile(path.join(sourceRoot, file), 'utf8');
+      if (!afterCosts && file === 'content.js') script = script.replace("executionProtocol: 2, catalogMode: 'after_costs'", "executionProtocol: 2, catalogMode: 'on_demand'");
+      window.eval(script);
+    }
     window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", { detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-CATALOG" } }));
     window.document.getElementById("erpa-cost-trigger").click();
     for (let attempt = 0; attempt < 200 && !submitted.length; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(submitted.length, 1, window.document.body.textContent);
     assert.equal(submitted[0].response.ok, true, submitted[0].response.message);
     const unresolvedTarget = !legacyScope && expectedSkus.some(sku => sku.platformSku === 'SKU-MISSING');
-    if (!legacyScope) {
+    if (afterCosts) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal(catalogSubmitted.length, 0, 'durable delivery alone never starts catalog');
+      const headers = { authorization: `Bearer ${capability}`, 'content-type': 'application/json' };
+      const { tasks } = await (await fetch(`${base}/erp/v1/collection-tasks?workspaceId=${encodeURIComponent(workspaceId)}`, { headers })).json();
+      const task = tasks[0];
+      assert.equal(task.phase, 'cost_adoption');
+      for (const batch of task.batches) {
+        const response = await fetch(`${base}/erp/v1/collection-tasks/${task.taskId}/adoption`, { method: 'POST', headers,
+          body: JSON.stringify({ workspaceId, deliveryId: batch.deliveryId, adoptedCount: expectedSkus.length }) });
+        assert.equal(response.status, 200);
+      }
+    } else if (!legacyScope) {
       for (let attempt = 0; attempt < 200 && (window.document.getElementById('erpa-recalculate').disabled || window.document.getElementById('erpa-supplement-catalog').hidden); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
       assert.equal(catalogSubmitted.length, 0, 'current cost collection ends before any optional material delivery');
       assert.equal(window.document.getElementById('erpa-recalculate').disabled, false, 'cost run releases the UI before explicit material collection');
@@ -213,8 +230,8 @@ export async function verifyErpCatalogTransport({
     assert.equal(catalogProgress.state, catalogSubmitted[0].response.envelope.catalog.status === 'completed' ? 'complete' : 'partial');
     assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
     assert.equal(new Set(requestedPaths).size, 4);
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, legacyScope ? 1 : 3, 'a separate explicit material attempt rereads current authoritative warehouse history');
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, legacyScope ? 2 : unresolvedTarget ? 6 : 4,
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, legacyScope || afterCosts ? 1 : 3, 'automatic catalog reuses durable complete procurement evidence');
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, legacyScope || afterCosts ? 2 : unresolvedTarget ? 6 : 4,
       'a separate explicit material attempt reads its own mappings instead of assuming account continuity');
     if (!legacyScope) assert.equal(submitted[0].payload.meta.scopeRetrySkcCount, unresolvedTarget ? 1 : 0);
     const retryCatalog = await window.ShopeersErpDeliveryBridge.submitCatalog(catalogSubmitted[0].payload);

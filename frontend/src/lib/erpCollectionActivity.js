@@ -19,6 +19,7 @@ export function publishErpCollectionActivity({ workspaceId, tasks, error = '' })
   const projected = tasks == null ? previous.tasks : tasks.filter(task => task.workspaceId === workspaceId).map(task => ({
     taskId: task.taskId, workspaceId, ledgerId: task.ledgerId, ledgerPeriod: task.ledgerPeriod,
     status: task.status, phase: task.phase, recoveryRequired: task.recoveryRequired,
+    executionProtocol: task.executionProtocol, catalogMode: task.catalogMode, runMode: task.runMode, runnerId: task.runnerId,
     batches: (task.batches ?? []).map(batch => ({
       status: batch.status, catalogStatus: batch.catalogStatus, deliveryId: batch.deliveryId,
       platformSkcs: batch.platformSkcs ?? [],

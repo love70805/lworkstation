@@ -7,6 +7,7 @@ import SelectionPrestorageAutomation from './SelectionPrestorageAutomation';
 import { ToastProvider } from './UI';
 import { db, DEFAULT_WORKSPACE_ID, saveProductCatalogRecord } from '../data/database';
 import { withWorkspaceReset } from '../lib/workspaceBackgroundTasks';
+import { syncErpCatalogPublications } from '../data/repositories/erpCatalogPublicationRepository';
 let root, container, product;
 async function waitFor(check) {
   for (let i = 0; i < 150; i++) {
@@ -55,4 +56,27 @@ it('defers automatic promotion during restore and retries unchanged sources when
   expect((await db.products.get(product.id)).status).toBe('draft');
   await act(async () => { finish(); await restore; });
   await waitFor(async () => (await db.products.get(product.id)).status === 'active');
+});
+
+it('keeps automatic archiving closed until the last batch calculation, then promotes exactly once', async () => {
+  const workspaceId = DEFAULT_WORKSPACE_ID;
+  const binding = { mode: 'after_costs', taskId: 'AUTOMATION-TASK', batchId: 'TASK-B1', attemptId: 'ATTEMPT-1' };
+  await act(async () => {
+    await db.ledgers.put({ id: 'L', workspaceId, period: '2026-08' });
+    await db.erpCostRequests.put({ id: 'R', workspaceId, ledgerId: 'L', ledgerPeriod: '2026-08', platformSkcs: ['BG'] });
+    await db.erpCostBatches.put({ id: 'B', workspaceId, ledgerId: 'L', requestId: 'R', status: 'published', sourceContract: {
+      batchId: 'SOURCE-B', requestId: 'R', query: { platformSkcs: ['BG'] }, catalogRows: [], sourceMeta: { catalogPublication: binding } } });
+    await db.erpCostRows.add({ workspaceId, ledgerId: 'L', batchId: 'B', platformSkc: 'BG', platformSku: 'BG-A', canonicalPlatformSku: 'BG-A', unitCost: 4, publishedAt: '2026-08-31T00:00:00Z' });
+  });
+  const task = { taskId: binding.taskId, workspaceId, ledgerId: 'L', requestId: 'R', catalogMode: 'after_costs', status: 'cost_complete', batches: [
+    { batchId: binding.batchId, attemptId: binding.attemptId, status: 'delivered', deliveryId: 'D1', adoptionReportedAt: '2026-10-22T00:00:00Z' },
+    { batchId: 'TASK-B2', attemptId: 'ATTEMPT-2', status: 'delivered', deliveryId: 'D2' },
+  ] };
+  await act(async () => { await syncErpCatalogPublications({ workspaceId, tasks: [task] }); await new Promise(resolve => setTimeout(resolve, 80)); });
+  expect((await db.products.get(product.id)).status).toBe('draft');
+  expect((await db.auditEvents.toArray()).some(event => event.after?.systemSource === 'prestorage-auto-promotion')).toBe(false);
+  task.batches[1].adoptionReportedAt = '2026-10-22T00:01:00Z';
+  await act(async () => syncErpCatalogPublications({ workspaceId, tasks: [task] }));
+  await waitFor(async () => (await db.products.get(product.id)).status === 'active');
+  expect((await db.auditEvents.toArray()).filter(event => event.after?.systemSource === 'prestorage-auto-promotion')).toHaveLength(1);
 });

@@ -1,11 +1,12 @@
 import { listErpCollectionTasks, reportErpCollectionAdoption } from './erpInboxTransport';
 import { listErpCostAdoptionStates } from '../data/database';
 import { publishErpCollectionActivity } from './erpCollectionActivity';
+import { syncErpCatalogPublications } from '../data/repositories/erpCatalogPublicationRepository';
 
 const reported = new Map();
 // Receipt acknowledgement and adopted cost are independent facts. Retry failed
 // reports from durable local inboxes, including after app/service restart.
-export async function syncErpCollectionAdoptions({ workspaceId, listTasks = listErpCollectionTasks, listInboxes = listErpCostAdoptionStates, report = reportErpCollectionAdoption } = {}) {
+export async function syncErpCollectionAdoptions({ workspaceId, listTasks = listErpCollectionTasks, listInboxes = listErpCostAdoptionStates, report = reportErpCollectionAdoption, publishCatalog = syncErpCatalogPublications } = {}) {
   let tasks;
   try {
     ({ tasks = [] } = await listTasks({ workspaceId }));
@@ -25,8 +26,11 @@ export async function syncErpCollectionAdoptions({ workspaceId, listTasks = list
     const key = `${workspaceId}/${task.taskId}/${batch.deliveryId}`;
     const signature = JSON.stringify([inbox.status, adoption]);
     if (batch.adoption && reported.get(key) === signature) continue;
-    await report(task.taskId, { workspaceId, deliveryId: batch.deliveryId, adoption });
+    const response = await report(task.taskId, { workspaceId, deliveryId: batch.deliveryId, adoption });
+    if (response?.task) Object.assign(task, response.task);
     reported.set(key, signature);
   }
+  await publishCatalog({ workspaceId, tasks });
+  publishErpCollectionActivity({ workspaceId, tasks });
   if (reported.size > 5000) reported.clear();
 }

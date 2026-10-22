@@ -5,7 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery } from './erp-collection-tasks.mjs';
+import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery, collectionCatalogSeed, collectionCostsSettled } from './erp-collection-tasks.mjs';
 import {createInboxStorage, cloneInboxMetadata} from './erp-inbox-storage.mjs';
 import {DESKTOP_INBOX_BACKUP_FORMAT,INBOX_RUNTIME_KINDS,INBOX_CLEAR_MAINTENANCE_ACTION,validateDesktopInboxBackup} from '../integrations/contracts/desktop-inbox-backup.mjs';
 import { normalizeErpHistoryMappings } from '../integrations/contracts/erp-history-mappings.mjs';
@@ -1082,6 +1082,11 @@ const server = http.createServer(async (req, res) => {
     if (!runtimeOnly && (expiredChanged || recoveredTasks)) await writeSpool(records);
     const taskResponse = handleCollectionTaskRequest(records, { method: req.method, url: new URL(req.url, `http://${bindHost}:${port}`), payload: payload ?? {}, instanceId: inboxInstanceId });
     if (taskResponse) {
+      if (taskResponse.body.catalogSeedReceipt) {
+        const receipt = records.find(item => item.kind === 'batch' && item.deliveryId === taskResponse.body.catalogSeedReceipt);
+        const hydrated = await spoolStorage.hydrate(receipt);
+        return json(res, 200, { seed: collectionCatalogSeed(hydrated.envelope.batch) });
+      }
       if(taskHeartbeat) {
         const task=taskResponse.body.task;
         await persistTaskHeartbeat(task, resetRevision);
@@ -1190,6 +1195,8 @@ const server = http.createServer(async (req, res) => {
       }
       const request = records.find(item => item.kind === 'request' && item.requestKind === 'catalog' && item.status === 'registered' && !requestExpired(item) && item.requestId === payload?.requestId && item.workspaceId === payload?.workspaceId);
       if (!request) return json(res, 409, { error: 'ERP_REQUEST_NOT_FOUND', message: '没有匹配且有效的已登记资料请求。' });
+      const sourceTask = records.find(item => item.kind === 'collection-task' && item.requestId === request.sourceRequestId && item.workspaceId === request.workspaceId && item.catalogMode === 'after_costs' && item.status !== 'stopped');
+      if (sourceTask && !collectionCostsSettled(sourceTask)) return json(res, 409, { error: 'ERP_TASK_COST_FIRST', message: '全部成本采集和本机核算完成后才能统一整理资料。' });
       const rawEvidence = normalizeErpCatalogPurchaseEvidence(stripExtensionDecisions(payload?.warehouseEvidence ?? []));
       const warehouseScope = new Set((payload?.rows ?? []).map(row => canonicalSku(row?.warehouseSku)).filter(Boolean));
       if (rawEvidence.some(entry => !warehouseScope.has(entry.canonicalWarehouseSku))) return json(res, 400, { error: 'INVALID_ERP_EVIDENCE', message: '资料采购证据超出已确认仓库映射。' });
@@ -1478,7 +1485,11 @@ const server = http.createServer(async (req, res) => {
         },
         ...(payload?.sourceMeta?.catalogCoverage ? { catalogVersion: 1, catalogCoverage: normalizeErpCatalogCoverage(payload.sourceMeta.catalogCoverage) } : {}),
         ...(request.historyMappings?.length ? { historyMappings: request.historyMappings.filter(row => querySkcSet(querySkcs).has(canonicalSku(row.platformSkc))) } : {}),
-        sourceMeta: { ...sourceMeta, sourceFormat: "erp-v8-http-bridge" },
+        sourceMeta: { ...sourceMeta, sourceFormat: "erp-v8-http-bridge",
+          ...(collectionContext?.task.catalogMode === 'after_costs' ? { catalogPublication: {
+            mode: 'after_costs', taskId: collectionContext.task.taskId,
+            batchId: collectionContext.batch.batchId, attemptId: collectionContext.batch.attemptId,
+          } } : {}) },
         warehouseEvidence,
         evidenceStatus: sourceMeta.evidenceComplete ? "complete" : "legacy_partial",
         rows,

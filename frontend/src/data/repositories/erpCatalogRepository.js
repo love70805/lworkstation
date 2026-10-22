@@ -5,6 +5,7 @@ import { canonicalPlatformSkc, canonicalPlatformSku } from "../../domain/identif
 import { buildErpCatalogRequest, validateErpCatalogRequest, validateErpCatalogInboxEnvelope, ERP_CATALOG_GROUPS } from "../../domain/erpCatalogRequest";
 import { registerErpBridgeRequest } from "../../lib/erpInboxTransport";
 import { validateErpCostInboxEnvelope } from "../../domain/erpInboxContract";
+import { readErpCatalogPublicationGate } from './erpCatalogPublicationRepository';
 
 const requestKey = (workspace, id) => `erp-catalog:request:${workspace}:${id}`;
 const resultKey = (workspace, batch) => `erp-catalog:result:${workspace}:${batch}`;
@@ -65,7 +66,9 @@ export async function readTrustedErpCostInboxCatalogRecords(context, snapshot = 
   };
   const ledgerById = new Map(local.ledgers.filter(item => item.workspaceId === context.workspaceId).map(item => [item.id, item]));
   const records = [];
+  const catalogAllowed = await readErpCatalogPublicationGate(context.workspaceId);
   for (const inbox of inboxes) {
+    if (!catalogAllowed(inbox.envelope?.batch)) continue;
     const request = requestById.get(inbox.requestId);
     const ledger = ledgerById.get(inbox.ledgerId);
     if (inbox.workspaceId !== context.workspaceId || !request || !ledger

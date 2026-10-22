@@ -17,6 +17,7 @@ import { erpCatalogReferenceCosts } from "../../domain/erpCatalogReference";
 import { selectCurrentErpCatalogCoverage } from "../../domain/erpCatalogFields";
 import { erpProductCatalogRowsFromEnvelope } from "../../domain/erpProductCatalog";
 import { readTrustedErpCatalogRecords, readTrustedErpCostInboxCatalogRecords } from "./erpCatalogRepository";
+import { readErpCatalogPublicationGate } from './erpCatalogPublicationRepository';
 import { buildProductDataReadiness, normalizeProductPublicationStatus } from "../../domain/productPublication";
 import { calculateReferenceProfitLine, DEFAULT_WAREHOUSE_RATE } from "../../domain/profitCalculations";
 import {
@@ -1809,13 +1810,15 @@ export async function getSelectionReferenceSnapshot(options = {}) {
   const workspaceMatch = (record) => (record.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId;
   const ledgerById = new Map(ledgers.filter(ledger => ledger.workspaceId === context.workspaceId).map(ledger => [ledger.id, ledger]));
   const requestById = new Map(erpRequests.filter(workspaceMatch).map(request => [request.id, request]));
-  const publishedCatalogBatches = new Map(erpBatches.filter(batch => {
+  const catalogAllowed = await readErpCatalogPublicationGate(context.workspaceId);
+  const publishedSourceBatches = erpBatches.filter(batch => {
     const request = requestById.get(batch.requestId);
     return workspaceMatch(batch) && batch.status === "published" && ledgerById.has(batch.ledgerId)
       && request?.workspaceId === batch.workspaceId && request?.ledgerId === batch.ledgerId
       && batch.sourceContract?.requestId === request?.id;
-  }).map(batch => [batch.id, batch]));
-  const publishedSourceBatchIds = new Set([...publishedCatalogBatches.values()].map(batch => batch.sourceContract.batchId).filter(id => typeof id === 'string' && id));
+  });
+  const publishedCatalogBatches = new Map(publishedSourceBatches.filter(batch => catalogAllowed({ ...batch.sourceContract, workspaceId: batch.workspaceId, ledgerId: batch.ledgerId })).map(batch => [batch.id, batch]));
+  const publishedSourceBatchIds = new Set(publishedSourceBatches.map(batch => batch.sourceContract.batchId).filter(id => typeof id === 'string' && id));
   const [independentCatalogRecords, receivedCatalogRecords] = await Promise.all([
     readTrustedErpCatalogRecords(context, sourceSnapshot),
     readTrustedErpCostInboxCatalogRecords(context, sourceSnapshot, { excludedBatchIds: publishedSourceBatchIds, requests: erpRequests }),
