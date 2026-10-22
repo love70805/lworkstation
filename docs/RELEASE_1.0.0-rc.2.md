@@ -12,6 +12,8 @@
 
 等待本机核算时遇到收件服务重启，会保留已送达成本并等待继续，不提前整理资料或将断线误报为 ERP 读取失败。发布审计发现测试依赖的两项已公布问题后，Vitest 升级至 4.1.12，保留 low 级审计门槛；参见官方 [手动 mock 修复](https://github.com/vitest-dev/vitest/security/advisories/GHSA-qxg6-89mg-rqv8)和 [Windows 路径修复](https://github.com/vitest-dev/vitest/security/advisories/GHSA-xp26-3454-mjgp)。
 
+Windows 远端审计同时发现 Electron 44.2.0 的已公布权限来源归属问题，桌面运行时升级至同一 44.x 系列的 44.3.0，并重新验证原生扩展和最终安装包。见 [Electron 官方说明](https://github.com/electron/electron/security/advisories/GHSA-fw47-9c62-h3vw)。
+
 完整前端回归、生产构建、31 项发布门禁、桌面检查及最终包验收进行中。独立 `rc.yml` 候选通道，安装包和上传结果将在验收及发布后记录。真实 ERP 账号与现场网络速度未测试。
 
 [本批契约](integration/COST_BEFORE_CATALOG_RC2.md)。
