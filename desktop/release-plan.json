@@ -1,20 +1,16 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "candidateOnly": true,
-  "integrationBranch": "codex/1.0-rc-hardening",
+  "integrationBranch": "codex/rc2-cost-before-catalog",
   "requiredCommits": [
     {
-      "module": "verified-main-0.4.54",
-      "commit": "49f512191cab58df2f7543f4574ace31fcf6cc8b"
+      "module": "verified-main-rc1",
+      "commit": "281ecc2b340680fd75ae2e592e501670c57b8d2a"
     },
     {
-      "module": "recovery-and-complete-export",
-      "commit": "cdedadcedc5bdf01b15b0a3ce71a782ba01f9b2b"
-    },
-    {
-      "module": "compact-page-facts-and-ERP-scheduling",
-      "commit": "6d17dff42e6471fc2fd4503017669d9b6ad12f34"
+      "module": "cost-before-catalog-and-durable-reuse",
+      "commit": "d28ad672de68b86716a8a5ffd313fe4bb20b09d3"
     }
   ]
 }
