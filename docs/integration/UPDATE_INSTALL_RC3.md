@@ -8,3 +8,5 @@
 - 不更改业务库、成本政策、定稿保护、账号、系统 UAC 或 Windows 全局权限。验收优先使用隔离合成环境；真实旧版点击安装的最小必要交互集中进行。
 
 完成信号：范围判断及失败恢复回归通过；原版 RC2 点击“重启安装”后真实 NSIS 安装至 RC3 并正常启动；新客户端失败/拒绝/重试/重复点击有验证；完整测试、桌面检查、候选包一致性、所需 CI 与 RC 发布资产核对通过。原始日志留本机忽略归档。
+
+发布收尾审计重新识别到 Electron 44.3.0 的三项公告，因此维持 low 审计阈值并升级到同一 44.x 系列的 44.5.0。官方修复范围见[权限请求来源归属](https://github.com/electron/electron/security/advisories/GHSA-x562-297c-g43g)、[帧订阅几何校验](https://github.com/electron/electron/security/advisories/GHSA-3qxv-5xgr-q7w9)与[离屏渲染几何校验](https://github.com/electron/electron/security/advisories/GHSA-h3v5-h239-pg29)。按变更补验包内运行时、原生 ERP、桌面 smoke 和更新交接；未改变更新逻辑的既有验收继续保留，不将审计阈值下调。
