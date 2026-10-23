@@ -18,15 +18,15 @@ describe("bounded ERP Chinese title suggestions", () => {
     expect(suggestErpProductTitles([specRow('A', '型号 X200 黑色', '颜色:黑色')]).name).toBe('型号 X200 黑色');
   });
   it("converges observed color variants while preserving accessory as a separate choice", () => {
-    const rows = ["1个蓝色收腰神器-HHX sh680", "1个黑色收腰神器-HHX sh680", "1pc备用毛巾扣sh672LYY"].map((value, index) => ({ platformSku: `S${index}`, canonicalPlatformSku: `S${index}`, erpCatalogFields: { productName: { candidates: [{ value }] } } }));
-    expect(suggestErpProductTitles(rows.slice(0, 2))).toMatchObject({ name: "收腰神器", needsChoice: false });
-    expect(suggestErpProductTitles(rows)).toMatchObject({ name: "", suggestedName: "收腰神器", needsChoice: true, candidates: [{ name: "收腰神器" }, { name: "备用毛巾扣" }] });
+    const rows = ["1个蓝色星云收纳盒-FFV sh901", "1个黑色星云收纳盒-FFV sh901", "1pc备用挂绳扣sh672MNN"].map((value, index) => ({ platformSku: `S${index}`, canonicalPlatformSku: `S${index}`, erpCatalogFields: { productName: { candidates: [{ value }] } } }));
+    expect(suggestErpProductTitles(rows.slice(0, 2))).toMatchObject({ name: "星云收纳盒", needsChoice: false });
+    expect(suggestErpProductTitles(rows)).toMatchObject({ name: "", suggestedName: "星云收纳盒", needsChoice: true, candidates: [{ name: "星云收纳盒" }, { name: "备用挂绳扣" }] });
   });
   it("does not strip semantic model, quantity, color, or arbitrary personnel strings", () => {
-    for (const name of ["蓝色妖姬 12件组合", "3合1收纳架", "2个装 毛巾扣", "型号 X200 黑色", "收腰神器-HHX", "ERP 合成商品"]) expect(erpProductTitle(name)).toBe(name);
+    for (const name of ["蓝色妖姬 12件组合", "3合1收纳架", "2个装 挂绳扣", "型号 X200 黑色", "星云收纳盒-FFV", "ERP 合成商品"]) expect(erpProductTitle(name)).toBe(name);
   });
   it("normalizes compound colors and attached internal suffixes", () => {
-    expect(erpProductTitle("1个灰粉色保暖手套-LBYsh680")).toBe("保暖手套");
-    expect(erpProductTitle("1个黑灰色保暖手套-LBYsh680")).toBe("保暖手套");
+    expect(erpProductTitle("1个灰粉色旅行收纳袋-KPXsh901")).toBe("旅行收纳袋");
+    expect(erpProductTitle("1个黑灰色旅行收纳袋-KPXsh901")).toBe("旅行收纳袋");
   });
 });

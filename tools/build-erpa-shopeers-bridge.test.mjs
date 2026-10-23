@@ -133,10 +133,10 @@ function requestRecord() {
     workspaceId: "workspace-secure",
     status: "registered",
     registeredAt: "2026-08-29T00:00:00.000Z",
-    platformSkcs: ["st260608151900573902683"],
+    platformSkcs: ["st900000000000000000009"],
     expectedSkus: [{
-      platformSku: "I3mqgejkr1vhv7",
-      platformSkc: "st260608151900573902683",
+      platformSku: "I9demo00000002",
+      platformSkc: "st900000000000000000009",
     }],
   };
 }
@@ -146,20 +146,20 @@ function resultInput(overrides = {}) {
     resultDeliveryId: "ERP-RESULT-SECURE-1",
     createdAt: freshCreatedAt(),
     queryCapturedAt: "2026-08-29T00:01:00.000Z",
-    querySkcs: ["st260608151900573902683"],
+    querySkcs: ["st900000000000000000009"],
     results: [{
-      warehouseSku: "SH25092037232977233-Y",
+      warehouseSku: "SH9000000000000000004-Y",
       unitCost: 3.2,
       totalQty: 12,
       mappings: [
-        { platformSku: "I3mqgejkr1vhv7", platformSkc: "st260608151900573902683" },
-        { platformSku: "I0mr8u67we1unj", platformSkc: "st260608151900573902683" },
+        { platformSku: "I9demo00000002", platformSkc: "st900000000000000000009" },
+        { platformSku: "I9demo00000001", platformSkc: "st900000000000000000009" },
       ],
     }],
     warehouseEvidence: {
       formatVersion: 2,
       warehouses: [{
-        warehouseSku: "SH25092037232977233-Y",
+        warehouseSku: "SH9000000000000000004-Y",
         purchaseRecords: [{ quantity: 12, unitPrice: 3.2 }],
         excludedRecords: [],
         sourceWarnings: [],
@@ -170,7 +170,7 @@ function resultInput(overrides = {}) {
       mappingFailures: [],
     },
     meta: {
-      querySkcs: ["st260608151900573902683"],
+      querySkcs: ["st900000000000000000009"],
       endpoint: "http://attacker.invalid:9999",
       token: "page-token-must-not-survive",
       requestId: "ERP-REQ-FORGED",
@@ -466,8 +466,8 @@ async function verifyBackgroundSecurityAndDelivery() {
   assert.equal(posted.requestId, "ERP-REQ-SECURE");
   assert.equal(posted.ledgerId, "LEDGER-2026-08");
   assert.equal(posted.workspaceId, "workspace-secure");
-  assert.equal(posted.rows.find((row) => row.platformSku === "I3mqgejkr1vhv7").ledgerScopeRole, "expected");
-  assert.equal(posted.rows.find((row) => row.platformSku === "I0mr8u67we1unj").ledgerScopeRole, "auxiliary");
+  assert.equal(posted.rows.find((row) => row.platformSku === "I9demo00000002").ledgerScopeRole, "expected");
+  assert.equal(posted.rows.find((row) => row.platformSku === "I9demo00000001").ledgerScopeRole, "auxiliary");
   assert.doesNotMatch(JSON.stringify(posted), /attacker\.invalid|page-token|page-capability|ERP-REQ-FORGED|LEDGER-FORGED|workspace-forged/);
   assert.deepEqual(background.storage.shopeersErpPendingCostResultsV2, []);
   assert.doesNotMatch(JSON.stringify(background.storage.shopeersErpPendingCostResultsV2), new RegExp(capability));
@@ -617,16 +617,16 @@ async function verifyPendingWorkspaceSnapshotCannotRebind() {
     queryCapturedAt: "2026-08-29T00:01:00.000Z",
     registeredBefore: "2026-08-29T00:01:00.000Z",
     attemptsTotal: 2,
-    querySkcs: ["ST260608151900573902683"],
+    querySkcs: ["ST900000000000000000009"],
     requestId: "ERP-REQ-SECURE",
     ledgerId: "LEDGER-2026-08",
     workspaceId: "workspace-secure",
     expectedSkus: requestRecord().expectedSkus,
     rows: [{
-      warehouseSku: "SH25092037232977233-Y",
-      platformSku: "I3mqgejkr1vhv7",
-      platformSkc: "st260608151900573902683",
-      evidenceRef: "SH25092037232977233-Y",
+      warehouseSku: "SH9000000000000000004-Y",
+      platformSku: "I9demo00000002",
+      platformSkc: "st900000000000000000009",
+      evidenceRef: "SH9000000000000000004-Y",
       unitCost: 3.2,
       previewUnitCost: 3.2,
       ledgerScopeRole: "expected",
@@ -748,16 +748,16 @@ async function verifyRetryRestartAndConflicts() {
     queryCapturedAt: "2026-08-29T00:01:00.000Z",
     registeredBefore: "2026-08-29T00:01:00.000Z",
     attemptsTotal: 1,
-    querySkcs: ["ST260608151900573902683"],
+    querySkcs: ["ST900000000000000000009"],
     requestId: "ERP-REQ-SECURE",
     ledgerId: "LEDGER-2026-08",
     workspaceId: "workspace-secure",
     expectedSkus: requestRecord().expectedSkus,
     rows: [{
-      warehouseSku: "SH25092037232977233-Y",
-      platformSku: "I3mqgejkr1vhv7",
-      platformSkc: "st260608151900573902683",
-      evidenceRef: "SH25092037232977233-Y",
+      warehouseSku: "SH9000000000000000004-Y",
+      platformSku: "I9demo00000002",
+      platformSkc: "st900000000000000000009",
+      evidenceRef: "SH9000000000000000004-Y",
       unitCost: 3.2,
       previewUnitCost: 3.2,
       ledgerScopeRole: "expected",

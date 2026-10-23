@@ -104,10 +104,10 @@ it('retains same-number store exclusions in profit display, saved filters and ex
   await act(async()=>root.unmount());
   mocks.status='finalized';
   const base=snapshotForStatus();
-  const profitLines=['甲','乙'].map((store,index)=>({...base.profitLines[0],id:index,store,platformSku:`SKU-${index}`,supplierNumber:'A-LBY'}));
+  const profitLines=['甲','乙'].map((store,index)=>({...base.profitLines[0],id:index,store,platformSku:`SKU-${index}`,supplierNumber:'A-KPX'}));
   snapshots.set('finalized',{...base,profitLines});
-  const supplierStoreSelection=[{store:'乙',supplierNumber:'A-LBY'}];
-  const href=buildProfitHref({ledgerId:'L',workspaceId:'W',supplierSelection:['A-LBY'],supplierStoreSelection});
+  const supplierStoreSelection=[{store:'乙',supplierNumber:'A-KPX'}];
+  const href=buildProfitHref({ledgerId:'L',workspaceId:'W',supplierSelection:['A-KPX'],supplierStoreSelection});
   root=createRoot(container);
   await act(async()=>root.render(<MemoryRouter initialEntries={[href]}><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
   const details=[...container.querySelectorAll('details')].find(element=>element.querySelector('summary')?.textContent.startsWith('查看利润明细'));

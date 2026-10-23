@@ -39,7 +39,7 @@ async function call(route, body, expected = 200, extraHeaders = {}) {
 }
 const request = { id: 'RESET-REQUEST', workspaceId: 'W', ledgerId: 'LEDGER-W-2026-09', ledgerPeriod: '2026-09',
   ledgerVersion: 'OLD-IMPORT', platformSkcs: ['SKC-A'] };
-const expectedSkus = [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', store: '680店' }];
+const expectedSkus = [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', store: '901店' }];
 async function readRecords(file) {return (await createInboxDisk(file).load()).map(entry=>entry.metadata);}
 try {
   await assert.rejects(service.clearBusinessData(), /尚未就绪/);

@@ -1,6 +1,6 @@
 # 0.3.3 ERP 商品档案与映射只读核验
 
-核验日期：2026-09-29（Asia/Shanghai）。使用用户已授权的ERP登录会话，通过页面正常查询和Chrome DevTools Network只读观察完成。未修改ERP商品、映射、人员、采购或成本；未采集/保存Cookie、Token、请求头或原始业务响应。本文件只保留接口结构、字段类型及样本数量。
+核验日期：2026-09-29（Asia/Shanghai）。使用用户已授权的ERP登录会话，通过页面正常查询和Chrome DevTools Network只读观察完成。未修改ERP商品、映射、人员、采购或成本；未采集/保存Cookie、Token、请求头或原始业务响应。本文件只保留接口结构、字段类型，不保留原始样本数量。
 
 ## 1. 商品档案按平台SKC查询
 
@@ -12,9 +12,9 @@
 /purchase/product/v1/product-page?composite=1&page=1&limit=100&productNameGroup=&skuGroup=<PLATFORM_SKC>&supplierGroup=&storeId=&createdBy=&specificationAndModel=&synchronizeUnitPrice=&productDeveloper=&testStatus=&englishName=
 ```
 
-响应HTTP 200：顶层`{code:0,count:4,data:[...4 rows],msg:<string>}`。页面同时显示4个仓库商品，其中一个为共享仓库商品。`itemId`与页面仓库SKU一致，`tradeName`为仓库中文名称。
+响应 HTTP 200，结构为 `{code:0,count:<row-count>,data:[...],msg:<string>}`；这里的占位符仅说明字段结构，不代表原始样本数量。页面结果包含共享仓库商品。`itemId` 与页面仓库 SKU 一致，`tradeName` 为仓库中文名称。
 
-当前实际加载的`/view/system/product/javascript/productManagement.js`第42–51行配置`product-page?composite=1`、`page:true`、`limit:100`、`limits:[100,200,500,1000]`、`where:{skuGroup}`，查询时重置第一页。分页参数是`page/limit`，不是offset或pageSize。当前目标样本只有4行，因此没有实际跨第二页；多页终止、重复页和漏页需在实现测试中覆盖，不将本次称为真实多页采集通过。
+当前页面脚本配置 `product-page?composite=1`、`page:true`、`limit:100`、`limits:[100,200,500,1000]`、`where:{skuGroup}`，查询时重置第一页。分页参数是 `page/limit`，不是 offset 或 pageSize。本次只读样本没有覆盖实际跨页；多页终止、重复页和漏页需在实现测试中覆盖，不能将此次字段核验称为真实多页采集通过。
 
 已观察的相关行字段：
 
@@ -28,7 +28,7 @@
 | commoditySpecificationAndModel1688 | string，采购规格 |
 | proportionOfGoodsPurchased1688 | string，样本格式`1-1`，不能把字段存在即视为所有比例已验证 |
 | purchaseSupplierId | string，采购供应商内部关联 |
-| supplierData | array，样本长度2；元素含supplierId、supplierName、supplierType、supplierServiceFee、supplierPurchaseUnitPrice、supplierUnitPriceSynchronization |
+| supplierData | array，可以包含多个供应商；元素含supplierId、supplierName、supplierType、supplierServiceFee、supplierPurchaseUnitPrice、supplierUnitPriceSynchronization |
 | commodityBarcodeData | array，元素含barcodeSkcid、barcodeBatchNumber；不包含完整平台SKU对，不能替代下述映射查询 |
 
 其它商品字段包括purchaseUnitPrice、referencePrice等，但本核验不确认其为已采用正式成本，禁止替代采购证据规则。
@@ -47,7 +47,7 @@
 /purchase/product/v1/product-info-sku?productId=<WAREHOUSE_SKU>
 ```
 
-HTTP 200，响应顶层`{code:0,count:128,data:[...128 rows],msg:<string>}`。当前页面源码配置`page:false`，请求没有page/limit；本样本一次返回全部128行，目标SKC仅匹配1行，证明必须逐行过滤，不能纳入整个仓库数组。仍应核对count与实际数组长度；若未来不一致，标记覆盖不完整，不擅自发明分页参数或宣称全量。
+HTTP 200，响应结构为 `{code:0,count:<row-count>,data:[...],msg:<string>}`，不公开原始样本数量。当前页面源码配置 `page:false`，请求没有 page/limit；共享仓库数组包含目标 SKC 以外的映射，必须逐行过滤。仍应核对 count 与实际数组长度；若未来不一致，标记覆盖不完整，不擅自发明分页参数或宣称全量。
 
 已观察到的平台映射字段（样本均为string）：
 

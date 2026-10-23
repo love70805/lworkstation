@@ -11,7 +11,7 @@ export function erpProductCatalogFixture(workspaceId = "workspace-default") {
       { platformSku: "SKU-BLUE", platformSkc: "SKC-CATALOG", warehouseSku: "WH-RED", productName: "ERP 多规格收纳盒", imageUrl: "https://images.example.invalid/red.png", attribute: "蓝色 · 小号" },
     ],
     purchaseRecords: [
-      { recordId: "REC-A", warehouseSku: "WH-RED", supplierName: "供应商甲", purchaseOrderNo: "PUR-A", supplier1688Url: "https://detail.1688.com/offer/730242606884.html" },
+      { recordId: "REC-A", warehouseSku: "WH-RED", supplierName: "供应商甲", purchaseOrderNo: "PUR-A", supplier1688Url: "https://detail.1688.com/offer/900000000011.html" },
       { recordId: "REC-B", warehouseSku: "WH-RED", supplierName: "供应商乙", purchaseOrderNo: "PUR-B", supplier1688Url: "https://shop-b.1688.com/" },
       { recordId: "REC-C", warehouseSku: "WH-RED", supplierName: "供应商丙", purchaseOrderNo: "PUR-C" },
     ],

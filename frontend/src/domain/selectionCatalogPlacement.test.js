@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { selectionCatalogPlacement } from './selectionCatalogPlacement';
 
 describe('selection catalog placement', () => {
-  const product = { id: 'P', platformSkc: 'st260606170768328630349', status: 'active' };
+  const product = { id: 'P', platformSkc: 'st900000000000000000008', status: 'active' };
   it('keeps existing SKCs and new branches together without mutating ownership', () => {
     const rows = [{ platformSku: 'OLD', platformSkc: product.platformSkc, productId: 'P', storeNames: ['甲店'] },
       { platformSku: 'NEW', platformSkc: product.platformSkc.toUpperCase(), productId: null, storeNames: ['乙店'] }];

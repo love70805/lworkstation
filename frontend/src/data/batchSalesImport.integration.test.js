@@ -41,12 +41,12 @@ afterEach(async () => { vi.restoreAllMocks(); db.close(); await db.delete(); });
 describe("同月多店铺原子台账导入", () => {
   it('commits only original full supplier numbers selected by fuzzy recognition', async () => {
     const source = [
-      { SKU: '0001', SKC: '父1', 货号: '0001-LBY', 数量: '2', 金额: '10' },
-      { SKU: '0002', SKC: '父2', 货号: '０００２-ｌｂｙｙ', 数量: '3', 金额: '15' },
+      { SKU: '0001', SKC: '父1', 货号: '0001-KPX', 数量: '2', 金额: '10' },
+      { SKU: '0002', SKC: '父2', 货号: '０００２-ｋｐｘｘ', 数量: '3', 金额: '15' },
       { SKU: '0003', SKC: '父3', 货号: '0003-LBZ', 数量: '4', 金额: '20' },
     ];
     const supplierMapping = { ...mapping, supplierNumber: '货号' };
-    const numbers = matchImportNumberRule(source.map(row => row.货号), { aliases: ['LBYY'], mode: 'fuzzy' });
+    const numbers = matchImportNumberRule(source.map(row => row.货号), { aliases: ['KPXX'], mode: 'fuzzy' });
     const filterOptions = { defaultStore: '识别店', supplierNumbers: numbers };
     const validated = validateSalesRows(source, supplierMapping, filterOptions);
     expect(validated.errors).toEqual([]);
@@ -54,7 +54,7 @@ describe("同月多店铺原子台账导入", () => {
     const result = await commit([{ ...file('识别店'), mapping: supplierMapping, filterOptions, rows: validated.rows,
       summary: { sourceRowCount: 3, errorCount: 0, ignoredCount: 1 } }]);
     const rows = await db.salesRows.toArray();
-    expect(rows.map(row => row.supplierNumber)).toEqual(['0001-LBY', '０００２-ｌｂｙｙ']);
+    expect(rows.map(row => row.supplierNumber)).toEqual(['0001-KPX', '０００２-ｋｐｘｘ']);
     expect(rows.map(row => row.platformSku)).toEqual(['0001', '0002']);
     expect(result.finalSummary.revenue).toBe(25);
   });

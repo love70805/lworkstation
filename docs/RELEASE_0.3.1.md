@@ -23,7 +23,7 @@
 
 导入修复 `bb384f0daf30e9e647be8f0c5ab68d23df8539b9`；构建依赖修复 `d2d0cc49c362940e516d10871f1bae5fd946748a`；候选构建提交 `3c2eaa570fe865674a315580b524616e2a798c03`。 [PR #122](https://github.com/love70805/lworkstation/pull/122)合入main `00a1a75aa1c2cc59ea5876b6c5a9c566604a22b1`，软件文件树与候选一致。PR [CI 36513542124](https://github.com/love70805/lworkstation/actions/runs/36513542124)全部通过，包含142文件/1004前端测试、完整release:check、前后端低级别依赖审计和16组桌面检查。[软件主线 CI 36513818775](https://github.com/love70805/lworkstation/actions/runs/36513818775)通过。候选持久记录经[PR #123](https://github.com/love70805/lworkstation/pull/123)、[PR CI 36514026405](https://github.com/love70805/lworkstation/actions/runs/36514026405)及[发布主线 CI 36514182606](https://github.com/love70805/lworkstation/actions/runs/36514182606)通过，合入main `47baf33103c478140a7bc6dd8373a42996bb8a15`，标签固定此提交；frontend/desktop/integrations/tools与构建提交3c2eaa5完全一致。
 
-最终稳定配置候选四资产已复制至主仓库 `C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.1/` 并逐文件回读一致，不覆盖0.3.0。安装包116982552字节，未数字签名。
+最终稳定配置候选四资产已复制至主仓库 `releases/candidates/0.3.1/` 并逐文件回读一致，不覆盖0.3.0。安装包116982552字节，未数字签名。
 
 | 候选文件 | SHA256 |
 | --- | --- |
@@ -34,7 +34,7 @@
 
 Windows实际EXE在隔离userData下隐藏smoke通过，version0.3.1、visibleWindowCount=0，ERP助手/loopback收件、桌面工作区和更新fixture正常；安装调用0。7-Zip只读解包的461文件与已测win-unpacked逐项哈希一致，414项桌面源码、生产前端、集成及收件资源与构建输入一致。latest.yml为0.3.1、仅引用同名公开规范EXE，SHA512/size与候选一致；release:organize及release:check通过。
 
-891文件源码清单、`source-3c2eaa5.zip`、原始构建/桌面/CI日志、安装包与生产输入比对、脱敏真实源聚合、合成浏览器/导出证据均持久在主仓库 `C:/Users/Administrator/Desktop/Lworkstation/archive/release-0.3.1/`。`durable-copy-check.json`记录复制、源码及0.3.0原件未变。候选与证据无需依赖54cb工作区保留。
+891文件源码清单、`source-3c2eaa5.zip`、原始构建/桌面/CI日志、安装包与生产输入比对、脱敏真实源聚合、合成浏览器/导出证据均持久在主仓库 `archive/release-0.3.1/`。`durable-copy-check.json`记录复制、源码及0.3.0原件未变。候选与证据无需依赖54cb工作区保留。
 
 ## 稳定公开发布与匿名回读
 

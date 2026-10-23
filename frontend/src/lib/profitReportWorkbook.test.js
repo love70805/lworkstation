@@ -9,15 +9,15 @@ const products=Array.from({length:6},(_,i)=>({lineKind:'product',store:i<3?'合�
 const dispatchRows=[{lineKind:'dispatch',platformSkc:'SKC-0',businessId:'00001234567890123456',quantityExact:'200',order1688:'12345678901234567890'}];
 const deductionRows=[{lineKind:'deduction',store:'合成甲店',businessId:'0000000000000001',platformSkc:'SKC-0',supplierNumber:'TEST',signedAmountExact:'0.0099'},{lineKind:'deduction',store:'合成乙店',businessId:'0000000000000002',platformSkc:'SKC-1',supplierNumber:'TEST',signedAmountExact:'-0.002'}];
 it('keeps product truncation while displaying deductions as general numeric values with source precision',()=>{
- const rows=[{...products[0],unitCostExact:'24.7025',purchaseCostExact:'49.405',revenueExact:'3774.2863',warehouseCostExact:'1.4099',profitExact:'-4.1525'},{...products[1],profitExact:'-4.1525'}];
- const report={kind:'financial',period:'2026-08',revision:1,totalsExact:reportTotals(rows,'8344','0.7',[{...deductionRows[0],signedAmountExact:'-4.1525'}])};
- const book=XLSX.read(buildProfitReportWorkbook({report,products:rows,dispatchRows,deductionRows:[{...deductionRows[0],signedAmountExact:'-4.1525'}]}).bytes,{type:'array',cellStyles:true});
+ const rows=[{...products[0],unitCostExact:'13.4567',purchaseCostExact:'26.9134',revenueExact:'123.4567',warehouseCostExact:'0.6789',profitExact:'-2.3456'},{...products[1],profitExact:'-2.3456'}];
+ const report={kind:'financial',period:'2026-08',revision:1,totalsExact:reportTotals(rows,'1234','0.7',[{...deductionRows[0],signedAmountExact:'-2.3456'}])};
+ const book=XLSX.read(buildProfitReportWorkbook({report,products:rows,dispatchRows,deductionRows:[{...deductionRows[0],signedAmountExact:'-2.3456'}]}).bytes,{type:'array',cellStyles:true});
  const sheet=book.Sheets['合成甲店'];
  expect(XLSX.utils.sheet_to_json(sheet,{header:1})[0]).toEqual(['SKC','SKU','属性','件数','销售额','1688单号','单件平均成本','总件数成本','仓储成本','利润']);
- for(const [address,value] of Object.entries({E2:3774.28,G2:24.70,H2:49.40,I2:1.40,J2:-4.15,J4:-8.30}))expect(sheet[address]).toMatchObject({t:'n',v:value,z:'0.00'});
- expect(sheet.G2.w).toBe('24.70');expect(sheet.H2.w).toBe('49.40');
- expect(book.Sheets['代发表'].G1.v).toBe('汇总数量');expect(book.Sheets['代发表'].H1.v).toBe('总价');expect(book.Sheets['代发表'].H2).toMatchObject({t:'n',v:5840.8,w:'5840.80'});
- expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.1525,w:'-4.1525',z:'General'});
+ for(const [address,value] of Object.entries({E2:123.45,G2:13.45,H2:26.91,I2:0.67,J2:-2.34,J4:-4.69}))expect(sheet[address]).toMatchObject({t:'n',v:value,z:'0.00'});
+ expect(sheet.G2.w).toBe('13.45');expect(sheet.H2.w).toBe('26.91');
+ expect(book.Sheets['代发表'].G1.v).toBe('汇总数量');expect(book.Sheets['代发表'].H1.v).toBe('总价');expect(book.Sheets['代发表'].H2).toMatchObject({t:'n',v:863.8,w:'863.80'});
+ expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-2.3456,w:'-2.3456',z:'General'});
  expect(book.Sheets['汇总表']['!merges'][0].e.c).toBe(9);
 });
 it.each(['pre_deduction','financial'])('writes readable %s workbook with textual IDs, dynamic sheets and approved report layout',kind=>{

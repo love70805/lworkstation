@@ -5,7 +5,7 @@ import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 beforeEach(async () => { await db.delete(); await db.open(); });
 afterEach(async () => { db.close(); await db.delete(); });
-const pricedDraft = () => ({ name: "旧报价商品", platformSkc: "SKC-CATALOG", salesStatus: "pending_review", supplierName: "供应商甲", sourceUrl: "https://detail.1688.com/offer/730242606884.html", shippingAmount: 36, handlingFee: 0.7, packageWeight: 120, englishTitle: "Legacy", salesPlatform: "legacy-platform", variants: [{ platformSku: "SKU-RED", purchaseUnitPrice: 10, purchasePackCount: 6, unitsPerPack: 2 }] });
+const pricedDraft = () => ({ name: "旧报价商品", platformSkc: "SKC-CATALOG", salesStatus: "pending_review", supplierName: "供应商甲", sourceUrl: "https://detail.1688.com/offer/900000000011.html", shippingAmount: 36, handlingFee: 0.7, packageWeight: 120, englishTitle: "Legacy", salesPlatform: "legacy-platform", variants: [{ platformSku: "SKU-RED", purchaseUnitPrice: 10, purchasePackCount: 6, unitsPerPack: 2 }] });
 
 describe("catalog metadata and quote boundaries", () => {
   it("preserves every old quote byte and hidden fee when editing metadata or adding a SKU", async () => {

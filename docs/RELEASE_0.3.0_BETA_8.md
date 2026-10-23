@@ -4,14 +4,14 @@
 
 ## 现场原因与修复
 
-Beta.7 现场同一平台 SKU 顶部为“当前采用：¥4.5900 · ERP”，正式成本已经生效。证据详情却报缺少 `evidenceRef` 并要求重采。完整 v2 批次校验通过后，发布路径保存成本行时漏写 `evidenceRef` 和 `evidenceComplete`；页面重新读取正式成本行时因此产生伪异常。
+Beta.7 现场同一平台 SKU 顶部显示有效的 ERP 正式成本，正式成本已经生效。证据详情却报缺少 `evidenceRef` 并要求重采。完整 v2 批次校验通过后，发布路径保存成本行时漏写 `evidenceRef` 和 `evidenceComplete`；页面重新读取正式成本行时因此产生伪异常。
 
 Beta.8 在新采用行中保存经过源批次校验的证据字段。Beta.7 已采用旧行仅在原批次仍有效、工作区/账本/请求/源批次相符，且仓库证据唯一完整、采购与排除记录一致时，只读投影证据字段，不迁移或改写旧行。范围不明时继续显示原缺失状态。撤回墓碑、人工更正优先、金额与定稿保护不变。详情说明 ERP 已生效时无需人工确认。具体边界见[证据引用契约](integration/ERP_PUBLISHED_EVIDENCE_REFERENCE.md)。
 
 ## 验收
 
 - 前端 130 文件 / 878 测试、生产构建、桌面 verify 全套通过。
-- 隔离 headless Edge 使用 11 条采购记录；最近三条 20×4.5、15×4.5、15×4.8 自动采用 4.5900 元，重新打开详情无缺 `evidenceRef` 提示。把隔离行模拟为 Beta.7 存储格式后，再次打开同样无伪异常，物理数据库行仍缺字段。原始脚本、结果、截图位于本机 `archive/beta8-evidence/`。
+- 隔离 headless Edge 使用保留字段结构的采购证据重放，最近三笔自动采用结果与独立加权计算一致，重新打开详情无缺 `evidenceRef` 提示；具体采购明细不公开。把隔离行模拟为 Beta.7 存储格式后，再次打开同样无伪异常，物理数据库行仍缺字段。原始脚本、结果、截图位于本机 `archive/beta8-evidence/`。
 - Windows packaged smoke 及 `release:check` 通过。[PR #111](https://github.com/love70805/lworkstation/pull/111) 两项必需检查和 [main CI](https://github.com/love70805/lworkstation/actions/runs/35985998406) 均通过。浏览器测试未连接真实 ERP 账号；桌面打包与收件由独立 smoke 验证。
 
 ## 资产、集成与公开回读

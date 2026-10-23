@@ -376,14 +376,14 @@ it('reports preference storage failure after commit without offering a duplicate
 
 it('applies fuzzy selection across stores only on request, with a local store override', async () => {
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',
-    facets:{supplierNumbers:['A-HHHX','BhhHx','HHHX-MID','其他'],supplierCounts:{'A-HHHX':1,BhhHx:1,'HHHX-MID':1,其他:1}}});
+    facets:{supplierNumbers:['A-FFFV','BffFv','FFFV-MID','其他'],supplierCounts:{'A-FFFV':1,BffFv:1,'FFFV-MID':1,其他:1}}});
   await upload(); await settled();
   const count = mocks.preview.mock.calls.length;
-  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target: { value:'ｈｈｈｘ' } }));
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target: { value:'ｆｆｆｖ' } }));
   await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count);
   await matchAndApply(); await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID'],['A-HHHX','BhhHx','HHHX-MID']]);
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-FFFV','BffFv','FFFV-MID'],['A-FFFV','BffFv','FFFV-MID']]);
   expect(container.querySelector('.supplier-apply-preview').textContent).toContain('应用后已选6');
   expect([...container.querySelectorAll('.batch-impact-details')].every(details => !details.open)).toBe(true);
   expect(container.querySelector('.batch-action-bar').compareDocumentPosition(container.querySelector('.batch-files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -392,14 +392,14 @@ it('applies fuzzy selection across stores only on request, with a local store ov
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
   await click('应用本次筛选');
   await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID','其他'],['A-HHHX','BhhHx','HHHX-MID']]);
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-FFFV','BffFv','FFFV-MID','其他'],['A-FFFV','BffFv','FFFV-MID']]);
   expect(container.querySelectorAll('.batch-store-suppliers')[1].textContent).toContain('已应用 3 / 4');
 });
 
 it('avoids duplicate unchanged applies and refreshes overwrite approval only after explicit revalidation', async () => {
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-HHHX','OTHER']}});
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-FFFV','OTHER']}});
   await upload(); await settled();
-  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'HHHX'}}));
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'FFFV'}}));
   await matchAndApply(); await settled();
   await act(async () => container.querySelector('.batch-overwrite input').click());
   expect(button('导入').disabled).toBe(false);
@@ -415,15 +415,15 @@ it('avoids duplicate unchanged applies and refreshes overwrite approval only aft
   await act(async () => container.querySelector('.batch-overwrite input').click());
   await click('导入');
   expect(mocks.save).toHaveBeenCalledTimes(1);
-  expect(mocks.save.mock.calls[0][0].items.map(item=>item.filterOptions.supplierNumbers)).toEqual([['A-HHHX'],['A-HHHX']]);
+  expect(mocks.save.mock.calls[0][0].items.map(item=>item.filterOptions.supplierNumbers)).toEqual([['A-FFFV'],['A-FFFV']]);
 });
 
 it('rebuilds a remembered identical supplier selection on its first batch suffix application', async () => {
-  localStorage.setItem('lworkstation:import-suppliers:v2:W', JSON.stringify({'甲店':{selected:['A-HHHX'],keywords:[]}}));
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-HHHX']}});
+  localStorage.setItem('lworkstation:import-suppliers:v2:W', JSON.stringify({'甲店':{selected:['A-FFFV'],keywords:[]}}));
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:1,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-FFFV']}});
   await upload(true,[new File(['first'],'甲店.csv')]); await settled();
   const count=mocks.preview.mock.calls.length;
-  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'hhhx'}}));
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'fffv'}}));
   await matchAndApply(); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count+1);
   expect(container.querySelector('.batch-preview')).not.toBeNull();
@@ -445,8 +445,8 @@ it('keeps zero suffix matches unselected and invalidates an earlier overwrite ap
 
 it('uses an applied fuzzy rule for newly added files including middle matches', async () => {
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',
-    facets:{supplierNumbers:['A-HHHX','HHHX-MID']}});
-  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{value:'HHHX'} }));
+    facets:{supplierNumbers:['A-FFFV','FFFV-MID']}});
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{value:'FFFV'} }));
   const choose = async files => {
     const input = container.querySelector('input[type=file]');
     Object.defineProperty(input, 'files', {configurable:true, value:files});
@@ -462,31 +462,31 @@ it('uses an applied fuzzy rule for newly added files including middle matches', 
   }, { timeout: 5000 });
   await waitForFiles(1);
   await choose([new File(['second'], '乙店.csv')]); await waitForFiles(2);
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','HHHX-MID'],['A-HHHX','HHHX-MID']]);
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-FFFV','FFFV-MID'],['A-FFFV','FFFV-MID']]);
 });
 
-it('saves LBYY and LBY together, applies the saved group, and remembers it only after a successful import', async () => {
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-LBYY','B-LBY','OTHER']}});
+it('saves KPXX and KPX together, applies the saved group, and remembers it only after a successful import', async () => {
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-KPXX','B-KPX','OTHER']}});
   await upload(); await settled();
-  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'LBYY、LBY'}}));
+  await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), {target:{value:'KPXX、KPX'}}));
   await click('保存为常用组');
-  await act(async () => Simulate.change(container.querySelector('#supplier-group-name'), {target:{value:'LBYY / LBY'}}));
+  await act(async () => Simulate.change(container.querySelector('#supplier-group-name'), {target:{value:'KPXX / KPX'}}));
   await click('保存货号组');
   const group = readSupplierGroups('W').groups[0];
-  expect(group.aliases).toEqual(['LBY','LBYY']);
+  expect(group.aliases).toEqual(['KPX','KPXX']);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
   await click(group.name); await click('应用本次筛选'); await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-LBYY','B-LBY'],['A-LBYY','B-LBY']]);
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-KPXX','B-KPX'],['A-KPXX','B-KPX']]);
   await act(async () => container.querySelector('.batch-overwrite input').click());
   await click('导入');
   expect(readSupplierGroups('W').lastAppliedId).toBe(group.id);
 });
 
 it('restores a group and its store exceptions without a new apply click, including newly seen alias members', async () => {
-  const group = saveSupplierGroup('W', { name: '负责组', aliases: ['LBYY','LBY'], mode: 'suffix' });
-  localStorage.setItem('lworkstation:import-suppliers:v2:W', JSON.stringify({'甲店':{selected:['A-LBYY','PREVIOUS-LBY'],keywords:[],matched:[]}}));
-  rememberSupplierGroupSelection('W', [{storeName:'甲店',supplierGroupRule:group,facets:{supplierNumbers:['A-LBYY','B-LBY']},filterOptions:{supplierNumbers:['A-LBYY']}}]);
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-LBYY','B-LBY','NEW-LBY','OTHER']}});
+  const group = saveSupplierGroup('W', { name: '负责组', aliases: ['KPXX','KPX'], mode: 'suffix' });
+  localStorage.setItem('lworkstation:import-suppliers:v2:W', JSON.stringify({'甲店':{selected:['A-KPXX','PREVIOUS-KPX'],keywords:[],matched:[]}}));
+  rememberSupplierGroupSelection('W', [{storeName:'甲店',supplierGroupRule:group,facets:{supplierNumbers:['A-KPXX','B-KPX']},filterOptions:{supplierNumbers:['A-KPXX']}}]);
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['A-KPXX','B-KPX','NEW-KPX','OTHER']}});
   const input = container.querySelector('input[type=file]');
   Object.defineProperty(input,'files',{configurable:true,value:[new File(['first'],'甲店.csv')]});
   await act(async () => input.dispatchEvent(new Event('change',{bubbles:true})));
@@ -496,24 +496,24 @@ it('restores a group and its store exceptions without a new apply click, includi
     expect(mocks.preview.mock.calls.at(-1)?.[0].items).toHaveLength(1);
     expect(container.querySelector('.batch-fieldset').disabled).toBe(false);
   }, { timeout: 5000 });
-  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBYY','NEW-LBY']);
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-KPXX','NEW-KPX']);
   expect(container.querySelector('.supplier-apply-preview').textContent).toContain('上次选择中，本文件未找到 · 1 个');
-  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('甲店 / PREVIOUS-LBY');
+  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('甲店 / PREVIOUS-KPX');
   const picker = container.querySelector('.supplier-filter-table');
   await act(async () => [...picker.querySelectorAll('.supplier-table-views button')].find(node => node.textContent.startsWith('未选 ')).click());
-  expect([...picker.querySelectorAll('.supplier-number-link')].map(node => node.textContent)).toEqual(['B-LBY','OTHER']);
+  expect([...picker.querySelectorAll('.supplier-number-link')].map(node => node.textContent)).toEqual(['B-KPX','OTHER']);
 });
 
 it('switches matching mode only on apply and leaves file selections intact when a saved group is deleted', async () => {
-  const group = saveSupplierGroup('W', {name:'负责人',aliases:['LBYY'],mode:'suffix'});
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['LBYY','A-LBYY','LBYY-MID']}});
+  const group = saveSupplierGroup('W', {name:'负责人',aliases:['KPXX'],mode:'suffix'});
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['KPXX','A-KPXX','KPXX-MID']}});
   await upload(); await settled();
   await click(group.name); await click('应用本次筛选'); await settled();
   const count = mocks.preview.mock.calls.length;
   await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), {target:{value:'exact'}}));
   await settled(); expect(mocks.preview).toHaveBeenCalledTimes(count);
   await matchAndApply(); await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['LBYY']);
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['KPXX']);
   await click('管理常用组'); await click('删除这个组'); await click('确认删除'); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
   expect(readSupplierGroups('W').groups).toEqual([]);
@@ -542,27 +542,27 @@ it('keeps page/search selection in a draft, preserves hidden items, and restores
 });
 
 it('preserves same-group draft exceptions while switching groups without inheriting another group selection', async () => {
-  const group = saveSupplierGroup('W',{name:'LBY组',aliases:['LBY'],mode:'suffix'}), other=saveSupplierGroup('W',{name:'其他组',aliases:['OTHER'],mode:'suffix'});
-  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'001'}],preset:'generic',facets:{supplierNumbers:['A-LBY','B-LBY','C-OTHER']}});
+  const group = saveSupplierGroup('W',{name:'KPX组',aliases:['KPX'],mode:'suffix'}), other=saveSupplierGroup('W',{name:'其他组',aliases:['OTHER'],mode:'suffix'});
+  mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'001'}],preset:'generic',facets:{supplierNumbers:['A-KPX','B-KPX','C-OTHER']}});
   await upload(true,[new File(['source'],'甲店.csv')]); await settled();
   const count=mocks.preview.mock.calls.length;
-  await click('LBY组');
-  await act(async()=>container.querySelector('[aria-label="选择 甲店 B-LBY"]').click());
+  await click('KPX组');
+  await act(async()=>container.querySelector('[aria-label="选择 甲店 B-KPX"]').click());
   await click('匹配货号');
-  expect(container.querySelector('[aria-label="选择 甲店 B-LBY"]').checked).toBe(false);
+  expect(container.querySelector('[aria-label="选择 甲店 B-KPX"]').checked).toBe(false);
   await click('其他组');
-  expect(container.querySelector('[aria-label="选择 甲店 A-LBY"]').checked).toBe(false);
+  expect(container.querySelector('[aria-label="选择 甲店 A-KPX"]').checked).toBe(false);
   expect(container.querySelector('[aria-label="选择 甲店 C-OTHER"]').checked).toBe(true);
-  await click('LBY组');
-  expect(container.querySelector('[aria-label="选择 甲店 B-LBY"]').checked).toBe(false);
+  await click('KPX组');
+  expect(container.querySelector('[aria-label="选择 甲店 B-KPX"]').checked).toBe(false);
   expect(mocks.preview).toHaveBeenCalledTimes(count);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
   await click('应用本次筛选'); await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBY']);
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-KPX']);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
   expect(readSupplierGroups('W').groups.map(g=>g.id)).toEqual([group.id,other.id]);
   await act(async()=>Simulate.change(container.querySelector('[data-field=quantity] select'),{target:{value:''}}));await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-LBY']);
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-KPX']);
 });
 it('drops a removed file late inspection and lets a fresh batch use the current workspace without carrying its old group', async () => {
   await upload(true,[new File(['source'],'甲店.csv')]); await settled();

@@ -4,6 +4,7 @@ import process from "node:process";
 
 const root = fileURLToPath(new URL("../frontend/", import.meta.url));
 const commands = [
+  ["公开资料脱敏检查", "node", ["../tools/public-data-check.mjs"]],
   ["单元与集成测试", "pnpm", ["test"]],
   ["前端生产构建", "pnpm", ["build"]],
   ["ERP Assistant 桥接生成", "pnpm", ["erp:bridge:test"]],

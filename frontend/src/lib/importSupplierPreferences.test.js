@@ -11,16 +11,16 @@ it('persists only explicit successful choices, isolated by workspace and store',
   expect(parseImportNumbers(' A，B\nA; C ')).toEqual(['A','B','C']);
 });
 it('matches any normalized keyword without rewriting original supplier identities', () => {
-  const words = parseImportKeywords('ｈｈｈｘ，LYYY\nhhhx; ＬＹＹＹ');
-  expect(words).toEqual(['HHHX','LYYY']);
-  expect(matchImportNumbers(['Ｓ－ｈｈｈｘ','a-LYYY','HHHX-LYYY','none'], words)).toEqual(['Ｓ－ｈｈｈｘ','a-LYYY','HHHX-LYYY']);
+  const words = parseImportKeywords('ｆｆｆｖ，MNNN\nfffv; ＭＮＮＮ');
+  expect(words).toEqual(['FFFV','MNNN']);
+  expect(matchImportNumbers(['Ｓ－ｆｆｆｖ','a-MNNN','FFFV-MNNN','none'], words)).toEqual(['Ｓ－ｆｆｆｖ','a-MNNN','FFFV-MNNN']);
   expect(matchImportNumbers(['any'], [])).toEqual([]);
 });
 it('restores explicit selections, identifies new matches and remembers deliberately excluded matches', () => {
-  saveImportNumbers('W', [{storeName:'甲', filterOptions:{supplierNumbers:['HHHX-1','gone']}, supplierKeywords:['hhHx'], facets:{supplierNumbers:['HHHX-1','HHHX-2','gone']}}]);
+  saveImportNumbers('W', [{storeName:'甲', filterOptions:{supplierNumbers:['FFFV-1','gone']}, supplierKeywords:['ffFv'], facets:{supplierNumbers:['FFFV-1','FFFV-2','gone']}}]);
   const preference = readImportPreference('W','甲');
-  expect(restoreImportPreference(preference,['HHHX-1','HHHX-2','HHHX-3'])).toEqual({selected:['HHHX-1'],missing:['gone'],newMatches:['HHHX-3']});
-  expect(restoreImportPreference(readImportPreference('W','乙'),['HHHX-1'])).toEqual({selected:[],missing:[],newMatches:[]});
+  expect(restoreImportPreference(preference,['FFFV-1','FFFV-2','FFFV-3'])).toEqual({selected:['FFFV-1'],missing:['gone'],newMatches:['FFFV-3']});
+  expect(restoreImportPreference(readImportPreference('W','乙'),['FFFV-1'])).toEqual({selected:[],missing:[],newMatches:[]});
 });
 it('unions successful same-store files while replacing only that stores previous preference', () => {
   saveImportNumbers('W',[{storeName:'甲',filterOptions:{supplierNumbers:['old']}},{storeName:'乙',filterOptions:{supplierNumbers:['keep']}}]);

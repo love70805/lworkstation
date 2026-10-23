@@ -13,7 +13,7 @@
 
 ## 验收与原件
 
-软件生产输入 `3e4d34e`；`3901873`仅修正证据目录，候选登记 `4b05a27`。151文件/1141测试、前端完整release:check及build、16组desktop verify、headless浅深色六布局/慢请求/取消、只读交叉审查通过。实际隐藏EXE smoke `ok:true`、`hiddenMode:true`、`visibleWindowCount:0`；502安装文件/455生产输入逐项一致。包内生产采集脚本重放完整脱敏历史：白色24.1020、橙色20.9620、挂钩八月0.1090/九月0.1112通过。[候选记录](RELEASE_0.3.5_CANDIDATE.md)、[现场字段](integration/ERP_UNIT_EVIDENCE_2026_09_30.md)、[修复契约](integration/ERP_PURCHASE_HISTORY_FIX_2026_09_30.md)。
+软件生产输入 `3e4d34e`；`3901873`仅修正证据目录，候选登记 `4b05a27`。151文件/1141测试、前端完整release:check及build、16组desktop verify、headless浅深色六布局/慢请求/取消、只读交叉审查通过。实际隐藏EXE smoke `ok:true`、`hiddenMode:true`、`visibleWindowCount:0`；502安装文件/455生产输入逐项一致。包内生产采集脚本重放完整历史证据，修复结果与独立选样期望一致；原商品、数量、日期与价格不公开。[候选记录](RELEASE_0.3.5_CANDIDATE.md)、[现场字段](integration/ERP_UNIT_EVIDENCE_2026_09_30.md)、[修复契约](integration/ERP_PURCHASE_HISTORY_FIX_2026_09_30.md)。
 
 沿用已验收候选，不重新构建。EXE117345388字节，SHA256 `FA750D5DC3F12D8247D365EC374F68FB3403B4D9F45BC55965232C24982FC573`；原四文件位于主仓 `releases/candidates/0.3.5/` 并已哈希回读。CD7A旧包归档保留。`candidateOnly:true`仅用于本地候选存放及检查路径，不能代表GitHub公开状态。
 

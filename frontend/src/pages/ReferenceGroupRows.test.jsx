@@ -12,8 +12,8 @@ const variant = (platformSku, extra = {}) => ({
 });
 const ledgerIdentity = {
   platformSkcSource: "ledger", attributeSource: "ledger",
-  platformSkcEvidence: [{ value: "SKC-1", sources: [{ kind: "ledger", period: "2026-08", store: "甲店", sourceSheet: "销售台账", sourceRow: 3, ledgerId: "LEDGER-UUID-123456789", batchId: "BATCH-UUID-987654321" }] }],
-  attributeEvidence: [{ value: "白色 / L", sources: [{ kind: "ledger", period: "2026-08", store: "甲店", sourceSheet: "销售台账", sourceRow: 3, ledgerId: "LEDGER-UUID-123456789" }] }],
+  platformSkcEvidence: [{ value: "SKC-1", sources: [{ kind: "ledger", period: "2026-08", store: "甲店", sourceSheet: "销售台账", sourceRow: 3, ledgerId: "LEDGER-UUID-900000000002", batchId: "BATCH-UUID-987654321" }] }],
+  attributeEvidence: [{ value: "白色 / L", sources: [{ kind: "ledger", period: "2026-08", store: "甲店", sourceSheet: "销售台账", sourceRow: 3, ledgerId: "LEDGER-UUID-900000000002" }] }],
 };
 
 async function render(variants, extra = {}) {
@@ -65,10 +65,10 @@ describe("selection reference shared SKU rows", () => {
     const details = container.querySelector(".reference-identity-evidence");
     const firstSource = details.querySelector("p small");
     expect(firstSource.textContent).toBe("台账 · 2026-08 · 甲店 · 销售台账 第 3 行");
-    expect(firstSource.title).toContain("账本 LEDGER-UUID-123456789 · 批次 BATCH-UUID-987654321");
+    expect(firstSource.title).toContain("账本 LEDGER-UUID-900000000002 · 批次 BATCH-UUID-987654321");
     const identifiers = details.querySelector(".reference-source-identifiers");
     expect(identifiers.open).toBe(false);
-    expect(identifiers.textContent).toContain("账本 LEDGER-UUID-123456789");
+    expect(identifiers.textContent).toContain("账本 LEDGER-UUID-900000000002");
     expect(identifiers.textContent).toContain("批次 BATCH-UUID-987654321");
   });
 

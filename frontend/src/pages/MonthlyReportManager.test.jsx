@@ -77,11 +77,11 @@ it('keeps explicit selections when clearing search and ignores unrelated sheets 
 });
 it('supports cross-sheet multiple codes, individual deselection, all search results and empty results without double counting',async()=>{
  await mount(base,'deduction');
- const first=source('F',[['货号','店铺','扣款单号','扣款金额'],['YW-sh27-HHHX','甲','A','-1.001'],['YW-SH27-HHHX','甲','B','2.002'],['OTHER','甲','C','8']]);
- const second={...source('F',[['货号','店铺','扣款单号','扣款金额'],['YW-20-HHHX','甲','D','0.0009']]),sheetName:'另一页'};
- await upload([first,second]);await change(field('搜索货号'),' ＨＨＨＸ ');
+ const first=source('F',[['货号','店铺','扣款单号','扣款金额'],['YW-sh27-FFFV','甲','A','-1.001'],['YW-SH27-FFFV','甲','B','2.002'],['OTHER','甲','C','8']]);
+ const second={...source('F',[['货号','店铺','扣款单号','扣款金额'],['YW-20-FFFV','甲','D','0.0009']]),sheetName:'另一页'};
+ await upload([first,second]);await change(field('搜索货号'),' ＦＦＦＶ ');
  expect(mock.preview.mock.calls.at(-1)[0].rows).toHaveLength(3);expect(container.textContent).toContain('有符号扣款合计 1.0019 元');
- await toggle('YW-SH27-HHHX',false);expect(container.textContent).toContain('有符号扣款合计 -1.0001 元');expect(mock.preview.mock.calls.at(-1)[0].rows).toHaveLength(2);
+ await toggle('YW-SH27-FFFV',false);expect(container.textContent).toContain('有符号扣款合计 -1.0001 元');expect(mock.preview.mock.calls.at(-1)[0].rows).toHaveLength(2);
  await act(async()=>button('全选搜索结果').click());expect(container.textContent).toContain('有符号扣款合计 1.0019 元');
  await upload([first,second]);expect(container.textContent).toContain('重复文件/工作表已跳过');expect(mock.preview.mock.calls.at(-1)[0].rows).toHaveLength(3);
  await change(field('搜索货号'),'not-found');expect(container.textContent).toContain('没有匹配货号');expect(button('导入本月来源').disabled).toBe(true);
@@ -91,18 +91,18 @@ it('supports cross-sheet multiple codes, individual deselection, all search resu
  await act(async()=>button('清空选择').click());expect(button('导入本月来源').disabled).toBe(true);
 });
 it('automatically selects newly loaded search matches while preserving individual exclusions',async()=>{
- await mount(base,'deduction');await upload([source('F',[['货号','店铺','扣款单号','扣款金额'],['HHHX-A','甲','A',1],['HHHX-B','甲','B',2]])]);
- await change(field('搜索货号'),'HHHX');await toggle('HHHX-A',false);
- await upload([source('G',[['货号','店铺','扣款单号','扣款金额'],['HHHX-A','甲','C',4],['HHHX-C','甲','D',8],['OTHER','甲','E',16]])]);
- expect(supplier('HHHX-A').checked).toBe(false);expect(supplier('HHHX-C').checked).toBe(true);expect(container.textContent).toContain('有符号扣款合计 10 元');
+ await mount(base,'deduction');await upload([source('F',[['货号','店铺','扣款单号','扣款金额'],['FFFV-A','甲','A',1],['FFFV-B','甲','B',2]])]);
+ await change(field('搜索货号'),'FFFV');await toggle('FFFV-A',false);
+ await upload([source('G',[['货号','店铺','扣款单号','扣款金额'],['FFFV-A','甲','C',4],['FFFV-C','甲','D',8],['OTHER','甲','E',16]])]);
+ expect(supplier('FFFV-A').checked).toBe(false);expect(supplier('FFFV-C').checked).toBe(true);expect(container.textContent).toContain('有符号扣款合计 10 元');
 });
 it('invalidates a stale multiple-code preview before adoption',async()=>{
  await mount(base,'deduction');const pending=[];mock.preview.mockImplementation(input=>new Promise(resolve=>pending.push({input,resolve})));
- await upload([source('F',[['货号','店铺','扣款单号','扣款金额'],['HHHX-A','甲','A',1],['HHHX-B','甲','B',2]])]);
- await change(field('搜索货号'),'HHHX');await toggle('HHHX-A',false);expect(button('导入本月来源').disabled).toBe(true);
+ await upload([source('F',[['货号','店铺','扣款单号','扣款金额'],['FFFV-A','甲','A',1],['FFFV-B','甲','B',2]])]);
+ await change(field('搜索货号'),'FFFV');await toggle('FFFV-A',false);expect(button('导入本月来源').disabled).toBe(true);
  await act(async()=>pending[1].resolve(check(pending[1].input)));await act(async()=>pending[0].resolve(check(pending[0].input)));
  expect(container.textContent).toContain('有符号扣款合计 2 元');await act(async()=>button('导入本月来源').click());
- expect(mock.adopt.mock.calls[0][0].rows.map(row=>row.supplierNumber)).toEqual(['HHHX-B']);
+ expect(mock.adopt.mock.calls[0][0].rows.map(row=>row.supplierNumber)).toEqual(['FFFV-B']);
 });
 it('shows the dispatch amount for manual, file and real zero quantities before adoption',async()=>{
  await mount();await change(field('来源方式'),'manual');await change(field('采用总代发件数'),'100');
@@ -113,8 +113,8 @@ it('shows the dispatch amount for manual, file and real zero quantities before a
 });
 it('automatically maps SH sheets, filters source cards and preserves source indexes when editing a visible mapping',async()=>{
  const state={...base,stores:['20店','27店']};await mount(state,'deduction');
- await upload([source('OTHER',[['货号','扣款金额'],['OTHER',9]]),{...source('F',[['货号','补扣款单号','扣款金额'],['HHHX-A','A','-0.0009']]),sheetName:'sh20'},{...source('F',[['货号','补扣款单号','扣款金额'],['HHHX-B','B','2']]),sheetName:'SH27'}]);
- await change(field('搜索货号'),'HHHX');expect(container.querySelectorAll('.report-source')).toHaveLength(2);expect(container.textContent).toContain('涉及 2 / 3 个工作表');
+ await upload([source('OTHER',[['货号','扣款金额'],['OTHER',9]]),{...source('F',[['货号','补扣款单号','扣款金额'],['FFFV-A','A','-0.0009']]),sheetName:'sh20'},{...source('F',[['货号','补扣款单号','扣款金额'],['FFFV-B','B','2']]),sheetName:'SH27'}]);
+ await change(field('搜索货号'),'FFFV');expect(container.querySelectorAll('.report-source')).toHaveLength(2);expect(container.textContent).toContain('涉及 2 / 3 个工作表');
  const shop20=container.querySelector('[aria-label="sh20 实际店铺"]');expect(shop20.value).toBe('20店');expect(container.querySelector('[aria-label="SH27 实际店铺"]').value).toBe('27店');
  expect(container.textContent).toContain('有符号扣款合计 1.9991 元');expect(mock.preview.mock.calls.at(-1)[0].rows.map(row=>row.store)).toEqual(['20店','27店']);
  await change(shop20,'27店');expect(mock.preview.mock.calls.at(-1)[0].rows.map(row=>row.store)).toEqual(['27店','27店']);
@@ -125,8 +125,8 @@ it('automatically maps SH sheets, filters source cards and preserves source inde
 it('shows all unresolved selected sheets near the picker, locates their controls and prevents partial adoption until mapped',async()=>{
  const state={...base,stores:['20','20店','27店']};await mount(state,'deduction');
  const sheet=(name,rows)=>({...source(name,[['货号','扣款单号','扣款金额'],...rows]),sheetName:name});
- await upload([sheet('sh20',[['HHHX-A','A',1],['HHHX-A','B',2]]),sheet('missing',[['HHHX-B','C',3]]),sheet('SH27',[['HHHX-C','D','-0.0009']])]);
- await change(field('搜索货号'),'HHHX');expect(mock.preview).not.toHaveBeenCalled();expect(container.textContent).toContain('2 个涉及工作表、3 条选中记录缺少实际店铺');expect(button('导入本月来源').disabled).toBe(true);
+ await upload([sheet('sh20',[['FFFV-A','A',1],['FFFV-A','B',2]]),sheet('missing',[['FFFV-B','C',3]]),sheet('SH27',[['FFFV-C','D','-0.0009']])]);
+ await change(field('搜索货号'),'FFFV');expect(mock.preview).not.toHaveBeenCalled();expect(container.textContent).toContain('2 个涉及工作表、3 条选中记录缺少实际店铺');expect(button('导入本月来源').disabled).toBe(true);
  await act(async()=>button('定位 sh20（2 条）').click());expect(document.activeElement).toBe(container.querySelector('[aria-label="sh20 实际店铺"]'));
  await change(container.querySelector('[aria-label="sh20 实际店铺"]'),'20店');expect(mock.preview).not.toHaveBeenCalled();
  await change(container.querySelector('[aria-label="missing 实际店铺"]'),'27店');expect(container.textContent).toContain('有符号扣款合计 5.9991 元');expect(button('导入本月来源').disabled).toBe(false);

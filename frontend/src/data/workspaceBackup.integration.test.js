@@ -14,7 +14,7 @@ import { captureBusinessPreferences, preparePreferenceRestore, applyPreferenceRe
 const workspace = 'workspace-default';
 const groupKey = id => `lworkstation:import-supplier-groups:v1:${id}`;
 const preferenceKey = id => `lworkstation:import-suppliers:v2:${id}`;
-const group = name => saveSupplierGroup(workspace, { id: 'group', name, aliases: ['LBYY', 'LBY'], mode: 'suffix' });
+const group = name => saveSupplierGroup(workspace, { id: 'group', name, aliases: ['KPXX', 'KPX'], mode: 'suffix' });
 const count = tables => Object.values(tables).reduce((sum, rows) => sum + rows.length, 0);
 beforeEach(async () => {
   const values = new Map();
@@ -105,10 +105,10 @@ it('restores a real v14-shaped package without removing newer local business pre
 });
 
 it('round trips groups, last selection, per-store overrides and both import preference versions only', async () => {
-  const rule = group('LBYY / LBY');
+  const rule = group('KPXX / KPX');
   rememberSupplierGroupSelection(workspace, [{ storeName: '甲', supplierGroupRule: rule,
-    facets: { supplierNumbers: ['A-LBYY', 'B-LBY', 'EXTRA'] }, filterOptions: { supplierNumbers: ['A-LBYY', 'EXTRA'] } }]);
-  saveImportNumbers(workspace, [{ storeName: '甲', supplierKeywords: ['LBY'], facets: { supplierNumbers: ['B-LBY'] }, filterOptions: { supplierNumbers: ['B-LBY'] } }]);
+    facets: { supplierNumbers: ['A-KPXX', 'B-KPX', 'EXTRA'] }, filterOptions: { supplierNumbers: ['A-KPXX', 'EXTRA'] } }]);
+  saveImportNumbers(workspace, [{ storeName: '甲', supplierKeywords: ['KPX'], facets: { supplierNumbers: ['B-KPX'] }, filterOptions: { supplierNumbers: ['B-KPX'] } }]);
   localStorage.setItem(`lworkstation:import-suppliers:v1:${workspace}`, JSON.stringify({ 乙: ['legacy'] }));
   localStorage.setItem('sb-auth-token', 'must-not-export');
   localStorage.setItem('shopeers-appearance', 'dark');
@@ -119,8 +119,8 @@ it('round trips groups, last selection, per-store overrides and both import pref
   saveSupplierGroup('OTHER', { id: 'other', name: 'unrelated', aliases: ['OTHER'], mode: 'suffix' });
   await restoreWorkspaceBackupPayload(backup);
   expect(captureBusinessPreferences([workspace])).toEqual(saved);
-  expect(readSupplierGroups(workspace)).toMatchObject({ lastAppliedId: rule.id, overrides: { 甲: { include: ['EXTRA'], exclude: ['B-LBY'] } } });
-  expect(readImportPreference(workspace, '甲').selected).toEqual(['B-LBY']);
+  expect(readSupplierGroups(workspace)).toMatchObject({ lastAppliedId: rule.id, overrides: { 甲: { include: ['EXTRA'], exclude: ['B-KPX'] } } });
+  expect(readImportPreference(workspace, '甲').selected).toEqual(['B-KPX']);
   expect(readSupplierGroups('OTHER').groups).toHaveLength(1);
 });
 

@@ -14,7 +14,7 @@ const workspace="workspace-default";
 const conversion=sku=>({warehouseUnits:2,platformUnits:1,source:"erp_platform_mapping",sourceRef:`mapping:WH:${sku}`});
 const evidence=(warehouseSku="WH", price=4)=>({warehouseSku,evidenceRef:`warehouse:${warehouseSku}`,evidenceComplete:true,purchaseRecords:[{recordId:`PURCHASE-${warehouseSku}`,warehouseSku,purchaseDate:"2026-08-28",quantity:6,unitPrice:price}]});
 const envelope=()=>({workspaceId:workspace,query:{platformSkcs:["SKC"]},rows:[{platformSku:"SKU-A",platformSkc:"SKC",warehouseSku:"WH",unitConversion:conversion("SKU-A")}],warehouseEvidence:[evidence()]});
-const pricedDraft=()=>({name:"合成旧报价",platformSkc:"SKC-CATALOG",supplierName:"合成供应商",sourceUrl:"https://detail.1688.com/offer/12345678901.html",imageUrl:"https://images.example.invalid/manual.jpg",shippingAmount:12,handlingFee:0.5,variants:[{platformSku:"SKU-RED",purchaseUnitPrice:4,purchasePackCount:2,unitsPerPack:1}]});
+const pricedDraft=()=>({name:"合成旧报价",platformSkc:"SKC-CATALOG",supplierName:"合成供应商",sourceUrl:"https://detail.1688.com/offer/900000000004.html",imageUrl:"https://images.example.invalid/manual.jpg",shippingAmount:12,handlingFee:0.5,variants:[{platformSku:"SKU-RED",purchaseUnitPrice:4,purchasePackCount:2,unitsPerPack:1}]});
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:workspace});});
 afterEach(async()=>{db.close();await db.delete();});
 
@@ -60,7 +60,7 @@ describe("0.3.3 independent read-only review regressions",()=>{
  it("does not read, adopt, or delete foreign-workspace children even when they point to a visible product ID",async()=>{
    const {product}=await saveProductCatalogRecord({draft:{name:"本工作区档案",platformSkc:"SKC-CATALOG",variants:[{platformSku:"SKU-RED"}]}});
    const foreignSku={id:"FOREIGN-SKU-ID",workspaceId:"W-FOREIGN",productId:product.id,platformSku:"FOREIGN-SKU",canonicalPlatformSku:"FOREIGN-SKU",platformSkc:"FOREIGN-SKC",attribute:"外工作区私有属性",status:"active"};
-   const foreignOffer={id:"FOREIGN-OFFER-ID",workspaceId:"W-FOREIGN",productId:product.id,platformSku:"FOREIGN-SKU",canonicalPlatformSku:"FOREIGN-SKU",supplierName:"外工作区私有供应商",sourceUrl:"https://detail.1688.com/offer/99999999999.html",purchaseUnitPrice:3,landedUnitCost:3,status:"active"};
+   const foreignOffer={id:"FOREIGN-OFFER-ID",workspaceId:"W-FOREIGN",productId:product.id,platformSku:"FOREIGN-SKU",canonicalPlatformSku:"FOREIGN-SKU",supplierName:"外工作区私有供应商",sourceUrl:"https://detail.1688.com/offer/900000000014.html",purchaseUnitPrice:3,landedUnitCost:3,status:"active"};
    await db.platformSkus.put(foreignSku);await db.supplierOffers.put(foreignOffer);
    const editor=await getProductEditorSnapshot({productId:product.id});
    expect(editor.draft.variants.map(row=>row.platformSku)).toEqual(["SKU-RED"]);

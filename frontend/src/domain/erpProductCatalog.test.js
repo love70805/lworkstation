@@ -5,8 +5,8 @@ import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 describe("ERP catalog evidence projection", () => {
   it('retains additional suppliers and all links/records without replacing manual fields or quotes', () => {
     const sources = [
-      { stableSupplierId: '1', supplierName: 'ERP甲', sourceUrl: 'https://detail.1688.com/offer/1234567890.html', sourceLinks: [{ url: 'https://shop-a.1688.com/' }], sourceRecords: [{ recordId: 'NEW-A' }] },
-      { stableSupplierId: '2', supplierName: '乙', sourceUrl: 'https://detail.1688.com/offer/2234567890.html', sourceLinks: [], sourceRecords: [{ recordId: 'NEW-B' }] },
+      { stableSupplierId: '1', supplierName: 'ERP甲', sourceUrl: 'https://detail.1688.com/offer/900000000003.html', sourceLinks: [{ url: 'https://shop-a.1688.com/' }], sourceRecords: [{ recordId: 'NEW-A' }] },
+      { stableSupplierId: '2', supplierName: '乙', sourceUrl: 'https://detail.1688.com/offer/900000000007.html', sourceLinks: [], sourceRecords: [{ recordId: 'NEW-B' }] },
     ];
     const rows = sources.map((supplier, index) => ({ platformSku: `SKU-${index}`, canonicalPlatformSku: `SKU-${index}`, platformSkc: 'S', erpCatalogSuppliers: [supplier] }));
     const draft = { platformSkc: 'S', suppliers: [{ id: 'MANUAL', stableSupplierId: '1', supplierName: '人工甲', sourceUrl: 'https://old-a.1688.com/', sourceLinks: [{ url: 'https://old-a.1688.com/' }], sourceRecords: [{ recordId: 'OLD-A' }], variants: [{ platformSku: 'SKU-0', purchaseUnitPrice: 7 }] }], fieldEdits: { suppliers: { MANUAL: { supplierName: true, sourceUrl: true } } } };
@@ -19,7 +19,7 @@ describe("ERP catalog evidence projection", () => {
     expect(result.prefill.warnings).toEqual([]);
   });
   it("keeps the explicitly selected alternate supplier link and an empty store product ID", () => {
-    const links = [{ url: "https://detail.1688.com/offer/1234567890.html" }, { url: "https://shop-a.1688.com/" }];
+    const links = [{ url: "https://detail.1688.com/offer/900000000003.html" }, { url: "https://shop-a.1688.com/" }];
     const rows = [{ platformSku: "A", canonicalPlatformSku: "A", platformSkc: "S", attributeConflict: true, erpCatalogSuppliers: [{ stableSupplierId: "1", supplierName: "甲", sourceUrl: links[0].url, sourceProductId: "123", sourceLinks: links, sourceRecords: [] }] }];
     const draft = { platformSkc: "S", variants: [{ platformSku: "A", attribute: "人工属性" }], suppliers: [{ id: "MANUAL", supplierName: "甲", sourceUrl: links[1].url, sourceUrlKind: "store", sourceProductId: "" }], fieldEdits: { variants: { A: { attribute: true } }, suppliers: { MANUAL: { sourceProductId: true, sourceUrl: true } } } };
     const result = prefillErpProductDraft({ draft, rows });
@@ -37,11 +37,11 @@ describe("ERP catalog evidence projection", () => {
     const fixture = erpProductCatalogFixture();
     fixture.purchaseRecords = [
       { recordId: "A", supplierName: "供应商甲", purchaseCatalog: { supplierId: "ERP-77" } },
-      { recordId: "B", supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/730242606884.html", purchaseCatalog: { supplierId: "ERP-77" } },
+      { recordId: "B", supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/900000000011.html", purchaseCatalog: { supplierId: "ERP-77" } },
     ];
     const row = { canonicalPlatformSku: "SKU-RED", platformSku: "SKU-RED", erpCatalogSuppliers: buildErpProductCatalogIndex([fixture]).get("SKU-RED").suppliers };
     expect(erpCatalogSuppliers([row])).toHaveLength(1);
-    expect(erpCatalogSuppliers([row])[0].sourceUrl).toBe("https://detail.1688.com/offer/730242606884.html");
+    expect(erpCatalogSuppliers([row])[0].sourceUrl).toBe("https://detail.1688.com/offer/900000000011.html");
   });
   it("uses a newer image while retaining an older title when a partial retry omits it", () => {
     const fixture = erpProductCatalogFixture();
@@ -58,7 +58,7 @@ describe("ERP catalog evidence projection", () => {
     fixture.purchaseRecords = [fixture.purchaseRecords[0]];
     const catalog = buildErpProductCatalogIndex([fixture]).get("SKU-RED");
     expect(catalog.suppliers.map(item => [item.supplierName, item.sourceUrl])).toEqual([
-      ["供应商甲", "https://detail.1688.com/offer/730242606884.html"], ["档案供应商乙", ""],
+      ["供应商甲", "https://detail.1688.com/offer/900000000011.html"], ["档案供应商乙", ""],
     ]);
     expect(catalog.purchases).toHaveLength(0);
   });
@@ -91,8 +91,8 @@ describe("ERP catalog evidence projection", () => {
   it("keeps explicit purchase barcodes scoped and procurement specifications separate from platform attributes", () => {
     const fixture = erpProductCatalogFixture();
     fixture.purchaseRecords = [
-      { recordId: "PURCHASE-RED", warehouseSku: fixture.warehouseSku, supplierName: "同名供货方", supplier1688Url: "https://detail.1688.com/offer/111111111111.html", purchaseCatalog: { purchaseOrderDetailId: "PURCHASE-RED", lineNumber: 0, barcodeSkuid: "SKU-RED", barcodeSkcid: "SKC-CATALOG", purchaseSpecificationAndModel1688: "采购红色包装", purchaseProportion1688: "1-1" } },
-      { recordId: "PURCHASE-BLUE", warehouseSku: fixture.warehouseSku, supplierName: "同名供货方", supplier1688Url: "https://detail.1688.com/offer/222222222222.html", purchaseCatalog: { purchaseOrderDetailId: "PURCHASE-BLUE", lineNumber: 2, barcodeSkuid: "SKU-BLUE", barcodeSkcid: "SKC-CATALOG", purchaseSpecificationAndModel1688: "采购蓝色包装", purchaseProportion1688: "2-3" } },
+      { recordId: "PURCHASE-RED", warehouseSku: fixture.warehouseSku, supplierName: "同名供货方", supplier1688Url: "https://detail.1688.com/offer/900000000001.html", purchaseCatalog: { purchaseOrderDetailId: "PURCHASE-RED", lineNumber: 0, barcodeSkuid: "SKU-RED", barcodeSkcid: "SKC-CATALOG", purchaseSpecificationAndModel1688: "采购红色包装", purchaseProportion1688: "1-1" } },
+      { recordId: "PURCHASE-BLUE", warehouseSku: fixture.warehouseSku, supplierName: "同名供货方", supplier1688Url: "https://detail.1688.com/offer/900000000006.html", purchaseCatalog: { purchaseOrderDetailId: "PURCHASE-BLUE", lineNumber: 2, barcodeSkuid: "SKU-BLUE", barcodeSkcid: "SKC-CATALOG", purchaseSpecificationAndModel1688: "采购蓝色包装", purchaseProportion1688: "2-3" } },
     ];
     const index = buildErpProductCatalogIndex([fixture]);
     expect(index.get("SKU-RED").suppliers.map(supplier => supplier.sourceUrl)).toEqual([fixture.purchaseRecords[0].supplier1688Url]);

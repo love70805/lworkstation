@@ -59,7 +59,7 @@ for (const size of [100, 500, 2000]) {
   call(`/${task.taskId}/control`,{action:'resume',scopeHash:scope});
   assert.equal(task.status,'running');
   assert.throws(()=>call(`/${task.taskId}/control`,{action:'resume',filters:{status:'changed'}}),/已变化/);
-  const scopedStore={...records[0],expectedSkus:[{platformSku:'SKU',platformSkc:'skc-0',store:'680店'}]};
+  const scopedStore={...records[0],expectedSkus:[{platformSku:'SKU',platformSkc:'skc-0',store:'901店'}]};
   assert.notEqual(collectionScopeHash(scopedStore),collectionScopeHash({...scopedStore,expectedSkus:[{platformSku:'SKU',platformSkc:'skc-0',store:'681店'}]}));
 }
 
@@ -88,7 +88,7 @@ try {
   await start();
   const missingWorkspace=await fetch(`http://127.0.0.1:${port}/erp/v1/collection-tasks`,{headers:{authorization:`Bearer ${capability}`}});
   assert.equal(missingWorkspace.status,400);
-  await request('requests',{request:scope,expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A',store:'680店'}]},202);
+  await request('requests',{request:scope,expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A',store:'901店'}]},202);
   let {task}=await request('collection-tasks',{requestId:scope.id,filters:{createTimePeriod:[]}},201);
   const taskUrl=`collection-tasks/${task.taskId}`;
   const batchUrl=`${taskUrl}/batches/${encodeURIComponent(task.batches[0].batchId)}`;

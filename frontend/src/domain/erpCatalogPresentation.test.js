@@ -28,10 +28,10 @@ it("counts distinct purchase lines once across batches and keeps specification, 
 });
 
 it("only offers validated links for the matching supplier identity and preserves product/store types", () => {
-  const candidates = [{ stableSupplierId: "A", supplierName: "同名", sourceUrl: "https://detail.1688.com/offer/1234567890.html", sourceLinks: [{ url: "https://shop-a.1688.com/" }, { url: "javascript:alert(1)" }], sourceRecords: [source] },
-    { stableSupplierId: "B", supplierName: "同名", sourceUrl: "https://detail.1688.com/offer/4567890123.html" }];
+  const candidates = [{ stableSupplierId: "A", supplierName: "同名", sourceUrl: "https://detail.1688.com/offer/900000000003.html", sourceLinks: [{ url: "https://shop-a.1688.com/" }, { url: "javascript:alert(1)" }], sourceRecords: [source] },
+    { stableSupplierId: "B", supplierName: "同名", sourceUrl: "https://detail.1688.com/offer/900000000010.html" }];
   const links = erpSupplierLinks({ stableSupplierId: "A", supplierName: "同名" }, candidates);
-  expect(links.map(item => [item.type, item.sourceProductId])).toEqual([["product", "1234567890"], ["store", ""]]);
+  expect(links.map(item => [item.type, item.sourceProductId])).toEqual([["product", "900000000003"], ["store", ""]]);
   expect(erpSupplierLinks({ supplierName: "其他" }, candidates)).toEqual([]);
   expect(erpSupplierLinks({}, candidates)).toEqual([]);
   expect(erpSupplierLinks({ supplierName: "同名" }, candidates)).toEqual([]);

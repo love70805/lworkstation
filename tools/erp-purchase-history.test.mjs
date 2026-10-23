@@ -7,31 +7,26 @@ import path from 'node:path';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(path.join(root, 'frontend/package.json'));
 const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
-// Observed response field names, dates, quantities, prices and status codes.
-// All identities, order numbers, suppliers and unrelated fields are replaced.
+// Independently constructed synthetic orders, dates, quantities and prices.
+// Only protocol field names and cancellation/void status semantics model ERP behavior.
 const summaries = [
- ['01','2026-07-23 12:28:48','7','2'], ['02','2026-07-13 10:08:28','2','4'],
- ['03','2026-07-01 15:40:14','7','2'], ['04','2026-06-16 17:44:47','7','2'],
- ['05','2026-09-15 12:50:56','8','3'], ['06','2026-09-11 17:58:49','8','3'],
- ['07','2026-09-11 17:15:21','11','2'], ['08','2026-06-21 13:06:15','7','3'],
- ['09','2026-04-16 11:48:23','7','3'], ['10','2026-03-31 13:18:44','7',''],
- ['11','2026-03-17 18:37:13','7',''], ['12','2026-02-07 18:39:43','8',''],
- ['13','2026-02-02 17:04:09','11',''], ['14','2026-02-02 13:00:54','8','3'],
- ['15','2026-01-29 18:11:29','7',''], ['16','2025-12-27 14:49:49','8','3'],
- ['17','2025-12-15 13:33:29','7','3'], ['18','2025-11-04 13:07:35','7','3'],
- ['19','2025-11-02 13:09:46','7','3'], ['20','2025-10-16 12:42:22','7','3'],
+ ['01','2026-07-22 10:00:00','7','2'], ['02','2026-07-12 10:00:00','2','4'],
+ ['03','2026-07-02 10:00:00','7','2'], ['04','2026-06-12 10:00:00','7','2'],
+ ['05','2026-09-20 10:00:00','8','3'], ['06','2026-09-10 10:00:00','8','3'],
+ ['07','2026-09-08 10:00:00','11','2'], ['08','2026-06-18 10:00:00','7','3'],
+ ['09','2026-04-12 10:00:00','7','3'], ['10','2026-03-10 10:00:00','7',''],
+ ['11','2026-02-14 10:00:00','7',''], ['12','2026-01-06 10:00:00','8',''],
+ ['13','2025-12-10 10:00:00','11',''],
 ];
 const orderRows = summaries.map(([id,date,purchaseStatus,purchaseOrderStatus1688])=>({purchaseOrderId:'ORDER-'+id,purchaseOrderNo:'ORDER-'+id,purchaseTime:date,purchaseStatus,purchaseOrderStatus1688,supplierName:'脱敏供应商'}));
 const detailValues = [
- ['01','WH-OTHER-1','2026-07-23 12:28:12',5,'20.9520'],['01','WH-OTHER-2','2026-07-23 12:28:12',5,'20.9520'],['01','WH-WHITE','2026-07-23 12:28:12',5,'24.0960'],
- ['02','WH-ORANGE','2026-07-13 10:07:21',10,'22.3000'],['02','WH-WHITE','2026-07-13 10:07:21',10,'25.3000'],
- ['03','WH-ORANGE','2026-07-01 15:40:07',5,'20.9620'],['03','WH-OTHER-1','2026-07-01 15:40:07',5,'20.9620'],['03','WH-OTHER-2','2026-07-01 15:40:07',5,'20.9620'],['03','WH-WHITE','2026-07-01 15:40:07',5,'24.1140'],
- ['04','WH-OTHER-1','2026-06-16 17:44:37',5,'20.9520'],['04','WH-OTHER-2','2026-06-16 17:44:37',5,'20.9520'],['04','WH-WHITE','2026-06-16 17:44:37',5,'24.0960'],
- ['05','WH-HOOK','2026-09-15 12:50:27',150,'0.1200'],['06','WH-HOOK','2026-09-11 17:58:39',150,'0.1200'],
- ['08','WH-HOOK','2026-06-21 13:06:01',500,'0.1060'],['09','WH-HOOK','2026-04-16 11:47:53',200,'0.1150'],['10','WH-HOOK','2026-03-31 13:18:36',50,'0.1150'],
- ['11','WH-HOOK','2026-03-17 18:36:39',5,'0.1150'],['12','WH-HOOK','2026-02-07 18:39:14',5,'0.1150'],['14','WH-HOOK','2026-02-02 13:00:25',200,'0.1150'],
- ['15','WH-HOOK','2026-01-29 18:11:22',5,'0.1280'],['16','WH-HOOK','2025-12-27 14:49:26',100,'0.1280'],['17','WH-HOOK','2025-12-15 13:30:59',50,'0.1560'],
- ['18','WH-HOOK','2025-11-04 13:05:38',20,'0.2400'],['19','WH-HOOK','2025-11-02 13:08:39',10,'0.3800'],['20','WH-HOOK','2025-10-16 12:39:47',10,'0.3800'],
+ ['01','WH-OTHER-1','2026-07-22 10:00:00',6,'8.2000'],['01','WH-OTHER-2','2026-07-22 10:00:00',6,'8.2000'],['01','WH-WHITE','2026-07-22 10:00:00',6,'10.2000'],
+ ['02','WH-ORANGE','2026-07-12 10:00:00',9,'9.0000'],['02','WH-WHITE','2026-07-12 10:00:00',9,'12.0000'],
+ ['03','WH-ORANGE','2026-07-02 10:00:00',6,'8.4000'],['03','WH-OTHER-1','2026-07-02 10:00:00',6,'8.4000'],['03','WH-OTHER-2','2026-07-02 10:00:00',6,'8.4000'],['03','WH-WHITE','2026-07-02 10:00:00',6,'10.8000'],
+ ['04','WH-OTHER-1','2026-06-12 10:00:00',6,'8.2000'],['04','WH-OTHER-2','2026-06-12 10:00:00',6,'8.2000'],['04','WH-WHITE','2026-06-12 10:00:00',6,'10.2000'],
+ ['05','WH-HOOK','2026-09-20 10:00:00',30,'0.2800'],['06','WH-HOOK','2026-09-10 10:00:00',30,'0.2800'],
+ ['08','WH-HOOK','2026-06-18 10:00:00',100,'0.2100'],['09','WH-HOOK','2026-04-12 10:00:00',80,'0.2400'],['10','WH-HOOK','2026-03-10 10:00:00',20,'0.2400'],
+ ['11','WH-HOOK','2026-02-14 10:00:00',6,'0.1900'],['12','WH-HOOK','2026-01-06 10:00:00',15,'0.3100'],
 ];
 const details = detailValues.map(([id,itemId,creationTime,quantity,purchaseUnitPrice],index)=>({purchaseOrderId:'ORDER-'+id,purchaseOrderNo:'ORDER-'+id,purchaseOrderDetailId:'DETAIL-'+index,itemId,creationTime,purchaseQuantity:String(quantity),purchaseUnitPrice,tradeName:'脱敏商品',supplierName:'脱敏供应商'}));
 const mappings = ['ORANGE','WHITE','HOOK'].map(key=>({associatedProductId:'WH-'+key,barcodeSkuid:'SKU-'+key,barcodeSkcid:'SKC-TARGET'}));
@@ -70,22 +65,22 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
 const currentAugust=await replay('2026-08','0');
 const currentSeptember=await replay('2026-09','0');
 
-assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-WHITE').unitCost,'24.1020');
-assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-ORANGE').unitCost,'20.9620');
-assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-HOOK').unitCost,'0.1090');
-assert.equal(currentSeptember.rows.find(r=>r.warehouseSku==='WH-HOOK').unitCost,'0.1112');
+assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-WHITE').unitCost,'10.4000');
+assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-ORANGE').unitCost,'8.4000');
+assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-HOOK').unitCost,'0.2250');
+assert.equal(currentSeptember.rows.find(r=>r.warehouseSku==='WH-HOOK').unitCost,'0.2362');
 assert.ok(!currentAugust.requests.some(r=>r.endpoint==='purchase-order-details'&&r.params.purchaseOrderId==='ORDER-02'),'numeric 1688 cancellation must be excluded before detail fan-out');
 assert.ok(!currentAugust.requests.some(r=>r.endpoint==='purchase-order-details'&&['ORDER-07','ORDER-13'].includes(r.params.purchaseOrderId)),'ERP void status 11 is excluded correctly');
 
 const limitedAugust=await replay('2026-08','1');
-assert.equal(limitedAugust.rows.find(r=>r.warehouseSku==='WH-WHITE').unitCost,'24.1020');
-assert.equal(limitedAugust.rows.find(r=>r.warehouseSku==='WH-HOOK').unitCost,'0.1090');
+assert.equal(limitedAugust.rows.find(r=>r.warehouseSku==='WH-WHITE').unitCost,'10.4000');
+assert.equal(limitedAugust.rows.find(r=>r.warehouseSku==='WH-HOOK').unitCost,'0.2250');
 for (const status of [4, '４', '已取消']) {
   const result = await replay('2026-08', '1', { status, paged: true });
-  assert.equal(result.rows.find(row => row.warehouseSku === 'WH-WHITE').unitCost, '24.1020');
-  assert.equal(result.rows.find(row => row.warehouseSku === 'WH-ORANGE').unitCost, '20.9620');
-  assert.equal(result.meta.orderCount, 20);
-  assert.equal(result.meta.orderPageCount, 3);
+  assert.equal(result.rows.find(row => row.warehouseSku === 'WH-WHITE').unitCost, '10.4000');
+  assert.equal(result.rows.find(row => row.warehouseSku === 'WH-ORANGE').unitCost, '8.4000');
+  assert.equal(result.meta.orderCount, 13);
+  assert.equal(result.meta.orderPageCount, 2);
   assert.equal(result.warehouseEvidence.excludedOrders.find(order => order.purchaseOrderId === 'ORDER-02').statusFields.purchaseOrderStatus1688, status);
 }
 const incomplete = await replay('2026-08', '1', { incomplete: true });
