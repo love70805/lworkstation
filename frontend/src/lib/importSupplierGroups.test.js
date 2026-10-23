@@ -2,13 +2,23 @@
 import { beforeEach, expect, it } from 'vitest';
 import { matchImportNumberRule, saveSupplierGroup, readSupplierGroups, deleteSupplierGroup, rememberSupplierGroupSelection, restoreSupplierGroupSelection } from './importSupplierGroups';
 beforeEach(() => localStorage.clear());
+it('reads legacy suffix groups as fuzzy without writing storage or dropping store exceptions', () => {
+  const key = 'lworkstation:import-supplier-groups:v1:W';
+  const stored = JSON.stringify({ schemaVersion: 1, groups: [{ id: 'legacy', name: '旧组', aliases: ['LBYY'], mode: 'suffix' }], lastAppliedId: 'legacy', overrides: { '甲': { groupId: 'legacy', exclude: ['A-LBY'], include: ['MANUAL'] } } });
+  localStorage.setItem(key, stored);
+  const state = readSupplierGroups('W');
+  expect(state.groups[0].mode).toBe('fuzzy');
+  expect(state.lastAppliedId).toBe('legacy');
+  expect(restoreSupplierGroupSelection(['A-LBY','B-LBY','LBYY-MID','MANUAL'], state.groups[0], state, '甲')).toEqual(['B-LBY','LBYY-MID','MANUAL']);
+  expect(localStorage.getItem(key)).toBe(stored);
+});
 const choices = ['A-LBYY', 'B-LBY', 'LBYY-MIDDLE', '其他'];
-const create = () => saveSupplierGroup('W', { name: '负责人货号', aliases: ['lbYY', 'ＬＢＹ'], mode: 'suffix' });
+const create = () => saveSupplierGroup('W', { name: '负责人货号', aliases: ['lbYY', 'ＬＢＹ'], mode: 'fuzzy' });
 const file = (group, selected, storeName = '甲') => ({ storeName, supplierGroupRule: group, facets: { supplierNumbers: choices }, filterOptions: { supplierNumbers: selected } });
 
-it('matches explicit aliases with three modes and retains original numbers', () => {
+it('matches fuzzy aliases and legacy modes while retaining original numbers', () => {
   const group = create();
-  expect(matchImportNumberRule(choices, group)).toEqual(['A-LBYY', 'B-LBY']);
+  expect(matchImportNumberRule(choices, group)).toEqual(choices.slice(0, 3));
   expect(matchImportNumberRule(choices, { ...group, mode: 'contains' })).toEqual(choices.slice(0, 3));
   expect(matchImportNumberRule(['ｌｂｙｙ', ...choices], { ...group, mode: 'exact' })).toEqual(['ｌｂｙｙ']);
   expect(matchImportNumberRule(choices, { aliases: ['UNKNOWN'] })).toEqual([]);
@@ -23,7 +33,7 @@ it('restores new members and per-store manual exceptions after successful use', 
   expect(state.lastAppliedId).toBe(group.id);
   expect(restoreSupplierGroupSelection(next, group, state, '甲')).toEqual(['A-LBYY', '其他', 'NEW-LBY']);
   expect(restoreSupplierGroupSelection(next, group, state, '乙')).toEqual(['B-LBY', 'NEW-LBY']);
-  expect(restoreSupplierGroupSelection(next, group, state, '新店')).toEqual(['A-LBYY', 'B-LBY', 'NEW-LBY']);
+  expect(restoreSupplierGroupSelection(next, group, state, '新店')).toEqual(['A-LBYY', 'B-LBY', 'LBYY-MIDDLE', 'NEW-LBY']);
   expect(restoreSupplierGroupSelection(['其他'], group, state, '新店')).toEqual([]);
 });
 
@@ -31,7 +41,7 @@ it('unions same-store files and does not change another workspace or legacy sele
   localStorage.setItem('lworkstation:import-suppliers:v1:W', '{"甲":["旧货号"]}');
   const group = create(), other = saveSupplierGroup('OTHER', { name: '另一工作区', aliases: ['X'] });
   rememberSupplierGroupSelection('W', [file(group, ['A-LBYY']), file(group, ['B-LBY'])]);
-  expect(readSupplierGroups('W').overrides['甲'].exclude).toEqual([]);
+  expect(readSupplierGroups('W').overrides['甲'].exclude).toEqual(['LBYY-MIDDLE']);
   expect(readSupplierGroups('OTHER').groups).toEqual([other]);
   expect(localStorage.getItem('lworkstation:import-suppliers:v1:W')).toBe('{"甲":["旧货号"]}');
   expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();

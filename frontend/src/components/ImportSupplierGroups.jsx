@@ -3,7 +3,7 @@ import { Button, Modal } from './UI';
 import { parseImportKeywords } from '../lib/importSupplierPreferences';
 import { readSupplierGroups, saveSupplierGroup, deleteSupplierGroup } from '../lib/importSupplierGroups';
 
-const modeName = { suffix: '货号末尾', contains: '货号包含', exact: '完整货号' };
+const modeName = { fuzzy: '模糊识别', exact: '精准识别' };
 const suggestedName = aliases => {
   const full = aliases.join(' / ');
   return full.length <= 80 ? full : `${aliases[0].slice(0, 50)} 等 ${aliases.length} 个关键词`;

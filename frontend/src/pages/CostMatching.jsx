@@ -344,7 +344,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost, manualOverride });
       return { ...row, erpCost, manualOverride, decision, finalizable: decision.eligibleForExactProfit, costIdentityIssue: decision.identityIssue ?? null };
     }), [formalCostsBySku, salesLines, ledgerIdentities, snapshot?.ledger, manualFor]);
-  const supplierSelectionKey = JSON.stringify(profitFilter.supplierSelection);
+  const supplierSelectionKey = JSON.stringify([profitFilter.supplierSelection, profitFilter.supplierStoreSelection]);
   const scopedSalesLines = useMemo(() => filterProfitRowsByScope(formalSalesLines, profitFilter), [formalSalesLines, profitFilter.storeFilter, supplierSelectionKey, profitFilter.missingOnly]);
   const filteredSalesLines = useMemo(() => searchProfitRows(scopedSalesLines, profitFilter.query), [scopedSalesLines, profitFilter.query]);
   const conflictingLedgerSkus = useMemo(() => new Set([...ledgerIdentities].filter(([, identity]) => identity.platformSkcs.size > 1).map(([sku]) => sku)), [ledgerIdentities]);

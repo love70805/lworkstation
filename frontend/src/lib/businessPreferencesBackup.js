@@ -38,7 +38,7 @@ function validateValue(field, value) {
     for (const group of value.groups) {
       keys(group, ['id', 'name', 'aliases', 'mode']);
       text(group.id, { max: 100 }); text(group.name, { max: 80 }); strings(group.aliases);
-      if (!group.aliases.length || group.aliases.length > 64 || !['suffix', 'contains', 'exact'].includes(group.mode) || ids.has(group.id)) fail();
+      if (!group.aliases.length || group.aliases.length > 64 || !['fuzzy', 'suffix', 'contains', 'exact'].includes(group.mode) || ids.has(group.id)) fail();
       ids.add(group.id);
     }
     text(value.lastAppliedId, { empty: true, max: 100 });

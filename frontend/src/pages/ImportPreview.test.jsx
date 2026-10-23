@@ -374,7 +374,7 @@ it('reports preference storage failure after commit without offering a duplicate
   } finally {spy.mockRestore();}
 });
 
-it('applies strict suffix selection across stores only on request, with a local store override', async () => {
+it('applies fuzzy selection across stores only on request, with a local store override', async () => {
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:4,previewRows:[{SKU:'000123'}],preset:'generic',
     facets:{supplierNumbers:['A-HHHX','BhhHx','HHHX-MID','其他'],supplierCounts:{'A-HHHX':1,BhhHx:1,'HHHX-MID':1,其他:1}}});
   await upload(); await settled();
@@ -383,8 +383,8 @@ it('applies strict suffix selection across stores only on request, with a local 
   await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count);
   await matchAndApply(); await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx'],['A-HHHX','BhhHx']]);
-  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('应用后已选4');
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID'],['A-HHHX','BhhHx','HHHX-MID']]);
+  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('应用后已选6');
   expect([...container.querySelectorAll('.batch-impact-details')].every(details => !details.open)).toBe(true);
   expect(container.querySelector('.batch-action-bar').compareDocumentPosition(container.querySelector('.batch-files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await act(async () => Simulate.change(container.querySelector('[aria-label="查看货号店铺"]'), { target: { value: '甲店' } }));
@@ -392,8 +392,8 @@ it('applies strict suffix selection across stores only on request, with a local 
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
   await click('应用本次筛选');
   await settled();
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID','其他'],['A-HHHX','BhhHx']]);
-  expect(container.querySelectorAll('.batch-store-suppliers')[1].textContent).toContain('已应用 2 / 4');
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','BhhHx','HHHX-MID','其他'],['A-HHHX','BhhHx','HHHX-MID']]);
+  expect(container.querySelectorAll('.batch-store-suppliers')[1].textContent).toContain('已应用 3 / 4');
 });
 
 it('avoids duplicate unchanged applies and refreshes overwrite approval only after explicit revalidation', async () => {
@@ -443,7 +443,7 @@ it('keeps zero suffix matches unselected and invalidates an earlier overwrite ap
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
-it('uses an applied batch suffix for newly added files without selecting middle matches', async () => {
+it('uses an applied fuzzy rule for newly added files including middle matches', async () => {
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',
     facets:{supplierNumbers:['A-HHHX','HHHX-MID']}});
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{value:'HHHX'} }));
@@ -462,7 +462,7 @@ it('uses an applied batch suffix for newly added files without selecting middle 
   }, { timeout: 5000 });
   await waitForFiles(1);
   await choose([new File(['second'], '乙店.csv')]); await waitForFiles(2);
-  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX'],['A-HHHX']]);
+  expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-HHHX','HHHX-MID'],['A-HHHX','HHHX-MID']]);
 });
 
 it('saves LBYY and LBY together, applies the saved group, and remembers it only after a successful import', async () => {

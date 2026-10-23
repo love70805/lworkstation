@@ -1,17 +1,20 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Simulate } from 'react-dom/test-utils';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import ProfitScopeFilters from './ProfitScopeFilters';
-import { saveSupplierGroup } from '../lib/importSupplierGroups';
+import { saveSupplierGroup, rememberSupplierGroupSelection } from '../lib/importSupplierGroups';
+import { filterProfitRowsByScope } from '../lib/profitFilter';
 
-let root, container, selection;
-function Harness({ suppliers = ['A-HHHX', 'B-LBY'], workspaceId = 'W' }) {
+let root, container, selection, filterSnapshot;
+function Harness({ suppliers = ['A-HHHX', 'B-LBY'], workspaceId = 'W', scopeRows = suppliers.map(supplierNumber => ({ store: '甲店', supplierNumber })) }) {
   const [filter, setFilter] = useState({ storeFilter: 'all', supplierSelection: null, skuQuery: '' });
   selection = filter.supplierSelection;
-  return <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={workspaceId} scopeRows={suppliers.map(supplierNumber => ({ store: '甲店', supplierNumber }))} onChange={update => setFilter(value => ({ ...value, ...update }))} />;
+  filterSnapshot = filter;
+  return <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={workspaceId} scopeRows={scopeRows} onChange={update => setFilter(value => ({ ...value, ...update }))} />;
 }
-beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; localStorage.clear(); saveSupplierGroup('W', { name: 'HHHX', aliases: ['HHHX'], mode: 'suffix' }); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
+beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; localStorage.clear(); saveSupplierGroup('W', { name: 'HHHX', aliases: ['HHHX'], mode: 'fuzzy' }); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 const render = async props => act(async () => root.render(<Harness {...props} />));
 const button = text => [...container.querySelectorAll('button')].find(node => node.textContent === text);
@@ -41,4 +44,24 @@ it('clears old group feedback after a scope change without silently expanding a 
   await click('HHHX');
   expect(selection).toEqual([]);
   expect(container.textContent).toContain('保持空选');
+});
+
+it('keeps same-number store exceptions through group application and later manual selection', async () => {
+  const group = saveSupplierGroup('W',{name:'LBY',aliases:['LBYY'],mode:'fuzzy'});
+  rememberSupplierGroupSelection('W',[
+    {storeName:'甲店',supplierGroupRule:group,facets:{supplierNumbers:['A-LBY','B-LBY']},filterOptions:{supplierNumbers:[]}},
+    {storeName:'乙店',supplierGroupRule:group,facets:{supplierNumbers:['A-LBY','B-LBY']},filterOptions:{supplierNumbers:['A-LBY']}},
+  ]);
+  const rows = ['甲店','乙店'].flatMap(store=>['A-LBY','B-LBY'].map(supplierNumber=>({store,supplierNumber})));
+  await render({suppliers:['A-LBY','B-LBY'],scopeRows:rows}); await open(); await click('LBY');
+  expect(filterProfitRowsByScope(rows,filterSnapshot)).toEqual([{store:'乙店',supplierNumber:'A-LBY'}]);
+  await act(async()=>Simulate.change(container.querySelector('.supplier-filter-table .search-input input'),{target:{value:'B-LBY'}}));
+  await click('选中筛选结果');
+  expect(filterProfitRowsByScope(rows,filterSnapshot)).toEqual([{store:'甲店',supplierNumber:'B-LBY'},{store:'乙店',supplierNumber:'A-LBY'},{store:'乙店',supplierNumber:'B-LBY'}]);
+  await click('全部货号');
+  expect(filterSnapshot.supplierSelection).toBeNull();
+  expect(filterSnapshot.supplierStoreSelection).toBeUndefined();
+  expect(filterProfitRowsByScope(rows,filterSnapshot)).toEqual(rows);
+  await click('LBY'); await click('清空选择');
+  expect(filterProfitRowsByScope(rows,filterSnapshot)).toEqual([]);
 });

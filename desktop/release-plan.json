@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0",
   "candidateOnly": true,
-  "integrationBranch": "codex/rc3-update-install",
+  "integrationBranch": "codex/supplier-recognition-1.0.0",
   "requiredCommits": [
     {
-      "module": "verified-main-rc2",
-      "commit": "8eb6075169768a6818d8d8f5958ce6b9ae91d0bf"
+      "module": "verified-main-rc3",
+      "commit": "8af0f0659466ef9a8a97de7c95a62c8cc0708764"
     }
   ]
 }

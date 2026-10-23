@@ -1,16 +1,14 @@
+import { createSupplierMatcher, supplierMatchKey } from '../domain/supplierRecognition';
+
 // Goods identities remain unchanged; normalization is only for matching keywords.
 export const normalizeImportNumbers = values => [...new Set((Array.isArray(values) ? values : []).map(value => String(value ?? '').trim()).filter(Boolean))].sort();
 export const parseImportNumbers = value => normalizeImportNumbers(String(value ?? '').split(/[\s,，;；、]+/));
-const matchKey = value => String(value ?? '').normalize('NFKC').trim().toUpperCase();
+const matchKey = supplierMatchKey;
 export const normalizeImportKeywords = values => normalizeImportNumbers(values).map(matchKey).filter((value, index, all) => all.indexOf(value) === index).sort();
 export const parseImportKeywords = value => normalizeImportKeywords(String(value ?? '').split(/[\r\n,，;；、]+/));
 export function matchImportNumbers(choices, keywords) {
-  const keys = normalizeImportKeywords(keywords);
-  return keys.length ? choices.filter(value => keys.some(key => matchKey(value).includes(key))) : [];
-}
-export function matchImportNumberSuffixes(choices, suffixes) {
-  const keys = normalizeImportKeywords(suffixes);
-  return keys.length ? choices.filter(value => keys.some(key => matchKey(value).endsWith(key))) : [];
+  const matcher = createSupplierMatcher(keywords);
+  return (choices ?? []).filter(value => matcher.matches(value));
 }
 const storageKey = (workspaceId, version = 2) => `lworkstation:import-suppliers:v${version}:${workspaceId}`;
 const empty = () => ({ selected: [], keywords: [], matched: [], hasSaved: false });

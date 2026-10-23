@@ -73,6 +73,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const [query, setQuery] = useState(initialFilter.query);
   const [storeFilter, setStoreFilter] = useState(initialFilter.storeFilter);
   const [supplierSelection, setSupplierSelection] = useState(initialFilter.supplierSelection);
+  const [supplierStoreSelection, setSupplierStoreSelection] = useState(initialFilter.supplierStoreSelection);
   const [supplierScopeError, setSupplierScopeError] = useState(initialFilter.supplierScopeError);
   const [missingOnly, setMissingOnly] = useState(initialFilter.missingOnly);
   const [warehouseRate, setWarehouseRate] = useState(0.7);
@@ -85,6 +86,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     setQuery(next.query);
     setStoreFilter(next.storeFilter);
     setSupplierSelection((previous) => JSON.stringify(previous) === JSON.stringify(next.supplierSelection) ? previous : next.supplierSelection);
+    setSupplierStoreSelection((previous) => JSON.stringify(previous) === JSON.stringify(next.supplierStoreSelection) ? previous : next.supplierStoreSelection);
     setMissingOnly(next.missingOnly);
     setSupplierScopeError(next.supplierScopeError);
   }, [filterSearchKey, requestedLedgerId, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
@@ -98,8 +100,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
 
   useEffect(() => {
     if (!snapshot?.ledger?.id) return;
-    saveProfitFilter(snapshot.ledger.id, { query, storeFilter, supplierSelection, missingOnly });
-  }, [missingOnly, query, snapshot?.ledger?.id, storeFilter, supplierSelection]);
+    saveProfitFilter(snapshot.ledger.id, { query, storeFilter, supplierSelection, supplierStoreSelection, missingOnly });
+  }, [missingOnly, query, snapshot?.ledger?.id, storeFilter, supplierSelection, supplierStoreSelection]);
 
   const locked = isProfitSnapshot(snapshot?.ledger);
   const legacySnapshot = locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION;
@@ -124,7 +126,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
 
   const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
   const suppliers = useMemo(() => [...new Set(calculated.filter((row) => storeFilter === "all" || row.store === storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated, storeFilter]);
-  const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, missingOnly, ...(supplierScopeError ? { supplierScopeError } : {}) }), [missingOnly, query, storeFilter, supplierSelection, supplierScopeError]);
+  const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, supplierStoreSelection, missingOnly, ...(supplierScopeError ? { supplierScopeError } : {}) }), [missingOnly, query, storeFilter, supplierSelection, supplierStoreSelection, supplierScopeError]);
   const viewStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, filterState]);
   const detailsStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, 'details']);
   useEffect(() => { setDetailsOpen(readProfitViewState(detailsStateKey).detailsOpen); }, [detailsStateKey]);
@@ -135,7 +137,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
   };
-  const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, missingOnly }), [calculated, storeFilter, supplierSelection, missingOnly]);
+  const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, supplierStoreSelection, missingOnly }), [calculated, storeFilter, supplierSelection, supplierStoreSelection, missingOnly]);
   const filtered = useMemo(() => searchProfitRows(scopedRows, query), [scopedRows, query]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
   const filteredSummary = useMemo(() => locked && snapshot?.ledger?.formulaVersion !== REPORT_FORMULA_VERSION && filtered.length === calculated.length && snapshot?.ledger?.profitSummary ? savedProfitSummary(snapshot.ledger.profitSummary) : summarizeProfitRows(filtered, costBySku), [costBySku, filtered, calculated.length, locked, snapshot?.ledger?.profitSummary]);

@@ -9,6 +9,7 @@ import { CostMatchingContent } from './CostMatching';
 import { costDraftKey } from '../lib/costMatchingDraft';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
+import { buildCostMatchingHref } from '../lib/profitFilter';
 
 const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn(), saveManual: vi.fn(), revokeManual: vi.fn() }));
 vi.mock('../data/repositories/profitRepository', async importOriginal => ({ ...await importOriginal(), saveManualCostOverride: mocks.saveManual, revokeManualCostOverride: mocks.revokeManual }));
@@ -28,17 +29,17 @@ vi.mock('../data/database', async importOriginal => {
 
 let container, root, writeText;
 const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
-function ScopeControls() {
+function ScopeControls({ nextScopeHref }) {
   const [params, setParams] = useSearchParams();
-  return <input aria-label="测试查询范围" value={params.get('q') ?? ''} onChange={event => { const next = new URLSearchParams(params); next.set('q', event.target.value); setParams(next); }} />;
+  return <><input aria-label="测试查询范围" value={params.get('q') ?? ''} onChange={event => { const next = new URLSearchParams(params); next.set('q', event.target.value); setParams(next); }} />{nextScopeHref && <button onClick={()=>setParams(new URL(nextScopeHref,'http://localhost').searchParams)}>测试切换逐店范围</button>}</>;
 }
-async function render(skcs, status = 'ready', { costs = [], approvals = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [] } = {}) {
+async function render(skcs, status = 'ready', { costs = [], approvals = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [], supplierNumbers = [], nextScopeHref } = {}) {
   mocks.snapshot = {
     ledger: { id: ledgerId, workspaceId: 'W', period: '2026-08', status },
-    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: skuIds[index] ?? `SKU-${index}`, quantity: 1, amount: 10 })),
+    rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: skuIds[index] ?? `SKU-${index}`, supplierNumber:supplierNumbers[index], quantity: 1, amount: 10 })),
     costs, approvals,
   };
-  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><ScopeControls /><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><ScopeControls nextScopeHref={nextScopeHref} /><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
 }
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -76,6 +77,19 @@ it('registers the selected store using exactly the displayed SKCs and expected S
   }), expect.any(Object));
   expect(container.textContent).toContain('当前查看平台 SKU1');
   await act(async () => button('复制 1 个平台 SKC').click());
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-A');
+  expect(mocks.snapshot.rows).toHaveLength(2);
+});
+
+it('keeps same-number store exclusions in actual ERP registration and recalculates when only the store scope changes', async () => {
+  const scope = store => buildCostMatchingHref({ledgerId:'STORE-SCOPE',workspaceId:'W',supplierSelection:['A-LBY'],supplierStoreSelection:[{store,supplierNumber:'A-LBY'}]});
+  await render(['SKC-A','SKC-B'],'ready',{ledgerId:'STORE-SCOPE',stores:['甲','乙'],supplierNumbers:['A-LBY','A-LBY'],initialEntry:scope('乙'),nextScopeHref:scope('甲')});
+  expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({platformSkcs:['SKC-B'],expectedSkus:[{platformSku:'SKU-1',platformSkc:'SKC-B',store:'乙'}]}),expect.any(Object));
+  mocks.register.mockClear();
+  await act(async()=>button('测试切换逐店范围').click());
+  await act(async()=>new Promise(resolve=>setTimeout(resolve,350)));
+  expect(mocks.register).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({platformSkcs:['SKC-A'],expectedSkus:[{platformSku:'SKU-0',platformSkc:'SKC-A',store:'甲'}]}),expect.any(Object));
+  await act(async()=>button('复制 1 个平台 SKC').click());
   expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-A');
   expect(mocks.snapshot.rows).toHaveLength(2);
 });

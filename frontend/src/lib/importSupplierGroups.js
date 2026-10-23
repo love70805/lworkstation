@@ -1,6 +1,6 @@
 import { normalizeImportKeywords, normalizeImportNumbers } from './importSupplierPreferences';
+import { createSupplierMatcher, supplierRecognitionMode } from '../domain/supplierRecognition';
 
-const modes = new Set(['suffix', 'contains', 'exact']);
 const key = workspaceId => `lworkstation:import-supplier-groups:v1:${workspaceId}`;
 const canonical = value => String(value ?? '').normalize('NFKC').trim().toUpperCase();
 const empty = () => ({ groups: [], lastAppliedId: '', overrides: {} });
@@ -8,14 +8,11 @@ function normalizeGroup(value) {
   if (!value || typeof value !== 'object') return null;
   const id = String(value.id ?? '').trim().slice(0, 100), name = String(value.name ?? '').trim().slice(0, 80);
   const aliases = normalizeImportKeywords(value.aliases).slice(0, 64);
-  return id && name && aliases.length ? { id, name, aliases, mode: modes.has(value.mode) ? value.mode : 'suffix' } : null;
+  return id && name && aliases.length ? { id, name, aliases, mode: supplierRecognitionMode(value.mode) } : null;
 }
 export function matchImportNumberRule(choices, rule = {}) {
-  const aliases = normalizeImportKeywords(rule.aliases), mode = modes.has(rule.mode) ? rule.mode : 'suffix';
-  return (choices ?? []).filter(value => aliases.some(alias => {
-    const number = canonical(value);
-    return mode === 'exact' ? number === alias : mode === 'contains' ? number.includes(alias) : number.endsWith(alias);
-  }));
+  const matcher = createSupplierMatcher(rule.aliases, rule.mode);
+  return (choices ?? []).filter(value => matcher.matches(value));
 }
 export function readSupplierGroups(workspaceId, storage = globalThis.localStorage) {
   if (!workspaceId) return empty();
@@ -52,7 +49,7 @@ export function deleteSupplierGroup(workspaceId, id, storage = globalThis.localS
   state.overrides = Object.fromEntries(Object.entries(state.overrides).filter(([, value]) => value?.groupId !== id));
   write(workspaceId, state, storage);
 }
-const sameRule = (left, right) => left?.mode === right?.mode && JSON.stringify(normalizeImportKeywords(left?.aliases)) === JSON.stringify(normalizeImportKeywords(right?.aliases));
+const sameRule = (left, right) => supplierRecognitionMode(left?.mode) === supplierRecognitionMode(right?.mode) && JSON.stringify(normalizeImportKeywords(left?.aliases)) === JSON.stringify(normalizeImportKeywords(right?.aliases));
 export function restoreSupplierGroupSelection(choices, group, state, store) {
   const override = state.overrides[canonical(store)], useOverride = override?.groupId === group.id;
   const selected = new Set(matchImportNumberRule(choices, group));
