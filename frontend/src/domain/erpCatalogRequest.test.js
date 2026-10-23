@@ -81,7 +81,7 @@ describe('ERP independent catalog requests', () => {
 describe('catalog evidence hygiene', () => {
   it('deduplicates exact rows while retaining different evidence and sanitizes optional URLs/status fields', () => {
     const input = payload(); input.catalog.rows.push({ ...input.catalog.rows[0] });
-    input.catalog.rows[0].supplier1688Url = 'https://detail.1688.com/offer/123456789.html?token=bad';
+    input.catalog.rows[0].supplier1688Url = 'https://detail.1688.com/offer/900000000002.html?token=bad';
     input.catalog.rows[1].supplier1688Url = input.catalog.rows[0].supplier1688Url;
     input.catalog.warehouseEvidence[0].purchaseRecords[0].statusFields = { status: '11', token: 'bad', productSeller: 'person' };
     const envelope = buildErpCatalogInboxEnvelope(input, { request: request() });

@@ -179,7 +179,7 @@ describe("sales import row compatibility", () => {
       { 供方货号: "YW-B", SKC: "SKC-B", 平台SKU: "SKU-B", 属性集: "蓝", 变动类型: "客单发货", 数量: "1", 单价: "8" },
       { 供方货号: "YW-A", SKC: "SKC-A", 平台SKU: "SKU-C", 属性集: "黑", 变动类型: "退款", 数量: "1", 单价: "9" },
     ], mapping, {
-      defaultStore: "680店",
+      defaultStore: "901店",
       movementTypes: ["平台客单发货", "客单发货"],
       supplierNumbers: ["YW-A"],
       deriveAmountFromUnitPrice: true,

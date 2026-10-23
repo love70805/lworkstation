@@ -70,7 +70,7 @@ describe("ERP bridge contract", () => {
         calculationCount: 2,
         totalQuantity: 5,
         totalPrice: 21.25,
-        supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+        supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
         confirmed: true,
         formalCost: 99,
       }],
@@ -80,7 +80,7 @@ describe("ERP bridge contract", () => {
     expect(envelope).toMatchObject({
       requestId: "ERP-REQ-1",
       sourceMeta: { sourceFormat: "erp-v8-legacy-text", sourceName: "clipboard.tsv" },
-      rows: [{ platformSku: "SKU-1", platformSkc: "SKC-1", supplier1688Url: "https://detail.1688.com/offer/730242606884.html", previewUnitCost: 4.25 }],
+      rows: [{ platformSku: "SKU-1", platformSkc: "SKC-1", supplier1688Url: "https://detail.1688.com/offer/900000000011.html", previewUnitCost: 4.25 }],
     });
     expect(envelope.evidenceStatus).toBe("legacy_partial");
     expect(envelope.rows[0]).not.toHaveProperty("confirmed");

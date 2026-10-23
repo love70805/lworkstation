@@ -8,10 +8,10 @@ beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemb
 afterEach(async () => { db.close(); await db.delete(); });
 
 it('continues a new SKU in the same catalog and preserves manual fields and financial rows through save/reopen', async () => {
-  const platformSkc = 'st260606170768328630349', workspaceId = 'workspace-default';
+  const platformSkc = 'st900000000000000000008', workspaceId = 'workspace-default';
   const { product } = await saveProductCatalogRecord({ draft: { name: '挂钩档案', platformSkc, store: '甲店',
     imageUrl: 'https://example.com/hook.png', notes: '保留人工说明', variants: [{ platformSku: 'SAVED-SKU', attribute: '红色', salePrice: 18, purchaseUnitPrice: 2, purchasePackCount: 1, unitsPerPack: 1 }],
-    suppliers: [{ supplierId: 'SUPPLIER', supplierName: '原供应商', sourceUrl: 'https://detail.1688.com/offer/123456789.html', variants: [{ platformSku: 'SAVED-SKU', purchaseUnitPrice: 2, purchasePackCount: 1, unitsPerPack: 1 }] }] } });
+    suppliers: [{ supplierId: 'SUPPLIER', supplierName: '原供应商', sourceUrl: 'https://detail.1688.com/offer/900000000002.html', variants: [{ platformSku: 'SAVED-SKU', purchaseUnitPrice: 2, purchasePackCount: 1, unitsPerPack: 1 }] }] } });
   await db.ledgers.add({ id: 'PLACEMENT-L', workspaceId, period: '2026-09', status: 'finalized' });
   await db.importBatches.add({ id: 'PLACEMENT-B', workspaceId, ledgerId: 'PLACEMENT-L', store: '乙店', status: 'completed' });
   await db.salesRows.add({ id: 'PLACEMENT-R', workspaceId, ledgerId: 'PLACEMENT-L', batchId: 'PLACEMENT-B', store: '乙店', platformSkc: platformSkc.toUpperCase(), platformSku: 'NEW-SKU', attribute: '蓝色', quantity: 1, amount: 22, sourceRow: 2 });

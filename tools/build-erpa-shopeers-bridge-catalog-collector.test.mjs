@@ -12,7 +12,7 @@ const root = path.resolve(toolsRoot, '..');
 const sourceRoot = path.join(root, 'integrations/erp-assistant-extension/src');
 const json = value => JSON.parse(JSON.stringify(value));
 const run = (expectedSkus = Array.from({ length: 205 }, (_, index) => ({ platformSku: 'SKU-WH-' + index, platformSkc: 'SKC-TARGET' }))) => ({ controller: new AbortController(), expectedSkus });
-const completeEvidence = warehouseSku => ({ warehouseSku, evidenceComplete: true, sourceWarnings: [], purchaseRecords: [0, 0.00001, 2, 3, 4].map((unitPrice, index) => ({ recordId: warehouseSku + ':' + index, warehouseSku, quantity: 2, unitPrice, purchaseDate: '2026-08-20', supplierName: '供应商甲', supplier1688Links: [{ type: 'product', url: 'https://detail.1688.com/offer/123456789012.html', supplierName: '供应商甲' }], selectedForPreview: false })), excludedRecords: [] });
+const completeEvidence = warehouseSku => ({ warehouseSku, evidenceComplete: true, sourceWarnings: [], purchaseRecords: [0, 0.00001, 2, 3, 4].map((unitPrice, index) => ({ recordId: warehouseSku + ':' + index, warehouseSku, quantity: 2, unitPrice, purchaseDate: '2026-08-20', supplierName: '供应商甲', supplier1688Links: [{ type: 'product', url: 'https://detail.1688.com/offer/900000000005.html', supplierName: '供应商甲' }], selectedForPreview: false })), excludedRecords: [] });
 const response = (code, data, count = data.length) => ({ code, count, data });
 async function policyAndCollector() {
   const sandbox = { window: {}, URL, AbortController, setTimeout, clearTimeout };

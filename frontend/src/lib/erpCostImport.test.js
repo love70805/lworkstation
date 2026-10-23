@@ -42,7 +42,7 @@ describe("ERP cost import", () => {
   it("preserves the richer v8.0 CSV evidence columns", () => {
     const result = parseErpCostText([
       "仓库SKU,平台SKU,平台SKC,单号类型,1688单号,产品名称,供应商,供应商1688链接,核算次数,核算日期范围,总采购量,总采购价(￥),单件平均成本",
-      "WH-1,SKU-1,SKC-1,1688,A-100,测试商品,义乌市鑫颉日用品有限公司,https://detail.1688.com/offer/730242606884.html,2,2026-06-01 ~ 2026-07-01,5,31.00,6.2000",
+      "WH-1,SKU-1,SKC-1,1688,A-100,测试商品,义乌市鑫颉日用品有限公司,https://detail.1688.com/offer/900000000011.html,2,2026-06-01 ~ 2026-07-01,5,31.00,6.2000",
     ].join("\n"));
 
     expect(result.rows[0]).toMatchObject({
@@ -56,7 +56,7 @@ describe("ERP cost import", () => {
       totalQuantity: 5,
       totalPrice: 31,
       supplierName: "义乌市鑫颉日用品有限公司",
-      supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+      supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
       unitCost: 6.2,
     });
   });

@@ -82,8 +82,8 @@ it('registers the selected store using exactly the displayed SKCs and expected S
 });
 
 it('keeps same-number store exclusions in actual ERP registration and recalculates when only the store scope changes', async () => {
-  const scope = store => buildCostMatchingHref({ledgerId:'STORE-SCOPE',workspaceId:'W',supplierSelection:['A-LBY'],supplierStoreSelection:[{store,supplierNumber:'A-LBY'}]});
-  await render(['SKC-A','SKC-B'],'ready',{ledgerId:'STORE-SCOPE',stores:['甲','乙'],supplierNumbers:['A-LBY','A-LBY'],initialEntry:scope('乙'),nextScopeHref:scope('甲')});
+  const scope = store => buildCostMatchingHref({ledgerId:'STORE-SCOPE',workspaceId:'W',supplierSelection:['A-KPX'],supplierStoreSelection:[{store,supplierNumber:'A-KPX'}]});
+  await render(['SKC-A','SKC-B'],'ready',{ledgerId:'STORE-SCOPE',stores:['甲','乙'],supplierNumbers:['A-KPX','A-KPX'],initialEntry:scope('乙'),nextScopeHref:scope('甲')});
   expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({platformSkcs:['SKC-B'],expectedSkus:[{platformSku:'SKU-1',platformSkc:'SKC-B',store:'乙'}]}),expect.any(Object));
   mocks.register.mockClear();
   await act(async()=>button('测试切换逐店范围').click());

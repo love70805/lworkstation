@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "./selectionReferences";
 
 const costs = ["sku-a", "sku-b"].map(platformSku => ({ platformSku, unitCost: 4.59, publishedAt: "2026-08-01" }));
-const source = { ledgerId: "ledger-a", batchId: "batch-a", period: "2026-08", store: "680店", sourceSheet: "台账变动明细", sourceRow: 2 };
+const source = { ledgerId: "ledger-a", batchId: "batch-a", period: "2026-08", store: "901店", sourceSheet: "台账变动明细", sourceRow: 2 };
 
 describe("read-only selection reference identity", () => {
   it("groups ERP-only reference costs using an existing ledger and preserves provenance", () => {

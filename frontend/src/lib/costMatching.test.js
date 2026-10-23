@@ -54,27 +54,27 @@ describe("成本核对按平台 SKC 分组", () => {
     const groups = groupAuxiliaryCostRows([
       {
         ledgerScopeRole: "auxiliary",
-        platformSku: "I0mr8u67we1unj",
-        platformSkc: "st260606170768328630349",
-        warehouseSku: "SH25092037232977233-Y",
+        platformSku: "I9demo00000001",
+        platformSkc: "st900000000000000000008",
+        warehouseSku: "SH9000000000000000004-Y",
         purchaseRecords: Array.from({ length: 12 }, (_, index) => ({ recordId: `R-${index}` })),
         excludedRecords: [],
       },
       {
         ledgerScopeRole: "auxiliary",
-        platformSku: "I5mq252xyw8fd7",
-        platformSkc: "st260606170768328630349",
-        warehouseSku: "SH25092037232977233-Y",
+        platformSku: "I9demo00000003",
+        platformSkc: "st900000000000000000008",
+        warehouseSku: "SH9000000000000000004-Y",
         purchaseRecords: Array.from({ length: 12 }, (_, index) => ({ recordId: `R-${index}` })),
         excludedRecords: [],
       },
     ]);
     expect(groups).toEqual([expect.objectContaining({
-      platformSkc: "st260606170768328630349",
-      warehouseSku: "SH25092037232977233-Y",
+      platformSkc: "st900000000000000000008",
+      warehouseSku: "SH9000000000000000004-Y",
       purchaseRecordCount: 12,
       excludedRecordCount: 0,
-      variants: [expect.objectContaining({ platformSku: "I0mr8u67we1unj" }), expect.objectContaining({ platformSku: "I5mq252xyw8fd7" })],
+      variants: [expect.objectContaining({ platformSku: "I9demo00000001" }), expect.objectContaining({ platformSku: "I9demo00000003" })],
     })]);
     expect(JSON.stringify(groups)).not.toContain("unknown_platform_sku");
   });
@@ -163,11 +163,11 @@ describe("成本核对按平台 SKC 分组", () => {
 
   it("searches anomaly records by procurement evidence fields", () => {
     const matches = [
-      { platformSkc: "SKC-1", platformSku: "SKU-1", sourceWarehouseSku: "WH-1", supplier1688Url: "https://detail.1688.com/offer/730242606884.html", orderNumber: "PO-1" },
+      { platformSkc: "SKC-1", platformSku: "SKU-1", sourceWarehouseSku: "WH-1", supplier1688Url: "https://detail.1688.com/offer/900000000011.html", orderNumber: "PO-1" },
       { platformSkc: "SKC-2", platformSku: "SKU-2", sourceWarehouseSku: "WH-2", orderNumber: "PO-2" },
     ];
 
-    expect(filterCostMatches(matches, "730242606884")).toEqual([matches[0]]);
+    expect(filterCostMatches(matches, "900000000011")).toEqual([matches[0]]);
     expect(filterCostMatches(matches, "PO-2")).toEqual([matches[1]]);
   });
 

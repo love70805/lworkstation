@@ -13,7 +13,7 @@ const source = Object.fromEntries(await Promise.all(files.map(async file => [fil
 const expectedSkus = [{ platformSku: 'SKU-USED', platformSkc: 'SKC-USED' }];
 const mapping = (sku, skc, warehouse = 'WH-SHARED') => ({ associatedProductId: warehouse, barcodeSkuid: sku, barcodeSkcid: skc });
 const shared = [...Array.from({ length: 230 }, (_, i) => mapping('UNUSED-' + i, i % 2 ? 'SKC-FOREIGN' : 'SKC-USED')), mapping('SKU-USED', 'SKC-USED')];
-const evidence = warehouseSku => ({ warehouseSku, evidenceComplete: true, sourceWarnings: [], purchaseRecords: [{ recordId: 'D', warehouseSku, quantity: 2, unitPrice: 3, purchaseDate: '2026-09-02', supplierName: '供应商', supplier1688Links: [{ type: 'product', url: 'https://detail.1688.com/offer/123456789012.html' }], imageUrl: 'https://images.example.invalid/item.png' }], excludedRecords: [] });
+const evidence = warehouseSku => ({ warehouseSku, evidenceComplete: true, sourceWarnings: [], purchaseRecords: [{ recordId: 'D', warehouseSku, quantity: 2, unitPrice: 3, purchaseDate: '2026-09-02', supplierName: '供应商', supplier1688Links: [{ type: 'product', url: 'https://detail.1688.com/offer/900000000005.html' }], imageUrl: 'https://images.example.invalid/item.png' }], excludedRecords: [] });
 const body = data => ({ code: 0, count: data.length, data });
 const until = async check => { const end = Date.now() + 8000; while (!check()) { if (Date.now() > end) throw Error('Scope pipeline timed out'); await new Promise(resolve => setTimeout(resolve, 5)); } };
 
@@ -65,7 +65,7 @@ for (const mode of ['normal', 'scope-missing', 'target-conflict', 'directory-sho
   else if (endpoint === 'product-info-sku') value = url.searchParams.get('productId') === 'WH-SHARED' ? body(mode === 'target-conflict' ? [...shared, mapping('SKU-USED', 'SKC-FOREIGN')] : shared) : { code: 0, count: 0, data: '查询结果为空' };
   else if (endpoint === 'purchase-order-page') value = body([{ purchaseOrderId: 'PO-1' }]);
   else if (endpoint === 'purchase-order-details') value = body([
-   { itemId: 'WH-SHARED', purchaseOrderDetailId: 'D-USED', creationTime: '2026-08-02', purchaseQuantity: 2, purchaseUnitPrice: 3, supplierName: '供应商', picturesLinking: 'https://images.example.invalid/item.png', supplier1688Url: 'https://detail.1688.com/offer/123456789012.html' },
+   { itemId: 'WH-SHARED', purchaseOrderDetailId: 'D-USED', creationTime: '2026-08-02', purchaseQuantity: 2, purchaseUnitPrice: 3, supplierName: '供应商', picturesLinking: 'https://images.example.invalid/item.png', supplier1688Url: 'https://detail.1688.com/offer/900000000005.html' },
    { itemId: 'WH-ORDER-ONLY', purchaseOrderDetailId: 'D-UNUSED', creationTime: '2026-08-02', purchaseQuantity: 2, purchaseUnitPrice: 99 },
   ]);
   else throw Error('Unexpected endpoint ' + endpoint);

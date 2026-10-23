@@ -7,10 +7,10 @@ describe("profit filter context", () => {
     const storage = new Map();
     const clientStorage = {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
     vi.stubGlobal('sessionStorage', clientStorage); vi.stubGlobal('localStorage', clientStorage);
-    const excluded = { store:'甲', supplierNumber:'A-LBY', platformSku:'SKU-A', finalizable:false };
-    const included = { store:'乙', supplierNumber:'A-LBY', platformSku:'SKU-B', finalizable:false };
+    const excluded = { store:'甲', supplierNumber:'A-KPX', platformSku:'SKU-A', finalizable:false };
+    const included = { store:'乙', supplierNumber:'A-KPX', platformSku:'SKU-B', finalizable:false };
     const other = { store:'乙', supplierNumber:'OTHER', platformSku:'SKU-C', finalizable:false };
-    const filter = { query:'', storeFilter:'all', supplierSelection:['A-LBY'], supplierStoreSelection:[{store:'乙',supplierNumber:'A-LBY'}], missingOnly:false };
+    const filter = { query:'', storeFilter:'all', supplierSelection:['A-KPX'], supplierStoreSelection:[{store:'乙',supplierNumber:'A-KPX'}], missingOnly:false };
     const rows = [excluded,included,other];
     expect(filterProfitRowsByScope(rows,filter)).toEqual([included]);
     saveProfitFilter('L', filter);
@@ -44,7 +44,7 @@ describe("profit filter context", () => {
   it('round-trips 10000 suppliers through a bounded, ledger/workspace-bound reference and fails closed if unavailable', () => {
     const storage = new Map();
     vi.stubGlobal('sessionStorage', {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)});
-    const selection = Array.from({length:10000},(_,i)=>`000${i}-LBY`);
+    const selection = Array.from({length:10000},(_,i)=>`000${i}-KPX`);
     const href = buildCostMatchingHref({ledgerId:'L',workspaceId:'W',supplierSelection:selection});
     expect(href.length).toBeLessThan(200);
     const params = new URL(href,'http://localhost').searchParams;
@@ -59,10 +59,10 @@ describe("profit filter context", () => {
     expect(readProfitFilter(params,'L',{workspaceId:'W'}).supplierSelection).toEqual([]);
   });
   it("round-trips selected suppliers through profit and ERP routes", () => {
-    const href = buildCostMatchingHref({ ledgerId: "L-1", query: "SKC-1", storeFilter: "680店", supplierSelection: ["YW-B", "YW-A"], missingOnly: true });
+    const href = buildCostMatchingHref({ ledgerId: "L-1", query: "SKC-1", storeFilter: "901店", supplierSelection: ["YW-B", "YW-A"], missingOnly: true });
     const params = new URL(href, "http://localhost").searchParams;
     const filter = readProfitFilter(params, "L-1");
-    expect(filter).toEqual({ query: "SKC-1", storeFilter: "680店", supplierSelection: ["YW-A", "YW-B"], missingOnly: true });
+    expect(filter).toEqual({ query: "SKC-1", storeFilter: "901店", supplierSelection: ["YW-A", "YW-B"], missingOnly: true });
     const profitUrl = new URL(buildProfitHref({ ledgerId: "L-1", ...filter }), "http://localhost");
     expect(profitUrl.pathname).toBe("/profit");
     expect(profitUrl.searchParams.get("ledger")).toBe("L-1");
@@ -78,11 +78,11 @@ describe("profit filter context", () => {
 
   it("filters the same sales rows used by the profit and cost pages", () => {
     const rows = [
-      { groupSkc: "SKC-1", platformSku: "SKU-1", attribute: "红", supplierNumber: "YW-A", store: "680店", finalizable: false },
-      { groupSkc: "SKC-2", platformSku: "SKU-2", attribute: "蓝", supplierNumber: "YW-B", store: "680店", finalizable: true },
+      { groupSkc: "SKC-1", platformSku: "SKU-1", attribute: "红", supplierNumber: "YW-A", store: "901店", finalizable: false },
+      { groupSkc: "SKC-2", platformSku: "SKU-2", attribute: "蓝", supplierNumber: "YW-B", store: "901店", finalizable: true },
     ];
     expect(filterProfitRows(rows, { query: "", storeFilter: "all", supplierSelection: ["YW-A"], missingOnly: false })).toEqual([rows[0]]);
-    expect(filterProfitRows(rows, { query: "SKC-2", storeFilter: "680店", supplierSelection: null, missingOnly: true })).toEqual([]);
+    expect(filterProfitRows(rows, { query: "SKC-2", storeFilter: "901店", supplierSelection: null, missingOnly: true })).toEqual([]);
   });
 
   it("restores the most recent filter when the profit route has no ledger query", () => {
@@ -92,7 +92,7 @@ describe("profit filter context", () => {
       setItem: (key, value) => store.set(key, String(value)),
       removeItem: (key) => store.delete(key),
     };
-    const expected = { query: "SKU-9", storeFilter: "680店", supplierSelection: ["YW-A"], missingOnly: true };
+    const expected = { query: "SKU-9", storeFilter: "901店", supplierSelection: ["YW-A"], missingOnly: true };
     saveProfitFilter("L-9", expected);
     expect(readProfitFilter(new URLSearchParams(), "")).toEqual(expected);
     expect(readProfitFilter(new URLSearchParams(), "L-9")).toEqual(expected);

@@ -27,6 +27,6 @@
 
 ## 承接位置
 
-基线 `aa1e97094e4288700718c598d93baa5723f652fb`；工作区 `C:/Users/Administrator/.codex/worktrees/d308/Lworkstation`，分支名暂保留 `codex/release-0-3-5`（仅原准备名称，不代表批准版本）。修复和文档均未提交；证据保留在该工作区 `archive/release-0.3.5/`，目录名同样仅为原准备名称。主仓库及 a87e 未提交规划未改动。
+基线 `aa1e97094e4288700718c598d93baa5723f652fb`；工作区 `.worktrees/release-candidate/`，分支名暂保留 `codex/release-0-3-5`（仅原准备名称，不代表批准版本）。修复和文档均未提交；证据保留在该工作区 `archive/release-0.3.5/`，目录名同样仅为原准备名称。主仓库及 a87e 未提交规划未改动。
 
 主要文件：`profitRepository.js`、`erpInboxMatching.js`、`CostMatching.jsx` 及对应三份回归测试。主对话先汇总其他问题和验收标准，再决定统一实现与发布批次。

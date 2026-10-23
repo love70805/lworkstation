@@ -12,30 +12,30 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 const button = text => [...container.querySelectorAll('button')].find(node => node.textContent === text);
 const click = async text => act(async () => button(text).click());
 const change = async (node, value) => act(async () => Simulate.change(node, { target: { value } }));
-const render = async props => act(async () => root.render(<ImportSupplierGroups workspaceId="W" aliasesText="HHHX" mode="fuzzy" onApply={onApply} {...props} />));
+const render = async props => act(async () => root.render(<ImportSupplierGroups workspaceId="W" aliasesText="FFFV" mode="fuzzy" onApply={onApply} {...props} />));
 
 it('uses the keyword as the default name and keeps saving separate from applying the group', async () => {
   await render();
   expect(container.querySelector('#supplier-group-name')).toBeNull();
   await click('保存为常用组');
-  expect(container.querySelector('#supplier-group-name').value).toBe('HHHX');
+  expect(container.querySelector('#supplier-group-name').value).toBe('FFFV');
   await click('保存货号组');
   const group = readSupplierGroups('W').groups[0];
-  expect(group).toMatchObject({ name: 'HHHX', aliases: ['HHHX'], mode: 'fuzzy' });
+  expect(group).toMatchObject({ name: 'FFFV', aliases: ['FFFV'], mode: 'fuzzy' });
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
   expect(onApply).not.toHaveBeenCalled();
-  expect(container.textContent).not.toContain('HHHX · HHHX');
-  await click('HHHX');
+  expect(container.textContent).not.toContain('FFFV · FFFV');
+  await click('FFFV');
   expect(onApply).toHaveBeenCalledWith(group);
 });
 
 it('keeps group identity and successful store exceptions when only renaming, and cancels edits without writing', async () => {
-  const group = saveSupplierGroup('W', { name: 'HHHX', aliases: ['HHHX'], mode: 'fuzzy' });
-  rememberSupplierGroupSelection('W', [{ storeName: '甲店', supplierGroupRule: group, facets: { supplierNumbers: ['A-HHHX', 'B-HHHX'] }, filterOptions: { supplierNumbers: ['A-HHHX'] } }]);
+  const group = saveSupplierGroup('W', { name: 'FFFV', aliases: ['FFFV'], mode: 'fuzzy' });
+  rememberSupplierGroupSelection('W', [{ storeName: '甲店', supplierGroupRule: group, facets: { supplierNumbers: ['A-FFFV', 'B-FFFV'] }, filterOptions: { supplierNumbers: ['A-FFFV'] } }]);
   const before = readSupplierGroups('W');
   await render({ activeId: group.id });
   await click('管理常用组');
-  expect([...container.querySelectorAll('option')].map(node => node.textContent)).toContain('HHHX');
+  expect([...container.querySelectorAll('option')].map(node => node.textContent)).toContain('FFFV');
   await change(container.querySelector('#supplier-group-name'), '负责货号');
   await click('取消');
   expect(readSupplierGroups('W')).toEqual(before);
@@ -46,7 +46,7 @@ it('keeps group identity and successful store exceptions when only renaming, and
 });
 
 it('retains inputs on duplicate or storage failure and requires an explicit delete without touching current selections', async () => {
-  const group = saveSupplierGroup('W', { name: 'HHHX', aliases: ['HHHX'], mode: 'fuzzy' });
+  const group = saveSupplierGroup('W', { name: 'FFFV', aliases: ['FFFV'], mode: 'fuzzy' });
   await render(); await click('保存为常用组'); await click('保存货号组');
   expect(container.querySelector('[role=alert]').textContent).toContain('同名');
   await change(container.querySelector('#supplier-group-name'), '新名称');
@@ -63,10 +63,10 @@ it('retains inputs on duplicate or storage failure and requires an explicit dele
 });
 
 it('isolates management from the active match and closes a stale editor when the workspace changes', async () => {
-  const group = saveSupplierGroup('W', { name: '原组', aliases: ['HHHX'], mode: 'fuzzy' });
+  const group = saveSupplierGroup('W', { name: '原组', aliases: ['FFFV'], mode: 'fuzzy' });
   await render({ activeId: group.id }); await click('管理常用组');
-  await change(container.querySelector('.supplier-group-editor details input'), 'LBY'); await click('保存修改');
-  expect(readSupplierGroups('W').groups[0].aliases).toEqual(['LBY']);
+  await change(container.querySelector('.supplier-group-editor details input'), 'KPX'); await click('保存修改');
+  expect(readSupplierGroups('W').groups[0].aliases).toEqual(['KPX']);
   expect(button('原组').getAttribute('aria-pressed')).toBe('false');
   expect(onApply).not.toHaveBeenCalled();
   await click('管理常用组'); await change(container.querySelector('#supplier-group-name'), '未保存');

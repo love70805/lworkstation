@@ -17,7 +17,7 @@
 
 `latest.yml`的path/files.url均为公开EXE名，size为116980840，SHA512为 `ZpWF+d9l3SacI/SRIHLfEvK6qqmrGHTTP6FwR/ayWynN4CysbgS/5mEMQilzjXbdHiq0vxbiJSEogl2+b4TCfg==`，与匿名下载的EXE一致；同名blockmap已单独下载核对。
 
-公开上传副本持久目录：`C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.0-public/`。发布说明、GitHub公开响应、匿名下载原件及校验、实际生产更新provider联网结果保存在 `C:/Users/Administrator/Desktop/Lworkstation/archive/release-0.3.0-public/`；原候选目录与准备阶段证据继续保留。
+公开上传副本持久目录：`releases/candidates/0.3.0-public/`。发布说明、GitHub公开响应、匿名下载原件及校验、实际生产更新provider联网结果保存在 `archive/release-0.3.0-public/`；原候选目录与准备阶段证据继续保留。
 
 ## 公开更新通道实测
 
@@ -43,7 +43,7 @@
 
 四资产已从54cb工作树复制至主仓库持久目录，逐文件回读哈希一致，目标此前不存在，未覆盖旧候选：
 
-`C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.0/`
+`releases/candidates/0.3.0/`
 
 | 文件 | SHA256 |
 | --- | --- |
@@ -55,7 +55,7 @@ EXE 116,980,840字节，未数字签名；另有SHA256.txt。latest.yml的版本
 
 源码ZIP、889文件源码清单、构建/验收日志、合成报表和截图持久保存在：
 
-`C:/Users/Administrator/Desktop/Lworkstation/archive/release-0.3.0-preparation/`
+`archive/release-0.3.0-preparation/`
 
 `source-8c49f76.zip`对应已合入软件文件树；`source-manifest.json`记录源码哈希，`durable-copy-check.json`记录39项初次复制回读。验收归档不包含真实业务明细和原生真实库。原RC.1/RC.2忽略资产未在应用自动归档快照中保留，本次仍未寻获；原RC文档中的哈希仅是历史交付记录，不代表当前原件可用。
 

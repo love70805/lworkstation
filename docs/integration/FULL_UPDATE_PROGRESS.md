@@ -65,7 +65,7 @@
 
 - 专职78a1f1d提供台账添加日期/单价/活动字段、精确每日分析、可展开全部SKC/SKU及页内成本核对，主线承接f33a390；70754a8修复账本列表工作区隔离，主线承接ee33c8c。数据库仍v14，不代表v15报告已交付。
 - 主线组合桌面包执行89文件591测试、frontend build、ERP inbox/bridge测试均通过。另使用准备Worktree的5197端口及隔离Electron profile独立运行profit-analytics-smoke：1024×768、1280×800、390×780单壳/无body横向溢出、人工零值与撤销、月份保留视图、快速换店/刷新、旧成本页和外工作区拒绝通过。
-- 专职11项合成截图/result已逐一SHA256回读归档，主线独立11项结果保存于archive/profit-analytics-ui-2026-09-13/main-integration；专职只读680样本报告5559源行、5543销售行、0错误、日期完整、419SKU，月精确金额与旧摘要一致。原业务数据不提交。
+- 专职11项合成截图/result已逐一SHA256回读归档，主线独立11项结果保存于archive/profit-analytics-ui-2026-09-13/main-integration；专职原表只读核验证实日期完整、月份归属及金额与原摘要一致，具体样本月份、规模和业务数据不公开。
 - 原生脚本首次直接启动已生成ok结果；后续重复的Start-Process等待式启动被自动审批拒绝（仅返回策略阻止），未继续重试。此记录不影响首次已完成且回读的验收证据。
 - CostMatching的ledgerIdentityRef effect清理在初次加载/StrictMode可能将当前id设空，专职2771adc修复承接ea65b68，主线复审及StrictMode/初载/切换/卸载定向测试通过，此项关闭。当前浏览器证据没有真实ERP账户，不冒充用户现场修复闭环。
 

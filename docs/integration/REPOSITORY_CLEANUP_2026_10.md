@@ -27,7 +27,7 @@
 - 同一托管树的 `frontend/dist/`：可由源码重建的旧前端输出。
 - 主工作区 `archive/repository-channel-2026-10-07/distribution/`：本次临时迁移克隆，已生成并验证独立 bundle。
 
-托管树为 `C:/Users/Administrator/.codex/worktrees/v041-import-scope/Lworkstation`；主工作区为 `C:/Users/Administrator/Desktop/Lworkstation`。目标清单、大小和哈希保存在本机 `cleanup-targets.json`，不删除其他工作树、唯一备份、故障证据或用户未提交文件。
+托管树为 `.worktrees/release-candidate/`；主工作区为 `.`。目标清单、大小和哈希保存在本机 `cleanup-targets.json`，不删除其他工作树、唯一备份、故障证据或用户未提交文件。
 
 ## 验证
 

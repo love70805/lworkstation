@@ -12,7 +12,7 @@ function item(raw, fileHash = 'one') {
   return { itemId: 'one', fileName: '甲店.csv', fileHash, storeName: '甲店', mapping, rows: validation.rows,
     summary: { sourceRowCount: raw.length, validRowCount: validation.rows.length, errorCount: 0, ignoredCount: 0, errors: [] } };
 }
-const row = (sku, skc = '父A', attribute = '红色') => ({ SKU: sku, SKC: skc, 货号: '货号HHHX', 属性: attribute, 数量: 2, 金额: 30 });
+const row = (sku, skc = '父A', attribute = '红色') => ({ SKU: sku, SKC: skc, 货号: '货号FFFV', 属性: attribute, 数量: 2, 金额: 30 });
 async function commit(source, extra = {}) {
   const input = { period: '2026-08', items: [source], ...extra };
   const preview = await previewSalesImports(input);

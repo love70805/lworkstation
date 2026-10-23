@@ -5,12 +5,12 @@ const source=cells=>({fileHash:'HASH',fileName:'synthetic.csv',sheetName:'CSV',h
 const context={ledger:{id:'L',workspaceId:'W',period:'2026-08'},stores:['甲']};
 const candidate=(kind,rows,extra={})=>normalizeSupplementCandidate({kind,ledgerId:'L',workspaceId:'W',period:'2026-08',mode:'files',rows,...extra},context);
 it('suggests only a unique same-number store alias without removing supplier/channel prefixes',()=>{
- expect(suggestSupplementStore('680',['680店','20店'])).toBe('680店');
+ expect(suggestSupplementStore('901',['901店','20店'])).toBe('901店');
  expect(suggestSupplementStore('sh20',['20店'])).toBe('');
- expect(suggestSupplementStore('680',['680店',' 680店 '])).toBe('');
- expect(suggestSupplementStore('680',['680','680店'])).toBe('680');
- const s={fileHash:'F',fileName:'test.xlsx',sheetName:'680',cells:[['店铺','货号','扣款金额'],['680','C',1]]};
- expect(inspectSupplementSource(s,{kind:'deduction',ownerMarker:'C',stores:['680店']}).rows[0]).toMatchObject({store:'680店',originalStore:'680'});
+ expect(suggestSupplementStore('901',['901店',' 901店 '])).toBe('');
+ expect(suggestSupplementStore('901',['901','901店'])).toBe('901');
+ const s={fileHash:'F',fileName:'test.xlsx',sheetName:'901',cells:[['店铺','货号','扣款金额'],['901','C',1]]};
+ expect(inspectSupplementSource(s,{kind:'deduction',ownerMarker:'C',stores:['901店']}).rows[0]).toMatchObject({store:'901店',originalStore:'901'});
 });
 it('matches trimmed registrant names exactly and retains all remarks and source quantities',()=>{
  const result=inspectSupplementSource(source([
@@ -25,7 +25,7 @@ it('matches trimmed registrant names exactly and retains all remarks and source 
 });
 it.each([
  ['sh20',['20店'],'20店'],['SH27',['27店'],'27店'],[' ｓｈ２０ ',['20店'],'20店'],
- ['680',['680店'],'680店'],['EZ627',['627店'],''],['sh20',['27店'],''],
+ ['901',['901店'],'901店'],['EZ627',['627店'],''],['sh20',['27店'],''],
  ['sh20',['20','20店'],''],['sh20',['sh20','20店'],'sh20'],['sh20',['sh20','SH20','20店'],''],
 ])('maps deduction worksheet %s only to its unique actual store', (name,stores,expected)=>{
  expect(suggestDeductionStore(name,stores)).toBe(expected);
@@ -104,14 +104,14 @@ it('selects allocated amounts before source totals without adding semantic colum
  expect(suggestSupplementMapping(['数量','sku数量']).quantity).toBe('1');
 });
 it('matches an explicit normalized set exactly once and keeps case-distinct full codes and signed source positions',()=>{
- const s={fileHash:'F',fileName:'synthetic.xlsx',sheetName:'甲',cells:[['货号','扣款金额','扣款单号'],['YW-sh27-HHHX','-1.001','A'],['YW-SH27-HHHX','2.002','B'],['YW-20-HHHX','0','C'],['YW-sh27-HHHX-more','8','D']]};
- const result=inspectSupplementSource(s,{kind:'deduction',supplierNumbers:[' ＹＷ-sh27-HHHX ','YW-SH27-HHHX','YW-20-HHHX','YW-sh27-HHHX',''],ownerMarker:'HHHX',matchMode:'contains',store:'甲'});
+ const s={fileHash:'F',fileName:'synthetic.xlsx',sheetName:'甲',cells:[['货号','扣款金额','扣款单号'],['YW-sh27-FFFV','-1.001','A'],['YW-SH27-FFFV','2.002','B'],['YW-20-FFFV','0','C'],['YW-sh27-FFFV-more','8','D']]};
+ const result=inspectSupplementSource(s,{kind:'deduction',supplierNumbers:[' ＹＷ-sh27-FFFV ','YW-SH27-FFFV','YW-20-FFFV','YW-sh27-FFFV',''],ownerMarker:'FFFV',matchMode:'contains',store:'甲'});
  expect(result.errors).toEqual([]);expect(result.rows.map(row=>row.sourceRow)).toEqual([2,3,4]);expect(candidate('deduction',result.rows).signedAmountExact).toBe('1.001');
- expect(result.source.selection).toMatchObject({ownerMarker:'',supplierNumbers:['YW-20-HHHX','YW-sh27-HHHX','YW-SH27-HHHX'],matchMode:'exact'});
+ expect(result.source.selection).toMatchObject({ownerMarker:'',supplierNumbers:['YW-20-FFFV','YW-sh27-FFFV','YW-SH27-FFFV'],matchMode:'exact'});
  expect(result.ignored).toContainEqual(expect.objectContaining({sourceRow:5,reason:'owner_excluded'}));
  expect(()=>inspectSupplementSource(s,{kind:'deduction',supplierNumbers:[],store:'甲'})).toThrow('请选择供方货号');
- expect(()=>inspectSupplementSource(s,{kind:'deduction',supplierNumbers:'HHHX',store:'甲'})).toThrow('完整货号数组');
- expect(()=>inspectSupplementSource(s,{kind:'dispatch',supplierNumbers:['HHHX']})).toThrow('扣款来源');
+ expect(()=>inspectSupplementSource(s,{kind:'deduction',supplierNumbers:'FFFV',store:'甲'})).toThrow('完整货号数组');
+ expect(()=>inspectSupplementSource(s,{kind:'dispatch',supplierNumbers:['FFFV']})).toThrow('扣款来源');
 });
 it('preserves equal legitimate allocations, rejects duplicate coordinates, and reports cross-file overlaps',()=>{
  const row={kind:'deduction',fileHash:'H',sourceSheet:'甲',sourceRow:2,store:'甲',businessId:'0001',platformSkc:'S',supplierNumber:'C',signedAmountExact:'0.899'};

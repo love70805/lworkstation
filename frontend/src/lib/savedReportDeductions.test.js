@@ -5,11 +5,11 @@ import {buildProfitReportWorkbook,bytesToBase64,prepareReportDownload,writeRepor
 
 function fixture(){
  const products=['3店','20店','627店'].map((store,i)=>({store,platformSku:'SKU-'+i,groupSkc:'SKC',quantityExact:'1',revenueExact:'20.009',unitCostExact:'0',purchaseCostExact:'0',warehouseCostExact:'0.7',profitExact:'19.309'}));
- const deductionRows=[{store:'627店',businessId:'0001',platformSkc:'S1',supplierNumber:'YW-20-HHHX',signedAmountExact:'1.0099'},
- {store:'20店',businessId:'0002',platformSkc:'S2',supplierNumber:'YW-sh20-HHHX',signedAmountExact:'-0.002'},
- {store:'3店',businessId:'0003',platformSkc:'S3',supplierNumber:'YW-3-HHHX',signedAmountExact:'0'},
- {store:'627店',businessId:'0001',platformSkc:'S1',supplierNumber:'YW-20-HHHX',signedAmountExact:'2.0001'},
- {store:'20店',businessId:'0004',platformSkc:'S4',supplierNumber:'YW-sh20-HHHX',signedAmountExact:'0.0088'}];
+ const deductionRows=[{store:'627店',businessId:'0001',platformSkc:'S1',supplierNumber:'YW-20-FFFV',signedAmountExact:'1.0099'},
+ {store:'20店',businessId:'0002',platformSkc:'S2',supplierNumber:'YW-sh20-FFFV',signedAmountExact:'-0.002'},
+ {store:'3店',businessId:'0003',platformSkc:'S3',supplierNumber:'YW-3-FFFV',signedAmountExact:'0'},
+ {store:'627店',businessId:'0001',platformSkc:'S1',supplierNumber:'YW-20-FFFV',signedAmountExact:'2.0001'},
+ {store:'20店',businessId:'0004',platformSkc:'S4',supplierNumber:'YW-sh20-FFFV',signedAmountExact:'0.0088'}];
  const report={kind:'financial',period:'2026-09',revision:1,totalsExact:reportTotals(products,'0','0.7',deductionRows)};
  return {report,products,deductionRows};
 }
@@ -20,7 +20,7 @@ it('sorts by actual store naturally, retains source order inside a store and mak
  expect(sheet.F1.v).toBe('店铺');expect(sheet.G1.v).toBe('明细合计');
  expect([2,3,4].map(r=>sheet['F'+r].v)).toEqual(['3店','20店','627店']);
  expect([2,3,4,5,6].map(r=>sheet['A'+r].v)).toEqual(['0003','0002','0004','0001','0001']);
- expect([2,3,4,5,6].map(r=>sheet['C'+r].v)).toEqual(['YW-3-HHHX','YW-sh20-HHHX','YW-sh20-HHHX','YW-20-HHHX','YW-20-HHHX']);
+ expect([2,3,4,5,6].map(r=>sheet['C'+r].v)).toEqual(['YW-3-FFFV','YW-sh20-FFFV','YW-sh20-FFFV','YW-20-FFFV','YW-20-FFFV']);
  expect(sheet.D3).toMatchObject({t:'n',v:-0.002,z:'General'});
  expect([2,3,4,5,6].reduce((sum,r)=>sum+sheet['D'+r].v,0)).toBeCloseTo(sheet.G5.v,12);
  expect(sheet.G5.v).toBe(Number(data.report.totalsExact.deductionExact));

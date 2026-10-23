@@ -118,7 +118,7 @@ describe("ERP cost reconciliation", () => {
       { platformSku: "SKU-AUX", platformSkc: "SKC-1", warehouseSku: "WH-1", attribute: "蓝色" },
       { platformSku: "SKU-AUX", platformSkc: "SKC-CONFLICT", warehouseSku: "WH-1", attribute: "冲突候选" },
     ];
-    const row = { platformSku: "SKU-A", platformSkc: "SKC-1", warehouseSku: "WH-1", previewUnitCost: 4.59, purchaseRecords: [{ ...purchaseRecord("R-CATALOG", "WH-1", "2026-07-01", 4.59), purchaseCatalog }], evidenceComplete: true, imageUrl: mappings[0].imageUrl, attribute: "红色", purchaseCatalog, catalogMappings: mappings, catalogQuerySkcs: ["SKC-1"], supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商" }] };
+    const row = { platformSku: "SKU-A", platformSkc: "SKC-1", warehouseSku: "WH-1", previewUnitCost: 4.59, purchaseRecords: [{ ...purchaseRecord("R-CATALOG", "WH-1", "2026-07-01", 4.59), purchaseCatalog }], evidenceComplete: true, imageUrl: mappings[0].imageUrl, attribute: "红色", purchaseCatalog, catalogMappings: mappings, catalogQuerySkcs: ["SKC-1"], supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/900000000011.html", supplierName: "甲供应商" }] };
     const result = reconcileErpCostRows({ workspaceId: "workspace-a", period: "2026-08", expectedSkus: [{ platformSku: "SKU-A", platformSkc: "SKC-1" }, { platformSku: "SKU-MISSING" }], costRows: [row, { ...row, platformSku: "SKU-AUX", ledgerScopeRole: "auxiliary" }] });
     expect(result.matches[0]).toMatchObject({ status: "matched", unitCost: 4.59, imageUrl: row.imageUrl, attribute: "红色", catalogQuerySkcs: ["SKC-1"], supplier1688Links: [{ supplierName: "甲供应商" }] });
     expect(result.matches[0].catalogMappings).toHaveLength(3);
@@ -137,31 +137,31 @@ describe("ERP cost reconciliation", () => {
     const result = reconcileErpCostRows({
       workspaceId: "workspace-a",
       expectedSkus: [
-        { platformSku: "I3mqgejkr1vhv7", platformSkc: "st260608151900573902683", warehouseSku: "SH25092037232977233-Y" },
-        { platformSku: "SKU-MISSING", platformSkc: "st260606170768328630349", warehouseSku: "WH-AUX-ONLY" },
+        { platformSku: "I9demo00000002", platformSkc: "st900000000000000000009", warehouseSku: "SH9000000000000000004-Y" },
+        { platformSku: "SKU-MISSING", platformSkc: "st900000000000000000008", warehouseSku: "WH-AUX-ONLY" },
       ],
       costRows: [
         {
-          platformSku: "I3mqgejkr1vhv7",
-          platformSkc: "st260608151900573902683",
-          warehouseSku: "SH25092037232977233-Y",
+          platformSku: "I9demo00000002",
+          platformSkc: "st900000000000000000009",
+          warehouseSku: "SH9000000000000000004-Y",
           ledgerScopeRole: "expected",
           previewUnitCost: 1.99,
-          purchaseRecords: [purchaseRecord("R-EXPECTED", "SH25092037232977233-Y", "2026-07-01", 1.99)],
+          purchaseRecords: [purchaseRecord("R-EXPECTED", "SH9000000000000000004-Y", "2026-07-01", 1.99)],
           evidenceComplete: true,
         },
         {
-          platformSku: "I0mr8u67we1unj",
-          platformSkc: "st260606170768328630349",
-          warehouseSku: "SH25092037232977233-Y",
+          platformSku: "I9demo00000001",
+          platformSkc: "st900000000000000000008",
+          warehouseSku: "SH9000000000000000004-Y",
           ledgerScopeRole: "auxiliary",
           previewUnitCost: 1.99,
-          purchaseRecords: [purchaseRecord("R-SHARED", "SH25092037232977233-Y", "2026-07-01", 1.99)],
+          purchaseRecords: [purchaseRecord("R-SHARED", "SH9000000000000000004-Y", "2026-07-01", 1.99)],
           evidenceComplete: true,
         },
         {
           platformSku: "SKU-AUX-ONLY",
-          platformSkc: "st260606170768328630349",
+          platformSkc: "st900000000000000000008",
           warehouseSku: "WH-AUX-ONLY",
           ledgerScopeRole: "auxiliary",
           previewUnitCost: 3,
@@ -171,9 +171,9 @@ describe("ERP cost reconciliation", () => {
       ],
     });
 
-    expect(result.matches[0]).toMatchObject({ status: "matched", ledgerScopeRole: "expected", sourcePlatformSku: "I3mqgejkr1vhv7" });
+    expect(result.matches[0]).toMatchObject({ status: "matched", ledgerScopeRole: "expected", sourcePlatformSku: "I9demo00000002" });
     expect(result.matches[1]).toMatchObject({ status: "missing", matchMethod: null });
-    expect(result.auxiliaryCostRows.map((row) => row.platformSku)).toEqual(["I0mr8u67we1unj", "SKU-AUX-ONLY"]);
+    expect(result.auxiliaryCostRows.map((row) => row.platformSku)).toEqual(["I9demo00000001", "SKU-AUX-ONLY"]);
     expect(result.summary).toMatchObject({ matchedCount: 1, missingCount: 1, fallbackCount: 0, auxiliaryCount: 2 });
   });
 

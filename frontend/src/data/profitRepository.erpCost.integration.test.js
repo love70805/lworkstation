@@ -54,8 +54,8 @@ it("persists catalog carriers from verified source evidence and rejects page met
   const imageUrl = "https://cbu01.alicdn.com/img/one.jpg";
   const purchaseCatalog = { picturesLinking: imageUrl, pictureLink1688: "https://cbu01.alicdn.com/img/1688.jpg", purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-A", purchaseOrderId: "PUR-1", purchaseOrderNo: "PO-1", lineNumber: 0, supplierId: "SUP-A", barcodeSkuid: "SKU-AUDIT", barcodeSkcid: "SKC-AUDIT", raw: { token: "discard" } };
   const purchaseRecords = [
-    { ...record("CATALOG-A", 4.59, 10), productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog, supplierName: "甲供应商", supplier1688Url: "https://detail.1688.com/offer/730242606884.html", supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商", token: "discard" }] },
-    { ...record("CATALOG-B", 4.59, 5), purchaseCatalog: { ...purchaseCatalog, purchaseOrderDetailId: "DETAIL-B", lineNumber: 1, supplierId: "SUP-B" }, supplierName: "乙供应商", supplier1688Links: [{ type: "store", url: "https://shop123456789.1688.com", supplierName: "乙供应商" }] },
+    { ...record("CATALOG-A", 4.59, 10), productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog, supplierName: "甲供应商", supplier1688Url: "https://detail.1688.com/offer/900000000011.html", supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/900000000011.html", supplierName: "甲供应商", token: "discard" }] },
+    { ...record("CATALOG-B", 4.59, 5), purchaseCatalog: { ...purchaseCatalog, purchaseOrderDetailId: "DETAIL-B", lineNumber: 1, supplierId: "SUP-B" }, supplierName: "乙供应商", supplier1688Links: [{ type: "store", url: "https://shop900000000002.1688.com", supplierName: "乙供应商" }] },
   ];
   const source = sourceEnvelope({ ledger, request, purchaseRecords });
   source.rows[0] = { ...source.rows[0], productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog, catalogMappings: [
@@ -67,12 +67,12 @@ it("persists catalog carriers from verified source evidence and rejects page met
   await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation, sourceEnvelope: source });
   db.close(); await db.open();
   const reopened = (await getLatestLedgerCosts(ledger.id))[0];
-  expect(reopened).toMatchObject({ unitCost: 4.59, productName: "采购商品", imageUrl, attribute: "红色", catalogQuerySkcs: ["SKC-AUDIT"], supplierName: "审计供应商", supplier1688Url: "https://detail.1688.com/offer/730242606884.html" });
+  expect(reopened).toMatchObject({ unitCost: 4.59, productName: "采购商品", imageUrl, attribute: "红色", catalogQuerySkcs: ["SKC-AUDIT"], supplierName: "审计供应商", supplier1688Url: "https://detail.1688.com/offer/900000000011.html" });
   expect(reopened.catalogMappings.map((mapping) => mapping.platformSku)).toEqual(["SKU-AUDIT", "SKU-SIBLING"]);
   expect(reopened.purchaseCatalog).toMatchObject({ picturesLinking: imageUrl, pictureLink1688: purchaseCatalog.pictureLink1688, purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-A", lineNumber: "0", barcodeSkuid: "SKU-AUDIT", barcodeSkcid: "SKC-AUDIT" });
   expect(reopened.purchaseRecords).toEqual(expect.arrayContaining([
-    expect.objectContaining({ recordId: "CATALOG-A", quantity: 10, unitPrice: 4.59, productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog: reopened.purchaseCatalog, supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商" }] }),
-    expect.objectContaining({ recordId: "CATALOG-B", supplierName: "乙供应商", purchaseCatalog: expect.objectContaining({ purchaseOrderDetailId: "DETAIL-B", lineNumber: "1", supplierId: "SUP-B" }), supplier1688Links: [{ type: "store", url: "https://shop123456789.1688.com/", supplierName: "乙供应商" }] }),
+    expect.objectContaining({ recordId: "CATALOG-A", quantity: 10, unitPrice: 4.59, productName: "采购商品", imageUrl, attribute: "红色", purchaseCatalog: reopened.purchaseCatalog, supplier1688Links: [{ type: "product", url: "https://detail.1688.com/offer/900000000011.html", supplierName: "甲供应商" }] }),
+    expect.objectContaining({ recordId: "CATALOG-B", supplierName: "乙供应商", purchaseCatalog: expect.objectContaining({ purchaseOrderDetailId: "DETAIL-B", lineNumber: "1", supplierId: "SUP-B" }), supplier1688Links: [{ type: "store", url: "https://shop900000000002.1688.com/", supplierName: "乙供应商" }] }),
   ]));
   expect(JSON.stringify(reopened)).not.toMatch(/页面伪造|FORGED|discard/);
   expect(await db.erpCostRows.count()).toBe(1);
@@ -236,7 +236,7 @@ function reconcile({ purchaseRecords, resolutions = [], previewUnitCost = null }
       purchaseRecords,
       evidenceComplete: true,
       supplierName: "审计供应商",
-      supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+      supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
       confirmed: true,
       formalCost: 99,
       manualUnitPrice: 99,
@@ -267,7 +267,7 @@ function sourceEnvelope({
       mappings,
       previewUnitCost,
       supplierName: "审计供应商",
-      supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+      supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
     }],
     warehouseEvidence: [{
       warehouseSku: "WH-AUDIT",
@@ -580,8 +580,8 @@ describe("ERP cost repository independent recalculation", () => {
 
   it("loads 19 of 19 expected rows from inbox while retaining a shared-warehouse auxiliary variant as audit-only", async () => {
     const querySkcs = [
-      "st260608151900573902683",
-      "st260606170768328630349",
+      "st900000000000000000009",
+      "st900000000000000000008",
       "SKC-SHARED-3",
       "SKC-SHARED-4",
       "SKC-SHARED-5",
@@ -589,7 +589,7 @@ describe("ERP cost repository independent recalculation", () => {
       "SKC-SHARED-7",
     ];
     const expectedSkus = [
-      { platformSku: "I3mqgejkr1vhv7", platformSkc: querySkcs[0] },
+      { platformSku: "I9demo00000002", platformSkc: querySkcs[0] },
       ...Array.from({ length: 18 }, (_, index) => ({
         platformSku: `SKU-SHARED-EXPECTED-${String(index + 2).padStart(2, "0")}`,
         platformSkc: querySkcs[(index + 2) % querySkcs.length],
@@ -597,12 +597,12 @@ describe("ERP cost repository independent recalculation", () => {
     ];
     const { ledger, request } = await context({ platformSkcs: querySkcs, expectedSkus });
     await db.salesRows.bulkAdd(expectedSkus.map(row => ({ ...row, ledgerId: ledger.id, workspaceId: DEFAULT_WORKSPACE_ID, store: '合成店铺', quantity: 1, amount: 10 })));
-    const sharedWarehouseSku = "SH25092037232977233-Y";
+    const sharedWarehouseSku = "SH9000000000000000004-Y";
     const results = expectedSkus.map((item, index) => ({
       warehouseSku: index === 0 ? sharedWarehouseSku : `WH-SHARED-EXPECTED-${index + 1}`,
       mappings: index === 0 ? [
         { ...item, ledgerScopeRole: "expected" },
-        { platformSku: "I0mr8u67we1unj", platformSkc: querySkcs[1], ledgerScopeRole: "auxiliary" },
+        { platformSku: "I9demo00000001", platformSkc: querySkcs[1], ledgerScopeRole: "auxiliary" },
       ] : [{ ...item, ledgerScopeRole: "expected" }],
       previewUnitCost: 4,
     }));
@@ -662,7 +662,7 @@ describe("ERP cost repository independent recalculation", () => {
     });
     expect(reconciliation.summary).toMatchObject({ matchedCount: 19, missingCount: 0, auxiliaryCount: 1 });
     expect(reconciliation.auxiliaryCostRows).toEqual([
-      expect.objectContaining({ platformSku: "I0mr8u67we1unj", ledgerScopeRole: "auxiliary", warehouseSku: sharedWarehouseSku }),
+      expect.objectContaining({ platformSku: "I9demo00000001", ledgerScopeRole: "auxiliary", warehouseSku: sharedWarehouseSku }),
     ]);
     const published = await savePublishedErpCostBatch({
       ledgerId: ledger.id,
@@ -673,7 +673,7 @@ describe("ERP cost repository independent recalculation", () => {
     });
     const storedFormalRows = await db.erpCostRows.where("batchId").equals(published.batchId).toArray();
     expect(storedFormalRows).toHaveLength(19);
-    expect(storedFormalRows.some((row) => row.platformSku === "I0mr8u67we1unj")).toBe(false);
+    expect(storedFormalRows.some((row) => row.platformSku === "I9demo00000001")).toBe(false);
   });
 
   it("rejects formal publication when an old recorded request cannot verify declared auxiliary scope", async () => {
@@ -740,7 +740,7 @@ describe("ERP cost repository independent recalculation", () => {
       resolutionStatus: "resolved",
       unresolvedAnomalyCount: 0,
       supplierName: "审计供应商",
-      supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+      supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
       purchaseRecords: [{ recordId: "ONE", unitPrice: 1 }],
       resolutions: [{ recordId: "ONE", action: "confirm_true_price", resolvedUnitPrice: 1 }],
     });

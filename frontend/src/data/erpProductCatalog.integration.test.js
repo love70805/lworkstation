@@ -10,7 +10,7 @@ afterEach(async () => { db.close(); await db.delete(); });
 describe("ERP catalog draft projection", () => {
   it('saves and restores all supplier links and SKU/order associations without any chosen common URL', async () => {
     const suppliers = [
-      { id: 'SUP-A', stableSupplierId: 'ERP-A', supplierName: '同名供货方', catalogSource: 'erp', sourceUrl: '', sourceLinks: [{ url: 'https://detail.1688.com/offer/1234567890.html' }, { url: 'https://shop-a.1688.com/' }], sourceRecords: [{ platformSku: 'SKU-A', recordId: 'ORDER-A' }], variants: [{ platformSku: 'SKU-A' }] },
+      { id: 'SUP-A', stableSupplierId: 'ERP-A', supplierName: '同名供货方', catalogSource: 'erp', sourceUrl: '', sourceLinks: [{ url: 'https://detail.1688.com/offer/900000000003.html' }, { url: 'https://shop-a.1688.com/' }], sourceRecords: [{ platformSku: 'SKU-A', recordId: 'ORDER-A' }], variants: [{ platformSku: 'SKU-A' }] },
       { id: 'SUP-B', stableSupplierId: 'ERP-B', supplierName: '同名供货方', catalogSource: 'erp', sourceUrl: '', sourceLinks: [{ url: 'https://shop-b.1688.com/' }], sourceRecords: [{ platformSku: 'SKU-B', recordId: 'ORDER-B' }], variants: [{ platformSku: 'SKU-B' }] },
     ];
     const { product } = await saveProductCatalogRecord({ draft: { name: '多来源保留', platformSkc: 'SKC-LINKS', variants: [{ platformSku: 'SKU-A' }, { platformSku: 'SKU-B' }], suppliers } });
@@ -35,7 +35,7 @@ describe("ERP catalog draft projection", () => {
     expect(editor.draft).toMatchObject({ name: source.productName, imageUrl: source.imageUrl, platformSkc: "SKC-CATALOG" });
     expect(editor.draft.variants.map(item => [item.platformSku, item.attribute]).sort()).toEqual([["SKU-BLUE", "蓝色 · 小号"], ["SKU-RED", "红色 · 大号"]]);
     expect(editor.draft.suppliers.map(item => [item.supplierName, item.sourceUrlKind, item.sourceUrl])).toEqual([
-      ["供应商甲", "product", "https://detail.1688.com/offer/730242606884.html"], ["供应商乙", "store", "https://shop-b.1688.com/"], ["供应商丙", null, ""],
+      ["供应商甲", "product", "https://detail.1688.com/offer/900000000011.html"], ["供应商乙", "store", "https://shop-b.1688.com/"], ["供应商丙", null, ""],
     ]);
     expect(editor.draft.suppliers.every(item => item.variants.every(variant => variant.purchaseUnitPrice === ""))).toBe(true);
     expect(await db.products.count()).toBe(0);
@@ -93,7 +93,7 @@ describe("ERP catalog draft projection", () => {
   });
 
   it("opens the existing catalog, retains manual values and adds only unowned same-SKC branches", async () => {
-    const { product } = await saveProductCatalogRecord({ draft: { name: "人工商品名", platformSkc: "SKC-CATALOG", imageUrl: "https://images.example.invalid/manual.png", sourceUrl: "https://detail.1688.com/offer/730242606884.html", supplierName: "人工供应商名称", variants: [{ platformSku: "SKU-RED", attribute: "人工属性", salePrice: 30 }] } });
+    const { product } = await saveProductCatalogRecord({ draft: { name: "人工商品名", platformSkc: "SKC-CATALOG", imageUrl: "https://images.example.invalid/manual.png", sourceUrl: "https://detail.1688.com/offer/900000000011.html", supplierName: "人工供应商名称", variants: [{ platformSku: "SKU-RED", attribute: "人工属性", salePrice: 30 }] } });
     await db.erpCostRows.add(erpProductCatalogFixture());
     const snapshot = await getProductEditorSnapshot({ platformSku: "SKU-BLUE", platformSkc: "SKC-CATALOG" });
     expect(snapshot.product.id).toBe(product.id);
@@ -116,10 +116,10 @@ describe("ERP catalog draft projection", () => {
   });
 
   it("does not fill a different product ID into an explicit manual supplier URL with the same name", async () => {
-    const { product } = await saveProductCatalogRecord({ draft: { name: "人工档案", platformSkc: "SKC-CATALOG", supplierName: "供应商甲", sourceUrl: "https://detail.1688.com/offer/999999999999.html", variants: [{ platformSku: "SKU-RED" }] } });
+    const { product } = await saveProductCatalogRecord({ draft: { name: "人工档案", platformSkc: "SKC-CATALOG", supplierName: "供应商甲", sourceUrl: "https://detail.1688.com/offer/900000000015.html", variants: [{ platformSku: "SKU-RED" }] } });
     await db.erpCostRows.add(erpProductCatalogFixture());
     const snapshot = await getProductEditorSnapshot({ productId: product.id });
-    expect(snapshot.draft.sourceUrl).toBe("https://detail.1688.com/offer/999999999999.html");
+    expect(snapshot.draft.sourceUrl).toBe("https://detail.1688.com/offer/900000000015.html");
     expect(snapshot.draft.sourceProductId).toBe("");
     expect(snapshot.draft.suppliers[0].sourceProductId).toBe("");
   });

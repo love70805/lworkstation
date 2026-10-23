@@ -444,7 +444,7 @@ try {
       platformSkc: "SKC-A",
       warehouseSku: "WH-A",
       supplierName: "义乌市鑫颉日用品有限公司",
-      supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+      supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
       imageUrl: "https://images.example/product-a.jpg",
       attribute: "红色/M",
       purchaseCatalog: { picturesLinking: "https://images.example.invalid/warehouse.jpg", pictureLink1688: "https://images.example.invalid/1688.jpg", purchaseSpecificationAndModel1688: "采购规格", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-CATALOG", purchaseOrderId: "PO-CATALOG", purchaseOrderNo: "PO-CATALOG", lineNumber: 0, supplierId: "SUPPLIER-CATALOG", barcodeSkuid: "", barcodeSkcid: null },
@@ -454,7 +454,7 @@ try {
         { platformSku: "SKU-A", platformSkc: "SKC-CONFLICT", warehouseSku: "WH-A", attribute: "有冲突" },
       ],
       supplier1688Links: [
-        { type: "product", url: "https://detail.1688.com/offer/730242606884.html?trace=erp", supplierName: "义乌市鑫颉日用品有限公司" },
+        { type: "product", url: "https://detail.1688.com/offer/900000000011.html?trace=erp", supplierName: "义乌市鑫颉日用品有限公司" },
         { type: "store", url: "https://xinjie.1688.com/page/offerlist.htm", supplierName: "义乌市鑫颉日用品有限公司" },
         { type: "product", url: "https://xinjie.1688.com/page/offerlist.htm" },
       ],
@@ -509,7 +509,7 @@ try {
   response = await fetch(`${base}/erp/v1/cost-batches?workspaceId=workspace-test&ledgerId=ledger-A`);
   assert.equal(response.status, 200);
   const firstPending = await response.json();
-  assert.equal(firstPending.records[0].envelope.batch.rows[0].supplier1688Url, "https://detail.1688.com/offer/730242606884.html");
+  assert.equal(firstPending.records[0].envelope.batch.rows[0].supplier1688Url, "https://detail.1688.com/offer/900000000011.html");
   const catalogRow = firstPending.records[0].envelope.batch.rows[0];
   assert.equal(catalogRow.imageUrl, "https://images.example/product-a.jpg");
   assert.equal(catalogRow.attribute, "红色/M");
@@ -522,7 +522,7 @@ try {
   assert.equal(catalogRow.catalogMappings[1].attribute, "蓝色/L");
   assert.equal(catalogRow.catalogMappings[0].storeName, "店铺甲");
   assert.equal(catalogRow.supplier1688Links.length, 2, "typed store/product links cannot replace each other");
-  assert.equal(catalogRow.supplier1688Links[0].url, "https://detail.1688.com/offer/730242606884.html");
+  assert.equal(catalogRow.supplier1688Links[0].url, "https://detail.1688.com/offer/900000000011.html");
   assert.equal(firstPending.records[0].envelope.formatVersion, 2);
   assert.equal(firstPending.records[0].envelope.batch.formatVersion, 2);
   assert.equal(firstPending.records[0].envelope.batch.rows[0].previewUnitCost, 0);
@@ -1156,8 +1156,8 @@ try {
   await post("/erp/v1/cost-batches", { deliveryId: multiDelivered.deliveryId, workspaceId: "workspace-test", status: "acknowledged" });
 
   const sharedQuerySkcs = [
-    "st260608151900573902683",
-    "st260606170768328630349",
+    "st900000000000000000009",
+    "st900000000000000000008",
     "SKC-SHARED-3",
     "SKC-SHARED-4",
     "SKC-SHARED-5",
@@ -1165,7 +1165,7 @@ try {
     "SKC-SHARED-7",
   ];
   const sharedExpectedSkus = [
-    { platformSku: "I3mqgejkr1vhv7", platformSkc: sharedQuerySkcs[0] },
+    { platformSku: "I9demo00000002", platformSkc: sharedQuerySkcs[0] },
     ...Array.from({ length: 18 }, (_, index) => ({
       platformSku: `SKU-SHARED-EXPECTED-${String(index + 2).padStart(2, "0")}`,
       platformSkc: sharedQuerySkcs[(index + 2) % sharedQuerySkcs.length],
@@ -1181,7 +1181,7 @@ try {
     expectedSkus: sharedExpectedSkus,
   });
   assert.equal(response.status, 202);
-  const sharedWarehouseSku = "SH25092037232977233-Y";
+  const sharedWarehouseSku = "SH9000000000000000004-Y";
   const sharedRows = sharedExpectedSkus.map((item, index) => ({
     platformSku: item.platformSku,
     platformSkc: item.platformSkc,
@@ -1189,7 +1189,7 @@ try {
     unitCost: index === 0 ? 1.99 : 4,
   }));
   sharedRows.push({
-    platformSku: "I0mr8u67we1unj",
+    platformSku: "I9demo00000001",
     platformSkc: sharedQuerySkcs[1],
     warehouseSku: sharedWarehouseSku,
     unitCost: 1.99,
@@ -1231,9 +1231,9 @@ try {
   const auxiliaryScopeRows = sharedScopeBatch.rows.filter((row) => row.ledgerScopeRole === "auxiliary");
   assert.equal(expectedScopeRows.length, 19);
   assert.equal(auxiliaryScopeRows.length, 1);
-  assert.equal(auxiliaryScopeRows[0].platformSku, "I0mr8u67we1unj");
+  assert.equal(auxiliaryScopeRows[0].platformSku, "I9demo00000001");
   assert.equal(auxiliaryScopeRows[0].sourceWarnings.some((warning) => warning.includes("unknown_platform_sku")), false);
-  assert.equal(expectedScopeRows.find((row) => row.platformSku === "I3mqgejkr1vhv7").sourceWarnings.length, 0);
+  assert.equal(expectedScopeRows.find((row) => row.platformSku === "I9demo00000002").sourceWarnings.length, 0);
   assert.equal(sharedScopeBatch.warehouseEvidence.find((entry) => entry.warehouseSku === sharedWarehouseSku).sourceWarnings.length, 0);
   assert.equal(sharedScopeBatch.warehouseEvidence.find((entry) => entry.warehouseSku === sharedWarehouseSku).purchaseRecords.length, 12);
   assert.equal(sharedScopeBatch.evidenceStatus, "complete");

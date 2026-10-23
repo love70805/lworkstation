@@ -28,10 +28,10 @@ describe("optional ERP catalog carriers", () => {
   });
 
   it("whitelists mapping data without inventing missing identifiers or resolving conflicts", () => {
-    const mapping = { platformSku: " ＳＫＵ-1 ", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "款式一", imageUrl: "https://cbu01.alicdn.com/img/one.jpg", attribute: "红色", storeName: "680店", platform: "TEMU", articleNumber: "A1", raw: { token: "discard" }, cookie: "discard" };
+    const mapping = { platformSku: " ＳＫＵ-1 ", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "款式一", imageUrl: "https://cbu01.alicdn.com/img/one.jpg", attribute: "红色", storeName: "901店", platform: "TEMU", articleNumber: "A1", raw: { token: "discard" }, cookie: "discard" };
     const mappings = normalizeErpCatalogMappings([mapping, mapping, { ...mapping, attribute: "蓝色" }, { platformSku: "SKU-2", productName: "未确认映射" }]);
     expect(mappings).toHaveLength(3);
-    expect(mappings[0]).toEqual({ platformSku: "SKU-1", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "款式一", imageUrl: mapping.imageUrl, attribute: "红色", storeName: "680店", platform: "TEMU", articleNumber: "A1" });
+    expect(mappings[0]).toEqual({ platformSku: "SKU-1", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "款式一", imageUrl: mapping.imageUrl, attribute: "红色", storeName: "901店", platform: "TEMU", articleNumber: "A1" });
     expect(mappings[1].attribute).toBe("蓝色");
     expect(mappings[2]).toMatchObject({ platformSku: "SKU-2", platformSkc: null, warehouseSku: null });
     expect(JSON.stringify(mappings)).not.toContain("discard");
@@ -40,15 +40,15 @@ describe("optional ERP catalog carriers", () => {
 
   it("keeps supplier URLs typed and paired with their own supplier", () => {
     expect(normalizeErpSupplierLinks([
-      { type: "product", url: "https://detail.1688.com/offer/730242606884.html?spm=1", supplierName: "甲供应商", token: "discard" },
-      { type: "store", url: "https://shop123456789.1688.com/?spm=2", supplierName: "乙供应商" },
-      { type: "store", url: "https://detail.1688.com/offer/730242606884.html" },
-      { type: "product", url: "https://shop123456789.1688.com" },
+      { type: "product", url: "https://detail.1688.com/offer/900000000011.html?spm=1", supplierName: "甲供应商", token: "discard" },
+      { type: "store", url: "https://shop900000000002.1688.com/?spm=2", supplierName: "乙供应商" },
+      { type: "store", url: "https://detail.1688.com/offer/900000000011.html" },
+      { type: "product", url: "https://shop900000000002.1688.com" },
       { type: "store", url: "https://www.1688.com" },
-      { type: "product", url: "https://detail.1688.com.evil.test/offer/730242606884.html" },
+      { type: "product", url: "https://detail.1688.com.evil.test/offer/900000000011.html" },
     ])).toEqual([
-      { type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "甲供应商" },
-      { type: "store", url: "https://shop123456789.1688.com/", supplierName: "乙供应商" },
+      { type: "product", url: "https://detail.1688.com/offer/900000000011.html", supplierName: "甲供应商" },
+      { type: "store", url: "https://shop900000000002.1688.com/", supplierName: "乙供应商" },
     ]);
   });
 

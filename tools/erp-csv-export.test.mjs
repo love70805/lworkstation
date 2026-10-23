@@ -364,9 +364,9 @@ async function verifyChronologicalPreview(extensionRoot) {
 
 async function verifyLedgerPreview(extensionRoot) {
   const records = [
-    { detailId: 'SEP15', creationTime: '2026-09-15 10:00:00', purchaseQuantity: '150', purchaseUnitPrice: '.12' },
-    { detailId: 'SEP11', creationTime: '2026-09-11 10:00:00', purchaseQuantity: '150', purchaseUnitPrice: '.12' },
-    { detailId: 'JUNE', creationTime: '2026-06-21 10:00:00', purchaseQuantity: '500', purchaseUnitPrice: '.106' },
+    { detailId: 'SEP-A', creationTime: '2026-09-20 10:00:00', purchaseQuantity: '30', purchaseUnitPrice: '.28' },
+    { detailId: 'SEP-B', creationTime: '2026-09-10 10:00:00', purchaseQuantity: '30', purchaseUnitPrice: '.28' },
+    { detailId: 'JUNE', creationTime: '2026-06-18 10:00:00', purchaseQuantity: '100', purchaseUnitPrice: '.21' },
   ].map(record => ({ ...record, itemId: 'WH-MONTH', tradeName: '月份测试' }));
   let savedCache;
   for (const ledgerPeriod of ['2026-08', '2026-05']) {
@@ -388,10 +388,10 @@ async function verifyLedgerPreview(extensionRoot) {
       const { rows } = await extension.exportCsv();
       const scopeText = window.document.getElementById('erpa-preview-scope').textContent;
       if (ledgerPeriod === '2026-08') {
-        assert.equal(result.unitCost, '0.1060');
+        assert.equal(result.unitCost, '0.2100');
         assert.deepEqual(Array.from(result.selectedRecordIds), ['JUNE']);
-        assert.equal(rows[1][15], '0.1060');
-        assert.equal(rows[1][12], '2026-06-21 10:00:00');
+        assert.equal(rows[1][15], '0.2100');
+        assert.equal(rows[1][12], '2026-06-18 10:00:00');
         assert.match(scopeText, /台账月份：2026-08/);
         window.document.querySelector('.erpa-result-row').click();
         assert.doesNotMatch(window.document.querySelector('.erpa-detail-table').textContent, /2026-09/);
@@ -412,7 +412,7 @@ async function verifyLedgerPreview(extensionRoot) {
       assert.doesNotMatch(extension.window.document.getElementById('erpa-preview-scope').textContent, /2099/);
       await new Promise(resolve => setTimeout(resolve, 0));
       const { rows } = await extension.exportCsv();
-      assert.equal(rows[1][15], ledgerPeriod ? '0.1112' : '');
+      assert.equal(rows[1][15], ledgerPeriod ? '0.2362' : '');
       assert.equal(extension.deliveries.length, 0, 'cache preview must not submit different formal evidence');
       assert.equal(extension.window.localStorage.getItem(cacheKey), JSON.stringify(savedCache), 'preview does not overwrite cached evidence');
     } finally { await extension.close(); }

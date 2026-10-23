@@ -33,6 +33,6 @@ ERP小灯只显示颜色，不可点击、悬停或键盘展开，没有就绪to
 | `beta.yml` | `3E5427E779C1A43755C55FB13D14BFE658A80C9CEE48F11662743552371BFC59` |
 | `SHA256.txt` | `B779C4FE2349595643CF8AB12A159FB0EBA91F9672AE0E1B38DDB32DDF8A5E44` |
 
-候选：`releases/candidates/0.3.0-beta.10-export-status/`。原始证据：`archive/beta10/`。持久交接目录：`C:/Users/Administrator/Desktop/Lworkstation/archive/beta10-execution-closeout-20260928/`，候选四资产、脚本/截图/日志/合成XLSX与MANIFEST逐项哈希保留，不包含业务数据/profile。
+候选：`releases/candidates/0.3.0-beta.10-export-status/`。原始证据：`archive/beta10/`。持久交接目录：`archive/beta10-execution-closeout-20260928/`，候选四资产、脚本/截图/日志/合成XLSX与MANIFEST逐项哈希保留，不包含业务数据/profile。
 
 用户随后要求准备0.3.0正式版时Beta.10已经公开。按每版本独立执行聊天约定，本任务仅收尾交接，正式版由新任务承接；不得将本Beta候选当作正式版候选，也不得跳过稳定更新合同与最终打包验收。

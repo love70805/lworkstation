@@ -16,15 +16,15 @@ const button = text => [...container.querySelectorAll('button')].find(node=>node
 async function click(text) {await act(async()=>button(text).click());}
 async function input(value) {await act(async()=>Simulate.change(container.querySelector('.import-supplier-picker > input'),{target:{value}}));}
 it('edits keywords without changing selections and explicitly adds/removes deduplicated matching goods', async()=>{
-  await act(async()=>root.render(<Harness choices={['HHHX-1','LYYY-1','HHHX-LYYY','other']} selected={['other']} />));
+  await act(async()=>root.render(<Harness choices={['FFFV-1','MNNN-1','FFFV-MNNN','other']} selected={['other']} />));
   expect(button('选中匹配货号').disabled).toBe(true);
-  await input('ｈｈｈｘ，lyyy');
+  await input('ｆｆｆｖ，mnnn');
   expect(state.selected).toEqual(['other']);
   expect(container.textContent).toContain('匹配 3 个');
   await click('选中匹配货号');
-  expect(state.selected).toEqual(['HHHX-1','HHHX-LYYY','LYYY-1','other']);
-  await input('HHHX'); await click('取消匹配货号');
-  expect(state.selected).toEqual(['LYYY-1','other']);
+  expect(state.selected).toEqual(['FFFV-1','FFFV-MNNN','MNNN-1','other']);
+  await input('FFFV'); await click('取消匹配货号');
+  expect(state.selected).toEqual(['MNNN-1','other']);
   await input(''); expect(button('取消匹配货号').disabled).toBe(true);
 });
 it('shows new matches separately and does not recommend previously excluded goods', async()=>{

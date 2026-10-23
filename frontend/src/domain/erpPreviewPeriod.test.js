@@ -10,19 +10,19 @@ const record = (id, date, quantity, unitPrice, extra = {}) => ({ recordId: id, w
 const preview = (records, period) => JSON.parse(JSON.stringify(policy.previewForLedger([{ warehouseSku: 'WH', mappings: [] }], { warehouses: [{ warehouseSku: 'WH', purchaseRecords: records }] }, period)[0]));
 
 describe('ERP extension preview uses the ledger month', () => {
-  it('excludes the screenshot September records for August and keeps all evidence', () => {
-    const records = [record('SEP15', '2026-09-15', 150, .12), record('SEP11', '2026-09-11', 150, .12), record('JUNE', '2026-06-21', 500, .106), record('MAY', '2026-05-01', 100, .108), record('APRIL', '2026-04-01', 100, .11)];
+  it('excludes independently constructed future-month records for August and keeps all evidence', () => {
+    const records = [record('SEP-A', '2026-09-20', 30, .28), record('SEP-B', '2026-09-10', 30, .28), record('JUNE', '2026-06-18', 100, .21), record('MAY', '2026-05-02', 20, .22), record('APRIL', '2026-04-02', 20, .24)];
     const original = structuredClone(records);
     vi.useFakeTimers();
     try {
       for (const now of ['2026-07-01', '2026-09-22', '2027-01-01']) {
         vi.setSystemTime(new Date(now));
         const result = preview(records, '2026-08');
-        expect(result).toMatchObject({ ledgerPeriod: '2026-08', selectedRecordIds: ['JUNE', 'MAY', 'APRIL'], unitCost: '0.1068' });
+        expect(result).toMatchObject({ ledgerPeriod: '2026-08', selectedRecordIds: ['JUNE', 'MAY', 'APRIL'], unitCost: '0.2157' });
         expect(Number(result.unitCost)).toBe(calculateWarehouseCostDecision({ warehouseSku: 'WH', purchaseRecords: records, period: '2026-08' }).unitCost);
       }
     } finally { vi.useRealTimers(); }
-    expect(preview(records, '2026-09')).toMatchObject({ selectedRecordIds: ['SEP15', 'SEP11', 'JUNE'], unitCost: '0.1112' });
+    expect(preview(records, '2026-09')).toMatchObject({ selectedRecordIds: ['SEP-A', 'SEP-B', 'JUNE'], unitCost: '0.2362' });
     expect(records).toEqual(original);
   });
 

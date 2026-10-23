@@ -51,7 +51,7 @@ function buildFixture() {
       {
         warehouseSku: "WH-1",
         mappings: [{ platformSku: "SKU-1", platformSkc: "SKC-1" }, { platformSku: "SKU-2", platformSkc: "SKC-1" }],
-        supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+        supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
         unitCost: "6.2000",
         confirmed: true,
         formalCost: 99,
@@ -102,13 +102,13 @@ describe("ERP cost batch envelope v2", () => {
   it("round-trips optional catalog mappings and per-purchase fields without changing cost evidence", () => {
     const imageUrl = "https://cbu01.alicdn.com/img/one.jpg";
     const purchaseCatalog = { picturesLinking: imageUrl, pictureLink1688: "https://cbu01.alicdn.com/img/1688.jpg", purchaseSpecificationAndModel1688: "1688白色大号", purchaseProportion1688: "1-1", purchaseOrderDetailId: "DETAIL-1", purchaseOrderId: "PUR-1", purchaseOrderNo: "PO-1", lineNumber: 0, supplierId: "SUP-1", barcodeSkuid: "SKU-1", barcodeSkcid: "SKC-1", raw: { token: "discard" } };
-    const supplier1688Links = [{ type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "测试供应商", cookie: "discard" }];
+    const supplier1688Links = [{ type: "product", url: "https://detail.1688.com/offer/900000000011.html", supplierName: "测试供应商", cookie: "discard" }];
     const envelope = buildErpCostBatchEnvelope({
       batchId: "ERP-CATALOG-1", workspaceId: "workspace-default", ledgerId: "LEDGER-CATALOG-1", requestId: "REQ-CATALOG-1", platformSkcs: ["SKC-1"],
       expectedSkus: [{ platformSku: "SKU-1", platformSkc: "SKC-1" }],
       results: [{ warehouseSku: "WH-1", mappings: [{ platformSku: "SKU-1", platformSkc: "SKC-1" }], name: "采购商品", unitCost: 4.59, imageUrl, attribute: "红色", purchaseCatalog, supplier1688Links,
         catalogMappings: [
-          { platformSku: "SKU-1", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "采购商品", imageUrl, attribute: "红色", storeName: "680店", token: "discard" },
+          { platformSku: "SKU-1", platformSkc: "SKC-1", warehouseSku: "WH-1", productName: "采购商品", imageUrl, attribute: "红色", storeName: "901店", token: "discard" },
           { platformSku: "SKU-2", platformSkc: "SKC-1", warehouseSku: "WH-1", attribute: "蓝色" },
           { platformSku: "SKU-2", platformSkc: "SKC-OTHER", warehouseSku: "WH-OTHER", attribute: "冲突候选" },
         ],
@@ -139,19 +139,19 @@ describe("ERP cost batch envelope v2", () => {
       workspaceId: "workspace-default",
       ledgerId: "LEDGER-SHARED-WAREHOUSE",
       requestId: "ERP-REQ-SHARED-WAREHOUSE",
-      platformSkcs: ["st260608151900573902683", "st260606170768328630349"],
-      expectedSkus: [{ platformSku: "I3mqgejkr1vhv7", platformSkc: "st260608151900573902683" }],
+      platformSkcs: ["st900000000000000000009", "st900000000000000000008"],
+      expectedSkus: [{ platformSku: "I9demo00000002", platformSkc: "st900000000000000000009" }],
       generatedAt: "2026-08-20T08:00:00.000Z",
       results: [{
-        warehouseSku: "SH25092037232977233-Y",
+        warehouseSku: "SH9000000000000000004-Y",
         mappings: [
-          { platformSku: "I3mqgejkr1vhv7", platformSkc: "st260608151900573902683", ledgerScopeRole: "expected" },
-          { platformSku: "I0mr8u67we1unj", platformSkc: "st260606170768328630349", ledgerScopeRole: "auxiliary" },
+          { platformSku: "I9demo00000002", platformSkc: "st900000000000000000009", ledgerScopeRole: "expected" },
+          { platformSku: "I9demo00000001", platformSkc: "st900000000000000000008", ledgerScopeRole: "auxiliary" },
         ],
         unitCost: 1.99,
       }],
       warehouseEvidence: [{
-        warehouseSku: "SH25092037232977233-Y",
+        warehouseSku: "SH9000000000000000004-Y",
         evidenceComplete: true,
         purchaseRecords,
         excludedRecords: [],
@@ -160,17 +160,17 @@ describe("ERP cost batch envelope v2", () => {
 
     expect(envelope.evidenceStatus).toBe("complete");
     expect(envelope.rows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ platformSku: "I3mqgejkr1vhv7", ledgerScopeRole: "expected", sourceWarnings: [] }),
-      expect.objectContaining({ platformSku: "I0mr8u67we1unj", ledgerScopeRole: "auxiliary", sourceWarnings: [] }),
+      expect.objectContaining({ platformSku: "I9demo00000002", ledgerScopeRole: "expected", sourceWarnings: [] }),
+      expect.objectContaining({ platformSku: "I9demo00000001", ledgerScopeRole: "auxiliary", sourceWarnings: [] }),
     ]));
     expect(envelope.warehouseEvidence[0]).toMatchObject({ evidenceComplete: true, purchaseRecords });
 
     const roleless = { ...envelope, rows: envelope.rows.map(({ ledgerScopeRole: _role, ...row }) => row) };
     const parsed = validateErpCostBatchEnvelope(roleless, {
-      expectedSkus: [{ platformSku: "I3mqgejkr1vhv7", platformSkc: "st260608151900573902683" }],
+      expectedSkus: [{ platformSku: "I9demo00000002", platformSkc: "st900000000000000000009" }],
     });
     expect(parsed.envelope.evidenceStatus).toBe("complete");
-    expect(parsed.rows.find((row) => row.platformSku === "I0mr8u67we1unj").ledgerScopeRole).toBe("auxiliary");
+    expect(parsed.rows.find((row) => row.platformSku === "I9demo00000001").ledgerScopeRole).toBe("auxiliary");
 
     const historicalPartial = {
       ...roleless,
@@ -178,7 +178,7 @@ describe("ERP cost batch envelope v2", () => {
       sourceMeta: { ...roleless.sourceMeta, evidenceComplete: false },
     };
     const reparsedPartial = validateErpCostBatchEnvelope(historicalPartial, {
-      expectedSkus: [{ platformSku: "I3mqgejkr1vhv7", platformSkc: "st260608151900573902683" }],
+      expectedSkus: [{ platformSku: "I9demo00000002", platformSkc: "st900000000000000000009" }],
     });
     expect(reparsedPartial.envelope.evidenceStatus).toBe("legacy_partial");
     expect(reparsedPartial.envelope.sourceMeta.evidenceComplete).toBe(false);

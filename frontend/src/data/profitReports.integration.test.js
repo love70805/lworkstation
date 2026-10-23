@@ -149,7 +149,7 @@ it('persists audited SH store mappings and exact per-store totals across reload 
  }
  const dispatch={...target,kind:'dispatch',mode:'manual',adoptedQuantityExact:'0',rows:[]};await adoptMonthlySupplement(dispatch,await previewMonthlySupplement(dispatch));
  const baseInput={ledgerId:target.ledgerId,kind:'pre_deduction'},p=await previewProfitReport(baseInput),frozen=await saveProfitReport(baseInput,{expectedFingerprint:p.fingerprint}),before=JSON.stringify(frozen);
- const parsed=['sh20','SH27'].map((name,index)=>inspectSupplementSource({fileHash:'MAPPING',fileName:'isolated.xlsx',sheetName:name,cells:[['货号','扣款单号','扣款金额'],['HHHX','D'+index,index?'2.002':'-0.0009']]},{kind:'deduction',supplierNumbers:['HHHX'],stores:['20店','27店']}));
+ const parsed=['sh20','SH27'].map((name,index)=>inspectSupplementSource({fileHash:'MAPPING',fileName:'isolated.xlsx',sheetName:name,cells:[['货号','扣款单号','扣款金额'],['FFFV','D'+index,index?'2.002':'-0.0009']]},{kind:'deduction',supplierNumbers:['FFFV'],stores:['20店','27店']}));
  const input={...target,kind:'deduction',mode:'files',rows:parsed.flatMap(result=>result.rows),sources:parsed.map(result=>result.source)},batch=await adoptMonthlySupplement(input,await previewMonthlySupplement(input));
  expect(batch).toMatchObject({signedAmountExact:'2.0011',coveredStores:['20店','27店'],parserVersion:SUPPLEMENT_PARSER_VERSION});
  db.close();await db.open();const rows=(await readMonthlyReportState(target.ledgerId)).adoptedRows.filter(row=>row.kind==='deduction');
@@ -159,7 +159,7 @@ it('persists audited SH store mappings and exact per-store totals across reload 
 });
 it('persists multiple exact deduction codes and cross-sheet amounts through reload and backup without changing a frozen base',async()=>{
  await adopt('dispatch');const frozen=await report(),before=JSON.stringify(frozen);
- const selected=['YW-20-HHHX','YW-27-HHHX'];
+ const selected=['YW-20-FFFV','YW-27-FFFV'];
  const sources=[{fileHash:'MULTI',fileName:'isolated.xlsx',sheetName:'甲',cells:[['货号','扣款单号','扣款金额'],[selected[0],'A','-0.0009'],['OTHER','NO',99]]},{fileHash:'MULTI',fileName:'isolated.xlsx',sheetName:'乙',cells:[['货号','扣款单号','扣款金额'],[selected[1],'B','0.002']]}];
  const parsed=sources.map(source=>inspectSupplementSource(source,{kind:'deduction',supplierNumbers:selected,store:source.sheetName,stores:['甲','乙']}));
  const input={...scope,kind:'deduction',mode:'files',rows:parsed.flatMap(result=>result.rows),sources:parsed.map(result=>result.source)};

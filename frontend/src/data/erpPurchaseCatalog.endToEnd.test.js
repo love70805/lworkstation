@@ -104,13 +104,13 @@ it("parses verified purchase field shapes through the actual extension, inbox, p
   expect(editor.prefill.sources.every(source => source.imageUrl)).toBe(true);
   const nativeBlue = editor.prefill.purchases.find(item => item.source.recordId === "DETAIL-BLUE");
   expect(nativeBlue).toMatchObject({ platformSkus: ["SKU-BLUE"], purchaseCatalog: { purchaseSpecificationAndModel1688: "采购蓝色规格(仅参考)", purchaseProportion1688: "2-1" } });
-  const blueSupplier = editor.draft.suppliers.find(supplier => supplier.sourceUrl.endsWith("222222222222.html"));
+  const blueSupplier = editor.draft.suppliers.find(supplier => supplier.sourceUrl.endsWith("900000000006.html"));
   // One stable ERP supplier ID owns both branches, even when its purchase
   // records use different 1688 product links. Keep those links as evidence.
   expect(editor.draft.suppliers).toHaveLength(1);
   expect(blueSupplier.stableSupplierId).toBe("SUPPLIER-SYNTHETIC-A");
   expect(blueSupplier.variants.map(variant => variant.platformSku).sort()).toEqual(["SKU-BLUE", "SKU-RED"]);
-  expect(blueSupplier.sourceLinks.map(link => link.url)).toContain("https://detail.1688.com/offer/222222222222.html");
+  expect(blueSupplier.sourceLinks.map(link => link.url)).toContain("https://detail.1688.com/offer/900000000006.html");
   expect(blueSupplier.sourceLinks.length).toBeGreaterThan(1);
   const financialSnapshot = async () => ({ erpRows: await db.erpCostRows.toArray(), erpBatches: await db.erpCostBatches.toArray(), ledgers: await db.ledgers.toArray(), sales: await db.salesRows.toArray(), profits: await db.profitLines.toArray(), approvals: await db.costApprovals.toArray() });
   // Catalog save can happen even while its source monthly ledger is finalized.

@@ -44,8 +44,8 @@ assert.equal(excludedDiagnostic.previewDiagnostic.code, 'price_missing', 'invali
 assert.equal(policy.previewEvidenceRecords(excludedDiagnostic, {warehouses:[{warehouseSku:'MISSING',excludedRecords:[diagnosticRecords[0]]}],excludedDetails:[diagnosticRecords[0]]}).length, 1, 'duplicate excluded evidence is displayed once');
 
 const mappings = policy.normalizeMappings([
-  { barcodeSkuid: "SKU-TARGET-RED", barcodeSkcid: "SKC-TARGET", barcodeArticleNumber: "YW-672-LYYY", platform: "Shein", storeName: "恩昭672" },
-  { barcodeSkuid: "SKU-TARGET-BLUE", barcodeSkcid: "skc-target", barcodeArticleNumber: "YW-672-LYYY", platform: "Shein", storeName: "恩昭672" },
+  { barcodeSkuid: "SKU-TARGET-RED", barcodeSkcid: "SKC-TARGET", barcodeArticleNumber: "YW-672-MNNN", platform: "Shein", storeName: "恩昭672" },
+  { barcodeSkuid: "SKU-TARGET-BLUE", barcodeSkcid: "skc-target", barcodeArticleNumber: "YW-672-MNNN", platform: "Shein", storeName: "恩昭672" },
   { barcodeSkuid: "SKU-OTHER", barcodeSkcid: "SKC-OTHER", barcodeArticleNumber: "YW-OTHER", platform: "Shein", storeName: "恩昭27" },
   { barcodeSkuid: "SKU-TARGET-RED", barcodeSkcid: "SKC-TARGET", storeName: "重复映射" },
   { barcodeSkuid: "SKU-MISSING-SKC", storeName: "缺少 SKC" },
@@ -55,8 +55,8 @@ assert.deepEqual(
   JSON.parse(JSON.stringify(mappings.map((item) => [item.platformSku, item.platformSkc, item.articleNumber]))),
   [
     ["SKU-OTHER", "SKC-OTHER", "YW-OTHER"],
-    ["SKU-TARGET-BLUE", "skc-target", "YW-672-LYYY"],
-    ["SKU-TARGET-RED", "SKC-TARGET", "YW-672-LYYY"],
+    ["SKU-TARGET-BLUE", "skc-target", "YW-672-MNNN"],
+    ["SKU-TARGET-RED", "SKC-TARGET", "YW-672-MNNN"],
   ],
 );
 
@@ -100,7 +100,7 @@ const mappingPartition = policy.partitionResultsByMapping([
     totalPrice: 64,
     unitCost: 3.2,
     supplierName: "完整预览供应商",
-    supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+    supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
     selectedRecordIds: ["PURCHASE-1"],
     sourceWarnings: ["existing_warning"],
     costWarnings: { count: 1, reasons: ["unit_price_one"], records: [{ recordId: "PURCHASE-0", unitPrice: 1, reasons: ["unit_price_one"] }] },
@@ -130,7 +130,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(evidenceOnlyResults)), [
     totalPrice: 64,
     unitCost: 3.2,
     supplierName: "完整预览供应商",
-    supplier1688Url: "https://detail.1688.com/offer/730242606884.html",
+    supplier1688Url: "https://detail.1688.com/offer/900000000011.html",
     selectedRecordIds: ["PURCHASE-1"],
     sourceWarnings: ["existing_warning", "evidence_only_warehouse_sku", "mapping_missing_for_warehouse_sku"],
     costWarnings: { count: 1, reasons: ["unit_price_one"], records: [{ recordId: "PURCHASE-0", unitPrice: 1, reasons: ["unit_price_one"] }] },
@@ -156,18 +156,18 @@ assert.deepEqual(JSON.parse(JSON.stringify(evidenceOnlyResults)), [
 ]);
 
 assert.equal(
-  policy.extractSupplier1688Url({ supplierUrl: "<a href=\"https://detail.1688.com/offer/730242606884.html?trace=erp\">供应商</a>" }),
-  "https://detail.1688.com/offer/730242606884.html",
+  policy.extractSupplier1688Url({ supplierUrl: "<a href=\"https://detail.1688.com/offer/900000000011.html?trace=erp\">供应商</a>" }),
+  "https://detail.1688.com/offer/900000000011.html",
 );
 assert.equal(
-  policy.extractSupplier1688Url({ offerId: "730242606884" }),
-  "https://detail.1688.com/offer/730242606884.html",
+  policy.extractSupplier1688Url({ offerId: "900000000011" }),
+  "https://detail.1688.com/offer/900000000011.html",
 );
 assert.equal(
   policy.extractSupplier1688Url({ href: "https://xinjie.1688.com/page/offerlist.htm?spm=erp" }),
   "https://xinjie.1688.com/page/offerlist.htm?spm=erp",
 );
-assert.equal(policy.extractSupplier1688Url({ href: "https://xinjie.1688.com.evil.example/offer/730242606884.html" }), "");
+assert.equal(policy.extractSupplier1688Url({ href: "https://xinjie.1688.com.evil.example/offer/900000000011.html" }), "");
 
 // Synthetic carrier fixtures validate transport; these do not claim real ERP
 // picture/specification aliases, which still require a purchase-detail response.
@@ -211,18 +211,18 @@ assert.equal(policy.purchaseImageUrl({ purchaseOrderId: "PO-1", purchaseCatalog,
 assert.equal(policy.normalizePurchaseCatalog({ lineNumber: Number.NaN }).lineNumber, null);
 assert.equal(policy.purchaseCatalogFromDetail({ imageUrl: "https://images.example.invalid/generic.jpg" }), null);
 const typedLinks = JSON.parse(JSON.stringify(policy.extractSupplier1688Links({
-  productUrl: "https://detail.1688.com/offer/730242606884.html?trace=erp",
+  productUrl: "https://detail.1688.com/offer/900000000011.html?trace=erp",
   storeUrl: "https://xinjie.1688.com/page/offerlist.htm",
 }, "供应商甲")));
 assert.deepEqual(typedLinks, [
-  { type: "product", url: "https://detail.1688.com/offer/730242606884.html", supplierName: "供应商甲" },
+  { type: "product", url: "https://detail.1688.com/offer/900000000011.html", supplierName: "供应商甲" },
   { type: "store", url: "https://xinjie.1688.com/page/offerlist.htm", supplierName: "供应商甲" },
 ]);
 assert.equal(policy.normalizeSupplier1688Links([{ type: "product", url: typedLinks[1].url }]).length, 0);
 assert.equal(policy.normalizeSupplier1688Links([{ type: "product", url: `https://attacker.example/?redirect=${typedLinks[0].url}` }]).length, 0);
 assert.deepEqual(JSON.parse(JSON.stringify(policy.extractSupplier1688Links({
   supplier1688Links: typedLinks,
-  _supplier1688Url: "https://detail.1688.com/offer/888888888888.html",
+  _supplier1688Url: "https://detail.1688.com/offer/900000000013.html",
 }, "不同供应商"))), typedLinks, "cached context and explicit supplier names must not be relabeled or recaptured");
 const pairedPreview = policy.previewForLedger([{ warehouseSku: "WH-PAIR" }], { warehouses: [{ warehouseSku: "WH-PAIR", purchaseRecords: [
   { recordId: "NEW", purchaseDate: "2026-09-02", quantity: 1, unitPrice: 2, supplierName: "供应商乙", supplier1688Url: "" },

@@ -68,7 +68,7 @@ describe("product editing workflow", () => {
     const { product } = await saveProductCatalogRecord({ draft: { name: "来源核对商品", platformSkc: "SKC-CATALOG", supplierName: "供应商甲", variants: [{ platformSku: "SKU-RED", attribute: "红色 · 大号" }] } });
     const fixture = erpProductCatalogFixture();
     fixture.purchaseRecords = [
-      { recordId: "DETAIL-A", purchaseOrderNo: "ORDER-A", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/1234567890.html", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-A", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
+      { recordId: "DETAIL-A", purchaseOrderNo: "ORDER-A", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://detail.1688.com/offer/900000000003.html", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-A", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
       { recordId: "DETAIL-B", purchaseOrderNo: "ORDER-B", warehouseSku: fixture.warehouseSku, supplierName: "供应商甲", supplier1688Url: "https://shop-a.1688.com/", purchaseCatalog: { supplierId: "SUP-1", purchaseOrderDetailId: "DETAIL-B", purchaseSpecificationAndModel1688: "颜色:红色", purchaseProportion1688: "1-1" } },
       { recordId: "DETAIL-C", purchaseOrderNo: "ORDER-C", warehouseSku: fixture.warehouseSku, supplierName: "供应商乙", supplier1688Url: "https://shop-b.1688.com/", purchaseCatalog: { supplierId: "SUP-2", purchaseOrderDetailId: "DETAIL-C", barcodeSkuid: "SKU-BLUE", purchaseSpecificationAndModel1688: "颜色:蓝色", purchaseProportion1688: "1-1" } },
     ];
@@ -112,7 +112,7 @@ describe("product editing workflow", () => {
   it('retains late links and suppliers while a manual title is unsaved', async () => {
     const { product } = await saveProductCatalogRecord({ draft: { name: '原始商品', platformSkc: 'SKC-CATALOG', variants: [{ platformSku: 'SKU-RED' }] } });
     const fixture = erpProductCatalogFixture();
-    const record = { recordId: 'LINK-A', warehouseSku: fixture.warehouseSku, supplierName: '甲', supplier1688Url: 'https://detail.1688.com/offer/1234567890.html', purchaseCatalog: { supplierId: 'SUP-A' } };
+    const record = { recordId: 'LINK-A', warehouseSku: fixture.warehouseSku, supplierName: '甲', supplier1688Url: 'https://detail.1688.com/offer/900000000003.html', purchaseCatalog: { supplierId: 'SUP-A' } };
     fixture.purchaseRecords = [record];
     const id = await db.erpCostRows.add(fixture);
     await mount(`/products/edit?product=${product.id}`);
@@ -204,10 +204,10 @@ describe("product editing workflow", () => {
 
   it("requires a title candidate and explicit identity-branch exclusion, then saves the clear SKU in one step", async () => {
     const conflict = { platformSku: "CONFLICT-SKU", reason: "relationship_conflict" };
-    editorSnapshotOverride.value = { mode: "new", product: null, capture: null, draft: { name: "", platformSkc: "SAMPLE-SKC", productStatus: "on_sale", variants: [{ platformSku: "CLEAR-SKU" }], suppliers: [], identityConflicts: [conflict] }, prefill: { source: "erp", skuCount: 1, warnings: [], sources: [], purchases: [], titleCandidates: [{ name: "收腰神器", rawNames: ["1个蓝色收腰神器-HHX sh680"] }, { name: "备用毛巾扣", rawNames: ["备用毛巾扣"] }], needsTitleChoice: true, identityConflicts: [conflict] } };
+    editorSnapshotOverride.value = { mode: "new", product: null, capture: null, draft: { name: "", platformSkc: "SAMPLE-SKC", productStatus: "on_sale", variants: [{ platformSku: "CLEAR-SKU" }], suppliers: [], identityConflicts: [conflict] }, prefill: { source: "erp", skuCount: 1, warnings: [], sources: [], purchases: [], titleCandidates: [{ name: "星云收纳盒", rawNames: ["1个蓝色星云收纳盒-FFV sh901"] }, { name: "备用挂绳扣", rawNames: ["备用挂绳扣"] }], needsTitleChoice: true, identityConflicts: [conflict] } };
     await mount("/products/edit?skc=SAMPLE-SKC");
     expect(input("商品名称").value).toBe(""); expect(button("保存预存资料").disabled).toBe(true);
-    await click("收腰神器"); expect(input("商品名称").value).toBe("收腰神器");
+    await click("星云收纳盒"); expect(input("商品名称").value).toBe("星云收纳盒");
     expect(button("保存预存资料").disabled).toBe(true);
     await click("排除此冲突分支"); expect(button("保存预存资料").disabled).toBe(false);
     await click("保存预存资料"); await waitFor(async () => await db.products.count() === 1);

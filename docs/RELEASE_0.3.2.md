@@ -2,7 +2,7 @@
 
 2026-09-29 11:39:55（UTC+8），[v0.3.2](https://github.com/love70805/lworkstation/releases/tag/v0.3.2)已公开为稳定 GitHub Latest，draft=false、prerelease=false。基线远端 main `ff74ef9f7d01f9309af24566ca6b2ff3eb46355a`（0.3.1 / PR #124），应用工作区 d308 / `codex/release-0-3-2`。软件提交 `57c1d07b5fecd67bc81c37fc01a597d568348b66`，标签固定主线 `67eec80dcfdfe5491bc941d7b49c22c87d860c78`。[关联契约](integration/RELEASE_0_3_2_SHARED_1688.md)。
 
-本机最终候选、源码和脱敏证据已复制并回读到主仓库 `C:/Users/Administrator/Desktop/Lworkstation/releases/candidates/0.3.2/` 及 `archive/release-0.3.2/`。四个匿名下载原件另在候选目录 `public/`，与公开资产及候选逐项核对。候选验收、PR/main CI 集成、公开匿名资产及真实更新通道回读均通过。未安装、未改真实库或源文件。
+本机最终候选、源码和脱敏证据已复制并回读到主仓库 `releases/candidates/0.3.2/` 及 `archive/release-0.3.2/`。四个匿名下载原件另在候选目录 `public/`，与公开资产及候选逐项核对。候选验收、PR/main CI 集成、公开匿名资产及真实更新通道回读均通过。未安装、未改真实库或源文件。
 
 ## 修复与使用
 

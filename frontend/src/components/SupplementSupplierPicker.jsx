@@ -13,7 +13,7 @@ export default function SupplementSupplierPicker({ markers, selection, search, o
     onChange(markers.filter(value => next.has(value)));
   }
   return <>
-    <label>搜索货号<input type="search" value={search} disabled={disabled} placeholder="例如 HHHX，自动全选匹配货号" onChange={event => {
+    <label>搜索货号<input type="search" value={search} disabled={disabled} placeholder="例如 FFFV，自动全选匹配货号" onChange={event => {
       const value = event.target.value, term = value.trim().normalize('NFKC');
       onSearch(value);
       if (term) onChange(markers.filter(marker => marker.includes(term)));

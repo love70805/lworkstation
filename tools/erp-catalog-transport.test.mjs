@@ -114,7 +114,7 @@ export async function verifyErpCatalogTransport({
     vm.runInContext(await fs.readFile(path.join(sourceRoot, "background.js"), "utf8"), worker);
     const submitted = [], catalogSubmitted = [], submissionOrder = [];
     window = new Window({ url: erpUrl });
-    window.document.body.innerHTML = '<table><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/999999999999.html">供应商甲</a></td></tr><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/888888888888.html">供应商甲</a></td></tr></table>';
+    window.document.body.innerHTML = '<table><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/900000000015.html">供应商甲</a></td></tr><tr><td data-field="supplierName"><a id="supplierName1688" href="https://detail.1688.com/offer/900000000013.html">供应商甲</a></td></tr></table>';
     const sender = { frameId: 0, url: erpUrl, tab: { url: erpUrl } };
     window.chrome = { runtime: { lastError: null, sendMessage(message, callback) {
       // Assert dispatch order, not the nondeterministic completion order of two HTTP deliveries.
@@ -145,7 +145,7 @@ export async function verifyErpCatalogTransport({
       let data;
       if (url.pathname === "/purchase/purchase/v1/purchase-order-page") {
         data = [
-          { purchaseOrderId: "PO-NEW", purchaseOrderNo: "PO-NEW", purchaseStatus: 4, paymentStatus: 4, purchaseOrderStatus1688: 2, supplierName: "供应商甲", productLink1688: "https://detail.1688.com/offer/777777777777.html", storeUrl: "https://synthetic-a.1688.com/" },
+          { purchaseOrderId: "PO-NEW", purchaseOrderNo: "PO-NEW", purchaseStatus: 4, paymentStatus: 4, purchaseOrderStatus1688: 2, supplierName: "供应商甲", productLink1688: "https://detail.1688.com/offer/900000000012.html", storeUrl: "https://synthetic-a.1688.com/" },
           { purchaseOrderId: "PO-OLD", purchaseOrderNo: "PO-OLD", supplierName: "供应商甲" },
           ...(includeCancelled ? [{ purchaseOrderId: 'PO-CANCELLED', purchaseOrderNo: 'PO-CANCELLED', purchaseStatus: 2, purchaseOrderStatus1688: 4 }] : []),
         ];
@@ -157,22 +157,22 @@ export async function verifyErpCatalogTransport({
             purchaseProportion1688: "1-2",
             picturesLinking: "https://images.example.invalid/catalog-red.jpg",
             pictureLink1688: "https://images.example.invalid/1688-red.jpg",
-            productLink1688: "https://detail.1688.com/offer/111111111111.html?trace=erp",
-            purchasingLink1688: "https://detail.1688.com/offer/111111111111.html",
+            productLink1688: "https://detail.1688.com/offer/900000000001.html?trace=erp",
+            purchasingLink1688: "https://detail.1688.com/offer/900000000001.html",
           }),
           detail("DETAIL-BLUE", "WH-BLUE", "PO-NEW", 1, "2026-09-20 10:00:00", 5, {
             pictureLink1688: "https://images.example.invalid/1688-blue.jpg",
             purchaseSpecificationAndModel1688: "采购蓝色规格（仅参考）", model1688: "蓝色",
             purchaseProportion1688: "2-1",
-            productLink1688: "https://detail.1688.com/offer/222222222222.html",
-            purchasingLink1688: "https://detail.1688.com/offer/222222222222.html",
+            productLink1688: "https://detail.1688.com/offer/900000000006.html",
+            purchasingLink1688: "https://detail.1688.com/offer/900000000006.html",
           }),
           detail("DETAIL-NO-LINK", "WH-CATALOG", "PO-NEW", 2, "2026-09-15 10:00:00", 5),
           ...(includeCancelled ? ['WH-CATALOG', 'WH-BLUE'].map(warehouse => detail('CANCELLED-' + warehouse, warehouse, 'PO-NEW', 3, '2026-09-30 23:59:59', 99, { purchaseOrderStatus1688: '4' })) : []),
         ] : [detail("DETAIL-OLD", "WH-CATALOG", "PO-OLD", 0, "2026-09-10 10:00:00", 4, {
           pictureLink1688: "https://images.example.invalid/1688-old.jpg",
-          productLink1688: "https://detail.1688.com/offer/333333333333.html",
-          purchasingLink1688: "https://detail.1688.com/offer/333333333333.html",
+          productLink1688: "https://detail.1688.com/offer/900000000008.html",
+          purchasingLink1688: "https://detail.1688.com/offer/900000000008.html",
         })];
       } else if (url.pathname === "/purchase/product/v1/product-page") {
         data = [{ itemId: 'WH-CATALOG' }, { itemId: 'WH-BLUE' }];
@@ -257,8 +257,8 @@ export async function verifyErpCatalogTransport({
     assert.equal(red.catalogMappings[0].storeName, "店铺甲");
     assert.equal(red.catalogMappings[0].articleNumber, "GOODS-1");
     assert.equal(red.supplierName, "供应商甲");
-    assert.equal(red.supplier1688Url, "https://detail.1688.com/offer/111111111111.html");
-    assert.equal(blue.supplier1688Url, "https://detail.1688.com/offer/222222222222.html");
+    assert.equal(red.supplier1688Url, "https://detail.1688.com/offer/900000000001.html");
+    assert.equal(blue.supplier1688Url, "https://detail.1688.com/offer/900000000006.html");
     assert.ok(red.supplier1688Links.every((link) => link.url !== blue.supplier1688Url), "a same-supplier sibling line's product link cannot be borrowed");
     assert.equal(red.purchaseCatalog.purchaseOrderDetailId, "DETAIL-NEW");
     assert.equal(red.purchaseCatalog.purchaseSpecificationAndModel1688, "采购红色规格(仅参考)");
@@ -283,7 +283,7 @@ export async function verifyErpCatalogTransport({
     assert.equal(missing.purchaseCatalog.purchaseOrderDetailId, "DETAIL-NO-LINK");
     assert.equal(missing.purchaseCatalog.lineNumber, "2");
     assert.equal(oldest.supplierName, "供应商甲");
-    assert.equal(oldest.supplier1688Url, "https://detail.1688.com/offer/333333333333.html");
+    assert.equal(oldest.supplier1688Url, "https://detail.1688.com/offer/900000000008.html");
     assert.equal(oldest.imageUrl, "https://images.example.invalid/1688-old.jpg");
     assert.equal(oldest.purchaseOrderId, "PO-OLD");
     assert.equal(red.previewUnitCost, 5, "catalog transport must not alter weighted cost arithmetic");
@@ -297,7 +297,7 @@ export async function verifyErpCatalogTransport({
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
     const persisted = await readInboxRecords(spoolPath);
     assert.deepEqual(persisted.find((record) => record.kind === "batch" && record.workspaceId === workspaceId).envelope.batch.rows, batch.rows);
-    assert.doesNotMatch(JSON.stringify(batch), /999999999999|888888888888|777777777777/, "global DOM and order-level product links must never enter detail evidence");
+    assert.doesNotMatch(JSON.stringify(batch), /900000000015|900000000013|900000000012/, "global DOM and order-level product links must never enter detail evidence");
 
     // Synthetic non-empty values for the observed barcode fields check source
     // ownership without changing the nominal two-warehouse return fixture.
@@ -316,7 +316,7 @@ export async function verifyErpCatalogTransport({
     history.selectedForPreview = false;
     history.purchaseCatalog.purchaseOrderDetailId = "DETAIL-HISTORY";
     history.purchaseCatalog.pictureLink1688 = "https://images.example.invalid/1688-history.jpg";
-    history.supplier1688Url = "https://detail.1688.com/offer/444444444444.html";
+    history.supplier1688Url = "https://detail.1688.com/offer/900000000009.html";
     history.supplier1688Links = [{ type: "product", url: history.supplier1688Url, supplierName: "供应商乙" }];
     sharedRecords.push(history);
     for (const record of sharedRecords) {

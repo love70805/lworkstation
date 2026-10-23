@@ -13,9 +13,9 @@ describe("selection reference trusted ledger snapshot", () => {
     const validated = validateSalesRows([
       { SKC: "SKC-TEST", 平台SKU: "SKU-TEST-RED", 属性集: "多色-红色", 数量: 2, 单价: 10 },
       { SKC: "SKC-TEST", 平台SKU: "SKU-TEST-BLUE", 属性集: "多色-蓝色", 数量: 3, 单价: 10 },
-    ], mapping, { defaultStore: "680店" });
+    ], mapping, { defaultStore: "901店" });
     expect(validated.errors).toEqual([]);
-    await saveSalesImport({ fileName: "synthetic-ledger.xlsx", mapping, period: "2026-08", storeName: "680店", rows: validated.rows,
+    await saveSalesImport({ fileName: "synthetic-ledger.xlsx", mapping, period: "2026-08", storeName: "901店", rows: validated.rows,
       summary: { sourceRowCount: validated.sourceRowCount, errorCount: 0, ignoredCount: 0 } });
     await db.erpCostRows.bulkAdd(validated.rows.map(row => ({ workspaceId: DEFAULT_WORKSPACE_ID, platformSku: row.platformSku, unitCost: 4.59 })));
     const references = buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
@@ -33,7 +33,7 @@ describe("selection reference trusted ledger snapshot", () => {
       { id: "bb", workspaceId: "workspace-b", ledgerId: "lb", status: "completed" },
       { id: "bad", workspaceId: "workspace-a", ledgerId: "la", status: "failed" },
     ]);
-    const base = { workspaceId: "workspace-a", ledgerId: "la", batchId: "ba", platformSku: "SKU-A", platformSkc: "SKC-1", attribute: "红色", store: "680店", sourceSheet: "台账变动明细", sourceRow: 2 };
+    const base = { workspaceId: "workspace-a", ledgerId: "la", batchId: "ba", platformSku: "SKU-A", platformSkc: "SKC-1", attribute: "红色", store: "901店", sourceSheet: "台账变动明细", sourceRow: 2 };
     await db.salesRows.bulkAdd([
       base, { ...base, platformSku: "SKU-B", attribute: "蓝色", sourceRow: 3 },
       { ...base, workspaceId: "workspace-b", ledgerId: "lb", batchId: "bb", platformSkc: "OTHER" },

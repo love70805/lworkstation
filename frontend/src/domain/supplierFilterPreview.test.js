@@ -12,16 +12,16 @@ function file(id, store, source, selected = []) {
 }
 describe('read-only supplier filter preview', () => {
   it('counts full goods codes per store, real source rows and global identifier unions without touching source', () => {
-    const first = [raw('0001-LBY', 'ＳＫＣ-1', '００１'), raw('0001-LBY', 'SKC-1', '001'), raw('0002-LBY', 'SKC-1', '002'), raw('0002-LBY', 'ignored', 'ignored', '2026-09-01', { 类型: '盘亏' }), raw('0002-LBY', 'error', 'bad', '2026-09-01', { 数量: '错误' })];
-    const files = [file('A', '甲', first), file('B', '乙', [raw('0001-LBY', 'SKC-1', '001')])], snapshot = JSON.stringify(files);
+    const first = [raw('0001-KPX', 'ＳＫＣ-1', '００１'), raw('0001-KPX', 'SKC-1', '001'), raw('0002-KPX', 'SKC-1', '002'), raw('0002-KPX', 'ignored', 'ignored', '2026-09-01', { 类型: '盘亏' }), raw('0002-KPX', 'error', 'bad', '2026-09-01', { 数量: '错误' })];
+    const files = [file('A', '甲', first), file('B', '乙', [raw('0001-KPX', 'SKC-1', '001')])], snapshot = JSON.stringify(files);
     const candidates = supplierFilterCandidates(files, { workspaceId: 'W', period: '2026-09' });
-    const preview = supplierFilterPreview(candidates, { selected: { A: ['0001-LBY','0002-LBY'], B: ['0001-LBY'] }, applied: { A: ['0001-LBY'], B: [] }, rule: { aliases: ['LBY','BY'], mode: 'fuzzy' } });
+    const preview = supplierFilterPreview(candidates, { selected: { A: ['0001-KPX','0002-KPX'], B: ['0001-KPX'] }, applied: { A: ['0001-KPX'], B: [] }, rule: { aliases: ['KPX','PX'], mode: 'fuzzy' } });
     expect(preview.batch).toMatchObject({ total: 3, selected: 3, applied: 1, added: 2, removed: 0, sourceRowCount: 6, skcCount: 1, skuCount: 2 });
     expect(preview.stores.map(row => row.selected)).toEqual([2, 1]);
     expect(preview.aliases.map(row => row.count)).toEqual([3, 3]);
     expect(new Set(preview.rows.map(row => row.key)).size).toBe(3);
     expect(JSON.stringify(files)).toBe(snapshot);
-    expect(preview.rows.find(row => row.supplierNumber === '0002-LBY')).toMatchObject({ sourceRowCount: 3, skcCount: 1, skuCount: 1 });
+    expect(preview.rows.find(row => row.supplierNumber === '0002-KPX')).toMatchObject({ sourceRowCount: 3, skcCount: 1, skuCount: 1 });
   });
   it('reuses monthly evidence, marks unmapped/undated identities and never assigns an unknown date to a month', () => {
     const files = [file('A', '甲', [raw('货号', 'SEP', '1'), raw('货号', 'AUG', '2', '2026-08-01'), raw('货号', 'UNDATED', '3', '')])];
@@ -33,13 +33,13 @@ describe('read-only supplier filter preview', () => {
     expect(supplierFilterCandidates([unmapped])[0]).toMatchObject({ mappingPending: true, skcIncomplete: true, skuIncomplete: true });
   });
   it('keeps identity strings and leading zeros even when rules fold widths/case', () => {
-    const source = [raw('０００１-ｌｂｙ', '父', '００１')];
-    const validation = validateSalesRows(source, mapping, { defaultStore: '甲', supplierNumbers: ['０００１-ｌｂｙ'] });
-    expect(validation.rows[0]).toMatchObject({ supplierNumber: '０００１-ｌｂｙ', platformSku: '００１' });
+    const source = [raw('０００１-ｋｐｘ', '父', '００１')];
+    const validation = validateSalesRows(source, mapping, { defaultStore: '甲', supplierNumbers: ['０００１-ｋｐｘ'] });
+    expect(validation.rows[0]).toMatchObject({ supplierNumber: '０００１-ｋｐｘ', platformSku: '００１' });
     const rows = supplierFilterCandidates([file('A','甲',source)], { workspaceId: 'W', period: '2026-09' });
-    const preview = supplierFilterPreview(rows, { rule: { aliases: ['LBY'], mode: 'fuzzy' }, selected: { A: [] }, applied: { A: [] } });
+    const preview = supplierFilterPreview(rows, { rule: { aliases: ['KPX'], mode: 'fuzzy' }, selected: { A: [] }, applied: { A: [] } });
     expect(preview.rows[0]).toMatchObject({ matched: true, selected: false });
-    expect(supplierSelectionCsv([{ ...preview.rows[0], selected: true }])).toContain('"０００１-ｌｂｙ"');
+    expect(supplierSelectionCsv([{ ...preview.rows[0], selected: true }])).toContain('"０００１-ｋｐｘ"');
   });
   it('marks missing source identifiers and duplicate mappings instead of presenting inferred counts', () => {
     const missing = supplierFilterCandidates([file('A','甲',[raw('货号','父','')])],{period:'2026-09'});
@@ -61,27 +61,27 @@ describe('read-only supplier filter preview', () => {
     expect(supplierSelectionCsv(preview.rows).split('\r\n')).toHaveLength(3);
   });
   it('preserves current same-rule exceptions, applies only target-group compatible exceptions, and keeps zero matches empty', () => {
-    const choices = ['A-LBY','B-LBY','A-OTHER'], files = [{itemId:'A',status:'parsed',storeName:'甲',facets:{supplierNumbers:choices}}];
-    const group = { id:'G',aliases:['LBY'],mode:'fuzzy' }, other = { id:'O',aliases:['OTHER'],mode:'fuzzy' };
-    const state = {groups:[group,other],overrides:{'甲':{groupId:'G',exclude:['B-LBY'],include:['A-OTHER']}}};
-    expect(supplierRuleSelection(files,group,{previousRule:group,selected:{A:['A-LBY','A-OTHER']},savedState:state})).toEqual({A:['A-LBY','A-OTHER']});
-    expect(supplierRuleSelection(files,other,{previousRule:group,selected:{A:['A-LBY','A-OTHER']},savedState:state})).toEqual({A:['A-OTHER']});
+    const choices = ['A-KPX','B-KPX','A-OTHER'], files = [{itemId:'A',status:'parsed',storeName:'甲',facets:{supplierNumbers:choices}}];
+    const group = { id:'G',aliases:['KPX'],mode:'fuzzy' }, other = { id:'O',aliases:['OTHER'],mode:'fuzzy' };
+    const state = {groups:[group,other],overrides:{'甲':{groupId:'G',exclude:['B-KPX'],include:['A-OTHER']}}};
+    expect(supplierRuleSelection(files,group,{previousRule:group,selected:{A:['A-KPX','A-OTHER']},savedState:state})).toEqual({A:['A-KPX','A-OTHER']});
+    expect(supplierRuleSelection(files,other,{previousRule:group,selected:{A:['A-KPX','A-OTHER']},savedState:state})).toEqual({A:['A-OTHER']});
     expect(supplierRuleSelection(files,{aliases:['NOT-FOUND'],mode:'fuzzy'},{previousRule:group,selected:{A:choices},savedState:state})).toEqual({A:[]});
     expect(supplierRuleSelection(files,{...group,aliases:['OTHER']},{savedState:state})).toEqual({A:['A-OTHER']});
-    expect(supplierRuleSelection(files,group,{savedState:state,preserve:false})).toEqual({A:['A-LBY','B-LBY']});
-    expect(supplierRuleSelection([...files,{...files[0],itemId:'NEW',storeName:'乙'}],group,{previousRule:group,selected:{A:['A-LBY']},savedState:state})).toEqual({A:['A-LBY'],NEW:['A-LBY','B-LBY']});
+    expect(supplierRuleSelection(files,group,{savedState:state,preserve:false})).toEqual({A:['A-KPX','B-KPX']});
+    expect(supplierRuleSelection([...files,{...files[0],itemId:'NEW',storeName:'乙'}],group,{previousRule:group,selected:{A:['A-KPX']},savedState:state})).toEqual({A:['A-KPX'],NEW:['A-KPX','B-KPX']});
   });
   it('expands profit groups only against current ledger/store and keeps null and empty at the caller boundary', () => {
-    const rule = {id:'G',aliases:['LBY'],mode:'fuzzy'}, state = {groups:[rule],overrides:{'甲':{groupId:'G',exclude:['A-LBY'],include:['MANUAL']}}};
-    const rows = [{store:'甲',supplierNumber:'A-LBY'},{store:'甲',supplierNumber:'MANUAL'},{store:'乙',supplierNumber:'B-LBY'}];
+    const rule = {id:'G',aliases:['KPX'],mode:'fuzzy'}, state = {groups:[rule],overrides:{'甲':{groupId:'G',exclude:['A-KPX'],include:['MANUAL']}}};
+    const rows = [{store:'甲',supplierNumber:'A-KPX'},{store:'甲',supplierNumber:'MANUAL'},{store:'乙',supplierNumber:'B-KPX'}];
     expect(expandSupplierScopeGroup(rows,rule,state,'甲')).toEqual(['MANUAL']);
-    expect(expandSupplierScopeGroup(rows,rule,state)).toEqual(['B-LBY','MANUAL']);
+    expect(expandSupplierScopeGroup(rows,rule,state)).toEqual(['B-KPX','MANUAL']);
     expect(expandSupplierScopeGroup(rows,{aliases:['absent']},state)).toEqual([]);
   });
   it('preserves a same-number manual exclusion in only its own store when expanding a group', () => {
-    const rule = {id:'G',aliases:['LBYY'],mode:'fuzzy'}, state = {groups:[rule],overrides:{'甲':{groupId:'G',exclude:['A-LBY'],include:[]}}};
-    const rows = [{store:'甲',supplierNumber:'A-LBY'},{store:'乙',supplierNumber:'A-LBY'},{store:'乙',supplierNumber:'A-LBY'}];
-    expect(expandSupplierScopeGroupEntries(rows,rule,state)).toEqual([{store:'乙',supplierNumber:'A-LBY'}]);
+    const rule = {id:'G',aliases:['KPXX'],mode:'fuzzy'}, state = {groups:[rule],overrides:{'甲':{groupId:'G',exclude:['A-KPX'],include:[]}}};
+    const rows = [{store:'甲',supplierNumber:'A-KPX'},{store:'乙',supplierNumber:'A-KPX'},{store:'乙',supplierNumber:'A-KPX'}];
+    expect(expandSupplierScopeGroupEntries(rows,rule,state)).toEqual([{store:'乙',supplierNumber:'A-KPX'}]);
     expect(expandSupplierScopeGroupEntries(rows,rule,state,'甲')).toEqual([]);
   });
 });
