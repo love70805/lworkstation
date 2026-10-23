@@ -1,10 +1,11 @@
 import { normalizeImportKeywords, normalizeImportNumbers } from '../lib/importSupplierPreferences';
 import { matchImportNumberRule, restoreSupplierGroupSelection } from '../lib/importSupplierGroups';
+import { createSupplierMatcher, supplierRecognitionMode } from './supplierRecognition';
 
 const text = value => String(value ?? '').trim();
 const canonical = value => text(value).normalize('NFKC').toUpperCase();
 export const supplierEntryKey = (workspaceId, period, store, supplierNumber) => JSON.stringify([workspaceId ?? '', period ?? '', canonical(store), text(supplierNumber)]);
-export const supplierRuleKey = rule => JSON.stringify([rule?.id ?? '', rule?.mode ?? 'suffix', [...(rule?.aliases ?? [])].map(canonical).sort()]);
+export const supplierRuleKey = rule => JSON.stringify([rule?.id ?? '', supplierRecognitionMode(rule?.mode), normalizeImportKeywords(rule?.aliases)]);
 
 // Built in the import Worker. Source counts include excluded/error rows; only
 // validated evidence contributes identifiers. No amount or cost leaves here.
@@ -79,12 +80,11 @@ export function supplierFilterCandidates(files, { workspaceId = '', period = '' 
 export function supplierFilterPreview(candidates, { selected = {}, applied = {}, rule = null, store = 'all' } = {}) {
   const sets = Object.fromEntries(Object.entries(selected).map(([key, values]) => [key, new Set(values)]));
   const appliedSets = Object.fromEntries(Object.entries(applied).map(([key, values]) => [key, new Set(values)]));
-  const aliases = normalizeImportKeywords(rule?.aliases), matchCache = new Map();
+  const aliases = normalizeImportKeywords(rule?.aliases), matcher = createSupplierMatcher(aliases, rule?.mode), matchCache = new Map();
   const rows = candidates.map(row => {
     const chosen = row.itemIds.every(id => sets[id]?.has(row.supplierNumber)), wasChosen = row.itemIds.every(id => appliedSets[id]?.has(row.supplierNumber));
     if (!matchCache.has(row.supplierNumber)) {
-      const number = canonical(row.supplierNumber);
-      matchCache.set(row.supplierNumber, aliases.filter(alias => rule?.mode === 'exact' ? number === alias : rule?.mode === 'contains' ? number.includes(alias) : number.endsWith(alias)));
+      matchCache.set(row.supplierNumber, matcher.hits(row.supplierNumber));
     }
     const hits = matchCache.get(row.supplierNumber), matched = hits.length > 0;
     return { ...row, selected: chosen, applied: wasChosen, matched, aliases: hits, change: chosen === wasChosen ? 'unchanged' : chosen ? 'added' : 'removed',
@@ -104,9 +104,10 @@ export function supplierFilterPreview(candidates, { selected = {}, applied = {},
     stores: [...stores].map(([store, values]) => ({ store, ...summarize(values) })),
     aliases: aliases.map(alias => ({ alias, count: rows.filter(row => (store === 'all' || row.store === store) && row.aliases.includes(alias)).length })) };
 }
-export function filterSupplierCandidates(rows, { query = '', store = 'all', view = 'all' } = {}) {
+export function filterSupplierCandidates(rows, { query = '', store = 'all', view = 'all', mode = 'fuzzy' } = {}) {
   const search = canonical(query);
-  return rows.filter(row => (store === 'all' || row.store === store) && (!search || (row.searchText ?? canonical(`${row.supplierNumber} ${row.store ?? ''}`)).includes(search))
+  const matcher = createSupplierMatcher([query], mode);
+  return rows.filter(row => (store === 'all' || row.store === store) && (!search || matcher.matches(row.supplierNumber) || (mode !== 'exact' && (row.searchText ?? canonical(`${row.supplierNumber} ${row.store ?? ''}`)).includes(search)))
     && (view === 'all' || view === 'selected' && row.selected || view === 'unselected' && !row.selected || view === 'matched' && row.matched || view === 'added' && row.change === 'added'));
 }
 export function changeSupplierSelection(selected, rows, checked) {
@@ -131,13 +132,17 @@ export function supplierRuleSelection(files, rule, { previousRule, selected = {}
     return [file.itemId, choices.filter(value => matching.has(value))];
   }));
 }
-export function expandSupplierScopeGroup(rows, rule, savedState, store = 'all') {
+export function expandSupplierScopeGroupEntries(rows, rule, savedState, store = 'all') {
   const stores = new Map();
   for (const row of rows) if (row.supplierNumber && (store === 'all' || row.store === store)) {
     const choices = stores.get(row.store) ?? new Set(); choices.add(row.supplierNumber); stores.set(row.store, choices);
   }
-  return normalizeImportNumbers([...stores].flatMap(([storeName, choices]) => savedState?.groups?.some(group => supplierRuleKey(group) === supplierRuleKey(rule))
-    ? restoreSupplierGroupSelection([...choices], rule, savedState, storeName) : matchImportNumberRule([...choices], rule)));
+  return [...stores].flatMap(([storeName, choices]) => (savedState?.groups?.some(group => supplierRuleKey(group) === supplierRuleKey(rule))
+    ? restoreSupplierGroupSelection([...choices], rule, savedState, storeName) : matchImportNumberRule([...choices], rule))
+    .map(supplierNumber => ({ store: storeName, supplierNumber })));
+}
+export function expandSupplierScopeGroup(rows, rule, savedState, store = 'all') {
+  return normalizeImportNumbers(expandSupplierScopeGroupEntries(rows, rule, savedState, store).map(entry => entry.supplierNumber));
 }
 export function supplierSelectionCsv(rows) {
   const cell = value => `"${String(value ?? '').replace(/^[=+\-@\t\r]/, "'$&").replaceAll('"', '""')}"`;

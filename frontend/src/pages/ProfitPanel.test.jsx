@@ -7,8 +7,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ProfitWorkspaceContent } from "./ProfitPanel";
 import { ToastProvider } from "../components/UI";
 import { clearProfitViewState } from '../lib/profitViewState';
+import { buildProfitHref, readProfitFilter } from '../lib/profitFilter';
 
-const mocks = vi.hoisted(() => ({ updateRate: vi.fn(), reopen: vi.fn(), status: "cost_pending" }));
+const mocks = vi.hoisted(() => ({ updateRate: vi.fn(), reopen: vi.fn(), exportWorkbook:vi.fn(), status: "cost_pending" }));
+vi.mock('../lib/spreadsheetExport',()=>({exportWorkbook:mocks.exportWorkbook}));
 vi.mock("../data/database", () => ({ updateLedgerWarehouseRate: mocks.updateRate, reopenLedgerForCostCorrection: mocks.reopen }));
 const snapshots = new Map();
 function snapshotForStatus() {
@@ -25,6 +27,7 @@ beforeEach(async () => {
   clearProfitViewState();
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear(); snapshots.clear(); mocks.status = "cost_pending"; mocks.updateRate.mockReset().mockResolvedValue({}); mocks.reopen.mockReset().mockResolvedValue({});
+  mocks.exportWorkbook.mockReset().mockResolvedValue(undefined);
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
 });
@@ -96,6 +99,26 @@ it("opens the cost details from the missing-cost action", async () => {
   await act(async () => findButton("填写人工成本").click());
   expect(details.open).toBe(true);
   expect(container.querySelector(".profit-table-panel")).not.toBeNull();
+});
+it('retains same-number store exclusions in profit display, saved filters and exported rows', async()=>{
+  await act(async()=>root.unmount());
+  mocks.status='finalized';
+  const base=snapshotForStatus();
+  const profitLines=['甲','乙'].map((store,index)=>({...base.profitLines[0],id:index,store,platformSku:`SKU-${index}`,supplierNumber:'A-LBY'}));
+  snapshots.set('finalized',{...base,profitLines});
+  const supplierStoreSelection=[{store:'乙',supplierNumber:'A-LBY'}];
+  const href=buildProfitHref({ledgerId:'L',workspaceId:'W',supplierSelection:['A-LBY'],supplierStoreSelection});
+  root=createRoot(container);
+  await act(async()=>root.render(<MemoryRouter initialEntries={[href]}><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+  const details=[...container.querySelectorAll('details')].find(element=>element.querySelector('summary')?.textContent.startsWith('查看利润明细'));
+  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
+  await act(async()=>{for(const group of container.querySelectorAll('.profit-skc-group')){group.open=true;group.dispatchEvent(new Event('toggle'));}});
+  expect(container.textContent).toContain('SKU-1');
+  expect(container.textContent).not.toContain('SKU-0');
+  expect(readProfitFilter(new URLSearchParams(),'L').supplierStoreSelection).toEqual(supplierStoreSelection);
+  await act(async()=>findButton('导出旧账本').click());
+  expect(mocks.exportWorkbook).toHaveBeenCalledOnce();
+  expect(mocks.exportWorkbook.mock.calls[0][0].filter(row=>row.SKU).map(row=>row.SKU)).toEqual(['SKU-1']);
 });
 it('keeps the details and search field open while filters change', async () => {
  const details = [...container.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.startsWith('查看利润明细'));

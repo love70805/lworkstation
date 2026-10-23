@@ -7,6 +7,7 @@ import { summarizeLedgerRows } from "../domain/ledgerImport";
 import { buildSyncRecoveryPayload, replaySyncRecoveryPayload } from "../domain/syncRecovery";
 import { createImportStage, appendImportStage, sealImportStage, clearImportStages } from '../lib/salesImportStage';
 import { decodeSalesRowsAuditSnapshot, SALES_ROWS_AUDIT_FORMAT, SALES_ROWS_AUDIT_MIN_ROWS } from '../domain/salesRowsAuditSnapshot';
+import { matchImportNumberRule } from '../lib/importSupplierGroups';
 
 const period = "2026-08";
 const mapping = { platformSku: "SKU", platformSkc: "SKC", quantity: "数量", amount: "金额", directPenalty: "罚款" };
@@ -38,6 +39,26 @@ beforeEach(async () => { await db.delete(); await db.open(); });
 afterEach(async () => { vi.restoreAllMocks(); db.close(); await db.delete(); });
 
 describe("同月多店铺原子台账导入", () => {
+  it('commits only original full supplier numbers selected by fuzzy recognition', async () => {
+    const source = [
+      { SKU: '0001', SKC: '父1', 货号: '0001-LBY', 数量: '2', 金额: '10' },
+      { SKU: '0002', SKC: '父2', 货号: '０００２-ｌｂｙｙ', 数量: '3', 金额: '15' },
+      { SKU: '0003', SKC: '父3', 货号: '0003-LBZ', 数量: '4', 金额: '20' },
+    ];
+    const supplierMapping = { ...mapping, supplierNumber: '货号' };
+    const numbers = matchImportNumberRule(source.map(row => row.货号), { aliases: ['LBYY'], mode: 'fuzzy' });
+    const filterOptions = { defaultStore: '识别店', supplierNumbers: numbers };
+    const validated = validateSalesRows(source, supplierMapping, filterOptions);
+    expect(validated.errors).toEqual([]);
+    expect(validated.ignored).toHaveLength(1);
+    const result = await commit([{ ...file('识别店'), mapping: supplierMapping, filterOptions, rows: validated.rows,
+      summary: { sourceRowCount: 3, errorCount: 0, ignoredCount: 1 } }]);
+    const rows = await db.salesRows.toArray();
+    expect(rows.map(row => row.supplierNumber)).toEqual(['0001-LBY', '０００２-ｌｂｙｙ']);
+    expect(rows.map(row => row.platformSku)).toEqual(['0001', '0002']);
+    expect(result.finalSummary.revenue).toBe(25);
+  });
+
   it('stores one compact audit per large source and roundtrips JSON backups and sync recovery without schema changes', async () => {
     const item = largeFile('大店');
     const result = await commit([item, file('小店')]);

@@ -7,7 +7,7 @@ import { readSupplierGroups } from '../lib/importSupplierGroups';
 import { changeSupplierSelection, supplierFilterCandidates, supplierFilterPreview, supplierRuleKey, supplierRuleSelection, supplierSelectionCsv } from '../domain/supplierFilterPreview';
 
 const fileSelections = files => Object.fromEntries(files.filter(file => file.status === 'parsed').map(file => [file.itemId, file.filterOptions?.supplierNumbers ?? []]));
-const modeName = { suffix: '末尾匹配', contains: '包含匹配', exact: '完整匹配' };
+const modeName = { fuzzy: '模糊识别', exact: '精准识别' };
 export default function ImportSupplierWorkbench({ files, workspaceId, period, aliasesText, mode, onAliasesChange, onModeChange, initialRule, onApply, onDirtyChange, onMembers, viewStore, onViewStore, disabled }) {
   const appliedKey = JSON.stringify(fileSelections(files));
   const applied = useMemo(() => fileSelections(files), [appliedKey]);
@@ -36,11 +36,12 @@ export default function ImportSupplierWorkbench({ files, workspaceId, period, al
     overridesRef.current.set(currentKey, selection);
     const previousSelection = overridesRef.current.get(nextKey);
     const selected = supplierRuleSelection(files, next, { previousRule: previousSelection ? next : rule, selected: previousSelection ?? selection, savedState: readSupplierGroups(workspaceId), preserve });
-    setRule(next); setSelection(selected); setMessage(`已按${modeName[next.mode]}选中匹配货号，请核对后应用筛选。`);
+    const count = supplierFilterPreview(candidates, { selected }).batch.selected;
+    setRule(next); setSelection(selected); setMessage(count ? `已按${modeName[next.mode]}选中 ${count} 个店铺货号，请核对后应用筛选。` : '未匹配到货号。请检查关键词，或改用模糊识别；当前规则选择为空。');
     if (group) { onAliasesChange(group.aliases.join('、')); onModeChange(group.mode); }
   };
   const undo = () => {
-    setSelection(applied); setRule(initialRule); onAliasesChange((initialRule?.aliases ?? []).join('、')); onModeChange(initialRule?.mode ?? 'suffix'); overridesRef.current.clear(); setMessage('已恢复本批最近应用的文件筛选。');
+    setSelection(applied); setRule(initialRule); onAliasesChange((initialRule?.aliases ?? []).join('、')); onModeChange(initialRule?.mode ?? 'fuzzy'); overridesRef.current.clear(); setMessage('已恢复本批最近应用的文件筛选。');
   };
   useEffect(() => {
     const sequence = ++memberSequence.current;
@@ -60,10 +61,10 @@ export default function ImportSupplierWorkbench({ files, workspaceId, period, al
     <div className="supplier-stats" aria-label="当前查看店铺统计">{[['当前范围货号', preview.scope.total, '货号按店铺计数'], ['规则匹配', preview.scope.matched, rule?.aliases?.length ? modeName[rule.mode] : '尚未生成规则选择'], ['草稿已选', preview.scope.selected, `${preview.scope.skcIncomplete ? '待补 SKC' : `${count(preview.scope.skcCount)} 个 SKC`} · ${preview.scope.skuIncomplete ? '待补 SKU' : `${count(preview.scope.skuCount)} 个 SKU`}`], ['尚未选择', preview.scope.total - preview.scope.selected, `${count(preview.scope.sourceRowCount)} 来源行`]].map(([label, value, detail]) => <div key={label}><span>{label}</span><strong>{count(value)}</strong><small>{detail}</small></div>)}</div>
     <div className="supplier-rules">
       <ImportSupplierGroups workspaceId={workspaceId} aliasesText={aliasesText} mode={mode} activeId={ruleEdited ? '' : rule?.id} onApply={match} />
-      <div className="supplier-rule-fields"><label htmlFor="batch-supplier-suffix">货号关键词</label><input id="batch-supplier-suffix" className="text-input" value={aliasesText} placeholder="例如 HHHX，多个用顿号或逗号分隔" onChange={event => onAliasesChange(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); match(); } }} /><label htmlFor="supplier-match-mode">匹配方式</label><select id="supplier-match-mode" aria-label="货号匹配方式" value={mode} onChange={event => onModeChange(event.target.value)}><option value="suffix">货号末尾</option><option value="contains">货号包含</option><option value="exact">完整货号</option></select><Button disabled={!parseImportKeywords(aliasesText).length && !rule?.aliases?.length} onClick={() => match()}>{!parseImportKeywords(aliasesText).length && rule?.aliases?.length ? '清除匹配条件' : '匹配货号'}</Button><span>多个关键词任一命中即可选入</span></div>
+      <div className="supplier-rule-fields"><label htmlFor="batch-supplier-suffix">货号关键词</label><input id="batch-supplier-suffix" className="text-input" value={aliasesText} placeholder="例如 LBYY，多个用顿号、逗号或换行分隔" onChange={event => onAliasesChange(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); match(); } }} /><label htmlFor="supplier-match-mode">识别方式</label><select id="supplier-match-mode" aria-label="货号匹配方式" value={mode} onChange={event => onModeChange(event.target.value)}><option value="fuzzy">模糊识别</option><option value="exact">精准识别</option></select><Button disabled={!parseImportKeywords(aliasesText).length && !rule?.aliases?.length} onClick={() => match()}>{!parseImportKeywords(aliasesText).length && rule?.aliases?.length ? '清除匹配条件' : '匹配货号'}</Button><span>{mode === 'exact' ? '完整货号一致；忽略大小写与全半角' : '包含关键词，兼容字母连写，如 LBY / LBYY'}；多个关键词任一命中即可选入</span></div>
       {ruleEdited && <p role="status" className="supplier-rule-pending">{parseImportKeywords(aliasesText).length ? '关键词或匹配方式已修改。先点击“匹配货号”，再应用筛选。' : '关键词已清空。点击“清除匹配条件”后，可按当前勾选应用筛选。'}</p>}
     </div>
-    <div className="supplier-workbench-grid"><SupplierFilterTable rows={preview.rows} store={viewStore} disabled={disabled} resetKey={`${workspaceId}/${period}`} onSelect={(rows, checked) => { setSelection(current => changeSupplierSelection(current, rows, checked)); setMessage(''); }} onInspect={row => { setMemberPage(0); setMember(row); }} onExport={exportSelected} />
+    <div className="supplier-workbench-grid"><SupplierFilterTable rows={preview.rows} store={viewStore} mode={mode} disabled={disabled} resetKey={`${workspaceId}/${period}`} onSelect={(rows, checked) => { setSelection(current => changeSupplierSelection(current, rows, checked)); setMessage(''); }} onInspect={row => { setMemberPage(0); setMember(row); }} onExport={exportSelected} />
       <aside className="supplier-apply-preview" aria-label="应用前预览"><div className="supplier-preview-heading"><h3>应用前预览</h3><span>{dirty ? '待应用' : '已应用'}</span></div><p>本批全部店铺 · 查看筛选不改变应用范围</p>
         <dl><div><dt>当前已应用</dt><dd>{count(preview.batch.applied)}</dd></div><div><dt>本次新增选择</dt><dd className="supplier-positive">+ {count(preview.batch.added)}</dd></div><div><dt>本次取消选择</dt><dd className="supplier-negative">− {count(preview.batch.removed)}</dd></div><div className="supplier-preview-total"><dt>应用后已选</dt><dd>{count(preview.batch.selected)}</dd></div></dl>
         <label className="supplier-preserve"><input type="checkbox" checked={preserve} onChange={event => setPreserve(event.target.checked)} />重新匹配保留逐店人工例外</label>

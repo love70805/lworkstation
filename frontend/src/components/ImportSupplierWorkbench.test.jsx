@@ -5,11 +5,11 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ImportSupplierWorkbench from './ImportSupplierWorkbench';
 
-const initialRule = { aliases: ['HHHX'], mode: 'suffix' };
+const initialRule = { aliases: ['HHHX'], mode: 'fuzzy' };
 const initialFiles = [{ itemId: 'F', storeName: '甲店', status: 'parsed', facets: { supplierNumbers: ['A-HHHX', 'B-LBY', 'MANUAL'] }, filterOptions: { supplierNumbers: ['A-HHHX', 'MANUAL'] } }];
 let root, container, snapshot, apply, members;
 function Harness({ startingEmpty = false }) {
-  const [aliasesText, onAliasesChange] = useState(startingEmpty ? '' : 'HHHX'), [mode, onModeChange] = useState('suffix'), [files, setFiles] = useState(initialFiles), [rule, setRule] = useState(startingEmpty ? { aliases: [], mode: 'suffix' } : initialRule), [dirty, onDirtyChange] = useState(false), [viewStore, onViewStore] = useState('all');
+  const [aliasesText, onAliasesChange] = useState(startingEmpty ? '' : 'HHHX'), [mode, onModeChange] = useState('fuzzy'), [files, setFiles] = useState(initialFiles), [rule, setRule] = useState(startingEmpty ? { aliases: [], mode: 'fuzzy' } : initialRule), [dirty, onDirtyChange] = useState(false), [viewStore, onViewStore] = useState('all');
   snapshot = { aliasesText, files, rule, dirty };
   return <ImportSupplierWorkbench files={files} workspaceId="W" period="2026-09" aliasesText={aliasesText} mode={mode} onAliasesChange={onAliasesChange} onModeChange={onModeChange} initialRule={rule} onDirtyChange={onDirtyChange} viewStore={viewStore} onViewStore={onViewStore} onMembers={members} onApply={(selection, next) => { apply(selection, next); setRule(next); setFiles(files.map(file => ({ ...file, filterOptions: { supplierNumbers: selection[file.itemId] } }))); }} />;
 }
@@ -27,7 +27,7 @@ it('blocks applying stale matches after a rule edit and applies only the newly m
   await click('应用本次筛选'); expect(apply).not.toHaveBeenCalled();
   expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-HHHX', 'MANUAL']);
   await click('匹配货号'); await click('应用本次筛选');
-  expect(apply).toHaveBeenCalledWith({ F: ['B-LBY'] }, { aliases: ['LBY'], mode: 'suffix' });
+  expect(apply).toHaveBeenCalledWith({ F: ['B-LBY'] }, { aliases: ['LBY'], mode: 'fuzzy' });
   expect(snapshot.dirty).toBe(false);
   expect(button('应用本次筛选').disabled).toBe(true);
 });
@@ -35,7 +35,7 @@ it('blocks applying stale matches after a rule edit and applies only the newly m
 it('clears matching conditions explicitly without clearing manually selected goods and can undo an unmatched edit', async () => {
   await input(''); expect(button('应用本次筛选').disabled).toBe(true);
   await click('清除匹配条件'); await click('应用本次筛选');
-  expect(apply).toHaveBeenCalledWith({ F: ['A-HHHX', 'MANUAL'] }, { aliases: [], mode: 'suffix' });
+  expect(apply).toHaveBeenCalledWith({ F: ['A-HHHX', 'MANUAL'] }, { aliases: [], mode: 'fuzzy' });
   await input('UNKNOWN'); await click('撤销本次调整');
   expect(snapshot.aliasesText).toBe('');
   expect(snapshot.dirty).toBe(false);

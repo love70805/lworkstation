@@ -160,11 +160,11 @@ export default function ImportPreview() {
   const [overwriteSignature, setOverwriteSignature] = useState(null);
   const [result, setResult] = useState(null);
   const [batchSuffixText, setBatchSuffixText] = useState('');
-  const [batchMode, setBatchMode] = useState('suffix');
+  const [batchMode, setBatchMode] = useState('fuzzy');
   const [groupWorkspaceId, setGroupWorkspaceId] = useState(null);
   const [supplierDirty, setSupplierDirty] = useState(false);
   const [supplierViewStore, setSupplierViewStore] = useState('all');
-  const batchRuleRef = useRef({ aliases: [], mode: 'suffix' });
+  const batchRuleRef = useRef({ aliases: [], mode: 'fuzzy' });
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
   const periodEvidence = summarizeImportPeriod(files, requestedLedgerId ? period : null);
@@ -216,8 +216,8 @@ export default function ImportPreview() {
     void clearImportStages(cancelledOwner).catch(() => {});
     inspectionSequenceRef.current.clear();
     activeJobsRef.current.clear();
-    importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'suffix' };
-    setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('suffix'); setSupplierViewStore('all');
+    importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'fuzzy' };
+    setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('fuzzy'); setSupplierViewStore('all');
     setFiles([]); setPreview(null); setPayload(null); setOverwriteSignature(null); setSupplierDirty(false); setBusy(false); operationRef.current = false;
     setError("解析已取消，尚未写入任何数据。可重新选择文件。");
   };
@@ -375,8 +375,8 @@ export default function ImportPreview() {
     void removeImportStage(item.supplierPreview?.memberSource?.id).catch(() => {});
     invalidate(); setFiles((current) => current.filter((entry) => entry.itemId !== item.itemId));
     if (files.length === 1) {
-      generationRef.current += 1; importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'suffix' };
-      setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('suffix'); setSupplierViewStore('all'); setSupplierDirty(false);
+      generationRef.current += 1; importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'fuzzy' };
+      setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('fuzzy'); setSupplierViewStore('all'); setSupplierDirty(false);
     }
     await clientRef.current.release(item.itemId).catch(() => {});
   };
@@ -390,7 +390,7 @@ export default function ImportPreview() {
     operationRef.current = true; setBusy(true); invalidate();
     try {
       await assertImportContext();
-      batchRuleRef.current = rule ?? { aliases: [], mode: 'suffix' };
+      batchRuleRef.current = rule ?? { aliases: [], mode: 'fuzzy' };
       for (const item of files) if (item.status === 'parsed') {
         if (generation !== generationRef.current) return;
         const allowed = new Set(item.facets?.supplierNumbers ?? []);

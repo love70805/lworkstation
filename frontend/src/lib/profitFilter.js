@@ -5,12 +5,14 @@ const scopeCache = new Map();
 function readSupplierScope(id, ledgerId, workspaceId) {
   try {
     const value = JSON.parse(sessionStorage.getItem(`${SCOPE_PREFIX}${id}`) ?? 'null');
-    if (!value || value.ledgerId !== ledgerId || workspaceId && value.workspaceId !== workspaceId || !Array.isArray(value.suppliers)) throw Error('missing scope');
-    return { supplierSelection: cleanSupplierSelection(value.suppliers) };
+    if (!value || value.ledgerId !== ledgerId || workspaceId && value.workspaceId !== workspaceId) throw Error('missing scope');
+    const supplierStoreSelection = cleanSupplierStoreSelection(value.supplierStoreSelection);
+    if (!Array.isArray(value.suppliers) && !(value.suppliers === null && supplierStoreSelection !== null)) throw Error('missing scope');
+    return { supplierSelection: cleanSupplierSelection(value.suppliers), ...(supplierStoreSelection === null ? {} : { supplierStoreSelection }) };
   } catch { return { supplierSelection: [], supplierScopeError: '货号范围引用已失效或不属于当前账本，请重新选择货号。' }; }
 }
-function saveSupplierScope(suppliers, ledgerId, workspaceId) {
-  const serialized = JSON.stringify({ suppliers, ledgerId, workspaceId: workspaceId ?? '' });
+function saveSupplierScope(suppliers, ledgerId, workspaceId, supplierStoreSelection = null) {
+  const serialized = JSON.stringify({ suppliers, ledgerId, workspaceId: workspaceId ?? '', ...(supplierStoreSelection === null ? {} : { supplierStoreSelection }) });
   const cached = scopeCache.get(serialized);
   if (cached && sessionStorage.getItem(`${SCOPE_PREFIX}${cached}`)) return cached;
   const id = crypto.randomUUID();
@@ -34,6 +36,17 @@ function cleanSupplierSelection(value) {
   if (!Array.isArray(value)) return null;
   return [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))].toSorted();
 }
+function cleanSupplierStoreSelection(value) {
+  if (value == null) return null;
+  if (!Array.isArray(value)) throw Error('invalid store supplier scope');
+  const entries = new Map();
+  for (const item of value) {
+    if (!item || typeof item.store !== 'string' || !item.store.trim() || typeof item.supplierNumber !== 'string' || !item.supplierNumber.trim()) throw Error('invalid store supplier scope');
+    const entry = { store: item.store.trim(), supplierNumber: item.supplierNumber.trim() };
+    entries.set(JSON.stringify([entry.store, entry.supplierNumber]), entry);
+  }
+  return [...entries].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, entry]) => entry);
+}
 
 export function readProfitFilter(searchParams, ledgerId = "", { workspaceId } = {}) {
   const hasUrlFilter = ["q", "store", "supplier", "supplier_scope", "missing"].some((key) => searchParams?.has(key));
@@ -50,25 +63,29 @@ export function readProfitFilter(searchParams, ledgerId = "", { workspaceId } = 
   if (typeof localStorage === "undefined") return { ...DEFAULT_PROFIT_FILTER };
   try {
     const saved = JSON.parse(localStorage.getItem(ledgerId ? `${STORAGE_PREFIX}${ledgerId}` : LAST_STORAGE_KEY) ?? "null");
+    const supplierStoreSelection = cleanSupplierStoreSelection(saved?.supplierStoreSelection);
     return {
       ...DEFAULT_PROFIT_FILTER,
       ...saved,
       query: String(saved?.query ?? ""),
       storeFilter: String(saved?.storeFilter ?? "all"),
       supplierSelection: cleanSupplierSelection(saved?.supplierSelection),
+      ...(supplierStoreSelection === null ? {} : { supplierStoreSelection }),
       missingOnly: Boolean(saved?.missingOnly),
     };
   } catch {
-    return { ...DEFAULT_PROFIT_FILTER };
+    return { ...DEFAULT_PROFIT_FILTER, supplierSelection: [], supplierScopeError: '保存的货号范围无法读取，请重新选择货号。' };
   }
 }
 
 export function saveProfitFilter(ledgerId, filter) {
   if (typeof localStorage === "undefined") return;
+  const supplierStoreSelection = cleanSupplierStoreSelection(filter.supplierStoreSelection);
   const serialized = JSON.stringify({
     query: String(filter.query ?? ""),
     storeFilter: String(filter.storeFilter ?? "all"),
     supplierSelection: cleanSupplierSelection(filter.supplierSelection),
+    ...(supplierStoreSelection === null ? {} : { supplierStoreSelection }),
     missingOnly: Boolean(filter.missingOnly),
   });
   localStorage.setItem(LAST_STORAGE_KEY, serialized);
@@ -78,9 +95,17 @@ export function saveProfitFilter(ledgerId, filter) {
 export function filterProfitRowsByScope(rows = [], filter = DEFAULT_PROFIT_FILTER) {
   const storeFilter = filter.storeFilter ?? "all";
   const supplierSet = filter.supplierSelection == null ? null : new Set(filter.supplierSelection);
+  // A group may include the same full number in one store and exclude it in
+  // another. Keep both constraints as an intersection, including explicit [].
+  const storeSuppliers = filter.supplierStoreSelection == null ? null : new Map();
+  for (const entry of filter.supplierStoreSelection ?? []) {
+    if (!storeSuppliers.has(entry.store)) storeSuppliers.set(entry.store, new Set());
+    storeSuppliers.get(entry.store).add(entry.supplierNumber);
+  }
   return rows.filter((row) => {
     return (storeFilter === "all" || row.store === storeFilter)
       && (!supplierSet || supplierSet.has(row.supplierNumber))
+      && (!storeSuppliers || storeSuppliers.get(row.store)?.has(row.supplierNumber))
       && (!filter.missingOnly || !row.finalizable);
   });
 }
@@ -112,13 +137,16 @@ export function readProfitView(searchParams) {
   return ["detail", "cost"].includes(view) ? view : null;
 }
 
-export function buildProfitQuery({ ledgerId, workspaceId, query = "", storeFilter = "all", supplierSelection = null, missingOnly = false, view } = {}) {
+export function buildProfitQuery({ ledgerId, workspaceId, query = "", storeFilter = "all", supplierSelection = null, supplierStoreSelection = null, missingOnly = false, view } = {}) {
   const params = new URLSearchParams();
   if (["detail", "cost"].includes(view)) params.set("view", view);
   if (ledgerId) params.set("ledger", ledgerId);
   if (query) params.set("q", query);
   if (storeFilter && storeFilter !== "all") params.set("store", storeFilter);
-  if (Array.isArray(supplierSelection)) {
+  if (supplierStoreSelection != null) {
+    try { if (!ledgerId) throw Error('ledger required'); params.set('supplier_scope', saveSupplierScope(cleanSupplierSelection(supplierSelection), ledgerId, workspaceId, cleanSupplierStoreSelection(supplierStoreSelection))); }
+    catch { params.set('supplier_scope', 'unavailable'); }
+  } else if (Array.isArray(supplierSelection)) {
     if (supplierSelection.length === 0) params.append("supplier", "");
     else if (supplierSelection.length > 80 || JSON.stringify(supplierSelection).length > 1500) {
       try { if (!ledgerId) throw Error('ledger required'); params.set('supplier_scope', saveSupplierScope(cleanSupplierSelection(supplierSelection), ledgerId, workspaceId)); }

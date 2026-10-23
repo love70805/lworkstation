@@ -3,6 +3,44 @@ import { buildCostMatchingHref, buildProfitHref, filterProfitRows, filterProfitR
 afterEach(() => vi.unstubAllGlobals());
 
 describe("profit filter context", () => {
+  it('retains store-specific supplier scope through saved filters and both profit/ERP routes', () => {
+    const storage = new Map();
+    const clientStorage = {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
+    vi.stubGlobal('sessionStorage', clientStorage); vi.stubGlobal('localStorage', clientStorage);
+    const excluded = { store:'甲', supplierNumber:'A-LBY', platformSku:'SKU-A', finalizable:false };
+    const included = { store:'乙', supplierNumber:'A-LBY', platformSku:'SKU-B', finalizable:false };
+    const other = { store:'乙', supplierNumber:'OTHER', platformSku:'SKU-C', finalizable:false };
+    const filter = { query:'', storeFilter:'all', supplierSelection:['A-LBY'], supplierStoreSelection:[{store:'乙',supplierNumber:'A-LBY'}], missingOnly:false };
+    const rows = [excluded,included,other];
+    expect(filterProfitRowsByScope(rows,filter)).toEqual([included]);
+    saveProfitFilter('L', filter);
+    expect(readProfitFilter(new URLSearchParams(),'L')).toEqual(filter);
+    for (const build of [buildCostMatchingHref,buildProfitHref]) {
+      const href = build({ledgerId:'L',workspaceId:'W',...filter});
+      expect(href.length).toBeLessThan(200);
+      const params = new URL(href,'http://localhost').searchParams;
+      const restored = readProfitFilter(params,'L',{workspaceId:'W'});
+      expect(restored).toEqual(filter);
+      expect(filterProfitRows(rows,restored)).toEqual([included]);
+      expect(filterProfitRows(rows,readProfitFilter(params,'L',{workspaceId:'OTHER'}))).toEqual([]);
+    }
+    expect(filterProfitRowsByScope(rows,{...filter,supplierSelection:null,supplierStoreSelection:[]})).toEqual([]);
+    expect(filterProfitRowsByScope(rows,{...filter,supplierSelection:[],supplierStoreSelection:filter.supplierStoreSelection})).toEqual([]);
+    expect(filterProfitRowsByScope(rows,{...filter,supplierSelection:null,supplierStoreSelection:null})).toEqual(rows);
+    expect(filterProfitRowsByScope(rows,{...filter,storeFilter:'甲'})).toEqual([]);
+  });
+  it('fails closed when a saved store-specific scope or its URL reference is malformed or unavailable', () => {
+    const storage = new Map();
+    const clientStorage = {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
+    vi.stubGlobal('sessionStorage', clientStorage); vi.stubGlobal('localStorage', clientStorage);
+    storage.set('shopeers:profit-filter:L', JSON.stringify({supplierSelection:['A'],supplierStoreSelection:{store:'乙'}}));
+    expect(readProfitFilter(new URLSearchParams(),'L')).toMatchObject({supplierSelection:[],supplierScopeError:expect.any(String)});
+    storage.set('shopeers:profit-filter:scope:bad', JSON.stringify({ledgerId:'L',workspaceId:'W',suppliers:['A'],supplierStoreSelection:[{supplierNumber:'A'}]}));
+    expect(readProfitFilter(new URLSearchParams('supplier_scope=bad'),'L',{workspaceId:'W'})).toMatchObject({supplierSelection:[],supplierScopeError:expect.any(String)});
+    vi.stubGlobal('sessionStorage',{setItem:()=>{throw Error('unavailable');}});
+    const href = buildCostMatchingHref({ledgerId:'L',workspaceId:'W',supplierSelection:['A'],supplierStoreSelection:[{store:'乙',supplierNumber:'A'}]});
+    expect(readProfitFilter(new URL(href,'http://localhost').searchParams,'L')).toMatchObject({supplierSelection:[],supplierScopeError:expect.any(String)});
+  });
   it('round-trips 10000 suppliers through a bounded, ledger/workspace-bound reference and fails closed if unavailable', () => {
     const storage = new Map();
     vi.stubGlobal('sessionStorage', {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)});
