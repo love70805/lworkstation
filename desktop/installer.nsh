@@ -123,3 +123,30 @@ FunctionEnd
     Call instFilesPre
   FunctionEnd
 !macroend
+
+; Preserve the normal manual-install Finish page, but honor the updater's
+; --force-run request after a successful assisted update. Stock NSIS only
+; honors that request for silent installs, leaving an update at Finish.
+!macro customFinishPage
+  Function LworkstationStartApp
+    ${If} ${isUpdated}
+      StrCpy $1 "--updated"
+    ${Else}
+      StrCpy $1 ""
+    ${EndIf}
+    ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+  FunctionEnd
+
+  Function completeRequestedUpdate
+    ${If} ${isUpdated}
+    ${AndIf} ${isForceRun}
+      HideWindow
+      Call LworkstationStartApp
+      !insertmacro quitSuccess
+    ${EndIf}
+  FunctionEnd
+  !define MUI_FINISHPAGE_RUN
+  !define MUI_FINISHPAGE_RUN_FUNCTION "LworkstationStartApp"
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE completeRequestedUpdate
+  !insertmacro MUI_PAGE_FINISH
+!macroend

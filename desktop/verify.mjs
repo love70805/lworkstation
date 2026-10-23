@@ -410,6 +410,7 @@ assert.equal(pkg.build.nsis.allowElevation, false);
 assert.equal(pkg.build.nsis.perMachine, false);
 assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
 assert.equal(pkg.build.nsis.include, "installer.nsh");
+assert.match(read('installer.nsh'), /Function completeRequestedUpdate[\s\S]*\$\{isUpdated\}[\s\S]*\$\{isForceRun\}[\s\S]*Call LworkstationStartApp/);
 assert.match(pkg.scripts.build, /--publish never/);
 assert.match(read("installer.nsh"), /ReadRegStr \$R0 SHELL_CONTEXT.*InstallLocation/);
 
