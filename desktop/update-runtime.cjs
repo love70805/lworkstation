@@ -245,7 +245,7 @@ function createUpdateRuntime({
 
   async function check({ silent = false } = {}) {
     if (state.status === "disabled") return { ok: false, error: state.message };
-    if (downloadPromise || state.status === "downloaded") return { ok: false, error: "当前状态不能检查更新" };
+    if (downloadPromise || ["downloaded", "installing"].includes(state.status) || state.retryAction === "install") return { ok: false, error: "当前状态不能检查更新" };
     if (checkPromise) return checkPromise;
     acceptedVersion = null;
     downloadedVersion = null;
@@ -323,7 +323,9 @@ function createUpdateRuntime({
   return {
     get feedUrl() { return safeFeedConfig?.url || null; },
     get feedConfig() { return safeFeedConfig ? { ...safeFeedConfig } : null; },
-    canInstall: () => state.status === "downloaded" && validTarget(downloadedVersion)
+    beginInstall(message = "正在启动安装器，请稍候") { publish({ status: "installing", message, retryAction: null }); },
+    installFailed(error) { publish({ status: "error", message: sanitizeError(error), retryAction: error?.code === "CHECKSUM" || error?.code === "ENOENT" ? "check" : "install" }); },
+    canInstall: () => (state.status === "downloaded" || (state.status === "error" && state.retryAction === "install")) && validTarget(downloadedVersion)
       && downloadedVersion === acceptedVersion
       && (updater.updateInfoAndProvider?.info?.version === undefined || updater.updateInfoAndProvider.info.version === downloadedVersion)
       && (!updater.downloadedUpdateHelper || updater.downloadedUpdateHelper.versionInfo?.version === downloadedVersion),

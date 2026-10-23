@@ -20,6 +20,7 @@ if (!desktopInstance.acquired) {
   return;
 }
 const { autoUpdater, CancellationToken } = require("electron-updater");
+const { createUpdateInstaller } = require('./update-install.cjs');
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -118,6 +119,8 @@ const updateSmokeReportPath = process.env.SHOPEERS_DESKTOP_UPDATE_SMOKE_REPORT;
 let updateRuntime = null;
 let updateState = createInitialUpdateState({ currentVersion: app.getVersion(), enabled: app.isPackaged });
 let updateInstallInvocationCount = 0;
+let updateInstallPromise = null;
+let updateInstaller = createUpdateInstaller({ executable: process.execPath, userDataPath: app.getPath('userData') });
 let inboxState = {
   status: "stopped",
   ownership: "none",
@@ -1244,15 +1247,28 @@ function openDesktopReleaseNotes() {
 }
 
 async function installDownloadedUpdate() {
+  if (updateInstallPromise) return updateInstallPromise;
   if (!updateRuntime?.canInstall()) return { ok: false, error: "更新尚未下载完成" };
   updateInstallInvocationCount += 1;
   if (process.env.SHOPEERS_DESKTOP_UPDATE_SMOKE === "1") return { ok: true, installInvoked: true, smoke: true };
-  desktopLifecycle?.beginQuit();
-  closeUpdatePopover({ returnFocus: false });
-  await shutdownDesktop();
-  shutdownComplete = true;
-  autoUpdater.quitAndInstall(false, true);
-  return { ok: true, installInvoked: true };
+  updateRuntime.beginInstall();
+  updateInstallPromise = (async () => {
+    try {
+      await updateInstaller.prepare(autoUpdater, scope => updateRuntime.beginInstall(scope === 'machine'
+        ? '正在请求管理员授权，请在 Windows 授权窗口中确认' : '正在准备当前用户安装，请稍候'));
+      desktopLifecycle?.beginQuit();
+      closeUpdatePopover({ returnFocus: false });
+      updateInstaller.record('quit-requested', { version: updateState.availableVersion });
+      // The normal before-quit handler drains services and handles cleanup
+      // failures; the installer waits for this exact process to finish.
+      app.quit();
+      return { ok: true, installInvoked: true };
+    } catch (error) {
+      updateRuntime.installFailed(error);
+      return { ok: false, error: updateRuntime.snapshot().message };
+    } finally { updateInstallPromise = null; }
+  })();
+  return updateInstallPromise;
 }
 
 function registerProductionFrontend() {

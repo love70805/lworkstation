@@ -1,16 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "candidateOnly": true,
-  "integrationBranch": "codex/rc2-cost-before-catalog",
+  "integrationBranch": "codex/rc3-update-install",
   "requiredCommits": [
     {
-      "module": "verified-main-rc1",
-      "commit": "281ecc2b340680fd75ae2e592e501670c57b8d2a"
-    },
-    {
-      "module": "cost-before-catalog-and-durable-reuse",
-      "commit": "d28ad672de68b86716a8a5ffd313fe4bb20b09d3"
+      "module": "verified-main-rc2",
+      "commit": "8eb6075169768a6818d8d8f5958ce6b9ae91d0bf"
     }
   ]
 }

@@ -63,8 +63,8 @@ globalThis.__experience = {
  fail: () => views.get('workspace').webContents.loadURL(DEV_URL + '/retry-test').catch(() => {}),
  timeout: () => startup.start(),
  updateExit: () => {
-   updateRuntime = {canInstall: () => true, stop() {}};
-   autoUpdater.quitAndInstall = () => app.quit();
+   updateRuntime = {canInstall: () => true, stop() {}, beginInstall() {}, installFailed(error) { throw error; }};
+   updateInstaller = { prepare: async () => ({ok:true}), record() {} };
    return installDownloadedUpdate();
  },
 };

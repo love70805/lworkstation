@@ -88,7 +88,7 @@ assert.match(main, /titleBarStyle:\s*"hidden"/);
 assert.match(main, /titleBarOverlay/);
 assert.match(main, /height:\s*36/);
 assert.match(main, /openInExternalChrome/);
-assert.match(main, /autoUpdater\.quitAndInstall/);
+assert.match(main, /await updateInstaller\.prepare/);
 assert.doesNotMatch(main, /autoUpdater\.autoDownload\s*=\s*true/);
 assert.doesNotMatch(main, /autoUpdater\.autoInstallOnAppQuit\s*=\s*true/);
 assert.match(read("update-runtime.cjs"), /updater\.autoDownload = false/);
@@ -410,6 +410,7 @@ assert.equal(pkg.build.nsis.allowElevation, false);
 assert.equal(pkg.build.nsis.perMachine, false);
 assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
 assert.equal(pkg.build.nsis.include, "installer.nsh");
+assert.match(read('installer.nsh'), /Function completeRequestedUpdate[\s\S]*\$\{isUpdated\}[\s\S]*\$\{isForceRun\}[\s\S]*Call LworkstationStartApp/);
 assert.match(pkg.scripts.build, /--publish never/);
 assert.match(read("installer.nsh"), /ReadRegStr \$R0 SHELL_CONTEXT.*InstallLocation/);
 
