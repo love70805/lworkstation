@@ -31,6 +31,18 @@ it('keeps price and whole-store seven-day completeness while targeting one produ
   expect((await db.salesRows.toArray()).every(item => item.raw.original === 'retained')).toBe(true);
 });
 
+it('reads cost evidence in bounded chunks and never transfers raw financial copies to the reference Worker', async () => {
+  const evidence = { raw: 'immutable'.repeat(20000), selectedRecords: [{ recordId: 'ORIGINAL', unitPrice: '0.000001' }] };
+  await db.erpCostRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU-A', platformSkc: 'SKC-A',
+    unitCost: 0.000001, currency: 'CNY', publishedAt: '2026-08-31', resolutionStatus: 'resolved', evidence });
+  const compute = vi.spyOn(computations, 'runDerivedComputation');
+  const snapshot = await getSelectionReferenceSnapshot({ compact: true });
+  expect(snapshot.computedReferenceRows.find(row => row.platformSku === 'SKU-A').referenceUnitCost).toBe(0.000001);
+  const input = compute.mock.calls.find(([kind]) => kind === 'selection')[1];
+  expect(input.erpCosts[0].evidence).toBeUndefined();
+  expect((await db.erpCostRows.toArray())[0].evidence).toEqual(evidence);
+});
+
 it('reuses after process cache clear, then invalidates same-count edit, replacement and workspace switch', async () => {
   const compute = vi.spyOn(computations, 'runDerivedComputation');
   await getSelectionReferenceSnapshot({ compact: true });

@@ -12,7 +12,6 @@ import {
   Hourglass,
   Inbox,
   PackageCheck,
-  PackageSearch,
   RefreshCw,
   ShoppingCart,
   TriangleAlert,
@@ -20,10 +19,10 @@ import {
 } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { Button, Panel, PageHeader, useToast } from "../components/UI";
-import { db, getActiveMemberContext, getSelectionReferenceSnapshot, getWorkspaceOperationalSummary } from "../data/database";
+import { db, getActiveMemberContext, getWorkspaceOperationalSummary } from "../data/database";
 import { describeAuditEvent } from "../domain/auditEvents";
 import { buildWorkspaceTaskItems } from "../lib/workspaceTasks";
-import { buildSelectionReferenceRows } from "../lib/selectionReferences";
+import WorkspaceCostObservation from '../components/WorkspaceCostObservation';
 import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
 import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
 import SalesAnalytics from './SalesAnalytics';
@@ -79,10 +78,9 @@ export default function WorkspacePortal() {
   const portalData = useLiveQuery(async () => {
     try {
     const { workspaceId } = await getActiveMemberContext();
-    const [summary, auditEvents, referenceSnapshot] = await Promise.all([
+    const [summary, auditEvents] = await Promise.all([
       getWorkspaceOperationalSummary(),
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
-      getSelectionReferenceSnapshot({ compact: true }),
     ]);
     const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestFinalizedLedger].filter(Boolean));
     if ((await getActiveMemberContext()).workspaceId !== workspaceId) throw new Error('工作区已切换，请重新读取。');
@@ -90,7 +88,6 @@ export default function WorkspacePortal() {
       refresh,
       summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
       auditEvents,
-      referenceRows: buildSelectionReferenceRows(referenceSnapshot),
     };
     } catch (error) { return { refresh, error: error.message }; }
   }, [refresh], null);
@@ -109,9 +106,6 @@ export default function WorkspacePortal() {
     time: formatRelativeTime(event.createdAt),
   }));
 
-  const referenceRows = useMemo(() => (portalData?.referenceRows ?? [])
-    .toSorted((left, right) => Number(right.recentRevenue ?? 0) - Number(left.recentRevenue ?? 0))
-    .slice(0, 5), [portalData?.referenceRows]);
   const workflowLedger = ledgerScope.context?.selected;
   const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
   const workflowFrozen = ['finalized', 'locked'].includes(workflowLedger?.status);
@@ -206,10 +200,7 @@ export default function WorkspacePortal() {
             </> : <div className="task-empty"><CircleDollarSign size={20} /><span>当前没有待办事项。</span></div>}
           </Panel>
 
-          {referenceRows.length > 0 ? <details className="dashboard-widget reference-widget workspace-disclosure">
-            <summary><span><PackageSearch size={17} />商品成本观察</span><span className="widget-count">{referenceRows.length} 项</span></summary>
-            <div className="reference-mini-table"><div className="reference-mini-head"><span>平台 SKU</span><span>成本</span><span>利润</span></div>{referenceRows.map(row => <button className="reference-mini-row" key={row.id} onClick={() => row.latestLedgerId ? navigate(`/profit?ledger=${encodeURIComponent(row.latestLedgerId)}`) : navigate('/products?view=reference')}><span><strong className="mono">{row.platformSku}</strong><small>{row.platformSkc || '未关联 SKC'}</small></span><span className="mono">{row.referenceUnitCost == null ? '--' : money(row.referenceUnitCost)}</span><span className={row.latestProfit != null && row.latestProfit < 0 ? 'danger-text' : 'success-text'}>{row.latestProfit == null ? '--' : money(row.latestProfit)}</span></button>)}</div>
-          </details> : null}
+          <WorkspaceCostObservation refresh={refresh} navigate={navigate} />
 
           <Panel className="quick-panel dashboard-widget">
             <div className="panel-header">

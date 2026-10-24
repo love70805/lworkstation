@@ -102,7 +102,7 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
     const records = [...purchaseRecords, ...directoryNames.filter(name => !purchaseRecords.some(record => text(record.supplierName) === name))
       .map(supplierName => ({ supplierName, warehouseSku: row.warehouseSku, directoryOnly: true }))];
     const purchaseKey = JSON.stringify(records.map(record => [record.recordId, record.purchaseOrderId, record.purchaseOrderNo, record.warehouseSku, record.supplierName, record.supplier1688Url, record.supplier1688Links, record.purchaseCatalog]));
-    if (!purchaseCache.has(purchaseKey)) purchaseCache.set(purchaseKey, records.flatMap(record => {
+    if (!purchaseCache.has(purchaseKey)) purchaseCache.set(purchaseKey, { id: purchaseCache.size, records: records.flatMap(record => {
       const name = text(record.supplierName);
       const supplied = Array.isArray(record.supplier1688Links) ? record.supplier1688Links : [];
       const links = [...supplied, { url: record.supplier1688Url }].map(link => {
@@ -113,7 +113,7 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
       const pairs = links.length ? links : name ? [{ url: "", type: null, sourceProductId: "", supplierName: name }] : [];
       const purchaseCatalog = normalizeErpPurchaseCatalog(record.purchaseCatalog);
       return [{ pairs, record, purchaseCatalog, warehouse: text(record.warehouseSku) ? canonicalWarehouseSku(record.warehouseSku) : "" }];
-    }));
+    }) });
     const candidates = [row, ...(Array.isArray(row.catalogMappings) ? row.catalogMappings : [])];
     for (const candidate of candidates) {
       const platformSku = text(candidate.platformSku), platformSkc = text(candidate.platformSkc);
@@ -154,12 +154,15 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
       }
       // Legacy row-level supplier summaries may pair fields from different
       // purchases. Prefer the complete per-record pairs whenever available.
-      const expansionKey = JSON.stringify([source, purchaseKey]);
+      // A warehouse purchase list can be shared by hundreds of catalog SKUs.
+      // Keep its local identity here, not another full serialized history in
+      // every SKU's deduplication set. purchaseCache still compares full keys.
+      const expansionKey = JSON.stringify([source, purchaseCache.get(purchaseKey).id]);
       const expansions = supplierExpansions.get(catalog);
       if (expansions.has(expansionKey)) continue;
       expansions.add(expansionKey);
       const suppliersById = supplierMaps.get(catalog);
-      for (const { pairs, record, purchaseCatalog, warehouse } of purchaseCache.get(purchaseKey)) {
+      for (const { pairs, record, purchaseCatalog, warehouse } of purchaseCache.get(purchaseKey).records) {
         if (warehouse && warehouseSku && warehouse !== canonicalWarehouseSku(warehouseSku)) continue;
         if (purchaseCatalog?.barcodeSkuid && canonicalPlatformSku(purchaseCatalog.barcodeSkuid) !== key) continue;
         if (purchaseCatalog?.barcodeSkcid && canonicalPlatformSkc(purchaseCatalog.barcodeSkcid) !== canonicalPlatformSkc(platformSkc)) continue;

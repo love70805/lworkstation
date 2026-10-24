@@ -2,6 +2,7 @@ import { db } from '../db/clientDatabase';
 import { cachedDerived, derivedCacheDb, sourceRevision, tableRevisionReader } from '../db/derivedCache';
 import { canonicalPlatformSku, canonicalPlatformSkc } from '../../domain/identifiers';
 import { version as appVersion } from '../../../package.json';
+import Dexie from 'dexie';
 
 const salesRevision = tableRevisionReader('salesRows');
 const inputTables = ['costApprovals', 'erpCostRows', 'erpCostBatches', 'importBatches'];
@@ -48,6 +49,10 @@ const skuOf = row => {
   return String(raw ?? '').normalize('NFKC').trim() ? canonicalPlatformSku(raw) : null;
 };
 const skcOf = row => String(row?.platformSkc ?? '').normalize('NFKC').trim() ? canonicalPlatformSkc(row.platformSkc) : null;
+async function digestValue(value) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
+  return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 // These projections only decide whether a background no-op can be skipped.
 // They are never inputs to a financial write or a replacement for validation.
@@ -68,22 +73,42 @@ async function readSalesIdentities(ledgerId) {
 
 async function readLedgerInputs(ledgerId, readScope) {
   const compute = async () => {
-    const rows = await Promise.all(inputTables.map(table => db.table(table).where('ledgerId').equals(ledgerId).toArray()));
-    return Object.fromEntries(inputTables.map((table, index) => [table, rows[index]]));
+    const inputs = {};
+    for (const table of inputTables) {
+      const rows = [], keys = await db.table(table).where('ledgerId').equals(ledgerId).primaryKeys();
+      for (let offset = 0; offset < keys.length; offset += 16) {
+        const chunk = await db.table(table).bulkGet(keys.slice(offset, offset + 16));
+        for (const row of chunk) if (row) rows.push({ id: row.id, platformSku: row.platformSku, sku: row.sku,
+          batchId: row.batchId, sourceEnvelopeBatchId: row.sourceEnvelopeBatchId, fingerprint: await digestValue(row) });
+      }
+      inputs[table] = rows;
+    }
+    return inputs;
   };
   const revision = inputRevision();
   if (revision && readScope?.inputs?.ledgerId === ledgerId && readScope.inputs.revision === revision) return readScope.inputs.value;
-  const value = await (revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-inputs@1',
+  const value = await (revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-fingerprints@2',
     revision, revisionReader: inputRevision, persist: false, boundedMemory: true, compute }) : compute());
-  // A large ledger exceeds the persistent read cache's size limit. Retain only
-  // the current ledger for this sweep so every pending receipt does not clone
-  // the entire history again. A table edit forces a fresh read; ending the
-  // sweep releases this temporary owner, including oversized values.
+  // Only tiny, content-complete fingerprints remain in this optional cache.
+  // The raw evidence is released after each chunk. Financial/context changes
+  // still force revalidation; unrelated notifications reuse unchanged inputs.
   if (revision && revision === inputRevision() && readScope) readScope.inputs = { ledgerId, revision, value };
   return value;
 }
 
 export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext, readScope }) {
+  // WebCrypto is prepared outside the IndexedDB transaction so it cannot
+  // auto-commit a transaction or require a busy keep-alive loop. Verify the
+  // finance revision again inside the coherent receipt snapshot below.
+  let prepared;
+  if (globalThis.crypto?.subtle && !Dexie.currentTransaction) {
+    const candidate = await db.erpCostInbox.get(inboxId), member = await getContext(), revision = inputRevision();
+    if (revision && candidate?.workspaceId === workspaceId && member.workspaceId === workspaceId
+      && ['admin', 'finance'].includes(member.role) && ['pending', 'loaded'].includes(candidate.status)
+      && (!ledgerId || candidate.ledgerId === ledgerId)) {
+      prepared = { ledgerId: candidate.ledgerId, revision, value: await readLedgerInputs(candidate.ledgerId, readScope) };
+    }
+  }
   const snapshot = await db.transaction('r', db.settings, db.ledgers, db.erpCostInbox, db.erpCostRequests,
     db.salesRows, db.costApprovals, db.erpCostRows, db.erpCostBatches, db.importBatches, async () => {
       const inbox = await db.erpCostInbox.get(inboxId), member = await getContext();
@@ -94,25 +119,43 @@ export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, get
       const [ledger, request] = await Promise.all([db.ledgers.get(inbox.ledgerId), db.erpCostRequests.get(inbox.requestId)]);
       // Legacy request inference has broader dependencies; keep its full path.
       if (!ledger || !request?.expectedSkus?.length) return { metadata };
-      const [sales, inputs] = await Promise.all([readSalesIdentities(inbox.ledgerId), readLedgerInputs(inbox.ledgerId, readScope)]);
+      if (!prepared || prepared.ledgerId !== inbox.ledgerId || prepared.revision !== inputRevision()) return { metadata };
+      const sales = await readSalesIdentities(inbox.ledgerId), inputs = prepared.value;
       const queried = new Set((inbox.envelope?.batch?.query?.platformSkcs ?? []).map(row => skcOf(typeof row === 'string' ? { platformSkc: row } : row)).filter(Boolean));
       const wanted = new Set(request.expectedSkus.filter(row => queried.has(skcOf(row))).map(skuOf).filter(Boolean));
       const costs = inputs.erpCostRows.filter(row => !skuOf(row) || wanted.has(skuOf(row)) || row.sourceEnvelopeBatchId === inbox.batchId);
       const batchIds = new Set([inbox.appliedBatchId, ...costs.map(row => row.batchId)].filter(Boolean));
-      const serialized = JSON.stringify({ appVersion, member, inbox, request,
+      const signatureInput = { appVersion, member, inbox, request,
         ledger: { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period, status: ledger.status },
         imports: inputs.importBatches,
         sales,
         approvals: inputs.costApprovals.filter(row => wanted.has(skuOf(row))),
-        costs, batches: inputs.erpCostBatches.filter(row => batchIds.has(row.id)) });
+        costs, batches: inputs.erpCostBatches.filter(row => batchIds.has(row.id)) };
       const result = inbox.adoption ? { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status,
         adoption: inbox.adoption, ...inbox.adoption.summary, matchedCount: inbox.adoption.summary?.adoptedCount, idempotent: true } : null;
-      return { metadata, serialized, result, memoKey: memoKey(member), revision: sourceRevision(), key: JSON.stringify([appVersion, workspaceId, inbox.ledgerId, member.memberId, member.role, inbox.id]) };
+      return { metadata, signatureInput, result, memoKey: memoKey(member), revision: sourceRevision(), key: JSON.stringify([appVersion, workspaceId, inbox.ledgerId, member.memberId, member.role, inbox.id]) };
     });
-  if (!snapshot.serialized || !globalThis.crypto?.subtle) return snapshot;
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshot.serialized));
-  const { serialized: _serialized, ...probe } = snapshot;
-  return { ...probe, signature: [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('') };
+  const { signatureInput, ...probe } = snapshot;
+  if (!signatureInput || !globalThis.crypto?.subtle) return probe;
+  // Hash each complete evidence object once per sweep, then sign a small
+  // manifest. Previously every pending receipt stringified the same complete
+  // ledger costs and batches, creating repeated large strings and byte copies.
+  // No source field is omitted: equal-count/raw edits still change signatures.
+  const fingerprints = readScope ? (readScope.fingerprints ??= new WeakMap()) : new WeakMap();
+  const fingerprint = async value => {
+    if (value == null || typeof value !== 'object') return digestValue(value);
+    if (!fingerprints.has(value)) fingerprints.set(value, digestValue(value));
+    return fingerprints.get(value);
+  };
+  const manifest = {};
+  for (const [key, value] of Object.entries(signatureInput)) {
+    if (Array.isArray(value)) {
+      const hashes = [];
+      for (const row of value) hashes.push(await fingerprint(row));
+      manifest[key] = hashes;
+    } else manifest[key] = await fingerprint(value);
+  }
+  return { ...probe, signature: await digestValue(manifest) };
 }
 
 export function cachedErpRecoveryResult(probe) {

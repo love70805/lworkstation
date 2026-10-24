@@ -23,6 +23,21 @@ const { autoUpdater, CancellationToken } = require("electron-updater");
 const { createUpdateInstaller } = require('./update-install.cjs');
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const { createRuntimeDiagnostics } = require('./runtime-diagnostics.cjs');
+const diagnostics = createRuntimeDiagnostics({ userDataPath: app.getPath('userData'), version: app.getVersion() });
+let diagnosticTimer;
+function recordRuntimeSample() {
+  try {
+    const metrics = new Map(app.getAppMetrics().map(metric => [metric.pid, metric]));
+    const targets = [['main', process.pid], ['shell', mainWindow?.webContents.getOSProcessId()],
+      ...[...views].filter(([, view]) => !view.webContents.isDestroyed()).map(([page, view]) => [page, view.webContents.getOSProcessId()])];
+    for (const [page, pid] of targets) {
+      const metric = metrics.get(pid);
+      if (metric) diagnostics.record('sample', { page, workingSetKiB: metric.memory?.workingSetSize,
+        privateKiB: metric.memory?.privateBytes, peakWorkingSetKiB: metric.memory?.peakWorkingSetSize, cpuPercent: metric.cpu?.percentCPUUsage });
+    }
+  } catch { /* Technical diagnostics cannot interrupt business work. */ }
+}
 const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 const { normalizeAllowedRemoteUrl, resolveRemotePopup } = require("./remote-navigation.cjs");
@@ -369,6 +384,8 @@ function openUpdatePopover(anchor) {
 }
 
 async function shutdownDesktop() {
+  clearInterval(diagnosticTimer);
+  diagnostics.record('shutdown', { page: 'main' });
   remoteViewLoader.stop();
   desktopLifecycle?.dispose();
   workspaceRecovery.dispose();
@@ -600,6 +617,7 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
     }
   });
   view.webContents.on("render-process-gone", (_event, details) => {
+    diagnostics.record('render-process-gone', { page: tabId, reason: details.reason, exitCode: details.exitCode });
     setStatus(tabId, { status: "error", error: `内置页面进程已退出：${details.reason}` });
   });
 
@@ -765,7 +783,8 @@ function createWorkspaceView(url) {
       startup.fail(`工作站加载失败：${errorDescription}。请重试或退出。`);
     }
   });
-  view.webContents.on('render-process-gone', () => {
+  view.webContents.on('render-process-gone', (_event, details) => {
+    diagnostics.record('render-process-gone', { page: 'workspace', reason: details.reason, exitCode: details.exitCode });
     workspaceRecovery.pause();
     setStatus('workspace', { status: 'error', error: '工作站进程已退出' });
     startup.fail('工作站进程已退出，请重试恢复页面。');
@@ -777,6 +796,8 @@ function createWorkspaceView(url) {
     startup.fail('工作站页面已关闭，请重试恢复页面。');
   });
   view.webContents.on('unresponsive', () => {
+    diagnostics.record('unresponsive', { page: 'workspace' });
+    recordRuntimeSample();
     if (activeTab === 'workspace' && startup.getState().status === 'ready') workspaceRecovery.check();
   });
   view.webContents.loadURL(url).then(() => setStatus("workspace", { status: "ready", url })).catch((error) => {
@@ -1314,6 +1335,9 @@ async function createWindow() {
     },
   });
   await mainWindow.loadFile(path.join(__dirname, "shell.html"), { query: { appearance: shellAppearance } });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    diagnostics.record('render-process-gone', { page: 'shell', reason: details.reason, exitCode: details.exitCode });
+  });
   desktopLifecycle = createDesktopLifecycle({ app, window: mainWindow, Tray, Menu, icon: DESKTOP_ICON_PATH,
     userDataPath: app.getPath('userData'),
     canRestore: () => !hiddenSmoke,
@@ -1536,6 +1560,14 @@ ipcMain.on("workspace:appearance", (event, appearance) => {
 });
 
 app.setAppUserModelId("com.shopeers.workstation");
+app.on('child-process-gone', (_event, details) => {
+  diagnostics.record('child-process-gone', { page: details.type === 'GPU' ? 'gpu' : 'utility', reason: details.reason, exitCode: details.exitCode });
+});
+app.whenReady().then(() => {
+  diagnostics.record('startup', { page: 'main' });
+  diagnosticTimer = setInterval(recordRuntimeSample, 30000);
+  diagnosticTimer.unref();
+});
 app.whenReady().then(createWindow).catch((error) => {
   if (desktopLifecycle?.getState().quitting) { app.quit(); return; }
   console.error("桌面应用启动失败：", error);

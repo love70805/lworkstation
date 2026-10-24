@@ -63,7 +63,7 @@ it('rechecks the edited SKU receipt without revalidating unrelated pending evide
   validate.mockClear(); await recover(); expect(validate).not.toHaveBeenCalled();
 });
 
-it('reads an oversized ledger once per sweep without keeping it in the bounded cache', async () => {
+it('reads complete oversized evidence once per input version and retains only small fingerprints', async () => {
   await db.erpCostRows.add({ workspaceId, ledgerId, platformSku: 'UNRELATED', canonicalPlatformSku: 'UNRELATED', diagnosticPadding: 'x'.repeat(9 * 1024 * 1024) });
   const seen = [];
   const reading = row => { seen.push(row.platformSku); return row; };
@@ -72,11 +72,29 @@ it('reads an oversized ledger once per sweep without keeping it in the bounded c
     await recover();
     expect(seen.filter(sku => sku === 'UNRELATED')).toHaveLength(1);
     seen.length = 0;
+    await db.settings.put({ key: 'unrelated-notification', value: true });
+    await recover();
+    expect(seen).toEqual([]);
     // A new source revision starts a fresh sweep and never reuses stale rows.
     await db.costApprovals.put({ id: 'UNRELATED-APPROVAL', workspaceId, ledgerId, platformSku: 'UNRELATED', approvedAmount: 0 });
     await recover();
     expect(seen.filter(sku => sku === 'UNRELATED')).toHaveLength(1);
   } finally { db.erpCostRows.hook('reading').unsubscribe(reading); }
+});
+
+it('invalidates the complete row fingerprint on an equal-count raw cost edit', async () => {
+  const validate = vi.spyOn(contract, 'validateErpCostInboxEnvelope');
+  const row = await db.erpCostRows.where('platformSku').equals('A-NORMAL').first();
+  await db.erpCostRows.update(row.id, { rawDiagnosticEvidence: { sameCountChange: 'must revalidate the full record' } });
+  await recover();
+  expect(validate).toHaveBeenCalledTimes(1);
+  expect(validate.mock.calls[0][0].batch.batchId).toBe('BATCH-A');
+});
+
+it('does not turn an unrelated malformed foreign row into an adoption blocker', async () => {
+  await db.erpCostRows.add({ workspaceId: 'FOREIGN', ledgerId, platformSku: '\u3000 ' });
+  expect((await recover()).every(result => !result.error)).toBe(true);
+  expect(await db.erpCostRows.count()).toBe(3);
 });
 
 it('invalidates same-count source edits and does not hide forged raw evidence', async () => {

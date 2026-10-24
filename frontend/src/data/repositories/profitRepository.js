@@ -580,9 +580,9 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     if (resolutions.length && ['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或已锁定的账本不能确认采购价格。');
     if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
     if (request.ledgerVersion != null && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) return persistResult([], 'blocked', 'ledger_import_changed');
-    const [salesRows, approvals, allRows, batches] = await Promise.all([
+    const [salesRows, approvals, batches] = await Promise.all([
       db.salesRows.where('ledgerId').equals(ledger.id).toArray(), db.costApprovals.where('ledgerId').equals(ledger.id).toArray(),
-      db.erpCostRows.where('ledgerId').equals(ledger.id).toArray(), db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
+      db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
     ]);
     const ownedSales = salesRows.filter(row => row.workspaceId === ledger.workspaceId);
     const identities = buildLedgerSkuIdentityIndex(ownedSales);
@@ -595,6 +595,18 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     const boundary = erpBatchAdoptionBoundary(batch);
     const queried = new Set(batch.query.platformSkcs.map(row => canonicalPlatformSkc(row.platformSkc)));
     const expected = expectedSkus.filter(row => queried.has(canonicalPlatformSkc(row.platformSkc)));
+    const expectedSkuKeys = new Set(expected.map(row => canonicalPlatformSku(row.platformSku)));
+    // Retain COMPLETE records, including evidenceComplete, costDecision,
+    // purchaseRecords and resolutions. The two consumers below inspect only:
+    // (1) every row from this source envelope (including auxiliary SKUs), and
+    // (2) newer rows for this batch's validated expected SKUs. Other source
+    // histories cannot contribute to either check. All batches, the raw inbox
+    // envelope and the authoritative publication/validation paths stay intact.
+    const allRows = await db.erpCostRows.where('ledgerId').equals(ledger.id).filter(row => {
+      if (row.sourceEnvelopeBatchId === batch.batchId || !row.platformSku) return true;
+      try { return expectedSkuKeys.has(canonicalPlatformSku(row.platformSku)); }
+      catch { return true; } // Leave malformed legacy rows to the original guards.
+    }).toArray();
     const order = erpSourceOrder(request, batch);
     const batchById = new Map(batches.map(row => [row.id, row]));
     const existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');

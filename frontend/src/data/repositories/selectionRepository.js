@@ -33,6 +33,8 @@ import Dexie from "dexie";
 import { cachedDerived, sourceRevision, tableRevisionReader, observeSourceRevision, retrySourceRead, assertSourceRevision } from "../db/derivedCache";
 import { runDerivedComputation } from "./derivedComputationService";
 import { unpackSelectionFactIdentities } from "../../domain/selectionSalesFactsCodec";
+import { projectSelectionErpCost } from './selectionReadProjection';
+import { prestorageAttemptFingerprint } from '../../lib/prestorageAttemptFingerprint';
 const salesFactReaders = ['salesRows', 'importBatches'].map(tableRevisionReader);
 const salesFactsRevision = () => {
   const revisions = salesFactReaders.map(read => read());
@@ -1642,7 +1644,15 @@ export async function getSelectionPrestorageAutomationSnapshot() {
   const products = await db.products.toArray();
   const productIds = products.filter(product => selectionRecordVisible(product, context) && canAutoPromotePrestorage(product)).map(product => product.id);
   if (!productIds.length) return { workspaceId: context.workspaceId, products: [] };
-  return getSelectionPrestorageSnapshot({ productIds });
+  const snapshot = await getSelectionPrestorageSnapshot({ productIds });
+  const candidates = [];
+  for (const product of snapshot.products) candidates.push({ id: product.id, autoPromote: product.autoPromote,
+    readiness: { ready: product.readiness.ready },
+    ...(product.autoPromote && product.readiness.ready ? { fingerprint: await prestorageAttemptFingerprint(product) } : {}) });
+  // The automation re-reads full source evidence in its atomic promotion. Its
+  // live subscription only needs candidate IDs/readiness, never catalog rows,
+  // complete drafts, supplier histories or the source snapshot.
+  return { workspaceId: snapshot.workspaceId, products: candidates };
 }
 
 // A single source projection supplies both the staging UI and the automation.
@@ -1795,7 +1805,7 @@ export async function getSelectionReferenceSnapshot(options = {}) {
     db.products.toArray(),
     db.supplierOffers.toArray(),
     db.catalogManualCosts.toArray(),
-    db.erpCostRows.toArray(),
+    options.projectCostEvidence ? readSelectionCostProjection() : db.erpCostRows.toArray(),
     db.profitLines.toArray(),
     options.selectionSalesFacts ? [] : options.projectSales ? readSelectionSalesProjection(context.workspaceId) : db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(),
     db.ledgers.toArray(),
@@ -1876,6 +1886,16 @@ export async function getSelectionReferenceSnapshot(options = {}) {
 
 
 const SELECTION_SALES_FIELDS = ["id", "workspaceId", "ledgerId", "batchId", "platformSku", "sku", "platformSkc", "attribute", "store", "supplierNumber", "sourceSheet", "sourceRow", "sourceAddedDate", "sourceAddedAt", "rawAddedAt", "sourceTimePrecision", "movementType", "isDeduction", "quantityExact", "quantity", "qty", "amountExact", "amount", "unitPriceRaw", "unitPrice"];
+async function readSelectionCostProjection() {
+  const keys = await db.erpCostRows.toCollection().primaryKeys(), rows = [];
+  // Drop repeated raw/financial evidence after each bounded read, before the
+  // next chunk or Worker clone. Original rows are never modified.
+  for (let offset = 0; offset < keys.length; offset += 32) {
+    const chunk = await db.erpCostRows.bulkGet(keys.slice(offset, offset + 32));
+    for (const row of chunk) if (row) rows.push(projectSelectionErpCost(row));
+  }
+  return rows;
+}
 async function readSelectionSalesProjection(workspaceId, ledgerId = null) {
   const keys = await db.salesRows.where(ledgerId ? "ledgerId" : "workspaceId").equals(ledgerId ?? workspaceId).primaryKeys();
   const rows = [];
@@ -1915,7 +1935,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
     if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
     const selectionSalesFacts = { workspaceId: context.workspaceId, packedParts: parts, ledgerIdentityRows: parts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)) };
     assertSourceRevision(revision, selectionReferenceRevision);
-    const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts });
+    const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts, projectCostEvidence: true });
     assertSourceRevision(revision, selectionReferenceRevision);
     if (snapshot.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
     const rows = await runDerivedComputation("selection", { ...snapshot, store });
