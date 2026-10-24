@@ -17,7 +17,6 @@ const memory = new Map();
 const pending = new Map();
 const memoryReaders = new Map();
 const memoryBytes = new Map();
-const MAX_MEMORY = 8;
 const MAX_MEMORY_ROWS = 600000;
 const MAX_DISK = 24;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
@@ -206,7 +205,7 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
   onStatus('reading');
   if (pending.has(key)) { const value = await pending.get(key); assertSourceRevision(revision, revisionReader); onStatus('ready'); return value; }
   const task = (async () => {
-    let value;
+    let value, memorySize;
     if (persist && durable) {
       try { value = (await Dexie.ignoreTransaction(() => derivedCacheDb.entries.get(key)))?.value; } catch { /* cache is optional */ }
     }
@@ -215,29 +214,28 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
       onStatus('recalculating');
       value = await compute();
       assertSourceRevision(revision, revisionReader);
+      memorySize = derivedValueBytes(value);
       if (persist && durable) {
         try {
-          const bytes = derivedValueBytes(value);
-          if (bytes <= MAX_ENTRY_BYTES) await persistEntry({ key, namespace: JSON.stringify([formula, scope]), value, bytes, createdAt: Date.now() }, revision, revisionReader);
+          if (memorySize <= MAX_ENTRY_BYTES) await persistEntry({ key, namespace: JSON.stringify([formula, scope]), value, bytes: memorySize, createdAt: Date.now() }, revision, revisionReader);
         } catch { /* quota/private mode must not block a correct calculation */ }
       }
     }
     assertSourceRevision(revision, revisionReader);
-    // Facts are bounded on both disk and heap. Structured-clone Maps must not
-    // appear as empty objects in the size estimate.
-    const memorySize = boundedMemory || revisionReader === selectionFactsRevision ? derivedValueBytes(value) : null;
-    if (memorySize === null || memorySize <= MAX_ENTRY_BYTES) {
+    // Every revision reader shares the same heap budget. A small number of
+    // rows can still contain hundreds of megabytes of purchase evidence.
+    memorySize ??= derivedValueBytes(value);
+    if (memorySize <= MAX_ENTRY_BYTES) {
       const namespace = JSON.stringify([formula, scope]);
       for (const [prior, existing] of memoryNamespaces) if (existing === namespace && prior !== key) removeMemory(prior);
       memory.set(key, value);
       memoryNamespaces.set(key, namespace);
       memoryReaders.set(key, revisionReader);
-      if (memorySize !== null) memoryBytes.set(key, memorySize);
+      memoryBytes.set(key, memorySize);
     }
     const rowCount = () => [...memory.values()].reduce((count, item) => count + (Array.isArray(item) ? item.length : item?.rows?.length ?? item?.computedReferenceRows?.length ?? 0), 0);
-    const normalKeys = () => [...memory.keys()].filter(item => !memoryBytes.has(item));
-    while (normalKeys().length > MAX_MEMORY || rowCount() > MAX_MEMORY_ROWS) removeMemory(normalKeys()[0] ?? memory.keys().next().value);
-    while (memoryBytes.size > MAX_DISK || [...memoryBytes.values()].reduce((sum, bytes) => sum + bytes, 0) > MAX_DISK_BYTES) removeMemory(memoryBytes.keys().next().value);
+    while (memory.size > MAX_DISK || rowCount() > MAX_MEMORY_ROWS
+      || [...memoryBytes.values()].reduce((sum, bytes) => sum + bytes, 0) > MAX_DISK_BYTES) removeMemory(memory.keys().next().value);
     return value;
   })();
   pending.set(key, task);
@@ -246,6 +244,25 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
   finally { pending.delete(key); }
 }
 
-export function derivedValueBytes(value) {
-  return JSON.stringify(value, (_key, item) => item instanceof Map ? [...item.entries()] : item instanceof Set ? [...item] : item).length * 2;
+export function derivedValueBytes(value, limit = MAX_ENTRY_BYTES) {
+  // Conservative retained-size estimate, not another serialized copy of the
+  // evidence. Stop as soon as the entry cannot fit. Iterators bound traversal
+  // memory even for large arrays, Maps and Sets; shared objects count once.
+  let bytes = 0;
+  const seen = new WeakSet(), iterators = [[value][Symbol.iterator]()];
+  while (iterators.length && bytes <= limit) {
+    const next = iterators.at(-1).next();
+    if (next.done) { iterators.pop(); continue; }
+    const item = next.value;
+    if (typeof item === 'string') { bytes += 24 + item.length * 2; continue; }
+    if (item == null || typeof item !== 'object') { bytes += 8; continue; }
+    if (seen.has(item)) { bytes += 8; continue; }
+    seen.add(item); bytes += 64;
+    if (ArrayBuffer.isView(item)) bytes += item.byteLength;
+    else if (item instanceof ArrayBuffer) bytes += item.byteLength;
+    else if (item instanceof Map) iterators.push((function* () { for (const [key, entry] of item) { bytes += 32; yield key; yield entry; } })());
+    else if (item instanceof Set || Array.isArray(item)) iterators.push(item.values());
+    else iterators.push((function* () { for (const key of Object.keys(item)) { bytes += 24 + key.length * 2; yield item[key]; } })());
+  }
+  return bytes;
 }

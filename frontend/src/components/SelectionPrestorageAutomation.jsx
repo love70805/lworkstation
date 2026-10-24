@@ -3,6 +3,7 @@ import { getSelectionPrestorageAutomationSnapshot, promoteSelectionPrestorageRec
 import { useSelectionRead } from './SelectionReadState';
 import { useToast } from './UI';
 import { runWorkspaceBackgroundTask, subscribeWorkspaceResumed } from '../lib/workspaceBackgroundTasks';
+import { prestorageAttemptFingerprint } from '../lib/prestorageAttemptFingerprint';
 
 export default function SelectionPrestorageAutomation() {
   const read = useSelectionRead(getSelectionPrestorageAutomationSnapshot);
@@ -24,13 +25,14 @@ export default function SelectionPrestorageAutomation() {
     void runWorkspaceBackgroundTask(async () => {
       while (mounted.current && pending.current) {
         const snapshot = pending.current; pending.current = null;
-        const ready = snapshot.products.filter(product => {
-          if (!product.autoPromote || !product.readiness.ready) return false;
+        const ready = [];
+        for (const product of snapshot.products) {
+          if (!product.autoPromote || !product.readiness.ready) continue;
           const key = `${snapshot.workspaceId}:${product.id}`;
-          const fingerprint = JSON.stringify([product.updatedAt, product.draft, product.prefill]);
-          if (attempted.current.get(key) === fingerprint) return false;
-          attempted.current.set(key, fingerprint); return true;
-        });
+          const fingerprint = product.fingerprint ?? await prestorageAttemptFingerprint(product);
+          if (attempted.current.get(key) === fingerprint) continue;
+          attempted.current.set(key, fingerprint); ready.push(product);
+        }
         for (let index = 0; mounted.current && index < ready.length; index += 20) {
           try {
             await promoteSelectionPrestorageRecords({ productIds: ready.slice(index, index + 20).map(product => product.id), expectedWorkspaceId: snapshot.workspaceId });

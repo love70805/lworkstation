@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { liveQuery } from 'dexie';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { db } from './db/clientDatabase';
-import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, StaleDerivedResultError, invalidateDerivedCache } from './db/derivedCache';
+import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, StaleDerivedResultError, invalidateDerivedCache, derivedValueBytes } from './db/derivedCache';
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { readLedgerSalesAnalytics } from './repositories/salesAnalyticsRepository';
 import { readLedgerSalesRows } from './repositories/ledgerReadCache';
@@ -227,6 +227,35 @@ it('bounds disposable disk entries and preserves source data', async () => {
   for (let index = 0; index < 30; index++) await cachedDerived({ scope: [index], formula: 'bound', compute: () => index });
   expect(await derivedCacheDb.entries.count()).toBe(24);
   expect(await db.salesRows.count()).toBe(1);
+});
+
+it('bounds large evidence on the heap even with a custom revision reader and a single result row', async () => {
+  const value = [{ history: 'x'.repeat(9 * 1024 * 1024) }];
+  const compute = vi.fn(() => value), revisionReader = () => 'unchanged';
+  const options = { scope: ['W'], formula: 'large-custom-reader', revisionReader, compute, persist: false };
+  expect(await cachedDerived(options)).toBe(value);
+  expect(await cachedDerived(options)).toBe(value);
+  expect(compute).toHaveBeenCalledTimes(2);
+  expect(await db.salesRows.count()).toBe(1);
+});
+
+it('evicts custom-reader results under a shared byte budget and leaves authoritative rows intact', async () => {
+  const value = [{ history: 'x'.repeat(5 * 1024 * 1024) }], revisionReader = () => 'unchanged';
+  const first = vi.fn(() => value);
+  await cachedDerived({ scope: [0], formula: 'heap-budget', revisionReader, compute: first, persist: false });
+  for (let index = 1; index < 7; index++) await cachedDerived({ scope: [index], formula: 'heap-budget', revisionReader, compute: () => structuredClone(value), persist: false });
+  await cachedDerived({ scope: [0], formula: 'heap-budget', revisionReader, compute: first, persist: false });
+  expect(first).toHaveBeenCalledTimes(2);
+  expect(await db.salesRows.count()).toBe(1);
+});
+
+it('stops size estimation without serializing or visiting the rest of an oversized evidence object', () => {
+  const unread = vi.fn(() => { throw Error('the rest must not be traversed'); });
+  const large = { history: 'x'.repeat(1024), get remainder() { return unread(); }, toJSON() { throw Error('must not serialize'); } };
+  expect(derivedValueBytes(new Map([['evidence', large]]), 512)).toBeGreaterThan(512);
+  expect(unread).not.toHaveBeenCalled();
+  const shared = { amount: '0.00000001' }; shared.self = shared;
+  expect(derivedValueBytes(new Set([shared]))).toBeGreaterThan(0);
 });
 
 it('persists consumed profit exact fields and compact provenance across a restart', async () => {
