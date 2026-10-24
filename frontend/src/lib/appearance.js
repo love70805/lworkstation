@@ -21,7 +21,12 @@ export function applyAppearance(value, { animate = true, document: doc = documen
   if (changed && animate && !win.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     const surface = doc.querySelector('.app-shell');
     if (surface?.animate) {
-      try { animation = surface.animate([{ opacity: .86 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' }); } catch {}
+      try {
+        animation = surface.animate([{ opacity: .86 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' });
+        // Reentry cancels this decorative animation. Its finished promise
+        // rejects on cancellation; the synchronous theme choice remains valid.
+        animation.finished?.catch(() => {});
+      } catch {}
     }
   }
   return target;
