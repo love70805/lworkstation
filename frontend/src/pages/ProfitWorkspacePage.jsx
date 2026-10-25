@@ -32,7 +32,7 @@ export default function ProfitWorkspacePage() {
   const selected = ready ? context.ledgers.find(ledger => ledger.id === ledgerId) : null;
   useEffect(() => {
     if (!ready || context.error || selected || ledgerId) return;
-    if (context.ledgers.length) setSearchParams(workspaceLedgerQuery(context.ledgers[0].id), { replace: true });
+    if (context.ledgers.length) setSearchParams(workspaceLedgerQuery(context.ledgers[0].id, location.search, [], false, { workspaceId: context.workspaceId }), { replace: true });
     else if (location.search) setSearchParams({}, { replace: true });
   }, [ready, selected, context, location.search, setSearchParams]);
   useEffect(() => () => { generation.current += 1; }, []);
@@ -45,7 +45,7 @@ export default function ProfitWorkspacePage() {
       const rows = await readLedgerSalesRows(context.workspaceId, id, { strict: true });
       const member = await getActiveMemberContext();
       if (token !== generation.current || member.workspaceId !== context.workspaceId) return;
-      const next = workspaceLedgerQuery(id, location.search, rows, Boolean(selected));
+      const next = workspaceLedgerQuery(id, location.search, rows, Boolean(selected), { workspaceId: context.workspaceId });
       next.set("view", readProfitView(new URLSearchParams(location.search)) ?? "detail");
       setSearchParams(next);
     } catch (error) { notify(`切换月份失败：${error.message}`, "error"); }

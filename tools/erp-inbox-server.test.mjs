@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from 'node:crypto';
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -123,6 +124,18 @@ try {
   assert.equal(response.status, 401);
   assert.equal(response.headers.get("access-control-allow-origin"), null);
   assert.equal(response.headers.get("access-control-allow-private-network"), null);
+
+  const challenge = crypto.randomBytes(32).toString('hex');
+  response = await globalThis.fetch(`${base}/erp/v1/identity?challenge=${challenge}`);
+  assert.equal(response.status, 200);
+  const identityProof = await response.json();
+  assert.deepEqual(Object.keys(identityProof).sort(), ['challenge', 'proof']);
+  assert.equal(identityProof.challenge, challenge);
+  assert.equal(identityProof.proof, crypto.createHmac('sha256', capability).update('lworkstation-inbox-identity@1\0').update(challenge).digest('hex'));
+  for (const value of ['', 'a'.repeat(63), 'a'.repeat(65), 'g'.repeat(64), `${challenge}&extra=1`]) {
+    assert.equal((await globalThis.fetch(`${base}/erp/v1/identity?challenge=${value}`)).status, 400);
+  }
+  assert.equal((await globalThis.fetch(`${base}/erp/v1/identity?challenge=${challenge}`, { method: 'POST' })).status, 400);
 
   for (const [method, pathname] of [
     ["GET", "/erp/v1/status"],

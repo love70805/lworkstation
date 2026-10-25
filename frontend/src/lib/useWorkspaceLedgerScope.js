@@ -23,7 +23,7 @@ export function useWorkspaceLedgerScope() {
       const selected = requested || ledgers[0] || null;
       const rows = selected ? await readLedgerSalesRows(member.workspaceId, selected.id) : [];
       if ((await getActiveMemberContext()).workspaceId !== member.workspaceId) return null;
-      const query = selected ? workspaceLedgerQuery(selected.id, search, rows, Boolean(requested)) : new URLSearchParams();
+      const query = selected ? workspaceLedgerQuery(selected.id, search, rows, Boolean(requested), { workspaceId: member.workspaceId }) : new URLSearchParams();
       return { search, workspaceId: member.workspaceId, ledgers, selected, stores: [...new Set(rows.map(row => row.store).filter(Boolean))].sort(), store: query.get('store') || 'all', query: query.toString() };
     } catch (error) { return { search, error: error.message }; }
   }, [search, revision], null);
@@ -36,10 +36,26 @@ export function useWorkspaceLedgerScope() {
     const token = ++generation.current;
     if (pendingSelection.current?.search !== search) pendingSelection.current = { search, params: new URLSearchParams(result.query) };
     pendingSelection.current.params.set(field, value);
-    const next = pendingSelection.current.params.toString();
-    const member = await getActiveMemberContext();
-    if (token !== generation.current || member.workspaceId !== result.workspaceId) return;
-    setParams(next);
+    try {
+      let next = new URLSearchParams(pendingSelection.current.params);
+      const targetId = next.get('ledger');
+      if (targetId !== result.selected?.id) {
+        if (!result.ledgers.some(ledger => ledger.id === targetId)) throw new Error('指定账本不存在或不属于当前工作区，请重新选择账本。');
+        const rows = await readLedgerSalesRows(result.workspaceId, targetId, { strict: true });
+        if (token !== generation.current) return;
+        // The URL still names the source ledger until its supplier reference has
+        // been validated and rebound against the selected month's actual rows.
+        next.set('ledger', result.selected.id);
+        next = workspaceLedgerQuery(targetId, next, rows, true, { workspaceId: result.workspaceId });
+      }
+      const member = await getActiveMemberContext();
+      if (token !== generation.current || member.workspaceId !== result.workspaceId) return;
+      setParams(next);
+    } catch (error) {
+      if (token !== generation.current) return;
+      pendingSelection.current = null;
+      throw error;
+    }
   }
   return { ready, context: ready ? result : null, change, retry: () => setRevision(value => value + 1) };
 }

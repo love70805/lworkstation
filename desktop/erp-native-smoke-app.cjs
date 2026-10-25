@@ -2,14 +2,13 @@ const { app, BrowserWindow, WebContentsView, session } = require('electron');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
-const { once } = require('node:events');
 const { performance } = require('node:perf_hooks');
 const {pathToFileURL}=require('node:url');
 const root = path.resolve(__dirname, '..');
 const resources = process.env.ERP_NATIVE_RESOURCES || root;
 const runtime = process.env.ERP_NATIVE_RESOURCES ? path.join(resources, 'app.asar') : __dirname;
 const { prepareRuntimeExtension, extensionStorageConfig } = require(path.join(runtime, 'extension-runtime.cjs'));
+const { createInboxServiceController, installExtensionInboxTransport } = require(path.join(runtime, 'inbox-service.cjs'));
 const out = path.resolve(process.env.ERP_NATIVE_OUTPUT);
 const profile = path.join(out, `isolated-profile-${Date.now()}`);
 const port = Number(process.env.ERP_NATIVE_PORT || 23874);
@@ -19,7 +18,7 @@ app.setPath('userData', profile);
 app.commandLine.appendSwitch('disable-gpu');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], failures = [], timings = [], requests = [];
-let child, host, view, popup;
+let inbox, host, view, popup;
 async function call(route, body) {
   const started = performance.now();
   const response = await fetch(`http://127.0.0.1:${port}/erp/v1/${route}`, { headers: { authorization: `Bearer ${capability}`, 'content-type': 'application/json' }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(4000) });
@@ -35,10 +34,12 @@ async function waitFor(fn, label, timeout = 25000) {
 }
 async function startInbox() {
   const script = path.join(resources, process.env.ERP_NATIVE_RESOURCES ? 'runtime/erp-inbox-server.mjs' : 'tools/erp-inbox-server.mjs');
-  child = spawn(process.execPath, [script], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', SHOPEERS_ERP_INBOX_PORT: String(port), SHOPEERS_ERP_INBOX_FILE: path.join(profile, 'inbox.json'), SHOPEERS_ERP_INBOX_CAPABILITY: capability } });
+  inbox = createInboxServiceController({ executable: process.execPath, scriptPath: script, runAsNode: true,
+    port, capability, spoolPath: path.join(profile, 'inbox.json') });
+  assert.equal((await inbox.start()).ok, true);
   await waitFor(async () => { try { return await call('status'); } catch { return false; } }, 'inbox start');
 }
-async function stopInbox() { if (child?.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited; } }
+async function stopInbox() { await inbox?.stop({ wait: true }); }
 const evaluate = code => view.webContents.executeJavaScript(code);
 const purchase = 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html';
 app.whenReady().then(async () => {
@@ -47,6 +48,7 @@ app.whenReady().then(async () => {
     await startInbox();
     await call('requests', { request: { id: 'NATIVE-R', workspaceId, ledgerId: 'NATIVE-L', ledgerPeriod: '2026-09', platformSkcs: [{ platformSkc: 'SKC-A' }] }, expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] });
     const ses = session.fromPartition('persist:native-erp');
+    installExtensionInboxTransport(ses, () => inbox);
     ses.serviceWorkers.on('console-message', (_event, details) => { if (details?.level === 'error') failures.push(details.message); });
     ses.protocol.handle('https', request => {
       const url = new URL(request.url);

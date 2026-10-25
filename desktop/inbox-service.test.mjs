@@ -141,8 +141,8 @@ const concurrentRefresh = createInboxServiceController({ port: refreshServer.add
 try {
   const results = await Promise.all(Array.from({ length: 20 }, () => concurrentRefresh.refresh()));
   assert.equal(refreshCount, 1);
-  assert.ok(results.every(result => result.kind === 'shopeers'));
-  assert.equal(concurrentRefresh.getState().status, 'online');
+  assert.ok(results.every(result => result.kind === 'conflict'));
+  assert.equal(concurrentRefresh.getState().status, 'conflict', 'an unowned listener cannot become an online managed service');
 } finally {
   await concurrentRefresh.stop({ wait: true });
   await new Promise(resolve => refreshServer.close(resolve));

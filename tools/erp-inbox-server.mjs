@@ -1045,6 +1045,15 @@ function findDirectRequestContext(records, batch) {
 
 const server = http.createServer(async (req, res) => {
   if (!req.url?.startsWith("/erp/v1/") && !req.url?.startsWith("/selection/v1/")) return json(res, 404, { error: "NOT_FOUND" });
+  if (req.url?.split('?')[0] === '/erp/v1/identity') {
+    // This endpoint discloses no business state and requires no bearer. A fresh
+    // bounded challenge proves server identity before the desktop sends secrets.
+    const match = /^\/erp\/v1\/identity\?challenge=([a-f0-9]{64})$/.exec(req.url);
+    if (req.method !== 'GET' || !match) return json(res, 400, { error: 'INVALID_IDENTITY_CHALLENGE' });
+    const challenge = match[1];
+    const proof = crypto.createHmac('sha256', inboxCapability).update('lworkstation-inbox-identity@1\0').update(challenge).digest('hex');
+    return json(res, 200, { challenge, proof });
+  }
   if (!authorized(req)) return unauthorized(res);
   if (req.method === "OPTIONS") return json(res, 204, null);
 

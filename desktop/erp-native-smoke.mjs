@@ -15,3 +15,12 @@ await Promise.all([writeFile(path.join(output, 'stdout.log'), stdout), writeFile
 const result = JSON.parse(await readFile(path.join(output, 'erp-native-checks.json'), 'utf8'));
 console.log(JSON.stringify(result, null, 2));
 if (code !== 0 || !result.ok) process.exitCode = 1;
+else {
+  // The same Windows/native CI entry also verifies loopback credential isolation
+  // and the public HTTP body/status contract through real extension fetch.
+  const transport = spawn(process.execPath, [path.join(root, 'inbox-extension-smoke.mjs')], {
+    windowsHide: true, stdio: 'inherit', env: { ...process.env, INBOX_EXTENSION_OUTPUT: path.join(output, 'inbox-transport') },
+  });
+  const transportCode = await new Promise((resolve, reject) => { transport.once('exit', resolve); transport.once('error', reject); });
+  if (transportCode !== 0) process.exitCode = 1;
+}

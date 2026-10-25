@@ -1,5 +1,7 @@
+import { transferProfitSupplierScope } from './profitFilter';
+
 const returnPages = new Set(['/workspace', '/profit', '/ledger']);
-export function importReturnHref(search, returnTo, ledgerId) {
+export function importReturnHref(search, returnTo, ledgerId, { workspaceId } = {}) {
   const candidate = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/profit';
   const [path, query = ''] = candidate.split('?');
   const safePath = returnPages.has(path) ? path : '/profit';
@@ -9,5 +11,6 @@ export function importReturnHref(search, returnTo, ledgerId) {
     for (const value of params.getAll(key)) kept.append(key, value);
   }
   if (ledgerId) kept.set('ledger', ledgerId);
+  transferProfitSupplierScope(params, kept, { workspaceId });
   return safePath + (kept.size ? `?${kept}` : '');
 }

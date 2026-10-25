@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "candidateOnly": true,
-  "integrationBranch": "codex/background-stability-1-0-1",
+  "integrationBranch": "codex/audit-fixes-1-0-2",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "c18f79203335dab9b3ff17e25c5d16be08bcb005"
+      "commit": "a4b4f946a7d2465c6857cea9aa79f0698a887995"
     }
   ]
 }

@@ -42,7 +42,7 @@ const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 const { normalizeAllowedRemoteUrl, resolveRemotePopup } = require("./remote-navigation.cjs");
 const { isAllowedWorkspaceUrl } = require("./workspace-navigation.cjs");
-const { createInboxServiceController } = require("./inbox-service.cjs");
+const { createInboxServiceController, installExtensionInboxTransport } = require("./inbox-service.cjs");
 const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecycle.cjs');
 const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
 const { createRemoteViewLoader } = require('./remote-view-loader.cjs');
@@ -50,7 +50,7 @@ const { registerWorkspaceSystemIpc } = require('./workspace-system-ipc.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
 const { createInboxPopoverLifecycle } = require("./inbox-popover-lifecycle.cjs");
-const { buildInboxUrl, enforceWorkspaceContext, normalizeInboxRequest, normalizeWorkspaceContext } = require("./inbox-ipc.cjs");
+const { enforceWorkspaceContext, normalizeInboxRequest, normalizeWorkspaceContext } = require("./inbox-ipc.cjs");
 const {
   createWorkspaceContextCoordinator,
   configurationHttpResult,
@@ -548,6 +548,7 @@ async function buildRemoteView(tabId, partition, extensionDirectory) {
   setStatus(tabId, { status: 'loading', error: null, extension: { status: 'loading' } });
   const tabSession = session.fromPartition(partition, { cache: true });
   hardenSession(tabSession);
+  if (tabId === 'erp') installExtensionInboxTransport(tabSession, () => inboxService);
   const view = new WebContentsView({
     webPreferences: {
       session: tabSession,
@@ -806,27 +807,9 @@ function createWorkspaceView(url) {
 }
 
 async function requestJson(pathname, options = {}) {
-  const method = String(options.method || "GET").toUpperCase();
-  const query = options.query || {};
-  const route = pathname;
-  const requestUrl = buildInboxUrl(inboxState.port, { route, method, query, body: options.body ?? null });
-  const headers = {
-    ...(options.headers && typeof options.headers === "object" ? options.headers : {}),
-    authorization: `Bearer ${inboxCapability}`,
-  };
-  if (options.body != null) headers["content-type"] = "application/json";
-  const response = await net.fetch(requestUrl, {
-    ...options,
-    method,
-    headers,
-    ...(options.body == null ? {} : { body: typeof options.body === "string" ? options.body : JSON.stringify(options.body) }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(payload.message || `ERP 收件服务返回 HTTP ${response.status}`), {
-    status: response.status,
-    code: payload.error || payload.code || "INBOX_REQUEST_FAILED",
-  });
-  return payload;
+  if (!inboxService) throw Object.assign(new Error('本机收件服务尚未就绪，请稍后重试。'), { code: 'INBOX_SERVICE_UNAVAILABLE', status: 503 });
+  return inboxService.requestInbox({ route: pathname, method: options.method || 'GET',
+    query: options.query, body: options.body ?? null });
 }
 
 async function runErpV2SmokeFixture() {
@@ -844,11 +827,9 @@ async function runErpV2SmokeFixture() {
   const selectionStatusProbe = await requestJson("/selection/v1/status");
   const requestedAt = new Date().toISOString();
   const expectedSkus = [{ platformSku, platformSkc, warehouseSku }];
-  const headers = { "content-type": "application/json" };
   await requestJson("/erp/v1/requests", {
     method: "POST",
-    headers,
-    body: JSON.stringify({
+    body: {
       request: {
         id: requestId,
         workspaceId,
@@ -858,7 +839,7 @@ async function runErpV2SmokeFixture() {
         platformSkcs: [{ platformSkc }],
       },
       expectedSkus,
-    }),
+    },
   });
   const deliveryCapturedAt = new Date(Date.now() + 100).toISOString();
   const bridgePath = tabState.erp.extension?.path && path.join(tabState.erp.extension.path, "src", "shopeers-bridge.js");

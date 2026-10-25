@@ -20,8 +20,30 @@ import {
 } from "../repositories/selectionCatalogUtils";
 export const CLIENT_DATABASE_NAME = "shopeers-workstation";
 export const ERP_TEST_DATA_RESET_ACTION = "erp_test_data_reset_0_2_6_beta_1";
-export const db = new Dexie(CLIENT_DATABASE_NAME);
-installDerivedInvalidation(db);
+export const CLIENT_DATABASE_V11_STORES = {
+  workspaces: "id,name,updatedAt",
+  products: "id,workspaceId,status,publicationStatus,updatedAt",
+  platformSkus: "id,&[workspaceId+canonicalPlatformSku],workspaceId,platformSkc,productId,canonicalWarehouseSku,status",
+  supplierOffers: "id,workspaceId,productId,[productId+status],platformSku,canonicalPlatformSku,offerKey,status,source,sourceProductId,updatedAt",
+  captures: "id,workspaceId,status,requestId,sourceProductId,capturedAt",
+  ledgers: "id,[workspaceId+period],workspaceId,period,status,updatedAt",
+  importBatches: "id,ledgerId,workspaceId,createdAt,status,store,fileName,fileHash",
+  salesRows: "++id,batchId,ledgerId,[ledgerId+groupKey],workspaceId,platformSku,platformSkc,store,supplierNumber,orderId",
+  erpCostRequests: "id,workspaceId,ledgerId,status,createdAt",
+  erpCostBatches: "id,workspaceId,ledgerId,requestId,status,publishedAt",
+  erpCostRows: "++id,batchId,ledgerId,platformSku,canonicalPlatformSku,warehouseSku,publishedAt",
+  erpCostInbox: "id,&deliveryId,batchId,workspaceId,ledgerId,requestId,status,receivedAt",
+  costApprovals: "id,workspaceId,ledgerId,platformSku,status,approvedAt",
+  catalogManualCosts: "id,workspaceId,productId,platformSku,canonicalPlatformSku,status,confirmedAt,updatedAt",
+  profitLines: "++id,workspaceId,ledgerId,platformSku,canonicalPlatformSku,platformSkc,store,finalizedAt",
+  auditEvents: "++id,&eventId,workspaceId,objectType,objectId,createdAt,syncState",
+  settings: "key",
+};
+
+// Both the live database and isolated backup upgrades use these exact migrations.
+export function createClientDatabase(name, { observeChanges = false } = {}) {
+const db = new Dexie(name);
+if (observeChanges) installDerivedInvalidation(db);
 
 db.version(1).stores({
   importBatches: "id,createdAt,status,store,fileName",
@@ -297,26 +319,6 @@ db.version(10).stores({
   }
 });
 
-export const CLIENT_DATABASE_V11_STORES = {
-  workspaces: "id,name,updatedAt",
-  products: "id,workspaceId,status,publicationStatus,updatedAt",
-  platformSkus: "id,&[workspaceId+canonicalPlatformSku],workspaceId,platformSkc,productId,canonicalWarehouseSku,status",
-  supplierOffers: "id,workspaceId,productId,[productId+status],platformSku,canonicalPlatformSku,offerKey,status,source,sourceProductId,updatedAt",
-  captures: "id,workspaceId,status,requestId,sourceProductId,capturedAt",
-  ledgers: "id,[workspaceId+period],workspaceId,period,status,updatedAt",
-  importBatches: "id,ledgerId,workspaceId,createdAt,status,store,fileName,fileHash",
-  salesRows: "++id,batchId,ledgerId,[ledgerId+groupKey],workspaceId,platformSku,platformSkc,store,supplierNumber,orderId",
-  erpCostRequests: "id,workspaceId,ledgerId,status,createdAt",
-  erpCostBatches: "id,workspaceId,ledgerId,requestId,status,publishedAt",
-  erpCostRows: "++id,batchId,ledgerId,platformSku,canonicalPlatformSku,warehouseSku,publishedAt",
-  erpCostInbox: "id,&deliveryId,batchId,workspaceId,ledgerId,requestId,status,receivedAt",
-  costApprovals: "id,workspaceId,ledgerId,platformSku,status,approvedAt",
-  catalogManualCosts: "id,workspaceId,productId,platformSku,canonicalPlatformSku,status,confirmedAt,updatedAt",
-  profitLines: "++id,workspaceId,ledgerId,platformSku,canonicalPlatformSku,platformSkc,store,finalizedAt",
-  auditEvents: "++id,&eventId,workspaceId,objectType,objectId,createdAt,syncState",
-  settings: "key",
-};
-
 db.version(11).stores(CLIENT_DATABASE_V11_STORES);
 
 // v12 originally reset ERP and profit records for a beta fixture. It is retained
@@ -360,16 +362,31 @@ db.version(15).stores({
   profitReportLines: "id,workspaceId,ledgerId,reportId,[reportId+lineKind],[reportId+store]",
 });
 
-// Read the schemas already declared above; backup compatibility must not define
-// a second migration history. The regression test covers every declared version.
-export const CLIENT_DATABASE_BACKUP_SCHEMAS = Object.freeze(Object.fromEntries(
-  db._versions.map(version => [version._cfg.version, Object.freeze(Object.keys(version._cfg.dbschema))]),
-));
-
 db.auditEvents.hook("creating", (_primaryKey, event) => {
   if (!event.eventId) event.eventId = makeId("EVT");
   if (!event.syncState) event.syncState = SYNC_STATES.PENDING;
   if (event.syncAttempts == null) event.syncAttempts = 0;
   if (event.syncError == null) event.syncError = null;
 });
+return db;
+}
+
+export const db = createClientDatabase(CLIENT_DATABASE_NAME, { observeChanges: true });
+
+// Read the schemas already declared above; backup compatibility must not define
+// a second migration history. The regression test covers every declared version.
+export const CLIENT_DATABASE_BACKUP_SCHEMAS = Object.freeze(Object.fromEntries(
+  db._versions.map(version => [version._cfg.version, Object.freeze(Object.keys(version._cfg.dbschema))]),
+));
+
+export const BACKUP_MIGRATION_DATABASE_PREFIX = 'shopeers-backup-migration-';
+export function createBackupSeedDatabase(name, version) {
+  if (!name.startsWith(BACKUP_MIGRATION_DATABASE_PREFIX)) throw new Error('备份暂存数据库名称无效。');
+  const schema = db._versions.find(item => item._cfg.version === version)?._cfg.dbschema;
+  if (!schema) throw new Error('备份数据库版本不受支持。');
+  const seed = new Dexie(name);
+  seed.version(version).stores(Object.fromEntries(Object.entries(schema).map(([table, definition]) =>
+    [table, [definition.primKey.src, ...definition.indexes.map(index => index.src)].join(',')])));
+  return seed;
+}
 
