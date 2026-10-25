@@ -172,7 +172,7 @@ export default function ImportPreview() {
   useEffect(() => {
     if (!result && !requestedLedgerId && !periodChoiceRef.current) setPeriod(suggestedPeriod ?? "");
   }, [requestedLedgerId, suggestedPeriod, result]);
-  const returnHref = importReturnHref(location.search, location.state?.importReturnTo, result?.ledgerId);
+  const returnHref = importReturnHref(location.search, location.state?.importReturnTo, result?.ledgerId, { workspaceId: ledgerContext?.workspaceId ?? groupWorkspaceId });
   const returnLabel = returnHref.startsWith('/workspace') ? '返回经营概览' : returnHref.startsWith('/ledger') ? '返回月度账本' : '返回利润面板';
   useEffect(() => {
     if (!requestedLedgerId) { setLedgerContext(null); return; }

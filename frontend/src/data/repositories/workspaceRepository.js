@@ -1,7 +1,6 @@
 import { buildCloudSeedPayload } from "../../domain/cloudSeed";
 import { CLOUD_SEED_TABLES } from "../../domain/cloudSeed";
 import { REPORT_TABLES } from "../../domain/profitReports";
-import { validateReportBackup } from "../../domain/profitReportBackup";
 import { replaySyncRecoveryPayload } from "../../domain/syncRecovery";
 import { clearDesktopInboxData } from "../../lib/clearDesktopInboxData";
 import { clearAllCostDrafts,captureCostDrafts } from "../../lib/costMatchingDraft";
@@ -19,6 +18,7 @@ import {
 } from "../../domain/workspaceBackup";
 import { buildWorkspaceOperationalSummary } from "../../domain/workspaceSummary";
 import { db, CLIENT_DATABASE_BACKUP_SCHEMAS } from "../db/clientDatabase";
+import { prepareWorkspaceBackupForRestore } from '../backupMigration';
 import { withVerifiedLedgerCostSummaries } from "./profitRepository";
 import { cachedDerived, observeSourceRevision, sourceRevision, observeTableRevision, tableRevisionReader, assertSourceRevision, retrySourceRead } from "../db/derivedCache";
 import {
@@ -291,9 +291,10 @@ export function recoverWorkspacePreferenceRestore() {
 }
 
 export async function restoreWorkspaceBackupPayload(payload, restoredBy = "local-user", { beforeRestore } = {}) {
-  const inspection = inspectWorkspaceBackupPayload(payload);
-  await validateReportBackup(payload.tables);
+  const sourceDatabaseVersion = Number(payload?.databaseVersion);
   return withWorkspaceReset(async () => {
+    payload = await prepareWorkspaceBackupForRestore(payload);
+    const inspection = inspectWorkspaceBackupPayload(payload);
     await resolvePreferenceJournal();
     await beforeRestore?.();
     const restoredAt = new Date().toISOString();
@@ -328,6 +329,7 @@ export async function restoreWorkspaceBackupPayload(payload, restoredBy = "local
             sourceGeneratedAt: payload.generatedAt ?? null,
             recordCount: inspection.recordCount,
             databaseVersion: payload.databaseVersion ?? null,
+            sourceDatabaseVersion,
           },
         });
         if (journal) {

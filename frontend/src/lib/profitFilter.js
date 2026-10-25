@@ -25,6 +25,31 @@ function saveSupplierScope(suppliers, ledgerId, workspaceId, supplierStoreSelect
   return id;
 }
 
+// References belong to one workspace and ledger. Same-ledger navigation keeps
+// the verified reference; a month change intersects it with the new ledger and
+// writes a new binding. Missing evidence must never turn a selection into all.
+export function transferProfitSupplierScope(source, target, { workspaceId, rows } = {}) {
+  if (!source.has('supplier_scope')) return;
+  target.delete('supplier');
+  target.set('supplier_scope', 'unavailable');
+  const sourceLedgerId = source.get('ledger'), ledgerId = target.get('ledger');
+  if (!workspaceId || !sourceLedgerId || !ledgerId) return;
+  const scope = readSupplierScope(source.get('supplier_scope'), sourceLedgerId, workspaceId);
+  if (scope.supplierScopeError) return;
+  if (sourceLedgerId === ledgerId) {
+    target.set('supplier_scope', source.get('supplier_scope'));
+    return;
+  }
+  if (!Array.isArray(rows)) return;
+  const suppliers = new Set(rows.map(row => row.supplierNumber).filter(Boolean));
+  const pairs = new Set(rows.map(row => JSON.stringify([row.store, row.supplierNumber])));
+  const supplierSelection = scope.supplierSelection?.filter(value => suppliers.has(value)) ?? null;
+  const supplierStoreSelection = scope.supplierStoreSelection?.filter(entry => pairs.has(JSON.stringify([entry.store, entry.supplierNumber]))) ?? null;
+  const rebound = buildProfitQuery({ ledgerId, workspaceId, supplierSelection, supplierStoreSelection });
+  target.delete('supplier_scope');
+  for (const key of ['supplier', 'supplier_scope']) for (const value of rebound.getAll(key)) target.append(key, value);
+}
+
 export const DEFAULT_PROFIT_FILTER = {
   query: "",
   storeFilter: "all",

@@ -2,10 +2,11 @@
 import 'fake-indexeddb/auto';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import AppShell from './AppShell';
 import { ToastProvider } from './UI';
+import { buildProfitQuery, filterProfitRowsByScope, readProfitFilter } from '../lib/profitFilter';
 const mocks=vi.hoisted(()=>({member:vi.fn(),ledger:vi.fn(),create:vi.fn(),record:vi.fn(),save:vi.fn()}));
 vi.mock('../data/database',()=>({db:{ledgers:{get:mocks.ledger}},getActiveMemberContext:mocks.member,getWorkspaceOperationalSummary:vi.fn(),createWorkspaceBackupPayload:mocks.create,recordWorkspaceBackupExport:mocks.record}));
 vi.mock('../hooks/useSystemSnapshot',()=>({useSystemSnapshot:()=>({status:'error',data:null,error:'只读检查样例',refresh:async()=>({status:'error',error:'只读检查样例'})})}));
@@ -23,6 +24,26 @@ beforeEach(async()=>{
  window.shopeersDesktopRuntime={desktop:true,saveBackup:mocks.save};
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
  await act(async()=>root.render(<MemoryRouter initialEntries={['/diagnostics?ledger=L&store=A']}><ToastProvider><AppShell><p>系统检查可继续使用</p></AppShell></ToastProvider></MemoryRouter>));
+});
+
+function CurrentScope({ rows }) {
+ const location=useLocation();
+ const filter=readProfitFilter(new URLSearchParams(location.search),'L',{workspaceId:'W'});
+ return <output>{JSON.stringify(filterProfitRowsByScope(rows,filter).map(row=>row.platformSku))}</output>;
+}
+it.each(['per-store','large','empty'])('preserves the %s supplier selection after clicking the profit sidebar',async kind=>{
+ mocks.member.mockResolvedValue({workspaceId:'W'});
+ const rows=[{store:'甲店',supplierNumber:'DEMO-X',platformSku:'EXCLUDED'},{store:'乙店',supplierNumber:'DEMO-X',platformSku:'INCLUDED'},
+  ...Array.from({length:100},(_,index)=>({store:'乙店',supplierNumber:`DEMO-${index}`,platformSku:`SKU-${index}`}))];
+ const filter=kind==='per-store'?{supplierSelection:['DEMO-X'],supplierStoreSelection:[rows[1]]}:kind==='large'?{supplierSelection:rows.slice(2).map(row=>row.supplierNumber)}:{supplierSelection:[],supplierStoreSelection:[]};
+ const query=buildProfitQuery({ledgerId:'L',workspaceId:'W',...filter});query.set('store','all');query.set('missing','0');
+ const expected=JSON.stringify(filterProfitRowsByScope(rows,filter).map(row=>row.platformSku));
+ await act(async()=>root.render(<MemoryRouter key={kind} initialEntries={['/profit?'+query]}><ToastProvider><AppShell><CurrentScope rows={rows}/></AppShell></ToastProvider></MemoryRouter>));
+ await waitFor(()=>expect(host.querySelector('a[href*="supplier_scope="]')).not.toBeNull());
+ expect(host.querySelector('output').textContent).toBe(expected);
+ const link=[...host.querySelectorAll('a')].find(node=>node.textContent.includes('利润核算'));
+ await act(async()=>link.click());
+ expect(host.querySelector('output').textContent).toBe(expected);
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();delete window.shopeersDesktopRuntime;delete globalThis.IS_REACT_ACT_ENVIRONMENT;});
 it('keeps the page available when navigation reads fail and restores scoped links after retry',async()=>{
