@@ -2,11 +2,11 @@
 
 面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、ERP 成本核对和利润核算放在同一个本机工作区。
 
-**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v1.0.0 更新说明](docs/RELEASE_1.0.0.md)
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [全部版本](https://github.com/love70805/lworkstation/releases) · [v1.0.2 更新说明](docs/RELEASE_1.0.2.md)
 
-当前稳定版为 **v1.0.0**：货号统一为模糊识别 / 精准识别，支持 LBY / LBYY 连写容错，修复逐店人工排除跨店泄漏，利润、导出与 ERP 采集范围一致。当前为本机 Windows 桌面版，无需云端数据库；下载和安装更新由用户操作。
+当前稳定版为 **v1.0.2**：修复页面导航和切月丢失逐店货号范围、本机收件服务身份校验不足及旧备份恢复后找不到账本的问题，保留 1.0.1 的后台稳定性和加载优化。当前为本机 Windows 桌面版，无需云端数据库；下载和安装更新由用户操作。
 
-此前 RC 使用独立预发布通道；RC 用户进入 1.0.0 正式版需手动安装一次。正式版沿用成本核算后统一补资料/建档、助手 8.0.50 与 Electron 44.5.0。
+此前 RC 使用独立预发布通道；RC 用户进入正式稳定版需手动安装一次。正式版沿用成本核算后统一补资料/建档、助手 8.0.50 与 Electron 44.9.1。
 
 ## 主要功能
 

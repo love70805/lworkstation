@@ -1,8 +1,10 @@
-## 1.0.2 — 本机候选已验收，尚未发布（2026-10-26）
+## 1.0.2 — 已验收并公开稳定（2026-10-26）
 
-修复逐店货号范围导航、本机收件归属及旧备份历史迁移。完整前端回归/构建、桌面验证、原生 ERP 和解包程序隐藏验收通过；本机 GitHub 认证已就绪，正在继续 PR、远端 CI、合并与公开发布。
+修复逐店货号范围导航、本机收件归属及旧备份历史迁移。完整前端回归/构建、桌面验证、原生 ERP 和解包程序隐藏验收通过。
 
-安装包 116147202 字节，SHA256 `B2BC36E9BC42B82E4B7A14095BC7D7EFC7204977CD3D7A87FCB8395776335D6D`。规范候选 `releases/candidates/1.0.2/`，本机忽略证据 `archive/audit-fixes-1.0.2/`。未安装或操作真实业务数据。[候选记录](../docs/RELEASE_1.0.2.md)。
+[PR #295](https://github.com/love70805/lworkstation/pull/295)、[PR CI](https://github.com/love70805/lworkstation/actions/runs/40211382513) 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/40212224635)均通过。PR 头与软件合并提交跟踪树一致，验收软件提交 `c7a222e6581a3cf3547a492cd33afa86d7af78ba` 后仅有交付文档变化。标签 `v1.0.2` 固定于软件合并提交 `11bccdbe51d8642969c85c7629bede1486e0d1fe`；2026-10-25T16:39:05Z 已[公开稳定 Latest](https://github.com/love70805/lworkstation/releases/tag/v1.0.2)（非草稿、非预发布）。发布服务已核对四资产的上传状态、大小和 SHA256 digest，更新清单与安装包 SHA512 一致；公开下载无需验证。
+
+安装包 116147202 字节，SHA256 `B2BC36E9BC42B82E4B7A14095BC7D7EFC7204977CD3D7A87FCB8395776335D6D`。规范候选 `releases/candidates/1.0.2/`，本机忽略证据 `archive/audit-fixes-1.0.2/`。未安装或操作真实业务数据。本批可重建产物已清理，保留唯一候选与必要证据。[发布记录](../docs/RELEASE_1.0.2.md)。
 
 ## 1.0.1 — 已验收并公开稳定（2026-10-24）
 
