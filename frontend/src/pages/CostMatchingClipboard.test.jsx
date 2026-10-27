@@ -421,7 +421,7 @@ it('opens adopted cost details without a correction form and offers correction a
 });
 it('corrects only missing store SKUs directly without loading a receipt, accepting zero and tiny real costs', async () => {
   await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'DIRECT', stores: ['甲', '乙', '丙'], costs: [formalCost] });
-  await act(async () => button('逐项更正').click());
+  await act(async () => container.querySelector('[aria-label="乙 · SKU-1 · 直接人工更正"]').click());
   const dialog = () => container.querySelector('[role="dialog"]');
   expect(dialog().textContent).toContain('乙 · SKU-1');
   expect(dialog().textContent).toContain('第 1 / 2 项');
@@ -459,14 +459,14 @@ it('counts only the anomalous SKU and keeps healthy siblings out of the missing-
   await render(['SKC-1', 'SKC-1', 'SKC-1'], 'cost_pending', { ledgerId, costs: siblingCosts });
   expect(container.querySelector('.match-correction strong').textContent).toBe('1 条店铺 SKU');
   for (const sku of ['SKU-1', 'SKU-2']) expect(container.querySelector(`[data-platform-sku="${sku}"] .cost-match-current-cell`).textContent).toContain('ERP 已采用');
-  await act(async () => button('逐项更正').click());
+  await act(async () => container.querySelector('[aria-label="甲 · SKU-0 · 直接人工更正"]').click());
   expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-0');
   expect(container.querySelector('[role="dialog"]').textContent).toContain('第 1 / 1 项');
   expect(button('保存并下一项')).toBeUndefined();
 });
 it('keeps direct correction within the selected store even when a SKU is shared across stores', async () => {
   await render(['SKC-1', 'SKC-1'], 'ready', { ledgerId: 'STORE-CORRECTION', stores: ['甲', '乙'], skuIds: ['SHARED', 'SHARED'], contextStore: '乙' });
-  await act(async () => button('逐项更正').click());
+  await act(async () => container.querySelector('[aria-label="乙 · SHARED · 直接人工更正"]').click());
   expect(container.querySelector('[role="dialog"]').textContent).toContain('乙 · SHARED');
   expect(container.querySelector('[role="dialog"]').textContent).toContain('第 1 / 1 项');
   expect(button('保存并下一项')).toBeUndefined();
@@ -475,7 +475,7 @@ it('skips a queued row that becomes effective while the previous correction is s
   let finishSave;
   mocks.saveManual.mockImplementation(() => new Promise(resolve => { finishSave = resolve; }));
   await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION' });
-  await act(async () => button('逐项更正').click());
+  await act(async () => container.querySelector('[aria-label="甲 · SKU-0 · 直接人工更正"]').click());
   await act(async () => {
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '8.5' } });
     Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '已核实' } });
@@ -489,7 +489,7 @@ it('skips a queued row that becomes effective while the previous correction is s
 it('keeps a failed direct correction and entered amount open for retry', async () => {
   mocks.saveManual.mockRejectedValue(new Error('隔离保存故障'));
   await render(['SKC-1'], 'ready', { ledgerId: 'CORRECTION-FAILURE' });
-  await act(async () => button('逐项更正').click());
+  await act(async () => container.querySelector('[aria-label="甲 · SKU-0 · 直接人工更正"]').click());
   await act(async () => {
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '3.5' } });
     Simulate.change(container.querySelector('#manual-cost-reason'), { target: { value: '已核实' } });

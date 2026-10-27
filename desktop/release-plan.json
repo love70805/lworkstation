@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "candidateOnly": true,
-  "integrationBranch": "codex/audit-fixes-1-0-2",
+  "integrationBranch": "codex/cost-controls-1-0-3",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "a4b4f946a7d2465c6857cea9aa79f0698a887995"
+      "commit": "c3c5a3358105b585506e715a7e4533ebb7bbb652"
     }
   ]
 }

@@ -840,10 +840,6 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const correctableMissingRows = useMemo(() => missingReviewRows.filter(row => row.decision.identityIssue?.code !== 'ledger_sku_skc_conflict'), [missingReviewRows]);
   const reviewRowsRef = useRef(allReviewRows);
   reviewRowsRef.current = allReviewRows;
-  const openMissingCorrection = () => {
-    if (locked || !correctableMissingRows.length) return;
-    setManualTarget({ id: correctableMissingRows[0].id, mode: "edit", queueIds: correctableMissingRows.map(row => row.id) });
-  };
   const reviewRowsBySku = useMemo(() => {
     const result = new Map();
     for (const row of reviewRows) { const group = result.get(row.canonicalPlatformSku) ?? []; group.push(row); result.set(row.canonicalPlatformSku, group); }
@@ -1147,7 +1143,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       </div>
 
       {otherAdoptionFailure ? <p className="cost-registration-status" role="alert">较新的 ERP 回传自动采用未完成：{otherAdoptionFailure.message}。证据已保存，系统将继续重试。<Button onClick={() => setInboxQueueOpen(true)}>查看回传批次</Button></p> : null}
-      {!effectiveCostsReady && missingReviewRows.length ? <div className="cost-anomaly-warning" role="status"><AlertCircle size={20} /><span><strong>{missingReviewRows.length} 条店铺 SKU仍缺有效成本</strong><small>具体 SKU与原因见下方待处理列表；历史异常数量不等于当前缺成本数量。</small></span><Button variant="ghost" onClick={clearFilters}>查看全部范围</Button></div> : null}
+      {!effectiveCostsReady && missingReviewRows.length ? <div className="cost-anomaly-warning" role="status"><AlertCircle size={20} /><span><strong>{missingReviewRows.length} 条店铺 SKU仍缺有效成本</strong><small>具体 SKU与原因见下方待处理列表；历史异常数量不等于当前缺成本数量。</small></span></div> : null}
       {hasNewBatch && !isAutomaticInbox && exceptionGroups.length ? <details className="cost-exception-groups" open>
         <summary>按原因查看剩余项与处理方式</summary>
         <div className="cost-exception-grid">{exceptionGroups.map(group => <section key={group.state}>
@@ -1161,7 +1157,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
         <Panel className="match-stat"><ListChecks size={22} /><span>当前查看平台 SKU</span><strong>{displaySkuSet.size}</strong></Panel>
         <Panel className="match-stat match-success"><CheckCircle2 size={22} /><span>当前有效成本</span><strong>{filteredSalesLines.filter(row => row.finalizable).length}<small> 条店铺 SKU</small></strong></Panel>
         <Panel className="match-stat match-batch"><CheckCircle2 size={22} /><span>当前 ERP 已采用</span><strong>{reviewRows.filter(row => row.decision.eligibleForExactProfit && !row.manualOverride).length}<small> 条店铺 SKU</small></strong><p>按当前月份与查看范围</p></Panel>
-        <Panel className={`match-stat match-correction ${missingReviewRows.length ? "match-danger" : "match-success"}`}><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{missingReviewRows.length}<small> 条店铺 SKU</small></strong><div className="cost-correction-entry"><small>按当前月份与查看范围</small>{!locked && correctableMissingRows.length ? <Button onClick={openMissingCorrection}>逐项更正</Button> : null}</div></Panel>
+        <Panel className={`match-stat match-correction ${missingReviewRows.length ? "match-danger" : "match-success"}`}><AlertCircle size={22} /><span>仍缺有效成本</span><strong>{missingReviewRows.length}<small> 条店铺 SKU</small></strong><p>按当前月份与查看范围</p></Panel>
       </div>
 
       <ErpPendingSkuList entries={pendingReviewEntries} batchCount={inboxReview.batches.length} onOverview={openInboxOverview} onReviewItem={(entry, mode) => openReviewItem(entry, mode)} locked={locked} title="当前范围待处理 SKU" paginationResetKey={profitHref} />
@@ -1170,7 +1166,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
         <Panel className={`cost-preview-panel ${resultHighlighted ? "cost-preview-highlight" : ""}`}>
           {parseError ? <div className="cost-inline-error" role="alert"><AlertCircle size={16} />{parseError}</div> : null}
           <div className="panel-header cost-preview-header"><div className="panel-title"><ListChecks size={19} /><h2>成本核对与更正</h2></div><div className="cost-preview-tools"><SearchInput value={resultQuery} onChange={(event) => setResultQuery(event.target.value)} placeholder="搜索 SKC、SKU、仓库 SKU、供应商或采购单..." /><span className="cost-preview-count">显示 {visibleGroupedMatches.length} / {groupedMatches.length} 个 SKC</span><Button variant="ghost" onClick={clearFilters}>清除筛选</Button></div></div>
-          {!locked && correctableMissingRows.length ? <p className="cost-correction-help">人工更正无需选择待处理批次：点击上方“逐项更正”，或在对应店铺 SKU 行点击“人工更正”。同一 SKU 对应多个 SKC 时，须先核对台账归属。</p> : null}
+          {!locked && correctableMissingRows.length ? <p className="cost-correction-help">人工更正无需选择待处理批次：在对应店铺 SKU 行点击“人工更正”。同一 SKU 对应多个 SKC 时，须先核对台账归属。</p> : null}
           {visibleGroupedMatches.length ? <DataTable ref={rememberTable} className="cost-match-table" columns={columns} data={visibleGroupedMatches} getRowId={(row) => row.id} pageSize={12} initialViewState={initialView?.table} paginationResetKey={`${profitHref}/${resultQuery}`} /> : <EmptyState icon={ListChecks} title={!hasFilteredRows && profitFilter.missingOnly && allCostsReady ? "本月成本已齐" : "当前筛选没有匹配明细"} description={!hasFilteredRows && profitFilter.missingOnly && allCostsReady ? "没有待补成本的店铺 SKU，可返回利润明细继续核算。" : "清除搜索、店铺或缺成本筛选后查看；这不代表台账缺少 SKC。"} action={<Button onClick={clearFilters}>查看全部明细</Button>} />}
           {reconciliation?.overrides.length ? <div className="cost-audit-note"><AlertCircle size={17} />检测到 {reconciliation.overrides.length} 次候选替换，旧值与新值会随采用写入批次审计。</div> : null}
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}

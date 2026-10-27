@@ -30,9 +30,6 @@
 .match-stat.match-danger > span, .match-stat.match-danger > svg, .match-stat.match-danger > strong { color: var(--danger); }
 .match-stat p { margin: 12px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .match-stat > span { padding-right: 28px; }
-.cost-correction-entry { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; }
-.cost-correction-entry > small { color: var(--text-muted); font-size: 12px; }
-.cost-correction-entry .button { min-height: 44px; }
 .cost-correction-help { margin: 0 0 16px; color: var(--text-muted); font-size: 13px; line-height: 1.7; }
 .cost-correction-progress { margin: 0; color: var(--text-muted); font-size: 13px; }
 .cost-correction-evidence > summary { cursor: pointer; color: var(--text-muted); font-size: 13px; line-height: 1.7; }
@@ -133,7 +130,6 @@
 .cost-anomaly-warning > span { min-width: 0; flex: 1; }
 .cost-anomaly-warning strong, .cost-anomaly-warning small { display: block; }
 .cost-anomaly-warning small { margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 18px; }
-.cost-anomaly-warning .button { flex: 0 0 auto; }
 .cost-exception-groups { margin: -6px 0 18px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .cost-exception-groups > summary { padding: 11px 14px; cursor: pointer; color: var(--text); font-size: 12px; font-weight: 700; }
 .cost-exception-groups > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -3px; }
@@ -527,7 +523,6 @@
 .cost-page .match-stat > strong small { font-size: 12px; }
 .cost-page .match-stat > svg { top: 14px; right: 14px; width: 18px; height: 18px; }
 .cost-page .match-stat p { margin-top: 6px; font-size: 11px; }
-.cost-page .cost-correction-entry { gap: 6px; flex-wrap: wrap; }
 @media (min-width: 1000px) { .cost-page .match-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 999px) { .cost-page .match-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .cost-page .match-stat { padding: 12px; } .cost-page .match-stat > svg { display: none; } .cost-page .match-stat > span { padding-right: 0; } .cost-page .match-stat > strong small { display: block; margin-left: 0; font-size: 11px; } }
