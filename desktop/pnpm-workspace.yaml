@@ -1,7 +1,13 @@
 allowBuilds:
   electron: true
   electron-winstaller: false
+minimumReleaseAgeExclude:
+  - minimatch@11.0.4
 overrides:
+  # CVE-2026-118764: use the maintained implementation for all glob consumers.
+  # Older consumers need the callable CommonJS export, retained by a tiny adapter.
+  'minimatch@>=3 <6': 'file:build-compat/minimatch-legacy'
+  'minimatch@>=6 <11': 11.0.4
   # Security fixes within the existing parent ranges (^3.0.1 and ^0.8.8).
   'ajv@8.20.0>fast-uri': 3.1.9
   'undici@>=6 <7': 6.29.1

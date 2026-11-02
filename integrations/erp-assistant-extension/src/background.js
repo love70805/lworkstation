@@ -31,6 +31,32 @@
     'adjacentToTheSameSupplier', 'sort',
   ]);
   let checkpointWrites = Promise.resolve();
+  const WORKSPACE_RESET_KEY = 'shopeersErpWorkspaceResetV1';
+  let workspaceReset = null;
+  let appliedWorkspaceResetId = '';
+  let resetWrites = Promise.resolve();
+
+  function applyWorkspaceReset(config, marker) {
+    if (!marker?.resetId || !Number.isFinite(Date.parse(marker.clearedAt))) return Promise.resolve(null);
+    const operation = resetWrites.catch(() => {}).then(async () => {
+      if (workspaceReset?.baseUrl === config.baseUrl && Date.parse(workspaceReset.clearedAt) > Date.parse(marker.clearedAt)) return workspaceReset;
+      if (workspaceReset?.baseUrl === config.baseUrl && workspaceReset.resetId === marker.resetId && appliedWorkspaceResetId === marker.resetId) return marker;
+      const stored = (await chrome.storage.local.get(WORKSPACE_RESET_KEY))[WORKSPACE_RESET_KEY];
+      workspaceReset = { ...marker, baseUrl: config.baseUrl };
+      if (stored?.baseUrl !== config.baseUrl || stored.resetId !== marker.resetId) {
+        // Join both write queues so a previously accepted save cannot outlive
+        // the clear. Keep transport configuration and ERP login untouched.
+        checkpointWrites = checkpointWrites.catch(() => {}).then(() => chrome.storage.local.set({ [CHECKPOINT_KEY]: [] }));
+        pendingWrites = pendingWrites.catch(() => {}).then(() => writePending([]));
+        await Promise.all([checkpointWrites, pendingWrites]);
+        await chrome.storage.local.set({ [WORKSPACE_RESET_KEY]: workspaceReset });
+      }
+      appliedWorkspaceResetId = marker.resetId;
+      return marker;
+    });
+    resetWrites = operation;
+    return operation;
+  }
 
   function checkpointBytes(value) {
     let bytes = 0;
@@ -65,9 +91,9 @@
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
     const currentVersion = chrome.runtime.getManifest().version;
-    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49'];
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -510,7 +536,8 @@
   }
 
   async function writePending(records) {
-    await chrome.storage.local.set({ [PENDING_RESULTS_KEY]: records });
+    const clearedAt = Date.parse(workspaceReset?.clearedAt || '');
+    await chrome.storage.local.set({ [PENDING_RESULTS_KEY]: records.filter(record => !Number.isFinite(clearedAt) || Date.parse(record.createdAt || '') > clearedAt) });
   }
 
   let pendingWrites = Promise.resolve();
@@ -697,7 +724,8 @@
     const result = await fetchLoopbackJson(paths[action], { config, method: reading ? 'GET' : 'POST', ...(reading ? { query: { workspaceId: config.workspaceId, ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(action === 'catalogSeed' ? { attemptId: input.attemptId, runnerId: input.runnerId } : {}) } } : { body }) });
     assertRecordWorkspace({ workspaceId: config.workspaceId }, await runtimeConfig());
-    return { ...result, ok: true };
+    const marker = await applyWorkspaceReset(config, result.workspaceReset);
+    return { ...result, workspaceReset: marker || result.workspaceReset, ok: true };
   }
 
   async function prepareTaskCostResult(input) {
@@ -884,7 +912,7 @@
   async function reportInstalled({ ready = false, sender = null, sessionState = 'unknown', pageState = 'page_ready', queryAvailable = false } = {}) {
     const pageUrl = trustedSiteSenderUrl(sender);
     const config = await runtimeConfig();
-    return fetchLoopbackJson('/erp/v1/extension-status', {
+    const result = await fetchLoopbackJson('/erp/v1/extension-status', {
       config,
       method: 'POST',
       body: {
@@ -900,6 +928,8 @@
         queryAvailable: queryAvailable === true,
       },
     });
+    const marker = await applyWorkspaceReset(config, result.workspaceReset);
+    return { ...result, workspaceReset: marker || result.workspaceReset };
   }
 
   async function flushPending() {
@@ -923,7 +953,7 @@
         ? retryPending(message.payload, sender)
       : message?.type === 'shopeers.erp.reportStatus'
         ? (trustedSiteSenderUrl(sender)
-            ? reportInstalled({ ...message.payload, ready: message.payload?.ready !== false, sender }).then(() => ({ ok: true, status: 'success' }))
+            ? reportInstalled({ ...message.payload, ready: message.payload?.ready !== false, sender }).then(result => ({ ok: true, status: 'success', workspaceReset: result.workspaceReset || null }))
             : Promise.reject(loopbackError('ERP_UNTRUSTED_SENDER', '扩展状态来源无效。', 403)))
         : Promise.reject(loopbackError('ERP_UNKNOWN_MESSAGE', '未知扩展消息。', 400));
     operation

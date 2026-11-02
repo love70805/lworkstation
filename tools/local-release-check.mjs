@@ -15,6 +15,7 @@ const commands = [
   ["ERP 资料目标实际并发", "node", ["../tools/erp-catalog-concurrency.test.mjs"]],
   ["ERP 服务维护、缺项复核与批次恢复", "node", ["../tools/erp-collection-resilience.test.mjs"]],
   ["ERP 平台 SKU/SKC 精确采集范围", "node", ["../tools/erp-platform-scope.test.mjs"]],
+  ["清空后扩展缓存与 SKC 隔离", "node", ["../tools/erp-workspace-reset.test.mjs"]],
   ["清空本机数据与 ERP 历史隔离", "node", ["../tools/local-workspace-reset.test.mjs"]],
   ["ERP 分批采集规模与性能", "node", ["../tools/erp-collection-batches.test.mjs"]],
   ["ERP 实际读取流水线、限流恢复与精确 SKU 补查", "node", ["../tools/erp-collection-throughput.test.mjs"]],
