@@ -2,6 +2,7 @@ import { canonicalPlatformSku } from "./identifiers";
 import { manualSnapshot, createManualOverrideLookup, storeSkuKey } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
 import { buildLedgerSkuIdentityIndex, ledgerCostIdentityIssue, LEDGER_COST_IDENTITY_VERSION } from './ledgerCostIdentity';
+import { accountingApprovals } from './inventoryAccounting';
 
 function validAmount(value) {
   const amount = Number(value);
@@ -21,7 +22,8 @@ function collectSkus(items, predicate = () => true) {
     .filter(Boolean));
 }
 
-export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId, period = null }) {
+export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId, period = null, accountingMode = 'weighted' }) {
+  approvals = accountingApprovals(approvals, accountingMode);
   const manualFor = createManualOverrideLookup(approvals);
   const identities = buildLedgerSkuIdentityIndex(salesRows);
   const expectedRows = new Map(salesRows.map((row) => [storeSkuKey(row.store, row.platformSku ?? row.sku), row]));

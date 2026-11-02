@@ -10,6 +10,8 @@ import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
 import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
 import { createManualOverrideLookup } from "../domain/manualCostOverride";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
+import { costEvaluationPeriod } from '../domain/inventoryAccounting';
+import ErpCollectionLauncher from '../components/ErpCollectionLauncher';
 import ManualCostDialog from "./ManualCostDialog";
 import WarehouseHistoryDialog from './WarehouseHistoryDialog';
 import { readErpHistoryMappings } from '../data/repositories/profitRepository';
@@ -211,8 +213,8 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const collectionScopeChanged = Boolean(scopeCollection && (scopeCollection.ledgerVersion !== ledgerVersion || scopeCollection.ledgerPeriod !== snapshot?.ledger?.period));
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [collectionError, setCollectionError] = useState('');
-  const locked = ["finalized", "locked"].includes(snapshot?.ledger?.status);
-  const ledgerLocked = snapshot?.ledger?.status === "locked";
+  const locked = false;
+  const ledgerLocked = false;
   const [sourceText, setSourceText] = useState("");
   const [sourceName, setSourceName] = useState("clipboard.tsv");
   const [parsedRows, setParsedRows] = useState(null);
@@ -338,7 +340,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     canonicalPlatformSku(row.platformSku), row,
   ])), [snapshot?.costs]);
   const formalSalesLines = useMemo(() => salesLines.map((row) => {
-      const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: snapshot?.ledger?.period, store: row.store, platformSku: row.platformSku };
+      const scope = { workspaceId: snapshot?.ledger?.workspaceId, ledgerId: snapshot?.ledger?.id, period: costEvaluationPeriod(snapshot?.ledger), store: row.store, platformSku: row.platformSku };
       const erpCost = formalCostsBySku.get(row.canonicalPlatformSku);
       const manualOverride = manualFor(scope);
       const decision = resolveLedgerCostDecision({ ...scope, identity: ledgerIdentities.get(row.canonicalPlatformSku), erpCost, manualOverride });
@@ -389,7 +391,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     if (collection.loading || collection.error) return;
     if (scopeCollection && (collectionScopeChanged || locked)) {
       void controlErpCollectionTask(scopeCollection.taskId, { workspaceId: scopeCollection.workspaceId, action: 'stop' })
-        .then(() => { setCollectionError(locked ? '账本已定稿，采集已停止。' : '台账已重新导入，旧任务已停止，请按当前范围重新采集。'); collection.refresh(); })
+        .then(() => { setCollectionError('台账已重新导入，旧任务已停止，请按当前范围重新采集。'); collection.refresh(); })
         .catch(error => setCollectionError(error.message));
       return;
     }
@@ -440,11 +442,15 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     setCollectionBusy(true); setCollectionError('');
     try {
       const continuing = ['resume', 'retry_failed', 'catalog'].includes(action);
-      if (continuing && (locked || collectionTask.ledgerVersion !== ledgerVersion || collectionTask.ledgerPeriod !== snapshot?.ledger?.period)) throw new Error('账本已定稿或导入范围已变化，请从当前账本重新准备采集。');
+      if (continuing && (locked || collectionTask.ledgerVersion !== ledgerVersion || collectionTask.ledgerPeriod !== snapshot?.ledger?.period)) throw new Error('导入范围已变化，请从当前账本重新准备采集。');
       if (continuing && !requestRecords.some(request => request.id === collectionTask.requestId)) throw new Error('本工作区缺少原任务请求，请停止此任务后从当前账本重新开始。');
       await controlErpCollectionTask(collectionTask.taskId, { workspaceId: collectionTask.workspaceId,
         action: continuing ? 'request_resume' : action, requestId: collectionTask.requestId, scopeHash: collectionTask.scopeHash, filters: collectionTask.filters,
         ...(continuing ? { mode: action === 'catalog' ? 'catalog' : 'cost', retryFailed: action === 'retry_failed' } : {}) });
+      if (continuing && window.shopeersDesktopRuntime?.startErpCollection) {
+        const result = await window.shopeersDesktopRuntime.startErpCollection({ workspaceId: collectionTask.workspaceId, ledgerId: snapshot.ledger.id, requestId: collectionTask.requestId, mode: action === 'catalog' ? 'catalog' : 'cost', retryFailed: action === 'retry_failed' });
+        if (!result?.ok) throw new Error(result?.error || '后台采集尚未启动。');
+      }
       collection.refresh();
     } catch (error) { setCollectionError(error.message); }
     finally { setCollectionBusy(false); }
@@ -470,7 +476,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     if (!inbox?.id || !inbox.envelope || !snapshot?.ledger || !request) return;
     if (sourceText.trim() && loadedInboxId !== inbox.id && !discardDraft) { setInboxQueueOpen(false); setIncomingCandidate({ ...queueItem, returnToInbox }); return; }
     if (!queueItem.scopeMatched || locked) {
-      notify(locked ? "当前账本已定稿或锁定，ERP 批次继续保留在待处理列表。" : `该批次暂不能载入：${ERP_INBOX_MATCH_REASONS[queueItem.reason] ?? queueItem.reason}`, "error");
+      notify(`该批次暂不能载入：${ERP_INBOX_MATCH_REASONS[queueItem.reason] ?? queueItem.reason}`, "error");
       return;
     }
     if (inboxLoadRef.current) return;
@@ -615,9 +621,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       });
       setVoidDraft(null);
       setInboxQueueOpen(true);
-      notify(result.reopened
-        ? `已撤回本次采用的 ERP 成本 ${result.batchId}，本月已重新打开核对。`
-        : `已撤回本次采用的 ERP 成本 ${result.batchId}；受影响 SKU 需要重新确认成本。`, "success");
+      notify(`已撤回本次采用的 ERP 成本 ${result.batchId}；受影响 SKU 需要重新确认成本，历史报告保留。`, "success");
     } catch (error) {
       notify(`撤回采用失败：${error.message}`, "error");
     } finally {
@@ -1139,8 +1143,9 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       {usePersistedReconciliation && !persistedReconciliationReady ? <p role="status" className="cost-correction-help">正在后台更新成本证据列表，当前保留上次列表；已保存成本按最新结果核算。</p> : null}
       {viewedEvidenceBatch ? <Panel className="erp-review-current-batch"><div><strong>当前采购证据 · 第 {viewedEvidenceBatch.index} / {inboxReview.batches.length} 批</strong><p>当前核对草稿保留。全部批次与待处理 SKU可随时返回查看。</p></div><Button onClick={openInboxOverview}>返回全部 {inboxReview.batches.length} 批次</Button></Panel> : null}
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
-      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 采购截至 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
+      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 账本月份 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters searchCosts filter={profitFilter} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={formalSalesLines} onChange={changeScope} /> : null}
+      <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId} ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={() => setRegistrationRetry(value => value + 1)} />
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
       {!locked && missingReviewRows.length ? <p className="cost-correction-help">采集时会为映射缺失项补查有可靠历史关联的仓库。可用核价显示在原“人工更正”中，核对后保存；旧历史证据文件可通过“手动导入”读取。</p> : null}
       {warehouseHistoryOpen ? <WarehouseHistoryDialog key={snapshot.ledger.id} ledger={snapshot.ledger} initialFile={warehouseHistoryFile} onClose={() => { setWarehouseHistoryOpen(false); setWarehouseHistoryFile(null); }} onSaved={result => notify(`已补齐 ${result.savedCount} 项成本，剩余待处理 ${result.pending.length} 项。`, 'success')} /> : null}
@@ -1181,13 +1186,13 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
           {reconciliation?.summary.anomalyConfirmedCount ? <div className="cost-audit-note cost-audit-confirmed"><CheckCircle2 size={17} />有 {reconciliation.summary.anomalyConfirmedCount} 个平台 SKU 已完成人工判断；原始采购证据、修正结果、原因和时间会随本月成本保存。</div> : null}
           {hasNewBatch && publicationReconciliation?.unmatchedCostRows.length ? <div className="cost-audit-note"><AlertCircle size={17} />本批次有 {publicationReconciliation.unmatchedCostRows.length} 行成本不属于已登记的平台 SKU 范围，保留证据但不写入正式成本。</div> : null}
           {auxiliaryGroups.length ? <details className="cost-auxiliary-audit"><summary><Info size={17} />同查询 SKC 下、本账本未使用的额外变体 <strong>{reconciliation.summary.auxiliaryCount}</strong> 行</summary><div className="cost-auxiliary-list">{auxiliaryGroups.map((group) => <section key={group.id}><header><strong className="mono">{group.platformSkc}</strong><span>仓库 SKU <code>{group.warehouseSku}</code></span></header><p>{group.variants.map((variant) => variant.platformSku).join("、")}</p><small>采购记录 {group.purchaseRecordCount} 条 · 排除记录 {group.excludedRecordCount} 条 · 仅供预览与审计，不影响本账本成本，也不会写入正式利润。</small></section>)}</div></details> : null}
-          {(sourceText.trim() || locked || !persistedCostRows.length) ? <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "正在自动核验本次回传，请稍后查看结果。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{locked ? <Button disabled>账本已定稿</Button> : isAutomaticInbox ? (['pending', 'loaded'].includes(currentInbox?.status) ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>{reviewAdoptionFailure ? "重试自动采用" : "重试已处理异常"}</Button> : null) : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div> : null}
+          {(sourceText.trim() || locked || !persistedCostRows.length) ? <div className="cost-publish-bar"><span>{isAutomaticInbox ? adoptionNotice?.details ?? "正在自动核验本次回传，请稍后查看结果。" : hasNewBatch ? `手动批次可采用 ${adoption.summary.erpAdoptableCount} 项 · 异常待处理 ${adoption.summary.blockedAnomalyCount} 项` : sourceText.trim() ? "当前输入仅供核对；正式 ERP 采用需要完整采购证据批次。" : "尚无 ERP 成本，可从列表人工更正。"}</span>{isAutomaticInbox ? (['pending', 'loaded'].includes(currentInbox?.status) ? <Button variant="primary" loading={publishing} disabled={publishing || !canRetryAutomatic} onClick={publish}>{reviewAdoptionFailure ? "重试自动采用" : "重试已处理异常"}</Button> : null) : hasNewBatch ? <Button variant="primary" loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>采用手动批次成本</Button> : null}</div> : null}
           {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按原登记范围核对；查看筛选不改已收到批次的采用范围。人工有效值始终优先，异常证据保留。</p> : null}
         </Panel>
       </div>
       {inboxQueueDialog}
       {targetRow ? manualTarget.mode === "details" ? <Modal open={!resolutionDraft} className="cost-detail-modal" title="成本详情"
-        description={`${snapshot.ledger.period} · ${targetRow.store} · ${targetRow.platformSku}。${locked ? "已定稿或锁定，当前只读。" : targetIdentityConflict ? "请先核对台账父级归属；人工金额不能消除多 SKC 冲突。" : "直接核对采购价格，确认后自动采用合格 ERP 成本；需要指定成本时再人工更正。"}`}
+        description={`${snapshot.ledger.period} · ${targetRow.store} · ${targetRow.platformSku}。${targetIdentityConflict ? "请先核对台账父级归属；人工金额不能消除多 SKC 冲突。" : "直接核对采购价格，确认后自动采用合格 ERP 成本；需要指定成本时再人工更正。"}`}
         onClose={closeCostDetails} footer={<><Button onClick={closeCostDetails}>{manualTarget.returnToBatches ? "返回批次详情" : "关闭"}</Button>{!locked && (!targetIdentityConflict || targetRow.manualOverride) ? <Button onClick={() => setManualTarget({ ...manualTarget, mode: "edit" })}>{targetIdentityConflict ? "撤销人工更正" : targetRow.manualOverride ? "更正 / 撤销" : "人工更正"}</Button> : null}</>}>
         {targetDetails}
       </Modal> : <ManualCostDialog key={targetRow.id} open={!resolutionDraft} ledger={snapshot.ledger} row={targetRow} readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)} className="cost-detail-modal" title="人工更正成本" formFirst queueProgress={manualTarget.queueIds ? { index: targetIndex + 1, total: correctionIds.length } : null} saveLabel={manualTarget.queueIds && !nextTarget ? "保存并完成" : "保存更正"} onClose={closeCostDetails} onNext={manualTarget.returnToBatches ? undefined : nextTarget ? nextCorrection : undefined}>

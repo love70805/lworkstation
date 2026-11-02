@@ -197,20 +197,10 @@ it('ignores a late registration acknowledgement from the previous search range',
   expect(button('复制 1 个平台 SKC').disabled).toBe(false);
   expect(mocks.register.mock.calls.at(-1)[0].expectedSkus).toEqual([{ platformSku: 'SKU-1', platformSkc: 'SKC-B', store: '甲' }]);
 });
-it.each(['finalized', 'locked'])('allows read-only copy in %s while cost writes and registration remain blocked', async status => {
-  await render(['SKC-1'], status);
-  expect(button('复制 1 个平台 SKC').disabled).toBe(false);
-  await act(async () => button('复制 1 个平台 SKC').click());
-  expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-1');
-  expect(button('账本已定稿').disabled).toBe(true);
-  expect(container.querySelector('#manual-cost-actions')).toBeNull();
-  await act(async () => button('手动导入').click());
-  expect(container.querySelector('.cost-manual-textarea').disabled).toBe(true);
-  expect(button('解析并核对').disabled).toBe(true);
-  expect(button('导入成本文件').disabled).toBe(true);
-  await act(async () => { button('账本已定稿').click(); button('解析并核对').click(); });
-  expect(mocks.publish).not.toHaveBeenCalled();
-  expect(mocks.register).not.toHaveBeenCalled();
+it.each(['finalized','locked'])('allows cost collection and edits on a legacy %s month',async status=>{
+  await render(['SKC-1'],status);expect(button('账本已定稿')).toBeUndefined();
+  await act(async()=>button('复制 1 个平台 SKC').click());expect(writeText).toHaveBeenCalledExactlyOnceWith('SKC-1');
+  await act(async()=>button('手动导入').click());expect(container.querySelector('.cost-manual-textarea').disabled).toBe(false);expect(button('导入成本文件').disabled).toBe(false);expect(mocks.register).toHaveBeenCalled();
 });
 it('reports failure and restores the copy button if both clipboard paths reject', async () => {
   writeText.mockRejectedValue(new Error('denied'));
@@ -501,15 +491,10 @@ it('shows current cost coverage instead of requesting another correction from hi
   expect(container.querySelector('.cost-anomaly-warning')).toBeNull();
   expect(mocks.inboxRecords[0].adoption).toBe(adoption);
 });
-it.each(['finalized', 'locked'])('shows only details and preserves read-only cost evidence for %s', async status => {
-  await render(['SKC-1'], status, { ledgerId: `DETAILS-${status}`, costs: [formalCost] });
-  expect(container.querySelectorAll('.cost-match-row-actions button')).toHaveLength(1);
-  await act(async () => button('详情').click());
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain('已定稿或锁定');
-  expect(container.querySelector('#manual-cost-value')).toBeNull();
-  expect(button('人工更正')).toBeUndefined();
-  expect(button('逐项更正')).toBeUndefined();
-  expect(button('撤销当前更正')).toBeUndefined();
+it.each(['finalized','locked'])('keeps evidence and manual correction available for a legacy %s month',async status=>{
+  await render(['SKC-1'],status,{ledgerId:'DETAILS-'+status,costs:[formalCost]});await act(async()=>button('详情').click());
+  expect(container.querySelector('[role="dialog"]').textContent).not.toContain('已定稿或锁定');expect(button('人工更正')).toBeDefined();
+  await act(async()=>button('人工更正').click());expect(container.querySelector('#manual-cost-value')).not.toBeNull();
 });
 it('recognizes a restored draft already in the automatic inbox and explains its block', async () => {
   const ledgerId = 'RESTORED-INBOX';

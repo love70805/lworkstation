@@ -26,9 +26,10 @@ afterEach(async () => { db.close(); await db.delete(); });
 
 it("keeps latest ledgers, activity, pending costs and all counts isolated regardless of foreign dates and insertion order", async () => {
   const original = await getWorkspaceOperationalSummary();
-  expect(original).toMatchObject({ productCount: 1, platformSkuCount: 1, pendingCaptureCount: 1, openLedgerCount: 2, finalizedLedgerCount: 1, readyLedgerCount: 1, missingCostCount: 3,
-    latestLedger: { id: "A-NEW" }, latestOpenLedger: { id: "A-NEW" }, latestFinalizedLedger: { id: "A-CLOSED" }, latestActivityAt: "2026-09-08T08:00:00Z" });
+  expect(original).toMatchObject({ productCount: 1, platformSkuCount: 1, pendingCaptureCount: 1, openLedgerCount: 3, finalizedLedgerCount: 0, readyLedgerCount: 1, missingCostCount: 3,
+    latestLedger: { id: "A-NEW" }, latestOpenLedger: { id: "A-NEW" }, latestFinalizedLedger: null, latestReadyLedger:{id:"A-NEW"}, latestActivityAt: "2026-09-08T08:00:00Z" });
   expect(original.pendingLedgerTasks).toEqual([
+    { ledgerId: "A-CLOSED", period: "2026-06", kind: "ledger", missingCount: 0 },
     { ledgerId: "A-OLD", period: "2026-07", kind: "cost", missingCount: 3 },
     { ledgerId: "A-NEW", period: "2026-08", kind: "profit", missingCount: 0 },
   ]);
@@ -47,8 +48,8 @@ it("keeps latest ledgers, activity, pending costs and all counts isolated regard
   await db.salesRows.add({ workspaceId: foreign, ledgerId: "B-LATEST", platformSku: "B-S", quantity: 999 });
   expect(await getWorkspaceOperationalSummary()).toEqual(original);
   await setActiveMemberContext({ workspaceId: foreign, memberId: "summary-admin", role: "admin" });
-  expect(await getWorkspaceOperationalSummary()).toMatchObject({ productCount: 1, platformSkuCount: 2, blockedCaptureCount: 1, openLedgerCount: 2, finalizedLedgerCount: 1, readyLedgerCount: 1, missingCostCount: 900,
-    latestLedger: { id: "B-LATEST" }, latestOpenLedger: { id: "B-LATEST" }, latestFinalizedLedger: { id: "B-CLOSED" }, latestActivityAt: "2099-12-31T23:59:59Z" });
+  expect(await getWorkspaceOperationalSummary()).toMatchObject({ productCount: 1, platformSkuCount: 2, blockedCaptureCount: 1, openLedgerCount: 3, finalizedLedgerCount: 0, readyLedgerCount: 1, missingCostCount: 900,
+    latestLedger: { id: "B-LATEST" }, latestOpenLedger: { id: "B-LATEST" }, latestFinalizedLedger: null, latestReadyLedger:{id:"B-OLD"}, latestActivityAt: "2099-12-31T23:59:59Z" });
 });
 
 it("projects a legacy ready identity conflict as a cost task without writing the saved ledger", async () => {
@@ -69,6 +70,7 @@ it("a newer draft does not remove an earlier ready month from the persisted summ
   const summary = await getWorkspaceOperationalSummary();
   expect(summary.latestOpenLedger.id).toBe("A-DRAFT");
   expect(summary.pendingLedgerTasks).toEqual([
+    { ledgerId: "A-CLOSED", period: "2026-06", kind: "ledger", missingCount: 0 },
     { ledgerId: "A-OLD", period: "2026-07", kind: "cost", missingCount: 3 },
     { ledgerId: "A-NEW", period: "2026-08", kind: "profit", missingCount: 0 },
     { ledgerId: "A-DRAFT", period: "2026-09", kind: "ledger", missingCount: 0 },

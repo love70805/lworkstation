@@ -3,6 +3,7 @@ import { canonicalPlatformSku } from "./identifiers";
 import { createLedgerGroupKey, createLedgerSkuKey } from "./ledgerImport";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from './ledgerCostIdentity';
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
+import { costEvaluationPeriod } from './inventoryAccounting';
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
 export const REPORT_TEMPLATE_VERSION = "profit-zebra@10-optional-dispatch-store";
@@ -53,11 +54,11 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
   return [...groups.values()].map(row => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const cost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: ledger.period, erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
+    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: costEvaluationPeriod(ledger), erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
     if (!decision.eligibleForExactProfit) {
       if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId, costIdentityIssue:decision.identityIssue ?? null };
       if (decision.identityIssue) throw new Error(`${describeLedgerCostIdentityIssue(decision.identityIssue)}不能生成报告。`);
-      throw new Error(`${row.store} / ${row.platformSku} 尚缺正式成本，不能生成报告。`);
+      throw new Error(`${row.store} / ${row.platformSku} 缺少正式成本，不能生成报告。`);
     }
     const unitCostExact = exact(decision.unitCost, { nonnegative: true });
     const purchaseCostExact = new Exact(row.quantityExact).times(unitCostExact).toFixed();

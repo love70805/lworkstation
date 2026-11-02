@@ -31,7 +31,7 @@ it('rejects residual scope, cross-workspace and finalized changes', async () => 
   await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).rejects.toThrow('残留');
   await db.salesRows.delete('residual');
   await db.ledgers.update(scope.ledgerId, { status: 'finalized' });
-  await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).rejects.toThrow('重开');
+  await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).resolves.toMatchObject({scope:'full_month'});
   await db.ledgers.update(scope.ledgerId, { workspaceId: 'other' });
   await expect(confirmSalesSourceCoverage({ ...scope, confirmed: true })).rejects.toThrow('权限');
 });

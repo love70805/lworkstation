@@ -30,7 +30,7 @@ export function CostMatchingInboxQueueDialog({
     <Modal
       open={open}
       title={`ERP 回传记录（${inboxQueue.pendingCount} 批待核对）`}
-      description="每批最多采集 20 个 SKC，SKU 数随规格而变化。待核对计的是回传批次，不是缺成本商品数；同批正常成本已自动采用，剩余异常、缺证据或定稿保护记录保留。人工更正可直接从对应 SKU 明细行进入。"
+      description="每批最多采集 20 个 SKC，SKU 数随规格而变化。待核对计的是回传批次，不是缺成本商品数；同批正常成本已自动采用，剩余异常、缺证据或旧版本保护记录保留。人工更正可直接从对应 SKU 明细行进入。"
       className="cost-inbox-queue-modal"
       onClose={onClose}
       footer={<><Button variant="ghost" onClick={onManualImport}>手动导入</Button>{selectedPendingInboxIds.size > 0 ? <Button icon={Trash2} variant="danger" disabled={ledgerLocked} onClick={() => onDeleteSelected([...selectedPendingInboxIds])}>删除所选 {selectedPendingInboxIds.size} 个</Button> : null}<Button variant="primary" onClick={onClose}>关闭</Button></>}
@@ -47,7 +47,7 @@ export function CostMatchingInboxQueueDialog({
           return <article className={"cost-inbox-item" + (isLoaded ? " loaded" : "")} key={item.inbox.id}>
             <div className="cost-inbox-item-select">{item.inbox.status === "pending" && !item.inbox.appliedBatchId ? <input type="checkbox" aria-label={"选择批次 " + item.inbox.batchId} checked={selectedPendingInboxIds.has(item.inbox.id)} onChange={(event) => onTogglePending(item.inbox.id, event.target.checked)} /> : null}</div>
             <div className="cost-inbox-item-main"><strong>{period} · {skcCount} 个平台 SKC</strong><small>接收：{item.inbox.receivedAt || sentAt ? new Date(item.inbox.receivedAt ?? sentAt).toLocaleString("zh-CN", { hour12: false }) : "时间未知"}</small><small>批次 <code>{item.inbox.batchId}</code></small>{adoptionNotice ? <small>{adoptionNotice.details}</small> : null}{!item.scopeMatched ? <small>{ERP_INBOX_MATCH_REASONS[item.reason] ?? item.reason}</small> : null}</div>
-            <div className="cost-inbox-item-status"><Badge tone={adoptionNotice?.automaticCount ? "success" : isLoaded ? "info" : item.scopeMatched ? "default" : "warning"}>{adoptionNotice ? adoptionNotice.title : isActive ? "已载入，待采用" : isLoaded ? "待恢复核对" : "已收到，待载入"}</Badge><Button disabled={accountingReadOnly || isActive || !item.scopeMatched} onClick={() => onLoadInbox(item)}>{accountingReadOnly ? "账本已定稿" : isActive ? "已载入" : adoptionNotice ? "查看剩余项" : isLoaded ? "恢复载入" : "载入核对"}</Button>{item.inbox.appliedBatchId ? <Button icon={RotateCcw} variant="ghost" disabled={ledgerLocked} onClick={() => onVoid(item.inbox)}>撤回本次采用</Button> : <Button icon={Trash2} variant="ghost" disabled={ledgerLocked} title="删除批次" onClick={() => onDeleteOne(item.inbox.id)}>删除批次</Button>}</div>
+            <div className="cost-inbox-item-status"><Badge tone={adoptionNotice?.automaticCount ? "success" : isLoaded ? "info" : item.scopeMatched ? "default" : "warning"}>{adoptionNotice ? adoptionNotice.title : isActive ? "已载入，待采用" : isLoaded ? "待恢复核对" : "已收到，待载入"}</Badge><Button disabled={accountingReadOnly || isActive || !item.scopeMatched} onClick={() => onLoadInbox(item)}>{accountingReadOnly ? "当前只读" : isActive ? "已载入" : adoptionNotice ? "查看剩余项" : isLoaded ? "恢复载入" : "载入核对"}</Button>{item.inbox.appliedBatchId ? <Button icon={RotateCcw} variant="ghost" disabled={ledgerLocked} onClick={() => onVoid(item.inbox)}>撤回本次采用</Button> : <Button icon={Trash2} variant="ghost" disabled={ledgerLocked} title="删除批次" onClick={() => onDeleteOne(item.inbox.id)}>删除批次</Button>}</div>
           </article>;
         })}
       </div>
@@ -81,7 +81,7 @@ export function CostMatchingVoidBatchDialog({ draft, voiding, ledgerStatus, onCa
     <Modal
       open={Boolean(draft)}
       title="撤回本次采用的 ERP 成本"
-      description={ledgerStatus === "finalized" ? "该账本已定稿。确认后会重新打开本月并撤回这次 ERP 成本；旧报告、原始候选和人工成本保留。不会自动恢复更早的 ERP 成本。" : "撤回不会删除原始候选和采购证据，也不会改变人工成本；不再采用这次 ERP 结果，且不会自动恢复更早的 ERP 成本。"}
+      description={"撤回不会删除原始候选和采购证据，也不会改变人工成本；不再采用这次 ERP 结果，且不会自动恢复更早的 ERP 成本。"}
       onClose={() => { if (!voiding) onCancel(); }}
       footer={<><Button variant="ghost" disabled={voiding} onClick={onCancel}>取消</Button><Button variant="danger" icon={RotateCcw} loading={voiding} disabled={!draft?.reason?.trim()} onClick={onConfirm}>确认撤回并重新核对</Button></>}
     >

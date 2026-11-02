@@ -16,7 +16,9 @@ async function finalize() {
   const snapshot = await getLedgerSnapshot(ledgerId);
   const profitLines = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
   await adoptZeroDispatch(ledgerId);
-  return finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines, profitSummary: {} });
+  const report=await finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines, profitSummary: {} });
+  // Seed an actual legacy state for recovery-contract compatibility only.
+  await db.ledgers.update(ledgerId,{status:'finalized'});return report;
 }
 beforeEach(async () => {
   await db.delete(); await db.open();
@@ -27,23 +29,13 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.restoreAllMocks(); db.close(); await db.delete(); });
 
-it("explicitly reopens a pure manual ledger, preserves snapshots and permits correction then fresh finalization", async () => {
-  const original = await getLedgerSnapshot(ledgerId);
-  await expect(save("甲", 1)).rejects.toThrow("定稿");
-  const approval = original.approvals.find((row) => row.referenceCost.store === "乙");
-  await expect(revokeManualCostOverride({ ledgerId, approvalId: approval.id })).rejects.toThrow("定稿");
-  await reopenLedgerForCostCorrection({ ledgerId, reason: "复核人工成本" });
-  expect(await db.profitLines.count()).toBe(0);
-  const audit = (await db.auditEvents.toArray()).find((event) => event.action === "ledger_reopened_for_cost_correction");
-  expect(audit).toMatchObject({ actorId: "finance-real", after: { reason: "复核人工成本" }, before: { snapshot: { ledger: original.ledger, profitLines: original.profitLines } } });
-  await save("甲", 0.1);
-  await revokeManualCostOverride({ ledgerId, approvalId: approval.id });
-  await expect(finalize()).rejects.toThrow("缺少正式成本");
-  await save("乙", 0.3); await finalize();
-  expect((await getLedgerSnapshot(ledgerId)).ledger.profitSummary.profit).toBe(19.2);
-  expect((await db.auditEvents.get(audit.id)).before.snapshot.profitLines).toEqual(original.profitLines);
+it('edits an old manual ledger directly while retaining its saved report bytes',async()=>{
+  const original=await db.profitReports.where('ledgerId').equals(ledgerId).first();
+  const snapshot=await getLedgerSnapshot(ledgerId);const approval=snapshot.approvals.find(row=>row.referenceCost.store==='乙');
+  await save('甲',0.1);await revokeManualCostOverride({ledgerId,approvalId:approval.id});
+  await expect(finalize()).rejects.toThrow('缺少正式成本');await save('乙',0.3);await finalize();
+  expect((await getLedgerSnapshot(ledgerId)).ledger.profitSummary.profit).toBe(19.2);expect((await db.profitReports.get(original.id)).fileBase64).toBe(original.fileBase64);
 });
-
 it("keeps ERP published and restores it when a manual override is revoked after reopening", async () => {
   await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
   await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 0.5, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate: "2026-07-01", unitPrice: 0.5, quantity: 1 }] });

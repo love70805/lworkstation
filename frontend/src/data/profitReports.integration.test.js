@@ -19,7 +19,7 @@ import {prepareReportDownload,base64ToBytes} from '../lib/profitReportWorkbook';
 import {profitReportFileName} from '../domain/profitReportPresentation';
 const scope={workspaceId:"W",ledgerId:"L",period:"2026-08"};
 async function adopt(kind,patch={}){const input={...scope,kind,mode:"manual",...(kind==='dispatch'?{adoptedQuantityExact:'100',rows:[]}:{rows:[{kind,manual:true,store:'甲',signedAmountExact:'0.0009',sourceRow:1},{kind,manual:true,store:'乙',signedAmountExact:'-0.0001',sourceRow:1}]}),...patch};const preview=await previewMonthlySupplement(input);return adoptMonthlySupplement(input,preview);}
-async function report(kind='pre_deduction',baseReportId){const input={ledgerId:'L',kind,baseReportId};const preview=await previewProfitReport(input);return saveProfitReport(input,{expectedFingerprint:preview.fingerprint});}
+async function report(kind='pre_deduction',baseReportId){const input={ledgerId:'L',kind,baseReportId};const preview=await previewProfitReport(input);const result=await saveProfitReport(input,{expectedFingerprint:preview.fingerprint});return result;}
 beforeEach(async()=>{
  await db.delete();await db.open();await setActiveMemberContext({workspaceId:'W',memberId:'finance',role:'finance'});
  await db.ledgers.put({id:'L',workspaceId:'W',period:'2026-08',status:'cost_pending',warehouseRate:0.7});
@@ -28,22 +28,18 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
-it('directly saves a complete formal report and frozen base together with the registrant and ledger month',async()=>{
- await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'张三',quantityExact:'100'}]});
- await adopt('deduction');
- const saved=await report('financial'),state=await readMonthlyReportState('L'),base=state.reports.find(row=>row.id===saved.baseReportId);
- expect(saved).toMatchObject({kind:'financial',registrantNames:['张三'],fileName:'张三2026年8月利润表.xlsx'});
- expect(base).toMatchObject({kind:'pre_deduction',registrantNames:['张三']});
- expect(state.ledger).toMatchObject({status:'finalized',currentBaseReportId:base.id});
+it('directly exports a self-contained monthly report and keeps the ledger editable',async()=>{
+ await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'张三',quantityExact:'100'}]});await adopt('deduction');
+ const saved=await report('financial'),state=await readMonthlyReportState('L');
+ expect(saved).toMatchObject({kind:'financial',operationWorkflow:2,accountingMode:'weighted',baseReportId:null,registrantNames:['张三'],fileName:'张三2026年8月利润表.xlsx'});
+ expect(state.ledger.status).toBe('ready');expect(await db.profitLines.count()).toBe(2);
  expect(saved.totalsExact.profitExact).toBe('69.31719995');
- expect((await withCurrentLedgerResults([state.ledger]))[0].currentResult).toMatchObject({state:'financial',label:'正式利润表'});
- expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(2);
+ expect((await withCurrentLedgerResults([state.ledger]))[0].currentResult).toMatchObject({state:'current',profit:69.31});
+ expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(1);
  const before=JSON.stringify(await readSavedProfitReport(saved.id));
  await db.monthlySupplementRows.filter(row=>row.kind==='dispatch').modify({ownerMarker:'新姓名'});
- expect(profitReportFileName((await readProfitReportDownload(saved.id)).report)).toBe('张三2026年8月利润表.xlsx');
- expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(before);
+ expect(profitReportFileName((await readProfitReportDownload(saved.id)).report)).toBe('张三2026年8月利润表.xlsx');expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(before);
  const backup=await createWorkspaceBackupPayload();await db.delete();await db.open();await restoreWorkspaceBackupPayload(backup);await setActiveMemberContext({workspaceId:'W',memberId:'finance',role:'finance'});
- expect((await readMonthlyReportState('L')).ledger.currentBaseReportId).toBe(base.id);
  expect((await readProfitReportDownload(saved.id)).report.fileName).toBe(saved.fileName);
 });
 it('rolls back both reports, finalization and report audits if the formal report write fails after the base',async()=>{
@@ -64,7 +60,7 @@ it('blocks direct formal saves for missing sources, partial stores, missing cost
  await expect(saveProfitReport(input,{expectedFingerprint:preview.fingerprint})).rejects.toThrow('过期');
  await db.costApprovals.clear();await expect(report('financial')).rejects.toThrow('正式成本');
  expect(await db.profitReports.count()).toBe(0);
- await db.ledgers.update('L',{status:'locked'});await expect(report('financial')).rejects.toThrow('锁定');
+ await db.ledgers.update('L',{status:'locked'});await expect(report('financial')).rejects.toThrow('正式成本');
 });
 it('uses explicit zero dispatch and deductions for a direct formal report',async()=>{
  await adopt('dispatch',{adoptedQuantityExact:'0'});await adopt('deduction',{rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'0'}))});
@@ -75,30 +71,22 @@ it('uses only verified frozen deduction rows for downloads after live deductions
  await adopt('dispatch');await adopt('deduction');const saved=await report('financial');
  const download=await readProfitReportDownload(saved.id),original=JSON.stringify(await readSavedProfitReport(saved.id));
  expect(download.deductionRows.map(row=>row.signedAmountExact)).toEqual(['0.0009','-0.0001']);
- await reopenLedgerForCostCorrection({ledgerId:'L',reason:'隔离验证冻结下载'});
+
  await adopt('deduction',{rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'999'}))});
  expect((await readProfitReportDownload(saved.id)).deductionRows).toEqual(download.deductionRows);
  expect(JSON.stringify(await readSavedProfitReport(saved.id))).toBe(original);
  await db.profitReportLines.update(download.deductionRows[0].id,{signedAmountExact:'999'});
- await expect(readProfitReportDownload(saved.id)).rejects.toThrow('冻结扣款校验失败');
+ await expect(readProfitReportDownload(saved.id)).rejects.toThrow('来源校验失败');
 });
-it('protects formal deductions against repeated and stale submissions across reload and backup, and allows explicit reopening',async()=>{
+it('updates deductions after export across reload and backup while old files remain unchanged',async()=>{
  await adopt('dispatch');await adopt('deduction');
+ const saved=await report('financial'),original=await readSavedProfitReport(saved.id);
  const input={...scope,kind:'deduction',mode:'manual',rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'0'}))};
- const stale=await previewMonthlySupplement(input),saved=await report('financial'),original=await readSavedProfitReport(saved.id);
- async function protectedSources(){
-  const before=(await createWorkspaceBackupPayload()).tables;
-  await expect(previewMonthlySupplement(input)).rejects.toThrow('扣款已随正式报告保存');
-  await expect(adoptMonthlySupplement(input,stale)).rejects.toThrow('扣款已随正式报告保存');
-  await expect(adopt('deduction')).rejects.toThrow('扣款已随正式报告保存');
-  expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
- }
- await protectedSources();db.close();await db.open();await protectedSources();
- const backup=await createWorkspaceBackupPayload();await db.delete();await db.open();await restoreWorkspaceBackupPayload(backup);await setActiveMemberContext({workspaceId:'W',memberId:'finance',role:'finance'});await protectedSources();
- await reopenLedgerForCostCorrection({ledgerId:'L',reason:'显式更正扣款为真实零'});
  await adoptMonthlySupplement(input,await previewMonthlySupplement(input));
- const revised=await report('financial');expect(revised.totalsExact.deductionExact).toBe('0');expect(revised.baseReportId).not.toBe(saved.baseReportId);
- await protectedSources();expect(await readSavedProfitReport(saved.id)).toEqual(original);
+ const revised=await report('financial');expect(revised.totalsExact.deductionExact).toBe('0');expect(revised.revision).toBe(2);
+ db.close();await db.open();const backup=await createWorkspaceBackupPayload();await restoreWorkspaceBackupPayload(backup);
+ expect(await readSavedProfitReport(saved.id)).toEqual(original);
+ expect((await readMonthlyReportState('L')).ledger.status).toBe('ready');
 });
 it('derives legacy download names from the verified frozen dispatch after live sources change',async()=>{
  await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'LEGACY-OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'旧登记人',quantityExact:'2'}]});
@@ -137,7 +125,7 @@ it('reads download identifiers only from the verified frozen base and refuses ta
  expect((await readProfitReportDownload(base.id)).dispatchRows[0].remarks).toEqual(oldRow.remarks);
  expect(JSON.stringify(await readSavedProfitReport(base.id))).toBe(original);
  await db.profitReportLines.update(download.dispatchRows[0].id,{remarks:[{header:'1688',value:'999'}]});
- await expect(readProfitReportDownload(financial.id)).rejects.toThrow('冻结来源校验失败');
+ await expect(readProfitReportDownload(financial.id)).rejects.toThrow('来源校验失败');
  await setActiveMemberContext({workspaceId:'OTHER',memberId:'foreign',role:'finance'});
  await expect(readProfitReportDownload(base.id)).rejects.toThrow('权限');
 });
@@ -171,7 +159,7 @@ it('persists multiple exact deduction codes and cross-sheet amounts through relo
  const backup=await createWorkspaceBackupPayload();await db.delete();await db.open();await restoreWorkspaceBackupPayload(backup);await setActiveMemberContext({workspaceId:'W',memberId:'finance',role:'finance'});
  expect((await readMonthlyReportState('L')).deduction).toMatchObject({signedAmountExact:'0.0011',sources:batch.sources});
  expect(JSON.stringify(await readSavedProfitReport(frozen.id))).toBe(before);
- await report('financial',frozen.id);await db.ledgers.update('L',{status:'locked'});await expect(previewMonthlySupplement(input)).rejects.toThrow('锁定');
+ await report('financial',frozen.id);await db.ledgers.update('L',{status:'locked'});await expect(previewMonthlySupplement(input)).resolves.toMatchObject({candidate:{kind:'deduction'}});
 });
 it('replaces a legacy shared-order source without changing source identities and exports every persisted association',async()=>{
  const purchase='0016371098004076071';
@@ -204,7 +192,7 @@ it('replaces a legacy shared-order source without changing source identities and
   ]);
   for(const cell of ['D2','D3','D4'])expect(sheet[cell]).toMatchObject({t:'s',v:purchase});
  }
- await expect(previewMonthlySupplement(input)).rejects.toThrow('重开');
+ await (previewMonthlySupplement(input));
  expect((await readSavedProfitReport(saved.id)).fileBase64).toBe(saved.fileBase64);
 });
 it('persists skipped CSV record locations outside calculation rows across reopen and backup restore',async()=>{
@@ -220,29 +208,18 @@ it('persists skipped CSV record locations outside calculation rows across reopen
  await expect(previewMonthlySupplement({...input,rows:[...input.rows,{...input.rows[0],recordRow:999}]})).rejects.toThrow('重复源行');
  const legacy={...batch,parserVersion:'monthly-supplement@2'};await db.monthlySupplementBatches.put(legacy);
  const saved=await report();expect(saved.totalsExact.dispatchQuantityExact).toBe('2');
- await expect(adoptMonthlySupplement(input,preview)).rejects.toThrow('重开');
+ await (adoptMonthlySupplement(input,preview));
  expect((await readSavedProfitReport(saved.id)).fileSha256).toBe(saved.fileSha256);
 });
-it('overview follows the current base and deduction batch while historical files remain immutable', async () => {
- await adopt('dispatch');
- const base = await report();
- const current = async () => (await withCurrentLedgerResults([await db.ledgers.get('L')]))[0].currentResult;
- expect((await current()).state).toBe('base');
- await adopt('deduction');
- const financial = await report('financial', base.id);
- expect(await current()).toMatchObject({ state: 'financial', profit: Number(financial.displayTotals.profit), report: { id: financial.id } });
- await expect(adopt('deduction')).rejects.toThrow('先显式重开');
- await reopenLedgerForCostCorrection({ledgerId:'L',reason:'显式更正扣款'});
- expect(await current()).toMatchObject({state:'reopened',profit:null});
- await adopt('deduction', { rows: [{ kind: 'deduction', manual: true, store: '甲', signedAmountExact: '20', sourceRow: 1 }, { kind: 'deduction', manual: true, store: '乙', signedAmountExact: '0', sourceRow: 1 }] });
- const revisedBase=await report();
- expect(await current()).toMatchObject({ state: 'deduction_pending', profit: Number(revisedBase.displayTotals.profit), report: { id: revisedBase.id } });
- const updated = await report('financial', revisedBase.id);
- expect((await current()).report.id).toBe(updated.id);
- await reopenLedgerForCostCorrection({ ledgerId: 'L', reason: '复核基础' });
- expect(await current()).toMatchObject({ state: 'reopened', profit: null });
- expect((await readSavedProfitReport(base.id)).fileBase64).toBe(base.fileBase64);
- expect((await readSavedProfitReport(financial.id)).fileBase64).toBe(financial.fileBase64);
+it('overview follows current sources immediately while historical exports remain unchanged',async()=>{
+ await adopt('dispatch');const base=await report();
+ const current=async()=>(await withCurrentLedgerResults([await db.ledgers.get('L')]))[0].currentResult;
+ expect(await current()).toMatchObject({state:'current',label:'未扣款利润',profit:69.31});
+ await adopt('deduction');const financial=await report('financial');
+ await adopt('deduction',{rows:[{kind:'deduction',manual:true,store:'甲',signedAmountExact:'20',sourceRow:1},{kind:'deduction',manual:true,store:'乙',signedAmountExact:'0',sourceRow:1}]});
+ expect(await current()).toMatchObject({state:'current',profit:49.31});
+ const updated=await report('financial');expect(updated.revision).toBe(2);
+ expect((await readSavedProfitReport(base.id)).fileBase64).toBe(base.fileBase64);expect((await readSavedProfitReport(financial.id)).fileBase64).toBe(financial.fileBase64);
 });
 it('keeps an archived template file and formula unchanged when generating a new financial report', async () => {
  await adopt('dispatch');const created=await report();
@@ -256,7 +233,7 @@ it('keeps an archived template file and formula unchanged when generating a new 
  const stored=await readSavedProfitReport(created.id);
  expect(stored).toEqual(legacy);
  expect(stored.formulaVersion).toBe(REPORT_FORMULA_VERSION);
- expect((await withCurrentLedgerResults([await db.ledgers.get('L')]))[0].currentResult.state).toBe('base');
+ expect((await withCurrentLedgerResults([await db.ledgers.get('L')]))[0].currentResult.state).toBe('current');
  await adopt('deduction');const financial=await report('financial',legacy.id);
  expect(financial.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
  expect(financial.formulaVersion).toBe(legacy.formulaVersion);
@@ -327,25 +304,19 @@ it('preserves explicit empty-adoption validation and rejects stale adoption/repo
  await expect(saveProfitReport({ledgerId:'L',kind:'pre_deduction'},{expectedFingerprint:preview.fingerprint})).rejects.toThrow('过期');
  expect(await db.profitReports.count()).toBe(0);
 });
-it('freezes pre-deduction atomically, adds late signed deductions on the same August base, retains revisions',async()=>{
+it('retains export revisions while costs, dispatch and deductions remain directly editable',async()=>{
  await adopt('dispatch');const base=await report();
- expect(base.period).toBe('2026-08');expect(base.totalsExact).toMatchObject({revenueExact:'0.018',dispatchAmountExact:'70',preDeductionExact:'69.31799995'});
- expect((await db.ledgers.get('L')).status).toBe('finalized');
- await expect(adopt('dispatch',{adoptedQuantityExact:'1'})).rejects.toThrow('重开');
- await expect(saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU1',unitCost:1,reason:'不能覆盖'})).rejects.toThrow('定稿');
- await expect(report('financial',base.id)).rejects.toThrow('尚未取得');
- await adopt('deduction');const financial=await report('financial',base.id);
- expect(financial.baseReportId).toBe(base.id);expect(financial.totalsExact.profitExact).toBe('69.31719995');
- expect((await db.profitReportLines.where('reportId').equals(financial.id).toArray()).every(row=>row.lineKind==='deduction')).toBe(true);
- // Later ERP evidence must not participate in a financial report based on a frozen base.
- await db.erpCostBatches.put({id:'LATER',workspaceId:'W',ledgerId:'L',status:'published'});
- await db.erpCostRows.add({batchId:'LATER',ledgerId:'L',platformSku:'SKU1',unitCost:999,publishedAt:new Date().toISOString(),resolutionStatus:'resolved'});
- await expect(adopt('deduction',{rows:[{kind:'deduction',manual:true,store:'甲',signedAmountExact:'0',sourceRow:1},{kind:'deduction',manual:true,store:'乙',signedAmountExact:'0',sourceRow:1}]})).rejects.toThrow('先显式重开');
- const second=await report('financial',base.id);expect(second.revision).toBe(2);expect(second.totalsExact.profitExact).toBe(financial.totalsExact.profitExact);
+ expect(base.totalsExact).toMatchObject({revenueExact:'0.018',dispatchAmountExact:'70',preDeductionExact:'69.31799995'});
+ expect((await db.ledgers.get('L')).status).toBe('ready');
+ await adopt('dispatch',{adoptedQuantityExact:'101'});
+ await saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU1',unitCost:1,reason:'更新盘点成本'});
+ await expect(report('financial')).rejects.toThrow('尚未取得');
+ await adopt('deduction');const financial=await report('financial');
+ expect(financial.baseReportId).toBeNull();expect(financial.totalsExact.dispatchQuantityExact).toBe('101');
+ expect((await db.profitReportLines.where('reportId').equals(financial.id).toArray()).some(row=>row.lineKind==='product')).toBe(true);
+ const revised=await report();expect(revised.revision).toBe(2);expect(revised.supersedesReportId).toBe(base.id);
  expect((await readSavedProfitReport(base.id)).fileBase64).toBe(base.fileBase64);
- await reopenLedgerForCostCorrection({ledgerId:'L',reason:'显式修改代发'});await adopt('dispatch',{adoptedQuantityExact:'101'});const revised=await report();expect(revised.revision).toBe(2);expect(revised.supersedesReportId).toBe(base.id);
- await reopenLedgerForCostCorrection({ledgerId:'L',reason:'人工确认删除'});await deleteMonthlyLedger('L');
- expect(await db.ledgers.get('L')).toBeUndefined();expect(await db.profitReports.where('ledgerId').equals('L').count()).toBe(0);
+ await deleteMonthlyLedger('L');expect(await db.ledgers.get('L')).toBeUndefined();expect(await db.profitReports.where('ledgerId').equals('L').count()).toBe(0);
 });
 it('round-trips original report files and rejects corrupt references/files without altering current data',async()=>{
  await adopt('dispatch');const base=await report();await adopt('deduction');await report('financial',base.id);
@@ -429,7 +400,7 @@ it('retains legacy XLSX adopted rows until explicit replacement, persists new ow
  const corrected=await adoptMonthlySupplement(input,preview);expect(corrected.replacesBatchId).toBe(prior.id);expect(corrected.revision).toBe(2);
  expect(corrected.sources[0].ignored).toContainEqual(expect.objectContaining({reason:'unassigned_owner',sourceRow:4,quantityExact:'28'}));
  const saved=await report();expect(saved.totalsExact.dispatchQuantityExact).toBe('123');
- await expect(previewMonthlySupplement(input)).rejects.toThrow('重开');
+ await (previewMonthlySupplement(input));
  const backup=await createWorkspaceBackupPayload();await restoreWorkspaceBackupPayload(backup);
  expect((await db.monthlySupplementBatches.get(prior.id)).adoptedQuantityExact).toBe('151');
  expect((await db.monthlySupplementBatches.get(corrected.id)).sources).toEqual(corrected.sources);
@@ -444,14 +415,14 @@ it('saves and restores an immutable report without dispatch, including the legac
  expect(await db.monthlySupplementBatches.count()).toBe(0);
  const backup=await createWorkspaceBackupPayload();await validateReportBackup(backup.tables);await restoreWorkspaceBackupPayload(backup);
  expect((await readSavedProfitReport(base.id)).fileSha256).toBe(base.fileSha256);
- await expect(adopt('dispatch')).rejects.toThrow('重开');
+ await (adopt('dispatch'));
 });
 it('saves a direct financial report without dispatch while keeping shop dispatch rows traceable when entered', async()=>{
  const step=async(label,operation)=>{try{return await operation();}catch(error){throw new Error(label+': '+error.name+': '+error.message,{cause:error});}};
  await step('deduction',()=>adopt('deduction'));const formal=await step('financial',()=>report('financial'));
  expect(formal).toMatchObject({dispatchState:'not_recorded',totalsExact:{dispatchAmountExact:'0'}});
  await step('backup',async()=>validateReportBackup((await createWorkspaceBackupPayload()).tables));
- await step('reopen',()=>reopenLedgerForCostCorrection({ledgerId:'L',reason:'补录逐店代发'}));
+
  await adopt('dispatch',{rows:[{kind:'dispatch',manual:true,store:'甲',sourceRow:1,quantityExact:'2'},{kind:'dispatch',manual:true,store:'乙',sourceRow:1,quantityExact:'3'}],adoptedQuantityExact:'5'});
  const updated=await report();const download=await readProfitReportDownload(updated.id);
  const book=XLSX.read(await prepareReportDownload(download.report,download),{type:'array'});

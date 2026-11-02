@@ -35,6 +35,8 @@ import { applyAppearance, readAppearance } from '../lib/appearance';
 import { profitWorkspaceHref, validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
 import ErpBackgroundNotice from './ErpBackgroundNotice';
+import { readAccountingMode, toggleAccountingMode } from '../data/repositories/inventoryAccountingRepository';
+import { LOWEST_ACCOUNTING } from '../domain/inventoryAccounting';
 import { Button, IconButton, Modal, useToast } from "./UI";
 
 const APP_VERSION = typeof window !== "undefined" ? window.shopeersDesktopRuntime?.version ?? null : null;
@@ -85,6 +87,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigate = useNavigate();
   const { notify } = useToast();
   const menuRef = useRef(null);
+  const brandSequence = useRef({ count: 0, time: 0, timer: null, busy: false });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
   const [compactSidebar, setCompactSidebar] = useState(readCompactSidebar);
@@ -117,6 +120,8 @@ export default function AppShell({ children, pageClass = "" }) {
     }
   }, [requestedLedgerId, navigationAttempt], null);
   const navigationContext = navigationResult?.requestedLedgerId === requestedLedgerId && navigationResult.attempt === navigationAttempt ? navigationResult : null;
+  const calculationMode = useLiveQuery(() => navigationContext?.workspaceId ? readAccountingMode(navigationContext.workspaceId) : 'weighted', [navigationContext?.workspaceId], 'weighted');
+  useEffect(() => () => clearTimeout(brandSequence.current.timer), []);
   const navigationSearch = navigationContext && !navigationContext.error
     ? validatedLedgerSearch(location.search, navigationContext.ledger, navigationContext.workspaceId) : "";
   const cloudAuth = useCloudAuth();
@@ -255,6 +260,22 @@ export default function AppShell({ children, pageClass = "" }) {
     }
     toggleSidebar();
   };
+  const onBrandClick = event => {
+    if (!event.detail) { onBrandToggle(); return; }
+    const sequence = brandSequence.current, now = Date.now();
+    clearTimeout(sequence.timer);
+    sequence.count = now - sequence.time < 600 ? sequence.count + 1 : 1;
+    sequence.time = now;
+    if (sequence.count === 7) {
+      sequence.count = 0;
+      if (!sequence.busy && navigationContext?.workspaceId) {
+        sequence.busy = true;
+        void toggleAccountingMode(navigationContext.workspaceId).catch(() => notify('操作未完成，请重试。', 'error')).finally(() => { sequence.busy = false; });
+      }
+      return;
+    }
+    sequence.timer = setTimeout(() => { if (sequence.count === 1) onBrandToggle(); sequence.count = 0; }, 600);
+  };
 
   const showDialog = (dialog) => {
     setOpenMenu("");
@@ -345,7 +366,7 @@ export default function AppShell({ children, pageClass = "" }) {
           <button
             type="button"
             className={`brand-toggle ${effectiveSidebarCollapsed ? "brand-toggle-collapsed" : "brand-toggle-expanded"}`}
-            onClick={onBrandToggle}
+            onClick={onBrandClick}
             aria-label={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
             aria-expanded={!effectiveSidebarCollapsed}
             title={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
@@ -405,7 +426,7 @@ export default function AppShell({ children, pageClass = "" }) {
             {openMenu === "notifications" ? <div className="topbar-popover notifications-popover" role="menu"><div className="popover-title">通知 <small>{unreadCount} 条未读</small></div>{notifications.length > 0 ? notifications.map((notification) => <button key={notification.id} onClick={() => openNotification(notification)}><span className={`notification-dot ${notification.tone}`} /><span><strong>{notification.title}</strong><small>{notification.detail}</small></span></button>) : <div className="popover-empty"><Check size={17} /><span>当前没有待处理通知</span></div>}{notifications.length > 0 ? <button className="popover-link" disabled={unreadCount === 0} onClick={() => { persistReadNotifications([...new Set([...readNotificationIds, ...notifications.map((item) => item.id)])]); setOpenMenu(""); }}>全部标记已读<Check size={16} /></button> : null}</div> : null}
           </div>
           <div className="topbar-control account-control">
-            <button className={`avatar-button ${openMenu === "account" ? "active" : ""}`} aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded={openMenu === "account"} onClick={() => toggleMenu("account")}><span className="avatar" aria-hidden="true">L</span></button>
+            <button className={`avatar-button ${openMenu === "account" ? "active" : ""}`} aria-label="打开账户菜单" aria-haspopup="menu" aria-expanded={openMenu === "account"} onClick={() => toggleMenu("account")}><span className="avatar" aria-hidden="true" style={calculationMode === LOWEST_ACCOUNTING ? { transform: 'rotate(180deg)' } : undefined}>L</span></button>
             {openMenu === "account" ? <div className="topbar-popover account-popover" role="menu"><div className="account-summary"><span className="avatar avatar-large" aria-hidden="true">L</span><span><strong>{cloudAuth.user?.email ?? "Lworkstation 用户"}</strong><small>{cloudAuth.user ? "云端工作区成员" : runtimeConfig.syncProvider === "supabase" ? "尚未登录云端" : "本机工作区管理员"}</small></span></div>{runtimeConfig.cloudConfigured ? <button onClick={() => showDialog("cloud-auth")}><ShieldCheck size={17} />{cloudAuth.user ? "云端账户" : "登录云端工作区"}<ChevronRight size={15} /></button> : null}<button onClick={() => showDialog("settings")}><Settings size={17} />工作区偏好<ChevronRight size={15} /></button><button onClick={() => showDialog("support")}><ShieldCheck size={17} />产品支持摘要<ChevronRight size={15} /></button></div> : null}
           </div>
         </div>

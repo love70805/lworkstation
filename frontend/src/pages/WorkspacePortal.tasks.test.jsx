@@ -32,7 +32,7 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 
-it.each([["cost_pending", "下一步：核对成本", "cost"], ["finalized", "查看本月报告", "detail"]])("opens the selected %s month from its primary workflow action", async (status, label, view) => {
+it.each([["cost_pending", "下一步：核对成本", "cost"], ["ready", "下一步：导出本月报告", "detail"]])("opens the selected %s month from its primary workflow action", async (status, label, view) => {
   const selected = { id: "selected/month", period: "2026-07", status, costSummary: { missingCount: status === "cost_pending" ? 2 : 0 } };
   mocks.scope = { ready: true, context: { selected, query: "ledger=selected%2Fmonth&store=测试店" }, retry: vi.fn() };
   await render([selected]);

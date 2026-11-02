@@ -75,9 +75,9 @@ it('keeps a shared SKU under the same SKC valid across stores, with independent 
   expect((await db.ledgers.get(ledger.id)).costSummary).toMatchObject({expectedCount:2,formalMatchedCount:2,manualOverrideCount:1,missingCount:0});
   const report=await saveReport(ledger),savedLedger=await db.ledgers.get(ledger.id);
   expect(report.totalsExact.purchaseCostExact).toBe('5');
-  await expect(importSales(['SKC-B'])).rejects.toThrow('已定稿');
-  expect((await getLedgerSnapshot(ledger.id)).ledger).toEqual(savedLedger);
-  expect(await withVerifiedLedgerCostSummaries([savedLedger])).toEqual([savedLedger]);
+  await expect(importSales(['SKC-B'])).resolves.toBeDefined();
+  expect((await getLedgerSnapshot(ledger.id)).ledger.operationWorkflow).toBe(2);
+  expect((await withVerifiedLedgerCostSummaries([savedLedger]))[0].operationWorkflow).toBe(2);
   expect(await readSavedProfitReport(report.id)).toEqual(report);
 });
 
@@ -104,7 +104,7 @@ it('projects an old ready summary immediately without writes and reuses financia
   expect((await withVerifiedLedgerCostSummaries([raw]))[0]).toMatchObject({status:'ready',costSummary:{missingCount:0,identityIssues:[]}});
   expect(reads.mock.calls.length).toBeGreaterThan(count);
   const summaryOnly={id:'summary-only',workspaceId:ledger.workspaceId,period:'2026-07',status:'ready',costSummary:{missingCount:0}};
-  expect(await withVerifiedLedgerCostSummaries([summaryOnly])).toEqual([summaryOnly]);
+  expect(await withVerifiedLedgerCostSummaries([summaryOnly])).toEqual([{...summaryOnly,operationWorkflow:2}]);
 });
 
 it('includes historical sales scoped by their persisted ledger without rewriting missing workspace IDs',async()=>{

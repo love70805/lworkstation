@@ -3,8 +3,8 @@ import { Badge, Button } from "../components/UI";
 import SelectionSalesTag from "../components/SelectionSalesTag";
 import ReferenceIdentityEvidence from "../components/ReferenceIdentityEvidence";
 
-const columnLabels = ["平台 SKU / 属性", "当前参考成本", "最近定稿月", "近三月经营", "最近实际利润", "单件参考利润", "参考状态"];
-const sourceLabels = { erp_catalog_reference: "ERP 采购参考", erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "定稿历史", supplier_landed: "1688 参考" };
+const columnLabels = ["平台 SKU / 属性", "当前参考成本", "最近盘点月", "近三月经营", "最近实际利润", "单件参考利润", "参考状态"];
+const sourceLabels = { erp_catalog_reference: "ERP 采购参考", erp_history: "ERP 历史", manual_confirmed: "人工确认", finalized_profit_history: "历史盘点", supplier_landed: "1688 参考" };
 const money = (value, fractionDigits = 2) => Number(value ?? 0).toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits });
 const percent = value => value == null ? "--" : `${Number(value).toFixed(1)}%`;
 const count = value => Number(value ?? 0).toLocaleString("zh-CN");

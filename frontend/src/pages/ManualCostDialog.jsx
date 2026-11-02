@@ -13,6 +13,7 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
   const [historyCandidate, setHistoryCandidate] = useState(null);
   const editedRef = useRef(false);
   const amountRef = useRef(null);
+  const openingMode = useRef(ledger.accountingMode);
   useEffect(() => {
     if (!open || readOnly || identityConflict || !formFirst) return;
     const timer = window.setTimeout(() => amountRef.current?.focus({ preventScroll: true }), 0);
@@ -32,18 +33,19 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
     if (saving || readOnly || (!revoke && identityConflict)) return;
     setSaving(true); setError("");
     try {
+      if (openingMode.current !== ledger.accountingMode) throw new Error('核算上下文已变化，请重新打开成本明细。');
       const reason = historyCandidate && Number(amount) === historyCandidate.unitCost
         ? historyCandidate.reason : '人工输入单件成本并确认更正';
-      if (revoke) await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: row.manualOverride.id });
+      if (revoke) await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: row.manualOverride.id, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
       else if (historyCandidate && Number(amount) === historyCandidate.unitCost) await saveRecoveredWarehouseCost({
-        ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, inboxId: historyCandidate.inboxId, expectedUnitCost: amount, reason });
-      else await saveManualCostOverride({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount, reason });
+        ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, inboxId: historyCandidate.inboxId, expectedUnitCost: amount, reason, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
+      else await saveManualCostOverride({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount, reason, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
       if (next && onNext) onNext();
       else onClose();
     } catch (failure) { setError(failure.message); } finally { setSaving(false); }
   };
   const invalid = saving || amount.trim() === "" || !Number.isFinite(Number(amount)) || Number(amount) < 0;
-  return <Modal open={open} title={title} className={className} description={`${ledger.period} · ${row.store} · ${row.platformSku}。${readOnly ? "已定稿或锁定，当前只读。" : identityConflict ? "当前台账归属存在冲突，已保存的人工金额可撤销。" : hasEffectiveErpCost ? "ERP 成本已生效；如需更正，输入单件成本后确认即可。" : "输入单件成本后确认，仅对当前店铺月份生效，操作自动留痕。"}`} onClose={() => !saving && onClose()}
+  return <Modal open={open} title={title} className={className} description={`${ledger.period} · ${row.store} · ${row.platformSku}。${readOnly ? "当前只读。" : identityConflict ? "当前台账归属存在冲突，已保存的人工金额可撤销。" : hasEffectiveErpCost ? "ERP 成本已生效；如需更正，输入单件成本后确认即可。" : "输入单件成本后确认，仅对当前店铺月份生效，操作自动留痕。"}`} onClose={() => !saving && onClose()}
     footer={<>{!readOnly && row.manualOverride ? <Button disabled={saving} onClick={() => act(true)}>撤销当前更正</Button> : null}<Button disabled={saving} onClick={onClose}>{readOnly || identityConflict ? "关闭" : "取消"}</Button>{!readOnly && !identityConflict ? <><Button variant={onNext ? "secondary" : "primary"} loading={saving} disabled={invalid} onClick={() => act(false)}>{saveLabel}</Button>{onNext ? <Button variant="primary" disabled={invalid} onClick={() => act(false, true)}>保存并下一项</Button> : null}</> : null}</>}>
     {queueProgress ? <p className="cost-correction-progress" role="status">待补成本 · 第 {queueProgress.index} / {queueProgress.total} 项</p> : null}
     {!formFirst ? children : null}

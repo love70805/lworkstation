@@ -2,12 +2,13 @@ const frozen = ledger => ['finalized', 'locked'].includes(ledger?.status);
 const latest = reports => [...reports].sort((a, b) => (b.revision || 0) - (a.revision || 0) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0];
 
 export function hasSavedFinancialReport(ledger, reports = []) {
-  return Boolean(frozen(ledger) && ledger.currentBaseReportId && reports.some(report => report.kind === 'financial' && report.workspaceId === ledger.workspaceId && report.ledgerId === ledger.id && report.period === ledger.period && report.baseReportId === ledger.currentBaseReportId));
+  return Boolean(ledger?.operationWorkflow !== 2 && frozen(ledger) && ledger.currentBaseReportId && reports.some(report => report.kind === 'financial' && report.workspaceId === ledger.workspaceId && report.ledgerId === ledger.id && report.period === ledger.period && report.baseReportId === ledger.currentBaseReportId));
 }
 
 // Projection only. Never replace the frozen base or rewrite a historical file.
 export function currentLedgerResult(ledger, reports = [], deduction = null) {
   if (!ledger) return { state: 'empty', label: '尚无账本', profit: null, report: null };
+  if (ledger.operationWorkflow === 2) return ledger.liveResult ?? { state: 'pending', label: '待核算', profit: null, report: null };
   if (!frozen(ledger)) return { state: ledger.reportWorkflowVersion ? 'reopened' : 'pending', label: ledger.reportWorkflowVersion ? '基础已重开，待重算' : '待核算', profit: null, report: null };
   if (!ledger.currentBaseReportId) {
     return { state: 'legacy', label: '历史定稿', profit: ledger.profitSummary?.profit ?? null, report: null };
@@ -31,11 +32,15 @@ export function ledgerNextStep(ledger, { missingCount = ledger?.costSummary?.mis
   if (!ledger) return { key: 'import', text: '导入同月店铺台账，建立月度账本。', action: '导入台账' };
   if (frozen(ledger)) return { key: 'report', text: ledger.status === 'locked' ? '本月已锁定，可查看和下载已保存报告。' : '基础已保存，可查看报告；各店扣款齐全后可保存正式利润表。', action: '查看本月报告' };
   if (missingCount == null) return { key: 'cost', text: '打开成本核对，检查本月成本准备情况。', action: '核对成本' };
-  if (missingCount > 0) return { key: 'cost', text: `整月还有 ${missingCount} 条 SKU 待补成本；店铺筛选不改变定稿范围。`, action: '补齐成本' };
+  if (missingCount > 0) return { key: 'cost', text: `整月还有 ${missingCount} 条 SKU 待补成本；可先查看已取得成本的利润。`, action: '补齐成本' };
   return { key: 'report', text: '整月成本已齐，可直接导出报告；代发可选填，各店扣款齐全后可保存正式利润表。', action: '准备本月报告' };
 }
 
 export function reportReadiness({ ledger, stores = [], dispatch, deduction, reports = [], missingCount }) {
+  if (ledger?.operationWorkflow === 2) {
+    const missingStores=stores.filter(store=>!deduction?.coveredStores?.includes(store));
+    return {baseSaved:false,missingStores,deductionSaved:false,baseReady:missingCount===0,financialReady:missingCount===0&&Boolean(deduction)&&!missingStores.length};
+  }
   const locked = ledger?.status === 'locked';
   const baseSaved = frozen(ledger) && Boolean(ledger?.currentBaseReportId);
   const missingStores = stores.filter(store => !deduction?.coveredStores?.includes(store));

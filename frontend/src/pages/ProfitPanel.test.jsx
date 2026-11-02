@@ -31,20 +31,12 @@ beforeEach(async () => {
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
 });
-it("requires an explicit reopen confirmation and reason while details stay collapsed", async () => {
-  mocks.status = "finalized";
-  await act(async () => root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
-  await act(async () => findButton("重开本月全部店铺核算").click());
-  expect(container.querySelector('[role="dialog"]').closest("details:not([open])")).toBeNull();
-  expect(findButton("确认重开").disabled).toBe(true);
-  await act(async () => findButton("取消").click());
-  expect(mocks.reopen).not.toHaveBeenCalled();
-  await act(async () => findButton("重开本月全部店铺核算").click());
-  await act(async () => Simulate.change(container.querySelector("#profit-reopen-reason"), { target: { value: "人工成本复核" } }));
-  await act(async () => findButton("确认重开").click());
-  expect(mocks.reopen).toHaveBeenCalledWith({ ledgerId: "L", reason: "人工成本复核" });
-  expect(container.querySelector('[role="dialog"]')).toBeNull();
+it('keeps old months editable without a reopen dialog',async()=>{
+  mocks.status='finalized';await act(async()=>root.render(<MemoryRouter><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
+  expect(findButton('重开本月全部店铺核算')).toBeUndefined();expect(mocks.reopen).not.toHaveBeenCalled();
+  expect(container.querySelector('.profit-summary-action').disabled).toBe(false);
 });
+
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 it("opens the warehouse dialog outside collapsed details, cancels, and applies through the visible action", async () => {
   expect(container.querySelector("details").open).toBe(false);
@@ -99,12 +91,12 @@ it("opens the cost details from the missing-cost action", async () => {
   expect(details.open).toBe(true);
   expect(container.querySelector(".profit-table-panel")).not.toBeNull();
 });
-it('retains same-number store exclusions in profit display, saved filters and exported rows', async()=>{
+it('retains same-number store exclusions in current profit display and saved filters', async()=>{
   await act(async()=>root.unmount());
   mocks.status='finalized';
   const base=snapshotForStatus();
-  const profitLines=['甲','乙'].map((store,index)=>({...base.profitLines[0],id:index,store,platformSku:`SKU-${index}`,supplierNumber:'A-KPX'}));
-  snapshots.set('finalized',{...base,profitLines});
+  const rows=['甲','乙'].map((store,index)=>({...base.rows[0],store,platformSku:`SKU-${index}`,supplierNumber:'A-KPX'}));
+  snapshots.set('finalized',{...base,rows});
   const supplierStoreSelection=[{store:'乙',supplierNumber:'A-KPX'}];
   const href=buildProfitHref({ledgerId:'L',workspaceId:'W',supplierSelection:['A-KPX'],supplierStoreSelection});
   root=createRoot(container);
@@ -115,9 +107,7 @@ it('retains same-number store exclusions in profit display, saved filters and ex
   expect(container.textContent).toContain('SKU-1');
   expect(container.textContent).not.toContain('SKU-0');
   expect(readProfitFilter(new URLSearchParams(),'L').supplierStoreSelection).toEqual(supplierStoreSelection);
-  await act(async()=>findButton('导出旧账本').click());
-  expect(mocks.exportWorkbook).toHaveBeenCalledOnce();
-  expect(mocks.exportWorkbook.mock.calls[0][0].filter(row=>row.SKU).map(row=>row.SKU)).toEqual(['SKU-1']);
+  expect(findButton('导出旧账本')).toBeUndefined();
 });
 it('keeps the details and search field open while filters change', async () => {
  const details = [...container.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.startsWith('查看利润明细'));

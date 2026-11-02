@@ -9,6 +9,9 @@
     const DETAIL_PATH = '/purchase/purchase/v1/purchase-order-details';
     const SKU_PATH = '/purchase/product/v1/product-info-sku';
     const PURCHASE_PAGE_PATH = '/view/system/purchaseOrderModule/purchasingManagement.html';
+    let collectorRequestId = new URL(window.location.href).searchParams.get('lworkstationRequest') || '';
+    try { collectorRequestId ||= window.sessionStorage.getItem('lworkstationCollectorRequest') || ''; if (collectorRequestId) window.sessionStorage.setItem('lworkstationCollectorRequest', collectorRequestId); } catch { /* URL still identifies an unredirected collector. */ }
+    const taskForThisPage = task => collectorRequestId ? task.requestId === collectorRequestId : task.executionTarget !== 'desktop';
     const MAX_RECORDS = 3;
     const MAX_CONCURRENT_DETAIL = 12;
     const MAX_REQUEST_CONCURRENCY = 12;
@@ -27,7 +30,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.52';
+    const EXTENSION_VERSION = '8.0.53';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -586,7 +589,7 @@
                 const response = await window.ShopeersErpDeliveryBridge.collectionTask({ action: 'list' });
                 if (revision !== workspaceStateRevision) return;
                 if ((!activeRun || force) && response?.ok && Array.isArray(response.tasks)) {
-                    collectionTaskState = response.tasks.find(task => !['stopped','completed','invalidated'].includes(task.status)) || null;
+                    collectionTaskState = response.tasks.find(task => taskForThisPage(task) && !['stopped','completed','invalidated'].includes(task.status)) || null;
                     if (collectionTaskState) updateTaskStatus(collectionTaskState);
                 }
             }
@@ -652,6 +655,7 @@
     }
 
     function getResultCache() {
+        if (collectorRequestId) return null;
         try {
             const raw = window.localStorage.getItem('erpAssistantV8_' + RESULT_CACHE_KEY);
             if (!raw) return null;
@@ -673,6 +677,7 @@
     }
 
     function setResultCache(results, meta, warehouseEvidence, capturedUrl, resultDeliveryId, deliveryState = {}) {
+        if (collectorRequestId) return;
         try {
             const queryCapturedAt = String(deliveryState.queryCapturedAt || deliveryState.registeredBefore || meta?.queryCapturedAt || meta?.registeredBefore || '').trim();
             window.localStorage.setItem('erpAssistantV8_' + RESULT_CACHE_KEY, JSON.stringify({
@@ -1672,7 +1677,7 @@
         taskPollBusy = true;
         try {
             const response = await taskOperation({ action: 'list' });
-            const tasks = response.tasks || [];
+            const tasks = (response.tasks || []).filter(taskForThisPage);
             const queued = tasks.find(task => task.executionProtocol === 2 && task.status === 'ready' && !task.recoveryRequired);
             const current = queued || tasks.find(task => !['stopped', 'completed', 'invalidated'].includes(task.status));
             if (activeRun || taskStartPending) return;
@@ -1725,7 +1730,7 @@
         let task = run.task;
         if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
         run.runnerId = makeResultDeliveryId();
-        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs' })).task;
+        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs', ...(collectorRequestId ? { executionRole: 'desktop' } : {}) })).task;
         run.task = task;
         const snapshot = task.requestSnapshot;
         run.previewContext = { ...run.previewContext, requestId: task.requestId, ledgerPeriod: snapshot.ledgerPeriod,
@@ -2768,6 +2773,7 @@
     }
 
     function reportExtensionStatus() {
+        if (collectorRequestId) return Promise.resolve();
         if (statusReportPending) { statusReportQueued = true; return statusReportPending; }
         statusReportPending = (async () => {
             do { statusReportQueued = false; await performStatusReport(); } while (statusReportQueued);

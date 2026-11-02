@@ -9,16 +9,19 @@ const resources = process.env.ERP_NATIVE_RESOURCES || root;
 const runtime = process.env.ERP_NATIVE_RESOURCES ? path.join(resources, 'app.asar') : __dirname;
 const { prepareRuntimeExtension, extensionStorageConfig } = require(path.join(runtime, 'extension-runtime.cjs'));
 const { createInboxServiceController, installExtensionInboxTransport } = require(path.join(runtime, 'inbox-service.cjs'));
+const { createWorkspaceErpCollector } = require(path.join(runtime, 'erp-workspace-collector.cjs'));
 const out = path.resolve(process.env.ERP_NATIVE_OUTPUT);
 const profile = path.join(out, `isolated-profile-${Date.now()}`);
+console.log('Native isolated profile: '+profile);
 const port = Number(process.env.ERP_NATIVE_PORT || 23874);
 const capability = 'synthetic-native-extension-capability-0123456789';
 const workspaceId = 'native-qa';
 app.setPath('userData', profile);
 app.commandLine.appendSwitch('disable-gpu');
+app.on('window-all-closed',()=>{});
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], failures = [], timings = [], requests = [];
-let inbox, host, view, popup;
+let inbox, host, view, popup, collector, collectorView, automaticLoginRequired = false;
 async function call(route, body) {
   const started = performance.now();
   const response = await fetch(`http://127.0.0.1:${port}/erp/v1/${route}`, { headers: { authorization: `Bearer ${capability}`, 'content-type': 'application/json' }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(4000) });
@@ -52,6 +55,7 @@ app.whenReady().then(async () => {
     ses.serviceWorkers.on('console-message', (_event, details) => { if (details?.level === 'error') failures.push(details.message); });
     ses.protocol.handle('https', request => {
       const url = new URL(request.url);
+      if (url.searchParams.has('lworkstationRequest') && automaticLoginRequired) return new Response('<!doctype html><html><body><input type="password"></body></html>', { headers: { 'content-type': 'text/html' } });
       if (!url.pathname.startsWith('/purchase/')) return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离原生 ERP</h1>' + (url.pathname === '/view/console/index.html' ? '<iframe id="procurement" style="width:100%;height:720px" src="/view/system/purchaseOrderModule/purchasingManagement.html"></iframe>' : '') + (url.pathname === '/login.html' ? '<input type="password" aria-label="ERP 密码">' : '') + '</body></html>', { headers: { 'content-type': 'text/html' } });
       requests.push(url.pathname);
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-A' }]
@@ -95,6 +99,38 @@ app.whenReady().then(async () => {
     const persisted=(await createInboxDisk(path.join(profile,'inbox.json')).load()).map(entry=>entry.metadata);
     assert.ok(persisted.some(item => item.kind === 'batch' && item.deliveryId === delivered.deliveryId));
     checks.push({ name: 'real MAIN query hook, procurement reads, SKU mapping, native chrome.storage checkpoint, native background delivery, durable v2 evidence', unitCost: 4 });
+    const previousTasks = await call(`collection-tasks?workspaceId=${workspaceId}`);
+    for (const task of previousTasks.tasks ?? []) if (!['stopped','completed','invalidated'].includes(task.status)) await call(`collection-tasks/${task.taskId}/control`, { workspaceId, action: 'stop' });
+    await pause(1200);
+    await call('requests', { request: { id: 'NATIVE-AUTO-R', workspaceId, ledgerId: 'NATIVE-AUTO-L', ledgerPeriod: '2026-09', platformSkcs: [{ platformSkc: 'SKC-A' }] }, expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] });
+    await evaluate(`document.body.insertAdjacentHTML('beforeend','<input id="keep-foreground" value="前台原查询"><select id="keep-page"><option>20</option><option selected>100</option></select>')`);
+    const foregroundUrl = view.webContents.getURL();
+    const foregroundCache = await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v7'))?.results`);
+    automaticLoginRequired = true;
+    collector = createWorkspaceErpCollector({
+      getContext: () => ({ workspaceId }),
+      requestInbox: input => inbox.requestInbox(input),
+      createView: async url => {
+        const hidden = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+        collectorView = hidden;
+        hidden.setBounds({ x: 0, y: 0, width: 1280, height: 900 });
+        await hidden.webContents.loadURL(url);
+        return hidden;
+      },
+    });
+    const waiting = await collector.start({ workspaceId, ledgerId: 'NATIVE-AUTO-L', requestId: 'NATIVE-AUTO-R' });
+    assert.equal(waiting.status, 'waiting_login');
+    automaticLoginRequired = false;
+    await collector.sessionChanged();
+    const automatic = await waitFor(async () => { const result = await call(`cost-batches?workspaceId=${workspaceId}`); return (result.batches ?? result.records)?.find(item => item.requestId === 'NATIVE-AUTO-R'); }, 'workspace-only collection without a query or clipboard', 45000);
+    assert.equal(automatic.envelope.batch.rows[0].unitCost, 4);
+    assert.equal(automatic.envelope.batch.evidenceStatus, 'complete');
+    assert.equal(view.webContents.getURL(), foregroundUrl);
+    assert.equal(await evaluate(`document.querySelector('#keep-foreground').value`), '前台原查询');
+    assert.equal(await evaluate(`document.querySelector('#keep-page').value`), '100');
+    assert.deepEqual(await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v7'))?.results`), foregroundCache);
+    await collector.stop(); collector.dispose(); collector = null;
+    checks.push({ name: 'workspace launch, first-login wait/resume, real hidden native collector, fixed scope, complete delivery and unchanged foreground URL/form/pagination/result cache', unitCost: 4 });
     // Selecting another workspace detaches the remote view in the real shell.
     host.contentView.removeChildView(view);
     const ages = [], until = Date.now() + Number(process.env.ERP_NATIVE_IDLE_MS || 100000);
@@ -126,9 +162,14 @@ app.whenReady().then(async () => {
     await fs.writeFile(path.join(out, 'erp-native-checks.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
   } catch (error) {
-    await fs.writeFile(path.join(out, 'erp-native-checks.json'), JSON.stringify({ ok: false, checks, failures, message: error.message, stack: error.stack, body: view && !view.webContents.isDestroyed() ? await evaluate('document.body.innerText').catch(() => '') : '' }, null, 2));
+    const collectorState = collector?.snapshot();
+    const tasks = inbox ? await call(`collection-tasks?workspaceId=${workspaceId}`).catch(() => null) : null;
+    let collectorBody='';
+    try { if (collectorView && !collectorView.webContents.isDestroyed()) collectorBody=await collectorView.webContents.executeJavaScript('document.body.innerText').catch(()=>''); } catch { /* Closed test view. */ }
+    await fs.writeFile(path.join(out, 'erp-native-checks.json'), JSON.stringify({ ok: false, checks, failures, message: error.message, stack: error.stack, collectorState, tasks, collectorBody, body: view && !view.webContents.isDestroyed() ? await evaluate('document.body.innerText').catch(() => '') : '' }, null, 2));
     process.exitCode = 1;
   } finally {
+    collector?.dispose();
     if (view && !view.webContents.isDestroyed()) view.webContents.close(); host?.destroy(); popup?.destroy(); await stopInbox(); app.exit(process.exitCode || 0);
   }
 });

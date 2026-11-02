@@ -8,6 +8,19 @@ import { once } from 'node:events';
 import { handleCollectionTaskRequest, collectionScopeHash, recoverCollectionTasks, recordCollectionDelivery } from './erp-collection-tasks.mjs';
 
 {
+  const records = [{ kind: 'request', status: 'registered', requestId: 'R-desktop', workspaceId: 'W', ledgerId: 'L', platformSkcs: ['A'], expectedSkus: [] }];
+  const call = (suffix, payload) => handleCollectionTaskRequest(records, { method: 'POST', url: new URL(`http://localhost/erp/v1/collection-tasks${suffix}`), payload: { workspaceId: 'W', ...payload }, instanceId: 'I' }).body;
+  const { task } = call('', { requestId: 'R-desktop', executionProtocol: 2, executionTarget: 'desktop', filters: { sku: 'A' } });
+  const control = `/${task.taskId}/control`;
+  call(control, { action: 'request_resume' });
+  const claim = { action: 'claim', runnerId: 'DESKTOP-RUNNER', resumeRequestId: task.resumeRequestId };
+  assert.throws(() => call(control, claim), /该任务由工作台后台执行/);
+  assert.equal(task.status, 'ready', 'an older foreground helper cannot steal the reserved task');
+  call(control, { ...claim, executionRole: 'desktop' });
+  assert.equal(task.status, 'running');
+}
+
+{
   const records = [{ kind: 'request', status: 'registered', requestId: 'R-reason', workspaceId: 'W', ledgerId: 'L', platformSkcs: ['A'], expectedSkus: [] }];
   const call = (suffix, payload) => handleCollectionTaskRequest(records, { method: 'POST', url: new URL(`http://localhost/erp/v1/collection-tasks${suffix}`), payload: { workspaceId: 'W', ...payload }, instanceId: 'I' }).body;
   const { task } = call('', { requestId: 'R-reason' });

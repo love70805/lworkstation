@@ -157,7 +157,7 @@ it('reuses idle recovery without rereading evidence, but rechecks manual costs a
  expect(manual[0].adoption.summary.manualEffectiveCount).toBe(1);
  await db.ledgers.update(ledger.id,{status:'locked'});
  const locked=await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId});
- expect(locked[0].adoption.summary.protectedCount).toBe(1);
+ expect(locked[0].adoption.summary.protectedCount).toBe(0);
  expect(await db.erpCostRows.count()).toBe(1);
  await db.ledgers.update(ledger.id,{status:'draft'});
  expect((await recoverErpCostInboxAdoptions({workspaceId:ledger.workspaceId}))[0].adoption.summary).toMatchObject({protectedCount:0,anomalyCount:1});
@@ -206,9 +206,9 @@ it('stores healthy background ERP while manual zero remains effective, then rest
  expect(resolveFormalCostDecision({...scope,erpCost:snapshot.costs.find(row=>row.platformSku==='A'),manualOverride:selectManualOverride(snapshot.approvals,scope)}).unitCost).toBe(0);
  await revokeManualCostOverride({ledgerId:ledger.id,approvalId:manual.id});snapshot=await getLedgerSnapshot(ledger.id);expect(resolveFormalCostDecision({...scope,erpCost:snapshot.costs.find(row=>row.platformSku==='A'),manualOverride:selectManualOverride(snapshot.approvals,scope)}).unitCost).toBe(5);
 });
-it.each(['finalized','locked'])('retains incoming evidence without changing %s ledger',async status=>{
+it.each(['finalized','locked'])('adopts costs for an editable legacy %s month while retaining archived summary data',async status=>{
  const {ledger,envelope}=await seed({prices:[5,8]});await db.ledgers.update(ledger.id,{status,profitSummary:{sentinel:123}});
- const before=await db.ledgers.get(ledger.id);const receipt=await receiveErpCostInboxEnvelope({envelope});expect(receipt.adoptionError).toBeUndefined();expect(receipt.adoption.state).toBe('protected');expect(await db.erpCostRows.count()).toBe(0);expect(await db.ledgers.get(ledger.id)).toEqual(before);
+ const before=await db.ledgers.get(ledger.id);const receipt=await receiveErpCostInboxEnvelope({envelope});expect(receipt.adoptionError).toBeUndefined();expect(receipt.adoption.state).toBe('applied');expect(await db.erpCostRows.count()).toBe(2);expect((await db.ledgers.get(ledger.id)).profitSummary).toEqual(before.profitSummary);
 });
 it('does not roll back new costs for late old requests and rejects mutated source IDs',async()=>{
  const older=await seed({prices:[5,8],id:'old'}),newer=await seed({prices:[10,12],id:'new',requestAt:'2026-09-02T00:00:00Z'});
@@ -240,7 +240,7 @@ it('exception correction appends only the affected item to one batch and repeats
 });
 it('rechecks lock and workspace ownership inside the processing transaction',async()=>{
  const {ledger,envelope}=await seed({prices:[5,8]});await db.ledgers.update(ledger.id,{status:'locked'});const received=await receiveErpCostInboxEnvelope({envelope});await db.ledgers.update(ledger.id,{status:'draft'});
- await setActiveMemberContext({workspaceId:'foreign',memberId:'other',role:'finance'});await expect(processErpCostInboxAdoption({inboxId:received.id})).rejects.toThrow('工作区');expect(await db.erpCostRows.count()).toBe(0);
+ await setActiveMemberContext({workspaceId:'foreign',memberId:'other',role:'finance'});await expect(processErpCostInboxAdoption({inboxId:received.id})).rejects.toThrow('工作区');expect(await db.erpCostRows.count()).toBe(2);
  await setActiveMemberContext({workspaceId:ledger.workspaceId,memberId:'finance',role:'finance'});await processErpCostInboxAdoption({inboxId:received.id});expect(await db.erpCostRows.count()).toBe(2);
 });
 it('blocks unscoped global collection failures while preserving all original evidence',async()=>{
@@ -315,9 +315,9 @@ it('preserves finalized ledger state when promoting a complete old draft to the 
  const values=new Map([[costDraftKey(ledger.id),JSON.stringify({sourceText:JSON.stringify(envelope.batch),updatedAt:0})]]);
  const storage={get length(){return values.size;},key:index=>[...values.keys()][index],getItem:key=>values.get(key)??null,removeItem:key=>values.delete(key)};
  expect(await recoverCompleteErpCostDrafts({workspaceId:ledger.workspaceId,storage})).toEqual({recovered:1,failures:[]});
- expect((await db.erpCostInbox.toArray())[0].adoption.state).toBe('protected');
- expect(await db.erpCostRows.count()).toBe(0);
- expect((await db.ledgers.get(ledger.id)).status).toBe('finalized');
+ expect((await db.erpCostInbox.toArray())[0].adoption.state).toBe('applied');
+ expect(await db.erpCostRows.count()).toBe(2);
+ expect((await db.ledgers.get(ledger.id)).status).toBe('ready');
 });
 it('keeps an unrelated draft untouched and never adopts it in the active workspace',async()=>{
  const {ledger,envelope}=await seed({prices:[4.59,8],id:'foreign-draft'});
@@ -396,10 +396,10 @@ it.each(['finalized', 'locked'])('rejects confirmation on a %s ledger and preser
   const { ledger, envelope } = await seed({ prices: [5, 1] });
   const receipt = await receiveErpCostInboxEnvelope({ envelope });
   await db.ledgers.update(ledger.id, { status, profitSummary: { sentinel: 'frozen' } });
-  await expect(processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B')] })).rejects.toThrow('不能确认采购价格');
-  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toBeUndefined();
-  expect((await db.ledgers.get(ledger.id))).toMatchObject({ status, profitSummary: { sentinel: 'frozen' } });
-  expect(await db.erpCostRows.count()).toBe(1);
+  await expect(processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B')] })).resolves.toBeDefined();
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toHaveLength(1);
+  expect((await db.ledgers.get(ledger.id))).toMatchObject({ status: 'ready', profitSummary: { sentinel: 'frozen' } });
+  expect(await db.erpCostRows.count()).toBe(2);
 });
 
 it('rejects confirmations outside the original warehouse, purchase record or original price', async () => {

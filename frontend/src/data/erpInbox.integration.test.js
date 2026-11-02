@@ -81,8 +81,8 @@ describe("ERP 本机收件箱", () => {
 
     const locked = await receiveErpCostInboxEnvelope({ envelope: envelopeFixture({ batchId: "B-LOCKED-NODELETE", deliveryId: "D-LOCKED-NODELETE" }) });
     await db.ledgers.add({ id: "LEDGER-IT", workspaceId: "workspace-default", period: "2026-08", status: "locked" });
-    await expect(rejectErpCostInboxBatches({ ids: [locked.id] })).rejects.toThrow("已锁定账本");
-    expect(await db.erpCostInbox.get(locked.id)).toMatchObject({ status: "pending" });
+    await expect(rejectErpCostInboxBatches({ ids: [locked.id] })).resolves.toMatchObject({rejectedCount:1});
+    expect(await db.erpCostInbox.get(locked.id)).toMatchObject({ status: "rejected" });
   });
 
   it("lists pending batches oldest first and excludes processed batches", async () => {

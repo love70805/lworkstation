@@ -34,7 +34,7 @@ it('blocks applying stale matches after a rule edit and applies only the newly m
 
 it('clears matching conditions explicitly without clearing manually selected goods and can undo an unmatched edit', async () => {
   await input(''); expect(button('应用本次筛选')).toBeUndefined();
-  await click('清除匹配条件');
+  await click('匹配货号');
   expect(apply).toHaveBeenCalledWith({ F: ['A-FFFV', 'MANUAL'] }, { aliases: [], mode: 'fuzzy' });
   await input('UNKNOWN'); await click('恢复上次关键词');
   expect(snapshot.aliasesText).toBe('');
@@ -52,11 +52,15 @@ it('recovers from a synchronous member read failure in the same dialog', async (
   expect(apply).not.toHaveBeenCalled();
 });
 
-it('does not block manual selection when the match mode changes with no keywords', async () => {
+it('stages manual selection and the mode without reprocessing files until matching', async () => {
   await act(async () => root.render(<Harness key="empty" startingEmpty />));
   await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), { target: { value: 'exact' } }));
-  expect(snapshot.dirty).toBe(false);
+  expect(snapshot.dirty).toBe(true);
   await act(async () => container.querySelector('[aria-label="选择 甲店 B-KPX"]').click());
+  expect(apply).not.toHaveBeenCalled();
+  expect(container.querySelector('[aria-label="选择 甲店 B-KPX"]').checked).toBe(true);
+  expect(container.querySelector('.supplier-selected-list').open).toBe(false);
+  await click('匹配货号');
   expect(apply).toHaveBeenCalledTimes(1);
 
   expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-FFFV', 'B-KPX', 'MANUAL']);

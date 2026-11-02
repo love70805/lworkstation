@@ -28,56 +28,41 @@ async function mount(patch={},controls={}){
  await act(async()=>root.render(<ToastProvider><MonthlyReportManager ledgerId="L" workspaceId="W" missingCostCount={0} editor={controls.editor} onEdit={controls.onEdit??vi.fn()}/></ToastProvider>));
 }
 afterEach(async()=>{if(root)await act(async()=>root.unmount());container?.remove();root=null;});
-it('provides one direct formal action and saves the checked preview with the ledger-month export name',async()=>{
- await mount();expect(button('预览正式利润表').disabled).toBe(false);expect(button('预览未扣款报告')).toBeUndefined();
- await act(async()=>button('预览正式利润表').click());
- expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'financial',baseReportId:undefined});
- expect(document.querySelector('[role=dialog]').textContent).toContain('张三2026年9月利润表.xlsx');
- await act(async()=>button('保存正式利润表并下载').click());
- expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial',baseReportId:undefined},{expectedFingerprint:'checked'});expect(mock.download).toHaveBeenCalledWith(formal);
- expect(document.querySelector('[role=dialog]')).toBeNull();expect(container.textContent).toContain('正式利润表已保存');
+it('directly exports the checked current report in one click without a finalization dialog',async()=>{
+ await mount();expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('导出利润表').click());
+ expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'});expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},{expectedFingerprint:'checked'});expect(mock.download).toHaveBeenCalledWith(formal);
+ expect(document.querySelector('[role=dialog]')).toBeNull();expect(container.textContent).not.toMatch(/定稿|重开/);
 });
-it('allows the unreceived-deduction report without recording dispatch',async()=>{
- await mount({deduction:null,dispatch:null});expect(button('预览正式利润表')).toBeUndefined();expect(button('预览未扣款报告').disabled).toBe(false);
- expect(button('登记代发')).toBeDefined();expect(button('登记扣款')).toBeDefined();
+it('exports without optional dispatch or pending deductions and keeps both source entries available',async()=>{
+ await mount({deduction:null,dispatch:null});expect(button('导出未扣款报告').disabled).toBe(false);expect(button('登记代发')).toBeDefined();expect(button('登记扣款')).toBeDefined();
+ await act(async()=>button('导出未扣款报告').click());expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'pre_deduction'});
 });
-it('uses the current frozen base when deductions arrive and makes the pending result explicit',async()=>{
- await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[base]});
- expect(button('预览正式利润表').disabled).toBe(false);expect(button('更新代发')).toBeUndefined();
- expect(container.textContent).toContain('扣款已更新，待生成');expect(container.textContent).toContain('已保存的未扣款基础');
- await act(async()=>button('预览正式利润表').click());expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'financial',baseReportId:'B'});
+it('uses current data for legacy finalized ledgers and permits source updates directly',async()=>{
+ const onEdit=vi.fn();await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[base]},{onEdit});
+ expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('更新代发').click());expect(onEdit).toHaveBeenCalledWith('dispatch');
+ await act(async()=>button('导出利润表').click());expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'});
 });
-it('makes the saved formal download primary, hides duplicate generation and lists only other reports in history',async()=>{
+it('keeps historical downloads separate from the direct current export and allows regenerating after data edits',async()=>{
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
- expect(container.textContent).toContain('正式版已保存');expect(button('预览正式利润表')).toBeUndefined();expect(button('预览未扣款报告')).toBeUndefined();
- expect(button('下载正式利润表').classList.contains('button-primary')).toBe(true);expect(container.textContent).toContain('历史报告与基础（1）');
- expect(button('更新扣款')).toBeUndefined();expect(button('登记扣款')).toBeUndefined();expect([...container.querySelectorAll('.report-source-status')].map(node=>node.textContent)).toEqual(['已随报告保存','已随报告保存']);
- await act(async()=>button('下载正式利润表').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined});
+ expect(button('导出利润表')).toBeDefined();expect(container.textContent).toContain('历史导出（2）');expect(button('更新扣款')).toBeDefined();
+ await act(async()=>button('下载此报告').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined});
 });
-it('can finish a previously adopted legacy replacement, while further source changes require reopening',async()=>{
- await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[formal,base]});
- expect(button('下载正式利润表')).toBeDefined();expect(button('预览正式利润表')).toBeUndefined();expect(button('更新扣款')).toBeUndefined();
- await act(async()=>root.unmount());container.remove();root=null;
- await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base],deduction:{...deduction,id:'NEW'}});
- expect(button('预览正式利润表').disabled).toBe(false);expect(button('下载正式利润表')).toBeUndefined();expect(container.textContent).not.toContain('正式版已保存');
- expect(button('更新扣款')).toBeUndefined();expect(container.textContent).toContain('更正需先重开');
+it('does not close a source editor when a prior report exists',async()=>{
+ const onEdit=vi.fn();await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});
+ expect(onEdit).not.toHaveBeenCalledWith(null);expect(document.querySelector('[role=dialog]')).not.toBeNull();
 });
-it('closes a stale deduction editor after the current base has a formal report',async()=>{
- const onEdit=vi.fn();await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});
- expect(onEdit).toHaveBeenCalledWith(null);expect(document.querySelector('[role=dialog]')).toBeNull();
+it('keeps the monthly summary source entry editable for the operating workflow',async()=>{
+ await mount();const onEdit=vi.fn(),target={...ledger,status:'ready',operationWorkflow:2};
+ const summary=monthlyProfitSummary({ledger:target,missingCostCount:0,productProfitExact:'93',reportState:{ledgerId:'L',workspaceId:'W',data:{ledger:target,stores:['甲'],dispatch,deduction,reports:[formal]}}});
+ await act(async()=>root.render(<MonthlyProfitSummary summary={summary} ledger={target} onEdit={onEdit}/>));
+ expect(button('更新扣款')).toBeDefined();await act(async()=>button('更新扣款').click());expect(onEdit).toHaveBeenCalledWith('deduction');
 });
-it('keeps monthly summary deduction entry available before formal saving and after reopening only',async()=>{
- await mount();const onEdit=vi.fn();
- for(const [status,reports,editable] of [['finalized',[base],true],['finalized',[base,formal],false],['cost_pending',[base,formal],true],['locked',[base,formal],false]]){
-  const target={...ledger,status,currentBaseReportId:status==='cost_pending'?null:'B'};
-  const summary=monthlyProfitSummary({ledger:target,missingCostCount:0,productProfitExact:'93',reportState:{ledgerId:'L',workspaceId:'W',data:{ledger:target,stores:['甲'],dispatch,deduction,reports}}});
-  await act(async()=>root.render(<MonthlyProfitSummary summary={summary} ledger={target} onEdit={onEdit}/>));
-  expect(Boolean(button('更新扣款'))).toBe(editable);
-  if(status==='finalized'&&!editable)expect(container.textContent).toContain('已随报告保存');
- }
+it('reports a stale snapshot without downloading a file or claiming success',async()=>{
+ await mount();mock.save.mockRejectedValue(new Error('报告预览已过期，请重新核对。'));await act(async()=>button('导出利润表').click());
+ expect(container.querySelector('[role=alert]').textContent).toContain('预览已过期');expect(mock.download).not.toHaveBeenCalled();
 });
-it('reports stale preview failures without starting a download or claiming a formal save',async()=>{
- await mount();mock.save.mockRejectedValue(new Error('报告预览已过期，请重新核对。'));
- await act(async()=>button('预览正式利润表').click());await act(async()=>button('保存正式利润表并下载').click());
- expect(container.querySelector('[role=alert]').textContent).toContain('预览已过期');expect(mock.download).not.toHaveBeenCalled();expect(container.textContent).not.toContain('正式版已保存');
+it('guards double clicks while a report is being prepared',async()=>{
+ await mount();let finish;mock.preview.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ await act(async()=>{button('导出利润表').click();button('导出利润表').click();});expect(mock.preview).toHaveBeenCalledTimes(1);expect(mock.save).not.toHaveBeenCalled();
+ await act(async()=>finish({report:formal,fingerprint:'checked'}));expect(mock.save).toHaveBeenCalledTimes(1);expect(mock.download).toHaveBeenCalledTimes(1);
 });

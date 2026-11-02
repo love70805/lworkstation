@@ -126,7 +126,8 @@ describe("CostMatching ERP inbox dialogs", () => {
     expect(container.querySelector(".cost-inbox-history").open).toBe(true);
     await act(async () => { findButton(container, "撤回本次采用").click(); });
     expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-    expect(container.textContent).toContain("该账本已定稿");
+    expect(container.textContent).toContain("撤回不会删除原始候选和采购证据");
+    expect(container.textContent).not.toContain("重开");
     const confirmVoid = findButton(container, "确认撤回并重新核对");
     expect(confirmVoid.disabled).toBe(true);
     const reason = container.querySelector("textarea");
