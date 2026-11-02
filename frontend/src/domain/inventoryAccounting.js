@@ -4,6 +4,7 @@ import { normalizePurchaseEvidenceRecord } from './erpPurchaseEvidence';
 import { normalizedResolution } from './erpCostResolution';
 import { purchaseOrderSummary } from './erpPurchaseSelection';
 import { manualSnapshot, storeSkuKey } from './manualCostOverride';
+import { compareErpSourceOrder } from './erpAutomaticAdoption';
 
 export const WEIGHTED_ACCOUNTING = 'weighted';
 export const LOWEST_ACCOUNTING = 'historical_lowest';
@@ -28,6 +29,22 @@ export function operatingLedger(ledger) {
 }
 
 const monthExclusions = new Set(['current_month', 'on_or_after_ledger_period', 'after_ledger_period']);
+const timestamp = value => {
+  const parsed = typeof value === 'number' ? value : Date.parse(value ?? '');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+function evidenceOrder(cost) {
+  // The history snapshot is generated before transport/adoption. A delayed
+  // receipt or publication cannot make an older ERP history newer.
+  return [timestamp(cost.sourceGeneratedAt) || timestamp(cost.sourceOrder?.[1]) || timestamp(cost.generatedAt) || timestamp(cost.publishedAt),
+    timestamp(cost.sourceOrder?.[0]), cost.sourceEnvelopeBatchId ?? cost.sourceOrder?.[2] ?? cost.batchId ?? ''];
+}
+function compareEvidence(left, right) {
+  return compareErpSourceOrder(evidenceOrder(left), evidenceOrder(right))
+    // For the same immutable snapshot, keep its formally recorded corrections.
+    || Number(left.evidenceOrigin === 'published') - Number(right.evidenceOrigin === 'published')
+    || timestamp(left.publishedAt) - timestamp(right.publishedAt);
+}
 export function historicalLowestCosts(rows = []) {
   const best = new Map();
   const latest = new Map();
@@ -35,11 +52,11 @@ export function historicalLowestCosts(rows = []) {
     if (cost?.evidenceComplete !== true || !cost.platformSku || !cost.platformSkc || !cost.warehouseSku) continue;
     const key = JSON.stringify([canonicalPlatformSku(cost.platformSku), canonicalPlatformSkc(cost.platformSkc), canonicalWarehouseSku(cost.warehouseSku)]);
     const previous = latest.get(key);
-    if (!previous || String(cost.publishedAt ?? '') >= String(previous.publishedAt ?? '')) latest.set(key, cost);
+    if (!previous || compareEvidence(cost, previous) >= 0) latest.set(key, cost);
   }
   for (const cost of latest.values()) {
     if (!cost.platformSku || !cost.platformSkc || !cost.warehouseSku || cost.evidenceComplete !== true) continue;
-    const source = cost.purchaseRecords ?? cost.costDecision?.purchaseRecords ?? [];
+    const source = [...(cost.purchaseRecords ?? cost.costDecision?.purchaseRecords ?? []), ...(cost.excludedRecords ?? [])];
     const records = source.map((record, index) => {
       const reasons = record.exclusionReasons ?? [];
       return normalizePurchaseEvidenceRecord({ ...record,
@@ -57,13 +74,14 @@ export function historicalLowestCosts(rows = []) {
       if (!(unitCost > 0)) continue;
       const key = JSON.stringify([canonicalPlatformSku(cost.platformSku), canonicalPlatformSkc(cost.platformSkc)]);
       const previous = best.get(key);
-      if (previous && (previous.unitCost < unitCost || previous.unitCost === unitCost && String(previous.publishedAt ?? '') >= String(cost.publishedAt ?? ''))) continue;
+      if (previous && (previous.unitCost < unitCost || previous.unitCost === unitCost && compareEvidence(previous, cost) >= 0)) continue;
       const selected = { ...record, effectiveUnitPrice: value.toNumber(), resolution };
       const decision = { resolutionStatus: 'resolved', resolutionVersion: 'inventory-lowest@2', evidenceComplete: true,
         purchaseRecords: [record], selectedRecords: [selected], selectedRecordIds: [record.recordId], resolutions: resolution ? [resolution] : [],
         unitCost, formalUnitCost: unitCost, unresolvedAnomalyCount: 0 };
       best.set(key, { id: `LOWEST:${cost.id}:${record.recordId}`, workspaceId: cost.workspaceId, ledgerId: cost.ledgerId,
         batchId: cost.batchId, sourceEnvelopeBatchId: cost.sourceEnvelopeBatchId, publishedAt: cost.publishedAt,
+        sourceGeneratedAt: cost.sourceGeneratedAt, sourceOrder: cost.sourceOrder, evidenceOrigin: cost.evidenceOrigin,
         platformSku: cost.platformSku, canonicalPlatformSku: canonicalPlatformSku(cost.platformSku),
         platformSkc: cost.platformSkc, canonicalPlatformSkc: canonicalPlatformSkc(cost.platformSkc),
         warehouseSku: cost.warehouseSku, canonicalWarehouseSku: canonicalWarehouseSku(cost.warehouseSku), currency: cost.currency ?? 'CNY',

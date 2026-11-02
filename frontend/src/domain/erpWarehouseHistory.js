@@ -1,6 +1,7 @@
 import { canonicalPlatformSku, canonicalPlatformSkc, canonicalWarehouseSku } from './identifiers';
 import { calculateWarehouseCostDecision } from './erpCostResolution';
 import { validateCostPeriod } from './erpPurchaseEvidence';
+import { historicalLowestCosts, LOWEST_ACCOUNTING } from './inventoryAccounting';
 
 export const WAREHOUSE_HISTORY_FORMAT = 'shopeers-erp-warehouse-history';
 const text = value => String(value ?? '').trim();
@@ -8,7 +9,7 @@ const pair = row => JSON.stringify([canonicalPlatformSku(row.platformSku), canon
 
 // A warehouse history file provides purchase evidence, never a live platform
 // binding. Its application is an explicit, audited manual correction action.
-export function readWarehouseHistory(value, period) {
+export function readWarehouseHistory(value, period, accountingMode = 'weighted') {
   validateCostPeriod(period);
   if (value?.format !== WAREHOUSE_HISTORY_FORMAT || value.formatVersion !== 1) throw new Error('请选择 ERP 助手导出的仓库历史采购证据 JSON。');
   if (value.ledgerPeriod !== period) throw new Error('历史核价月份与当前账本不一致，请按当前月份重新导出。');
@@ -29,14 +30,18 @@ export function readWarehouseHistory(value, period) {
       if (!id || ids.has(id) || canonicalWarehouseSku(record.warehouseSku) !== key) throw new Error('采购记录标识重复或仓库归属不一致。');
       ids.add(id);
     }
-    const decision = calculateWarehouseCostDecision({ warehouseSku: entry.warehouseSku, purchaseRecords: records, evidenceComplete: true, period });
+    const ordinary = calculateWarehouseCostDecision({ warehouseSku: entry.warehouseSku, purchaseRecords: records, evidenceComplete: true, period });
+    const lowest = accountingMode === LOWEST_ACCOUNTING ? historicalLowestCosts([{ ...entry, purchaseRecords: records,
+      platformSku: 'HISTORY', platformSkc: 'HISTORY' }])[0] : null;
+    const decision = accountingMode === LOWEST_ACCOUNTING ? lowest?.costDecision ?? { ...ordinary, resolutionStatus: 'unresolved',
+      unitCost: null, formalUnitCost: null, selectedRecordIds: [], selectedRecords: [], unresolvedAnomalyCount: 0 } : ordinary;
     warehouses.set(key, { ...entry, decision });
   }
   return { ...value, warehouses };
 }
 
-export function planWarehouseHistoryCosts({ history, period, targets = [], knownMappings = [] }) {
-  const parsed = readWarehouseHistory(history, period);
+export function planWarehouseHistoryCosts({ history, period, targets = [], knownMappings = [], accountingMode = 'weighted' }) {
+  const parsed = readWarehouseHistory(history, period, accountingMode);
   const mappings = [...(Array.isArray(history.historicalMappings) ? history.historicalMappings : []).map(row => ({ ...row, historyOrigin: 'imported_history' })),
     ...knownMappings.map(row => ({ ...row, historyOrigin: 'published_erp_cost' }))];
   const parents = new Map();

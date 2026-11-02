@@ -9,6 +9,7 @@ import { buildErpCostRequest } from '../domain/erpCosts';
 import { buildErpCostBatchEnvelope, validateErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 import { warehouseHistoryFixture } from '../testFixtures/warehouseHistory';
+import { toggleAccountingMode } from './repositories/inventoryAccountingRepository';
 const ledgerId = 'RECOVERY-LEDGER', expectedSkus = [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', store: '甲店' }];
 const input = { ledgerId, store: '甲店', platformSku: 'SKU-A' };
 let request, batch, receipt;
@@ -72,18 +73,46 @@ it('rejects forged history provenance and unrelated evidence-only warehouses', (
   const unrelated = structuredClone(batch); unrelated.rows[0].warehouseSku = 'FOREIGN-WAREHOUSE';
   expect(() => validateErpCostBatchEnvelope(unrelated, { expectedSkus, expectedHistoryMappings: request.historyMappings })).toThrow();
 });
-it.each(['voided-source', 'conflicting-source', 'changed-import', 'finalized', 'effective-manual'])('does not use stale suggestions after %s', async change => {
+it.each(['voided-source', 'conflicting-source', 'changed-import', 'effective-manual'])('does not use stale suggestions after %s', async change => {
   const candidate = await previewRecoveredWarehouseCost(input);
   expect(candidate).not.toBeNull();
   if (change === 'voided-source') await db.erpCostBatches.update('OLD-BATCH', { status: 'voided' });
   if (change === 'conflicting-source') await db.erpCostRows.add({ batchId: 'OLD-BATCH', workspaceId, ledgerId: 'OLD-LEDGER', platformSku: 'SKU-A',
     canonicalPlatformSku: 'SKU-A', platformSkc: 'SKC-A', warehouseSku: 'WH-CONFLICT', evidenceComplete: true, publishedAt: '2026-09-02T00:00:00Z' });
   if (change === 'changed-import') { await db.erpCostRequests.update(request.id, { ledgerVersion: 'old-import' }); await db.importBatches.add({ id: 'NEW', ledgerId }); }
-  if (change === 'finalized') await db.ledgers.update(ledgerId, { status: 'finalized' });
   if (change === 'effective-manual') await saveManualCostOverride({ ...input, unitCost: 0, reason: '真实零值' });
   expect(await previewRecoveredWarehouseCost(input)).toBeNull();
   await expect(saveRecoveredWarehouseCost({ ...input, inboxId: candidate.inboxId, expectedUnitCost: candidate.unitCost })).rejects.toThrow('已变化');
   expect(await db.costApprovals.count()).toBe(change === 'effective-manual' ? 1 : 0);
+});
+it.each(['finalized', 'locked'])('keeps historical recovery available for editable legacy months: %s', async status => {
+  await db.ledgers.update(ledgerId, { status });
+  const candidate = await previewRecoveredWarehouseCost(input);
+  expect(candidate?.unitCost).toBe(0.35);
+  const saved = await saveRecoveredWarehouseCost({ ...input, expectedUnitCost: 0.35 });
+  expect(saved.approvedAmount).toBe(0.35);
+});
+it('does not let an isolated manual cost suppress an ordinary missing-cost suggestion', async () => {
+  await toggleAccountingMode(workspaceId);
+  await saveManualCostOverride({ ...input, unitCost: 0, reason: '人工输入单件成本并确认更正' });
+  await toggleAccountingMode(workspaceId);
+  expect((await previewRecoveredWarehouseCost(input))?.unitCost).toBe(0.35);
+});
+it('calculates recovered evidence in the current context and refuses an obsolete draft', async () => {
+  const candidate = await previewRecoveredWarehouseCost(input);
+  await toggleAccountingMode(workspaceId);
+  expect((await previewRecoveredWarehouseCost(input))?.unitCost).toBe(0.2);
+  await expect(saveRecoveredWarehouseCost({ ...input, expectedUnitCost: candidate.unitCost, expectedAccountingMode: 'weighted' })).rejects.toThrow('上下文已变化');
+  expect(await db.costApprovals.count()).toBe(0);
+  const saved = await saveRecoveredWarehouseCost({ ...input, expectedUnitCost: 0.2, expectedAccountingMode: 'historical_lowest' });
+  expect(saved).toMatchObject({ approvedAmount: 0.2, accountingMode: 'historical_lowest' });
+});
+it('rejects source-wide incomplete history even when the selected warehouse says complete', async () => {
+  const incomplete = structuredClone((await db.erpCostInbox.get(receipt.id)).envelope);
+  incomplete.batch.sourceMeta.sourceWarnings = ['incomplete purchase history'];
+  incomplete.batch.sourceMeta.completenessScope = 'source';
+  await db.erpCostInbox.update(receipt.id, { envelope: incomplete });
+  expect(await previewRecoveredWarehouseCost(input)).toBeNull();
 });
 it('does not guess a conflicting parent or cross-workspace source', async () => {
   await db.salesRows.add({ ...input, workspaceId, platformSkc: 'SKC-OTHER', quantity: 1, amount: 20 });

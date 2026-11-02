@@ -35,5 +35,5 @@ export async function readCachedReportProducts({ snapshot, warehouseRate = snaps
   if (!snapshot.dataVersion) return compute();
   const revisionOptions = snapshot.revisionKind === 'ledger' ? { revisionReader: ledgerSnapshotRevision } : snapshot.revisionKind === 'inventory' ? { revisionReader: inventoryCalculationRevision } : snapshot.revisionKind === 'inventory-lowest' ? { revisionReader: inventoryLowestRevision } : {};
   assertSourceRevision(snapshot.dataVersion, revisionOptions.revisionReader);
-  return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, snapshot.ledger.accountingMode ?? 'weighted', 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@7-inventory-accounting`, revision: snapshot.dataVersion, ...revisionOptions, compute, onStatus });
+  return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, snapshot.ledger.accountingMode ?? 'weighted', 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@8-source-evidence`, revision: snapshot.dataVersion, ...revisionOptions, compute, onStatus });
 }

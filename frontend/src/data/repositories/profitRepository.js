@@ -150,29 +150,32 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
   });
 }
 
-async function warehouseHistoryPlan({ ledgerId, history }) {
+async function warehouseHistoryPlan({ ledgerId, history, expectedAccountingMode }) {
   const member = await getActiveMemberContext();
-  const ledger = operatingLedger(await db.ledgers.get(ledgerId));
-  if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
-  if (['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或锁定账本不能补齐成本，请先显式重开。');
-  const [rows, costs, approvals, batches] = await Promise.all([
+  const original = operatingLedger(await db.ledgers.get(ledgerId));
+  if (!original || original.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
+  const mode = await readAccountingMode(member.workspaceId);
+  if (expectedAccountingMode && expectedAccountingMode !== mode) throw new Error('核算上下文已变化，请重新打开成本明细。');
+  const ledger = await projectAccountingLedger(original, mode);
+  const [rows, originalCosts, approvals, batches] = await Promise.all([
     db.salesRows.where('ledgerId').equals(ledgerId).toArray(), getLatestLedgerCosts(ledgerId),
     db.costApprovals.where('ledgerId').equals(ledgerId).toArray(), db.erpCostBatches.where('workspaceId').equals(member.workspaceId).toArray(),
   ]);
+  const costs = await accountingCosts(ledger, originalCosts, mode, rows);
   const identities = buildLedgerSkuIdentityIndex(rows);
   const costBySku = new Map(costs.map(row => [canonicalPlatformSku(row.platformSku), row]));
   const uniqueRows = new Map(rows.map(row => [JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)]), row]));
   const targets = new Map();
   for (const row of uniqueRows.values()) {
     const scope = { workspaceId: member.workspaceId, ledgerId, store: row.store, platformSku: row.platformSku };
-    const decision = resolveLedgerCostDecision({ ...scope, period: ledger.period, identity: identities.get(canonicalPlatformSku(row.platformSku)), manualOverride: selectManualOverride(approvals, scope), erpCost: costBySku.get(canonicalPlatformSku(row.platformSku)) });
+    const decision = resolveLedgerCostDecision({ ...scope, period: costEvaluationPeriod(ledger), identity: identities.get(canonicalPlatformSku(row.platformSku)), manualOverride: selectManualOverride(accountingApprovals(approvals, mode), scope), erpCost: costBySku.get(canonicalPlatformSku(row.platformSku)) });
     if (decision.eligibleForExactProfit) continue;
     targets.set(JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)]), { store: row.store, platformSku: row.platformSku, platformSkc: row.platformSkc });
   }
   const trustedBatches = new Set(batches.filter(batch => batch.status === 'published').map(batch => batch.id));
   const oldRows = targets.size ? await db.erpCostRows.where('canonicalPlatformSku').anyOf([...new Set([...targets.values()].map(row => canonicalPlatformSku(row.platformSku)))]).toArray() : [];
   const knownMappings = oldRows.filter(row => row.workspaceId === member.workspaceId && trustedBatches.has(row.batchId) && row.platformSkc && row.warehouseSku && row.evidenceComplete === true && !row.mappingFallback);
-  return { ledger, ...planWarehouseHistoryCosts({ history, period: ledger.period, targets: [...targets.values()], knownMappings }) };
+  return { ledger, ...planWarehouseHistoryCosts({ history, period: ledger.period, targets: [...targets.values()], knownMappings, accountingMode: mode }) };
 }
 
 export async function readErpHistoryMappings({ ledgerId, expectedSkus = [] }) {
@@ -214,16 +217,16 @@ export async function readErpHistoryMappings({ ledgerId, expectedSkus = [] }) {
 
 export async function previewWarehouseHistoryCosts(input) { return warehouseHistoryPlan(input); }
 
-export async function saveWarehouseHistoryCosts({ ledgerId, history, sourceName = '仓库历史采购证据' }) {
+export async function saveWarehouseHistoryCosts({ ledgerId, history, sourceName = '仓库历史采购证据', expectedAccountingMode }) {
   return db.transaction('rw', db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
-    const plan = await warehouseHistoryPlan({ ledgerId, history });
+    const plan = await warehouseHistoryPlan({ ledgerId, history, expectedAccountingMode });
     const saved = [];
     for (const row of plan.ready) {
       const evidence = { ...row.historyEvidence, sourceName: String(sourceName).slice(0, 250) };
       // Re-evaluate from the preserved evidence; no imported proposed price is trusted.
       if (evidence.format !== WAREHOUSE_HISTORY_FORMAT) throw new Error('历史采购证据来源无效。');
       saved.push(await mutateManualCostOverride({ ledgerId, store: row.store, platformSku: row.platformSku, unitCost: row.unitCost,
-        reason: `历史仓库采购补齐：${row.warehouseSku}；${plan.ledger.period} 当月及以前最近三笔核价；来源 ${evidence.sourceName}；采购记录 ${row.selectedRecordIds.join('、')}。保留历史关联，不恢复当前 ERP 映射。`, historyEvidence: evidence }));
+        reason: `历史仓库采购补齐：${row.warehouseSku}；按当前核算口径核价；来源 ${evidence.sourceName}；采购记录 ${row.selectedRecordIds.join('、')}。保留历史关联，不恢复当前 ERP 映射。`, historyEvidence: evidence, expectedAccountingMode: plan.ledger.accountingMode }));
     }
     return { savedCount: saved.length, pending: plan.pending, savedIds: saved.map(row => row.id) };
   });
@@ -1618,20 +1621,28 @@ export async function finalizeMonthlyLedger({ ledgerId, profitLines, formulaVers
 }
 
 export async function getLatestLedgerCosts(ledgerId) {
-  if (Dexie.currentTransaction) return readLatestLedgerCosts(ledgerId);
-  await observePublishedCostRevision();
-  return cachedDerived({ scope: [ledgerId], formula: 'published-ledger-costs@1', revisionReader: publishedCostRevision,
-    revision: publishedCostRevision(), persist: false, compute: () => readLatestLedgerCosts(ledgerId) });
+  return readOwnedLedgerCosts(await db.ledgers.get(ledgerId));
 }
 
-async function readLatestLedgerCosts(ledgerId) {
+async function readOwnedLedgerCosts(ledger) {
+  if (!ledger?.workspaceId) return [];
+  const ledgerId = ledger.id;
+  if (Dexie.currentTransaction) return readLatestLedgerCosts(ledgerId, ledger.workspaceId);
+  await observePublishedCostRevision();
+  return cachedDerived({ scope: [ledgerId,ledger.workspaceId], formula: 'published-ledger-costs@2-owned', revisionReader: publishedCostRevision,
+    revision: publishedCostRevision(), persist: false, compute: () => readLatestLedgerCosts(ledgerId, ledger.workspaceId) });
+}
+
+async function readLatestLedgerCosts(ledgerId, workspaceId) {
   const [rows, batches] = await Promise.all([
     db.erpCostRows.where("ledgerId").equals(ledgerId).toArray(),
     db.erpCostBatches.where("ledgerId").equals(ledgerId).toArray(),
   ]);
-  const batchById = new Map(batches.map((batch) => [batch.id, batch]));
+  const batchById = new Map(batches.filter(batch => !batch.workspaceId || batch.workspaceId === workspaceId).map((batch) => [batch.id, batch]));
   const latest = new Map();
-  rows.toSorted((a, b) => {
+  // A foreign or orphan row is not a successor of this workspace's cost.
+  // Owned voided batches still suppress their prior values as before.
+  rows.filter(row => (!row.workspaceId || row.workspaceId === workspaceId) && batchById.has(row.batchId)).toSorted((a, b) => {
     const dateOrder = String(a.publishedAt ?? "").localeCompare(String(b.publishedAt ?? ""));
     return dateOrder || Number(a.id ?? 0) - Number(b.id ?? 0);
   }).forEach((row) => {
@@ -1873,7 +1884,7 @@ async function readLedgerSnapshot(ledgerId) {
   const [rows, batches, originalCosts, approvals, profitLines] = await Promise.all([
     readLedgerSalesRows(member.workspaceId, ledgerId),
     db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
-    accountingMode === LOWEST_ACCOUNTING ? [] : getLatestLedgerCosts(ledgerId),
+    accountingMode === LOWEST_ACCOUNTING ? [] : readOwnedLedgerCosts(ledger),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
@@ -1896,7 +1907,7 @@ async function readLedgerSnapshot(ledgerId) {
   // checks existed. Project current readiness without mutating business data or
   // touching any frozen report/snapshot during an upgrade or ordinary read.
   const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period, accountingMode],
-    formula: 'inventory-cost-coverage@1', revisionReader: calculationReader, revision: calculationRevision, persist: false,
+    formula: 'inventory-cost-coverage@2-source-evidence', revisionReader: calculationReader, revision: calculationRevision, persist: false,
     compute: () => runDerivedComputation('cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
       workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: costEvaluationPeriod(ledger), accountingMode }) });
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);

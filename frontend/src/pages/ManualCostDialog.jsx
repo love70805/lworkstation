@@ -22,7 +22,7 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
   useEffect(() => {
     if (!open || readOnly || identityConflict || hasEffectiveErpCost || row.manualOverride) return;
     let canceled = false;
-    void previewRecoveredWarehouseCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku }).then(candidate => {
+    void previewRecoveredWarehouseCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, ...(openingMode.current ? { expectedAccountingMode: openingMode.current } : {}) }).then(candidate => {
       if (canceled || !candidate) return;
       setHistoryCandidate(candidate);
       if (!editedRef.current) setAmount(String(candidate.unitCost));
