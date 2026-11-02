@@ -8,7 +8,7 @@ import { erpLedgerVersion } from '../../domain/erpLedgerVersion';
 import { validateErpCostInboxEnvelope } from '../../domain/erpInboxContract';
 import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
 
-const tables = () => [db.settings, db.ledgers, db.salesRows, db.erpCostBatches, db.erpCostRows, db.costApprovals,
+const tables = () => [db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostBatches, db.erpCostRows, db.costApprovals,
   db.erpCostRequests, db.erpCostInbox, db.importBatches, db.auditEvents];
 const samePair = (a, b) => canonicalPlatformSku(a.platformSku) === canonicalPlatformSku(b.platformSku)
   && canonicalPlatformSkc(a.platformSkc) === canonicalPlatformSkc(b.platformSkc);
@@ -82,6 +82,6 @@ export function saveRecoveredWarehouseCost({ expectedUnitCost, reason, ...input 
     const candidate = await readCandidate(input);
     if (!candidate || Number(expectedUnitCost) !== candidate.unitCost) throw new Error('历史核价来源或当前成本已变化，请重新核对。');
     return saveManualCostOverride({ ledgerId: input.ledgerId, store: candidate.store, platformSku: candidate.platformSku,
-      unitCost: candidate.unitCost, reason: String(reason ?? '').trim() || candidate.reason, historyEvidence: candidate.historyEvidence });
+      unitCost: candidate.unitCost, reason: String(reason ?? '').trim() || candidate.reason, historyEvidence: candidate.historyEvidence, ...(input.expectedAccountingMode ? {expectedAccountingMode:input.expectedAccountingMode} : {}) });
   });
 }

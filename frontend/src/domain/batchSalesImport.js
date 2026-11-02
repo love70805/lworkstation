@@ -137,7 +137,6 @@ export async function compactSalesImportPlan(input, loadItem) {
 
 export function planSalesImports(input) { return planSalesImportsCore(input); }
 async function planSalesImportsCore({ ledger, existingRows, batches, items, ledgerId, period }, snapshot) {
-  if (ledger && ["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的月度账本不能直接导入新数据。");
   const rowsByGroup = new Map();
   const rowsByBatch = new Map();
   for (const row of existingRows) {

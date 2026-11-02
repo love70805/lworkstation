@@ -694,7 +694,7 @@ describe("商品到利润再到选品参考的持久化闭环", () => {
     });
 
     expect(ledgerSnapshotBeforeCost.ledger.status).toBe("cost_pending");
-    expect((await getLedgerSnapshot(ledger.id)).ledger.status).toBe("finalized");
+    expect((await getLedgerSnapshot(ledger.id)).ledger.status).toBe("ready");
 
     const auditRows = await db.auditEvents.orderBy("id").toArray();
     const syncEvents = auditRows.filter(event => !event.localOnly).map(auditEventToSyncEvent);

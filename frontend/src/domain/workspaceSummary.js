@@ -65,6 +65,7 @@ export function buildWorkspaceOperationalSummary({
     latestOpenLedger,
     latestMissingCostLedger,
     latestFinalizedLedger,
+    latestReadyLedger: [...openLedgers].filter(ledger => ledger.status === 'ready').sort((a,b) => compareLatest(a,b,['updatedAt','period']))[0] ?? null,
     latestCaptureAt: timestampOf(latestCapture, ["capturedAt", "updatedAt", "createdAt"]) || null,
     latestActivityAt: timestampOf(latestActivity, ["createdAt"]) || null,
   };

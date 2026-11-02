@@ -46,6 +46,7 @@ const { createInboxServiceController, installExtensionInboxTransport } = require
 const { createDesktopLifecycle, createStartupState } = require('./desktop-lifecycle.cjs');
 const { createWorkspaceRecovery } = require('./workspace-recovery.cjs');
 const { createRemoteViewLoader } = require('./remote-view-loader.cjs');
+const { createWorkspaceErpCollector } = require('./erp-workspace-collector.cjs');
 const { registerWorkspaceSystemIpc } = require('./workspace-system-ipc.cjs');
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
 const { cleanupRuntimeExtensionStagingSync, extensionStorageConfig, prepareRuntimeExtension, runtimeRoot } = require("./extension-runtime.cjs");
@@ -114,6 +115,30 @@ const remoteViewLoader = createRemoteViewLoader({
   getView: tabId => views.get(tabId), canCreate: canCreateRemoteView,
   build: tabId => buildRemoteView(tabId, remotePartitions[tabId], remoteExtensions[tabId]),
   discard: discardRemoteView,
+});
+let collectorCookieSession;
+let collectorCookieTimer;
+const workspaceErpCollector = createWorkspaceErpCollector({
+  getContext: () => workspaceContextCoordinator.getCommittedContext(),
+  requestInbox: input => inboxService.requestInbox(input),
+  createView: async url => {
+    const foreground = await remoteViewLoader.ensure('erp');
+    const targetSession = foreground.webContents.session;
+    if (!collectorCookieSession) {
+      collectorCookieSession = targetSession;
+      targetSession.cookies.on('changed', (_event, cookie) => {
+        if (!/(token|session|auth|user|tenant|company|org)/i.test(cookie.name)) return;
+        clearTimeout(collectorCookieTimer);
+        collectorCookieTimer = setTimeout(() => { void workspaceErpCollector.sessionChanged().catch(() => {}); }, 1000);
+      });
+    }
+    const view = new WebContentsView({ webPreferences: { session: targetSession, backgroundThrottling: false, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
+    view.setBounds({ x: 0, y: 0, width: 1280, height: 900 });
+    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    for (const name of ['will-navigate','will-redirect']) view.webContents.on(name, (event,target) => { if (!normalizeAllowedRemoteUrl('erp', typeof target === 'string' ? target : target.url)) event.preventDefault(); });
+    try { await view.webContents.loadURL(url); return view; }
+    catch (error) { if (!view.webContents.isDestroyed()) view.webContents.close(); throw error; }
+  },
 });
 let shutdownPromise = null;
 let shutdownComplete = false;
@@ -387,6 +412,8 @@ async function shutdownDesktop() {
   clearInterval(diagnosticTimer);
   diagnostics.record('shutdown', { page: 'main' });
   remoteViewLoader.stop();
+  clearTimeout(collectorCookieTimer);
+  workspaceErpCollector.dispose();
   desktopLifecycle?.dispose();
   workspaceRecovery.dispose();
   startup.dispose();
@@ -729,6 +756,7 @@ async function configureExtensionTarget(target, targetContext) {
 }
 
 async function configureLoadedExtensions(context) {
+  if (activeWorkspaceContext?.workspaceId && activeWorkspaceContext.workspaceId !== context.workspaceId) await workspaceErpCollector.stop('workspace_changed');
   const result = await workspaceContextCoordinator.apply(context, extensionTargets, configureExtensionTarget);
   if (result.ok) activeWorkspaceContext = result.committedContext;
   else activeWorkspaceContext = workspaceContextCoordinator.getCommittedContext();
@@ -1387,6 +1415,19 @@ ipcMain.on('workspace:ready', event => {
 });
 ipcMain.on('workspace:probe-result', (event, payload) => {
   if (event.sender === views.get('workspace')?.webContents && event.senderFrame === event.sender.mainFrame) workspaceRecovery.acknowledge(event.sender, payload);
+});
+const trustedWorkspaceFrame = event => event.sender === views.get('workspace')?.webContents && event.senderFrame === event.sender.mainFrame;
+ipcMain.handle('workspace:start-erp-collection', async (event,input) => {
+  if (!trustedWorkspaceFrame(event)) return { ok: false, error: '仅允许工作台发起采集。' };
+  try { return { ok: true, ...await workspaceErpCollector.start(input) }; }
+  catch (error) { return { ok: false, error: error.message, code: error.code }; }
+});
+ipcMain.handle('workspace:get-erp-collection', event => trustedWorkspaceFrame(event) ? { ok: true, ...workspaceErpCollector.snapshot() } : { ok: false });
+ipcMain.handle('workspace:open-erp-login', async event => {
+  if (!trustedWorkspaceFrame(event)) return { ok: false };
+  await remoteViewLoader.ensure('erp');
+  setActiveTab('erp');
+  return { ok: true };
 });
 ipcMain.handle("desktop:request-inbox", async (event, input) => {
   if (event.sender !== views.get("workspace")?.webContents) {

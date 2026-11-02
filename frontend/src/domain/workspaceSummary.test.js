@@ -47,6 +47,7 @@ describe("buildWorkspaceOperationalSummary", () => {
       latestOpenLedger: null,
       latestMissingCostLedger: null,
       latestFinalizedLedger: null,
+      latestReadyLedger: null,
       latestCaptureAt: null,
       latestActivityAt: null,
     });

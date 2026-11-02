@@ -14,7 +14,8 @@ export async function validateReportBackup(tables) {
     const rows=supplementRows.filter(row=>row.batchId===batch.id);
     if(rows.length!==batch.rowCount)fail();
     if(batch.kind==='dispatch')exact(batch.adoptedQuantityExact,{nonnegative:true});
-    if(batch.status==='adopted') {const key=canonicalJson([batch.workspaceId,batch.ledgerId,batch.kind]);if(adopted.has(key))fail();adopted.add(key);}
+    if(batch.accountingMode!=null&&!['weighted','historical_lowest'].includes(batch.accountingMode))fail();
+    if(batch.status==='adopted') {const key=canonicalJson([batch.workspaceId,batch.ledgerId,batch.kind,batch.accountingMode??'weighted']);if(adopted.has(key))fail();adopted.add(key);}
     if(batch.replacesBatchId&&!sameScope(batch,batches.get(batch.replacesBatchId)))fail();
   }
   for(const row of supplementRows){const batch=batches.get(row.batchId);if(!sameScope(row,batch)||row.kind!==batch.kind)fail();exact(row.kind==='dispatch'?row.quantityExact:row.signedAmountExact,{nonnegative:row.kind==='dispatch'});}
@@ -22,7 +23,8 @@ export async function validateReportBackup(tables) {
   for(const report of reports.values()){
     const ledger=ledgers.get(report.ledgerId),base=report.baseReportId?reports.get(report.baseReportId):null;
     if(!sameScope(report,ledger)||report.period!==ledger.period||!['pre_deduction','financial'].includes(report.kind))fail();
-    if(report.kind==='financial'&&(!sameScope(report,base)||base.kind!=='pre_deduction'||base.period!==report.period))fail();
+    if(report.kind==='financial'&&report.operationWorkflow!==2&&(!sameScope(report,base)||base.kind!=='pre_deduction'||base.period!==report.period))fail();
+    if(report.operationWorkflow===2&&(base||!['weighted','historical_lowest'].includes(report.accountingMode)))fail();
     if(report.kind==='pre_deduction'&&base)fail();
     const kinds=new Set();
     for(const id of report.adoptedBatchIds??[]){const batch=batches.get(id);if(!sameScope(report,batch)||kinds.has(batch.kind))fail();kinds.add(batch.kind);}

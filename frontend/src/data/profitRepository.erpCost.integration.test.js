@@ -172,8 +172,9 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   expect(snapshot.ledger.profitSummary).toMatchObject(summary);
   const exported = buildProfitExportRows(savedProfitRows(snapshot.profitLines), snapshot.ledger, savedProfitSummary(summary));
   expect(exported[0]["总件数*成本"]).toBe(0.0119752999);
-  await expect(finalizeMonthlyLedger(args)).rejects.toThrow("显式重开");
-  expect((await getLedgerSnapshot(ledger.id)).profitLines).toEqual(snapshot.profitLines);
+  await finalizeMonthlyLedger(args);
+  expect((await db.profitReports.where('ledgerId').equals(ledger.id).toArray())).toHaveLength(2);
+  expect((await getLedgerSnapshot(ledger.id)).profitLines).toMatchObject([{ purchaseCost: 0.0119752999, profit: 0.9880247001 }]);
   const backup = JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));
   expect(backup.tables.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001 });
   expect(backup.tables.erpCostRows[0].unitCost).toBe(0.0097);
@@ -307,22 +308,20 @@ it("withdraws adopted ERP costs and reopens a frozen report in one confirmation 
   await adoptZeroDispatch(ledger.id);
   await finalizeMonthlyLedger({ ledgerId: ledger.id });
   const frozen = await getLedgerSnapshot(ledger.id);
-  const report = await db.profitReports.get(frozen.ledger.currentBaseReportId);
+  const report = await db.profitReports.get(frozen.ledger.latestInventoryReportId);
   const reportLines = await db.profitReportLines.where("reportId").equals(report.id).toArray();
 
   const result = await voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "重新采集采购成本" });
 
-  expect(result.reopened).toBe(true);
+  expect(result.reopened).toBe(false);
   const reopened = await getLedgerSnapshot(ledger.id);
   expect(reopened.ledger.status).toBe("cost_pending");
   expect(reopened.ledger.currentBaseReportId).toBeUndefined();
-  expect(reopened.profitLines).toEqual([]);
+  expect(reopened.profitLines).toEqual(frozen.profitLines);
   expect(reopened.costs).toEqual([]);
   expect(await db.profitReports.get(report.id)).toEqual(report);
   expect(await db.profitReportLines.where("reportId").equals(report.id).toArray()).toEqual(reportLines);
-  const audit = (await db.auditEvents.toArray()).find(event => event.action === "ledger_reopened_for_cost_correction");
-  expect(audit.before.snapshot.ledger).toEqual(frozen.ledger);
-  expect(audit.before.snapshot.profitLines).toEqual(frozen.profitLines);
+
   expect(await db.erpCostInbox.get(applied.inboxId)).toMatchObject({ status: "voided" });
 });
 
@@ -381,12 +380,13 @@ describe("ERP cost repository independent recalculation", () => {
     const live = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period, expectedSkus: ["SKU-AUDIT"], costRows: [storedCost] });
     expect(live.matches[0]).toMatchObject({ periodReviewRequired: true, adoptedUnitCost: 4, formalUnitCost: null });
     const snapshot = await getLedgerSnapshot(ledger.id);
-    expect(snapshot.ledger.status).toBe("finalized");
+    expect(snapshot.ledger.status).toBe("cost_pending");
     expect(snapshot.profitLines[0].purchaseCost).toBe(4);
     const purchaseRecords = [record("CURRENT", 8, 2, "2026-08-31")];
-    await expect(savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }),
-      sourceEnvelope: sourceEnvelope({ ledger, request, purchaseRecords }) })).rejects.toThrow("已定稿");
     expect((await createWorkspaceBackupPayload()).tables).toEqual(before);
+    await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }),sourceEnvelope: sourceEnvelope({ ledger, request, purchaseRecords }) });
+    expect((await getLatestLedgerCosts(ledger.id))[0].unitCost).toBe(8);
+    expect((await getLedgerSnapshot(ledger.id)).profitLines[0].purchaseCost).toBe(4);
   });
 
   it("persists authoritative b,a,b order evidence and rejects forged page order labels", async () => {
@@ -1025,8 +1025,8 @@ describe("ERP cost repository independent recalculation", () => {
     const { ledger, request } = await context();
     const applied = await publishAppliedInbox({ ledger, request, unitPrice: 4, deliveryId: "DELIVERY-LOCKED" });
     await db.ledgers.update(ledger.id, { status: "locked", lockedAt: "2026-08-27T00:00:00.000Z", lockedBy: "finance-1" });
-    await expect(voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "测试", voidedBy: "finance-2" })).rejects.toThrow("已锁定账本");
-    expect(await db.erpCostBatches.get(applied.batchId)).toMatchObject({ status: "published" });
+    await expect(voidPublishedErpCostBatch({ inboxId: applied.inboxId, reason: "测试", voidedBy: "finance-2" })).resolves.toBeDefined();
+    expect(await db.erpCostBatches.get(applied.batchId)).toMatchObject({ status: "voided" });
   });
 
   it("does not fall back to an older formal cost after voiding the latest batch and allows a new batch to replace the tombstone", async () => {

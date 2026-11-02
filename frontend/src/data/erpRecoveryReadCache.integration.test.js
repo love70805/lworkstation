@@ -123,7 +123,7 @@ it('invalidates table read caches on abort and still enforces role and finalizat
   expect(salesClock()).not.toBe(before);
   expect((await recover())[0].adoption.items.find(row => row.platformSku === 'A-ANOMALY').state).toBe('anomaly_pending');
   await db.ledgers.update(ledgerId, { status: 'finalized' });
-  expect((await recover())[0].adoption.summary.protectedCount).toBe(1);
+  expect((await recover())[0].adoption.summary.protectedCount).toBe(0);
   await setActiveMemberContext({ workspaceId, memberId: 'viewer', role: 'viewer' });
   expect((await recover()).every(row => row.error.includes('财务写权限'))).toBe(true);
   await setActiveMemberContext({ workspaceId: 'OTHER', memberId: 'finance', role: 'finance' });

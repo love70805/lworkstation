@@ -3,6 +3,7 @@ import { canonicalPlatformSku } from "./identifiers";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision } from './ledgerCostIdentity';
 import { createManualOverrideLookup } from "./manualCostOverride";
 import { calculateExactProfitLine } from "./profitCalculations";
+import { costEvaluationPeriod } from './inventoryAccounting';
 
 export function calculateFormalLedgerRows({ ledger, salesRows, erpCosts, approvals }) {
   const manualFor = createManualOverrideLookup(approvals);
@@ -11,7 +12,7 @@ export function calculateFormalLedgerRows({ ledger, salesRows, erpCosts, approva
   return flattenLedgerGroups(aggregateLedgerRows(salesRows)).map(({ id: _id, ...row }) => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const erpCost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: ledger.period, erpCost, manualOverride: manualFor(scope) });
+    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: costEvaluationPeriod(ledger), erpCost, manualOverride: manualFor(scope) });
     return { ...row, ...calculateExactProfitLine({ revenue: row.revenue, quantity: row.qty, penalty: row.penalty, warehouseRate: ledger.warehouseRate, costDecision: decision }),
       unitCost: decision.unitCost, costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, costPolicyVersion: decision.policyVersion,
       costIdentityIssue: decision.identityIssue ?? null,

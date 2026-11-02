@@ -40,7 +40,7 @@ function median(values) {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function normalizedResolution(resolution, warehouseSku, record) {
+export function normalizedResolution(resolution, warehouseSku, record) {
   if (!resolution || typeof resolution !== "object") return null;
   if (canonicalWarehouseSku(resolution.warehouseSku ?? warehouseSku) !== canonicalWarehouseSku(warehouseSku)) return null;
   if (text(resolution.recordId) !== record.recordId) return null;

@@ -16,7 +16,7 @@ export async function listSalesSourceConfirmations(ledgerId) {
   const member = await getActiveMemberContext();
   const ledger = await db.ledgers.get(ledgerId);
   if (!ledger || ledger.workspaceId !== member.workspaceId) return [];
-  return (await candidates(ledgerId)).map(({ batch, eligible }) => ({ id: batch.id, fileName: batch.fileName, store: batch.store, period: ledger.period, rowCount: batch.validRowCount, eligible: eligible && !['finalized', 'locked'].includes(ledger.status) }));
+  return (await candidates(ledgerId)).map(({ batch, eligible }) => ({ id: batch.id, fileName: batch.fileName, store: batch.store, period: ledger.period, rowCount: batch.validRowCount, eligible }));
 }
 // Explicit metadata confirmation; financial rows and reports are immutable here.
 export async function confirmSalesSourceCoverage({ ledgerId, batchId, confirmed = false }) {
@@ -25,7 +25,6 @@ export async function confirmSalesSourceCoverage({ ledgerId, batchId, confirmed 
     const member = await getActiveMemberContext();
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的确认权限。');
-    if (['finalized', 'locked'].includes(ledger.status)) throw new Error('请先显式重开账本，再确认来源。');
     const entry = (await candidates(ledgerId)).find(item => item.batch.id === batchId && item.eligible);
     if (!entry || entry.batch.workspaceId !== member.workspaceId || entry.batch.period !== ledger.period) throw new Error('来源已变化或存在分组重导残留，请重新导入本店完整月台账。');
     const sourceCoverage = createSalesSourceCoverage({ period: ledger.period, storeName: entry.batch.store, declarationSource: 'manual' });

@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "candidateOnly": true,
-  "integrationBranch": "codex/profit-workflow-1-0-5",
+  "integrationBranch": "codex/supplier-cost-workflow-1-0-6",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "edbd9da3a3bd884ac8a1f21ae76d3e2ab632c600"
+      "commit": "0d86cd4dcce5fe999aa21d5e60137c1c4436d945"
     }
   ]
 }

@@ -147,7 +147,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       requestSnapshot: structuredClone(request), expectedSkus: structuredClone(request.expectedSkus ?? []), scopeHash: collectionScopeHash(request),
       filters: structuredClone(filters), queryCapturedAt: payload.queryCapturedAt ?? timestamp(now), status: 'paused', phase: 'cost',
       createdAt: timestamp(now), updatedAt: timestamp(now), instanceId, batches: [] };
-    if (coordinated) Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: 'cost' });
+    if (coordinated) Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: 'cost', ...(payload.executionTarget === 'desktop' ? { executionTarget: 'desktop' } : {}) });
     const batchSize = coordinated ? COST_BATCH_SIZE : 20;
     for (let i = 0; i < skcs.length; i += batchSize) task.batches.push({ batchId: `${task.taskId}:${i / batchSize + 1}`, platformSkcs: skcs.slice(i,i+batchSize), status: 'pending', attemptId: null });
     records.push(refresh(task));
@@ -192,6 +192,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       if (['stopped', 'completed', 'invalidated'].includes(task.status)) fail('ERP_TASK_STOPPED', '任务已结束，请从当前账本准备新任务。');
       if (request.status === 'expired' && payload.scopeHash !== task.scopeHash) fail('ERP_TASK_REVALIDATION_REQUIRED', '任务已过期，请在工作台核对当前账本后点击继续原任务。');
       if (action === 'request_resume') {
+        if (payload.executionTarget === 'desktop') task.executionTarget = 'desktop';
         const mode = payload.mode ?? 'cost';
         if (!['cost', 'catalog'].includes(mode) || payload.retryFailed != null && typeof payload.retryFailed !== 'boolean') fail('ERP_TASK_MODE_INVALID', '任务继续方式无效。', 400);
         if (mode === 'catalog' && task.batches.some(batch => !batch.deliveryId)) fail('ERP_TASK_COST_FIRST', '请先完成成本采集，再按需补齐商品资料。');
@@ -204,6 +205,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
           resumeRequestId: crypto.randomUUID(), resumeRequestedAt: timestamp(now), instanceId });
         delete task.runnerId; delete task.runnerLeaseExpiresAt; delete task.pauseReason;
       } else {
+        if (task.executionTarget === 'desktop' && payload.executionRole !== 'desktop') fail('ERP_TASK_ROLE_MISMATCH', '该任务由工作台后台执行，请从工作台继续。');
         if (task.executionProtocol !== 2 || task.status !== 'ready' || payload.resumeRequestId !== task.resumeRequestId) fail('ERP_TASK_ALREADY_CLAIMED', '任务已由其他页面接续或继续请求已失效，请查看统一任务状态。');
         if (typeof payload.runnerId !== 'string' || payload.runnerId.length < 8 || payload.runnerId.length > 200) fail('ERP_TASK_RUNNER_INVALID', '缺少有效执行者标识。', 400);
         if (records.some(item => item.kind === 'collection-task' && item.taskId !== task.taskId && item.workspaceId === task.workspaceId

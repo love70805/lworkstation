@@ -18,6 +18,6 @@ it.each([{penalty:1},{amountExact:'invalid decimal'}])('shows an actionable calc
  expect(container.textContent).toContain('本月利润待处理');
  expect(container.textContent).toContain('尚未计算商品利润');
  expect(container.textContent).toContain('核对月度账本');
- expect([...container.querySelectorAll('button')].find(button=>button.textContent==='预览并定稿').disabled).toBe(true);
+ expect([...container.querySelectorAll('button')].find(button=>button.textContent==='导出利润表').disabled).toBe(true);
  expect(container.querySelector('.profit-summary-total')).toBeNull();
 });

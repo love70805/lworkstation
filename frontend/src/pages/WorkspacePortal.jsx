@@ -41,7 +41,7 @@ const ledgerStatusLabels = {
   cost_pending: "待核对成本",
   approval_pending: "待确认成本",
   ready: "待确认利润",
-  finalized: "已定稿",
+  finalized: "可继续盘点",
   locked: "已锁定",
 };
 
@@ -82,11 +82,11 @@ export default function WorkspacePortal() {
       getWorkspaceOperationalSummary(),
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
     ]);
-    const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestFinalizedLedger].filter(Boolean));
+    const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestReadyLedger ?? summary.latestFinalizedLedger].filter(Boolean));
     if ((await getActiveMemberContext()).workspaceId !== workspaceId) throw new Error('工作区已切换，请重新读取。');
     return {
       refresh,
-      summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
+      summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestReadyLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
       auditEvents,
     };
     } catch (error) { return { refresh, error: error.message }; }
@@ -98,7 +98,7 @@ export default function WorkspacePortal() {
 
   const summary = portalData?.summary;
   const latestLedger = summary?.latestLedger ?? null;
-  const latestFinalizedLedger = summary?.latestFinalizedLedger ?? null;
+  const latestFinalizedLedger = summary?.latestReadyLedger ?? summary?.latestFinalizedLedger ?? null;
   const latestSales = latestLedger?.summary ?? {};
   const recentActivities = (portalData?.auditEvents ?? []).map((event) => ({
     ...describeAuditEvent(event),
@@ -108,13 +108,13 @@ export default function WorkspacePortal() {
 
   const workflowLedger = ledgerScope.context?.selected;
   const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
-  const workflowFrozen = ['finalized', 'locked'].includes(workflowLedger?.status);
+  const workflowFrozen = false;
   const workflowQuery = ledgerScope.context?.query ?? '';
   const workflowStep = !workflowLedger ? 0 : workflowFrozen ? 3 : nextStep.key === 'cost' ? 1 : 2;
   const workflowSteps = [
     { title: workflowFrozen ? "查看销售台账" : "导入销售台账", detail: workflowLedger ? "沿用当前账本月份" : "先建立月度账本", path: workflowFrozen ? `/ledger?${workflowQuery}` : `/import-preview?${workflowQuery}` },
     { title: workflowFrozen ? "查看成本" : "核对成本", detail: "ERP 默认，人工更正优先", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'cost') : "/import-preview" },
-    { title: workflowFrozen ? "查看本月报告" : "保存本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "登记代发，预览后保存", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
+    { title: workflowFrozen ? "查看本月报告" : "导出本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "代发可选填，直接导出", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
   ];
   const taskItems = useMemo(() => buildWorkspaceTaskItems(summary), [summary]);
   const workflowAction = workflowSteps[Math.min(workflowStep, workflowSteps.length - 1)];
@@ -140,7 +140,7 @@ export default function WorkspacePortal() {
         <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>正式商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待核算账本</small><strong>{summary?.openLedgerCount ?? 0}</strong><em>进入当前月份继续处理</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon info"><ShoppingCart size={19} /></span><span><small>{latestLedger ? `${latestLedger.period} 销售额` : "最近月度销售额"}</small><strong>{money(latestSales.revenue ?? 0)}</strong><em>总销量 {Number(latestSales.quantity ?? 0).toLocaleString("zh-CN")} 件</em></span></Panel>
-        <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近已保存利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已定稿账本"}</em></span></Panel>
+        <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近月度利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已核算账本"}</em></span></Panel>
       </div> : null}
 
       <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
@@ -208,7 +208,7 @@ export default function WorkspacePortal() {
             </div>
             <div className="quick-actions">
               <button onClick={() => navigate("/products?view=reference")}><BarChart3 size={21} /><span><strong>查看选品参考</strong><small>{summary?.platformSkuCount ?? 0} 个平台 SKU 可分析</small></span><ArrowUpRight size={17} /></button>
-              <button onClick={() => navigate("/ledger")}><CalendarDays size={21} /><span><strong>管理月度账本</strong><small>{summary?.openLedgerCount ?? 0} 个未完成 · {summary?.finalizedLedgerCount ?? 0} 个已定稿</small></span><ArrowUpRight size={17} /></button>
+              <button onClick={() => navigate("/ledger")}><CalendarDays size={21} /><span><strong>管理月度账本</strong><small>{summary?.openLedgerCount ?? 0} 个月份 · {summary?.readyLedgerCount ?? 0} 个成本已齐</small></span><ArrowUpRight size={17} /></button>
             </div>
           </Panel>
         </aside>

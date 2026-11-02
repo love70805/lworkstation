@@ -147,9 +147,9 @@ it('shows unassigned XLSX source rows outside adopted quantities and explains co
  const adopted=mock.adopt.mock.calls[0][0];expect(adopted.rows).toHaveLength(2);expect(adopted.sources[0].ignored).toContainEqual(expect.objectContaining({reason:'unassigned_owner',quantityExact:'28',sourceRow:4}));
 });
 
-it('keeps historical adopted counts immutable and explains explicit reopening for a finalized ledger',async()=>{
+it('keeps historical adopted counts intact and allows replacing the current source directly',async()=>{
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;container=document.createElement('div');document.body.append(container);root=createRoot(container);
  const rows=Object.freeze([{kind:'dispatch',sourceFormat:'xlsx',fileHash:'OLD',sourceName:'old.xlsx',sourceSheet:'来源',sourceRow:4,inheritedFrom:3,quantityExact:'28'}]);
  await act(async()=>root.render(<AdoptedDispatchNotice rows={rows} locked/>));
- expect(container.textContent).toContain('共 28 件');expect(container.textContent).toContain('历史采用值保持不变');expect(container.textContent).toContain('先显式重开');expect(rows[0].quantityExact).toBe('28');
+ expect(container.textContent).toContain('共 28 件');expect(container.textContent).toContain('历史采用值保持不变');expect(container.textContent).toContain('替换已有来源');expect(rows[0].quantityExact).toBe('28');
 });

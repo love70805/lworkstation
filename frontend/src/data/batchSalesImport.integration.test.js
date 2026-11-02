@@ -241,7 +241,7 @@ describe("同月多店铺原子台账导入", () => {
     }
   });
 
-  it("binds approval to input and target snapshots and rejects finalization after preview", async () => {
+  it("binds approval to input and target snapshots and permits importing into a legacy finalized month", async () => {
     await commit([file("甲店")]);
     const input = { period, items: [file("甲店", 30)] };
     const preview = await previewSalesImports(input);
@@ -252,7 +252,7 @@ describe("同月多店铺原子台账导入", () => {
     expect(await facts()).toEqual(before);
     const fresh = await previewSalesImports(input);
     await db.ledgers.update(fresh.ledgerId, { status: "finalized" });
-    await expect(saveSalesImports({ ...input, preview: fresh, overwriteSignature: fresh.targetSignature })).rejects.toThrow("定稿");
+    await expect(saveSalesImports({ ...input, preview: fresh, overwriteSignature: fresh.targetSignature })).resolves.toMatchObject({ledgerId:fresh.ledgerId});
   });
 
   it.each([false, true])("rolls back every row, batch, ledger and audit when the second file fails (existing=%s)", async (existing) => {

@@ -1,6 +1,7 @@
 import ImportLeaveGuard from '../components/ImportLeaveGuard';
 import ImportSupplierWorkbench from '../components/ImportSupplierWorkbench';
 import ImportMovementPicker from '../components/ImportMovementPicker';
+import { supplierRuleKey } from '../domain/supplierFilterPreview';
 import { readImportPreference, restoreImportPreference, saveImportNumbers } from '../lib/importSupplierPreferences';
 import { readSupplierGroups, matchImportNumberRule, restoreSupplierGroupSelection, rememberSupplierGroupSelection } from '../lib/importSupplierGroups';
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -163,11 +164,14 @@ export default function ImportPreview() {
   const [batchMode, setBatchMode] = useState('fuzzy');
   const [groupWorkspaceId, setGroupWorkspaceId] = useState(null);
   const [supplierDirty, setSupplierDirty] = useState(false);
+  const [supplierMatched, setSupplierMatched] = useState(false);
   const [supplierViewStore, setSupplierViewStore] = useState('all');
   const batchRuleRef = useRef({ aliases: [], mode: 'fuzzy' });
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
-  const periodEvidence = summarizeImportPeriod(files, requestedLedgerId ? period : null);
+  const filesToImport = files.filter(item => item.status === 'parsed' && item.filterOptions?.supplierNumbers?.length);
+  const periodFiles = files.filter(item => item.status !== 'parsed' || item.filterOptions?.supplierNumbers?.length);
+  const periodEvidence = summarizeImportPeriod(periodFiles.length ? periodFiles : files, requestedLedgerId ? period : null);
   const suggestedPeriod = periodEvidence.suggestedPeriod;
   useEffect(() => {
     if (!result && !requestedLedgerId && !periodChoiceRef.current) setPeriod(suggestedPeriod ?? "");
@@ -183,7 +187,6 @@ export default function ImportPreview() {
         const member = await getActiveMemberContext();
         const ledger = (await listLedgerSummaries()).find(item => item.id === requestedLedgerId && item.workspaceId === member.workspaceId);
         if (!ledger) throw new Error('指定账本不存在或不属于当前工作区，请重新选择账本。');
-        if (['finalized', 'locked'].includes(ledger.status)) throw new Error('本月基础已定稿，请返回账本显式重开后再导入。');
         if ((await getActiveMemberContext()).workspaceId !== member.workspaceId) throw new Error('工作区已切换，请重新选择账本。');
         if (active) { setPeriod(ledger.period); setLedgerContext({ id: ledger.id, workspaceId: member.workspaceId }); }
       } catch (failure) { if (active) setLedgerContext({ id: requestedLedgerId, error: failure.message }); }
@@ -305,7 +308,7 @@ export default function ImportPreview() {
   const loadFiles = async (selection, retryItem = null, selectedSheet = null) => {
     if (operationRef.current || !selection.length || result || contextBlocked) return;
     const generation = generationRef.current;
-    operationRef.current = true; setBusy(true); invalidate();
+    operationRef.current = true; setBusy(true); setSupplierMatched(false); invalidate();
     const additions = Array.from(selection).map((file) => ({ file, sourceScope: "full_month", importMode: "replace_store_month", fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
     if (retryItem) additions[0] = { ...retryItem, status: "queued", error: null, selectedSheet };
     setFiles((current) => retryItem ? current.map(item => item.itemId === retryItem.itemId ? additions[0] : item) : [...current, ...additions]);
@@ -386,18 +389,25 @@ export default function ImportPreview() {
   };
   const applySupplierDraft = async (selection, rule) => {
     if (operationRef.current || busy || contextBlocked) return false;
+    if (supplierMatched && supplierRuleKey(rule) === supplierRuleKey(batchRuleRef.current)
+      && files.filter(item => item.status === 'parsed').every(item => JSON.stringify(selection[item.itemId] ?? []) === JSON.stringify(item.filterOptions?.supplierNumbers ?? []))) { setSupplierDirty(false); return true; }
     const generation = generationRef.current;
     operationRef.current = true; setBusy(true); invalidate();
     try {
       await assertImportContext();
+      attemptedRef.current = "";
       batchRuleRef.current = rule ?? { aliases: [], mode: 'fuzzy' };
       for (const item of files) if (item.status === 'parsed') {
         if (generation !== generationRef.current) return false;
         const allowed = new Set(item.facets?.supplierNumbers ?? []);
-        await update(item.itemId, { usesBatchSuffix: Boolean(rule?.aliases?.length), supplierMatchRule: rule, supplierGroupRule: rule?.id ? rule : null,
-          filterOptions: { ...item.filterOptions, supplierNumbers: (selection[item.itemId] ?? []).filter(value => allowed.has(value)) } });
+        const numbers = (selection[item.itemId] ?? []).filter(value => allowed.has(value));
+        const patch = { usesBatchSuffix: Boolean(rule?.aliases?.length), supplierMatchRule: rule, supplierGroupRule: rule?.id ? rule : null,
+          filterOptions: { ...item.filterOptions, supplierNumbers: numbers } };
+        if (JSON.stringify(numbers) === JSON.stringify(item.filterOptions?.supplierNumbers ?? [])) {
+          setFiles(current => current.map(entry => entry.itemId === item.itemId ? { ...entry, ...patch } : entry));
+        } else await update(item.itemId, patch);
       }
-      if (generation === generationRef.current) { setSupplierDirty(false); return true; }
+      if (generation === generationRef.current) { setSupplierMatched(true); setSupplierDirty(false); return true; }
       return false;
     } catch (failure) { if (generation === generationRef.current) setError(failure.message); return false; }
     finally { if (generation === generationRef.current) { setBusy(false); operationRef.current = false; } }
@@ -417,9 +427,9 @@ export default function ImportPreview() {
       await assertImportContext();
       const items = [];
       let hasErrors = false;
-      for (let index = 0; index < files.length; index += 1) {
-        const item = files[index];
-        setProgress({ value: index / files.length * 100, label: `校验 ${index + 1}/${files.length}：${item.fileName}` });
+      for (let index = 0; index < filesToImport.length; index += 1) {
+        const item = filesToImport[index];
+        setProgress({ value: index / filesToImport.length * 100, label: `校验 ${index + 1}/${filesToImport.length}：${item.fileName}` });
         if (generation !== generationRef.current) return;
         let validation;
         if (item.rowSource) validation = { rowSource: item.rowSource, summary: item.periodEvidence.validationSummary };
@@ -476,20 +486,20 @@ export default function ImportPreview() {
     } catch (writeError) { invalidate(); setError(`整批未写入：${writeError.message}`); }
     finally { abortRef.current = null; setBusy(false); setCommitting(false); operationRef.current = false; }
   };
-  const ready = !contextBlocked && files.length > 0 && /^\d{4}-\d{2}$/.test(period) && !periodEvidence.awaitingEvidence && files.every((item) => {
+  const ready = !contextBlocked && supplierMatched && !supplierDirty && filesToImport.length > 0 && files.every(item => item.status === 'parsed' && item.storeName.trim()) && /^\d{4}-\d{2}$/.test(period) && !periodEvidence.awaitingEvidence && filesToImport.every((item) => {
     const columns = Object.values(item.mapping ?? {}).filter(Boolean);
     const hasMovements = !Array.isArray(item.filterOptions?.movementTypes) || item.filterOptions.movementTypes.length > 0;
     return item.status === "parsed" && hasMovements && item.filterOptions?.supplierNumbers?.length > 0 && item.storeName.trim() && !validateSalesMapping(item.mapping, { defaultStore: item.storeName }).length && new Set(columns).size === columns.length;
   });
   const configurationKey = JSON.stringify([period, files.map(item => [item.itemId, item.status, item.storeName, item.mapping, item.filterOptions, item.sourceScope, item.importMode, item.periodEvidence]), contextBlocked]);
   const storesWithoutNumbers = files.filter(item => item.status === 'parsed' && !item.filterOptions?.supplierNumbers?.length).map(item => item.storeName || item.fileName);
-  const storesWithoutMovements = files.filter(item => item.status === 'parsed' && Array.isArray(item.filterOptions?.movementTypes) && !item.filterOptions.movementTypes.length).map(item => item.storeName || item.fileName);
+  const storesWithoutMovements = filesToImport.filter(item => Array.isArray(item.filterOptions?.movementTypes) && !item.filterOptions.movementTypes.length).map(item => item.storeName || item.fileName);
   const importPreparation = periodEvidence.awaitingEvidence ? '正在按本次选择重新校验…'
     : storesWithoutMovements.length ? `${storesWithoutMovements.join('、')}未选变动类型，请勾选后再导入`
-    : supplierDirty ? '货号选择草稿尚未应用，请应用或撤销本次调整'
-    : storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，请在货号筛选中调整或移除文件`
+    : supplierDirty || !supplierMatched ? '货号已预选；点击“匹配货号”后统一校验并导入'
+    : !filesToImport.length ? '尚未选择货号，请先搜索或勾选要导入的货号'
     : !period ? '请选择账本月份'
-    : error || '选择货号并核对店铺后自动校验';
+    : error || (storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，本次自动跳过；已选店铺可直接导入` : '已匹配货号，核对预览后可直接导入');
   validateRef.current = validate;
   useEffect(() => {
     if (!ready || busy || result || attemptedRef.current === configurationKey) return;
@@ -507,7 +517,7 @@ export default function ImportPreview() {
           <span className={result ? "completed" : "active"} aria-current={!result ? "step" : undefined}><b>1</b><strong>导入销售台账</strong><small>{result ? "已完成" : "当前步骤"}</small></span>
           <span className={result ? "active" : undefined} aria-current={result ? "step" : undefined}><b>2</b><strong>取得正式成本</strong><small>{result ? "下一步 · ERP 自动采用" : "ERP 自动采用"}</small></span>
           <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
-          <span><b>4</b><strong>确认利润</strong><small>核对后再定稿</small></span>
+          <span><b>4</b><strong>确认利润</strong><small>核对后直接导出</small></span>
         </div>
       </details>
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
@@ -528,7 +538,7 @@ export default function ImportPreview() {
               <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；自动识别实际明细页；多个候选时仅需为该文件选择。</p></div>
               <Button onClick={() => inputRef.current?.click()}>添加文件</Button>{!files.length && <Button variant="ghost" onClick={() => loadFiles([sampleFile()])}>使用示例</Button>}
             </div>
-            <ImportSupplierWorkbench key={`${groupWorkspaceId}/${period}`} files={files} workspaceId={groupWorkspaceId} period={period} aliasesText={batchSuffixText} mode={batchMode} initialRule={batchRuleRef.current} onAliasesChange={setBatchSuffixText} onModeChange={setBatchMode} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} disabled={busy || contextBlocked} />
+            <ImportSupplierWorkbench key={groupWorkspaceId} files={files} workspaceId={groupWorkspaceId} period={period} aliasesText={batchSuffixText} mode={batchMode} initialRule={batchRuleRef.current} onAliasesChange={setBatchSuffixText} onModeChange={setBatchMode} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} disabled={busy || contextBlocked} />
           </fieldset>
           {busy && <div className="import-progress" role="status">{progress.value == null ? <span>{progress.label}</span> : <ProgressBar value={progress.value} label={progress.label} />}<Button onClick={cancel}>取消当前处理</Button></div>}
           <div className="batch-files">{files.map((item, index) => <section className="batch-file" key={item.itemId}>
@@ -540,7 +550,7 @@ export default function ImportPreview() {
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
               <div className="batch-store-suppliers"><span>本店已应用 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个货号</span><Button variant="ghost" onClick={() => { setSupplierViewStore(item.storeName); document.querySelector('.supplier-workbench')?.scrollIntoView({ block: 'start' }); }}>查看本店货号</Button></div>
-              {!item.filterOptions?.supplierNumbers?.length && <p role="alert" className="import-error">本店未选货号，请在货号筛选中调整，或移除此文件。</p>}
+              {!item.filterOptions?.supplierNumbers?.length && <p role="status">本店未选货号，本次自动跳过；已有台账数据保留。</p>}
               <ImportMovementPicker store={item.storeName} choices={item.facets?.movementTypes ?? []} counts={item.facets?.movementTypeCounts}
                 selected={item.filterOptions?.movementTypes ?? item.facets?.movementTypes ?? []}
                 defaults={item.preset === "ledger_report" ? LEDGER_REPORT_MOVEMENT_TYPES.filter(type => item.facets?.movementTypes?.includes(type)) : item.facets?.movementTypes ?? []}
@@ -561,7 +571,7 @@ export default function ImportPreview() {
           <div className="wizard-card-footer"><span>{files.length ? `${files.length} 个文件 · 已自动解析与校验` : "添加文件后自动校验"}</span>{(error || preview) && ready && <Button disabled={busy || supplierDirty} onClick={() => { invalidate(); void validate(); }}>重新校验</Button>}</div>
         </section>
         {error && <div className="import-error" role="alert"><AlertCircle size={18} />{error}</div>}
-        {preview && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览 · {period}</h2>
+        {preview && !supplierDirty && supplierMatched && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览 · {period}</h2>
           {preview.items.map((item) => <article key={item.itemId}><h3>{item.storeName} · {item.fileName}</h3><p>{item.status === "skipped_duplicate" ? "已生效重复，本次跳过" : `新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组`} · {item.removedGroupCount ? `移除 ${item.removedGroupCount} 个旧分组 · ` : ""}有效 {item.validRowCount} / 跳过 {item.ignoredRowCount} / 错误 {item.errorCount}</p><p>{item.sourceCoverage?.scope === "full_month" ? "完整月台账" : "部分或旧来源"} · {period}{item.replacementScope === "store_month" ? " · 本店本月完整替换" : " · 按分组追加或替换"}</p><Totals summary={item.summary} />
             <OverlapPreview item={item} />
           </article>)}

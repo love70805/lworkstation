@@ -188,7 +188,7 @@ describe("Beta purchases through the ledger month end", () => {
     const lines = buildReportProducts({ ledger, salesRows, erpCosts: [oldCost], approvals: [], allowMissing: true });
     expect(lines[0]).toMatchObject({ purchaseCostExact: null, profitExact: null });
     expect(calculateLedgerCostCoverage({ salesRows, erpCosts: [oldCost], period: ledger.period })).toMatchObject({ formalMatchedCount: 0, missingCount: 1 });
-    expect(() => buildReportProducts({ ledger, salesRows, erpCosts: [oldCost], approvals: [] })).toThrow("尚缺正式成本");
+    expect(() => buildReportProducts({ ledger, salesRows, erpCosts: [oldCost], approvals: [] })).toThrow("缺少正式成本");
     expect(oldCost).toEqual(original);
     expect(resolveFormalCostDecision({ platformSku: "SKU", period: ledger.period, erpCost: published(cost([record("MAY", "2026-05-31")])) })).toMatchObject({ source: "erp", unitCost: 5 });
   });

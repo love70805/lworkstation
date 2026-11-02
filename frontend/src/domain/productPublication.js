@@ -56,7 +56,7 @@ export function productDataStatusLabel(kind, status) {
   return ({
     purchase: { complete: "已覆盖", partial: "部分覆盖", missing: "未采集" },
     referenceProfit: { complete: "可参考", partial: "部分可参考", missing: "待成本/售价" },
-    profit: { complete: "已有定稿", partial: "部分定稿", missing: "尚无定稿" },
+    profit: { complete: "已有盘点", partial: "部分盘点", missing: "尚无盘点" },
     warehouseMapping: { complete: "已映射", partial: "部分映射", missing: "待映射" },
   })[kind]?.[status] ?? "待读取";
 }

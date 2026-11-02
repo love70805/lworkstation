@@ -29,7 +29,7 @@ const referenceSourceLabels = {
   erp_catalog_reference: "ERP 采购参考",
   erp_history: "ERP 历史",
   manual_confirmed: "人工确认",
-  finalized_profit_history: "定稿历史",
+  finalized_profit_history: "历史盘点",
   supplier_landed: "1688 参考",
 };
 
@@ -37,7 +37,7 @@ const catalogSourceLabels = {
   erp_reference: "ERP 采购参考",
   erp: "ERP",
   manual_confirmed: "人工确认",
-  finalized_profit_history: "定稿历史",
+  finalized_profit_history: "历史盘点",
   supplier_landed: "1688 参考",
 };
 
@@ -459,7 +459,7 @@ function ProductLibraryView({ workspaceId, view }) {
         ERP采购数据: productDataStatusLabel("purchase", product.dataReadiness?.purchase.status),
         参考利润数据: productDataStatusLabel("referenceProfit", product.dataReadiness?.referenceProfit.status),
         SKU参考单件利润: product.skuReferences.map(sku => `${sku.platformSku}=${sku.referenceUnitProfit ?? "待成本/售价"}`).join("；"),
-        定稿历史: productDataStatusLabel("profit", product.dataReadiness?.profit.status),
+        历史盘点: productDataStatusLabel("profit", product.dataReadiness?.profit.status),
         仓库SKU映射: productDataStatusLabel("warehouseMapping", product.dataReadiness?.warehouseMapping.status),
         数据状态: statusLabel[product.status] ?? product.status,
         状态: salesStatusLabel(resolveProductStatus(product, salesStatusDefinitions).statusId),
@@ -514,7 +514,7 @@ function ProductLibraryView({ workspaceId, view }) {
         人工确认人: row.referenceKind === "manual_confirmed" ? row.referenceConfirmedBy ?? "" : "",
         参考更新时间: row.referenceUpdatedAt ?? "",
         参考币种: row.referenceCurrency ?? "CNY",
-        最近定稿月: row.latestPeriod ?? "",
+        最近盘点月: row.latestPeriod ?? "",
         最近月销量: row.latestQuantity,
         最近月销售额: row.latestRevenue,
         最近月实际利润: row.latestProfit ?? "",
@@ -634,7 +634,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const officialActiveFilters = [...commonActiveFilters,
     status !== "all" && { key: "status", label: `状态：${salesStatusLabel(status)}`, clear: () => setStatus("all") },
     recordStatus !== "all" && { key: "record", label: `档案：${({ active: "正式档案", draft: "草稿资料", inactive: "停用资料" })[recordStatus] ?? recordStatus}`, clear: () => setRecordStatus("all") },
-    dataStatus !== "all" && { key: "data", label: `经营数据：${({missing_purchase:"ERP 采购未覆盖",missing_reference_profit:"参考利润待补",missing_profit:"定稿历史未覆盖",missing_mapping:"仓库 SKU 待映射",erp_complete:"ERP 采购已覆盖",reference_profit_complete:"参考利润可用",profit_complete:"定稿历史已覆盖",mapping_complete:"仓库 SKU 已映射"})[dataStatus] ?? dataStatus}`, clear: () => setDataStatus("all") },
+    dataStatus !== "all" && { key: "data", label: `经营数据：${({missing_purchase:"ERP 采购未覆盖",missing_reference_profit:"参考利润待补",missing_profit:"历史盘点未覆盖",missing_mapping:"仓库 SKU 待映射",erp_complete:"ERP 采购已覆盖",reference_profit_complete:"参考利润可用",profit_complete:"历史盘点已覆盖",mapping_complete:"仓库 SKU 已映射"})[dataStatus] ?? dataStatus}`, clear: () => setDataStatus("all") },
     missingOnly && { key: "missing", label: "资料/参考待补", clear: () => setMissingOnly(false) },
     duplicatesOnly && { key: "duplicates", label: "重复 SKC", clear: () => setDuplicatesOnly(false) },
   ].filter(Boolean);
@@ -685,7 +685,7 @@ function ProductLibraryView({ workspaceId, view }) {
             common={<LibraryFilterField label="店铺"><select className="select-input" aria-label="参考来源店铺" value={store} onChange={event => setStore(event.target.value)}><option value="all">全部店铺</option>{[...new Set([...pendingReferences.flatMap(row => row.storeNames ?? []), ...prestorageProducts.map(product => product.store)].filter(Boolean))].sort().map(name => <option key={name} value={name}>{name}</option>)}</select></LibraryFilterField>}
             advancedCount={[supplierNumber.trim(), referenceSource !== "all", salesLabel !== "all", negativeOnly].filter(Boolean).length}
             advanced={<><LibraryFilterField label="供方货号"><input className="text-input" aria-label="按供方货号筛选" placeholder="输入供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} /></LibraryFilterField><LibraryFilterField label="参考成本来源"><select className="select-input" aria-label="按参考成本来源筛选" value={referenceSource} onChange={(event) => setReferenceSource(event.target.value)}>
-                <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="erp_catalog_reference">ERP 采购参考</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">定稿历史</option><option value="supplier_landed">1688 参考</option>
+                <option value="all">全部成本来源</option><option value="erp_history">ERP 历史</option><option value="erp_catalog_reference">ERP 采购参考</option><option value="manual_confirmed">人工确认</option><option value="finalized_profit_history">历史盘点</option><option value="supplier_landed">1688 参考</option>
               </select></LibraryFilterField><LibraryFilterField label="月末七天销量">{salesLabelFilter}</LibraryFilterField><button aria-pressed={negativeOnly} className={`filter-chip ${negativeOnly ? "active" : ""}`} onClick={() => setNegativeOnly(value => !value)}><AlertCircle size={17} />只看负利润</button></>}
             activeFilters={referenceActiveFilters} onClear={resetReferenceFilters}
             actions={<Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || catalogState.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续补齐</Button>}
@@ -710,7 +710,7 @@ function ProductLibraryView({ workspaceId, view }) {
         </>
       ) : view === "official" ? (
         <>
-          <div className="selection-workflow-note"><p>参考利润用于选品；定稿历史来自月度报告，尚无定稿不代表商品资料缺失。</p><Button variant="ghost" icon={WalletCards} onClick={() => navigate("/profit")}>核对月度利润</Button></div>
+          <div className="selection-workflow-note"><p>参考利润用于选品；历史盘点来自月度报告，尚无报告不代表商品资料缺失。</p><Button variant="ghost" icon={WalletCards} onClick={() => navigate("/profit")}>核对月度利润</Button></div>
           <LibraryFilterBar key="official-filters"
             search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />}
             common={<><LibraryFilterField label="店铺"><select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
@@ -724,7 +724,7 @@ function ProductLibraryView({ workspaceId, view }) {
               <LibraryFilterField label="档案类型"><select className="select-input" aria-label="按档案类型筛选" value={recordStatus} onChange={event => setRecordStatus(event.target.value)}><option value="all">全部档案</option><option value="active">正式档案</option><option value="draft">草稿资料</option><option value="inactive">停用资料</option></select></LibraryFilterField>
               <LibraryFilterField label="月末七天销量">{salesLabelFilter}</LibraryFilterField>
               <LibraryFilterField label="参考与核算状态"><select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
-                <option value="all">全部参考与核算状态</option><option value="missing_purchase">ERP 采购未覆盖</option><option value="missing_reference_profit">参考利润待补</option><option value="missing_profit">定稿历史未覆盖</option><option value="missing_mapping">仓库 SKU 待映射</option><option value="erp_complete">ERP 采购已覆盖</option><option value="reference_profit_complete">参考利润可用</option><option value="profit_complete">定稿历史已覆盖</option><option value="mapping_complete">仓库 SKU 已映射</option>
+                <option value="all">全部参考与核算状态</option><option value="missing_purchase">ERP 采购未覆盖</option><option value="missing_reference_profit">参考利润待补</option><option value="missing_profit">历史盘点未覆盖</option><option value="missing_mapping">仓库 SKU 待映射</option><option value="erp_complete">ERP 采购已覆盖</option><option value="reference_profit_complete">参考利润可用</option><option value="profit_complete">历史盘点已覆盖</option><option value="mapping_complete">仓库 SKU 已映射</option>
               </select></LibraryFilterField>
               <button aria-pressed={missingOnly} className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly(value => !value)}><AlertCircle size={17} />资料/参考待补（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
               {duplicateSkcGroups.length ? <button aria-pressed={duplicatesOnly} className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly(value => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
@@ -804,7 +804,7 @@ function ProductLibraryView({ workspaceId, view }) {
         open={mergeManagerOpen}
         className="skc-merge-modal"
         title="整理重复 SKC 档案"
-        description="此工具不会自动合并。请先选择同一平台 SKC 下需要保留的主档案，其余档案的 SKU、供应商报价和人工确认成本将转入主档。月度已定稿利润不会被改写。"
+        description="此工具不会自动合并。请先选择同一平台 SKC 下需要保留的主档案，其余档案的 SKU、供应商报价和人工确认成本将转入主档。已导出的历史报告保留。"
         onClose={closeMergeManager}
         footer={<><Button variant="ghost" disabled={mergingSkcRecords} onClick={closeMergeManager}>取消</Button><Button icon={GitMerge} disabled={!mergePrimaryId || !mergeSourceIds.length || mergingSkcRecords} onClick={requestMergePreview}>查看合并预览</Button>{mergePreview ? <Button variant="primary" icon={GitMerge} disabled={mergingSkcRecords} onClick={() => setMergeConfirmOpen(true)}>发起合并</Button> : null}</>}
       >

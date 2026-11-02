@@ -18,7 +18,7 @@ const ledgerStateLabels = {
   cost_pending: "待核对成本",
   approval_pending: "待确认成本",
   ready: "待确认利润",
-  finalized: "已定稿",
+  finalized: "可继续盘点",
   locked: "已锁定",
 };
 
@@ -127,7 +127,7 @@ export default function MonthlyLedger() {
 
       {result && !result.error && items.length > 0 ? <div className="ledger-stat-grid">
         <Panel className="ledger-stat"><CalendarDays size={18} /><span>已建立月份</span><strong>{items.length}</strong></Panel>
-        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年已保存利润</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{baseMonths ? `含 ${baseMonths} 个未扣款或历史定稿月份` : '采用各月当前财务报告'}</small></Panel>
+        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年已保存利润</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{baseMonths ? `含 ${baseMonths} 个未扣款或历史月份` : '采用各月当前财务报告'}</small></Panel>
         <Panel className="ledger-stat"><BarChart3 size={18} /><span>{currentYear} 年导入销量</span><strong>{yearQuantity.toLocaleString("zh-CN")}</strong></Panel>
         <Panel className="ledger-stat pending"><CalendarDays size={18} /><span>当前待处理</span><strong>{pending ? formatLedgerPeriod(pending.period) : "无"}</strong><small>{pending ? ledgerStateLabels[pending.status] : "所有账本均已处理"}</small></Panel>
       </div> : null}
@@ -164,9 +164,9 @@ export default function MonthlyLedger() {
         </div>
       )}
 
-      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">已定稿或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
+      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">可继续盘点或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
       <Modal open={Boolean(sourceLedger)} title={sourceLedger ? `确认台账来源 · ${formatLedgerPeriod(sourceLedger.period)}` : "确认台账来源"} description="仅在原文件包含该店整月全部商品时确认。确认后更新销量参考，不修改销售明细或正式利润。" onClose={() => { if (!confirmingSource) setSourceLedger(null); }}>
-        {!sourceState ? <p role="status">正在读取本月台账来源…</p> : sourceState.error ? <div role="alert"><p>台账来源读取失败：{sourceState.error}</p><Button onClick={() => setSourceAttempt(value => value + 1)}>重试读取来源</Button></div> : sourceState.items.length ? sourceState.items.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或账本已定稿，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
+        {!sourceState ? <p role="status">正在读取本月台账来源…</p> : sourceState.error ? <div role="alert"><p>台账来源读取失败：{sourceState.error}</p><Button onClick={() => setSourceAttempt(value => value + 1)}>重试读取来源</Button></div> : sourceState.items.length ? sourceState.items.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或当前只读，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
       </Modal>
     </AppShell>
   );

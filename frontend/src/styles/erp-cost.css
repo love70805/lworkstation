@@ -532,3 +532,5 @@
 .cost-erp-responses > summary { cursor: pointer; font-weight: 600; }
 .cost-erp-responses p { font-size: 13px; overflow-wrap: anywhere; }
 .cost-erp-responses pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; background: var(--surface-muted); color: var(--text-primary); border-radius: 6px; padding: 12px; font-size: 12px; }
+.erp-workspace-launcher { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; }
+.erp-workspace-launcher > span { max-width: 100%; overflow-wrap: anywhere; color: var(--text-muted); }

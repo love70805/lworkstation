@@ -75,7 +75,7 @@ describe("manual exact cost overrides", () => {
     expect(await db.erpCostRows.get(id)).toEqual(stored);
     expect((await db.ledgers.get(ledgerId)).status).toBe("cost_pending");
   });
-  it("rejects stale UI after replacement/revocation and freezes successful full-ledger finalization", async () => {
+  it("rejects stale UI after replacement/revocation and keeps exports immutable while allowing later corrections", async () => {
     await save("甲", 0); const other = await save("乙", 0.0000001);
     const old = await lines();
     await save("甲", 0.0000002);
@@ -85,8 +85,8 @@ describe("manual exact cost overrides", () => {
     await finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines: current, profitSummary: { profit: 999 } });
     const snapshot = await getLedgerSnapshot(ledgerId);
     expect(snapshot.ledger.profitSummary).toMatchObject({ purchaseCost: 0.03, profit: 1.97 });
-    await expect(save("甲", 1)).rejects.toThrow("定稿");
-    await expect(revokeManualCostOverride({ ledgerId, approvalId: other.id })).rejects.toThrow("定稿");
+    await expect(save("甲", 1)).resolves.toBeDefined();
+    await expect(revokeManualCostOverride({ ledgerId, approvalId: other.id })).resolves.toBeNull();
     expect((await getLedgerSnapshot(ledgerId)).profitLines).toEqual(snapshot.profitLines);
   });
   it.each([null, "", -1, Infinity, NaN])("rejects invalid value %s", async (value) => { await expect(save("甲", value)).rejects.toThrow("非负有限"); });
