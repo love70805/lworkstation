@@ -27,7 +27,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.51';
+    const EXTENSION_VERSION = '8.0.52';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -380,7 +380,10 @@
 
             if (response.status === 401 || response.status === 403) { taskCache.clear(); erpSessionState = 'login_required'; throw Object.assign(new CostError('ERP 登录已失效', '请登录 ERP 并重新查询后重试。'), { code: 'ERP_LOGIN_REQUIRED' }); }
             if (!response.ok) {
-                const error = new CostError(context + '请求失败', 'HTTP ' + response.status + ' ' + response.statusText);
+                let body;
+                try { body = response.json ? await Promise.race([response.json(), aborted]) : null; } catch { body = { message: 'ERP 未返回 JSON 业务数据' }; }
+                const raw = resultPolicy.diagnosticResponse({ stage: context, httpStatus: response.status, code: body?.code, msg: body?.msg ?? body?.message, data: body?.data });
+                const error = Object.assign(new CostError(context + '请求失败', 'HTTP ' + response.status + ' ' + response.statusText + '\nERP 返回：' + raw), { erpResponse: raw });
                 if (response.status === 429) {
                     const value = response.headers?.get?.('Retry-After');
                     const delay = value && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
@@ -397,6 +400,7 @@
                     throw new CostError(context + '数据格式异常', 'ERP 返回了网页，未取得接口数据。');
                 }
                 const body = await Promise.race([response.json(), aborted]);
+                if (body && typeof body === 'object') Object.defineProperty(body, '__erpDiagnostic', { value: resultPolicy.diagnosticResponse({ stage: context, httpStatus: response.status, code: body.code, msg: body.msg ?? body.message, count: body.count, data: body.data }) });
                 if (Number(body?.code) === 429) throw Object.assign(new CostError(context + '请求失败', 'HTTP 429 · ERP 请求过于频繁'), { status: 429, retryAfter: 1000 });
                 if (response.status === 401 || response.status === 403 || [401, 403].includes(Number(body?.code)) || /登录|login|session.*expired/i.test(String(body?.msg || body?.message || ''))) {
                     erpSessionState = 'login_required';
@@ -774,8 +778,8 @@
     function requireApiData(response, context) {
         if (!response || response.code !== 0) {
             const code = response && response.code !== undefined ? response.code : '缺失';
-            const message = response && (response.msg || response.message);
-            throw new CostError(context + '接口异常', '业务状态码：' + code + (message ? '\n' + message : ''));
+            const message = response && JSON.parse(resultPolicy.diagnosticResponse({ message: response.msg || response.message || '' })).message;
+            throw Object.assign(new CostError(context + '接口异常', '业务状态码：' + code + (message ? '\n' + message : '') + '\nERP 返回：' + (response?.__erpDiagnostic || resultPolicy.diagnosticResponse(response))), { erpResponse: response?.__erpDiagnostic || resultPolicy.diagnosticResponse(response) });
         }
         if (!Array.isArray(response.data)) {
             throw new CostError(context + '数据格式异常', '接口 data 不是数组。');
@@ -786,8 +790,8 @@
     function requireApiList(response, context) {
         if (!response || response.code !== 0) {
             const code = response && response.code !== undefined ? response.code : '缺失';
-            const message = response && (response.msg || response.message);
-            throw new CostError(context + '接口异常', '业务状态码：' + code + (message ? '\n' + message : ''));
+            const message = response && JSON.parse(resultPolicy.diagnosticResponse({ message: response.msg || response.message || '' })).message;
+            throw Object.assign(new CostError(context + '接口异常', '业务状态码：' + code + (message ? '\n' + message : '') + '\nERP 返回：' + (response?.__erpDiagnostic || resultPolicy.diagnosticResponse(response))), { erpResponse: response?.__erpDiagnostic || resultPolicy.diagnosticResponse(response) });
         }
         const data = response.data;
         if (data == null || data === '' || (typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length === 0)) return [];
@@ -803,8 +807,8 @@
     function requireMappingData(response, context) {
         if (!response || response.code !== 0) {
             const code = response && response.code !== undefined ? response.code : '缺失';
-            const message = response && (response.msg || response.message);
-            throw new CostError(context + '接口异常', '业务状态码：' + code + (message ? '\n' + message : ''));
+            const message = response && JSON.parse(resultPolicy.diagnosticResponse({ message: response.msg || response.message || '' })).message;
+            throw Object.assign(new CostError(context + '接口异常', '业务状态码：' + code + (message ? '\n' + message : '') + '\nERP 返回：' + (response?.__erpDiagnostic || resultPolicy.diagnosticResponse(response))), { erpResponse: response?.__erpDiagnostic || resultPolicy.diagnosticResponse(response) });
         }
         const data = response.data;
         if (data == null || data === '' || (typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length === 0)) return [];
@@ -920,10 +924,11 @@
     }
 
     function withOrderContext(detail, order, purchaseOrderId) {
+        const sameOrder = !detail.purchaseOrderId || String(detail.purchaseOrderId).trim() === String(purchaseOrderId).trim();
         return Object.assign({}, detail, {
             _purchaseOrderId: purchaseOrderId,
-            _orderNo1688: String(order.purchaseOrderNo1688 || '').trim(),
-            _purchaseOrderNo: String(order.purchaseOrderNo || '').trim(),
+            _orderNo1688: String(order.purchaseOrderNo1688 || '').trim() || (sameOrder ? String(detail.purchaseOrderNo1688 || detail.order1688 || '').trim() : ''),
+            _purchaseOrderNo: String(order.purchaseOrderNo || '').trim() || (sameOrder ? String(detail.purchaseOrderNo || '').trim() : ''),
             _supplierName: supplierName(detail) || supplierName(order),
             _supplier1688Url: resolveSupplier1688Url(detail, order),
             _supplier1688Links: resolveSupplier1688Links(detail, order),
@@ -1146,7 +1151,7 @@
                     return await readOrderDetails(order, run);
                 } catch (error) {
                     if (run.controller.signal.aborted || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error.code)) throw error;
-                    failedOrders.push({ id, no: order.purchaseOrderNo || order.purchaseOrderNo1688 || id, message: error.message || String(error) });
+                    failedOrders.push({ id, no: order.purchaseOrderNo || order.purchaseOrderNo1688 || id, stage: '采购明细读取', message: (error.message || String(error)) + (error.details ? '：' + error.details.split('\nERP 返回：')[0] : ''), erpResponse: error.erpResponse || '' });
                     return [];
                 } finally {
                     if (!run.catalogPhase) run.readProgress.lanes.delete(lane);
@@ -1403,11 +1408,12 @@
             setReadLane(run, lane, { title: result.warehouseSku });
             try {
                 const state = await catalogCollector.mappings(result.warehouseSku, run, refreshWarehouses.has(resultPolicy.canonical(result.warehouseSku)));
+                result.mappingDiagnostic = state.erpResponse || '';
                 result.mappings = state.mappings;
                 result.catalogMappings = state.catalogMappings;
                 const conflicts = resultPolicy.platformMappingConflicts([result], run.expectedSkus, run.querySkcs, run.platformTargets);
                 result.catalogMappingsComplete = state.complete && !conflicts.length;
-                if (!result.catalogMappingsComplete && resultPolicy.filterCatalogByPlatformScope([result], run.expectedSkus, run.querySkcs, run.platformTargets).results.length) failedMappings.push({ warehouseSku: result.warehouseSku, message: [...state.reasons, ...conflicts].join(';') });
+                if (!result.catalogMappingsComplete && resultPolicy.filterCatalogByPlatformScope([result], run.expectedSkus, run.querySkcs, run.platformTargets).results.length) failedMappings.push({ warehouseSku: result.warehouseSku, stage: '平台 SKU 映射', message: [...state.reasons, ...conflicts].join(';'), erpResponse: state.erpResponse || '' });
             } finally { run.readProgress.lanes.delete(lane); }
         }, run, completed => {
             run.readProgress.completed = completed;
@@ -1473,7 +1479,7 @@
             missingTargets = resultPolicy.missingPlatformTargets(scopedState.results, run.expectedSkus, querySkcs, run.platformTargets);
             missingTargets = missingTargets.map(target => {
                 const state = lookup.targets.find(item => resultPolicy.canonical(item.platformSku) === resultPolicy.canonical(target.platformSku));
-                return { ...target, reason: !state?.complete ? 'sku_directory_incomplete' : !state.warehouseSkus.length ? 'sku_directory_empty' : 'sku_pair_not_confirmed',
+                return { ...target, stage: '平台 SKU 精确查询', erpResponse: lookup.results.find(result => state?.warehouseSkus.some(sku => resultPolicy.canonical(sku) === resultPolicy.canonical(result.warehouseSku)))?.mappingDiagnostic || state?.erpResponse || '', reason: !state?.complete ? 'sku_directory_incomplete' : !state.warehouseSkus.length ? 'sku_directory_empty' : 'sku_pair_not_confirmed',
                     message: !state?.complete ? '平台 SKU 精确查询未完整返回，尚不能确认仓库映射' : !state.warehouseSkus.length
                         ? '平台 SKU 精确查询没有返回仓库档案，请核对 ERP 当前关联' : '已查到 SKU 档案，但未返回一致的 SKU/SKC/仓库映射，请核对 ERP 当前关联' };
             });
@@ -1484,7 +1490,7 @@
             run.task?.requestSnapshot?.historyMappings ?? previewContext.historyMappings, run.expectedSkus);
         const historicalWarehouses = [...new Set(historicalTargets.map(target => target.warehouseSku))]
             .filter(warehouse => !scopedWarehouseSkus.has(resultPolicy.canonical(warehouse)));
-        if (!scopedWarehouseSkus.size && !historicalWarehouses.length) throw new CostError('目标平台规格未取得映射', missingTargets.map(target => target.platformSkc + ' / ' + target.platformSku).join('\n') + '\n当前也没有可核实的唯一历史仓库关联，请核对 ERP 关联；不能用其他仓库档案代替。');
+        if (!scopedWarehouseSkus.size && !historicalWarehouses.length) throw new CostError('目标平台规格未取得映射', missingTargets.map(target => target.platformSkc + ' / ' + target.platformSku + '：' + target.message + (target.erpResponse ? '\nERP 返回：' + target.erpResponse : '')).join('\n') + '\n当前也没有可核实的唯一历史仓库关联，请核对 ERP 关联；不能用其他仓库档案代替。');
         const evidenceWarehouseSkus = new Set([...scopedWarehouseSkus, ...historicalWarehouses.map(resultPolicy.canonical)]);
         const additionalWarehouses = scopedState.results.filter(result => !originalWarehouses.has(resultPolicy.canonical(result.warehouseSku))).map(result => result.warehouseSku);
         const historyTargets = [...new Set([...(scopedWarehouseSkus.size ? querySkcs : []), ...additionalWarehouses, ...historicalWarehouses])];

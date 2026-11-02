@@ -26,10 +26,13 @@ export async function validateReportBackup(tables) {
     if(report.kind==='pre_deduction'&&base)fail();
     const kinds=new Set();
     for(const id of report.adoptedBatchIds??[]){const batch=batches.get(id);if(!sameScope(report,batch)||kinds.has(batch.kind))fail();kinds.add(batch.kind);}
-    if(!kinds.has('dispatch')||(report.kind==='financial'&&!kinds.has('deduction')))fail();
+    if(report.dispatchState === 'not_recorded') { if(kinds.has('dispatch') || exact(report.totalsExact.dispatchQuantityExact) !== '0')fail(); }
+    else if(!kinds.has('dispatch'))fail();
+    if(report.kind==='financial'&&!kinds.has('deduction'))fail();
     const lines=reportLines.filter(row=>row.reportId===report.id).sort((a,b)=>a.ordinal-b.ordinal);
     if(lines.length!==report.lineCount||lines.some((row,i)=>row.ordinal!==i))fail();
     const baseLines=base?reportLines.filter(row=>row.reportId===base.id).sort((a,b)=>a.ordinal-b.ordinal):lines;
+    if(report.dispatchState === 'not_recorded' && baseLines.some(row=>row.lineKind==='dispatch'))fail();
     const products=baseLines.filter(row=>row.lineKind==='product');
     if(!products.length|| (base&&lines.some(row=>row.lineKind!=='deduction')))fail();
     const totals=reportTotals(products,report.totalsExact.dispatchQuantityExact,report.warehouseRateExact,lines.filter(row=>row.lineKind==='deduction'));

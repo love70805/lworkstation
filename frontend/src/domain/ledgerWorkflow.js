@@ -32,14 +32,14 @@ export function ledgerNextStep(ledger, { missingCount = ledger?.costSummary?.mis
   if (frozen(ledger)) return { key: 'report', text: ledger.status === 'locked' ? '本月已锁定，可查看和下载已保存报告。' : '基础已保存，可查看报告；各店扣款齐全后可保存正式利润表。', action: '查看本月报告' };
   if (missingCount == null) return { key: 'cost', text: '打开成本核对，检查本月成本准备情况。', action: '核对成本' };
   if (missingCount > 0) return { key: 'cost', text: `整月还有 ${missingCount} 条 SKU 待补成本；店铺筛选不改变定稿范围。`, action: '补齐成本' };
-  return { key: 'report', text: '整月成本已齐，登记代发与各店扣款后即可保存正式利润表。扣款待齐时可先保存未扣款报告。', action: '准备本月报告' };
+  return { key: 'report', text: '整月成本已齐，可直接导出报告；代发可选填，各店扣款齐全后可保存正式利润表。', action: '准备本月报告' };
 }
 
 export function reportReadiness({ ledger, stores = [], dispatch, deduction, reports = [], missingCount }) {
   const locked = ledger?.status === 'locked';
   const baseSaved = frozen(ledger) && Boolean(ledger?.currentBaseReportId);
   const missingStores = stores.filter(store => !deduction?.coveredStores?.includes(store));
-  const baseReady = !locked && !frozen(ledger) && missingCount === 0 && Boolean(dispatch);
+  const baseReady = !locked && !frozen(ledger) && missingCount === 0;
   return {
     baseSaved, missingStores, deductionSaved: hasSavedFinancialReport(ledger, reports),
     baseReady,

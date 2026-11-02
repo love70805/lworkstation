@@ -67,6 +67,6 @@ it('opens and focuses the monthly report from cost view while preserving the sel
  expect(container.querySelector('.profit-workspace-controls select').value).toBe('乙');
  expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('T');
  expect(document.activeElement).toBe(container.querySelector('#monthly-report-section'));
- expect(container.querySelector('.profit-sales-disclosure').open).toBe(false);
+ expect(container.querySelector('.profit-sales-disclosure')).toBeNull();
  expect(container.querySelector('.sales-analytics')).toBeNull();
 });

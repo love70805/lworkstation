@@ -20,23 +20,23 @@ const click = async text => act(async () => button(text).click());
 const input = async value => act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target: { value } }));
 
 it('blocks applying stale matches after a rule edit and applies only the newly matched selection', async () => {
-  expect(button('应用本次筛选').disabled).toBe(true);
+  expect(button('应用本次筛选')).toBeUndefined();
   await input('KPX');
   expect(snapshot.dirty).toBe(true);
-  expect(button('应用本次筛选').disabled).toBe(true);
-  await click('应用本次筛选'); expect(apply).not.toHaveBeenCalled();
+  expect(button('应用本次筛选')).toBeUndefined();
+   expect(apply).not.toHaveBeenCalled();
   expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-FFFV', 'MANUAL']);
-  await click('匹配货号'); await click('应用本次筛选');
+  await click('匹配货号');
   expect(apply).toHaveBeenCalledWith({ F: ['B-KPX'] }, { aliases: ['KPX'], mode: 'fuzzy' });
   expect(snapshot.dirty).toBe(false);
-  expect(button('应用本次筛选').disabled).toBe(true);
+  expect(button('应用本次筛选')).toBeUndefined();
 });
 
 it('clears matching conditions explicitly without clearing manually selected goods and can undo an unmatched edit', async () => {
-  await input(''); expect(button('应用本次筛选').disabled).toBe(true);
-  await click('清除匹配条件'); await click('应用本次筛选');
+  await input(''); expect(button('应用本次筛选')).toBeUndefined();
+  await click('清除匹配条件');
   expect(apply).toHaveBeenCalledWith({ F: ['A-FFFV', 'MANUAL'] }, { aliases: [], mode: 'fuzzy' });
-  await input('UNKNOWN'); await click('撤销本次调整');
+  await input('UNKNOWN'); await click('恢复上次关键词');
   expect(snapshot.aliasesText).toBe('');
   expect(snapshot.dirty).toBe(false);
   expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-FFFV', 'MANUAL']);
@@ -57,8 +57,8 @@ it('does not block manual selection when the match mode changes with no keywords
   await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), { target: { value: 'exact' } }));
   expect(snapshot.dirty).toBe(false);
   await act(async () => container.querySelector('[aria-label="选择 甲店 B-KPX"]').click());
-  expect(button('应用本次筛选').disabled).toBe(false);
-  await click('应用本次筛选');
+  expect(apply).toHaveBeenCalledTimes(1);
+
   expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-FFFV', 'B-KPX', 'MANUAL']);
   expect(snapshot.dirty).toBe(false);
 });

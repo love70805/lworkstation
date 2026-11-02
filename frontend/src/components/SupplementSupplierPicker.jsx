@@ -1,10 +1,11 @@
 import { Button } from './UI';
+import { includesSearch } from '../lib/textSearch';
 
 export const ALL_SUPPLEMENT_MARKERS = '__all_source_records__';
 
 export default function SupplementSupplierPicker({ markers, selection, search, onSearch, onChange, disabled }) {
   const query = search.trim().normalize('NFKC');
-  const matches = markers.filter(marker => marker.includes(query));
+  const matches = markers.filter(marker => includesSearch(marker, query));
   const selected = new Set(selection === ALL_SUPPLEMENT_MARKERS ? markers : selection);
   const count = markers.filter(marker => selected.has(marker)).length;
   function toggle(marker, checked) {
@@ -16,7 +17,7 @@ export default function SupplementSupplierPicker({ markers, selection, search, o
     <label>搜索货号<input type="search" value={search} disabled={disabled} placeholder="例如 FFFV，自动全选匹配货号" onChange={event => {
       const value = event.target.value, term = value.trim().normalize('NFKC');
       onSearch(value);
-      if (term) onChange(markers.filter(marker => marker.includes(term)));
+      if (term) onChange(markers.filter(marker => includesSearch(marker, term)));
     }} /></label>
     <div className="report-supplier-actions">
       <Button disabled={disabled || !matches.length} onClick={() => onChange(matches)}>全选搜索结果</Button>

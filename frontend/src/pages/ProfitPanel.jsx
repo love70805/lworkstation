@@ -1,4 +1,3 @@
-import SalesAnalytics from './SalesAnalytics';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, CalendarDays, CheckCircle2, Download, LockKeyhole, Plus, RotateCcw, Warehouse } from "lucide-react";
@@ -380,7 +379,6 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
 
 export function ProfitViewsContent({ monthControl = null }) {
   const [reportJump, setReportJump] = useState(false);
-  const [trendOpen, setTrendOpen] = useState(false);
   const [readiness, setReadiness] = useState(null);
   const [reportState, setReportState] = useState(null);
   const [supplementEditor, setSupplementEditor] = useState(null);
@@ -424,8 +422,8 @@ export function ProfitViewsContent({ monthControl = null }) {
         actions={<div className="profit-workspace-controls"><a className="button button-secondary" href="#monthly-report-section" onClick={event => { if (view === "cost") { event.preventDefault(); setReportJump(true); change("detail"); } }}>本月报告</a>{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={(event) => change(view, event.target.value)}><option value="all">全部店铺</option>{stores.map((name) => <option key={name}>{name}</option>)}</select></label></div>}
       />
       <nav className="profit-view-tabs" aria-label="利润核算视图"><Button aria-current={view === "detail" ? "page" : undefined} onClick={() => change("detail")}>利润明细</Button><Button aria-current={view === "cost" ? "page" : undefined} onClick={() => change("cost")}>成本核对</Button></nav>
-      <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={snapshot?.rows ?? []} onChange={changeScope} showStore={false} />
-      {view === "cost" ? <div className="cost-page"><CostMatchingContent suppliedSnapshot={snapshot} key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} reportState={reportState} onEditSupplement={setSupplementEditor} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><section id="monthly-report-section" className="profit-report-section" tabIndex={-1} aria-label="本月报告"><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId} onState={setReportState} editor={supplementEditor} onEdit={setSupplementEditor} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></section><details className="profit-sales-disclosure" open={trendOpen} onToggle={event => { if (event.currentTarget.open !== trendOpen) setTrendOpen(event.currentTarget.open); }}><summary>查看本月销售趋势<span>按日期与店铺分析销售额、销量</span></summary>{trendOpen ? <SalesAnalytics workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} store={store} stores={stores} /> : null}</details></>}
+      <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={snapshot?.rows ?? []} onChange={changeScope} searchCosts={view === "cost"} showStore={false} />
+      {view === "cost" ? <div className="cost-page"><CostMatchingContent suppliedSnapshot={snapshot} key={`${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} validatedContext={{ workspaceId: snapshot.ledger.workspaceId, ledgerId: snapshot.ledger.id, store }} onPublished={() => change("detail")} /></div> : <><ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} reportState={reportState} onEditSupplement={setSupplementEditor} key={`profit/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}/${store}`} /><section id="monthly-report-section" className="profit-report-section" tabIndex={-1} aria-label="本月报告"><MonthlyReportManager key={`report/${snapshot.ledger.workspaceId}/${snapshot.ledger.id}`} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId} onState={setReportState} editor={supplementEditor} onEdit={setSupplementEditor} missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null} onOpenCosts={openAllMissingCosts} /></section></>}
     </>}
   </>;
 }

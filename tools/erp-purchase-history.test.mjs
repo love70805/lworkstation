@@ -30,7 +30,7 @@ const detailValues = [
 ];
 const details = detailValues.map(([id,itemId,creationTime,quantity,purchaseUnitPrice],index)=>({purchaseOrderId:'ORDER-'+id,purchaseOrderNo:'ORDER-'+id,purchaseOrderDetailId:'DETAIL-'+index,itemId,creationTime,purchaseQuantity:String(quantity),purchaseUnitPrice,tradeName:'脱敏商品',supplierName:'脱敏供应商'}));
 const mappings = ['ORANGE','WHITE','HOOK'].map(key=>({associatedProductId:'WH-'+key,barcodeSkuid:'SKU-'+key,barcodeSkcid:'SKC-TARGET'}));
-async function replay(period, queryRange, { status = '4', paged = false, incomplete = false, emptyScope = false } = {}) {
+async function replay(period, queryRange, { status = '4', paged = false, incomplete = false, emptyScope = false, detailOnlyNumbers = false, badDetail = false } = {}) {
  const window = new Window({url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html'});
  const messages=[],requests=[];
  window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(structuredClone(message));callback(collectionReply(message,{ledgerPeriod:period, expectedSkus: mappings.map(m => ({ platformSku: m.barcodeSkuid, platformSkc: m.barcodeSkcid }))}) || (message.type==='shopeers.erp.catalogContext'?{ok:false,message:'isolated observation'}:{ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId}));}}};
@@ -45,13 +45,14 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
     const orders = orderRows.map(row => row.purchaseOrderId === 'ORDER-02' ? { ...row, purchaseOrderStatus1688: status } : row);
     count = incomplete ? orders.length + 1 : orders.length;
     const page = Number(url.searchParams.get('page'));
+    if(detailOnlyNumbers)for(const order of orders){order.purchaseOrderNo='';order.purchaseOrderNo1688='';}
     data = paged ? orders.slice((page - 1) * 7, page * 7) : page === 1 ? orders : [];
   }
-  else if(endpoint==='purchase-order-details')data=details.filter(d=>d.purchaseOrderId===url.searchParams.get('purchaseOrderId'));
+  else if(endpoint==='purchase-order-details')data=details.filter(d=>d.purchaseOrderId===url.searchParams.get('purchaseOrderId')).map(d=>detailOnlyNumbers?{...d,purchaseOrderNo:'DETAIL-'+d.purchaseOrderId,purchaseOrderNo1688:'00012345678901234567890'+d.purchaseOrderId}:d);
   else if(endpoint==='product-info-sku')data=mappings.filter(m=>m.associatedProductId===url.searchParams.get('productId'));
   else if(endpoint==='product-page')data=mappings.map(m=>({itemId:m.associatedProductId,tradeName:'脱敏商品'}));
   else throw new Error('Unexpected endpoint '+endpoint);
-  return {ok:true,status:200,json:async()=>({code:0,count:count ?? data.length,data})};
+  return {ok:true,status:200,json:async()=>badDetail&&endpoint==='purchase-order-details'&&url.searchParams.get('purchaseOrderId')==='ORDER-01'?{code:17,msg:'明细权限未开通 token=synthetic-sensitive-value',token:'synthetic-sensitive-value',data:{purchaseOrderId:'ORDER-01',authorization:'synthetic-sensitive-value'}}:({code:0,count:count ?? data.length,data})};
  };
  try {
   for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(await readFile(path.join(process.env.ERP_TEST_SOURCE_ROOT || path.join(root,'integrations/erp-assistant-extension/src'),name),'utf8'));
@@ -88,3 +89,19 @@ assert.ok(incomplete.rows.every(row => row.unitCost === null && row.previewStatu
 assert.equal((await replay('2026-08', '1', { emptyScope: true })).emptyScopeRejected,true);
 if (process.env.ERP_HISTORY_ACCEPTANCE_OUTPUT) await writeFile(process.env.ERP_HISTORY_ACCEPTANCE_OUTPUT, JSON.stringify({ ok: true, currentAugust, currentSeptember, limitedAugust, statusVariants: [4, '４', '已取消'], incompleteHistoryBlocked: true, companyWideScanBlocked: true }, null, 2));
 console.log('Complete scoped purchase history and cancelled 1688 order regression passed');
+
+const detailOnly = await replay('2026-08', '0', { detailOnlyNumbers: true });
+const detailOnlyRecord = detailOnly.warehouseEvidence.warehouses.flatMap(warehouse=>warehouse.purchaseRecords).find(record=>record.purchaseOrderId==='ORDER-01');
+assert.equal(detailOnlyRecord.purchaseOrderNo,'DETAIL-ORDER-01');
+assert.equal(detailOnlyRecord.order1688,'00012345678901234567890ORDER-01');
+assert.equal(detailOnly.rows.find(row=>row.warehouseSku==='WH-WHITE').unitCost,currentAugust.rows.find(row=>row.warehouseSku==='WH-WHITE').unitCost);
+console.log('Detail-only order identifiers survive the real collector without changing cost selection');
+
+const badDetail = await replay('2026-08', '0', { badDetail: true });
+const failure = badDetail.meta.detailFailures.find(item=>item.id==='ORDER-01');
+assert.ok(failure.message.includes('业务状态码：17'));
+assert.ok(failure.erpResponse.includes('明细权限未开通'));
+assert.ok(!failure.erpResponse.includes('synthetic-sensitive-value'));
+assert.ok(!failure.message.includes('synthetic-sensitive-value'));
+assert.equal(badDetail.rows.find(row=>row.warehouseSku==='WH-WHITE').unitCost,null);
+console.log('Real ERP business error retains stage/code/redacted response and cannot become formal cost');

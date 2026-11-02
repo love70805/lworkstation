@@ -20,7 +20,7 @@ async function mount(state=base,kind='dispatch'){
  const close=vi.fn();await act(async()=>root.render(<ToastProvider><SupplementEditor state={state} kind={kind} onClose={close}/></ToastProvider>));return close;
 }
 const button=text=>[...container.querySelectorAll('button')].find(node=>node.textContent===text);
-const field=text=>[...container.querySelectorAll('label')].find(node=>node.firstChild?.textContent===text)?.querySelector('input,select');
+const field=text=>[...container.querySelectorAll('label')].find(node=>node.firstChild?.textContent===text)?.querySelector('input,select')??container.querySelector(`[aria-label="${text}"]`);
 async function change(node,value){await act(async()=>Simulate.change(node,{target:{value}}));}
 const supplier=code=>[...container.querySelectorAll('.report-supplier-option')].find(node=>node.textContent===code)?.querySelector('input');
 async function toggle(code,checked){await act(async()=>Simulate.change(supplier(code),{target:{checked}}));}
@@ -105,10 +105,10 @@ it('invalidates a stale multiple-code preview before adoption',async()=>{
  expect(mock.adopt.mock.calls[0][0].rows.map(row=>row.supplierNumber)).toEqual(['FFFV-B']);
 });
 it('shows the dispatch amount for manual, file and real zero quantities before adoption',async()=>{
- await mount();await change(field('来源方式'),'manual');await change(field('采用总代发件数'),'100');
+ await mount();await change(field('来源方式'),'manual');await change(field('甲 代发件数'),'100');
  expect(container.textContent).toContain('代发金额 ¥70.00');expect(container.textContent).toContain('采用后立即计入整月利润汇总');
- await change(field('采用总代发件数'),'0');expect(container.textContent).toContain('代发金额 ¥0.00');expect(button('导入本月来源').disabled).toBe(false);
- await change(field('采用总代发件数'),'');expect(container.querySelector('.report-dispatch-amount')).toBeNull();expect(button('导入本月来源').disabled).toBe(true);
+ await change(field('甲 代发件数'),'0');expect(container.textContent).toContain('代发金额 ¥0.00');expect(button('导入本月来源').disabled).toBe(false);
+ await change(field('甲 代发件数'),'');expect(container.querySelector('.report-dispatch-amount')).toBeNull();expect(button('导入本月来源').disabled).toBe(true);
  await change(field('来源方式'),'files');await upload([source()]);await change(field('登记人'),'甲人');expect(container.textContent).toContain('代发金额 ¥2.10');
 });
 it('automatically maps SH sheets, filters source cards and preserves source indexes when editing a visible mapping',async()=>{

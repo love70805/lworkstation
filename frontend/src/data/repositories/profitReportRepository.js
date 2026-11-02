@@ -1,3 +1,4 @@
+import Dexie from 'dexie';
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
@@ -112,11 +113,12 @@ async function reportDraft(input,write=false,source=null){
     if(ledger.status==='finalized')throw new Error("已有定稿基础，请重下载原报告；变更基础需显式重开。");
     if(input.expectedLegacyLines?.some(line=>!line.finalizable))throw new Error("仍有平台 SKU 缺少正式成本，账本不能定稿。");
     if(input.expectedLegacyLines && input.legacyFormulaVersion===PROFIT_FORMULA_VERSION && canonicalJson(comparableProfitLines(input.expectedLegacyLines))!==canonicalJson(comparableProfitLines(calculateFormalLedgerRows(context))))throw new Error("成本或台账已变化，请刷新核对后重新定稿。");
-    if(!dispatch)throw new Error("请先采用本月代发件数，真实零件也需明确录入零。");
     products=buildReportProducts(context);
-    dispatchRows=await db.monthlySupplementRows.where('batchId').equals(dispatch.id).toArray();
+    dispatchRows=dispatch?await db.monthlySupplementRows.where('batchId').equals(dispatch.id).toArray():[];
   }else if(ledger.status!=='finalized'&&!input.baseReportId){
-    baseDraft=await reportDraft({...input,kind:'pre_deduction'},write,context);
+    // Without a dispatch batch the nested draft may finish without an IndexedDB
+    // request. Keep the transaction alive until its caller can read deductions.
+    baseDraft=await Dexie.waitFor(reportDraft({...input,kind:'pre_deduction'},write,context));
     products=baseDraft.products;dispatchRows=baseDraft.dispatchRows;
   }else{
     base=reports.find(report=>report.id===input.baseReportId&&report.kind==='pre_deduction');
@@ -133,11 +135,11 @@ async function reportDraft(input,write=false,source=null){
   }
   const deductionRows=input.kind==='financial'?await db.monthlySupplementRows.where('batchId').equals(deduction.id).toArray():[];
   const rate=base?.warehouseRateExact??exact(ledger.warehouseRate??'0.7',{nonnegative:true});
-  const quantity=base?.totalsExact.dispatchQuantityExact??dispatch.adoptedQuantityExact;
+  const quantity=base?.totalsExact.dispatchQuantityExact??dispatch?.adoptedQuantityExact??'0';
   const totalsExact=reportTotals(products,quantity,rate,deductionRows);
   const revision=Math.max(0,...reports.filter(report=>report.kind===input.kind).map(report=>report.revision))+1;
   const fingerprint=canonicalJson(input.kind==='financial'?{kind:input.kind,ledgerId:ledger.id,currentBaseReportId:ledger.currentBaseReportId,status:ledger.status,baseId:base?.id,baseHash:base?.payloadHash,baseFingerprint:baseDraft?.fingerprint,deduction,deductionRows,revision}:{kind:input.kind,ledger,salesRows:context.salesRows,erpCosts:context.erpCosts,approvals:context.approvals,dispatch,dispatchRows,revision});
-  const report={workspaceId:ledger.workspaceId,ledgerId:ledger.id,period:ledger.period,kind:input.kind,revision,baseReportId:base?.id??null,supersedesReportId:reports.filter(report=>report.kind===input.kind).sort((a,b)=>b.revision-a.revision)[0]?.id??null,formulaVersion:REPORT_FORMULA_VERSION,templateVersion:REPORT_TEMPLATE_VERSION,warehouseRateExact:rate,adoptedBatchIds:[...(base?base.adoptedBatchIds:[dispatch.id]),...(input.kind==='financial'?[deduction.id]:[])],registrantNames:base?.registrantNames??dispatchRegistrantNames(dispatchRows),totalsExact,displayTotals:{profit:displayMoney(totalsExact.profitExact),preDeduction:displayMoney(totalsExact.preDeductionExact)},createdBy:context.member.memberId,reason:ledger.reportReopenReason??''};
+  const report={workspaceId:ledger.workspaceId,ledgerId:ledger.id,period:ledger.period,kind:input.kind,revision,baseReportId:base?.id??null,supersedesReportId:reports.filter(report=>report.kind===input.kind).sort((a,b)=>b.revision-a.revision)[0]?.id??null,formulaVersion:REPORT_FORMULA_VERSION,templateVersion:REPORT_TEMPLATE_VERSION,warehouseRateExact:rate,adoptedBatchIds:[...(base?base.adoptedBatchIds:dispatch?[dispatch.id]:[]),...(input.kind==='financial'?[deduction.id]:[])],dispatchState:base?(base.dispatchState??'recorded'):(dispatch?'recorded':'not_recorded'),registrantNames:base?.registrantNames??dispatchRegistrantNames(dispatchRows),totalsExact,displayTotals:{profit:displayMoney(totalsExact.profitExact),preDeduction:displayMoney(totalsExact.preDeductionExact)},createdBy:context.member.memberId,reason:ledger.reportReopenReason??''};
   return {context,report,products,dispatchRows,deductionRows,fingerprint,baseDraft};
 }
 export async function previewProfitReport(input){

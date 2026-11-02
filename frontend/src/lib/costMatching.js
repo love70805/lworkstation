@@ -1,7 +1,7 @@
 import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifiers";
 
 function normalizedSearch(value) {
-  return String(value ?? "").trim().toLocaleLowerCase();
+  return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 export function matchesCostQuery(match, query) {
@@ -12,11 +12,12 @@ export function matchesCostQuery(match, query) {
     match.platformSku,
     match.sourcePlatformSku,
     match.attribute,
-    match.sourceWarehouseSku,
+    match.sourceWarehouseSku ?? match.warehouseSku,
     match.supplierName,
     match.supplier1688Url,
     match.orderNumber,
     ...(match.costDecision?.selectedRecords ?? []).flatMap(record => [record.order1688, record.purchaseOrderNo, record.purchaseOrderId, record.purchaseDate]),
+    ...(match.purchaseRecords ?? []).flatMap(record => [record.order1688, record.purchaseOrderNo, record.purchaseOrderId]),
     match.productName,
   ].map(normalizedSearch).join(" ");
   return searchText.includes(normalizedQuery);

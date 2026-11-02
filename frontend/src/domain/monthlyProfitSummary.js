@@ -13,7 +13,7 @@ export function monthlyProfitSummary({ ledger, reportState, productProfitExact, 
   if (frozen && !base) return { status: 'error', error: '基础报告缺失，请检查备份。' };
   const dispatch = belongs(data.dispatch) && data.dispatch.status === 'adopted' ? data.dispatch : null;
   const deduction = belongs(data.deduction) && data.deduction.status === 'adopted' ? data.deduction : null;
-  const dispatchQuantityExact = frozen ? base.totalsExact.dispatchQuantityExact : dispatch?.adoptedQuantityExact ?? null;
+  const dispatchQuantityExact = frozen ? base.totalsExact.dispatchQuantityExact : dispatch?.adoptedQuantityExact ?? '0';
   const rateExact = frozen ? base.warehouseRateExact : String(ledger.warehouseRate ?? '0.7');
   const dispatchAmountExact = frozen ? base.totalsExact.dispatchAmountExact : dispatchQuantityExact === null ? null : new Exact(dispatchQuantityExact).times(rateExact).toFixed();
   const deductionExact = deduction?.signedAmountExact ?? null;
@@ -22,7 +22,7 @@ export function monthlyProfitSummary({ ledger, reportState, productProfitExact, 
   const costsPending = !frozen && (missingCostCount !== 0 || products == null);
   const profitExact = costsPending || dispatchAmountExact === null ? null : new Exact(products).plus(dispatchAmountExact).minus(deductionExact ?? '0').toFixed();
   return {
-    status: 'ready', dispatchQuantityExact, dispatchAmountExact, rateExact, deductionExact, missingStores, costsPending, profitExact,
+    status: 'ready', dispatchRecorded: frozen ? base.dispatchState !== 'not_recorded' : Boolean(dispatch), dispatchQuantityExact, dispatchAmountExact, rateExact, deductionExact, missingStores, costsPending, profitExact,
     label: deductionExact === null ? '未扣款利润' : missingStores.length ? '暂计利润' : '本月利润',
     frozen, formalSaved: currentLedgerResult(ledger, data.reports, deduction).state === 'financial', deductionSaved: hasSavedFinancialReport(ledger, data.reports),
   };

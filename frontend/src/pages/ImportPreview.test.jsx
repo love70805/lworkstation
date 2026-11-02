@@ -17,14 +17,14 @@ const mapping = {platformSku:'SKU',platformSkc:'SKC',quantity:'数量',amount:'�
 const summary = {quantity:2,revenue:10,penalty:0};
 function button(text) { return [...container.querySelectorAll('button')].find((node)=>node.textContent === text); }
 async function click(text) { await act(async()=>button(text).click()); }
-async function matchAndApply() { await click('匹配货号'); await click('应用本次筛选'); }
+async function matchAndApply() { await click('匹配货号');  }
 async function upload(selectPeriod = true, files = [new File(['first'], '甲店.csv'),new File(['second'],'乙店.csv')]) {
   const parseCount = mocks.parse.mock.calls.length;
   const input = container.querySelector('input[type=file]');
   Object.defineProperty(input,'files',{configurable:true,value:files});
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
   await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(parseCount + files.length)); });
-  await click('选中筛选结果'); await click('应用本次筛选');
+  await click('选中筛选结果');
   if (selectPeriod) await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
 }
 beforeEach(async()=>{
@@ -273,7 +273,7 @@ it('asks for a sheet only for the ambiguous file and parses the chosen sheet', a
   await act(async () => Simulate.change(select,{target:{value:'明细乙'}}));
   await settled();
   expect(mocks.parse.mock.calls.some(call=>call[2]==='明细乙')).toBe(true);
-  await click('选中筛选结果'); await click('应用本次筛选');
+  await click('选中筛选结果');
   await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(1);
 });
@@ -324,7 +324,7 @@ it('starts with no goods, preserves selected goods through search and remembers 
   await settled();
   expect(mocks.preview).not.toHaveBeenCalled();
   expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('0');
-  await click('选中筛选结果'); await click('应用本次筛选');
+  await click('选中筛选结果');
   await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ filterOptions:{supplierNumbers:['测试货号']}, sourceCoverage:{version:2,supplierNumbers:['测试货号'],scope:'full_month'}, importMode:'replace_store_month' });
@@ -346,7 +346,7 @@ it('keeps rule edits local to the rule draft and remembers actual selected goods
   expect(localStorage.getItem('lworkstation:import-suppliers:v2:W')).toBeNull();
   expect(button('导入').disabled).toBe(true);
   await click('导入'); expect(mocks.save).not.toHaveBeenCalled();
-  await click('撤销本次调整');
+  await click('恢复上次关键词');
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   await click('导入');
   expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:[],matched:[]});
@@ -384,13 +384,13 @@ it('applies fuzzy selection across stores only on request, with a local store ov
   expect(mocks.preview).toHaveBeenCalledTimes(count);
   await matchAndApply(); await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-FFFV','BffFv','FFFV-MID'],['A-FFFV','BffFv','FFFV-MID']]);
-  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('应用后已选6');
+  expect(container.querySelector('.supplier-apply-preview').textContent).toContain('本批已选6');
   expect([...container.querySelectorAll('.batch-impact-details')].every(details => !details.open)).toBe(true);
   expect(container.querySelector('.batch-action-bar').compareDocumentPosition(container.querySelector('.batch-files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await act(async () => Simulate.change(container.querySelector('[aria-label="查看货号店铺"]'), { target: { value: '甲店' } }));
   await click('选中筛选结果');
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
-  await click('应用本次筛选');
+
   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-FFFV','BffFv','FFFV-MID','其他'],['A-FFFV','BffFv','FFFV-MID']]);
   expect(container.querySelectorAll('.batch-store-suppliers')[1].textContent).toContain('已应用 3 / 4');
@@ -406,7 +406,7 @@ it('avoids duplicate unchanged applies and refreshes overwrite approval only aft
   const count = mocks.preview.mock.calls.length;
   await matchAndApply(); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count);
-  expect(button('应用本次筛选').disabled).toBe(true);
+  expect(button('应用本次筛选')).toBeUndefined();
   await click('重新校验'); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
   expect(container.querySelector('.batch-preview')).not.toBeNull();
@@ -475,7 +475,7 @@ it('saves KPXX and KPX together, applies the saved group, and remembers it only 
   const group = readSupplierGroups('W').groups[0];
   expect(group.aliases).toEqual(['KPX','KPXX']);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
-  await click(group.name); await click('应用本次筛选'); await settled();
+  await click(group.name);  await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items.map(item => item.filterOptions.supplierNumbers)).toEqual([['A-KPXX','B-KPX'],['A-KPXX','B-KPX']]);
   await act(async () => container.querySelector('.batch-overwrite input').click());
   await click('导入');
@@ -508,7 +508,7 @@ it('switches matching mode only on apply and leaves file selections intact when 
   const group = saveSupplierGroup('W', {name:'负责人',aliases:['KPXX'],mode:'suffix'});
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:3,previewRows:[{SKU:'000123'}],preset:'generic',facets:{supplierNumbers:['KPXX','A-KPXX','KPXX-MID']}});
   await upload(); await settled();
-  await click(group.name); await click('应用本次筛选'); await settled();
+  await click(group.name);  await settled();
   const count = mocks.preview.mock.calls.length;
   await act(async () => Simulate.change(container.querySelector('[aria-label="货号匹配方式"]'), {target:{value:'exact'}}));
   await settled(); expect(mocks.preview).toHaveBeenCalledTimes(count);
@@ -519,7 +519,7 @@ it('switches matching mode only on apply and leaves file selections intact when 
   expect(readSupplierGroups('W').groups).toEqual([]);
 });
 
-it('keeps page/search selection in a draft, preserves hidden items, and restores applied selection on undo', async () => {
+it('applies page and search selections immediately while preserving hidden items', async () => {
   const choices = Array.from({length:65},(_,i)=>`货号${String(i).padStart(3,'0')}`);
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:65,previewRows:[{SKU:'001'}],preset:'generic',facets:{supplierNumbers:choices}});
   const input = container.querySelector('input[type=file]'); Object.defineProperty(input,'files',{configurable:true,value:[new File(['source'],'甲店.csv')]});
@@ -531,13 +531,16 @@ it('keeps page/search selection in a draft, preserves hidden items, and restores
   await act(async()=>Simulate.change(container.querySelector('.supplier-filter-table .search-input input'),{target:{value:'货号064'}}));
   await click('选中筛选结果');
   expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('21');
-  expect(mocks.parse).toHaveBeenCalledTimes(parseCount); expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount); expect(mocks.preview).not.toHaveBeenCalled();
-  await click('应用本次筛选'); await settled();
+  expect(mocks.parse.mock.calls.length).toBeGreaterThan(parseCount); expect(mocks.inspectPeriod.mock.calls.length).toBeGreaterThan(inspectCount);
+   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual([...choices.slice(0,20),choices[64]]);
   await click('取消筛选结果');
-  expect(button('导入').disabled).toBe(true);
-  await click('撤销本次调整');
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('21');
+  await settled();
+  expect(container.querySelector('.batch-overwrite input').checked).toBe(false);
+  await act(async()=>container.querySelector('.batch-overwrite input').click());
+  expect(button('导入').disabled).toBe(false);
+  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('20');
+  expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(choices.slice(0,20));
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
@@ -557,7 +560,7 @@ it('preserves same-group draft exceptions while switching groups without inherit
   expect(container.querySelector('[aria-label="选择 甲店 B-KPX"]').checked).toBe(false);
   expect(mocks.preview).toHaveBeenCalledTimes(count);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
-  await click('应用本次筛选'); await settled();
+   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(['A-KPX']);
   expect(readSupplierGroups('W').lastAppliedId).toBe('');
   expect(readSupplierGroups('W').groups.map(g=>g.id)).toEqual([group.id,other.id]);

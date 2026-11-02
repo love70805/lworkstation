@@ -33,7 +33,7 @@ it('shows the automatically collected suggestion in the existing correction dial
   await render();
   expect(document.body.textContent).toContain('已自动补查历史仓库采购');
   expect(document.querySelector('#manual-cost-value').value).toBe('0.35');
-  expect(document.querySelector('#manual-cost-reason').value).toBe(candidate.reason);
+  expect(document.querySelector('#manual-cost-reason')).toBeNull();
   expect(mocks.historySave).not.toHaveBeenCalled(); expect(mocks.manualSave).not.toHaveBeenCalled();
   await act(async () => saveButton().click());
   expect(mocks.historySave).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', store: '甲店', platformSku: 'SKU-A', inboxId: 'INBOX',
@@ -41,15 +41,15 @@ it('shows the automatically collected suggestion in the existing correction dial
   expect(mocks.manualSave).not.toHaveBeenCalled();
 });
 it('keeps an explicit different amount as an ordinary manual correction', async () => {
-  await render(); await edit('#manual-cost-value', '0'); await edit('#manual-cost-reason', '确认真实零成本');
+  await render(); await edit('#manual-cost-value', '0');
   await act(async () => saveButton().click());
-  expect(mocks.manualSave).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', store: '甲店', platformSku: 'SKU-A', unitCost: '0', reason: '确认真实零成本' });
+  expect(mocks.manualSave).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', store: '甲店', platformSku: 'SKU-A', unitCost: '0', reason: '人工输入单件成本并确认更正' });
   expect(mocks.historySave).not.toHaveBeenCalled();
 });
 it('does not overwrite a typed amount when the historical lookup finishes later', async () => {
   let resolve; mocks.preview.mockReturnValue(new Promise(done => { resolve = done; }));
-  await render(); await edit('#manual-cost-value', '0.0000001'); await edit('#manual-cost-reason', '已核实单价');
+  await render(); await edit('#manual-cost-value', '0.0000001');
   await act(async () => resolve(candidate));
   expect(document.querySelector('#manual-cost-value').value).toBe('0.0000001');
-  expect(document.querySelector('#manual-cost-reason').value).toBe('已核实单价');
+  expect(document.querySelector('#manual-cost-reason')).toBeNull();
 });
