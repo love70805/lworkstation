@@ -1,7 +1,7 @@
 import Decimal from 'decimal.js';
 import { canonicalPlatformSku, canonicalPlatformSkc, canonicalWarehouseSku } from './identifiers';
 import { normalizePurchaseEvidenceRecord } from './erpPurchaseEvidence';
-import { detectPurchaseCostAnomalies, normalizedResolution } from './erpCostResolution';
+import { normalizedResolution } from './erpCostResolution';
 import { purchaseOrderSummary } from './erpPurchaseSelection';
 import { manualSnapshot, storeSkuKey } from './manualCostOverride';
 
@@ -47,25 +47,29 @@ export function historicalLowestCosts(rows = []) {
         exclusionReasons: reasons.filter(reason => !monthExclusions.has(reason)),
       }, index, cost.warehouseSku);
     }).filter(record => record.canonicalWarehouseSku === canonicalWarehouseSku(cost.warehouseSku) && record.eligible && !record.exclusionReasons.length);
-    const anomalies = new Map(detectPurchaseCostAnomalies(records, records).anomalies.map(item => [item.recordId, item]));
     const resolutions = cost.costDecision?.resolutions ?? cost.resolutions ?? [];
     for (const record of records) {
       const resolution = resolutions.map(item => normalizedResolution(item, cost.warehouseSku, record)).find(Boolean);
-      if (anomalies.has(record.recordId) && !resolution) continue;
+      if (record.unitPrice == null && !resolution) continue;
       const value = new Decimal(resolution?.resolvedUnitPrice ?? record.unitPrice);
       if (!value.isFinite() || !value.gt(0)) continue;
-      const unitCost = value.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber();
+      const unitCost = value.toNumber();
       if (!(unitCost > 0)) continue;
       const key = JSON.stringify([canonicalPlatformSku(cost.platformSku), canonicalPlatformSkc(cost.platformSkc)]);
       const previous = best.get(key);
       if (previous && (previous.unitCost < unitCost || previous.unitCost === unitCost && String(previous.publishedAt ?? '') >= String(cost.publishedAt ?? ''))) continue;
       const selected = { ...record, effectiveUnitPrice: value.toNumber(), resolution };
-      const decision = { resolutionStatus: 'resolved', resolutionVersion: 'inventory-lowest@1', evidenceComplete: true,
+      const decision = { resolutionStatus: 'resolved', resolutionVersion: 'inventory-lowest@2', evidenceComplete: true,
         purchaseRecords: [record], selectedRecords: [selected], selectedRecordIds: [record.recordId], resolutions: resolution ? [resolution] : [],
         unitCost, formalUnitCost: unitCost, unresolvedAnomalyCount: 0 };
-      best.set(key, { ...cost, id: `LOWEST:${cost.id}:${record.recordId}`, unitCost, accountingMode: LOWEST_ACCOUNTING,
+      best.set(key, { id: `LOWEST:${cost.id}:${record.recordId}`, workspaceId: cost.workspaceId, ledgerId: cost.ledgerId,
+        batchId: cost.batchId, sourceEnvelopeBatchId: cost.sourceEnvelopeBatchId, publishedAt: cost.publishedAt,
+        platformSku: cost.platformSku, canonicalPlatformSku: canonicalPlatformSku(cost.platformSku),
+        platformSkc: cost.platformSkc, canonicalPlatformSkc: canonicalPlatformSkc(cost.platformSkc),
+        warehouseSku: cost.warehouseSku, canonicalWarehouseSku: canonicalWarehouseSku(cost.warehouseSku), currency: cost.currency ?? 'CNY',
+        unitCost, accountingMode: LOWEST_ACCOUNTING,
         purchaseRecords: [record], selectedRecordIds: [record.recordId], costDecision: decision,
-        resolutionStatus: 'resolved', unresolvedAnomalyCount: 0, orderNumber: purchaseOrderSummary([selected]), evidenceComplete: true });
+        resolutionStatus: 'resolved', unresolvedAnomalyCount: 0, ...purchaseOrderSummary([selected]), evidenceComplete: true });
     }
   }
   return [...best.values()];

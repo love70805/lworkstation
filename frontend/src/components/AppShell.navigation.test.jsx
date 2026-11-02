@@ -73,20 +73,19 @@ it('reports a saved settings backup separately from a failed record registration
  expect(host.querySelector('.system-operation-warning').textContent).toContain('备份文件已保存');
   expect(host.textContent).not.toContain('备份导出失败');
 });
-it('switches only after seven logo clicks and indicates the persisted workspace mode solely through the inverted avatar',async()=>{
+it('toggles the sidebar immediately on every click and never changes accounting from the sidebar logo',async()=>{
  await localDb.settings.delete('inventory-accounting:W');
  mocks.member.mockResolvedValue({workspaceId:'W'});
  await act(async()=>root.render(<MemoryRouter key="secret-entry" initialEntries={['/workspace']}><ToastProvider><AppShell><p>盘点工作台</p></AppShell></ToastProvider></MemoryRouter>));
  await waitFor(()=>expect(host.querySelector('a[href="/profit"]')).not.toBeNull());
- const clickLogo=()=>host.querySelector('.brand-toggle').dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1}));
- await act(async()=>{for(let index=0;index<6;index++)clickLogo();});
+ const logo=host.querySelector('.brand-toggle');
+ for(let index=0;index<7;index++){
+   const previous=logo.getAttribute('aria-expanded');
+   await act(async()=>logo.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})));
+   expect(logo.getAttribute('aria-expanded')).not.toBe(previous);
+ }
  expect(await readAccountingMode('W')).toBe('weighted');
- await act(async()=>clickLogo());
- await waitFor(()=>expect(host.querySelector('.avatar-button .avatar').style.transform).toBe('rotate(180deg)'));
- expect(await readAccountingMode('W')).toBe('historical_lowest');
+ expect(host.querySelector('.avatar-button .avatar').style.transform).toBe('');
  expect(host.textContent).not.toMatch(/最低|开发者|切换核算/);
- await act(async()=>{for(let index=0;index<7;index++)clickLogo();});
- await waitFor(()=>expect(host.querySelector('.avatar-button .avatar').style.transform).toBe(''));
- expect(await readAccountingMode('W')).toBe('weighted');
  await localDb.settings.delete('inventory-accounting:W');
 });

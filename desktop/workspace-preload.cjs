@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld("shopeersDesktopRuntime", Object.freeze({
   desktop: true,
   version,
   appearance: savedAppearance,
+  onAccountingToggle: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('workspace:toggle-accounting', listener);
+    return () => ipcRenderer.removeListener('workspace:toggle-accounting', listener);
+  },
   startErpCollection: input => ipcRenderer.invoke('workspace:start-erp-collection', input),
   getErpCollection: () => ipcRenderer.invoke('workspace:get-erp-collection'),
   openErpLogin: () => ipcRenderer.invoke('workspace:open-erp-login'),

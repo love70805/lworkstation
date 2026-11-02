@@ -291,7 +291,7 @@ const {
   runtimeRoot,
 } = require("./extension-runtime.cjs");
 const extensionConfig = extensionStorageConfig({ port: 23125, capability: "x".repeat(43), workspaceId: "workspace-1" });
-assert.deepEqual(Object.keys(extensionConfig).sort(), ["shopeersErpInboxBaseUrl", "shopeersErpInboxCapability", "shopeersErpWorkspaceId"].sort());
+assert.deepEqual(Object.keys(extensionConfig).sort(), ["shopeersErpInboxBaseUrl", "shopeersErpInboxCapability", "shopeersErpWorkspaceId", "shopeersErpDesktopTaskUi"].sort());
 assert.throws(() => extensionStorageConfig({ port: 23125, capability: "short", workspaceId: "workspace-1" }), /配置无效/);
 const { normalizeAllowedRemoteUrl, resolveRemotePopup } = require("./remote-navigation.cjs");
 const { navigationState, navigateHistory } = require("./navigation-history.cjs");
@@ -415,7 +415,7 @@ assert.match(pkg.scripts.build, /--publish never/);
 assert.match(read("installer.nsh"), /ReadRegStr \$R0 SHELL_CONTEXT.*InstallLocation/);
 
 assert.doesNotMatch(main, /desktop:(?:toggle|close|resize|get)-inbox-popover|erpReadyNoticeUntil/);
-assert.doesNotMatch(read('shell.js'), /inboxAction\.addEventListener|inboxAction\.title|erpReadyNotice|erpStatusHint/);
+assert.doesNotMatch(read('shell.js'), /inboxAction\.title|erpReadyNotice|erpStatusHint/);
 assert.match(read('shell.html'), /<div id="inbox-status"[^>]*role="img"/);
 assert.doesNotMatch(read('shell.html'), /erp-status-hint|erp-ready-notice/);
 assert.match(read('smoke.mjs'), /erpIndicatorSmoke/);

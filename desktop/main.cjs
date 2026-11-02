@@ -1471,6 +1471,13 @@ ipcMain.handle("desktop:request-inbox", async (event, input) => {
   }
   return { status: 200, body: responseBody };
 });
+ipcMain.handle('desktop:toggle-accounting', event => {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
+  const workspace = views.get('workspace')?.webContents;
+  if (!workspace || workspace.isDestroyed()) return { ok: false };
+  workspace.send('workspace:toggle-accounting');
+  return { ok: true };
+});
 ipcMain.handle("desktop:switch-tab", (_event, tabId) => setActiveTab(tabId));
 ipcMain.on("desktop:update-popover-toggle-intent", (event) => {
   if (event.sender !== mainWindow?.webContents) return;

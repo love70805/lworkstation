@@ -11,9 +11,9 @@ const sourceRoot = path.join(workspaceRoot, 'integrations/erp-assistant-extensio
 const purchasePath = '/view/system/purchaseOrderModule/purchasingManagement.html';
 const origin = 'https://www.zhuolinkeji.cn';
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
-const sources = await Promise.all(['query-hook.js', 'result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js'].map(file => readFile(path.join(sourceRoot, file), 'utf8')));
+const sources = await Promise.all(['query-hook.js', 'result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'desktop-task-preview.js', 'content.js'].map(file => readFile(path.join(sourceRoot, file), 'utf8')));
 
-async function createPage(url, { topWindow, connected = true, earlySessionResponse = false } = {}) {
+async function createPage(url, { topWindow, connected = true, earlySessionResponse = false, desktopTaskUi = false } = {}) {
   const window = new Window({ url });
   if (topWindow) Object.defineProperty(window, 'top', { value: topWindow });
   const messages = [], calls = [], intervals = [];
@@ -23,9 +23,10 @@ async function createPage(url, { topWindow, connected = true, earlySessionRespon
     lastError: null,
     sendMessage(message, callback) {
       messages.push(JSON.parse(JSON.stringify(message)));
-      callback(connected ? { ok: true, status: 'success' } : { ok: false, status: 'failed' });
+      callback(connected ? { ok: true, status: 'success', tasks: [{ executionTarget: 'desktop', ledgerPeriod: '2026-10', status: 'running', summary: { total: 231, collected: 30, delivered: 25, adopted: 107 }, batches: [] }] } : { ok: false, status: 'failed' });
     },
   } };
+  window.chrome.storage = { local: { get: (_keys, callback) => callback({ shopeersErpDesktopTaskUi: desktopTaskUi }) } };
   window.fetch = async (...args) => {
     calls.push(args);
     return { ok: true, status: 200, headers: { get: () => 'application/json' }, clone() { return this; }, json: async () => ({ code: 0, data: [], count: 0 }) };
@@ -38,6 +39,23 @@ async function createPage(url, { topWindow, connected = true, earlySessionRespon
 }
 
 export async function verifyErpPageStartup() {
+  const desktop = await createPage(origin + '/view/console/index.html', { desktopTaskUi: true });
+  try {
+    assert.ok(desktop.window.document.querySelector('.erpa-task-preview'));
+    desktop.window.document.getElementById('erpa-cost-trigger').click();
+    await tick();
+    assert.match(desktop.window.document.querySelector('.erpa-task-body').textContent, /25 \/ 231.*107 个 SKU/);
+    assert.equal(desktop.window.document.querySelector('#erpa-recalculate,#erpa-search,#erpa-targets'), null);
+    desktop.window.history.pushState({}, '', purchasePath);
+    desktop.window.dispatchEvent(new desktop.window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: origin + '/purchase/purchase/v1/purchase-order-page?sku=FOREGROUND' } }));
+    desktop.window.dispatchEvent(new desktop.window.Event('pageshow'));
+    await tick();
+    assert.equal(desktop.calls.length, 0, 'managed preview never issues ERP business reads or changes foreground pagination');
+    assert.ok(desktop.messages.filter(message => message.type === 'shopeers.erp.collectionTask').every(message => message.payload.action === 'list'));
+    desktop.window.document.getElementById('erpa-cost-root').remove();
+    await tick();
+    assert.equal(desktop.window.document.querySelectorAll('.erpa-task-preview').length, 1, 'managed preview repairs after body replacement');
+  } finally { await desktop.destroy(); }
   const early = await createPage(origin + '/', { earlySessionResponse: true });
   try {
     assert.ok(early.messages.some(message => message.type === 'shopeers.erp.reportStatus' && message.payload.sessionState === 'authenticated'), 'root homepage session response before isolated init is replayed through the real bridge');

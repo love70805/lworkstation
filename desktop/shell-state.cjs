@@ -45,6 +45,15 @@
   }
 
   return {
+    createTitleClickHandler: (trigger, now = Date.now) => {
+      let count = 0, previous = 0;
+      return () => {
+        const time = now();
+        count = time - previous < 600 ? count + 1 : 1;
+        previous = time;
+        if (count === 7) { count = 0; trigger(); }
+      };
+    },
     classifyErpState,
     getAddressPresentation,
     getSurfacePresentation,

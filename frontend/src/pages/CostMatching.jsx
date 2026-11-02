@@ -1,3 +1,4 @@
+import { revealErpCollectionProgress } from '../components/ErpBackgroundNotice';
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { erpLedgerVersion } from '../domain/erpLedgerVersion';
 import { runDerivedComputation } from '../data/repositories/derivedComputationService';
@@ -19,9 +20,9 @@ import CostMatchGroupRows, { CostMatchTableHeader } from "./CostMatchGroupRows";
 import { ErpPendingSkuList } from './ErpInboxReviewPanel';
 import { buildErpInboxReview, readErpInboxReviewEvidence } from '../lib/erpInboxReview';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { AlertCircle, CheckCircle2, ClipboardPaste, Copy, Download, FileJson, FileUp, Inbox, Info, ListChecks, PlugZap, Upload, Warehouse } from "lucide-react";
+import { AlertCircle, CheckCircle2, ClipboardPaste, FileJson, FileUp, Inbox, Info, ListChecks, PlugZap, Upload, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
 import ErpAssistantSetup from "../components/ErpAssistantSetup";
@@ -42,7 +43,6 @@ import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
 import { groupImportedSales } from "../lib/profit";
 import { registerErpBridgeRequest, controlErpCollectionTask } from "../lib/erpInboxTransport";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, saveProfitFilter } from "../lib/profitFilter";
-import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, matchesCostQuery, groupAuxiliaryCostRows, groupCostMatchesBySkc, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "../lib/costMatching";
 import { clearCostDraft, invalidateLegacyCostDrafts, readRestorableCostDraft, writeCostDraft } from "../lib/costMatchingDraft";
 import { recoverCompleteErpCostDrafts } from "../lib/erpLegacyDraftRecovery";
@@ -67,29 +67,6 @@ async function sha256Text(value) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((item) => item.toString(16).padStart(2, "0")).join("");
-}
-
-async function writeClipboardText(value) {
-  const text = String(value ?? "");
-  try {
-    if (typeof navigator.clipboard?.writeText === "function") {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    // Some embedded browsers expose the Clipboard API but reject writes.
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  const copied = document.execCommand?.("copy") ?? false;
-  textarea.remove();
-  if (!copied) throw new Error("当前浏览器未授予剪贴板写入权限，请检查浏览器权限后重试。");
 }
 
 async function readCostFileText(file) {
@@ -203,6 +180,12 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const requestRecords = useLiveQuery(() => queryLedgerId ? listErpCostRequests(queryLedgerId) : [], [queryLedgerId], []);
   const collection = useErpCollectionTasks(snapshot?.ledger?.workspaceId, snapshot?.ledger?.id);
   const collectionTask = collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash !== '#erp-collection-progress' || !collectionTask) return;
+    const frame = requestAnimationFrame(revealErpCollectionProgress);
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash, collectionTask?.taskId]);
   const activeCollection = isActiveErpCollection(collectionTask) ? collectionTask : null;
   // Optional materials no longer count as active reads, but retain the original
   // request so the registration timer cannot supersede a long cost run's link.
@@ -225,12 +208,10 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const resolutionSaveRef = useRef(false);
   const [parseError, setParseError] = useState("");
   const [publishing, setPublishing] = useState(false);
-  const [copyingSkcs, setCopyingSkcs] = useState(false);
   const [registrationState, setRegistrationState] = useState({ status: "idle", message: "" });
   const [registrationRetry, setRegistrationRetry] = useState(0);
   const [incomingCandidate, setIncomingCandidate] = useState(null);
   const [manualTarget, setManualTarget] = useState(null);
-  const [exportingTemplate, setExportingTemplate] = useState(false);
   const [erpAssistantOpen, setErpAssistantOpen] = useState(false);
   const [manualInputOpen, setManualInputOpen] = useState(false);
   const [warehouseHistoryOpen, setWarehouseHistoryOpen] = useState(false);
@@ -405,7 +386,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     const previous = previousRegistrationRef.current;
     const noScope = !registrationSkcs.length;
     const conflict = !activeCollection && scopeHasIdentityConflict;
-    const cancelledLedger = previous && (previous.scope !== registrationScope || locked || conflict || noScope)
+    const cancelledLedger = previous && previous.ledger.id === snapshot?.ledger?.id && (previous.scope !== registrationScope || locked || conflict || noScope)
       ? previous.ledger
       : snapshot?.ledger && (locked || conflict || noScope) ? snapshot.ledger : null;
     if (cancelledLedger) {
@@ -754,37 +735,6 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     }
   };
 
-  const copySkcs = async () => {
-    if (!snapshot?.ledger || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)) return;
-    setCopyingSkcs(true);
-    try {
-      await writeClipboardText(displayPlatformSkcs.join("\n"));
-      notify(`已复制 ${displayPlatformSkcs.length} 个平台 SKC。`);
-    } catch (error) {
-      notify(`复制 SKC 失败：${error.message}`, "error");
-    } finally {
-      setCopyingSkcs(false);
-    }
-  };
-
-  const downloadCostTemplate = async () => {
-    setExportingTemplate(true);
-    try {
-      await exportWorkbook([{
-        平台SKU: "",
-        平台SKC: "",
-        仓库SKU: "",
-        "关联单号": "",
-        单件平均成本: "",
-        "供应商1688链接": "",
-      }], "erp-cost-template.xlsx", "ERP成本导入模板");
-      notify("WPS/Excel 成本导入模板已下载。填写后可直接从“导入 ERP 成本结果”导回。", "success");
-    } catch (error) {
-      notify(`成本模板下载失败：${error.message}`, "error");
-    } finally {
-      setExportingTemplate(false);
-    }
-  };
 
   const publish = async () => {
     if (!snapshot?.ledger || publishing) return;
@@ -1086,7 +1036,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       <textarea className="cost-textarea cost-manual-textarea mono" value={sourceText} disabled={locked} onChange={(event) => { setSourceText(event.target.value); setSourceName("手动输入"); setParsedRows(null); setBatchEnvelope(null); releaseLoadedInbox(); setParseError(""); }} placeholder={buildErpCostTemplate()} aria-label="手动输入 ERP 成本批次 JSON、TSV 或 CSV" />
       {parseError ? <div className="import-error" role="alert"><AlertCircle size={18} />{parseError}</div> : null}
       <div className="cost-source-actions cost-manual-actions"><Button icon={ClipboardPaste} disabled={locked} onClick={pasteFromClipboard}>粘贴 ERP 结果</Button><Button variant="ghost" disabled={locked} onClick={() => { setSourceText(buildErpCostTemplate()); setSourceName("template.tsv"); setParsedRows(null); setBatchEnvelope(null); releaseLoadedInbox(); setParseError(""); }}>插入列模板</Button><Button variant="ghost" icon={FileUp} disabled={locked} onClick={() => fileInputRef.current?.click()}>导入成本文件</Button></div>
-      {effectiveRequestId ? <p className="cost-request-note">已关联 ERP 请求：<code>{effectiveRequestId}</code></p> : <p className="cost-request-note warning-text">{registrationState.status === "failed" ? "回传关联登记失败，请关闭此窗口后点击“重试登记”。" : "正在自动登记回传关联，请等待登记完成。"}复制平台 SKC 仅用于方便 ERP 查询。</p>}
+      {effectiveRequestId ? <p className="cost-request-note">已关联 ERP 请求：<code>{effectiveRequestId}</code></p> : <p className="cost-request-note warning-text">{registrationState.status === "failed" ? "回传关联登记失败，请关闭此窗口后点击“重试登记”。" : "正在自动登记回传关联，请等待登记完成。"}</p>}
     </Modal>
   );
 
@@ -1143,7 +1093,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       {usePersistedReconciliation && !persistedReconciliationReady ? <p role="status" className="cost-correction-help">正在后台更新成本证据列表，当前保留上次列表；已保存成本按最新结果核算。</p> : null}
       {viewedEvidenceBatch ? <Panel className="erp-review-current-batch"><div><strong>当前采购证据 · 第 {viewedEvidenceBatch.index} / {inboxReview.batches.length} 批</strong><p>当前核对草稿保留。全部批次与待处理 SKU可随时返回查看。</p></div><Button onClick={openInboxOverview}>返回全部 {inboxReview.batches.length} 批次</Button></Panel> : null}
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
-      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 账本月份 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={displayPlatformSkcs.length ? Copy : AlertCircle} loading={copyingSkcs} disabled={copyingSkcs || displayPlatformSkcs.length === 0 || (!locked && !registrationReady)} onClick={copySkcs}>{displayPlatformSkcs.length ? `复制 ${displayPlatformSkcs.length} 个平台 SKC` : hasFilteredRows ? "待补平台 SKC" : "当前范围无明细"}</Button><Button icon={Download} loading={exportingTemplate} disabled={exportingTemplate} onClick={downloadCostTemplate} title="下载可用 WPS/Excel 打开的成本导入模板">下载成本导入模板</Button><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
+      <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 账本月份 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters searchCosts filter={profitFilter} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={formalSalesLines} onChange={changeScope} /> : null}
       <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId} ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={() => setRegistrationRetry(value => value + 1)} />
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />

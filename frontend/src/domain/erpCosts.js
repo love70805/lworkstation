@@ -148,7 +148,9 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions, period) {
   const publishedWithinPeriod = publishedScoped && isErpCostWithinPeriod(row, period);
   const adoptedCost = publishedScoped ? finiteDecimal(row.unitCost) : null;
   const trustedPublishedLegacy = period == null && Boolean(row.publishedAt) && Boolean(previewCost?.gt(0));
-  const decision = warehouseSkuText && purchaseRecords.length > 0
+  const minimumDecision = period == null && row.accountingMode === 'historical_lowest'
+    && row.costDecision?.resolutionVersion === 'inventory-lowest@2' && evidenceComplete ? row.costDecision : null;
+  const decision = minimumDecision ?? (warehouseSkuText && purchaseRecords.length > 0
     ? calculateWarehouseCostDecision({
       warehouseSku: warehouseSkuText,
       purchaseRecords,
@@ -156,7 +158,7 @@ function normalizeCostRow(row, index, defaultBatchId, resolutions, period) {
       evidenceComplete,
       period,
     })
-    : null;
+    : null);
 
   if (!platformSkuText && !warehouseSkuText) reasons.push("missing_sku");
   if (!decision && (!previewCost || !previewCost.gt(0))) reasons.push("invalid_unit_cost");

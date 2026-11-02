@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { classifyErpState, getSurfacePresentation } = require('./shell-state.cjs');
+const { classifyErpState, getSurfacePresentation, createTitleClickHandler } = require('./shell-state.cjs');
+{
+  let time=1000, triggered=0;
+  const click=createTitleClickHandler(()=>triggered++,()=>time);
+  for(let i=0;i<6;i++){click();time+=30;}
+  assert.equal(triggered,0);click();assert.equal(triggered,1);
+  time+=700;click();time+=700;
+  for(let i=0;i<6;i++){click();time+=30;}
+  assert.equal(triggered,1,'a pause resets the click sequence');
+  click();assert.equal(triggered,2);
+}
 const extension = {
   ready: true, context: 'extension-isolated', handshakeVersion: 1, workspaceId: 'test-workspace',
   lastSeenAt: new Date().toISOString(), sessionState: 'authenticated', pageState: 'page_ready', queryAvailable: false,

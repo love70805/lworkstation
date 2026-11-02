@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "candidateOnly": true,
-  "integrationBranch": "codex/supplier-cost-workflow-1-0-6",
+  "integrationBranch": "codex/erp-task-costs-1-0-7",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "0d86cd4dcce5fe999aa21d5e60137c1c4436d945"
+      "commit": "ac0a333e3c417ad197d8bf591482cd6beed8a763"
     }
   ]
 }

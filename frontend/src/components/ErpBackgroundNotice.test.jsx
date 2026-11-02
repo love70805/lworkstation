@@ -3,11 +3,23 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import ErpBackgroundNotice, { ErpBackgroundNoticeContent } from './ErpBackgroundNotice';
 import { publishErpCollectionActivity, publishErpCollectionReceiptError, readErpCollectionActivity } from '../lib/erpCollectionActivity';
 
 const task = { taskId: 'T', workspaceId: 'NOTICE-W', ledgerId: 'LEDGER-A', ledgerPeriod: '2026-09', status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] };
+
+it('reveals and focuses the progress panel even when the user is already on the cost page', async () => {
+  const container=document.createElement('div'),panel=document.createElement('section');
+  panel.id='erp-collection-progress';panel.tabIndex=-1;panel.scrollIntoView=vi.fn();document.body.append(container,panel);
+  const root=createRoot(container);
+  try {
+    await act(async()=>root.render(<MemoryRouter initialEntries={['/profit?ledger=LEDGER-A&view=cost']}><ErpBackgroundNoticeContent tasks={[task]}/></MemoryRouter>));
+    expect(container.querySelector('a').getAttribute('href')).toContain('#erp-collection-progress');
+    await act(async()=>{container.querySelector('a').click();await new Promise(resolve=>setTimeout(resolve,10));});
+    expect(panel.scrollIntoView).toHaveBeenCalledOnce();expect(document.activeElement).toBe(panel);
+  } finally {await act(async()=>root.unmount());container.remove();panel.remove();}
+});
 
 it('shows the actual background stage and links to that task instead of the current page month', () => {
   const html = renderToStaticMarkup(<MemoryRouter><ErpBackgroundNoticeContent tasks={[task]} /></MemoryRouter>);

@@ -1,4 +1,10 @@
 /* Scoped Lworkstation palette; never change the host ERP document theme. */
+#erpa-cost-root.erpa-task-preview { inset: auto 18px 76px auto; width: min(440px, calc(100vw - 36px)); height: auto; padding: 0; background: transparent; }
+#erpa-cost-root.erpa-task-preview.erpa-open { display: block; }
+#erpa-cost-root.erpa-task-preview .erpa-panel { width: 100%; max-height: 65vh; overflow: auto; margin: 0; }
+.erpa-task-body { padding: 18px; color: var(--erpa-text); line-height: 1.65; }
+.erpa-task-body p { margin: 10px 0; }
+.erpa-task-body progress { width: 100%; margin-top: 12px; accent-color: var(--erpa-primary); }
 #erpa-cost-root, #erpa-cost-trigger {
   --erpa-primary: #2563eb; --erpa-primary-hover: #1d4ed8; --erpa-primary-soft: #eaf2ff; --erpa-primary-border: #b8cff7;
   --erpa-surface: #ffffff; --erpa-background: #f6f7f9; --erpa-hover: #f8faff; --erpa-border: #dce1e7; --erpa-border-strong: #c5cdd8;

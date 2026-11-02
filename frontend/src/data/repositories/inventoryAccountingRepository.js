@@ -1,6 +1,8 @@
 import { db } from '../db/clientDatabase';
+import Dexie from 'dexie';
 import { accountingMode, accountingSettingKey, historicalLowestCosts, LOWEST_ACCOUNTING } from '../../domain/inventoryAccounting';
-import { cachedDerived, sourceRevision } from '../db/derivedCache';
+import { cachedDerived } from '../db/derivedCache';
+import { inventoryEvidenceRevision, observeInventoryRevision } from '../db/inventoryRevisions';
 import { canonicalPlatformSku, canonicalPlatformSkc } from '../../domain/identifiers';
 import { validateErpCostBatchEnvelope } from '../../domain/erpCostBatchEnvelope';
 
@@ -21,7 +23,7 @@ export async function toggleAccountingMode(workspaceId) {
   });
 }
 export async function readHistoricalLowestCosts(workspaceId) {
-  return cachedDerived({ scope: [workspaceId], formula: 'inventory-lowest@1', revision: sourceRevision(), persist: false, compute: async () => {
+  const compute = async () => {
     const batches = await db.erpCostBatches.where('workspaceId').equals(workspaceId).toArray();
     const published = new Set(batches.filter(batch => batch.status === 'published').map(batch => batch.id));
     const rows = await db.erpCostRows.filter(row => published.has(row.batchId) && (!row.workspaceId || row.workspaceId === workspaceId)).toArray();
@@ -40,7 +42,12 @@ export async function readHistoricalLowestCosts(workspaceId) {
       } catch { /* Unverified or incompatible receipts cannot supply a minimum. */ }
     }
     return historicalLowestCosts(rows);
-  } });
+  };
+  // Transactions must read their own uncommitted state and must not wait on a
+  // separate cache database. Only ordinary reads publish reusable projections.
+  if (Dexie.currentTransaction) return compute();
+  await observeInventoryRevision(true);
+  return cachedDerived({ scope: [workspaceId], formula: 'inventory-lowest@2-open-prices-orders', revisionReader: inventoryEvidenceRevision, revision: inventoryEvidenceRevision(), compute });
 }
 export async function accountingCosts(ledger, costs, mode, salesRows = []) {
   if (mode !== LOWEST_ACCOUNTING) return costs;

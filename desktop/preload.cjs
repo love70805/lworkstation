@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("desktop", {
   getState: () => ipcRenderer.invoke("desktop:get-state"),
+  toggleAccounting: () => ipcRenderer.invoke('desktop:toggle-accounting'),
   startupAction: action => ipcRenderer.invoke('desktop:startup-action', action),
   noteUpdatePopoverToggleIntent: () => ipcRenderer.send("desktop:update-popover-toggle-intent"),
   toggleUpdatePopover: (anchor) => {

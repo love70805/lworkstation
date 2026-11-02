@@ -32,7 +32,8 @@ function normalizeCandidate(candidate, expectedCanonicalSku, kind) {
 
   const issues = [];
   const rawAmount = positiveAmount(candidate.unitCost ?? candidate.amount);
-  const amount = kind === "erp" ? rawAmount?.toDecimalPlaces(4, Decimal.ROUND_DOWN) : rawAmount;
+  const amount = kind === "erp" && candidate.accountingMode !== 'historical_lowest'
+    ? rawAmount?.toDecimalPlaces(4, Decimal.ROUND_DOWN) : rawAmount;
   const currency = String(candidate.currency ?? DEFAULT_CURRENCY).trim().toUpperCase();
   const candidateSku = text(candidate.platformSku);
 

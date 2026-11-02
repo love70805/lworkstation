@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { createBrowserRouter, RouterProvider, Navigate, Route, Routes } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
 import SelectionPrestorageAutomation from "./components/SelectionPrestorageAutomation";
+import DesktopAccountingBridge from './components/DesktopAccountingBridge';
 import LegacyCostRedirect from './components/LegacyCostRedirect';
 import AppRouteError from './components/AppRouteError';
 import WorkspacePreferenceRecoveryGate from './components/WorkspacePreferenceRecoveryGate';
@@ -268,6 +269,7 @@ function AppContent() {
           <CloudAuthenticationGate>
             <WorkspacePreferenceRecoveryGate>
             <MemberContextGate>
+              <DesktopAccountingBridge />
               <ErpInboxListener />
               <SelectionPrestorageAutomation />
               <LegacySelectionInboxRecovery />
