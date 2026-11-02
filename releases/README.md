@@ -717,6 +717,12 @@ candidates/0.4.6/：导入/ERP 修复验收通过，1326 前端测试、构建�
 
 候选 `candidates/0.4.7/`；软件提交 d365a56；证据 `archive/erp-real-timeout/`。1326 前端测试、构建、完整 ERP 门禁、16 组桌面 verify、隐藏 smoke、636 安装文件/589 生产输入及 PR #171/main CI 通过。61.6 MB/110 SKC 真实副本复现并修复 4 秒业务保存超时，28 份原始证据哈希保持；真实 ERP 分批回传与重启续读通过。安装包 118773220 字节，SHA256 `17C08A29042D62E67964D14F445E4B1879B3C6A5E66A081FDA7E248EB2C3912A`。原数据/会话/安装备份后已安装同一候选，原工作区全新 110 SKC/6 批成本/6 批资料任务完成并自动采用 254 SKU；5 个 ERP 空映射仍显式保留。v0.4.7 固定 8ee4a5b，已公开稳定 Latest；四公开资产匿名完整哈希及生产更新入口通过，正常工作台已恢复，见 [记录](../docs/RELEASE_0.4.7.md)。
 
-## 1.0.5 — 候选验收与发布中（2026-11-02）
+## 1.0.5 — 已验收并公开稳定（2026-11-02）
 
-本批涵盖利润导出、逐店代发、筛选/搜索、人工成本简化、ERP 错误定位与单号补取；内置助手 8.0.52。规范候选位置 `releases/candidates/1.0.5/`，必要证据 `archive/profit-workflow-1-0-5/`。完整回归与用户路径已通过，实包/CI/公开状态分阶段登记，不操作真实业务数据或执行本机安装。[发布记录](../docs/RELEASE_1.0.5.md)。
+2026-11-02T14:16:32Z 已[公开稳定 Latest](https://github.com/love70805/lworkstation/releases/tag/v1.0.5)（非草稿、非预发布）。内置 ERP Assistant 8.0.52，现有自动更新继续可用。
+
+实际安装包内 238 个程序文件、195 个生产输入及 141 个前端资源逐字节一致；隐藏实包 smoke 通过，实际可见窗口为 0。规范安装包 `releases/candidates/1.0.5/`，116151249 字节，SHA256 `81947F187539B39D4298EC8DFDAD45B5596087FD83A630B4E3A6F186E81D4E73`。
+
+[PR #308](https://github.com/love70805/lworkstation/pull/308)、[PR CI](https://github.com/love70805/lworkstation/actions/runs/41458585959) 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/41459456446)均通过。验收源码 `1e90e70160887a30a4d6336e119eea2d43ec1790` 与软件合并提交 `96b5c68bcb609f417b51e54ad207e593a9f5cd7c` 的跟踪树一致；标签 `v1.0.5` 固定于该软件合并提交。四资产上传状态、字节数及 SHA256 digest 已由发布服务确认，更新清单 SHA512 与候选安装包一致；公开下载无需验证。
+
+本批约 1.76 GB 可重建产物已清理，保留唯一规范候选、关键截图、日志、哈希和复现脚本。当前执行树受应用主检出保护，保留精简源码；其他工作树、共享依赖缓存和用户数据保持。必要本机证据 `archive/profit-workflow-1-0-5/`，未安装或操作真实业务数据。 [发布记录](../docs/RELEASE_1.0.5.md)。
