@@ -1,3 +1,4 @@
+import { normalizeErpDiagnostic } from './erpDiagnostics';
 import {
   DEFAULT_CURRENCY,
   ERP_COST_ALGORITHM_VERSION,
@@ -322,8 +323,8 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
       if (typeof item === "string") return item.slice(0, 500);
       if (!item || typeof item !== "object" || Array.isArray(item)) return null;
       return Object.fromEntries(Object.entries(item)
-        .filter(([key]) => !/(token|cookie|authorization|filter)/i.test(key))
-        .map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 500) : value])
+        .filter(([key]) => !/(token|cookie|authorization|filter|password|secret|session|capability|credential)/i.test(key))
+        .map(([key, value]) => [key, key === "erpResponse" ? normalizeErpDiagnostic(value) : typeof value === "string" ? value.slice(0, 500) : value])
         .filter(([, value]) => value == null || ["string", "number", "boolean"].includes(typeof value)));
     }).filter(Boolean);
   }

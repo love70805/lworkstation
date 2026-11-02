@@ -1,3 +1,5 @@
+import { searchKey } from "./textSearch";
+
 const STORAGE_PREFIX = "shopeers:profit-filter:";
 const LAST_STORAGE_KEY = `${STORAGE_PREFIX}last`;
 const SCOPE_PREFIX = `${STORAGE_PREFIX}scope:`;
@@ -140,13 +142,13 @@ export function filterProfitRowsByScope(rows = [], filter = DEFAULT_PROFIT_FILTE
 const profitSearchText = new WeakMap();
 
 export function searchProfitRows(rows = [], value = "") {
-  const query = String(value ?? "").trim().toLowerCase();
+  const query = searchKey(value);
   if (!query) return rows;
   return rows.filter((row) => {
     let text = profitSearchText.get(row);
     if (text === undefined) {
-      text = [row.groupSkc ?? row.platformSkc, row.platformSku, row.attribute, row.supplierNumber, row.store]
-        .map((field) => String(field ?? "").toLowerCase()).join(" ");
+      text = [row.groupSkc ?? row.platformSkc, row.platformSku, row.attribute, row.supplierNumber, row.store, row.orderNumber, ...(row.costPurchaseRecords ?? []).flatMap(record => [record.order1688, record.purchaseOrderNo, record.purchaseOrderId])]
+        .map(searchKey).join(" ");
       profitSearchText.set(row, text);
     }
     return text.includes(query);

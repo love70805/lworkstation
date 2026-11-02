@@ -2,12 +2,12 @@ import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 import { dispatchOrderHeaders } from './dispatchOrderNumber';
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@8-deduction-store-mapping";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@9-dispatch-store";
 export const DEDUCTION_STORE_RULE = 'deduction-store@1-sh-number';
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
   date: ["日期", "登记日期"],
-  store: ["店铺", "店铺名称"],
+  store: ["店铺", "店铺名称", "店铺号", "店铺编号"],
   platformSkc: ["SKC", "skc", "平台SKC"],
   supplierNumber: ["供方货号", "货号"],
   businessId: ["订单号", "补扣款单号", "扣款单号", "单号"],
@@ -142,6 +142,7 @@ export function normalizeSupplementCandidate(input, { ledger, stores }) {
   const rows = (input.rows ?? []).map(raw => {
     const { id, batchId, workspaceId, ledgerId, ...row } = raw;
     if (row.kind !== input.kind) throw new Error("补充数据类型不一致。");
+    if (input.kind === 'dispatch' && row.store && !stores.includes(row.store)) throw new Error(`代发店铺 ${row.store} 不在本月账本中。`);
     if (input.kind === "deduction" && !stores.includes(row.store)) throw new Error(`扣款店铺 ${row.store || "未映射"} 不在账本基础中。`);
     if (!row.manual && (!row.fileHash || !row.sourceSheet || !(Number(row.sourceRow) >= 1))) throw new Error("源行缺少可追溯位置。");
     return { ...row, ...(input.kind === "dispatch" ? {quantityExact:exact(row.quantityExact,{nonnegative:true})} : {signedAmountExact:exact(row.signedAmountExact)}) };
@@ -158,7 +159,7 @@ export function normalizeSupplementCandidate(input, { ledger, stores }) {
       if (!previous) businessIds.set(business,row);
     }
   }
-  const quantityExact = input.kind === "dispatch" ? exact(input.mode === "manual" ? input.adoptedQuantityExact : exactSum(rows,"quantityExact"),{nonnegative:true}) : null;
+  const quantityExact = input.kind === "dispatch" ? exact(input.mode === "manual" && !rows.length ? input.adoptedQuantityExact : exactSum(rows,"quantityExact"),{nonnegative:true}) : null;
   if(input.kind==='dispatch'&&(!/^\d+$/.test(quantityExact)||rows.some(row=>!/^\d+$/.test(row.quantityExact))))throw new Error('代发数量必须为非负整数。');
   if (input.kind === "dispatch" && !rows.length && input.mode !== "manual") throw new Error("没有有效代发记录，请检查来源和本人筛选。");
   if (input.kind === "deduction" && !rows.length) throw new Error("扣款尚未取得；真实零扣款请明确录入零值。");

@@ -37,8 +37,8 @@ it('provides one direct formal action and saves the checked preview with the led
  expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial',baseReportId:undefined},{expectedFingerprint:'checked'});expect(mock.download).toHaveBeenCalledWith(formal);
  expect(document.querySelector('[role=dialog]')).toBeNull();expect(container.textContent).toContain('正式利润表已保存');
 });
-it('offers the unreceived-deduction path and disables it until dispatch exists',async()=>{
- await mount({deduction:null,dispatch:null});expect(button('预览正式利润表')).toBeUndefined();expect(button('预览未扣款报告').disabled).toBe(true);
+it('allows the unreceived-deduction report without recording dispatch',async()=>{
+ await mount({deduction:null,dispatch:null});expect(button('预览正式利润表')).toBeUndefined();expect(button('预览未扣款报告').disabled).toBe(false);
  expect(button('登记代发')).toBeDefined();expect(button('登记扣款')).toBeDefined();
 });
 it('uses the current frozen base when deductions arrive and makes the pending result explicit',async()=>{

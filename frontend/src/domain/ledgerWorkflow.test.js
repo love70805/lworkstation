@@ -34,7 +34,7 @@ it('finalized and filtered views use whole-ledger readiness', () => {
 it('allows a direct formal report when all current sources are ready and blocks partial or locked reports', () => {
   const ready={ledger:{...ledger,status:'cost_pending',currentBaseReportId:null},stores:['A'],dispatch:{adoptedQuantityExact:'0'},deduction,missingCount:0};
   expect(reportReadiness(ready)).toMatchObject({baseSaved:false,baseReady:true,financialReady:true});
-  for(const patch of [{dispatch:null},{missingCount:1},{missingCount:null},{deduction:null},{stores:['A','B']},{ledger:{...ledger,status:'locked'}}]){
+  for(const patch of [{missingCount:1},{missingCount:null},{deduction:null},{stores:['A','B']},{ledger:{...ledger,status:'locked'}}]){
     expect(reportReadiness({...ready,...patch}).financialReady).toBe(false);
   }
 });

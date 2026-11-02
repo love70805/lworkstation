@@ -45,7 +45,7 @@
         const apiGet = (path, params, signal, context, run) => requestApi(path, params, signal, context);
         function list(response, label) {
             if (response?.code === 0 && Number(response.count) === 0 && (response.data === '' || response.data == null)) return [];
-            if (response?.code !== 0 || !Array.isArray(response.data)) throw new Error(label + ': invalid_response');
+            if (response?.code !== 0 || !Array.isArray(response.data)) throw Object.assign(new Error(label + ': ERP 返回非成功状态或无效列表'), { erpResponse: response?.__erpDiagnostic || policy.diagnosticResponse(response) });
             return response.data;
         }
         function count(response) {
@@ -59,11 +59,12 @@
             const cached = getCache(cacheKey);
             if (!refresh && cached?.complete === true && Array.isArray(cached.records)) return cached;
             const records = new Map();
-            let expected = null, pageCount = 0;
+            let expected = null, pageCount = 0, erpResponse = '';
             const reasons = [];
             try {
                 for (let page = 1; page <= MAX_PAGES; page += 1) {
                     const response = await bounded(() => apiGet(PRODUCT_PATH, { composite: 1, page, limit: LIMIT, skuGroup: skc }, run.controller.signal, '商品档案第 ' + page + ' 页'), run);
+                    erpResponse = response?.__erpDiagnostic || policy.diagnosticResponse(response);
                     const data = list(response, 'product-page');
                     pageCount += 1;
                     const reported = count(response);
@@ -77,7 +78,7 @@
                     onPage(pageCount, expected == null ? null : Math.max(1, Math.ceil(expected / LIMIT)));
                     if (expected != null && records.size > expected) throw new Error('product_count_mismatch');
                     if (expected != null && records.size === expected) {
-                        const result = { records: [...records.values()], pageCount, complete: true, reasons: [] };
+                        const result = { records: [...records.values()], pageCount, complete: true, reasons: [], erpResponse };
                         setCache(cacheKey, result);
                         return result;
                     }
@@ -91,29 +92,30 @@
             } catch (error) {
                 if ((run.controller.signal.aborted && !run.budgetExpired) || interrupted(error)) throw error;
                 reasons.push(String(error?.message || error));
-                return { records: [...records.values()], pageCount, complete: false, reasons };
+                return { records: [...records.values()], pageCount, complete: false, reasons, erpResponse: error.erpResponse || erpResponse };
             }
         }
         async function mappings(warehouseSku, run, refresh = false) {
             const cacheKey = 'catalog_mappings_complete_v1_' + key(warehouseSku);
             const cached = getCache(cacheKey);
             if (!refresh && cached?.complete === true && Array.isArray(cached.catalogMappings)) return cached;
-            let data = [];
+            let data = [], erpResponse = '';
             try {
                 const response = await bounded(() => apiGet(MAPPING_PATH, { productId: warehouseSku }, run.controller.signal, '仓库 SKU ' + warehouseSku + ' 平台映射'), run);
+                erpResponse = response?.__erpDiagnostic || policy.diagnosticResponse(response);
                 data = list(response, 'product-info-sku');
                 const reported = count(response);
                 if (reported == null || reported !== data.length) throw new Error('mapping_count_mismatch');
                 if (data.some(item => key(item?.associatedProductId) !== key(warehouseSku))) throw new Error('mapping_warehouse_mismatch');
                 const catalogMappings = policy.normalizeCatalogMappings(data, warehouseSku);
-                const result = { catalogMappings, mappings: policy.normalizeMappings(catalogMappings), complete: true, reasons: [], recordCount: data.length };
+                const result = { catalogMappings, mappings: policy.normalizeMappings(catalogMappings), complete: true, reasons: [], erpResponse, recordCount: data.length };
                 setCache(cacheKey, result);
                 return result;
             } catch (error) {
                 if ((run.controller.signal.aborted && !run.budgetExpired) || interrupted(error)) throw error;
                 const safe = data.filter(item => key(item?.associatedProductId) === key(warehouseSku));
                 const catalogMappings = policy.normalizeCatalogMappings(safe, warehouseSku);
-                return { catalogMappings, mappings: policy.normalizeMappings(catalogMappings), complete: false, reasons: [String(error?.message || error)], recordCount: safe.length };
+                return { catalogMappings, mappings: policy.normalizeMappings(catalogMappings), complete: false, reasons: [String(error?.message || error)], erpResponse: error.erpResponse || erpResponse, recordCount: safe.length };
             }
         }
         async function directory(querySkcs, run, { refreshSkcs = [], targetType = 'skc' } = {}) {
@@ -140,9 +142,9 @@
                 }
             }
             const targetStates = states.map((state, index) => ({ [targetType === 'sku' ? 'platformSku' : 'platformSkc']: scope[index], complete: state.complete,
-                warehouseSkus: state.records.map(record => String(record.itemId)), message: state.reasons.join(';') }));
+                erpResponse: state.erpResponse || '', warehouseSkus: state.records.map(record => String(record.itemId)), message: state.reasons.join(';') }));
             return { results: [...results.values()], complete: !reasons.length, reasons: unique(reasons), pageCount, recordCount,
-                targets: targetStates, failures: targetStates.filter(target => !target.complete).map(({ platformSkc, platformSku, message }) => ({ ...(platformSkc ? { platformSkc } : { platformSku }), message })) };
+                targets: targetStates, failures: targetStates.filter(target => !target.complete).map(({ platformSkc, platformSku, message, erpResponse }) => ({ erpResponse, ...(platformSkc ? { platformSkc } : { platformSku }), message })) };
         }
         async function collectScoped(querySkcs, run, initial = { results: [], warehouseEvidence: { warehouses: [] } }) {
             const scope = unique((Array.isArray(querySkcs) ? querySkcs : []).map(value => String(value).trim())).filter(Boolean);

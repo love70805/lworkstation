@@ -11,7 +11,7 @@ it('adds adopted dispatch immediately using exact whole-ledger amounts without p
   expect(summary({ ledger: { ...ledger, warehouseRate: '0.0009' } })).toMatchObject({ dispatchAmountExact: '0.09', profitExact: '10.099' });
 });
 it('distinguishes missing dispatch, explicit zero, missing costs and unreceived deductions', () => {
-  expect(summary({ dispatch: null })).toMatchObject({ dispatchAmountExact: null, profitExact: null, costsPending: false });
+  expect(summary({ dispatch: null })).toMatchObject({ dispatchRecorded: false, dispatchAmountExact: '0', profitExact: '10.009', costsPending: false });
   expect(summary({ dispatch: batch({ adoptedQuantityExact: '0' }) })).toMatchObject({ dispatchAmountExact: '0', profitExact: '10.009', label: '未扣款利润' });
   expect(summary({ missingCostCount: 1 })).toMatchObject({ dispatchAmountExact: '70', profitExact: null, costsPending: true });
   expect(summary({ missingCostCount: null })).toMatchObject({ profitExact: null, costsPending: true });
@@ -36,7 +36,7 @@ it('rejects stale, foreign and failed source state without displaying a healthy 
   expect(monthlyProfitSummary({ ...args, reportState: { ledgerId: 'OTHER', workspaceId: 'W' } }).status).toBe('loading');
   expect(monthlyProfitSummary({ ...args, reportState: { ledgerId: 'L', workspaceId: 'OTHER' } }).status).toBe('loading');
   expect(monthlyProfitSummary({ ...args, reportState: { ledgerId: 'L', workspaceId: 'W', error: '读取中断' } })).toEqual({ status: 'error', error: '读取中断' });
-  expect(summary({ dispatch: batch({ workspaceId: 'OTHER', adoptedQuantityExact: '900' }), deduction: batch({ period: '2026-08', signedAmountExact: '99', coveredStores: ['甲', '乙'] }) })).toMatchObject({ dispatchAmountExact: null, deductionExact: null, profitExact: null });
+  expect(summary({ dispatch: batch({ workspaceId: 'OTHER', adoptedQuantityExact: '900' }), deduction: batch({ period: '2026-08', signedAmountExact: '99', coveredStores: ['甲', '乙'] }) })).toMatchObject({ dispatchRecorded: false, dispatchAmountExact: '0', deductionExact: null, profitExact: '10.009' });
 });
 it('marks the saved formal result current only while its adopted deduction still matches', () => {
   const base=batch({id:'BASE',kind:'pre_deduction',warehouseRateExact:'0.7',totalsExact:{productProfitExact:'20',dispatchQuantityExact:'10',dispatchAmountExact:'7'}});

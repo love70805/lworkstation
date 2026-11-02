@@ -526,3 +526,9 @@
 @media (min-width: 1000px) { .cost-page .match-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 999px) { .cost-page .match-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 480px) { .cost-page .match-stat { padding: 12px; } .cost-page .match-stat > svg { display: none; } .cost-page .match-stat > span { padding-right: 0; } .cost-page .match-stat > strong small { display: block; margin-left: 0; font-size: 11px; } }
+.erp-task-details { margin-top: 12px; color: var(--text-muted); font-size: 13px; }
+.erp-task-details > summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+.cost-erp-responses { margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+.cost-erp-responses > summary { cursor: pointer; font-weight: 600; }
+.cost-erp-responses p { font-size: 13px; overflow-wrap: anywhere; }
+.cost-erp-responses pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; background: var(--surface-muted); color: var(--text-primary); border-radius: 6px; padding: 12px; font-size: 12px; }

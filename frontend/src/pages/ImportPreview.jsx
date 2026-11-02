@@ -385,20 +385,21 @@ export default function ImportPreview() {
     for (const item of files) if (item.itemId !== source.itemId && item.status === 'parsed' && columns.every(column => item.headers.includes(column))) void update(item.itemId, { mapping: { ...source.mapping } });
   };
   const applySupplierDraft = async (selection, rule) => {
-    if (operationRef.current || busy || contextBlocked) return;
+    if (operationRef.current || busy || contextBlocked) return false;
     const generation = generationRef.current;
     operationRef.current = true; setBusy(true); invalidate();
     try {
       await assertImportContext();
       batchRuleRef.current = rule ?? { aliases: [], mode: 'fuzzy' };
       for (const item of files) if (item.status === 'parsed') {
-        if (generation !== generationRef.current) return;
+        if (generation !== generationRef.current) return false;
         const allowed = new Set(item.facets?.supplierNumbers ?? []);
         await update(item.itemId, { usesBatchSuffix: Boolean(rule?.aliases?.length), supplierMatchRule: rule, supplierGroupRule: rule?.id ? rule : null,
           filterOptions: { ...item.filterOptions, supplierNumbers: (selection[item.itemId] ?? []).filter(value => allowed.has(value)) } });
       }
-      if (generation === generationRef.current) setSupplierDirty(false);
-    } catch (failure) { if (generation === generationRef.current) setError(failure.message); }
+      if (generation === generationRef.current) { setSupplierDirty(false); return true; }
+      return false;
+    } catch (failure) { if (generation === generationRef.current) setError(failure.message); return false; }
     finally { if (generation === generationRef.current) { setBusy(false); operationRef.current = false; } }
   };
   const readSupplierMembers = useCallback(async (row, page) => {

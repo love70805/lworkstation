@@ -70,7 +70,7 @@ const detailRow = cells => cells.map(cell=>cell?{...cell,detail:true}:null);
 const bandRow = cells => cells.map(cell=>({...cell,value:cell?.value??'',bold:true,band:true}));
 const productHeaders=["SKC","SKU","属性","件数","销售额","1688单号","单件平均成本","总件数成本","仓储成本","利润"];
 const productWidths=[26,25,20,8,13,28,13,14,13,14];
-const dispatchWidths=[27,23,8,28,2,2,12,14];
+const dispatchWidths=[25,22,7,25,12,2,11,13];
 const deductionWidths=[26,27,25,21,2,12,21];
 export function profitReportSheetWidths(sheet,name){
   if(sheet?.A1?.v==='SKC'&&sheet.B1?.v==='SKU'&&sheet.J1?.v==='利润')return name==='汇总表'?[...productWidths,2,16,12,20]:productWidths;
@@ -113,7 +113,7 @@ export function buildProfitReportWorkbook({report,products,dispatchRows=[],deduc
     if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,deductionNumber(store.deductionExact)]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
     sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','right',null,'right','right','right','right']});
   }
-  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号"]),...dispatchRows.filter(row=>!row.manual).map(row=>detailRow([identifier(row.platformSkc),identifier(row.businessId),number(row.quantityExact,2),identifier(dispatchOrderNumberForExport(row),1)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:dispatchWidths,rowHeight:reportRowHeight,alignment:[null,null,"center",null,null,null,"center","right"]});
+  sheets.push({name:"代发表",rows:combine([headers(["SKC","订单号","数量","1688订单号","店铺号"]),...dispatchRows.filter(row=>!row.manual||row.store).map(row=>detailRow([identifier(row.platformSkc),identifier(row.businessId),number(row.quantityExact,2),identifier(dispatchOrderNumberForExport(row),1),identifier(row.store)]))],[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:dispatchWidths,rowHeight:reportRowHeight,alignment:[null,null,"center",null,null,null,"center","right"]});
   if(financial)sheets.push(deductionSheet(report,deductionRows));
   const registry=createStyles();
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows[0]?.[1]?.value==='SKU'?mergeProfitSkcRows(sheet.rows):sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
@@ -144,7 +144,7 @@ export async function prepareReportDownload(report, { dispatchRows = [], deducti
     const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
     bytes=restoreSavedDispatchOrders(bytes, dispatchRows);
   }
-  if(report.templateVersion===REPORT_TEMPLATE_VERSION)return bytes;
+  if([REPORT_TEMPLATE_VERSION,'profit-zebra@9-compact-neutral'].includes(report.templateVersion))return bytes;
   const { formatSavedReportLayout } = await import('./savedReportLayout');
   return formatSavedReportLayout(bytes);
 }

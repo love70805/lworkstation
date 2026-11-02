@@ -10,7 +10,7 @@ const suggestedName = aliases => {
 };
 const editGroup = group => ({ id: group.id, name: group.name, aliasesText: group.aliases.join('、'), mode: group.mode });
 
-export default function ImportSupplierGroups({ workspaceId, aliasesText, mode, activeId, onApply }) {
+export default function ImportSupplierGroups({ workspaceId, aliasesText, mode, activeId, onApply, disabled = false }) {
   const id = useId();
   const [groups, setGroups] = useState([]), [editor, setEditor] = useState(null);
   const [message, setMessage] = useState(''), [error, setError] = useState(''), [deleting, setDeleting] = useState(false);
@@ -31,7 +31,7 @@ export default function ImportSupplierGroups({ workspaceId, aliasesText, mode, a
   return <section className="import-supplier-groups" aria-label="常用货号组">
     <div className="supplier-group-chips">
       <strong>常用组</strong>
-      {groups.map(group => <Button key={group.id} aria-pressed={activeId === group.id && group.mode === mode && JSON.stringify(group.aliases) === JSON.stringify(currentAliases)} title={`${modeName[group.mode]}：${group.aliases.join('、')}`} onClick={() => { setMessage(''); onApply(group); }}>{group.name}</Button>)}
+      {groups.map(group => <Button key={group.id} aria-pressed={activeId === group.id && group.mode === mode && JSON.stringify(group.aliases) === JSON.stringify(currentAliases)} title={`${modeName[group.mode]}：${group.aliases.join('、')}`} disabled={disabled} onClick={() => { setMessage(''); onApply(group); }}>{group.name}</Button>)}
       {!groups.length && <span>保存一次，下次直接点组名。</span>}
       <div className="supplier-group-actions">
         <Button variant="ghost" disabled={!workspaceId || !parseImportKeywords(aliasesText).length} onClick={() => openEditor({ id: '', name: suggestedName(parseImportKeywords(aliasesText)), aliasesText, mode })}>保存为常用组</Button>
@@ -40,7 +40,7 @@ export default function ImportSupplierGroups({ workspaceId, aliasesText, mode, a
     </div>
     {!workspaceId && <p>添加台账文件后，可保存和使用当前工作区的常用组。</p>}
     {message && <p role="status">{message}</p>}
-    <Modal open={Boolean(editor)} title={saved ? '管理常用组' : '保存常用组'} description="只保存名称和匹配条件，本次勾选及待导入文件保持不变。" onClose={closeEditor} footer={deleting ? <><Button onClick={() => setDeleting(false)}>保留这个组</Button><Button onClick={() => run(() => { deleteSupplierGroup(workspaceId, saved.id); setMessage(`已删除常用组 ${saved.name}，本次选择保留。`); })}>确认删除</Button></> : <><Button onClick={closeEditor}>取消</Button><Button variant="primary" disabled={!workspaceId || !editor?.name.trim() || !aliases.length} onClick={() => run(() => { const value = saveSupplierGroup(workspaceId, { id: editor.id, name: editor.name, aliases, mode: editor.mode }); setMessage(`已保存常用组 ${value.name}。点击组名匹配货号，再应用筛选。`); })}>{saved ? '保存修改' : '保存货号组'}</Button></>}>
+    <Modal open={Boolean(editor)} title={saved ? '管理常用组' : '保存常用组'} description="只保存名称和匹配条件，本次勾选及待导入文件保持不变。" onClose={closeEditor} footer={deleting ? <><Button onClick={() => setDeleting(false)}>保留这个组</Button><Button onClick={() => run(() => { deleteSupplierGroup(workspaceId, saved.id); setMessage(`已删除常用组 ${saved.name}，本次选择保留。`); })}>确认删除</Button></> : <><Button onClick={closeEditor}>取消</Button><Button variant="primary" disabled={!workspaceId || !editor?.name.trim() || !aliases.length} onClick={() => run(() => { const value = saveSupplierGroup(workspaceId, { id: editor.id, name: editor.name, aliases, mode: editor.mode }); setMessage(`已保存常用组 ${value.name}。点击组名即可匹配并选用货号。`); })}>{saved ? '保存修改' : '保存货号组'}</Button></>}>
       {editor && <div className="supplier-group-editor">
         {saved && <label htmlFor={`${id}-select`}>要管理的组<select id={`${id}-select`} value={editor.id} disabled={deleting} onChange={event => { const group = groups.find(item => item.id === event.target.value); if (group) openEditor(editGroup(group)); }}>{groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
         <label htmlFor="supplier-group-name">组名<input id="supplier-group-name" className="text-input" value={editor.name} maxLength={80} disabled={deleting} onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
