@@ -2,6 +2,7 @@ import { computeDerived } from '../../workers/derivedComputations';
 import { REPORT_FORMULA_VERSION } from '../../domain/profitReports';
 import { cachedDerived, assertSourceRevision } from '../db/derivedCache';
 import { ledgerSnapshotRevision } from './ledgerReadCache';
+import { inventoryCalculationRevision, inventoryLowestRevision } from '../db/inventoryRevisions';
 
 export function runDerivedComputation(kind, input, { signal } = {}) {
   const cancelled = () => Object.assign(new Error('后台计算已取消。'), { name: 'AbortError' });
@@ -32,7 +33,7 @@ export async function readCachedReportProducts({ snapshot, warehouseRate = snaps
   const compute = () => runDerivedComputation('profit', { ledger: { ...snapshot.ledger, warehouseRate }, salesRows: snapshot.rows, erpCosts: snapshot.costs ?? [], approvals: snapshot.approvals ?? [], allowMissing: true });
   // Supplied/testing snapshots without a verified source revision cannot be persisted.
   if (!snapshot.dataVersion) return compute();
-  const revisionOptions = snapshot.revisionKind === 'ledger' ? { revisionReader: ledgerSnapshotRevision } : {};
+  const revisionOptions = snapshot.revisionKind === 'ledger' ? { revisionReader: ledgerSnapshotRevision } : snapshot.revisionKind === 'inventory' ? { revisionReader: inventoryCalculationRevision } : snapshot.revisionKind === 'inventory-lowest' ? { revisionReader: inventoryLowestRevision } : {};
   assertSourceRevision(snapshot.dataVersion, revisionOptions.revisionReader);
   return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, snapshot.ledger.accountingMode ?? 'weighted', 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@7-inventory-accounting`, revision: snapshot.dataVersion, ...revisionOptions, compute, onStatus });
 }

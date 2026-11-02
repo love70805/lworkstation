@@ -34,6 +34,7 @@ const secureModules = [
   "catalog-collector.js",
   "content.css",
   "content.js",
+  "desktop-task-preview.js",
   "query-hook.js",
   "request-context.js",
   "result-policy.js",

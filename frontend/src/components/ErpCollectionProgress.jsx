@@ -41,7 +41,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
     tone: 'warning', title: '采集状态暂无法确认', description: '连接检查失败；已收到结果保留。连接恢复后自动刷新状态，请先查看下方错误原因。' }
     : erpCollectionPresentation(task);
   const Icon = view.running ? LoaderCircle : view.tone === 'warning' ? AlertCircle : ['completed', 'cost_completed'].includes(view.state) ? CheckCircle2 : Info;
-  return <Panel className="erp-collection-progress">
+  return <Panel className="erp-collection-progress" id="erp-collection-progress" tabIndex={-1}>
     <div className="panel-header"><div><h2>ERP 采集任务</h2><p>{task.ledgerPeriod} · 固定 {total} 个 SKC{task.taskId ? ` · 任务 ${task.taskId.slice(-8)}` : ''}</p></div>
       <div className="page-actions">
         {view.running || view.state === 'queued' ? <Button disabled={busy || Boolean(statusError) || task.status === 'pausing'} onClick={() => onControl('pause')}>暂停采集</Button> : null}

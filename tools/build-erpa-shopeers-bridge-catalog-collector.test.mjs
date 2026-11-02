@@ -178,6 +178,7 @@ export async function verifyErpCatalogActionPresentation() {
   };
   try {
     for (const file of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) window.eval(await readFile(path.join(sourceRoot, file), 'utf8'));
+    await waitFor(() => window.document.getElementById('erpa-supplement-catalog'));
     const button = window.document.getElementById('erpa-supplement-catalog');
     const status = window.document.getElementById('erpa-catalog-state');
     await waitFor(() => !button.hidden);

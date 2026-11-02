@@ -35,7 +35,7 @@ import { applyAppearance, readAppearance } from '../lib/appearance';
 import { profitWorkspaceHref, validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
 import ErpBackgroundNotice from './ErpBackgroundNotice';
-import { readAccountingMode, toggleAccountingMode } from '../data/repositories/inventoryAccountingRepository';
+import { readAccountingMode } from '../data/repositories/inventoryAccountingRepository';
 import { LOWEST_ACCOUNTING } from '../domain/inventoryAccounting';
 import { Button, IconButton, Modal, useToast } from "./UI";
 
@@ -87,7 +87,6 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigate = useNavigate();
   const { notify } = useToast();
   const menuRef = useRef(null);
-  const brandSequence = useRef({ count: 0, time: 0, timer: null, busy: false });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
   const [compactSidebar, setCompactSidebar] = useState(readCompactSidebar);
@@ -121,7 +120,6 @@ export default function AppShell({ children, pageClass = "" }) {
   }, [requestedLedgerId, navigationAttempt], null);
   const navigationContext = navigationResult?.requestedLedgerId === requestedLedgerId && navigationResult.attempt === navigationAttempt ? navigationResult : null;
   const calculationMode = useLiveQuery(() => navigationContext?.workspaceId ? readAccountingMode(navigationContext.workspaceId) : 'weighted', [navigationContext?.workspaceId], 'weighted');
-  useEffect(() => () => clearTimeout(brandSequence.current.timer), []);
   const navigationSearch = navigationContext && !navigationContext.error
     ? validatedLedgerSearch(location.search, navigationContext.ledger, navigationContext.workspaceId) : "";
   const cloudAuth = useCloudAuth();
@@ -260,22 +258,6 @@ export default function AppShell({ children, pageClass = "" }) {
     }
     toggleSidebar();
   };
-  const onBrandClick = event => {
-    if (!event.detail) { onBrandToggle(); return; }
-    const sequence = brandSequence.current, now = Date.now();
-    clearTimeout(sequence.timer);
-    sequence.count = now - sequence.time < 600 ? sequence.count + 1 : 1;
-    sequence.time = now;
-    if (sequence.count === 7) {
-      sequence.count = 0;
-      if (!sequence.busy && navigationContext?.workspaceId) {
-        sequence.busy = true;
-        void toggleAccountingMode(navigationContext.workspaceId).catch(() => notify('操作未完成，请重试。', 'error')).finally(() => { sequence.busy = false; });
-      }
-      return;
-    }
-    sequence.timer = setTimeout(() => { if (sequence.count === 1) onBrandToggle(); sequence.count = 0; }, 600);
-  };
 
   const showDialog = (dialog) => {
     setOpenMenu("");
@@ -366,7 +348,7 @@ export default function AppShell({ children, pageClass = "" }) {
           <button
             type="button"
             className={`brand-toggle ${effectiveSidebarCollapsed ? "brand-toggle-collapsed" : "brand-toggle-expanded"}`}
-            onClick={onBrandClick}
+            onClick={onBrandToggle}
             aria-label={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
             aria-expanded={!effectiveSidebarCollapsed}
             title={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}

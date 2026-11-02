@@ -12,6 +12,8 @@
     let collectorRequestId = new URL(window.location.href).searchParams.get('lworkstationRequest') || '';
     try { collectorRequestId ||= window.sessionStorage.getItem('lworkstationCollectorRequest') || ''; if (collectorRequestId) window.sessionStorage.setItem('lworkstationCollectorRequest', collectorRequestId); } catch { /* URL still identifies an unredirected collector. */ }
     const taskForThisPage = task => collectorRequestId ? task.requestId === collectorRequestId : task.executionTarget !== 'desktop';
+    let managedDesktopUi = false;
+    let desktopUiResolved = false;
     const MAX_RECORDS = 3;
     const MAX_CONCURRENT_DETAIL = 12;
     const MAX_REQUEST_CONCURRENCY = 12;
@@ -30,7 +32,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.53';
+    const EXTENSION_VERSION = '8.0.54';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -288,6 +290,7 @@
     }
 
     function schedulePageSizeUpgrade() {
+        if (!desktopUiResolved || managedDesktopUi) return;
         if (!isPurchasePage()) return;
         if (ensurePageSize50()) return;
         if (!document.body || !window.MutationObserver) return;
@@ -1673,6 +1676,7 @@
     }
 
     async function pollCollectionTask() {
+        if (managedDesktopUi) return window.ShopeersErpTaskPreview.refresh();
         if (taskPollBusy || activeRun || taskStartPending || !isPurchasePage() || needsLogin() || !window.ShopeersErpDeliveryBridge?.collectionTask) return;
         taskPollBusy = true;
         try {
@@ -2491,6 +2495,7 @@
     }
 
     async function openPanel() {
+        if (managedDesktopUi) { createUi(); document.getElementById('erpa-cost-root')?.classList.add('erpa-open'); return window.ShopeersErpTaskPreview.refresh(); }
         const frame = activePurchaseFrame();
         if (frame) {
             closePanel();
@@ -2586,6 +2591,8 @@
     }
 
     function createUi() {
+        if (!desktopUiResolved) return false;
+        if (managedDesktopUi) return window.ShopeersErpTaskPreview.mount();
         if (!document.body || (!isTopFrame && !isPurchasePage())) return false;
 
         const existingTrigger = document.getElementById('erpa-cost-trigger');
@@ -2773,7 +2780,7 @@
     }
 
     function reportExtensionStatus() {
-        if (collectorRequestId) return Promise.resolve();
+        if (!desktopUiResolved || collectorRequestId) return Promise.resolve();
         if (statusReportPending) { statusReportQueued = true; return statusReportPending; }
         statusReportPending = (async () => {
             do { statusReportQueued = false; await performStatusReport(); } while (statusReportQueued);
@@ -2796,7 +2803,7 @@
             });
             bridgeConnection = response?.ok ? 'connected' : 'disconnected';
             if (response?.ok) applyWorkspaceReset(response.workspaceReset);
-            if (!activeRun && response?.ok) await refreshCatalogAction();
+            if (!managedDesktopUi && !activeRun && response?.ok) await refreshCatalogAction();
         } catch { bridgeConnection = 'disconnected'; }
         finally {
             renderPageContext();
@@ -2804,6 +2811,8 @@
     }
 
     function handleRouteChange() {
+        if (!desktopUiResolved) return;
+        if (managedDesktopUi) { createUi(); void reportExtensionStatus(); return; }
         const changed = currentPageUrl !== window.location.href;
         currentPageUrl = window.location.href;
         if (changed) {
@@ -2858,11 +2867,17 @@
         openPanel();
     });
 
-    initWhenReady();
-    window.dispatchEvent(new CustomEvent('shopeers:erp-v8-session-replay-request'));
-    schedulePageSizeUpgrade();
-    reportExtensionStatus();
-    window.setInterval(reportExtensionStatus, 15000);
-    window.setInterval(pollCollectionTask, 3000);
-    console.info(PREFIX, `v${EXTENSION_VERSION} 已在卓麟 ERP 启动`);
+    function initializeUi(managed) {
+        managedDesktopUi = Boolean(managed && !collectorRequestId);
+        desktopUiResolved = true;
+        initWhenReady();
+        window.dispatchEvent(new CustomEvent('shopeers:erp-v8-session-replay-request'));
+        schedulePageSizeUpgrade();
+        reportExtensionStatus();
+        window.setInterval(reportExtensionStatus, 15000);
+        window.setInterval(pollCollectionTask, 3000);
+        console.info(PREFIX, `v${EXTENSION_VERSION} 已在卓麟 ERP 启动`);
+    }
+    if (window.ShopeersErpTaskPreview) void window.ShopeersErpTaskPreview.isManaged().then(initializeUi);
+    else initializeUi(false);
 }());

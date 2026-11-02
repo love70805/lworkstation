@@ -14,7 +14,9 @@ const {
   classifyErpState,
   getAddressPresentation,
   getSurfacePresentation,
+  createTitleClickHandler,
 } = window.LworkstationShellState;
+inboxAction.addEventListener('click', createTitleClickHandler(() => { void window.desktop.toggleAccounting().catch(() => {}); }));
 let latestState;
 let lastErpAnnouncement = "";
 let actionFeedbackTimer;

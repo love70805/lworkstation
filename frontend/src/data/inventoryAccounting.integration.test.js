@@ -4,7 +4,8 @@ import { liveQuery } from 'dexie';
 import { db } from './db/clientDatabase';
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { getLedgerSnapshot, saveManualCostOverride, revokeManualCostOverride, updateLedgerWarehouseRate } from './repositories/profitRepository';
-import { readAccountingMode, toggleAccountingMode } from './repositories/inventoryAccountingRepository';
+import { readAccountingMode, toggleAccountingMode, readHistoricalLowestCosts } from './repositories/inventoryAccountingRepository';
+import { readCachedReportProducts } from './repositories/derivedComputationService';
 import { previewProfitReport, saveProfitReport, readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement } from './repositories/profitReportRepository';
 import { createWorkspaceBackupPayload, restoreWorkspaceBackupPayload } from './repositories/workspaceRepository';
 import { calculateWarehouseCostDecision } from '../domain/erpCostResolution';
@@ -12,6 +13,8 @@ import { buildReportProducts } from '../domain/profitReports';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 
 beforeEach(async () => {
+  const storage = new Map();
+  vi.stubGlobal('localStorage', {getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)});
   await db.delete(); await db.open();
   await setActiveMemberContext({ workspaceId: 'W', memberId: 'finance', role: 'finance' });
   await db.ledgers.put({ id: 'L', workspaceId: 'W', period: '2026-08', status: 'ready', warehouseRate: 0.7 });
@@ -22,9 +25,26 @@ beforeEach(async () => {
   await db.erpCostBatches.put({ id: 'B', workspaceId: 'W', ledgerId: 'L', status: 'published' });
   await db.erpCostRows.add({ batchId: 'B', workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU', canonicalPlatformSku: 'SKU', platformSkc: 'SKC', warehouseSku: 'WH', unitCost: decision.unitCost, currency: 'CNY', evidenceComplete: true, purchaseRecords: decision.purchaseRecords, selectedRecordIds: decision.selectedRecordIds, costDecision: decision, resolutionStatus: 'resolved', publishedAt: '2026-11-02T12:00:00Z' });
 });
-afterEach(async () => { await db.delete(); });
+afterEach(async () => { await db.delete(); vi.unstubAllGlobals(); });
 const lines = snapshot => buildReportProducts({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
 async function exportReport() { const input = { ledgerId: 'L', kind: 'pre_deduction' }, preview = await previewProfitReport(input); return saveProfitReport(input, { expectedFingerprint: preview.fingerprint }); }
+
+it('reuses both computed results and purchase evidence across mode switches without another ERP read', async () => {
+  const ordinary=await getLedgerSnapshot('L'),normalLines=await readCachedReportProducts({snapshot:ordinary});
+  const lowest=await readHistoricalLowestCosts('W');
+  const evidenceReads=vi.spyOn(db.erpCostInbox,'where');
+  try {
+    await toggleAccountingMode('W');
+    const alternate=await getLedgerSnapshot('L');
+    expect(lines(alternate)[0].unitCostExact).toBe('2');
+    expect(await readHistoricalLowestCosts('W')).toBe(lowest);
+    expect(evidenceReads).not.toHaveBeenCalled();
+    await toggleAccountingMode('W');
+    const restored=await getLedgerSnapshot('L');
+    expect(restored.dataVersion).toBe(ordinary.dataVersion);
+    expect(await readCachedReportProducts({snapshot:restored})).toBe(normalLines);
+  } finally {evidenceReads.mockRestore();}
+});
 
 it('refreshes an already observed report history when an isolated export leaves the ordinary ledger untouched', async () => {
   await toggleAccountingMode('W');

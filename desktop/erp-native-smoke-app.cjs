@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
     const loaded = await ses.extensions.loadExtension(directory, { allowFileAccess: true });
     popup = new BrowserWindow({ show: false, webPreferences: { session: ses, sandbox: true, contextIsolation: true } });
     await popup.loadURL(`chrome-extension://${loaded.id}/popup/popup.html`);
-    await popup.webContents.executeJavaScript(`chrome.storage.local.set(${JSON.stringify(extensionStorageConfig({ port, capability, workspaceId }))})`);
+    await popup.webContents.executeJavaScript(`chrome.storage.local.set(${JSON.stringify(extensionStorageConfig({ port, capability, workspaceId, desktopTaskUi: false }))})`);
     host = new BrowserWindow({ show: false, width: 1280, height: 900 });
     view = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
     host.contentView.addChildView(view); view.setBounds({ x: 0, y: 0, width: 1280, height: 900 });
@@ -157,6 +157,18 @@ app.whenReady().then(async () => {
     await waitFor(() => evaluate('document.body.innerText.includes("请先登录 ERP")'), 'actual login guidance');
     assert.equal(await evaluate('document.querySelector("#erpa-recalculate").disabled'), true);
     checks.push({ name: 'native login state blocks collection with explicit guidance' });
+    await popup.webContents.executeJavaScript(`chrome.storage.local.set(${JSON.stringify(extensionStorageConfig({ port, capability, workspaceId }))})`);
+    await view.webContents.loadURL('https://www.zhuolinkeji.cn/view/console/index.html');
+    await waitFor(() => evaluate('Boolean(document.querySelector(".erpa-task-preview"))'), 'managed progress preview mounted');
+    await evaluate('document.querySelector("#erpa-cost-trigger").click()');
+    await waitFor(() => evaluate('document.querySelector(".erpa-task-body").textContent.includes("个 SKC")'), 'managed preview reads the durable task API from ERP home');
+    assert.equal(await evaluate('document.querySelector("#erpa-recalculate,#erpa-copy")'), null);
+    assert.equal(await evaluate('document.querySelector("#procurement")?.contentDocument?.querySelectorAll("#erpa-cost-root").length'), 0, 'managed iframe has no duplicate or legacy assistant');
+    const previewReads = requests.length;
+    await evaluate('document.querySelector("#erpa-cost-trigger").click(); document.querySelector("#erpa-cost-trigger").click()');
+    await pause(3500);
+    assert.equal(requests.length, previewReads, 'opening and polling progress does not issue ERP purchase reads');
+    checks.push({ name: 'built-in managed preview uses native task list on ERP home, one nonmodal entry, no legacy controls or ERP business reads' });
     assert.deepEqual(failures, []);
     const result = { ok: true, electron: process.versions.electron, nativeChromeApis: true, packagedResources: Boolean(process.env.ERP_NATIVE_RESOURCES), fixture: true, checks, maxStatusMs: Math.max(...timings.filter(item => item.route === 'status').map(item => item.ms)), requests, limitations: ['ERP HTTP responses are isolated fixtures; native extension APIs, renderer, storage, messages and server are real.'] };
     await fs.writeFile(path.join(out, 'erp-native-checks.json'), JSON.stringify(result, null, 2));

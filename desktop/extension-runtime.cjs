@@ -8,9 +8,10 @@ const INBOX_STORAGE_KEYS = Object.freeze([
   "shopeersErpInboxBaseUrl",
   "shopeersErpInboxCapability",
   "shopeersErpWorkspaceId",
+  "shopeersErpDesktopTaskUi",
 ]);
 
-function extensionStorageConfig({ port, capability, workspaceId } = {}) {
+function extensionStorageConfig({ port, capability, workspaceId, desktopTaskUi = true } = {}) {
   const numericPort = Number(port);
   const normalizedCapability = String(capability || "").trim();
   const normalizedWorkspaceId = String(workspaceId || "").trim();
@@ -22,6 +23,7 @@ function extensionStorageConfig({ port, capability, workspaceId } = {}) {
     shopeersErpInboxBaseUrl: `http://127.0.0.1:${numericPort}`,
     shopeersErpInboxCapability: normalizedCapability,
     shopeersErpWorkspaceId: normalizedWorkspaceId,
+    shopeersErpDesktopTaskUi: desktopTaskUi,
   });
 }
 
@@ -95,10 +97,10 @@ async function prepareRuntimeExtension({ sourceDirectory, port, runtimeId, userD
   let movedPrevious = false;
   try {
     if (fsSync.existsSync(target)) {
-      await fs.rename(target, previous);
+      await renameRuntimeDirectory(target, previous);
       movedPrevious = true;
     }
-    await fs.rename(staging, target);
+    await renameRuntimeDirectory(staging, target);
     await fs.rm(previous, { recursive: true, force: true });
     return target;
   } catch (error) {
@@ -106,6 +108,16 @@ async function prepareRuntimeExtension({ sourceDirectory, port, runtimeId, userD
     if (movedPrevious && fsSync.existsSync(previous)) await fs.rename(previous, target).catch(() => {});
     await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
     throw error;
+  }
+}
+
+async function renameRuntimeDirectory(source, target) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await fs.rename(source, target); }
+    catch (error) {
+      if (attempt >= 4 || !['EPERM','EACCES','EBUSY'].includes(error.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 60 * (attempt + 1)));
+    }
   }
 }
 

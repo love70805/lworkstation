@@ -48,7 +48,8 @@ import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
 import { ERP_ADOPTION_VERSION, erpSourceOrder, compareErpSourceOrder, erpBatchAdoptionBoundary, legacyExpectedSkusForRequest, summarizeErpAdoption } from "../../domain/erpAutomaticAdoption";
 import { operatingLedger, costEvaluationPeriod, accountingMode, accountingApprovals, LOWEST_ACCOUNTING } from '../../domain/inventoryAccounting';
-import { readAccountingMode, accountingCosts, projectAccountingLedger, accountingRateKey } from './inventoryAccountingRepository';
+import { readAccountingMode, accountingCosts, projectAccountingLedger, accountingRateKey, readHistoricalLowestCosts } from './inventoryAccountingRepository';
+import { inventoryCalculationRevision, inventoryLowestRevision, observeInventoryRevision, publishedCostRevision, observePublishedCostRevision } from '../db/inventoryRevisions';
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
 
@@ -1617,6 +1618,13 @@ export async function finalizeMonthlyLedger({ ledgerId, profitLines, formulaVers
 }
 
 export async function getLatestLedgerCosts(ledgerId) {
+  if (Dexie.currentTransaction) return readLatestLedgerCosts(ledgerId);
+  await observePublishedCostRevision();
+  return cachedDerived({ scope: [ledgerId], formula: 'published-ledger-costs@1', revisionReader: publishedCostRevision,
+    revision: publishedCostRevision(), persist: false, compute: () => readLatestLedgerCosts(ledgerId) });
+}
+
+async function readLatestLedgerCosts(ledgerId) {
   const [rows, batches] = await Promise.all([
     db.erpCostRows.where("ledgerId").equals(ledgerId).toArray(),
     db.erpCostBatches.where("ledgerId").equals(ledgerId).toArray(),
@@ -1861,31 +1869,43 @@ async function readLedgerSnapshot(ledgerId) {
   if (!ledger) return null;
   const member = await getActiveMemberContext();
   if (ledger.workspaceId !== member.workspaceId) return null;
-  const [rows, batches, originalCosts, approvals, profitLines, accountingMode] = await Promise.all([
+  const accountingMode = await readAccountingMode(ledger.workspaceId);
+  const [rows, batches, originalCosts, approvals, profitLines] = await Promise.all([
     readLedgerSalesRows(member.workspaceId, ledgerId),
     db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
-    getLatestLedgerCosts(ledgerId),
+    accountingMode === LOWEST_ACCOUNTING ? [] : getLatestLedgerCosts(ledgerId),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
     db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
-    readAccountingMode(ledger.workspaceId),
   ]);
   Object.assign(ledger, await projectAccountingLedger(ledger, accountingMode));
-  if (accountingMode === LOWEST_ACCOUNTING) await observeSourceRevision();
-  const calculationRevision = accountingMode === LOWEST_ACCOUNTING ? sourceRevision() : dataVersion;
+  await observeInventoryRevision(false, accountingMode);
+  const calculationReader = accountingMode === LOWEST_ACCOUNTING ? inventoryLowestRevision : inventoryCalculationRevision;
+  const calculationRevision = calculationReader();
   const costs = await accountingCosts(ledger, originalCosts, accountingMode, rows);
+  if (accountingMode !== LOWEST_ACCOUNTING && originalCosts.length && !Dexie.currentTransaction) {
+    // Prepare both projections from the same captured history. No ERP read is
+    // performed, and later switches reuse the independently versioned cache.
+    // Keep optional history warming outside the ordinary live-query scope:
+    // a pending receipt must not make unchanged ordinary profits reread.
+    await new Promise(resolve => setTimeout(() => {
+      readHistoricalLowestCosts(ledger.workspaceId).then(resolve, resolve);
+    }, 0));
+  }
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
   // Older live ledgers may have a ready summary written before parent identity
   // checks existed. Project current readiness without mutating business data or
   // touching any frozen report/snapshot during an upgrade or ordinary read.
-  const coverage = await runDerivedComputation('cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
-    workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: costEvaluationPeriod(ledger), accountingMode });
+  const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period, accountingMode],
+    formula: 'inventory-cost-coverage@1', revisionReader: calculationReader, revision: calculationRevision, persist: false,
+    compute: () => runDerivedComputation('cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
+      workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: costEvaluationPeriod(ledger), accountingMode }) });
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
   const snapshotLedger = {
     ...ledger,
     ...buildLedgerCoveragePatch(ledger, coverage, ledger.updatedAt),
   };
-  if (accountingMode === LOWEST_ACCOUNTING) assertSourceRevision(calculationRevision);
-  return { ledger: snapshotLedger, rows, batches, costs, approvals: accountingApprovals(approvals, accountingMode), profitLines, dataVersion: calculationRevision, revisionKind: accountingMode === LOWEST_ACCOUNTING ? 'source' : 'ledger' };
+  assertSourceRevision(calculationRevision, calculationReader);
+  return { ledger: snapshotLedger, rows, batches, costs, approvals: accountingApprovals(approvals, accountingMode), profitLines, dataVersion: calculationRevision, revisionKind: accountingMode === LOWEST_ACCOUNTING ? 'inventory-lowest' : 'inventory' };
 }
 
 export async function getLatestLedgerSnapshot() {
