@@ -17,6 +17,13 @@ it('accepts one-yuan and extreme positive prices while excluding cancelled, inva
   expect(historicalLowestCosts([input, { ...cost([record('unverified', 0.01)]), evidenceComplete: false }])[0].unitCost).toBe(1);
   expect(historicalLowestCosts([cost([record('low', 0.001), record('high', 100000)])])[0].unitCost).toBe(0.001);
 });
+it('recovers date-only exclusions kept in the separate evidence list without admitting cancelled purchases', () => {
+  const input = { ...cost([record('ordinary', 6)]), excludedRecords: [
+    record('after-month', 1, { purchaseDate: '2027-01-01', eligible: false, exclusionReasons: ['after_ledger_period'], purchaseOrderNo: 'FUTURE-PO' }),
+    record('cancelled', 0.01, { eligible: false, exclusionReasons: ['cancelled'], statusFields: { purchaseStatus: '11' } }),
+  ] };
+  expect(historicalLowestCosts([input])[0]).toMatchObject({ unitCost: 1, selectedRecordIds: ['after-month'], orderNumber: 'FUTURE-PO' });
+});
 
 it('keeps the minimum price attached to its actual 1688 or purchase order number', () => {
   expect(historicalLowestCosts([cost([record('min',1,{order1688:'QA-1688'}),record('other',8,{purchaseOrderNo:'QA-PO'})])])[0]).toMatchObject({unitCost:1,orderNumber:'QA-1688',orderType:'1688'});
@@ -49,4 +56,33 @@ it('does not resurrect old erroneous prices or cancelled records from a supersed
   const latest = { ...cost([record('same', 8), record('other', 6)]), publishedAt: '2026-10-01' };
   expect(historicalLowestCosts([old, latest])[0].unitCost).toBe(6);
   expect(historicalLowestCosts([old, { ...latest, purchaseRecords: [record('same', 2, { statusFields: { purchaseStatus: '11' } })] }])).toEqual([]);
+});
+
+it('does not let delayed adoption of older evidence replace a newer captured history', () => {
+  const old = { ...cost([record('old', 8)]), sourceOrder: [Date.parse('2026-09-01'), Date.parse('2026-10-01'), 'OLD'], publishedAt: '2026-10-05' };
+  const fresh = { ...cost([record('fresh', 3)]), sourceOrder: [Date.parse('2026-09-02'), Date.parse('2026-10-02'), 'NEW'], publishedAt: '2026-10-03' };
+  expect(historicalLowestCosts([old, fresh])[0]).toMatchObject({ unitCost: 3, selectedRecordIds: ['fresh'] });
+});
+
+it('keeps corrected newer history even when an old snapshot arrives late', () => {
+  const old = { ...cost([record('old-wrong-price', 1)]), sourceOrder: [1, Date.parse('2026-10-01'), 'OLD'], publishedAt: '2026-10-05' };
+  const fresh = { ...cost([record('corrected', 6)]), sourceOrder: [2, Date.parse('2026-10-02'), 'NEW'], publishedAt: '2026-10-03' };
+  expect(historicalLowestCosts([fresh, old])[0]).toMatchObject({ unitCost: 6, selectedRecordIds: ['corrected'] });
+});
+it('orders complete snapshots by generation even when a long-running request started earlier', () => {
+  const earlierRequest = { ...cost([record('fresh', 6)]), sourceOrder: [Date.parse('2026-09-01'), Date.parse('2026-11-03'), 'FRESH'] };
+  const laterRequest = { ...cost([record('stale', 1)]), sourceOrder: [Date.parse('2026-10-01'), Date.parse('2026-11-02'), 'STALE'] };
+  expect(historicalLowestCosts([earlierRequest, laterRequest])[0].selectedRecordIds).toEqual(['fresh']);
+});
+it('preserves a recorded correction when the same raw snapshot is delivered again', () => {
+  const raw = { ...cost([record('price', 1)]), sourceGeneratedAt: '2026-11-02T00:00:00Z', sourceOrder: [1, 2, 'SAME'], evidenceOrigin: 'receipt', publishedAt: '2026-11-04' };
+  const published = { ...raw, evidenceOrigin: 'published', publishedAt: '2026-11-03', costDecision: { resolutions: [
+    { recordId: 'price', warehouseSku: 'WH', action: 'correct_price', originalUnitPrice: 1, resolvedUnitPrice: 3, resolvedBy: 'finance', resolvedAt: '2026-11-03T00:00:00Z' },
+  ] } };
+  expect(historicalLowestCosts([published, raw])[0].unitCost).toBe(3);
+});
+it('compares fallback timestamps by their instant rather than ISO text ordering', () => {
+  const fresh = { ...cost([record('fresh', 4)]), publishedAt: '2026-11-02T00:30:00Z' };
+  const stale = { ...cost([record('stale', 1)]), publishedAt: '2026-11-02T08:00:00+08:00' };
+  expect(historicalLowestCosts([fresh, stale])[0].unitCost).toBe(4);
 });

@@ -18,6 +18,18 @@ it('imports once and applies all eligible missing items in one action',async()=>
  expect(document.body.textContent).toContain('可补齐 1 项');
  const apply=[...document.querySelectorAll('button')].find(x=>x.textContent==='补齐 1 项成本');
  await act(async()=>apply.click());
- expect(mock.save).toHaveBeenCalledExactlyOnceWith({ledgerId:'L',history:{format:'fixture'},sourceName:'history.json'});
+ expect(mock.save).toHaveBeenCalledExactlyOnceWith({ledgerId:'L',history:{format:'fixture'},sourceName:'history.json',expectedAccountingMode:'weighted'});
  expect(onSaved).toHaveBeenCalledWith({savedCount:1,pending:[]});expect(onClose).toHaveBeenCalledOnce();
+});
+it('does not submit an open preview after its ledger context changes',async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ mock.preview.mockResolvedValue({warehouseCount:1,ready:[{store:'甲店',platformSku:'SKU-A',warehouseSku:'WH-A',unitCost:0.35}],pending:[]});
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ const props={onClose:vi.fn(),onSaved:vi.fn(),initialFile:{name:'history.json',size:10,text:async()=>JSON.stringify({format:'fixture'})}};
+ await act(async()=>root.render(<WarehouseHistoryDialog {...props} ledger={{id:'L',period:'2026-09',accountingMode:'weighted'}}/>));
+ await act(async()=>root.render(<WarehouseHistoryDialog {...props} ledger={{id:'L',period:'2026-09',accountingMode:'historical_lowest'}}/>));
+ const apply=[...document.querySelectorAll('button')].find(x=>x.textContent==='补齐 1 项成本');
+ await act(async()=>apply.click());
+ expect(mock.save).not.toHaveBeenCalled();
+ expect(document.querySelector('[role=alert]').textContent).toContain('上下文已变化');
 });

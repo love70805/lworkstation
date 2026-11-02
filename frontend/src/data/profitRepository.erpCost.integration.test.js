@@ -120,8 +120,9 @@ it("projects a Beta.7 published row's missing reference only from matching retai
   expect((await db.erpCostRows.get(raw.id)).evidenceRef).toBeUndefined();
   expect(describeEvidenceIssues(reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: request.expectedSkus, costRows: [projected] }).matches[0])).toEqual([]);
 
+  await db.erpCostBatches.put({ ...originalBatch, workspaceId: "another-workspace" });
+  expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);
   const unsafeBatches = [
-    { ...originalBatch, workspaceId: "another-workspace" },
     { ...originalBatch, requestId: "another-request" },
     { ...originalBatch, sourceContract: { ...originalBatch.sourceContract, batchId: "another-source-batch" } },
     { ...originalBatch, sourceContract: { ...originalBatch.sourceContract, warehouseEvidence: [...originalBatch.sourceContract.warehouseEvidence, ...originalBatch.sourceContract.warehouseEvidence] } },

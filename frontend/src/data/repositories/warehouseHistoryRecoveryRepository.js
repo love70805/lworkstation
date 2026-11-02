@@ -7,27 +7,33 @@ import { selectManualOverride, storeIdentity } from '../../domain/manualCostOver
 import { erpLedgerVersion } from '../../domain/erpLedgerVersion';
 import { validateErpCostInboxEnvelope } from '../../domain/erpInboxContract';
 import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
+import { operatingLedger, accountingApprovals, costEvaluationPeriod } from '../../domain/inventoryAccounting';
+import { readAccountingMode, accountingCosts } from './inventoryAccountingRepository';
+import { erpBatchAdoptionBoundary } from '../../domain/erpAutomaticAdoption';
 
 const tables = () => [db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostBatches, db.erpCostRows, db.costApprovals,
-  db.erpCostRequests, db.erpCostInbox, db.importBatches, db.auditEvents];
+  db.erpCostInbox, db.importBatches, db.auditEvents];
 const samePair = (a, b) => canonicalPlatformSku(a.platformSku) === canonicalPlatformSku(b.platformSku)
   && canonicalPlatformSkc(a.platformSkc) === canonicalPlatformSkc(b.platformSkc);
 
-async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
-  const member = await getActiveMemberContext(), ledger = await db.ledgers.get(ledgerId);
-  if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务权限。');
-  if (['finalized', 'locked'].includes(ledger.status)) return null;
+async function readCandidate({ ledgerId, store, platformSku, inboxId = null, expectedAccountingMode }) {
+  const member = await getActiveMemberContext(), original = operatingLedger(await db.ledgers.get(ledgerId));
+  if (!original || original.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务权限。');
+  const mode = await readAccountingMode(member.workspaceId);
+  if (expectedAccountingMode && expectedAccountingMode !== mode) throw new Error('核算上下文已变化，请重新打开成本明细。');
+  const ledger = { ...original, accountingMode: mode };
   const rows = await db.salesRows.where('ledgerId').equals(ledgerId).toArray();
   const target = rows.find(row => storeIdentity(row.store) === storeIdentity(store) && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku));
   if (!target) return null;
   const identity = buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(platformSku));
   if (identity?.platformSkcs.size !== 1) return null;
-  const [costs, approvals] = await Promise.all([
+  const [originalCosts, approvals] = await Promise.all([
     getLatestLedgerCosts(ledgerId), db.costApprovals.where('ledgerId').equals(ledgerId).toArray(),
   ]);
+  const costs = await accountingCosts(ledger, originalCosts, mode, rows);
   const scope = { workspaceId: ledger.workspaceId, ledgerId, store, platformSku };
-  const decision = resolveLedgerCostDecision({ ...scope, period: ledger.period, identity,
-    manualOverride: selectManualOverride(approvals, scope), erpCost: costs.find(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku)) });
+  const decision = resolveLedgerCostDecision({ ...scope, period: costEvaluationPeriod(ledger), identity,
+    manualOverride: selectManualOverride(accountingApprovals(approvals, mode), scope), erpCost: costs.find(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku)) });
   if (decision.eligibleForExactProfit) return null;
   // Re-read current published identities so a subsequently voided or conflicting
   // source cannot be adopted merely because a request once carried it.
@@ -54,6 +60,7 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
         expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus,
         expectedHistoryMappings: request.historyMappings ?? [] }).batch;
     } catch { continue; }
+    if (erpBatchAdoptionBoundary(batch).globalReasons.length) continue;
     for (const warehouse of batch.warehouseEvidence) {
       if (!verified.some(row => canonicalWarehouseSku(row.warehouseSku) === canonicalWarehouseSku(warehouse.warehouseSku))
         || warehouse.evidenceComplete !== true || warehouse.sourceWarnings.length) continue;
@@ -62,11 +69,11 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
         historicalMappings: verified, sourceMeta: { complete: true, detailFailureCount: 0 } };
       const targets = rows.filter(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku))
         .map(row => ({ store: row.store, platformSku: row.platformSku, platformSkc: row.platformSkc }));
-      const plan = planWarehouseHistoryCosts({ history, period: ledger.period, targets, knownMappings: known });
+      const plan = planWarehouseHistoryCosts({ history, period: ledger.period, targets, knownMappings: known, accountingMode: mode });
       const candidate = plan.ready.find(row => storeIdentity(row.store) === storeIdentity(store));
       if (!candidate) continue;
-      return { ...candidate, ledgerId, inboxId: inbox.id,
-        reason: `确认历史仓库 ${candidate.warehouseSku} 的采购证据；按 ${ledger.period} 当月及以前最近三笔核价。历史关联不代表当前 ERP 映射。`,
+      return { ...candidate, ledgerId, inboxId: inbox.id, accountingMode: mode,
+        reason: `确认历史仓库 ${candidate.warehouseSku} 的采购证据；按当前核算口径核价。历史关联不代表当前 ERP 映射。`,
         historyEvidence: { ...candidate.historyEvidence, sourceInboxId: inbox.id, sourceBatchId: inbox.batchId, sourceName: 'ERP 同批历史采购证据' } };
     }
   }
@@ -74,7 +81,7 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null }) {
 }
 
 export function previewRecoveredWarehouseCost(input) {
-  return db.transaction('r', tables(), () => readCandidate(input));
+  return db.transaction('r', tables(), async () => readCandidate(input));
 }
 
 export function saveRecoveredWarehouseCost({ expectedUnitCost, reason, ...input }) {

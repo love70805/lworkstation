@@ -108,6 +108,74 @@ it('uses complete unadopted receipts independently of the ordinary monthly cutof
   await toggleAccountingMode('W');expect((await getLedgerSnapshot('L')).costs).toEqual([]);
 });
 
+it('does not use raw prices from a source-wide incomplete receipt', async () => {
+  await db.erpCostRows.clear(); await db.erpCostBatches.clear();
+  const expectedSkus = [{ platformSku: 'SKU', platformSkc: 'SKC' }];
+  await db.erpCostRequests.put({ id: 'INCOMPLETE-R', workspaceId: 'W', ledgerId: 'L', ledgerPeriod: '2026-08', platformSkcs: [{ platformSkc: 'SKC' }], expectedSkus });
+  const batch = buildErpCostBatchEnvelope({ workspaceId: 'W', ledgerId: 'L', requestId: 'INCOMPLETE-R', batchId: 'INCOMPLETE-B', platformSkcs: ['SKC'], expectedSkus,
+    sourceMeta: { completenessScope: 'source', sourceWarnings: ['QA: history page was not read completely'] },
+    warehouseEvidence: [{ warehouseSku: 'WH', evidenceComplete: true, purchaseRecords: [{ recordId: 'PARTIAL', warehouseSku: 'WH', quantity: 2, unitPrice: 1, purchaseDate: '2026-01-01' }], excludedRecords: [], sourceWarnings: [] }],
+    results: [{ warehouseSku: 'WH', previewUnitCost: 1, unitCost: 1, selectedRecordIds: ['PARTIAL'], mappings: [{ platformSku: 'SKU', platformSkc: 'SKC' }] }] });
+  await db.erpCostInbox.put({ id: 'INCOMPLETE-I', workspaceId: 'W', ledgerId: 'L', requestId: 'INCOMPLETE-R', batchId: 'INCOMPLETE-B', status: 'pending', receivedAt: '2026-11-03T00:00:00Z', envelope: { batch } });
+  expect(await readHistoricalLowestCosts('W')).toEqual([]);
+});
+it('applies the source-wide completeness boundary to previously published evidence too', async () => {
+  await db.erpCostBatches.update('B', { sourceContract: { formatVersion: 2, generatedAt: '2026-11-02T00:00:00Z',
+    sourceMeta: { completenessScope: 'source', sourceWarnings: ['unread history'] } } });
+  expect(await readHistoricalLowestCosts('W')).toEqual([]);
+});
+it('keeps unrelated complete targets and reads a shared request once for all its receipts', async () => {
+  await db.erpCostRows.clear(); await db.erpCostBatches.clear();
+  const expectedSkus = [{ platformSku: 'SKU', platformSkc: 'SKC' }, { platformSku: 'OTHER', platformSkc: 'SKC' }];
+  await db.erpCostRequests.put({ id: 'SHARED-R', workspaceId: 'W', ledgerId: 'L', ledgerPeriod: '2026-08', platformSkcs: [{ platformSkc: 'SKC' }], expectedSkus });
+  for (const [batchId, generatedAt, price] of [['A', '2026-11-02T00:00:00Z', 1], ['B', '2026-11-03T00:00:00Z', 3]]) {
+    const batch = buildErpCostBatchEnvelope({ workspaceId: 'W', ledgerId: 'L', requestId: 'SHARED-R', batchId, generatedAt, platformSkcs: ['SKC'], expectedSkus,
+      sourceMeta: { completenessScope: 'target', sourceWarnings: [], mappingFailures: [{ platformSku: 'OTHER', message: 'unrelated mapping failure' }] },
+      warehouseEvidence: expectedSkus.map((row, i) => ({ warehouseSku: `WH-${i}`, evidenceComplete: true, sourceWarnings: [], excludedRecords: [],
+        purchaseRecords: [{ recordId: `${batchId}-${i}`, warehouseSku: `WH-${i}`, quantity: 1, unitPrice: price, purchaseDate: '2026-01-01' }] })),
+      results: expectedSkus.map((row, i) => ({ warehouseSku: `WH-${i}`, unitCost: price, selectedRecordIds: [`${batchId}-${i}`], mappings: [row] })) });
+    await db.erpCostInbox.put({ id: `I-${batchId}`, workspaceId: 'W', ledgerId: 'L', requestId: 'SHARED-R', batchId, status: 'pending', receivedAt: generatedAt, envelope: { batch } });
+  }
+  const requestReads = vi.spyOn(db.erpCostRequests, 'get');
+  try {
+    expect(await readHistoricalLowestCosts('W')).toEqual([expect.objectContaining({ platformSku: 'SKU', unitCost: 3 })]);
+    expect(requestReads).toHaveBeenCalledTimes(1);
+  } finally { requestReads.mockRestore(); }
+});
+
+it('prefers newer captured evidence over a previously adopted row with a later publication time', async () => {
+  const expectedSkus = [{ platformSku: 'SKU', platformSkc: 'SKC' }];
+  await db.erpCostRows.toCollection().modify({ sourceOrder: [Date.parse('2026-10-01'), Date.parse('2026-11-01'), 'OLDER-SNAPSHOT'], publishedAt: '2026-11-04T12:00:00Z' });
+  await db.erpCostRequests.put({ id: 'FRESH-R', workspaceId: 'W', ledgerId: 'L', requestedAt: '2026-11-02T00:00:00Z', ledgerPeriod: '2026-08', platformSkcs: [{ platformSkc: 'SKC' }], expectedSkus });
+  const batch = buildErpCostBatchEnvelope({ workspaceId: 'W', ledgerId: 'L', requestId: 'FRESH-R', batchId: 'FRESH-B', generatedAt: '2026-11-03T00:00:00Z', platformSkcs: ['SKC'], expectedSkus,
+    warehouseEvidence: [{ warehouseSku: 'WH', evidenceComplete: true, purchaseRecords: [{ recordId: 'FRESH-PRICE', warehouseSku: 'WH', quantity: 2, unitPrice: 3, purchaseDate: '2026-01-01' }], excludedRecords: [], sourceWarnings: [] }],
+    results: [{ warehouseSku: 'WH', previewUnitCost: 3, unitCost: 3, selectedRecordIds: ['FRESH-PRICE'], mappings: [{ platformSku: 'SKU', platformSkc: 'SKC' }] }] });
+  await db.erpCostInbox.put({ id: 'FRESH-I', workspaceId: 'W', ledgerId: 'L', requestId: 'FRESH-R', batchId: 'FRESH-B', status: 'pending', receivedAt: '2026-11-03T00:01:00Z', envelope: { batch } });
+  expect((await readHistoricalLowestCosts('W'))[0].unitCost).toBe(3);
+});
+
+it.each(['foreign-batch','foreign-row'])('never substitutes another workspace cost through a shared ledger key: %s', async kind => {
+  const original = (await db.erpCostRows.toArray())[0];
+  const decision = calculateWarehouseCostDecision({ warehouseSku: 'WH', period: '2026-08', purchaseRecords: [
+    { recordId: 'FOREIGN-PRICE', warehouseSku: 'WH', quantity: 2, unitPrice: 7, purchaseDate: '2026-07-01' },
+  ] });
+  await db.erpCostBatches.put({ id: 'OTHER-WORKSPACE-BATCH', workspaceId: kind === 'foreign-batch' ? 'OTHER' : 'W', ledgerId: 'L', status: 'published' });
+  const { id, ...base } = original;
+  await db.erpCostRows.add({ ...base, batchId: 'OTHER-WORKSPACE-BATCH', workspaceId: kind === 'foreign-row' ? 'OTHER' : 'W', unitCost: 7,
+    purchaseRecords: decision.purchaseRecords, selectedRecordIds: decision.selectedRecordIds, costDecision: decision, publishedAt: '2026-11-04T12:00:00Z' });
+  expect(lines(await getLedgerSnapshot('L'))[0].unitCostExact).toBe('9');
+});
+
+it('retains owned legacy cost rows without workspace fields and keeps explicit voiding effective', async () => {
+  await db.erpCostBatches.update('B', { workspaceId: undefined });
+  await db.erpCostRows.toCollection().modify({ workspaceId: undefined });
+  expect(lines(await getLedgerSnapshot('L'))[0].unitCostExact).toBe('9');
+  const { id, ...row } = (await db.erpCostRows.toArray())[0];
+  await db.erpCostBatches.put({ id: 'VOIDED', ledgerId: 'L', workspaceId: 'W', status: 'voided' });
+  await db.erpCostRows.add({ ...row, batchId: 'VOIDED', workspaceId: 'W', publishedAt: '2026-11-04T12:00:00Z' });
+  expect((await getLedgerSnapshot('L')).costs).toEqual([]);
+});
+
 it('rejects a manual cost draft after its accounting context changes', async () => {
   await toggleAccountingMode('W');
   const before = await db.costApprovals.toArray();

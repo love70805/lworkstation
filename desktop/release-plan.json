@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-task-costs-1-0-7",
+  "integrationBranch": "codex/accounting-logic-audit",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "ac0a333e3c417ad197d8bf591482cd6beed8a763"
+      "commit": "ece5253a90274366f6cb7eb0297b0e5bb5756db5"
     }
   ]
 }

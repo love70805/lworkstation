@@ -5,6 +5,7 @@ import { DEFAULT_WORKSPACE_ID as workspaceId } from './db/constants';
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { previewWarehouseHistoryCosts, saveWarehouseHistoryCosts, saveManualCostOverride, revokeManualCostOverride, getLedgerSnapshot } from './repositories/profitRepository';
 import { historyTarget, warehouseHistoryFixture } from '../testFixtures/warehouseHistory';
+import { toggleAccountingMode } from './repositories/inventoryAccountingRepository';
 const ledgerId='HISTORY-LEDGER';
 beforeEach(async()=>{
   await db.delete();await db.open();await setActiveMemberContext({workspaceId,memberId:'history-finance',role:'finance'});
@@ -36,7 +37,7 @@ it('preserves effective manual costs and valid ERP costs',async()=>{
   await db.erpCostRows.add({batchId:'ERP',ledgerId,workspaceId,platformSku:'SKU-ERP',canonicalPlatformSku:'SKU-ERP',platformSkc:'SKC-E',warehouseSku:'WH-E',unitCost:5,resolutionStatus:'resolved',selectedRecordIds:['R'],purchaseRecords:[{recordId:'R',purchaseDate:'2026-09-01',quantity:1,unitPrice:5}],publishedAt:'2026-10-01T00:00:00Z'});
   expect((await previewWarehouseHistoryCosts({ledgerId,history:warehouseHistoryFixture()})).ready).toHaveLength(0);
 });
-it('blocks finalized ledgers, foreign workspaces and incomplete reads without partial writes',async()=>{
+it('allows legacy editable months but blocks foreign workspaces and incomplete reads without partial writes',async()=>{
   await db.ledgers.update(ledgerId,{status:'finalized'});
   await expect(saveWarehouseHistoryCosts({ledgerId,history:warehouseHistoryFixture()})).resolves.toBeDefined();
   const before=await db.costApprovals.toArray();
@@ -45,5 +46,23 @@ it('blocks finalized ledgers, foreign workspaces and incomplete reads without pa
   await db.ledgers.update(ledgerId,{workspaceId});
   const history=warehouseHistoryFixture();history.sourceMeta.detailFailureCount=1;
   await expect(saveWarehouseHistoryCosts({ledgerId,history})).rejects.toThrow('未完成');
+  expect(await db.costApprovals.toArray()).toEqual(before);
+});
+it('keeps history imports isolated from manual costs in another accounting context',async()=>{
+  await toggleAccountingMode(workspaceId);
+  await saveManualCostOverride({ledgerId,store:'甲店',platformSku:'SKU-A',unitCost:0,reason:'人工输入单件成本并确认更正'});
+  await toggleAccountingMode(workspaceId);
+  expect((await previewWarehouseHistoryCosts({ledgerId,history:warehouseHistoryFixture()})).ready).toHaveLength(1);
+});
+it('uses all-history minimum evidence on import and rejects a preview after switching contexts',async()=>{
+  const history=warehouseHistoryFixture();
+  history.warehouseEvidence.warehouses[0].purchaseRecords[2].unitPrice=0.01;
+  await toggleAccountingMode(workspaceId);
+  expect((await previewWarehouseHistoryCosts({ledgerId,history})).ready[0]?.unitCost).toBe(0.01);
+  const result=await saveWarehouseHistoryCosts({ledgerId,history,expectedAccountingMode:'historical_lowest'});
+  expect((await db.costApprovals.get(result.savedIds[0])).accountingMode).toBe('historical_lowest');
+  await toggleAccountingMode(workspaceId);
+  const before=await db.costApprovals.toArray();
+  await expect(saveWarehouseHistoryCosts({ledgerId,history,expectedAccountingMode:'historical_lowest'})).rejects.toThrow('上下文已变化');
   expect(await db.costApprovals.toArray()).toEqual(before);
 });
