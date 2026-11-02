@@ -1,8 +1,10 @@
-## 1.0.6 — 候选验收中（2026-11-03）
+## 1.0.6 — 已验收并公开稳定（2026-11-03）
 
 货号先预选、一次匹配后导入，未选店铺自动跳过；工作台直接发起后台 ERP 采集；月份可随时调整并直接导出，既有报告文件保留。内置助手 8.0.53。
 
-规范候选 `releases/candidates/1.0.6/`，116154954 字节，SHA256 `50936B4B47172BF6B463AF1B59EF0823E836CCEDC1E772B8AE93C82B05091B8E`。安装器内 237 个程序文件、195 个生产输入及 140 个前端资源逐字节核对一致，隐藏实包启动通过。完整回归、构建、桌面与其余发布门禁通过；最终原生稳定复验、PR/主线 CI 和公开发布结果待补记。不安装、不操作真实数据。[本批契约及验证](../docs/integration/SUPPLIER_COST_WORKFLOW_1.0.6.md)。
+规范候选 `releases/candidates/1.0.6/`，116154954 字节，SHA256 `50936B4B47172BF6B463AF1B59EF0823E836CCEDC1E772B8AE93C82B05091B8E`。安装器内 237 个程序文件、195 个生产输入及 140 个前端资源逐字节核对一致，隐藏实包及原生后台链路通过。完整前端 230 文件 / 1,812 项、构建、24 项桌面验证入口、其余 31 项门禁和依赖审计通过。
+
+[PR #310](https://github.com/love70805/lworkstation/pull/310)、[PR CI](https://github.com/love70805/lworkstation/actions/runs/41478795970) 与[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/41479756856)通过；`v1.0.6` 固定 `ccd9815524caea45dcb6d27b14bb73d7a0cef6a6`。2026-11-02T16:21:32Z 已[公开稳定 Latest](https://github.com/love70805/lworkstation/releases/tag/v1.0.6)，四资产状态、大小和 digest、更新清单 SHA512 均已核对，公开下载无需验证。约 1.66 GB 可重建产物已清理；不安装、不操作真实数据。[发布记录](../docs/RELEASE_1.0.6.md)与[本批契约及验证](../docs/integration/SUPPLIER_COST_WORKFLOW_1.0.6.md)。
 
 ## 1.0.3 — 已验收并公开稳定（2026-10-27）
 
