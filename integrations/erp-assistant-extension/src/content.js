@@ -22,7 +22,12 @@
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
     const RESULT_CACHE_KEY = 'latest_cost_result_v7';
     const PREFIX = '[ERP Assistant]';
-    const EXTENSION_VERSION = '8.0.50';
+    const WORKSPACE_RESET_KEY = 'erpAssistantV8_workspaceResetV1';
+    let workspaceResetId = '';
+    let workspaceResetAt = 0;
+    let workspaceStateRevision = 0;
+    try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
+    const EXTENSION_VERSION = '8.0.51';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -58,7 +63,7 @@
     let uiRepairTimer = null;
     let documentEventsBound = false;
     let bridgeConnection = 'connecting';
-    let statusReportPending = false;
+    let statusReportPending = null;
     let statusReportQueued = false;
     let currentPageUrl = window.location.href;
     let querySnapshotRestoreAllowed = isPurchasePage();
@@ -535,18 +540,54 @@
         taskCache.set(key, { timestamp: Date.now(), value });
     }
 
+    function applyWorkspaceReset(marker) {
+        const clearedAt = Date.parse(marker?.clearedAt || '');
+        if (!marker?.resetId || !Number.isFinite(clearedAt) || clearedAt < workspaceResetAt || marker.resetId === workspaceResetId) return;
+        workspaceResetAt = clearedAt;
+        workspaceResetId = marker.resetId;
+        workspaceStateRevision++;
+        if (activeRun) {
+            activeRun.workspaceCleared = true;
+            activeRun.cancelledByUser = true;
+            activeRun.controller.abort();
+        }
+        taskCache.clear();
+        resumableCheckpoint = null; collectionTaskState = null;
+        checkpointMessage = ''; taskStage = '本机数据已清空，请从工作台重新登记采集';
+        catalogAction = null; catalogActionRevision++;
+        capturedListUrl = ''; capturedQueryCapturedAt = ''; querySnapshotRestoreAllowed = false;
+        lastResults = []; lastMeta = null; lastWarehouseEvidence = null; lastImportEnvelope = null;
+        searchText = ''; resultFilter = 'all'; resultPage = 0; expandedRows.clear();
+        try {
+            window.localStorage.removeItem('erpAssistantV8_' + RESULT_CACHE_KEY);
+            window.localStorage.setItem(WORKSPACE_RESET_KEY, JSON.stringify(marker));
+        } catch { /* memory is still cleared when storage is unavailable */ }
+        const search = document.getElementById('erpa-search'); if (search) search.value = '';
+        const filter = document.getElementById('erpa-result-filter'); if (filter) filter.value = 'all';
+        hideLoading(); hideError();
+        renderResults(); renderStatus(); renderAnomalyBanner(); updateActionState(); renderPageContext();
+    }
+
+    window.addEventListener('storage', event => {
+        if (event.key === WORKSPACE_RESET_KEY && event.newValue) {
+            try { applyWorkspaceReset(JSON.parse(event.newValue)); } catch { /* ignore invalid cross-document storage */ }
+        }
+    });
+
     async function refreshCheckpoint(force = false) {
+        const revision = workspaceStateRevision;
         if (!isPurchasePage() || !window.ShopeersErpDeliveryBridge?.collectionCheckpoint) return;
         try {
             if (window.ShopeersErpDeliveryBridge.collectionTask) {
                 const response = await window.ShopeersErpDeliveryBridge.collectionTask({ action: 'list' });
+                if (revision !== workspaceStateRevision) return;
                 if ((!activeRun || force) && response?.ok && Array.isArray(response.tasks)) {
                     collectionTaskState = response.tasks.find(task => !['stopped','completed','invalidated'].includes(task.status)) || null;
                     if (collectionTaskState) updateTaskStatus(collectionTaskState);
                 }
             }
             const response = await window.ShopeersErpDeliveryBridge.collectionCheckpoint({ action: 'list' });
-            if (activeRun && !force) return;
+            if (revision !== workspaceStateRevision || activeRun && !force) return;
             resumableCheckpoint = response?.ok ? response.records?.[0] || null : null;
             renderPageContext();
         } catch { /* Offline collection remains available; no false saved claim. */ }
@@ -611,7 +652,7 @@
             const raw = window.localStorage.getItem('erpAssistantV8_' + RESULT_CACHE_KEY);
             if (!raw) return null;
             const entry = JSON.parse(raw);
-            if (!entry || Date.now() - Number(entry.timestamp) > RESULT_CACHE_TTL) {
+            if (!entry || Date.now() - Number(entry.timestamp) > RESULT_CACHE_TTL || workspaceResetId && entry.workspaceResetId !== workspaceResetId) {
                 window.localStorage.removeItem('erpAssistantV8_' + RESULT_CACHE_KEY);
                 return null;
             }
@@ -632,6 +673,7 @@
             const queryCapturedAt = String(deliveryState.queryCapturedAt || deliveryState.registeredBefore || meta?.queryCapturedAt || meta?.registeredBefore || '').trim();
             window.localStorage.setItem('erpAssistantV8_' + RESULT_CACHE_KEY, JSON.stringify({
                 timestamp: Date.now(),
+                workspaceResetId,
                 results,
                 meta,
                 warehouseEvidence,
@@ -1611,7 +1653,10 @@
 
     async function taskOperation(input) {
         if (activeRun?.runnerId && input.taskId === activeRun.task?.taskId && (['batch','catalogSeed'].includes(input.action) || ['heartbeat', 'release'].includes(input.control))) input = { ...input, runnerId: activeRun.runnerId };
+        const revision = workspaceStateRevision;
         const response = await window.ShopeersErpDeliveryBridge.collectionTask(input);
+        applyWorkspaceReset(response?.workspaceReset);
+        if (revision !== workspaceStateRevision) throw Object.assign(new CostError('本机数据已清空，请重新登记采集'), { code: 'ERP_WORKSPACE_CLEARED' });
         if (!response?.ok) throw Object.assign(new CostError('采集任务未保存', response?.message || '本机收件服务暂不可用，请重试。'), { code: response?.code });
         return response;
     }
@@ -1626,19 +1671,21 @@
             const current = queued || tasks.find(task => !['stopped', 'completed', 'invalidated'].includes(task.status));
             if (activeRun || taskStartPending) return;
             if (current) updateTaskStatus(current);
+            else if (collectionTaskState) { collectionTaskState = null; taskStage = ''; renderPageContext(); }
             if (!queued) return;
             taskStartPending = true;
             capturedListUrl = buildUrl(LIST_PATH, queued.filters, { preserveEmpty: true });
             capturedQueryCapturedAt = queued.queryCapturedAt;
             await calculate(queued.requestId, false, null, null, null, queued);
         } catch (error) {
-            if (!['ERP_TASK_ALREADY_CLAIMED', 'ERP_TASK_OTHER_RUNNING'].includes(error.code)) {
+            if (!['ERP_WORKSPACE_CLEARED', 'ERP_TASK_ALREADY_CLAIMED', 'ERP_TASK_OTHER_RUNNING'].includes(error.code)) {
                 taskStage = '任务连接暂未确认；已送达结果保留'; renderPageContext();
             }
         } finally { taskPollBusy = false; taskStartPending = false; }
     }
 
     function updateTaskStatus(task) {
+        if (activeRun?.workspaceCleared) return;
         collectionTaskState = task;
         if (activeRun?.task?.taskId === task.taskId) activeRun.task = task;
         const batches = task.batches || [];
@@ -1688,7 +1735,7 @@
                 if (fresh.status === 'paused') { run.pauseRequested = true; run.controller.abort(Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' })); }
                 if (['stopped','invalidated'].includes(fresh.status)) { run.cancelledByUser = true; run.controller.abort(); }
                 updateTaskStatus(task);
-            } catch { taskStage = '进度续约暂未确认；已送达结果保留'; renderPageContext(); }
+            } catch { if (!run.workspaceCleared) taskStage = '进度续约暂未确认；已送达结果保留'; renderPageContext(); }
             finally { heartbeatBusy = false; }
         }, 3000);
         try {
@@ -1922,7 +1969,7 @@
             }
         } finally {
             window.clearTimeout(budgetTimer);
-            if (run.task && run.runnerId) {
+            if (run.task && run.runnerId && !run.workspaceCleared) {
                 try { updateTaskStatus((await taskOperation({ action: 'control', taskId: run.task.taskId, control: 'release' })).task); }
                 catch { /* A newer execution or service recovery owns the task. */ }
             }
@@ -2444,6 +2491,7 @@
         const root = document.getElementById('erpa-cost-root');
         if (!root) return;
         root.classList.add('erpa-open');
+        await reportExtensionStatus();
         renderAnomalyBanner();
         renderStatus();
         if (isPurchasePage() && !needsLogin() && capturedListUrl && lastResults.length === 0 && !activeRun) {
@@ -2713,12 +2761,18 @@
         }, { once: true });
     }
 
-    async function reportExtensionStatus() {
+    function reportExtensionStatus() {
+        if (statusReportPending) { statusReportQueued = true; return statusReportPending; }
+        statusReportPending = (async () => {
+            do { statusReportQueued = false; await performStatusReport(); } while (statusReportQueued);
+        })().finally(() => { statusReportPending = null; });
+        return statusReportPending;
+    }
+
+    async function performStatusReport() {
         if (!isTopFrame && !isPurchasePage()) return;
-        if (statusReportPending) { statusReportQueued = true; return; }
         const bridge = window.ShopeersErpDeliveryBridge;
         if (!bridge || typeof bridge.reportStatus !== 'function') return;
-        statusReportPending = true;
         try {
             const loginRequired = needsLogin();
             const response = await bridge.reportStatus({
@@ -2729,15 +2783,11 @@
                 userAgent: navigator.userAgent,
             });
             bridgeConnection = response?.ok ? 'connected' : 'disconnected';
+            if (response?.ok) applyWorkspaceReset(response.workspaceReset);
             if (!activeRun && response?.ok) await refreshCatalogAction();
         } catch { bridgeConnection = 'disconnected'; }
         finally {
-            statusReportPending = false;
             renderPageContext();
-            if (statusReportQueued) {
-                statusReportQueued = false;
-                void reportExtensionStatus();
-            }
         }
     }
 

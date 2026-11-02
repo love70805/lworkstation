@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "candidateOnly": true,
-  "integrationBranch": "codex/cost-controls-1-0-3",
+  "integrationBranch": "codex/erp-reset-skc-1-0-4",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "c3c5a3358105b585506e715a7e4533ebb7bbb652"
+      "commit": "90d30b102f4fba2cb1ab0475b78d12755ac5c8ff"
     }
   ]
 }

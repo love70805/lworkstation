@@ -184,6 +184,8 @@ async function clearBusinessRecords(records) {
     // Only the active ERP transport heartbeat survives. Retired selection
     // contexts contain old workspace/member scope and must be erased too.
     const retained = records.filter(record => record.kind === 'extension-status');
+    const workspaceReset = { resetId: crypto.randomUUID(), clearedAt: new Date().toISOString() };
+    retained.push({ kind: 'workspace-reset', ...workspaceReset });
     await spoolStorage.reset(retained);
     const clearLeases = leaseWriteChain.catch(() => {}).then(async () => {
       await leaseStorage.reset([]);
@@ -192,10 +194,15 @@ async function clearBusinessRecords(records) {
     leaseWriteChain = clearLeases;
     await clearLeases;
     latestTransportError = null;
-    return { ok: true, clearedCount: records.length - retained.length, clearedAt: new Date().toISOString() };
+    return { ok: true, clearedCount: records.filter(record => !['extension-status', 'workspace-reset'].includes(record.kind)).length, clearedAt: workspaceReset.clearedAt, workspaceReset };
   } finally {
     resettingBusinessData = false;
   }
+}
+
+function workspaceResetState(records) {
+  const marker = records.find(record => record.kind === 'workspace-reset');
+  return marker ? { resetId: marker.resetId, clearedAt: marker.clearedAt } : null;
 }
 
 function readBody(req,limit=maxBytes) {
@@ -1100,7 +1107,7 @@ const server = http.createServer(async (req, res) => {
         const task=taskResponse.body.task;
         await persistTaskHeartbeat(task, resetRevision);
       } else if (req.method === 'POST') await writeSpool(records);
-      return json(res, taskResponse.status, taskResponse.body);
+      return json(res, taskResponse.status, { ...taskResponse.body, workspaceReset: workspaceResetState(records) });
     }
     const selectionRoute = new URL(req.url, `http://${bindHost}:${port}`).pathname;
     if (["/selection/v1/context", "/selection/v1/extension-status"].includes(selectionRoute)
@@ -1351,7 +1358,7 @@ const server = http.createServer(async (req, res) => {
       if (existingIndex >= 0) records[existingIndex] = record;
       else records.push(record);
       extensionHeartbeats.set(`erp:${extensionId}`,record);
-      return json(res, 202, { accepted: true, extensionId, version, lastSeenAt: record.lastSeenAt });
+      return json(res, 202, { accepted: true, extensionId, version, lastSeenAt: record.lastSeenAt, workspaceReset: workspaceResetState(records) });
     }
     if (requestUrl.pathname === "/erp/v1/cost-results") {
       const resultDeliveryId = String(payload?.resultDeliveryId ?? "").trim();
