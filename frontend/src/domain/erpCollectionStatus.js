@@ -57,6 +57,9 @@ export function erpCollectionPresentation(task) {
   } else if (task?.status === 'pausing') {
     state = 'pausing'; title = '正在暂停后台采集';
     description = '等待当前操作结束；已送达结果保留。';
+  } else if (task?.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED') {
+    state = 'paused'; title = 'ERP 店铺权限校验未通过，采集已暂停';
+    description = '请在软件内 ERP 确认采购管理可正常查询，再点击继续原任务。已送达批次和已采用成本保留，未完成部分会重新核验。'; tone = 'warning';
   } else if (awaitingAdoption) {
     state = 'cost_adoption'; title = '成本已送达，正在完成本机核算';
     description = '全部批次处理完成后，统一复用暂存资料补全商品并自动建档；无需再次请求已取得的 ERP 资料。';

@@ -32,7 +32,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.54';
+    const EXTENSION_VERSION = '8.0.55';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -234,8 +234,8 @@
         return Object.assign(new CostError('ERP 服务暂不可用', context + '：' + detail + '。已送达结果保留，请在服务恢复后继续原任务。'), { code: 'ERP_SERVICE_UNAVAILABLE' });
     }
 
-    function rememberServicePause(run, error) {
-        if (error?.code !== 'ERP_SERVICE_UNAVAILABLE') return false;
+    function rememberSourcePause(run, error) {
+        if (!['ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED'].includes(error?.code)) return false;
         run.pauseRequested = true;
         run.pauseReason = { code: error.code, message: error.details || error.message };
         return true;
@@ -413,6 +413,13 @@
                     taskCache.clear();
                     throw Object.assign(new CostError('ERP 登录已失效', '请登录 ERP 并重新查询后重试。'), { code: 'ERP_LOGIN_REQUIRED' });
                 }
+                if (Number(body?.code) !== 0 && (Number(body?.code) === -40102
+                    || /校验用户店铺权限失败|数据库地址(?:不可为空|不能为空)/.test(String(body?.msg || body?.message || '')))) {
+                    throw Object.assign(new CostError('ERP 店铺权限校验未通过', context + '：ERP 采购接口未通过店铺权限校验（业务码 ' + String(body?.code ?? '未返回').slice(0, 40)
+                        + '）。请在软件内 ERP 确认采购管理可正常查询后继续原任务；已送达结果保留。'), {
+                        code: 'ERP_PERMISSION_REQUIRED', erpResponse: body.__erpDiagnostic,
+                    });
+                }
                 if (Number(body?.code) !== 0 && /维护|maintenance|temporarily unavailable|service unavailable/i.test(String(body?.msg || body?.message || ''))) {
                     throw serviceUnavailable(context, 'ERP 返回了维护提示');
                 }
@@ -487,6 +494,7 @@
     }
 
     async function apiGetRetry(path, params, parentSignal, context) {
+        const owner = activeRun, ownerController = owner?.controller;
         // Fast/cache-backed responses must still allow stop controls and budget
         // timers to run; an unbroken promise chain can starve browser events.
         if (++requestTurns % 32 === 0) await wait(0);
@@ -518,6 +526,14 @@
                 const metrics = parentSignal?.readMetrics;
                 if (metrics) metrics.requestErrorCount += 1;
                 healthyRequests = 0;
+                if (error.code === 'ERP_PERMISSION_REQUIRED') {
+                    if (owner && activeRun === owner && owner.controller === ownerController) {
+                        taskCache.clear();
+                        rememberSourcePause(owner, error);
+                        ownerController.abort(error);
+                    }
+                    throw error;
+                }
                 if (error.status === 429) {
                     requestLimit = 2;
                     throttleUntil = Math.max(throttleUntil, Date.now() + Math.max(1000, error.retryAfter || 0));
@@ -1101,7 +1117,7 @@
             while (!closed && !controller.signal.aborted && active < Math.max(1, requestLimit - 4) && queued.length) {
                 const order = queued.shift(); active += 1;
                 void readOrderDetails(order, run).catch(error => {
-                    if (['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error.code)) controller.abort(error);
+                    if (['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED'].includes(error.code)) controller.abort(error);
                 }).finally(() => { active -= 1; pump(); });
             }
         };
@@ -1158,7 +1174,7 @@
                 try {
                     return await readOrderDetails(order, run);
                 } catch (error) {
-                    if (run.controller.signal.aborted || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error.code)) throw error;
+                    if (run.controller.signal.aborted || ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED'].includes(error.code)) throw error;
                     failedOrders.push({ id, no: order.purchaseOrderNo || order.purchaseOrderNo1688 || id, stage: '采购明细读取', message: (error.message || String(error)) + (error.details ? '：' + error.details.split('\nERP 返回：')[0] : ''), erpResponse: error.erpResponse || '' });
                     return [];
                 } finally {
@@ -1658,7 +1674,7 @@
             const missing = Object.entries(catalog.coverage).filter(([, group]) => group.state !== 'complete' && group.reasons?.some(reason => reason !== 'query_scope_subset')).map(([key, group]) => labels[key] + '缺项 ' + (group.missingCount || 1));
             return { ...response, coverageComplete, message: response?.status === 'success' && !coverageComplete ? '资料已送达，但尚未齐全：' + missing.join('；') + '。可补齐 ERP 资料后继续。' : response?.message };
         } catch (error) {
-            rememberServicePause(run, error);
+            rememberSourcePause(run, error);
             if (error.code === 'ERP_COLLECTION_PAUSED') run.pauseRequested = true;
             if (!run.cancelledByUser) showToast('成本已完成；资料补充未完成：' + (error.message || String(error)), 'error');
             return { status: 'failed', message: error.details || error.message || String(error) };
@@ -1724,6 +1740,7 @@
             + (failed.length ? ' · ' + failed.length + ' 批待核对：' + (failed[0].error?.message || failed[0].error || '证据不完整') : '')
             + (batches.some(batch => batch.catalogStatus) ? ' · 资料已检查 ' + batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).length + '/' + batches.length + ' 批，齐全 ' + batches.filter(batch => batch.catalogStatus === 'completed').length + ' 批' : '');
         if (task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') taskStage += ' · 已送达结果保留，服务恢复后继续原任务';
+        if (task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED') taskStage = 'ERP 店铺权限校验未通过，采集已暂停 · 已送达结果保留，请检查 ERP 采购查询后继续原任务';
         renderPageContext();
         renderStatus();
     }
@@ -1829,7 +1846,7 @@
                         taskStage = '回执待核对 · 已采集结果保留，点击继续核对';
                         break;
                     }
-                    const paused = rememberServicePause(run, error) || error.code === 'ERP_COLLECTION_PAUSED' || run.pauseRequested;
+                    const paused = rememberSourcePause(run, error) || error.code === 'ERP_COLLECTION_PAUSED' || run.pauseRequested;
                     const result = await taskOperation({ action: 'batch', ...identity, state: paused ? 'pending' : 'failed', error: paused ? null : error.details || error.message });
                     task = result.task;
                     if (paused || error.code === 'ERP_LOGIN_REQUIRED') { run.pauseRequested = true; break; }
@@ -1971,8 +1988,8 @@
             // Uncoordinated preview has no durable all-batch adoption barrier.
             // Only shared tasks can start automatic material completion.
         } catch (error) {
-            if (rememberServicePause(run, error)) {
-                taskStage = 'ERP 服务暂不可用 · 已暂停，服务恢复后继续原任务';
+            if (rememberSourcePause(run, error)) {
+                taskStage = error.code === 'ERP_PERMISSION_REQUIRED' ? 'ERP 店铺权限校验未通过 · 已暂停，请检查采购查询后继续原任务' : 'ERP 服务暂不可用 · 已暂停，服务恢复后继续原任务';
                 showError(error);
             } else if (run.cancelledByUser || (error && error.name === 'AbortError')) {
                 hideLoading();

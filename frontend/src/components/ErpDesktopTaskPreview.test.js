@@ -17,6 +17,12 @@ it('shows the real desktop task on ERP home without legacy acquisition controls 
     expect(document.getElementById('erpa-cost-root').classList.contains('erpa-open')).toBe(true);
     await new Promise(resolve=>setTimeout(resolve,0));
     expect(collectionTask.mock.calls.every(([input])=>input.action==='list')).toBe(true);
+    collectionTask.mockResolvedValue({ok:true,tasks:[{executionTarget:'desktop',status:'paused',pauseReason:{code:'ERP_PERMISSION_REQUIRED'},batches:[]}]});
+    await window.ShopeersErpTaskPreview.refresh();
+    expect(document.querySelector('.erpa-task-body').textContent).toContain('店铺权限校验未通过，采集已暂停');
+    expect(document.querySelector('.erpa-task-body').textContent).toContain('确认 ERP 采购管理可正常查询');
+    expect(document.querySelector('.erpa-task-body').textContent).not.toContain('登录');
+    expect(collectionTask.mock.calls.every(([input])=>input.action==='list')).toBe(true);
     collectionTask.mockResolvedValue({ok:false});
     await window.ShopeersErpTaskPreview.refresh();
     expect(document.querySelector('.erpa-task-body').textContent).toContain('暂时无法读取任务进度');

@@ -83,3 +83,14 @@ test('historical login errors do not override a running task or prevent retry of
   assert.equal(h.collector.snapshot().status,'ready');
   assert.equal(h.created,2);h.collector.dispose();
 });
+
+test('a permission pause closes the hidden view and continues the same task without requiring another login',async()=>{
+  const h=harness();await h.collector.start(h.input);
+  h.update({status:'paused',pauseReason:{code:'ERP_PERMISSION_REQUIRED'},batches:[{status:'delivered',deliveryId:'RECEIPT'},{status:'pending'}]});
+  await h.collector.poll();
+  assert.equal(h.collector.snapshot().status,'paused');assert.equal(h.closed,1);
+  const result=await h.collector.start(h.input);
+  assert.equal(result.status,'ready');assert.equal(result.taskId,'TASK');assert.equal(h.created,2);
+  assert.equal(h.calls.filter(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST').length,1);
+  h.collector.dispose();
+});

@@ -21,7 +21,7 @@ app.commandLine.appendSwitch('disable-gpu');
 app.on('window-all-closed',()=>{});
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], failures = [], timings = [], requests = [];
-let inbox, host, view, popup, collector, collectorView, automaticLoginRequired = false;
+let inbox, host, view, popup, collector, collectorView, automaticLoginRequired = false, permissionRequired = false;
 async function call(route, body) {
   const started = performance.now();
   const response = await fetch(`http://127.0.0.1:${port}/erp/v1/${route}`, { headers: { authorization: `Bearer ${capability}`, 'content-type': 'application/json' }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(4000) });
@@ -58,6 +58,7 @@ app.whenReady().then(async () => {
       if (url.searchParams.has('lworkstationRequest') && automaticLoginRequired) return new Response('<!doctype html><html><body><input type="password"></body></html>', { headers: { 'content-type': 'text/html' } });
       if (!url.pathname.startsWith('/purchase/')) return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离原生 ERP</h1>' + (url.pathname === '/view/console/index.html' ? '<iframe id="procurement" style="width:100%;height:720px" src="/view/system/purchaseOrderModule/purchasingManagement.html"></iframe>' : '') + (url.pathname === '/login.html' ? '<input type="password" aria-label="ERP 密码">' : '') + '</body></html>', { headers: { 'content-type': 'text/html' } });
       requests.push(url.pathname);
+      if (permissionRequired && url.pathname.endsWith('product-info-sku')) return new Response(JSON.stringify({ code: -40102, msg: '校验用户店铺权限失败！' }), { headers: { 'content-type': 'application/json' } });
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-A' }]
         : url.pathname.endsWith('purchase-order-details') ? [{ purchaseOrderDetailId: 'D-A', itemId: 'WH-A', tradeName: '原生隔离商品', creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }]
           : url.pathname.endsWith('product-page') ? [{ itemId: 'WH-A' }] : url.pathname.endsWith('product-info-sku') ? [{ associatedProductId: 'WH-A', barcodeSkcid: 'SKC-A', barcodeSkuid: 'SKU-A' }] : [];
@@ -139,6 +140,26 @@ app.whenReady().then(async () => {
     assert.equal(restarted.envelope.batch.rows[0].unitCost, 4);
     assert.ok((await call(`cost-batches?workspaceId=${workspaceId}`)).records.some(item => item.deliveryId === automatic.deliveryId), 'old durable receipt stays available');
     checks.push({ name: 'changed login stops the old native task; a fresh registration restarts collection and preserves earlier receipts' });
+    await collector.stop();
+    await call('requests', { request: { id: 'NATIVE-PERMISSION', workspaceId, ledgerId: 'NATIVE-PERMISSION-L', ledgerPeriod: '2026-09', platformSkcs: [{ platformSkc: 'SKC-A' }] }, expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] });
+    permissionRequired = true;
+    const permissionInput = { workspaceId, ledgerId: 'NATIVE-PERMISSION-L', requestId: 'NATIVE-PERMISSION' };
+    await collector.start(permissionInput);
+    const pausedPermission = await waitFor(async () => (await call(`collection-tasks?workspaceId=${workspaceId}`)).tasks?.find(task => task.requestId === permissionInput.requestId && task.status === 'paused'), 'native permission failure pauses the task');
+    assert.equal(pausedPermission.pauseReason?.code, 'ERP_PERMISSION_REQUIRED');
+    assert.equal(pausedPermission.batches[0].status, 'pending');
+    assert.ok(!(await call(`cost-batches?workspaceId=${workspaceId}`)).records?.some(item => item.requestId === permissionInput.requestId), 'permission failure cannot deliver partial costs');
+    await collector.poll();
+    assert.equal(collector.snapshot().status, 'paused');
+    permissionRequired = false;
+    await collector.start(permissionInput);
+    const permissionReceipt = await waitFor(async () => (await call(`cost-batches?workspaceId=${workspaceId}`)).records?.find(item => item.requestId === permissionInput.requestId), 'native permission recovery continues without logging in again');
+    assert.equal(permissionReceipt.envelope.batch.rows[0].unitCost, 4);
+    const resumedPermission = (await call(`collection-tasks?workspaceId=${workspaceId}`)).tasks.find(task => task.requestId === permissionInput.requestId);
+    assert.equal(resumedPermission.taskId, pausedPermission.taskId);
+    assert.equal(resumedPermission.pauseReason, undefined);
+    assert.ok((await call(`cost-batches?workspaceId=${workspaceId}`)).records.some(item => item.deliveryId === automatic.deliveryId));
+    checks.push({ name: 'native HTTP 200 permission failure pauses with pending costs, closes hidden view, resumes the same task without another login and preserves earlier receipts' });
     await collector.stop(); collector.dispose(); collector = null;
     checks.push({ name: 'workspace launch, first-login wait/resume, real hidden native collector, fixed scope, complete delivery and unchanged foreground URL/form/pagination/result cache', unitCost: 4 });
     // Selecting another workspace detaches the remote view in the real shell.

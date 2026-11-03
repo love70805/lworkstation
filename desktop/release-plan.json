@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "candidateOnly": true,
-  "integrationBranch": "codex/response-optimization-1-0-9",
+  "integrationBranch": "codex/erp-permission-1-0-10",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "20058f0f5f2976f1a6e3ddbe6e929e147b6224d9"
+      "commit": "4a28474dd294f97c7a6f6d9e15053d23539f1936"
     }
   ]
 }

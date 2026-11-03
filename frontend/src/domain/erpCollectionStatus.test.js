@@ -68,6 +68,19 @@ it('shows durable ERP service pause separately from initial waiting and user pau
   expect(erpCollectionPresentation({ ...task, status: 'running', batches: [{ status: 'running' }] }).state).toBe('cost_running');
 });
 
+it('explains permission pauses before the first batch and during optional catalog without claiming logout', () => {
+  const task = { status: 'paused', pauseReason: { code: 'ERP_PERMISSION_REQUIRED' }, batches: [{ status: 'pending' }] };
+  for (const batches of [task.batches, [{ ...delivered, catalogStatus: 'running' }]]) {
+    const view = erpCollectionPresentation({ ...task, batches });
+    expect(view).toMatchObject({ state: 'paused', running: false, canResume: true, canRetry: false, tone: 'warning' });
+    expect(view.title).toContain('店铺权限校验未通过');
+    expect(view.description).toContain('继续原任务');
+    expect(view.description).not.toContain('登录');
+  }
+  expect(erpCollectionPresentation({ ...task, status: 'stopped' }).state).toBe('stopped');
+  expect(erpCollectionPresentation({ ...task, status: 'running', batches: [{ status: 'running' }] }).state).toBe('cost_running');
+});
+
 it('distinguishes a queued continuation and a claimed executor from an actual read', () => {
   const task = { executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost', status: 'ready', batches: [{ status: 'pending' }] };
   expect(erpCollectionPresentation(task)).toMatchObject({ state: 'queued', running: false, canResume: false, canRetry: false });

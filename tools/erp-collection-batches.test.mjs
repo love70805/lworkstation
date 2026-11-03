@@ -20,7 +20,7 @@ export async function scenario(size, mode = '', options = {}) {
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
   const records = [request], deliveries = [], catalogs = [], calls = [], errors = [], listTimes = new Map(), windows = [], claims = [];
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
-  let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false;
+  let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false, permissionCatalogBlocked = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
   const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
@@ -34,6 +34,7 @@ export async function scenario(size, mode = '', options = {}) {
         if(body.catalogSeedReceipt) {
           const delivery=deliveries.find(item=>item.deliveryId===body.catalogSeedReceipt);
           body={seed:collectionCatalogSeed({rows:delivery.rows,sourceMeta:delivery.sourceMeta,warehouseEvidence:delivery.warehouseEvidence})};
+          if(options.permissionCatalog)for(const row of body.seed.results)row.catalogMappingsComplete=false;
         }
       }
       else if(url.pathname==='/erp/v1/requests') body={records:[request,...(options.afterCosts?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[])]};
@@ -80,6 +81,7 @@ export async function scenario(size, mode = '', options = {}) {
       await delay(options.requestDelay ?? (mode==='remote-stop'&&endpoint==='purchase-order-page'?4000:mode.startsWith('benchmark') ? 8 : 1));
       inflight--; if(endpoint==='purchase-order-page'){lists--;listTimes.get(timeKey).end=performance.now();}
       if(['throttle','speed-recovery'].includes(mode)&&!limited&&endpoint==='purchase-order-page'){limited=true;return {ok:false,status:429,statusText:'Limited',headers:{get:()=> '1'}};}
+      if(permissionCatalogBlocked&&endpoint==='product-info-sku')return {ok:true,status:200,json:async()=>({code:-40102,msg:'校验用户店铺权限失败！'})};
       if(options.fixture){const value=await options.fixture(url);return {ok:true,status:200,json:async()=>value};}
       const id=target.split('-').at(-1);
       const data=endpoint==='product-page'?[{itemId:`WH-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
@@ -137,13 +139,30 @@ export async function scenario(size, mode = '', options = {}) {
         return;
       }
       const before=calls.length;
+      const costReads=()=>calls.filter(call=>['purchase-order-page','purchase-order-details'].includes(call.endpoint)).length;
+      const costReadsBefore=costReads();
+      if(options.permissionCatalog){
+        window.document.getElementById('erpa-pause').click();
+        await until(()=>records[1].status==='paused'&&!window.document.getElementById('erpa-recalculate').disabled);
+      }
       for(const batch of records[1].batches) {
         assert.equal(catalogs.length,0,'no material delivery while any calculation remains');
         handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${records[1].taskId}/adoption`),
           payload:{workspaceId:'WS',deliveryId:batch.deliveryId,adoptedCount:batch.platformSkcs.length},instanceId:'test'});
       }
+      if(options.permissionCatalog){
+        permissionCatalogBlocked=true;
+        window.document.getElementById('erpa-resume').click();
+        await until(()=>records[1].pauseReason?.code==='ERP_PERMISSION_REQUIRED'&&!window.document.getElementById('erpa-recalculate').disabled);
+        assert.equal(records[1].status,'paused');assert.equal(deliveries.length,Math.ceil(size/5));assert.equal(catalogs.length,0);
+        assert.equal(costReads(),costReadsBefore,'a material permission failure never restarts completed costs');
+        assert.equal(records[1].batches[1].catalogStatus,undefined,'no following material batch starts after a permission failure');
+        permissionCatalogBlocked=false;
+        window.document.getElementById('erpa-resume').click();
+      }
       await until(()=>catalogs.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled);
-      assert.equal(calls.length,before,'durable seeds reuse directory, mapping and complete history even after the task cache is gone');
+      if(options.permissionCatalog){assert.equal(costReads(),costReadsBefore);assert.equal(records[1].pauseReason,undefined);}
+      else assert.equal(calls.length,before,'durable seeds reuse directory, mapping and complete history even after the task cache is gone');
     }
     await until(()=>{
       if(options.fixture && records[1]?.batches.some(batch=>batch.status==='failed') && !window.document.getElementById('erpa-recalculate').disabled)throw Error(JSON.stringify(records[1].batches));
