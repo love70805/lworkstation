@@ -36,3 +36,30 @@ it('keeps a failed registration actionable with its actual reason', async () => 
 it('preserves browser-only behavior when no desktop runtime exists', async () => {
   delete window.shopeersDesktopRuntime; await render(); expect(host.children).toHaveLength(0);
 });
+
+it('re-registers a cancelled session and starts the new request in the same click', async () => {
+  props.task={requestId:'R',status:'stopped',batches:[{status:'failed'}]};
+  runtime.getErpCollection.mockResolvedValue({requestId:'R',status:'waiting_login'});
+  runtime.startErpCollection.mockResolvedValueOnce({ok:false,code:'ERP_SESSION_CHANGED',error:'登录已变化'})
+    .mockResolvedValueOnce({ok:true,requestId:'R-NEW',status:'running'});
+  props.onRegistrationRetry.mockResolvedValue({id:'R-NEW'});
+  await render();
+  expect(host.textContent).not.toContain('登录后自动继续');
+  await act(async()=>button('继续成本核算').click());
+  expect(runtime.startErpCollection.mock.calls.map(([call])=>call.requestId)).toEqual(['R','R-NEW']);
+  expect(props.onStarted).toHaveBeenCalledOnce();
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('does not let an old completed task disable a newly registered scope', async () => {
+  props.task={requestId:'OLD',status:'completed',batches:[{deliveryId:'D'}]};
+  await render();expect(button('继续成本核算').disabled).toBe(false);
+});
+
+it('shows a failed renewal and leaves the action retryable without a start loop', async () => {
+  runtime.startErpCollection.mockResolvedValue({ok:false,code:'ERP_REQUEST_INVALID',error:'请求已失效'});
+  props.onRegistrationRetry.mockRejectedValue(new Error('登记失败：本机服务不可用'));
+  await render();await act(async()=>button('开始成本核算').click());
+  expect(host.querySelector('[role="alert"]').textContent).toContain('本机服务不可用');
+  expect(runtime.startErpCollection).toHaveBeenCalledOnce();expect(button('开始成本核算').disabled).toBe(false);
+});

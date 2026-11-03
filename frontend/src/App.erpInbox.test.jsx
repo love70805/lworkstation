@@ -117,8 +117,8 @@ describe('ERP inbox background delivery and adoption', () => {
     const options = defaults({ pollRecords: vi.fn(async () => []), recoverDrafts: vi.fn(async () => { throw Error('draft read failed'); }) });
     const result = await runErpInboxCycle(options);
     expect(options.recover).toHaveBeenCalledWith({ workspaceId: 'W1' });
-    expect(result).toMatchObject({ received: 0, recovered: true });
-    expect(result.failures.map(error => error.message)).toEqual(['draft read failed']);
+    expect(result).toMatchObject({ received: 0, recovered: false });
+    expect(result.failures.map(error => error.message)).toEqual(['旧成本草稿恢复失败：draft read failed']);
   });
 
   it('keeps a saved but unacknowledged record retryable while recovering the local inbox', async () => {
@@ -153,7 +153,7 @@ describe('ERP inbox background delivery and adoption', () => {
     let release;
     let disposed = false;
     const options = defaults({
-      pollRecords: vi.fn(() => new Promise(resolve => { release = resolve; })),
+      pollRecords: vi.fn().mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockResolvedValue([]),
       isDisposed: () => disposed,
     });
     const poll = createErpInboxPoller(options);
@@ -162,9 +162,20 @@ describe('ERP inbox background delivery and adoption', () => {
     expect(await poll()).toBeNull();
     release([]);
     await first;
-    expect(options.recover).toHaveBeenCalledOnce();
+    expect(options.recover).toHaveBeenCalledTimes(2);
     disposed = true;
     expect(await poll()).toBeNull();
-    expect(options.pollRecords).toHaveBeenCalledOnce();
+    expect(options.pollRecords).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps returned draft recovery failures visible and clears them after a successful retry', async () => {
+    const onReceiptStatus = vi.fn();
+    const options = defaults({ pollRecords: vi.fn(async () => []), onReceiptStatus,
+      recoverDrafts: vi.fn().mockResolvedValueOnce({ recovered: 0, failures: [{ key: 'draft-L', message: '草稿暂时无法读取' }] }).mockResolvedValue({ recovered: 1, failures: [] }) });
+    expect((await runErpInboxCycle(options)).recovered).toBe(false);
+    expect(onReceiptStatus).toHaveBeenLastCalledWith({ workspaceId: 'W1', error: '旧成本草稿恢复失败：草稿暂时无法读取' });
+    expect(options.recover).toHaveBeenCalledOnce();
+    expect((await runErpInboxCycle(options)).recovered).toBe(true);
+    expect(onReceiptStatus).toHaveBeenLastCalledWith({ workspaceId: 'W1', error: '' });
   });
 });

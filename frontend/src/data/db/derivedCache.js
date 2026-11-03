@@ -166,6 +166,15 @@ export function installDerivedInvalidation(database) {
 
 export function clearDerivedMemory() { memory.clear(); memoryReaders.clear(); memoryBytes.clear(); memoryNamespaces.clear(); pending.clear(); }
 
+function readPersistedEntry(key) {
+  // Cache insertions/evictions are not business changes. Observing these reads
+  // makes a large live summary invalidate itself before it can ever publish.
+  // Source revision and source-table reads remain in the caller's live query.
+  return new Promise((resolve, reject) => {
+    setTimeout(() => { derivedCacheDb.entries.get(key).then(resolve, reject); }, 0);
+  });
+}
+
 function persistEntry(entry, revision, revisionReader) {
   // A native timer starts a separate task outside Dexie's liveQuery scope.
   // ignoreTransaction only detaches transactions, not the read-only querier.
@@ -207,7 +216,7 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
   const task = (async () => {
     let value, memorySize;
     if (persist && durable) {
-      try { value = (await Dexie.ignoreTransaction(() => derivedCacheDb.entries.get(key)))?.value; } catch { /* cache is optional */ }
+      try { value = (await readPersistedEntry(key))?.value; } catch { /* cache is optional */ }
     }
     assertSourceRevision(revision, revisionReader);
     if (value === undefined) {

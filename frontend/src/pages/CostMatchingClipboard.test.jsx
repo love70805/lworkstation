@@ -58,6 +58,19 @@ beforeEach(() => {
   vi.stubGlobal('navigator', { clipboard: { writeText } });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
+it('renews a rejected stopped task in the displayed scope and starts again on the same click', async () => {
+  mocks.tasks=[{workspaceId:'W',ledgerId:'L',requestId:'REG-L',taskId:'T',status:'stopped',ledgerPeriod:'2026-08',ledgerVersion:'[]',batches:[]}];
+  await render(['SKC-A']);
+  window.shopeersDesktopRuntime.startErpCollection
+    .mockResolvedValueOnce({ok:false,code:'ERP_SESSION_CHANGED',error:'登录已变化'})
+    .mockResolvedValueOnce({ok:true,status:'running',requestId:'REG-NEW'});
+  mocks.register.mockImplementationOnce(async input=>({id:'REG-NEW',...input}));
+  await act(async()=>collectionButton().click());
+  expect(mocks.register.mock.calls.at(-1)[1].rejectedRequestId).toBe('REG-L');
+  expect(mocks.register.mock.calls.at(-1)[0]).toMatchObject({platformSkcs:['SKC-A'],expectedSkus:[{platformSku:'SKU-0',platformSkc:'SKC-A',store:'甲'}]});
+  expect(window.shopeersDesktopRuntime.startErpCollection.mock.calls.map(([input])=>input.requestId)).toEqual(['REG-L','REG-NEW']);
+  expect(container.textContent).not.toContain('登录已变化');
+});
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove();
   delete window.shopeersDesktopRuntime; vi.restoreAllMocks(); vi.unstubAllGlobals(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;

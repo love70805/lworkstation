@@ -1868,11 +1868,11 @@ export async function voidPublishedErpCostBatch({
   return result;
 }
 
-export async function getLedgerSnapshot(ledgerId) {
-  return retrySourceRead(() => readLedgerSnapshot(ledgerId));
+export async function getLedgerSnapshot(ledgerId, options = {}) {
+  return retrySourceRead(() => readLedgerSnapshot(ledgerId, options));
 }
 
-async function readLedgerSnapshot(ledgerId) {
+async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
   await observeLedgerSnapshotRevision();
   const dataVersion = ledgerSnapshotRevision();
   const original = await db.ledgers.get(ledgerId);
@@ -1883,17 +1883,17 @@ async function readLedgerSnapshot(ledgerId) {
   const accountingMode = await readAccountingMode(ledger.workspaceId);
   const [rows, batches, originalCosts, approvals, profitLines] = await Promise.all([
     readLedgerSalesRows(member.workspaceId, ledgerId),
-    db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
+    summaryOnly ? [] : db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
     accountingMode === LOWEST_ACCOUNTING ? [] : readOwnedLedgerCosts(ledger),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
-    db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
+    summaryOnly ? [] : db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
   Object.assign(ledger, await projectAccountingLedger(ledger, accountingMode));
   await observeInventoryRevision(false, accountingMode);
   const calculationReader = accountingMode === LOWEST_ACCOUNTING ? inventoryLowestRevision : inventoryCalculationRevision;
   const calculationRevision = calculationReader();
   const costs = await accountingCosts(ledger, originalCosts, accountingMode, rows);
-  if (accountingMode !== LOWEST_ACCOUNTING && originalCosts.length && !Dexie.currentTransaction) {
+  if (!summaryOnly && accountingMode !== LOWEST_ACCOUNTING && originalCosts.length && !Dexie.currentTransaction) {
     // Prepare both projections from the same captured history. No ERP read is
     // performed, and later switches reuse the independently versioned cache.
     // Keep optional history warming outside the ordinary live-query scope:
@@ -1938,7 +1938,7 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
     const mode = await readAccountingMode(member.workspaceId);
     const projected = await Promise.all(ledgers.map(async original => {
       const ledger = operatingLedger(original);
-      if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id))?.ledger ?? ledger;
+      if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id, { summaryOnly: true }))?.ledger ?? ledger;
       if (['finalized', 'locked'].includes(ledger.status) || ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
       const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@1-identity',
         revision, revisionReader: selectionFactsRevision, persist: false, compute: async () => {

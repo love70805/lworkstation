@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld("shopeersDesktopRuntime", Object.freeze({
   desktop: true,
   version,
   appearance: savedAppearance,
+  onInboxChanged: callback => {
+    const listener = () => callback();
+    ipcRenderer.on('workspace:inbox-changed', listener);
+    return () => ipcRenderer.removeListener('workspace:inbox-changed', listener);
+  },
   onAccountingToggle: callback => {
     const listener = () => callback();
     ipcRenderer.on('workspace:toggle-accounting', listener);

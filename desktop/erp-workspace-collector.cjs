@@ -29,7 +29,10 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
       const login = owner.view && await owner.view.webContents.executeJavaScript(`Boolean(/\\/(?:login|signin)(?:[/.]|$)/i.test(location.pathname)||document.querySelector('input[type="password"]'))`);
       if (current !== owner || revision !== generation) return;
       if (task.status === 'running') owner.hasRun = true;
-      const waiting = login || task.pauseReason?.code === 'ERP_LOGIN_REQUIRED' || task.batches?.some(batch => /登录/.test(batch.error?.message ?? batch.error ?? ''));
+      // A historical batch error cannot keep a terminal task waiting for login.
+      // Only the current document or an explicit live pause describes auth state.
+      const terminal = ['stopped','invalidated','completed'].includes(task.status);
+      const waiting = !terminal && (login || task.pauseReason?.code === 'ERP_LOGIN_REQUIRED');
       state = { requestId: owner.requestId, taskId: task.taskId, status: waiting ? 'waiting_login' : task.status };
       if (!waiting && ['paused','stopped','invalidated','completed','cost_complete','partial'].includes(task.status)
         && !(task.catalogMode === 'after_costs' && task.status === 'cost_complete' && !task.batches.every(batch => batch.catalogStatus === 'completed'))) closeView();
@@ -40,21 +43,26 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
   async function launch(input) {
     const context = getContext();
     if (!validId(input?.requestId) || !validId(input?.workspaceId) || !validId(input?.ledgerId) || context?.workspaceId !== input.workspaceId) throw new Error('采集请求不属于当前工作区。');
-    if (current?.view && current.requestId === input.requestId) return snapshot();
+    if (current?.view && current.requestId === input.requestId) {
+      await poll();
+      if (['starting','running','ready'].includes(state.status) && !state.error) return snapshot();
+      closeView();
+    }
     if (current?.view) throw new Error('已有成本采集正在执行，请先暂停或停止。');
     if (current?.sessionInvalidated && current.requestId === input.requestId) throw Object.assign(new Error('ERP 登录已变化，请重新准备本月采集。'), { code: 'ERP_SESSION_CHANGED' });
     const revision = ++generation;
     const registered = await requestInbox({ route: '/erp/v1/requests', query: { workspaceId: input.workspaceId, includeHistory: true } });
     const requests = registered.records ?? registered.requests ?? [];
     const request = requests.find(item => (item.requestId ?? item.id) === input.requestId && item.workspaceId === input.workspaceId && item.ledgerId === input.ledgerId);
-    if (!request || request.status !== 'registered' || !request.platformSkcs?.length || !request.expectedSkus?.length) throw new Error('采集请求已失效或缺少商品范围，请重新核对当前账本。');
+    if (!request || request.status !== 'registered' || !request.platformSkcs?.length || !request.expectedSkus?.length) throw Object.assign(new Error('采集请求已失效，请重新准备当前范围。'), { code: 'ERP_REQUEST_INVALID' });
     const existing = await requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId: input.workspaceId, requestId: input.requestId } });
     const retained = existing.tasks?.find(task => task.requestId === input.requestId && task.status !== 'stopped');
     const initialSku=String(request.platformSkcs[0]?.platformSkc??request.platformSkcs[0]).trim();
     const created = retained ? { task: retained } : await requestInbox({ route: '/erp/v1/collection-tasks', method: 'POST', body: { workspaceId: input.workspaceId, requestId: input.requestId, executionProtocol: 2, executionTarget: 'desktop', catalogMode: 'after_costs', filters: { ...PURCHASE_FILTERS, sku: initialSku } } });
     if (revision !== generation || getContext()?.workspaceId !== input.workspaceId) throw new Error('工作区已改变，采集未启动。');
     current = { ...input, request, task: created.task, view: null, hasRun: false };
-    if (['completed','stopped','invalidated'].includes(created.task.status)) { state = { ...input, status: created.task.status }; return snapshot(); }
+    if (['stopped','invalidated'].includes(created.task.status)) throw Object.assign(new Error('旧任务已结束，请重新准备当前范围。'), { code: 'ERP_TASK_STOPPED' });
+    if (created.task.status === 'completed') { state = { ...input, taskId: created.task.taskId, status: 'completed' }; return snapshot(); }
     const resumed = await control('request_resume', { executionTarget: 'desktop', mode: input.mode === 'catalog' ? 'catalog' : 'cost', retryFailed: input.retryFailed === true });
     current.task = resumed.task;
     state = { ...input, taskId: resumed.task.taskId, status: 'starting' };
@@ -73,10 +81,21 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
   }
   async function stop(status = 'stopped') { generation++; closeView(); await control(['session_changed','workspace_changed'].includes(status)?'stop':'pause').catch(() => {}); state = { ...state, status }; }
   async function sessionChanged() {
-    if (!current?.view) return;
-    if (state.status === 'waiting_login' && !current.hasRun) {
+    if (!current?.task || current.sessionInvalidated) return;
+    const owner = current, revision = generation;
+    const { task } = await requestInbox({ route: `/erp/v1/collection-tasks/${encodeURIComponent(owner.task.taskId)}`, query: { workspaceId: owner.workspaceId } });
+    if (current !== owner || revision !== generation) return;
+    current.task = task;
+    if (task.status === 'running') current.hasRun = true;
+    if (task.status === 'completed') {
+      state = { requestId: owner.requestId, taskId: task.taskId, status: task.status };
+      closeView();
+      return;
+    }
+    if (current.view && state.status === 'waiting_login' && !current.hasRun && !['stopped','invalidated','completed'].includes(current.task.status)) {
       await control('request_resume', { executionTarget: 'desktop', retryFailed: true });
       await current.view.webContents.loadURL(`${PURCHASE_PAGE}?lworkstationRequest=${encodeURIComponent(current.requestId)}`);
+      await poll();
       return;
     }
     current.sessionInvalidated=true;

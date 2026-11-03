@@ -1378,9 +1378,18 @@ async function createWindow() {
     port: inboxState.port,
     capability: inboxCapability,
     runAsNode: true,
+    onChange: () => {
+      const contents = views.get('workspace')?.webContents;
+      if (contents && !contents.isDestroyed()) contents.send('workspace:inbox-changed');
+    },
     onState: (state) => {
+      const availabilityChanged = inboxState.status !== state.status;
       inboxState = state;
       publishState();
+      if (availabilityChanged) {
+        const contents = views.get('workspace')?.webContents;
+        if (contents && !contents.isDestroyed()) contents.send('workspace:inbox-changed');
+      }
     },
   });
   await inboxService.start();

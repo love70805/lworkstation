@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "candidateOnly": true,
-  "integrationBranch": "codex/accounting-logic-audit",
+  "integrationBranch": "codex/response-optimization-1-0-9",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "ece5253a90274366f6cb7eb0297b0e5bb5756db5"
+      "commit": "20058f0f5f2976f1a6e3ddbe6e929e147b6224d9"
     }
   ]
 }

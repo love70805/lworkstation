@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { liveQuery } from 'dexie';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { db } from './db/clientDatabase';
-import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, StaleDerivedResultError, invalidateDerivedCache, derivedValueBytes } from './db/derivedCache';
+import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, StaleDerivedResultError, invalidateDerivedCache, derivedValueBytes, observeSourceRevision } from './db/derivedCache';
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { readLedgerSalesAnalytics } from './repositories/salesAnalyticsRepository';
 import { readLedgerSalesRows } from './repositories/ledgerReadCache';
@@ -33,6 +33,24 @@ beforeEach(async () => {
   await db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', store: '甲', platformSku: 'A', quantity: 1, amount: 0.009, amountExact: '0.009', sourceAddedDate: '2026-08-01' });
 });
 afterEach(async () => { await db.delete(); await derivedCacheDb.delete(); vi.unstubAllGlobals(); });
+it('settles a live summary larger than the cache limit while still observing actual source edits', async () => {
+  let runs=0;const values=[];
+  const subscription=liveQuery(async()=>{
+    runs++;await observeSourceRevision();
+    const result=[];
+    for(let month=0;month<36;month++)result.push(await cachedDerived({scope:['W',month],formula:'many-months@1',compute:async()=>db.salesRows.count()}));
+    return result;
+  }).subscribe(value=>values.push(value));
+  try {
+    await vi.waitFor(()=>expect(values.at(-1)).toEqual(Array(36).fill(1)),{timeout:3000});
+    await new Promise(resolve=>setTimeout(resolve,120));
+    const settled=runs;
+    await new Promise(resolve=>setTimeout(resolve,120));
+    expect(runs).toBe(settled);
+    await db.salesRows.add({workspaceId:'W',ledgerId:'L',platformSku:'B',quantity:1,amount:2});
+    await vi.waitFor(()=>expect(values.at(-1)).toEqual(Array(36).fill(2)),{timeout:3000});
+  } finally { subscription.unsubscribe(); }
+});
 it('keeps durable cache across identical startup identity initialization but invalidates on a real identity change', async () => {
   const compute = vi.fn(async () => 'unchanged-business-result');
   const options = { scope: ['W', 'L'], formula: 'startup-idempotence@1', compute };

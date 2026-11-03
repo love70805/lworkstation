@@ -5,7 +5,7 @@ import { db, CLIENT_DATABASE_NAME, CLIENT_DATABASE_V11_STORES } from "./db/clien
 import { setActiveMemberContext } from "./repositories/selectionRepository";
 import { previewMonthlySupplement,adoptMonthlySupplement,previewProfitReport,saveProfitReport,readSavedProfitReport,readMonthlyReportState,readProfitReportDownload } from "./repositories/profitReportRepository";
 import { monthlyProfitSummary } from '../domain/monthlyProfitSummary';
-import { saveManualCostOverride,reopenLedgerForCostCorrection,deleteMonthlyLedger,finalizeMonthlyLedger } from "./repositories/profitRepository";
+import { saveManualCostOverride,reopenLedgerForCostCorrection,deleteMonthlyLedger,finalizeMonthlyLedger,getLedgerSnapshot } from "./repositories/profitRepository";
 import { createWorkspaceBackupPayload,restoreWorkspaceBackupPayload,createWorkspaceCloudSeedPayload } from "./repositories/workspaceRepository";
 import { validateReportBackup } from "../domain/profitReportBackup";
 import { createWorkspaceBackupManifest } from '../domain/workspaceBackup';
@@ -28,6 +28,20 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('reads a compact deduplicated overview with accurate deduction readiness and unchanged profits',async()=>{
+ const full=await getLedgerSnapshot('L');
+ const imports=vi.spyOn(db.importBatches,'where'),history=vi.spyOn(db.profitLines,'where');
+ const compact=await getLedgerSnapshot('L',{summaryOnly:true});
+ expect(imports).not.toHaveBeenCalled();expect(history).not.toHaveBeenCalled();
+ expect(compact.rows).toEqual(full.rows);expect(compact.costs).toEqual(full.costs);expect(compact.ledger).toEqual(full.ledger);
+ const results=await withCurrentLedgerResults([full.ledger,full.ledger]);
+ expect(results).toHaveLength(1);
+ expect(results[0].currentResult).toMatchObject({deductionStatus:'missing',needsAttention:true,label:'未扣款利润'});
+ await adopt('deduction',{rows:[{kind:'deduction',manual:true,store:'甲',signedAmountExact:'0',sourceRow:1}]});
+ expect((await withCurrentLedgerResults([full.ledger]))[0].currentResult).toMatchObject({deductionStatus:'partial',needsAttention:true});
+ await adopt('deduction');
+ expect((await withCurrentLedgerResults([full.ledger]))[0].currentResult).toMatchObject({deductionStatus:'complete',needsAttention:false});
+});
 it('directly exports a self-contained monthly report and keeps the ledger editable',async()=>{
  await adopt('dispatch',{mode:'files',rows:[{kind:'dispatch',fileHash:'OWNER',sourceSheet:'代发',sourceRow:2,ownerMarker:'张三',quantityExact:'100'}]});await adopt('deduction');
  const saved=await report('financial'),state=await readMonthlyReportState('L');

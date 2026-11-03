@@ -9,6 +9,7 @@ import { filterMonthlyLedgers } from "../lib/ledgerFilter";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
 import { currentLedgerResult } from "../domain/ledgerWorkflow";
+import { readAccountingMode } from "../data/repositories/inventoryAccountingRepository";
 import { confirmSalesSourceCoverage, listSalesSourceConfirmations } from '../data/repositories/salesSourceCoverageRepository';
 
 const money = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
@@ -17,7 +18,7 @@ const ledgerStateLabels = {
   draft: "草稿",
   cost_pending: "待核对成本",
   approval_pending: "待确认成本",
-  ready: "待确认利润",
+  ready: "成本已齐",
   finalized: "可继续盘点",
   locked: "已锁定",
 };
@@ -41,10 +42,21 @@ export default function MonthlyLedger() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const [refresh, setRefresh] = useState(0);
-  const result = useLiveQuery(async () => {
-    try { return { items: await withCurrentLedgerResults(await listLedgerSummaries()) }; }
+  const listResult = useLiveQuery(async () => {
+    try {
+      const items = await listLedgerSummaries();
+      const mode = items[0]?.workspaceId ? await readAccountingMode(items[0].workspaceId) : 'weighted';
+      return { items, mode };
+    }
     catch (error) { return { error: error.message }; }
   }, [refresh], null);
+  const computedResult = useLiveQuery(async () => {
+    if (!listResult || listResult.error) return null;
+    try { return { source: listResult, items: await withCurrentLedgerResults(listResult.items) }; }
+    catch (error) { return { source: listResult, items: listResult.items, error: error.message }; }
+  }, [listResult, refresh], null);
+  const result = computedResult?.source === listResult ? computedResult : listResult;
+  const loadingResults = Boolean(listResult && !listResult.error && computedResult?.source !== listResult);
   const items = result?.items ?? [];
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -71,10 +83,12 @@ export default function MonthlyLedger() {
   const currentYear = String(new Date().getFullYear());
   const yearLedgers = items.filter((item) => item.period.startsWith(currentYear));
   const yearQuantity = yearLedgers.reduce((total, item) => total + (item.summary?.quantity ?? 0), 0);
-  const finalizedProfits = yearLedgers.map((item) => (item.currentResult ?? currentLedgerResult(item)).profit).filter((value) => value != null);
-  const baseMonths = yearLedgers.filter(item => ['base', 'deduction_pending', 'legacy'].includes((item.currentResult ?? currentLedgerResult(item)).state)).length;
-  const yearProfit = finalizedProfits.reduce((total, value) => total + value, 0);
-  const pending = items.find((item) => !["finalized", "locked"].includes(item.status));
+  const yearResults = yearLedgers.map(item => item.currentResult ?? currentLedgerResult(item));
+  const currentProfits = yearResults.map(result => result.profit).filter(value => value != null);
+  const yearProfit = currentProfits.reduce((total, value) => total + value, 0);
+  const deductionCounts = ['complete', 'partial', 'missing'].map(status => yearResults.filter(result => result.deductionStatus === status).length);
+  const pending = items.find(item => item.currentResult?.needsAttention);
+  const pendingLabel = pending?.currentResult?.state === 'pending' ? '待补成本' : '待补扣款';
 
   const deleteLedger = async () => {
     if (!deleteTarget || deleting) return;
@@ -117,7 +131,7 @@ export default function MonthlyLedger() {
       <PageHeader
         title="月度账本"
         description="每个自然月保存独立的销售数据、成本来源和利润结果，人工可以随时补充或修正。"
-        actions={<><Button icon={Download} loading={exporting} disabled={exporting || items.length === 0} onClick={exportArchive}>导出归档</Button><Button variant={items.length > 0 ? "primary" : "secondary"} icon={Plus} onClick={() => navigate("/import-preview")}>新建或导入账本</Button></>}
+        actions={<><Button icon={Download} loading={exporting} disabled={exporting || loadingResults || Boolean(result?.error) || items.length === 0} onClick={exportArchive}>导出归档</Button><Button variant={items.length > 0 ? "primary" : "secondary"} icon={Plus} onClick={() => navigate("/import-preview")}>新建或导入账本</Button></>}
       />
 
       <div className="ledger-filter-bar">
@@ -127,9 +141,9 @@ export default function MonthlyLedger() {
 
       {result && !result.error && items.length > 0 ? <div className="ledger-stat-grid">
         <Panel className="ledger-stat"><CalendarDays size={18} /><span>已建立月份</span><strong>{items.length}</strong></Panel>
-        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年已保存利润</span><strong>{finalizedProfits.length ? money(yearProfit) : "--"}</strong><small>{baseMonths ? `含 ${baseMonths} 个未扣款或历史月份` : '采用各月当前财务报告'}</small></Panel>
+        <Panel className="ledger-stat"><TrendingUp size={18} /><span>{currentYear} 年当前利润</span><strong>{loadingResults ? '正在核算…' : currentProfits.length ? money(yearProfit) : "--"}</strong><small>{loadingResults ? '月份已加载，正在读取利润摘要' : `扣款齐全 ${deductionCounts[0]} 月 · 部分扣款 ${deductionCounts[1]} 月 · 未扣款 ${deductionCounts[2]} 月`}</small>{!loadingResults && yearResults.some(result => result.profit == null) ? <small>不含成本未齐月份</small> : null}</Panel>
         <Panel className="ledger-stat"><BarChart3 size={18} /><span>{currentYear} 年导入销量</span><strong>{yearQuantity.toLocaleString("zh-CN")}</strong></Panel>
-        <Panel className="ledger-stat pending"><CalendarDays size={18} /><span>当前待处理</span><strong>{pending ? formatLedgerPeriod(pending.period) : "无"}</strong><small>{pending ? ledgerStateLabels[pending.status] : "所有账本均已处理"}</small></Panel>
+        <Panel className="ledger-stat pending"><CalendarDays size={18} /><span>当前待处理</span><strong>{loadingResults ? '正在核对…' : pending ? formatLedgerPeriod(pending.period) : "无"}</strong><small>{loadingResults ? '正在检查成本与扣款' : pending ? pendingLabel : "成本与扣款均已齐全"}</small></Panel>
       </div> : null}
 
       {!result ? <Panel><p role="status">正在读取月度账本与报告结果…</p></Panel> : result.error ? <Panel><p role="alert">账本读取失败：{result.error}</p><Button onClick={() => setRefresh(value => value + 1)}>重试</Button></Panel> : items.length === 0 ? (

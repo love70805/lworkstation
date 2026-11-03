@@ -418,6 +418,24 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     if (timer === null) registerScope();
     return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
   }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionScopeChanged]);
+  const retryCollectionRegistration = async result => {
+    if (!['ERP_SESSION_CHANGED', 'ERP_REQUEST_INVALID', 'ERP_TASK_STOPPED'].includes(result?.code)) {
+      setRegistrationRetry(value => value + 1);
+      return null;
+    }
+    const scope = registrationScope;
+    const request = await ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs: registrationSkcs, expectedSkus: registrationExpected, ledgerVersion }, {
+      latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest, prepareHistory: readErpHistoryMappings,
+      rejectedRequestId: result.requestId,
+      isCurrent: () => currentRegistrationScopeRef.current === scope,
+    });
+    if (!request || currentRegistrationScopeRef.current !== scope) return null;
+    setCostRequestId(request.id); setCostRequest(request);
+    setRegistrationState({ status: 'registered', scope, message: '已重新准备当前范围，可继续采集。' });
+    void registerCostCatalogCompanion(request).catch(() => {});
+    collection.refresh();
+    return request;
+  };
   const controlCollection = async action => {
     if (!collectionTask || collectionBusy) return;
     setCollectionBusy(true); setCollectionError('');
@@ -1095,7 +1113,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 账本月份 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters searchCosts filter={profitFilter} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={formalSalesLines} onChange={changeScope} /> : null}
-      <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId} ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={() => setRegistrationRetry(value => value + 1)} />
+      <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId} ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
       {!locked && missingReviewRows.length ? <p className="cost-correction-help">采集时会为映射缺失项补查有可靠历史关联的仓库。可用核价显示在原“人工更正”中，核对后保存；旧历史证据文件可通过“手动导入”读取。</p> : null}
       {warehouseHistoryOpen ? <WarehouseHistoryDialog key={snapshot.ledger.id} ledger={snapshot.ledger} initialFile={warehouseHistoryFile} onClose={() => { setWarehouseHistoryOpen(false); setWarehouseHistoryFile(null); }} onSaved={result => notify(`已补齐 ${result.savedCount} 项成本，剩余待处理 ${result.pending.length} 项。`, 'success')} /> : null}

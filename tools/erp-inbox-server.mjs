@@ -1077,6 +1077,16 @@ const server = http.createServer(async (req, res) => {
     const resetRevision = workspaceResetRevision;
     const extensionHeartbeat = req.method==='POST' && ['/erp/v1/extension-status','/selection/v1/extension-status'].includes(route);
     const taskHeartbeat = req.method==='POST' && /^\/erp\/v1\/collection-tasks\/[^/]+\/control$/.test(route) && payload?.action==='heartbeat';
+    // Only successful durable business responses wake the workspace. Context
+    // publications and lease renewals must not create a feedback polling loop.
+    const notifyWorkspace = req.method === 'POST' && !taskHeartbeat && (
+      /^\/erp\/v1\/collection-tasks(?:\/|$)/.test(route)
+      || ['/erp/v1/cost-results', '/erp/v1/cost-batches', '/erp/v1/catalog-results', '/erp/v1/catalog-batches', '/erp/v1/workspace-reset'].includes(route));
+    if (notifyWorkspace) res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300 && process.connected) {
+        try { process.send({ type: 'workspace-inbox-changed', version: 1 }, () => {}); } catch { /* Recovery polling survives IPC disconnects. */ }
+      }
+    });
     const runtimeOnly = req.method==='GET' || extensionHeartbeat || taskHeartbeat;
     if(!runtimeOnly) {
       const previousWrite = spoolWriteChain;

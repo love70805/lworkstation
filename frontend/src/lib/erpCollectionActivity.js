@@ -1,3 +1,4 @@
+import { publishErpTaskState } from './erpCollectionTaskStore';
 const empty = Object.freeze({ tasks: [], error: '' });
 const snapshots = new Map();
 const listeners = new Set();
@@ -15,6 +16,7 @@ export function subscribeErpCollectionActivity(listener) {
 // purchase request, financial evidence or business write is introduced here.
 export function publishErpCollectionActivity({ workspaceId, tasks, error = '' }) {
   if (!workspaceId) return;
+  publishErpTaskState({ workspaceId, tasks, error });
   const previous = readErpCollectionActivity(workspaceId);
   const projected = tasks == null ? previous.tasks : tasks.filter(task => task.workspaceId === workspaceId).map(task => ({
     taskId: task.taskId, workspaceId, ledgerId: task.ledgerId, ledgerPeriod: task.ledgerPeriod,

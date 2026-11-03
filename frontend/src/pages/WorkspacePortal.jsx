@@ -82,21 +82,33 @@ export default function WorkspacePortal() {
       getWorkspaceOperationalSummary(),
       db.auditEvents.orderBy("createdAt").reverse().filter(event => event.workspaceId === workspaceId).limit(8).toArray(),
     ]);
-    const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestReadyLedger ?? summary.latestFinalizedLedger].filter(Boolean));
     if ((await getActiveMemberContext()).workspaceId !== workspaceId) throw new Error('工作区已切换，请重新读取。');
     return {
       refresh,
-      summary: { ...summary, ...Object.fromEntries(['latestLedger', 'latestReadyLedger', 'latestFinalizedLedger'].map(key => [key, ledgers.find(ledger => ledger.id === summary[key]?.id) ?? null])) },
+      workspaceId, summary,
       auditEvents,
     };
     } catch (error) { return { refresh, error: error.message }; }
   }, [refresh], null);
+  const profitData = useLiveQuery(async () => {
+    if (!portalData?.summary) return null;
+    try {
+      const { summary, workspaceId } = portalData;
+      const ledgers = await withCurrentLedgerResults([summary.latestLedger, summary.latestReadyLedger ?? summary.latestFinalizedLedger].filter(Boolean));
+      if ((await getActiveMemberContext()).workspaceId !== workspaceId) return null;
+      return { source: portalData, ledgers };
+    } catch (error) { return { source: portalData, error: error.message }; }
+  }, [portalData], null);
   const checkingHealth = Boolean(refresh && portalData?.refresh !== refresh);
   useEffect(() => {
     if (refresh && portalData?.refresh === refresh) setHealthChecked(!portalData.error);
   }, [portalData, refresh]);
 
-  const summary = portalData?.summary;
+  const summary = useMemo(() => {
+    const base = portalData?.summary;
+    if (!base || profitData?.source !== portalData || !profitData.ledgers) return base;
+    return { ...base, ...Object.fromEntries(['latestLedger', 'latestReadyLedger', 'latestFinalizedLedger'].map(key => [key, profitData.ledgers.find(ledger => ledger.id === base[key]?.id) ?? null])) };
+  }, [portalData, profitData]);
   const latestLedger = summary?.latestLedger ?? null;
   const latestFinalizedLedger = summary?.latestReadyLedger ?? summary?.latestFinalizedLedger ?? null;
   const latestSales = latestLedger?.summary ?? {};
@@ -135,6 +147,7 @@ export default function WorkspacePortal() {
 
       {!portalData || checkingHealth ? <div className="workspace-load-state" role="status" aria-live="polite"><RefreshCw className="spin" size={16} />正在读取工作区总览...</div> : null}
       {portalData?.error ? <div className="workspace-load-state" role="alert">总览读取失败：{portalData.error}<Button onClick={runHealthCheck}>重试</Button></div> : null}
+      {profitData?.source === portalData && profitData?.error ? <div className="workspace-load-state" role="alert">利润摘要读取失败：{profitData.error}<Button onClick={runHealthCheck}>重试利润摘要</Button></div> : null}
 
       {summary ? <div className="dashboard-metric-grid">
         <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>正式商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU</em></span></Panel>
