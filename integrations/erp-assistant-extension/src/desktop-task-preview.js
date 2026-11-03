@@ -28,7 +28,9 @@
       body.replaceChildren();
       const line = (text, strong = false) => { const element = document.createElement(strong ? 'strong' : 'p'); element.textContent = text; body.append(element); };
       if (!task) { line('暂无后台任务'); line('从工作台开始成本核算后，这里会自动显示进度。'); return; }
-      line(stages[task.status] || '等待后台处理', true);
+      const permissionPaused = task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED';
+      line(permissionPaused ? 'ERP 店铺权限校验未通过，采集已暂停' : stages[task.status] || '等待后台处理', true);
+      if (permissionPaused) line('请确认 ERP 采购管理可正常查询，再回工作台继续原任务；已送达结果保留。');
       const batches = task.batches || [], total = task.summary?.total ?? batches.reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0);
       const delivered = task.summary?.delivered ?? batches.filter(batch=>batch.deliveryId).reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0);
       line(`${task.ledgerPeriod || ''} · 成本已送达 ${delivered} / ${total} 个 SKC`);

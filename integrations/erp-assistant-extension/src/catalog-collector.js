@@ -7,7 +7,7 @@
     const MAX_PAGES = 1000;
     const key = value => String(value ?? '').normalize('NFKC').trim().toUpperCase();
     const unique = values => [...new Set(values.filter(Boolean))];
-    const interrupted = error => ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error?.code);
+    const interrupted = error => ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED'].includes(error?.code);
 
     function create({ apiGet: requestApi, readWarehouseEvidence: requestEvidence, policy, budgetMs = 30 * 60 * 1000, maxRequests = Infinity, getCache = () => null, setCache = () => {}, onProgress = () => {} }) {
         // Parallel targets share the same budget and request limiter. Pages of

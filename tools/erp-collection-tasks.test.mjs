@@ -158,6 +158,17 @@ try {
   assert.equal((await request(secondUrl)).task.pauseReason.code, 'ERP_SERVICE_UNAVAILABLE', 'service pause survives a real service restart');
   await request(`${secondUrl}/control`, { action: 'resume' });
   assert.equal((await request(secondUrl)).task.pauseReason, undefined);
+  await request(`${secondUrl}/control`, { action: 'pause', reason: { code: 'ERP_PERMISSION_REQUIRED', message: '权限校验失败'.repeat(120), cookie: 'discard' } });
+  await stop(); await start();
+  const permissionPause = (await request(secondUrl)).task;
+  assert.equal(permissionPause.status, 'paused');
+  assert.equal(permissionPause.pauseReason.code, 'ERP_PERMISSION_REQUIRED', 'permission pause survives restart without becoming a login error');
+  assert.equal(permissionPause.pauseReason.message.length, 500);
+  assert.deepEqual(Object.keys(permissionPause.pauseReason).sort(), ['at', 'code', 'message']);
+  await request(`${secondUrl}/control`, { action: 'pause', reason: { code: 'UNKNOWN' } }, 400);
+  await request(`${secondUrl}/control`, { action: 'stop', reason: { code: 'ERP_PERMISSION_REQUIRED' } }, 400);
+  await request(`${secondUrl}/control`, { action: 'resume' });
+  assert.equal((await request(secondUrl)).task.pauseReason, undefined);
   await request(secondBatchUrl, { state: 'running' });
   await request('requests',{request:{...scope,id:'R-three',replaceLedgerScope:true},expectedSkus:[]},409);
   await stop(); await start();

@@ -64,6 +64,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
     <p>查看筛选不改变此任务；已送达结果按证据核验后采用。继续原任务保留已送达进度；重新采集会从头读取。</p>
     {task.phase && !['completed', 'cost_completed'].includes(view.state) ? <p>当前阶段：{task.phase === 'catalog' ? '补充资料' : timing.completed ? '成本证据核对' : '采购成本'}</p> : null}
     {view.catalogPending ? <p>成本回传与资料齐全分别核对；图片或供应商链接缺项时，已采用的成本继续保留。</p> : null}
+    {task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED' && task.pauseReason.message ? <p>暂停原因：{task.pauseReason.message}</p> : null}
     </details>
     {readFailures.length ? <details><summary>{readFailures.length} 批请求失败</summary>{readFailures.map(batch => <p key={batch.batchId}>批次 {batches.indexOf(batch) + 1}：{batch.error?.message ?? batch.error ?? 'ERP 请求未完成，请重试此批次。'}</p>)}</details> : null}
     {incomplete.length ? <details><summary>{incomplete.length} 批成本已送达，证据待补齐</summary>{incomplete.map(batch => <div key={batch.batchId}><p>批次 {batches.indexOf(batch) + 1}：{costIssue(batch, outcomes)}</p>{mappingIssues(batch, outcomes).map((issue, index) => <p key={index}>平台 SKU：{issue.platformSku || '未返回'} · SKC：{issue.platformSkc || '未返回'}{issue.warehouseSku ? ` · 仓库 SKU：${issue.warehouseSku}` : ''} · {issue.message || 'ERP 映射尚未确认，请核对该规格的映射关系。'}</p>)}</div>)}</details> : null}

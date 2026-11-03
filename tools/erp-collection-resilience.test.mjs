@@ -48,6 +48,10 @@ async function scenario(mode) {
   const window = new Window({ url: sender.url });
   const until = async check => { const end = Date.now() + 12000; while (!check()) { if (Date.now() > end) throw new Error(mode + ': ' + window.document.body.textContent.slice(0, 2200)); await delay(5); } };
   const warehouse = id => 'WH-' + (mode === 'persistent-directory' && healthy && id === '0' ? 'NEW-' : '') + id;
+  const permissionEndpoint = { 'permission-directory': 'product-page', 'permission-mapping': 'product-info-sku',
+    'permission-list': 'purchase-order-page', 'permission-list-page2': 'purchase-order-page',
+    'permission-detail': 'purchase-order-details', 'permission-startup': 'product-page' }[mode];
+  const blockedId = mode === 'permission-startup' ? '0' : '20';
   window.chrome = { runtime: { sendMessage: (message, done) => dispatch(message, sender, done) } };
   window.fetch = async raw => {
     const url = new URL(raw), endpoint = url.pathname.split('/').at(-1);
@@ -60,7 +64,16 @@ async function scenario(mode) {
       if (mode === 'outage-network') throw new TypeError('Failed to fetch');
       return { ok: false, status: 503, statusText: 'Service Unavailable', headers: { get: () => null } };
     }
-    if (endpoint === 'product-page' && id === '20' && holdResume) {
+    if (endpoint === permissionEndpoint && id === blockedId && !healthy
+      && (mode !== 'permission-list-page2' || Number(url.searchParams.get('page')) === 2)) {
+      const database = mode.startsWith('permission-list');
+      return { ok: true, status: 200, json: async () => ({ code: database ? -50001 : -40102,
+        msg: database ? '校验用户店铺权限失败！数据库地址不可为空' : '校验用户店铺权限失败！' }) };
+    }
+    if (mode === 'ordinary-business' && endpoint === 'purchase-order-page' && id === '20') {
+      return { ok: true, status: 200, json: async () => ({ code: -50001, msg: '订单参数格式无效' }) };
+    }
+    if (endpoint === 'product-page' && id === blockedId && holdResume) {
       holdResume = false; await new Promise(resolve => { releaseResume = resolve; });
     }
     let body;
@@ -71,8 +84,10 @@ async function scenario(mode) {
       body = mode === 'transient-mapping' && id === '0' && counters.get(callKey) === 1
         ? { code: 0, count: 0, data: '查询结果为空' }
         : { code: 0, count: 1, data: [{ associatedProductId: target, barcodeSkuid: 'SKU-' + id, barcodeSkcid: 'SKC-' + id }] };
-    } else if (endpoint === 'purchase-order-page') body = { code: 0, count: 1, data: [{ purchaseOrderId: 'PO-' + id }] };
-    else body = { code: 0, count: 1, data: [{ purchaseOrderDetailId: 'DETAIL-' + id, itemId: warehouse(id), creationTime: '2026-09-10', purchaseQuantity: 2, purchaseUnitPrice: 4 }] };
+    } else if (endpoint === 'purchase-order-page') body = { code: 0, count: mode === 'permission-list-page2' && id === '20' ? 2 : 1,
+      data: [{ purchaseOrderId: (Number(url.searchParams.get('page')) === 2 ? 'EXTRA-' : 'PO-') + id }] };
+    else body = { code: 0, count: 1, data: [{ purchaseOrderDetailId: 'DETAIL-' + target, itemId: warehouse(id), creationTime: '2026-09-10', purchaseQuantity: 2, purchaseUnitPrice: 4 }] };
+    if (mode === 'permission-startup' && healthy) body.msg = '校验用户店铺权限失败';
     return { ok: true, status: 200, json: async () => body };
   };
   try {
@@ -84,7 +99,38 @@ async function scenario(mode) {
     window.document.getElementById('erpa-cost-trigger').click();
     const idle = () => !window.document.getElementById('erpa-recalculate').disabled;
     const task = () => records.find(record => record.kind === 'collection-task');
-    if (mode.startsWith('outage')) {
+    if (mode.startsWith('permission')) {
+      await until(() => task()?.status === 'paused' && idle());
+      const index = mode === 'permission-startup' ? 0 : 4;
+      assert.equal(deliveries.length, index, 'permission failure never delivers partial cost evidence');
+      assert.equal(task().batches[index].status, 'pending');
+      assert.equal(task().pauseReason.code, 'ERP_PERMISSION_REQUIRED');
+      assert.match(window.document.getElementById('erpa-task-status').textContent, /店铺权限.*暂停/);
+      assert.doesNotMatch(window.document.getElementById('erpa-task-status').textContent, /请先登录/);
+      assert.equal(task().batches.filter(batch => batch.status === 'failed').length, 0);
+      if (index === 0) assert.equal(counters.get('product-page:SKC-5') || 0, 0, 'no following batch starts');
+      const receipt = task().batches[0].deliveryId;
+      const blockedReads = calls.filter(call => call.endpoint === permissionEndpoint && call.target.endsWith('-' + blockedId)
+        && (mode !== 'permission-list-page2' || call.page === 2)).length;
+      assert.equal(blockedReads, 1, 'permission errors are not blindly retried');
+      healthy = true;
+      window.document.getElementById('erpa-resume').click();
+      await until(() => deliveries.length === 5 && idle());
+      assert.equal(task().pauseReason, undefined);
+      assert.equal(task().summary.delivered, 21);
+      if (receipt) {
+        assert.equal(task().batches[0].deliveryId, receipt);
+        assert.equal(counters.get('purchase-order-page:SKC-0'), 1, 'successful batches are not read again');
+      }
+      assert.ok(deliveries.every(item => item.sourceMeta.scopeDirectoryComplete && !item.sourceMeta.mappingFailureCount && !item.sourceMeta.detailFailureCount));
+    } else if (mode === 'ordinary-business') {
+      await until(() => task()?.status === 'partial' && idle());
+      assert.equal(deliveries.length, 4);
+      assert.equal(task().pauseReason, undefined);
+      assert.equal(task().batches[4].status, 'failed');
+      assert.match(task().batches[4].error, /-50001/);
+      return;
+    } else if (mode.startsWith('outage')) {
       await until(() => task()?.status === 'paused' && idle());
       assert.equal(deliveries.length, 4); assert.equal(task().batches[0].status, 'delivered');
       assert.equal(task().batches[4].status, 'pending'); assert.equal(task().pauseReason.code, 'ERP_SERVICE_UNAVAILABLE');
@@ -143,4 +189,6 @@ async function scenario(mode) {
   } finally { releaseResume?.(); await window.happyDOM.close(); }
 }
 
-for (const mode of ['transient-directory', 'transient-mapping', 'persistent-directory', 'outage-html', 'outage-json', 'outage-http', 'outage-network']) await scenario(mode);
+for (const mode of process.argv.length > 2 ? process.argv.slice(2) : ['transient-directory', 'transient-mapping', 'persistent-directory',
+  'outage-html', 'outage-json', 'outage-http', 'outage-network', 'permission-startup', 'permission-directory', 'permission-mapping',
+  'permission-list', 'permission-list-page2', 'permission-detail', 'ordinary-business']) await scenario(mode);
