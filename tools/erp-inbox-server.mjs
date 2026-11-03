@@ -1512,8 +1512,8 @@ const server = http.createServer(async (req, res) => {
         ...(payload?.sourceMeta?.catalogCoverage ? { catalogVersion: 1, catalogCoverage: normalizeErpCatalogCoverage(payload.sourceMeta.catalogCoverage) } : {}),
         ...(request.historyMappings?.length ? { historyMappings: request.historyMappings.filter(row => querySkcSet(querySkcs).has(canonicalSku(row.platformSkc))) } : {}),
         sourceMeta: { ...sourceMeta, sourceFormat: "erp-v8-http-bridge",
-          ...(collectionContext?.task.catalogMode === 'after_costs' ? { catalogPublication: {
-            mode: 'after_costs', taskId: collectionContext.task.taskId,
+          ...(collectionContext?.task.catalogMode ? { catalogPublication: {
+            mode: collectionContext.task.catalogMode, taskId: collectionContext.task.taskId,
             batchId: collectionContext.batch.batchId, attemptId: collectionContext.batch.attemptId,
           } } : {}) },
         warehouseEvidence,

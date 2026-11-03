@@ -7,7 +7,7 @@ import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope } from "../domain/erpInboxContract";
-import { syncErpCatalogPublications } from './repositories/erpCatalogPublicationRepository';
+import { syncErpCatalogPublications, readErpCatalogPublicationGate } from './repositories/erpCatalogPublicationRepository';
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import vm from "node:vm";
@@ -86,6 +86,13 @@ it('holds an older companion catalog receipt when its cost task is continued wit
   expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toEqual([]);
   Object.assign(task.batches[1], { status: 'delivered', deliveryId: 'D2', adoptionReportedAt: 'now' }); task.status = 'cost_complete';
   await syncErpCatalogPublications({ workspaceId: product.workspaceId, tasks: [task] });
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toHaveLength(2);
+  task.catalogMode = 'on_demand'; task.status = 'paused';
+  await syncErpCatalogPublications({ workspaceId: product.workspaceId, tasks: [task] });
+  const gate = await readErpCatalogPublicationGate(product.workspaceId);
+  expect(gate({ requestId: source.id, ledgerId: ledger.id, sourceMeta: { catalogPublication: {
+    mode: 'after_costs', taskId: task.taskId, batchId: 'B1', attemptId: 'A1',
+  } } })).toBe(false);
   expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toHaveLength(2);
 });
 

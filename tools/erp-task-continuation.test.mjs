@@ -119,3 +119,33 @@ console.log('ERP continuation: durable intent, unique executor, short lease reco
   assert.equal(second.status, 'paused', 'queued intent also needs explicit recovery after service restart');
 }
 console.log('Workspace-wide executor exclusion and queued service-restart recovery passed.');
+
+{
+  const records = [scope(11)];
+  const task = call(records, '', { requestId: 'REQ', executionProtocol: 2, executionTarget: 'desktop', catalogMode: 'after_costs', filters: {} }).task;
+  control(records, task, 'request_resume');
+  Object.assign(task.batches[0], { status: 'delivered', deliveryId: 'SAVED', attemptId: 'SAVED-ATTEMPT', adoptionReportedAt: 'saved', adoption: { adoptedCount: 5 } });
+  const batches = structuredClone(task.batches), scopeHash = task.scopeHash, taskId = task.taskId, oldIntent = task.resumeRequestId;
+  control(records, task, 'reconnect', { resumeRequestId: oldIntent, catalogMode: 'on_demand' });
+  assert.notEqual(task.resumeRequestId, oldIntent);
+  assert.equal(task.catalogMode, 'on_demand');
+  assert.equal(task.taskId, taskId); assert.equal(task.scopeHash, scopeHash); assert.deepEqual(task.batches, batches);
+  rejects(() => control(records, task, 'reconnect', { resumeRequestId: oldIntent }), 'ERP_TASK_HANDOFF_CHANGED');
+  rejects(() => control(records, task, 'claim', { executionRole: 'desktop', runnerId: 'OLD-PAGE', resumeRequestId: oldIntent }), 'ERP_TASK_ALREADY_CLAIMED');
+  const currentIntent = task.resumeRequestId;
+  control(records, task, 'claim', { executionRole: 'desktop', runnerId: 'NEW-PAGE', resumeRequestId: currentIntent });
+  rejects(() => control(records, task, 'reconnect', { resumeRequestId: currentIntent }), 'ERP_TASK_HANDOFF_CHANGED');
+  assert.equal(task.runnerId, 'NEW-PAGE'); assert.deepEqual(task.batches, batches);
+  control(records, task, 'pause'); control(records, task, 'release', { runnerId: 'NEW-PAGE' });
+  rejects(() => control(records, task, 'reconnect', { resumeRequestId: currentIntent }), 'ERP_TASK_HANDOFF_CHANGED');
+  control(records, task, 'request_resume', { catalogMode: 'after_costs' });
+  control(records, task, 'request_resume', { catalogMode: 'on_demand' });
+  assert.equal(task.catalogMode, 'on_demand', 'explicitly continuing a queued old task also disables automatic catalog');
+  assert.deepEqual(task.batches, batches);
+  const beforeInvalid = structuredClone(task);
+  rejects(() => control(records, task, 'reconnect', { resumeRequestId: task.resumeRequestId, catalogMode: 'invalid' }), 'ERP_TASK_MODE_INVALID');
+  assert.deepEqual(task, beforeInvalid);
+  records[0].ledgerVersion = 'IMPORT-CHANGED';
+  rejects(() => control(records, task, 'reconnect', { resumeRequestId: task.resumeRequestId }), 'ERP_TASK_SCOPE_CHANGED');
+}
+console.log('Atomic desktop reconnect preserves receipts, fences stale pages and claims, respects pause/scope and switches old cost runs to manual catalog.');

@@ -5,14 +5,15 @@ const keyFor = (workspaceId, taskId) => `erp-catalog:publication:${workspaceId}:
 // Persist only the small barrier, not another copy of the cost evidence. An
 // absent record stays closed across restarts and connection failures.
 export async function syncErpCatalogPublications({ workspaceId, tasks }) {
-  if (!tasks.some(task => task.workspaceId === workspaceId && task.catalogMode === 'after_costs')) return;
+  const scoped = tasks.filter(task => task.workspaceId === workspaceId && ['after_costs', 'on_demand'].includes(task.catalogMode));
+  if (!scoped.length) return;
   await db.transaction('rw', db.settings, async () => {
-    for (const task of tasks.filter(task => task.workspaceId === workspaceId && task.catalogMode === 'after_costs')) {
+    for (const task of scoped) {
       const batches = task.batches ?? [];
-      const allowed = !task.recoveryRequired && !['paused', 'stopped', 'invalidated'].includes(task.status)
+      const allowed = task.catalogMode === 'after_costs' && !task.recoveryRequired && !['paused', 'stopped', 'invalidated'].includes(task.status)
         && batches.length > 0 && batches.every(batch => batch.status === 'delivered' && batch.deliveryId && batch.adoptionReportedAt);
       const record = { key: keyFor(workspaceId, task.taskId), kind: 'erp_catalog_publication', workspaceId,
-        taskId: task.taskId, requestId: task.requestId, ledgerId: task.ledgerId, allowed,
+        taskId: task.taskId, requestId: task.requestId, ledgerId: task.ledgerId, catalogMode: task.catalogMode, allowed,
         createdAt: task.createdAt ?? '',
         attempts: allowed ? batches.map(batch => [batch.batchId, batch.attemptId]) : [] };
       const previous = await db.settings.get(record.key);
@@ -32,7 +33,13 @@ export async function readErpCatalogPublicationGate(workspaceId) {
   }
   return source => {
     const binding = source?.sourceMeta?.catalogPublication;
-    if (binding?.mode !== 'after_costs') return byRequest.get(JSON.stringify([source?.requestId, source?.ledgerId]))?.allowed ?? true;
+    // Cost-only receipts retain identity and purchase evidence, but never
+    // supply product metadata. Explicit catalog receipts use a separate source.
+    if (binding?.mode === 'on_demand') return false;
+    if (binding?.mode !== 'after_costs') {
+      const record = byRequest.get(JSON.stringify([source?.requestId, source?.ledgerId]));
+      return record?.catalogMode === 'on_demand' ? true : record?.allowed ?? true;
+    }
     const record = byTask.get(binding.taskId);
     return Boolean(record?.allowed && record.workspaceId === workspaceId && record.requestId === source.requestId
       && record.ledgerId === source.ledgerId && record.attempts.some(([batchId, attemptId]) => batchId === binding.batchId && attemptId === binding.attemptId));

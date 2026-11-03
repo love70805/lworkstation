@@ -4,6 +4,8 @@ import { verifyErpCatalogTransport } from "../../../tools/erp-catalog-transport.
 import { buildErpCostRequest } from "../domain/erpCosts";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { syncErpCatalogPublications, readErpCatalogPublicationGate } from './repositories/erpCatalogPublicationRepository';
+import { buildErpCatalogRequest } from '../domain/erpCatalogRequest';
+import { saveErpCatalogRequest, receiveErpCatalogInboxEnvelope } from './repositories/erpCatalogRepository';
 import { createOrGetMonthlyLedger, db, getProductEditorSnapshot, getSelectionReferenceSnapshot, receiveErpCostInboxEnvelope, saveErpCostRequest, saveProductCatalogRecord, setActiveMemberContext, voidPublishedErpCostBatch } from "./database";
 
 beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemberContext({ workspaceId: "workspace-default" }); });
@@ -18,9 +20,42 @@ async function nativeCatalogDelivery(options = {}) {
   await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-RED", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 1, amount: 30 });
   if (expectedSkus.some(item => item.platformSku === 'SKU-BLUE')) await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-BLUE", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 2, amount: 40 });
   if (expectedSkus.some(item => item.platformSku === 'SKU-MISSING')) await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, batchId: "IMPORT-COST-SCOPE", platformSku: "SKU-MISSING", platformSkc: "SKC-CATALOG", store: "隔离测试店铺", quantity: 1, amount: 50 });
-  const { batch, envelope } = await verifyErpCatalogTransport({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, expectedSkus, includeConflict: false, ...options });
-  return { ledger, request, batch, envelope };
+  const { batch, envelope, catalogEnvelope } = await verifyErpCatalogTransport({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, expectedSkus, includeConflict: false, ...options });
+  return { ledger, request, batch, envelope, catalogEnvelope };
 }
+
+it('adopts current cost-only receipts without product projection until a separate manual catalog receipt arrives', async () => {
+  const { envelope, ledger, request, catalogEnvelope } = await nativeCatalogDelivery({ legacyScope: false,
+    expectedSkus: [{ platformSku: 'SKU-RED', platformSkc: 'SKC-CATALOG' }, { platformSku: 'SKU-BLUE', platformSkc: 'SKC-CATALOG' }] });
+  expect(envelope.batch.sourceMeta.catalogPublication.mode).toBe('on_demand');
+  const receipt = await receiveErpCostInboxEnvelope({ envelope, receivedVia: 'isolated-cost-only' });
+  expect(receipt.status, receipt.adoptionError).toBe('applied');
+  const financialBefore = await db.erpCostRows.toArray();
+  expect(financialBefore[0].unitCost).toBe(5);
+  const binding = envelope.batch.sourceMeta.catalogPublication;
+  await syncErpCatalogPublications({ workspaceId: ledger.workspaceId, tasks: [{ ...binding, catalogMode: 'on_demand',
+    workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id, status: 'cost_complete',
+    batches: [{ batchId: binding.batchId, attemptId: binding.attemptId, status: 'delivered', deliveryId: envelope.deliveryId, adoptionReportedAt: 'now' }] }] });
+  db.close(); await db.open();
+  const costOnly = await getSelectionReferenceSnapshot();
+  expect(costOnly.erpCatalogRows).toEqual([]);
+  expect(costOnly.erpCatalogReferences).toEqual([]);
+  expect(costOnly.erpCosts.every(row => row.catalogEligible === false)).toBe(true);
+  expect((await getProductEditorSnapshot({ platformSku: 'SKU-RED', platformSkc: 'SKC-CATALOG' })).draft.imageUrl).toBe('');
+  expect(await db.products.count()).toBe(0);
+
+  await db.importBatches.add({ id: 'IMPORT-COST-SCOPE', workspaceId: ledger.workspaceId, ledgerId: ledger.id, status: 'completed' });
+  const catalogRequest = buildErpCatalogRequest({ id: `${request.id}-CATALOG`, workspaceId: ledger.workspaceId, ledgerId: ledger.id,
+    ledgerPeriod: ledger.period, platformSkcs: request.platformSkcs, confirmedSkus: request.expectedSkus,
+    sourceRequestId: request.id, idempotencyKey: 'explicit-manual-catalog' });
+  await saveErpCatalogRequest(catalogRequest);
+  await receiveErpCatalogInboxEnvelope({ envelope: catalogEnvelope });
+  expect((await getSelectionReferenceSnapshot()).erpCatalogRows).toHaveLength(2);
+  const manualDraft = (await getProductEditorSnapshot({ platformSku: 'SKU-RED', platformSkc: 'SKC-CATALOG' })).draft;
+  expect(manualDraft.imageUrl).toBe('https://images.example.invalid/1688-blue.jpg');
+  expect(manualDraft.variants.map(row => row.platformSku).sort()).toEqual(['SKU-BLUE', 'SKU-RED']);
+  expect(await db.erpCostRows.toArray()).toEqual(financialBefore);
+}, 20000);
 
 it('stages received and published metadata across reopen until every cost batch calculation settles', async () => {
   const { envelope, ledger, request } = await nativeCatalogDelivery();

@@ -65,7 +65,9 @@ export function erpCollectionPresentation(task) {
     description = '全部批次处理完成后，统一复用暂存资料补全商品并自动建档；无需再次请求已取得的 ERP 资料。';
   } else if (queued || claimed && !running) {
     state = 'queued'; title = queued ? '继续请求已保存，等待 ERP 接续' : 'ERP 已接续，正在准备读取';
-    description = '无需重复点击。请保持 ERP 采购管理页已打开且已登录；连接恢复后会接续这个任务。';
+    description = task.executionTarget === 'desktop'
+      ? '工作台正在等待后台 ERP 确认接收；请保持 ERP 已登录。若连接未确认，可使用重新连接 ERP 接续原任务。'
+      : '无需重复点击。请保持 ERP 采购管理页已打开且已登录；连接恢复后会接续这个任务。';
   } else if (catalogOnly && !running) {
     state = 'cost_completed'; title = '成本采集已完成';
     description = task.catalogMode === 'after_costs'

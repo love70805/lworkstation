@@ -3,13 +3,23 @@ import { test } from 'node:test';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const {createWorkspaceErpCollector,PURCHASE_FILTERS}=require('./erp-workspace-collector.cjs');
-function harness(){
+function deferred(){
+  let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};
+}
+function harness(options={}){
   const input={workspaceId:'W',ledgerId:'L',requestId:'REQ'};
-  let context={workspaceId:'W'},task=null,login=false,created=0,closed=0,reloads=0,requestStatus='registered';
-  const calls=[];
-  const collector=createWorkspaceErpCollector({getContext:()=>context,interval:()=>1,clear:()=>{},createView:async url=>{
-    created++;assert.match(url,/lworkstationRequest=REQ/);
-    return {webContents:{isDestroyed:()=>false,close:()=>{closed++;},executeJavaScript:async()=>login,loadURL:async()=>{reloads++;}}};
+  let context={workspaceId:'W'},task=null,login=false,created=0,closed=0,reloads=0,requestStatus='registered',clock=0;
+  let nextRead=null,nextCreation=null,nextProbe=null,nextReconnectError=null,claimOnReconnect=false;
+  const calls=[],views=[];
+  const collector=createWorkspaceErpCollector({getContext:()=>context,now:()=>clock,ackTimeoutMs:100,...options,interval:()=>1,clear:()=>{},createView:async url=>{
+    created++;assert.equal(new URL(url).searchParams.get('lworkstationRequest'),input.requestId);
+    assert.equal(new URL(url).searchParams.get('lworkstationResume'),task.resumeRequestId,'the page is bound to the exact execution intent');
+    const view={url,destroyed:false,webContents:{isDestroyed:()=>view.destroyed,close:()=>{view.destroyed=true;closed++;},
+      executeJavaScript:async()=>{if(nextProbe){const gate=nextProbe;nextProbe=null;gate.entered.resolve();await gate.release.promise;}return login;},
+      getURL:()=>view.url,loadURL:async next=>{reloads++;assert.equal(new URL(next).searchParams.get('lworkstationResume'),task.resumeRequestId);view.url=next;}}};
+    views.push(view);
+    if(nextCreation){const gate=nextCreation;nextCreation=null;gate.entered.resolve();await gate.release.promise;}
+    return view;
   },requestInbox:async call=>{
     calls.push(structuredClone(call));
     if(call.route==='/erp/v1/requests'){
@@ -17,23 +27,39 @@ function harness(){
       return {records:[{...input,status:requestStatus,platformSkcs:[{platformSkc:'SKC-A'}],expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A'}]}]};
     }
     if(call.route==='/erp/v1/collection-tasks'){
-      if(call.method==='POST')task={...input,taskId:'TASK',scopeHash:'SCOPE',status:'paused',filters:call.body.filters,batches:[{batchId:'B',status:'pending'}]};
+      if(call.method==='POST')task={...input,taskId:'TASK',scopeHash:'SCOPE',status:'paused',executionTarget:call.body.executionTarget,catalogMode:call.body.catalogMode,runMode:'cost',filters:call.body.filters,batches:[{batchId:'B',status:'pending'}]};
       return call.method==='POST'?{task}:{tasks:task?[task]:[]};
     }
     if(call.route.endsWith('/control')){
+      if(call.body.action==='reconnect'){
+        if(nextReconnectError){const error=nextReconnectError;nextReconnectError=null;throw error;}
+        if(claimOnReconnect){claimOnReconnect=false;task={...task,status:'running',runnerId:'RACE-RUNNER'};}
+        if(task.status!=='ready'||task.runnerId||call.body.resumeRequestId!==task.resumeRequestId)throw Object.assign(new Error('handoff changed'),{code:'ERP_TASK_HANDOFF_CHANGED',status:409});
+        task={...task,resumeRequestId:'RECONNECT-'+calls.filter(item=>item.body?.action==='reconnect').length};return {task};
+      }
       if(call.body.action==='request_resume')assert.ok(!['stopped','invalidated','completed'].includes(task.status),'terminal tasks must not be resumed');
-      task={...task,status:call.body.action==='pause'?'paused':call.body.action==='stop'?'stopped':'ready',pauseReason:undefined};return {task};
+      if(call.body.action==='request_resume'&&task.runnerId&&task.status!=='paused')return {task};
+      task={...task,status:call.body.action==='pause'?'paused':call.body.action==='stop'?'stopped':'ready',pauseReason:undefined,
+        resumeRequestId:call.body.action==='request_resume'?'RESUME-'+calls.filter(item=>item.body?.action==='request_resume').length:task.resumeRequestId,
+        ...(call.body.action==='request_resume'?{runnerId:undefined,runnerLeaseExpiresAt:undefined,executionTarget:call.body.executionTarget??task.executionTarget}:{})};return {task};
     }
+    if(nextRead){const gate=nextRead;nextRead=null;const snapshot=structuredClone(task);gate.entered.resolve();await gate.release.promise;return {task:snapshot};}
     return {task};
   }});
-  return {collector,input,calls,login(value){login=value;},context(value){context=value;},running(){task.status='running';},update(value){Object.assign(task,value);},register(id){input.requestId=id;requestStatus='registered';task=null;},get created(){return created;},get closed(){return closed;},get reloads(){return reloads;}};
+  const gate=()=>({entered:deferred(),release:deferred()});
+  return {collector,input,calls,views,login(value){login=value;},context(value){context=value;},running(){task={...task,status:'running',runnerId:'RUNNER'};},
+    update(value){task={...task,...value};},register(id){input.requestId=id;requestStatus='registered';task=null;},advance(ms){clock+=ms;},
+    holdRead(){return nextRead=gate();},holdCreation(){return nextCreation=gate();},holdProbe(){return nextProbe=gate();},
+    claimBeforeReconnect(){claimOnReconnect=true;},failReconnect(error){nextReconnectError=error;},get task(){return task;},
+    get created(){return created;},get closed(){return closed;},get reloads(){return reloads;}};
 }
 test('starts one immutable desktop task with no foreground form or clipboard operation',async()=>{
   const h=harness();await Promise.all([h.collector.start(h.input),h.collector.start(h.input)]);
   assert.equal(h.created,1);
   const create=h.calls.find(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST');
   assert.equal(create.body.executionTarget,'desktop');assert.deepEqual(create.body.filters,{...PURCHASE_FILTERS,sku:'SKC-A'});
-  assert.equal(h.collector.snapshot().status,'ready');h.collector.dispose();
+  assert.equal(create.body.catalogMode,'on_demand');
+  assert.equal(h.collector.snapshot().status,'waiting_ack');h.collector.dispose();
 });
 test('waits for first login and resumes only that fixed task after login',async()=>{
   const h=harness();h.login(true);await h.collector.start(h.input);assert.equal(h.collector.snapshot().status,'waiting_login');
@@ -57,7 +83,7 @@ test('stopped work wins over login pages and old batch errors, then one click cr
   assert.equal(h.collector.snapshot().status,'stopped');assert.equal(h.closed,1);
   h.login(false);
   const result=await h.collector.start(h.input);
-  assert.equal(result.status,'ready');assert.equal(h.created,2);h.collector.dispose();
+  assert.equal(result.status,'waiting_ack');assert.equal(h.created,2);h.collector.dispose();
 });
 
 test('login callback never tries to resume a task stopped before the next poll',async()=>{
@@ -72,7 +98,7 @@ test('a fresh registration restarts after logout while the old session stays can
   h.login(true);await h.collector.sessionChanged();h.login(false);
   await assert.rejects(h.collector.start(h.input),{code:'ERP_SESSION_CHANGED'});
   h.register('REQ-NEW');const result=await h.collector.start(h.input);
-  assert.equal(result.requestId,'REQ-NEW');assert.equal(result.status,'ready');assert.equal(h.created,2);h.collector.dispose();
+  assert.equal(result.requestId,'REQ-NEW');assert.equal(result.status,'waiting_ack');assert.equal(h.created,2);h.collector.dispose();
 });
 
 test('historical login errors do not override a running task or prevent retry of a pause',async()=>{
@@ -80,7 +106,7 @@ test('historical login errors do not override a running task or prevent retry of
   h.update({status:'running',batches:[{status:'delivered',deliveryId:'RECEIPT',error:{message:'请先登录'}}]});
   await h.collector.poll();assert.equal(h.collector.snapshot().status,'running');
   h.update({status:'paused'});await h.collector.start(h.input);
-  assert.equal(h.collector.snapshot().status,'ready');
+  assert.equal(h.collector.snapshot().status,'waiting_ack');
   assert.equal(h.created,2);h.collector.dispose();
 });
 
@@ -90,7 +116,160 @@ test('a permission pause closes the hidden view and continues the same task with
   await h.collector.poll();
   assert.equal(h.collector.snapshot().status,'paused');assert.equal(h.closed,1);
   const result=await h.collector.start(h.input);
-  assert.equal(result.status,'ready');assert.equal(result.taskId,'TASK');assert.equal(h.created,2);
+  assert.equal(result.status,'waiting_ack');assert.equal(result.taskId,'TASK');assert.equal(h.created,2);
   assert.equal(h.calls.filter(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST').length,1);
+  h.collector.dispose();
+});
+
+test('an unclaimed task rebuilds once, fencing old intents while preserving the task, batches and receipts',async()=>{
+  const h=harness();await h.collector.start(h.input);
+  h.update({batches:[{batchId:'DONE',status:'delivered',deliveryId:'RECEIPT'},{batchId:'TODO',status:'pending'}]});
+  const batches=structuredClone(h.task.batches);
+  const intent=h.task.resumeRequestId;
+  assert.equal(new URL(h.views[0].url).searchParams.get('lworkstationResume'),intent);
+  h.views[0].url='https://www.zhuolinkeji.cn/unexpected-error.html';
+  h.advance(101);await h.collector.poll();
+  assert.equal(h.created,2);assert.equal(h.closed,1);
+  assert.equal(h.collector.snapshot().status,'waiting_ack');
+  assert.notEqual(h.task.resumeRequestId,intent);assert.equal(h.task.status,'ready');assert.deepEqual(h.task.batches,batches);
+  assert.equal(new URL(h.views[1].url).searchParams.get('lworkstationResume'),h.task.resumeRequestId);
+  assert.equal(h.calls.filter(call=>call.body?.action==='request_resume').length,1,'automatic recovery does not issue a new resume request');
+  const replacementIntent=h.task.resumeRequestId;
+  h.advance(101);await h.collector.poll();
+  assert.equal(h.collector.snapshot().status,'sync_error');
+  assert.equal(h.created,2);assert.equal(h.closed,2);
+  assert.equal(h.task.status,'ready');assert.notEqual(h.task.resumeRequestId,replacementIntent);assert.deepEqual(h.task.batches,batches);
+  const result=await h.collector.start(h.input);
+  assert.equal(result.status,'waiting_ack');assert.equal(result.requestId,'REQ');assert.equal(result.taskId,'TASK');
+  assert.equal(h.created,3);assert.equal(h.calls.filter(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST').length,1);
+  assert.deepEqual(h.task.batches,batches);assert.equal(h.task.requestId,'REQ');
+  h.collector.dispose();
+});
+
+test('a runner claiming between the status read and reconnect fence keeps its live view',async()=>{
+  const h=harness();await h.collector.start(h.input);h.advance(101);h.claimBeforeReconnect();
+  await h.collector.poll();
+  assert.equal(h.task.runnerId,'RACE-RUNNER');assert.equal(h.collector.snapshot().status,'running');
+  assert.equal(h.created,1);assert.equal(h.closed,0);h.collector.dispose();
+});
+
+test('a claim acknowledges the existing executor and never triggers automatic page recreation',async()=>{
+  const h=harness();await h.collector.start(h.input);h.running();
+  h.advance(1000);await h.collector.poll();
+  assert.equal(h.collector.snapshot().status,'running');assert.equal(h.created,1);assert.equal(h.closed,0);
+  h.advance(1000);await h.collector.poll();await h.collector.start(h.input);
+  assert.equal(h.created,1);assert.equal(h.closed,0);h.collector.dispose();
+});
+
+test('a claimed on-demand catalog executor stays open until its material checks finish',async()=>{
+  const h=harness();await h.collector.start(h.input);
+  h.update({status:'cost_complete',catalogMode:'on_demand',runMode:'catalog',runnerId:'CATALOG-RUNNER',
+    batches:[{status:'delivered',deliveryId:'RECEIPT',catalogStatus:'running'}]});
+  await h.collector.poll();assert.equal(h.closed,0);assert.equal(h.collector.snapshot().status,'cost_complete');
+  h.update({batches:[{status:'delivered',deliveryId:'RECEIPT',catalogStatus:'completed'}]});
+  await h.collector.poll();assert.equal(h.closed,1);h.collector.dispose();
+});
+
+test('the acknowledgement deadline does not count login waiting or bypass a later pause or stop',async()=>{
+  const h=harness();h.login(true);await h.collector.start(h.input);
+  h.advance(1000);await h.collector.poll();assert.equal(h.collector.snapshot().status,'waiting_login');assert.equal(h.created,1);
+  h.login(false);await h.collector.sessionChanged();
+  assert.equal(h.collector.snapshot().status,'waiting_ack');assert.equal(h.created,1);assert.equal(h.reloads,1);
+  h.update({status:'paused'});h.advance(1000);await h.collector.poll();
+  assert.equal(h.collector.snapshot().status,'paused');assert.equal(h.created,1);assert.equal(h.closed,1);
+  h.collector.dispose();
+  const stopped=harness();await stopped.collector.start(stopped.input);stopped.update({status:'stopped'});stopped.advance(1000);
+  await stopped.collector.poll();assert.equal(stopped.collector.snapshot().status,'stopped');assert.equal(stopped.created,1);stopped.collector.dispose();
+});
+
+test('concurrent polls at the acknowledgement deadline create only one replacement view',{timeout:1000},async()=>{
+  const h=harness();await h.collector.start(h.input);h.advance(101);
+  const gate=h.holdCreation();const rebuilding=h.collector.poll();await gate.entered.promise;
+  await Promise.all([h.collector.poll(),h.collector.poll()]);
+  assert.equal(h.created,2);gate.release.resolve();await rebuilding;
+  assert.equal(h.created,2);assert.equal(h.collector.snapshot().status,'waiting_ack');h.collector.dispose();
+});
+
+test('a replacement view finishing after a workspace change is discarded instead of reviving the old task',{timeout:1000},async()=>{
+  const h=harness();await h.collector.start(h.input);h.advance(101);
+  const gate=h.holdCreation();const rebuilding=h.collector.poll();await gate.entered.promise;
+  h.context({workspaceId:'OTHER'});await h.collector.stop('workspace_changed');
+  gate.release.resolve();await rebuilding;
+  assert.equal(h.collector.snapshot().status,'workspace_changed');
+  assert.equal(h.created,2);assert.ok(h.views.every(view=>view.destroyed),'old and late replacement views are both closed');
+  h.collector.dispose();
+});
+
+test('an old status read cannot overwrite a newly started workspace owner',{timeout:1000},async()=>{
+  const h=harness();await h.collector.start(h.input);
+  const gate=h.holdRead();const stale=h.collector.poll();await gate.entered.promise;
+  h.context({workspaceId:'OTHER'});await h.collector.stop('workspace_changed');
+  h.register('REQ-NEW');h.input.workspaceId='OTHER';
+  await h.collector.start(h.input);const expected=h.collector.snapshot();
+  gate.release.resolve();await stale;
+  assert.deepEqual(h.collector.snapshot(),expected);assert.equal(expected.requestId,'REQ-NEW');
+  assert.equal(h.views.at(-1).destroyed,false);h.collector.dispose();
+});
+
+test('a hung renderer probe has a bounded failure and does not hold the polling lock forever',{timeout:1000},async()=>{
+  const h=harness({probeTimeoutMs:5});await h.collector.start(h.input);
+  const gate=h.holdProbe();h.advance(101);const probing=h.collector.poll();await gate.entered.promise;
+  await probing;
+  assert.ok(['waiting_ack','sync_error'].includes(h.collector.snapshot().status));
+  gate.release.resolve();h.advance(101);await h.collector.poll();
+  assert.equal(h.collector.snapshot().status,'sync_error');h.collector.dispose();
+});
+
+test('a hidden view that finishes after its load deadline is discarded and the same task can reconnect',{timeout:1000},async()=>{
+  const h=harness({viewTimeoutMs:5});const gate=h.holdCreation();
+  const pending=h.collector.start(h.input);const rejected=assert.rejects(pending,/超时|timeout/i);
+  await gate.entered.promise;await rejected;
+  gate.release.resolve();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.views[0].destroyed,true,'a late view cannot become an orphan executor');
+  const result=await h.collector.start(h.input);
+  assert.equal(result.taskId,'TASK');assert.equal(result.requestId,'REQ');assert.equal(result.status,'waiting_ack');
+  assert.equal(h.created,2);assert.equal(h.calls.filter(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST').length,1);
+  h.collector.dispose();
+});
+
+test('a page that claims before its load deadline is preserved when loadURL finishes late',{timeout:1000},async()=>{
+  const h=harness({viewTimeoutMs:5});const gate=h.holdCreation();
+  const pending=h.collector.start(h.input).catch(error=>error);
+  await gate.entered.promise;h.running();const result=await pending;
+  gate.release.resolve();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.task.runnerId,'RUNNER');assert.equal(result.status,'running');
+  assert.equal(h.views[0].destroyed,false,'a late load completion must not kill an acknowledged executor');
+  assert.equal(h.created,1);h.collector.dispose();
+});
+
+test('an uncertain fence retains a late executor and a manual retry transfers it without a duplicate page',{timeout:1000},async()=>{
+  const h=harness({viewTimeoutMs:5});const gate=h.holdCreation();
+  const pending=h.collector.start(h.input).catch(error=>error);
+  await gate.entered.promise;h.failReconnect(Object.assign(new Error('isolated fence unavailable'),{status:503}));
+  const failed=await pending;assert.ok(failed instanceof Error);
+  h.running();const resumed=await h.collector.start(h.input);
+  assert.equal(resumed.status,'running');assert.equal(h.created,1);
+  gate.release.resolve();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.views[0].destroyed,false);assert.equal(h.collector.snapshot().status,'running');
+  assert.equal(h.created,1);assert.equal(h.closed,0);h.collector.dispose();
+});
+
+test('an explicit pause with an old runner still permits continuation with a fresh page',async()=>{
+  const h=harness();await h.collector.start(h.input);h.running();await h.collector.poll();
+  h.update({status:'paused'});await h.collector.poll();assert.equal(h.closed,1);
+  const result=await h.collector.start(h.input);
+  assert.equal(result.status,'waiting_ack');assert.equal(h.created,2);assert.equal(h.task.runnerId,undefined);
+  h.collector.dispose();
+});
+
+test('a ready task from an older external helper can be taken over by desktop in one start',async()=>{
+  const h=harness();h.update({...h.input,taskId:'LEGACY-TASK',scopeHash:'SCOPE',status:'ready',resumeRequestId:'EXTERNAL-INTENT',
+    executionProtocol:2,catalogMode:'on_demand',runMode:'cost',filters:{...PURCHASE_FILTERS,sku:'SKC-A'},batches:[{batchId:'OLD-B',status:'pending'}]});
+  const result=await h.collector.start(h.input);
+  assert.equal(result.status,'waiting_ack');assert.equal(result.taskId,'LEGACY-TASK');assert.equal(h.created,1);
+  assert.equal(h.task.executionTarget,'desktop');
+  assert.equal(h.calls.filter(call=>call.body?.action==='request_resume').length,1);
+  assert.equal(h.calls.filter(call=>call.body?.action==='reconnect').length,0);
+  assert.equal(h.calls.filter(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST').length,0);
   h.collector.dispose();
 });

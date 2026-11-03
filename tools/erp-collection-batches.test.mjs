@@ -37,7 +37,11 @@ export async function scenario(size, mode = '', options = {}) {
           if(options.permissionCatalog)for(const row of body.seed.results)row.catalogMappingsComplete=false;
         }
       }
-      else if(url.pathname==='/erp/v1/requests') body={records:[request,...(options.afterCosts?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[])]};
+      else if(url.pathname==='/erp/v1/requests') body={records:[request,...(options.afterCosts?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[]),
+        ...(options.catalogAmbiguity&&deliveries.length===Math.ceil(size/5)?[
+          {...request,requestId:'OLDER-REQ',ledgerId:'OLDER-LEDGER',ledgerPeriod:'2026-07'},
+          {...request,requestId:'OLDER-REQ-CATALOG',sourceRequestId:'OLDER-REQ',requestKind:'catalog',ledgerId:'OLDER-LEDGER',ledgerPeriod:'2026-07',confirmedSkus:request.expectedSkus},
+        ]:[])]};
       else if(url.pathname==='/erp/v1/extension-status') body={ok:true};
       else if(url.pathname==='/erp/v1/catalog-results') {
         assert.equal(deliveries.length,Math.ceil(size/5));
@@ -90,8 +94,7 @@ export async function scenario(size, mode = '', options = {}) {
     const lanes = mode==='benchmark-serial' ? 1 : mode==='benchmark-two-lanes' ? 2 : 4;
     for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
       let script=options.sources?.[name]??source[name];
-      if(!options.afterCosts&&name==='content.js')script=script.replace("executionProtocol: 2, catalogMode: 'after_costs'", "executionProtocol: 2, catalogMode: 'on_demand'");
-      if(!options.afterCosts&&name==='content.js')script=script.replace("resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs'", "resumeRequestId: task.resumeRequestId, catalogMode: 'on_demand'");
+      if(options.afterCosts&&name==='content.js')script=script.replace("executionProtocol: 2, catalogMode: 'on_demand'", "executionProtocol: 2, catalogMode: 'after_costs'");
       if(mode.startsWith('benchmark')&&name==='content.js')script=script.replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`);
       if(mode==='speed-recovery'&&name==='content.js')script=script.replace('const REQUEST_RECOVERY_DELAY_MS = 30000;','const REQUEST_RECOVERY_DELAY_MS = 100;');
       window.eval(script);
@@ -102,7 +105,8 @@ export async function scenario(size, mode = '', options = {}) {
   const began=Date.now();
   try {
     if(mode==='two-pages'||options.resumeLegacy) {
-      const task=handleCollectionTaskRequest(records,{method:'POST',url:new URL('http://localhost/erp/v1/collection-tasks'),payload:{workspaceId:'WS',requestId:'REQ',filters:{sku:'SKC-0'},executionProtocol:2},instanceId:'test'}).body.task;
+      const task=handleCollectionTaskRequest(records,{method:'POST',url:new URL('http://localhost/erp/v1/collection-tasks'),payload:{workspaceId:'WS',requestId:'REQ',filters:{sku:'SKC-0'},executionProtocol:2,
+        catalogMode:options.afterCosts?'after_costs':'on_demand'},instanceId:'test'}).body.task;
       await open(); if(mode==='two-pages')await open();
       assert.equal(calls.length,0,'paused tasks do not restart merely because ERP pages open');
       handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${task.taskId}/control`),payload:{workspaceId:'WS',action:'request_resume',scopeHash:task.scopeHash},instanceId:'test'});
@@ -161,6 +165,7 @@ export async function scenario(size, mode = '', options = {}) {
         window.document.getElementById('erpa-resume').click();
       }
       await until(()=>catalogs.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled);
+      if(options.catalogAmbiguity)assert.ok(catalogs.every(item=>item.requestId==='REQ-CATALOG'),'task materials use their exact companion despite historical requests with the same SKCs');
       if(options.permissionCatalog){assert.equal(costReads(),costReadsBefore);assert.equal(records[1].pauseReason,undefined);}
       else assert.equal(calls.length,before,'durable seeds reuse directory, mapping and complete history even after the task cache is gone');
     }

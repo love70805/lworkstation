@@ -10,10 +10,17 @@
     const SKU_PATH = '/purchase/product/v1/product-info-sku';
     const PURCHASE_PAGE_PATH = '/view/system/purchaseOrderModule/purchasingManagement.html';
     let collectorRequestId = new URL(window.location.href).searchParams.get('lworkstationRequest') || '';
-    try { collectorRequestId ||= window.sessionStorage.getItem('lworkstationCollectorRequest') || ''; if (collectorRequestId) window.sessionStorage.setItem('lworkstationCollectorRequest', collectorRequestId); } catch { /* URL still identifies an unredirected collector. */ }
-    const taskForThisPage = task => collectorRequestId ? task.requestId === collectorRequestId : task.executionTarget !== 'desktop';
+    let collectorResumeId = new URL(window.location.href).searchParams.get('lworkstationResume') || '';
+    try {
+        collectorRequestId ||= window.sessionStorage.getItem('lworkstationCollectorRequest') || '';
+        collectorResumeId ||= window.sessionStorage.getItem('lworkstationCollectorResume') || '';
+        if (collectorRequestId) window.sessionStorage.setItem('lworkstationCollectorRequest', collectorRequestId);
+        if (collectorResumeId) window.sessionStorage.setItem('lworkstationCollectorResume', collectorResumeId);
+    } catch { /* URL still identifies an unredirected collector. */ }
+    const taskForThisPage = task => collectorRequestId ? task.requestId === collectorRequestId && Boolean(collectorResumeId) && task.resumeRequestId === collectorResumeId : task.executionTarget !== 'desktop';
     let managedDesktopUi = false;
     let desktopUiResolved = false;
+    let desktopConfigRead = 0, desktopConfigRevision = 0, desktopConfigPending = null, desktopConfigRetry = false;
     const MAX_RECORDS = 3;
     const MAX_CONCURRENT_DETAIL = 12;
     const MAX_REQUEST_CONCURRENCY = 12;
@@ -32,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.55';
+    const EXTENSION_VERSION = '8.0.56';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1648,7 +1655,9 @@
             run.catalogPhase = true;
             run.readProgress = null;
             const bridge = window.ShopeersErpDeliveryBridge;
-            const settled = await requestContextPolicy.settleRequestContext(bridge.catalogContext({ querySkcs: state.meta.querySkcs, queryCapturedAt: run.queryCapturedAt }), 5000);
+            const query = run.task?.requestId ? { requestId: run.task.requestId + '-CATALOG' }
+                : { querySkcs: state.meta.querySkcs, queryCapturedAt: run.queryCapturedAt };
+            const settled = await requestContextPolicy.settleRequestContext(bridge.catalogContext(query), 5000);
             const context = settled.context;
             if (!context?.ok || !context.request) return;
             if (run.controller.signal.aborted) return;
@@ -1751,7 +1760,8 @@
         let task = run.task;
         if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
         run.runnerId = makeResultDeliveryId();
-        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs', ...(collectorRequestId ? { executionRole: 'desktop' } : {}) })).task;
+        task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'claim', runnerId: run.runnerId, resumeRequestId: task.resumeRequestId,
+            catalogMode: task.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', ...(collectorRequestId ? { executionRole: 'desktop' } : {}) })).task;
         run.task = task;
         const snapshot = task.requestSnapshot;
         run.previewContext = { ...run.previewContext, requestId: task.requestId, ledgerPeriod: snapshot.ledgerPeriod,
@@ -1949,7 +1959,7 @@
             if (window.ShopeersErpDeliveryBridge.collectionTask) {
                 const context = previewContext || await readPreviewContext(extractQuerySkcs(filters), run.queryCapturedAt);
                 if (context.requestId || restoredTask) {
-                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2, catalogMode: 'after_costs' });
+                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2, catalogMode: 'on_demand' });
                     if (response.task) {
                         window.clearTimeout(budgetTimer); budgetTimer = null;
                         run.task = response.task; run.previewContext = context;
@@ -2786,6 +2796,7 @@
             schedulePageSizeUpgrade();
             watchUiIntegrity();
             void reportExtensionStatus();
+            if (collectorRequestId) void pollCollectionTask();
             return;
         }
         document.addEventListener('DOMContentLoaded', () => {
@@ -2793,6 +2804,7 @@
             schedulePageSizeUpgrade();
             watchUiIntegrity();
             void reportExtensionStatus();
+            if (collectorRequestId) void pollCollectionTask();
         }, { once: true });
     }
 
@@ -2885,16 +2897,62 @@
     });
 
     function initializeUi(managed) {
-        managedDesktopUi = Boolean(managed && !collectorRequestId);
+        const next = Boolean(managed && !collectorRequestId);
+        const first = !desktopUiResolved;
+        if (!first && managedDesktopUi === next) return;
+        const wasOpen = document.getElementById('erpa-cost-root')?.classList.contains('erpa-open');
+        if (!first) {
+            if (activeRun) {
+                activeRun.pauseRequested = true;
+                activeRun.controller.abort(Object.assign(new CostError('ERP 连接配置已更新，采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' }));
+            }
+            pageSizeObserver?.disconnect(); pageSizeObserver = null; pageSizeObservedBody = null;
+            document.getElementById('erpa-cost-root')?.remove(); document.getElementById('erpa-cost-trigger')?.remove();
+        }
+        managedDesktopUi = next;
         desktopUiResolved = true;
-        initWhenReady();
+        if (first) initWhenReady();
+        else {
+            createUi();
+            if (wasOpen) document.getElementById('erpa-cost-root')?.classList.add('erpa-open');
+        }
         window.dispatchEvent(new CustomEvent('shopeers:erp-v8-session-replay-request'));
         schedulePageSizeUpgrade();
         reportExtensionStatus();
-        window.setInterval(reportExtensionStatus, 15000);
-        window.setInterval(pollCollectionTask, 3000);
-        console.info(PREFIX, `v${EXTENSION_VERSION} 已在卓麟 ERP 启动`);
+        if (first) {
+            window.setInterval(reportExtensionStatus, 15000);
+            window.setInterval(() => { if (desktopConfigRetry) void refreshDesktopMode(); return pollCollectionTask(); }, 3000);
+            console.info(PREFIX, `v${EXTENSION_VERSION} 已在卓麟 ERP 启动`);
+        }
     }
-    if (window.ShopeersErpTaskPreview) void window.ShopeersErpTaskPreview.isManaged().then(initializeUi);
+
+    function refreshDesktopMode() {
+        if (collectorRequestId || !window.ShopeersErpTaskPreview) return Promise.resolve();
+        if (desktopConfigPending) return desktopConfigPending;
+        const read = ++desktopConfigRead, revision = desktopConfigRevision;
+        const current = () => read === desktopConfigRead && revision === desktopConfigRevision;
+        const apply = managed => { if (current()) { desktopConfigRetry = false; initializeUi(managed); } };
+        const pending = Promise.resolve().then(() => window.ShopeersErpTaskPreview.isManaged({ onObserved: apply })).then(managed => {
+            if (!current()) return;
+            if (managed == null) { desktopConfigRetry = true; if (!desktopUiResolved) initializeUi(true); }
+            else apply(managed);
+        }).catch(() => {
+            if (current()) { desktopConfigRetry = true; if (!desktopUiResolved) initializeUi(true); }
+        }).finally(() => { if (desktopConfigPending === pending) desktopConfigPending = null; });
+        desktopConfigPending = pending;
+        return pending;
+    }
+
+    if (!collectorRequestId) window.chrome?.storage?.onChanged?.addListener((changes, area) => {
+        if (area !== 'local' || !['shopeersErpDesktopTaskUi', 'shopeersErpWorkspaceId'].some(key => Object.hasOwn(changes, key))) return;
+        desktopConfigRevision++; desktopConfigRead++; desktopConfigPending = null;
+        if (Object.hasOwn(changes, 'shopeersErpDesktopTaskUi')) {
+            desktopConfigRetry = false; initializeUi(changes.shopeersErpDesktopTaskUi.newValue === true);
+        } else void refreshDesktopMode();
+        void reportExtensionStatus();
+        if (managedDesktopUi) void window.ShopeersErpTaskPreview.refresh();
+    });
+    if (collectorRequestId) initializeUi(false);
+    else if (window.ShopeersErpTaskPreview) void refreshDesktopMode();
     else initializeUi(false);
 }());

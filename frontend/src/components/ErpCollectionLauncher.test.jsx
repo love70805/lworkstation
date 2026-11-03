@@ -33,6 +33,26 @@ it('keeps a failed registration actionable with its actual reason', async () => 
   expect(host.querySelector('[role="alert"]').textContent).toBe('采集请求已失效');
   expect(props.onRegistrationRetry).toHaveBeenCalledOnce(); expect(button('开始成本核算').disabled).toBe(false);
 });
+it('distinguishes a sent intent from ERP acknowledgement and exposes bounded reconnect failure', async () => {
+  runtime.getErpCollection.mockResolvedValue({ requestId: 'R', status: 'waiting_ack' });
+  await render();
+  expect(button('正在连接 ERP').disabled).toBe(true);
+  expect(host.textContent).toContain('等待 ERP 确认接收');
+  runtime.getErpCollection.mockResolvedValue({ requestId: 'R', status: 'sync_error', error: 'ERP 尚未确认接收任务' });
+  props.requestId = 'TEMP'; await render(); props.requestId = 'R'; await render();
+  expect(button('重新连接 ERP').disabled).toBe(false);
+  expect(host.querySelector('[role="alert"]').textContent).toContain('尚未确认接收');
+  runtime.startErpCollection.mockResolvedValue({ ok: true, requestId: 'R', status: 'waiting_ack' });
+  await act(async () => button('重新连接 ERP').click());
+  expect(runtime.startErpCollection).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'W', ledgerId: 'L', requestId: 'R', retryFailed: true });
+  expect(button('正在连接 ERP').disabled).toBe(true);
+});
+it('does not restart an acknowledged executor when its page probe reports an error', async () => {
+  runtime.getErpCollection.mockResolvedValue({ requestId: 'R', status: 'running', error: 'ERP 页面响应超时' });
+  await render();
+  expect(button('正在采集成本').disabled).toBe(true);
+  expect(runtime.startErpCollection).not.toHaveBeenCalled();
+});
 it('preserves browser-only behavior when no desktop runtime exists', async () => {
   delete window.shopeersDesktopRuntime; await render(); expect(host.children).toHaveLength(0);
 });
