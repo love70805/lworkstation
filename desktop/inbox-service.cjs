@@ -129,6 +129,7 @@ function createInboxServiceController({
   runAsNode = false,
   capability = "",
   onState = () => {},
+  onChange = () => {},
   pollIntervalMs = 1500,
   restartDelayMs = 800,
   maxRestarts = MAX_RESTARTS,
@@ -379,10 +380,13 @@ function createInboxServiceController({
         SHOPEERS_ERP_INBOX_CAPABILITY: capability,
         SHOPEERS_INBOX_RESET_CAPABILITY: resetCapability,
       },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
       windowsHide: true,
     });
     child = serviceProcess;
+    serviceProcess.on('message', message => {
+      if (!stopping && child === serviceProcess && message?.type === 'workspace-inbox-changed' && message.version === 1) onChange();
+    });
     serviceProcess.once("error", (error) => {
       abortOwnedRequests(serviceProcess);
       if (child === serviceProcess) child = null;

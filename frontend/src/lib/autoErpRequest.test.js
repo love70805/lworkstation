@@ -7,6 +7,14 @@ function dependencies() {
   return { latest: vi.fn(async () => saved), save: vi.fn(async (request) => { saved = request; }), register: vi.fn(async () => ({ accepted: true, status: "registered" })) };
 }
 describe("automatic ERP request lifecycle", () => {
+  it('replaces a desktop-rejected request once even if cancellation was not acknowledged', async () => {
+    const scope=input(),deps=dependencies();
+    const old=await ensureAutoErpRequest(scope,deps);
+    const fresh=await ensureAutoErpRequest(scope,{...deps,rejectedRequestId:old.id,activeRequest:old});
+    expect(fresh.id).not.toBe(old.id);expect(fresh.supersedesRequestId).toBe(old.id);
+    const repeated=await ensureAutoErpRequest(scope,{...deps,rejectedRequestId:old.id,activeRequest:old});
+    expect(repeated.id).toBe(fresh.id);
+  });
   it('binds historical read hints once without replacing an active legacy task', async () => {
     const scope = input(), deps = dependencies();
     const old = await ensureAutoErpRequest(scope, deps);

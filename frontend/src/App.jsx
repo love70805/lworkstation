@@ -24,7 +24,11 @@ import { acknowledgeSelectionCapture, pollSelectionCaptureInbox } from "./lib/se
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 import { syncErpCollectionAdoptions } from './lib/erpCollectionAdoption';
 import { publishErpCollectionReceiptError } from './lib/erpCollectionActivity';
-import { runWorkspaceBackgroundTask } from './lib/workspaceBackgroundTasks';
+import { runWorkspaceBackgroundTask, subscribeWorkspaceResumed } from './lib/workspaceBackgroundTasks';
+import { subscribeErpInboxRefresh, erpInboxRecoveryInterval } from './lib/erpInboxEvents';
+import { liveQuery } from 'dexie';
+import { db } from './data/db/clientDatabase';
+import { observeTableRevision, tableRevisionReader } from './data/db/derivedCache';
 
 const CaptureQueue = lazy(() => import("./pages/CaptureQueue"));
 const DataSecurity = lazy(() => import("./pages/DataSecurity"));
@@ -101,8 +105,16 @@ export async function runErpInboxCycle({
   }
 
   if (isDisposed()) return { received, failures, recovered: false };
-  try { await recoverDrafts({ workspaceId: context.workspaceId }); }
-  catch (error) { failures.push(error); }
+  let draftFailures = [];
+  try {
+    const result = await recoverDrafts({ workspaceId: context.workspaceId });
+    draftFailures = result?.failures ?? [];
+  } catch (error) { draftFailures = [{ message: error.message }]; }
+  for (const failure of draftFailures) {
+    const message = `旧成本草稿恢复失败：${failure.message || '请重试读取草稿。'}`;
+    failures.push(new Error(message));
+    receiptFailures.push(message);
+  }
   try {
     const results = await recover({ workspaceId: context.workspaceId });
     if (syncTaskAdoptions) {
@@ -112,7 +124,7 @@ export async function runErpInboxCycle({
     const recoveryFailures = Array.isArray(results) ? results.filter(result => result.error) : [];
     failures.push(...recoveryFailures.map(result => new Error(result.error)));
     receiptFailures.push(...recoveryFailures.map(result => result.error));
-    return finish({ received, failures, recovered: recoveryFailures.length === 0 });
+    return finish({ received, failures, recovered: recoveryFailures.length === 0 && draftFailures.length === 0 });
   } catch (error) {
     failures.push(error);
     receiptFailures.push(error.message);
@@ -121,11 +133,19 @@ export async function runErpInboxCycle({
 }
 
 export function createErpInboxPoller(options = {}) {
-  let running = false;
+  let running = false, queued = false;
   return async () => {
-    if (running || options.isDisposed?.()) return null;
+    if (options.isDisposed?.()) return null;
+    if (running) { queued = true; return null; }
     running = true;
-    try { return await runWorkspaceBackgroundTask(() => runErpInboxCycle(options)); }
+    try {
+      let result;
+      do {
+        queued = false;
+        result = await runWorkspaceBackgroundTask(() => runErpInboxCycle(options));
+      } while (queued && !options.isDisposed?.());
+      return result;
+    }
     finally { running = false; }
   };
 }
@@ -159,17 +179,40 @@ function ErpInboxListener() {
     let disposed = false;
     const poll = createErpInboxPoller({ getContext: getInboxContext, isDisposed: () => disposed, syncTaskAdoptions: syncErpCollectionAdoptions });
     void poll();
-    let catalogRunning = false;
+    let catalogRunning = false, catalogQueued = false;
     const pollCatalog = async () => {
-      if (disposed || catalogRunning) return;
+      if (disposed) return;
+      if (catalogRunning) { catalogQueued = true; return; }
       catalogRunning = true;
-      try { await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ getContext: getInboxContext, isDisposed: () => disposed })); }
+      try {
+        do {
+          catalogQueued = false;
+          await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ getContext: getInboxContext, isDisposed: () => disposed }));
+        } while (catalogQueued && !disposed);
+      }
       finally { catalogRunning = false; }
     };
     void pollCatalog();
-    const timer = window.setInterval(() => { void poll(); void pollCatalog(); }, 5000);
+    const refresh = () => { void poll(); void pollCatalog(); };
+    const unsubscribe = subscribeErpInboxRefresh(refresh);
+    const resume = subscribeWorkspaceResumed(refresh);
+    let observed = false;
+    const localChanges = liveQuery(async () => {
+      const tables = ['erpCostInbox', 'costApprovals'];
+      await Promise.all(tables.flatMap(table => [db.table(table).count(), observeTableRevision(table)]));
+      return tables.map(table => tableRevisionReader(table)()).join('/');
+    }).subscribe({ next: () => {
+      // First read is already covered by the initial cycle. Later committed
+      // local confirmations must not wait for the recovery timer.
+      if (observed) refresh();
+      observed = true;
+    }, error: () => { /* Durable recovery polling remains available. */ } });
+    const timer = window.setInterval(refresh, erpInboxRecoveryInterval());
     return () => {
       disposed = true;
+      unsubscribe();
+      resume();
+      localChanges.unsubscribe();
       window.clearInterval(timer);
     };
   }, []);

@@ -4,7 +4,6 @@ import { readCachedReportProducts } from './derivedComputationService';
 import { Exact } from '../../domain/profitReports';
 import { db } from '../db/clientDatabase';
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
-import { currentLedgerResult } from '../../domain/ledgerWorkflow';
 
 export async function readLedgerReportHeaders(ledger, revision = sourceRevision()) {
   return cachedDerived({
@@ -20,8 +19,8 @@ export async function withCurrentLedgerResults(ledgers) {
     await observeSourceRevision();
     const revision = sourceRevision();
     const results=[];
-    for(const original of ledgers){
-      const snapshot=await getLedgerSnapshot(original.id);
+    for(const original of new Map(ledgers.filter(Boolean).map(ledger => [ledger.id, ledger])).values()){
+      const snapshot=await getLedgerSnapshot(original.id, { summaryOnly: true });
       if(!snapshot)continue;
       const ledger=snapshot.ledger;
       const lines=await readCachedReportProducts({snapshot});
@@ -31,7 +30,8 @@ export async function withCurrentLedgerResults(ledgers) {
       const complete=deduction&&stores.every(store=>deduction.coveredStores.includes(store));
       const productProfit=lines.reduce((sum,line)=>sum.plus(line.profitExact??0),new Exact(0));
       const profit=missing?null:productProfit.plus(new Exact(dispatch?.adoptedQuantityExact??0).times(ledger.warehouseRate??'0.7')).minus(deduction?.signedAmountExact??0).toDecimalPlaces(2,Exact.ROUND_DOWN).toNumber();
-      const currentResult={state:missing?'pending':'current',label:missing?'待补成本':complete?'本月利润':deduction?'暂计利润':'未扣款利润',profit,report:null};
+      const currentResult={state:missing?'pending':'current',label:missing?'待补成本':complete?'本月利润':deduction?'暂计利润':'未扣款利润',profit,report:null,
+        deductionStatus: complete ? 'complete' : deduction ? 'partial' : 'missing', needsAttention: missing || !complete};
       results.push({...ledger,liveResult:currentResult,currentResult});
     }
     assertSourceRevision(revision);

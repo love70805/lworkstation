@@ -129,6 +129,16 @@ app.whenReady().then(async () => {
     assert.equal(await evaluate(`document.querySelector('#keep-foreground').value`), '前台原查询');
     assert.equal(await evaluate(`document.querySelector('#keep-page').value`), '100');
     assert.deepEqual(await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v7'))?.results`), foregroundCache);
+    await collector.sessionChanged();
+    assert.equal(collector.snapshot().status, 'session_changed');
+    await assert.rejects(collector.start({ workspaceId, ledgerId: 'NATIVE-AUTO-L', requestId: 'NATIVE-AUTO-R' }), { code: 'ERP_SESSION_CHANGED' });
+    await call('requests', { request: { id: 'NATIVE-AUTO-RELOGIN', workspaceId, ledgerId: 'NATIVE-AUTO-L', ledgerPeriod: '2026-09',
+      replaceLedgerScope: true, supersedesRequestId: 'NATIVE-AUTO-R', platformSkcs: [{ platformSkc: 'SKC-A' }] }, expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] });
+    await collector.start({ workspaceId, ledgerId: 'NATIVE-AUTO-L', requestId: 'NATIVE-AUTO-RELOGIN' });
+    const restarted = await waitFor(async () => (await call(`cost-batches?workspaceId=${workspaceId}`)).records?.find(item => item.requestId === 'NATIVE-AUTO-RELOGIN'), 'new native task delivers after login session changes', 45000);
+    assert.equal(restarted.envelope.batch.rows[0].unitCost, 4);
+    assert.ok((await call(`cost-batches?workspaceId=${workspaceId}`)).records.some(item => item.deliveryId === automatic.deliveryId), 'old durable receipt stays available');
+    checks.push({ name: 'changed login stops the old native task; a fresh registration restarts collection and preserves earlier receipts' });
     await collector.stop(); collector.dispose(); collector = null;
     checks.push({ name: 'workspace launch, first-login wait/resume, real hidden native collector, fixed scope, complete delivery and unchanged foreground URL/form/pagination/result cache', unitCost: 4 });
     // Selecting another workspace detaches the remote view in the real shell.

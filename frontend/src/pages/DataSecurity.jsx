@@ -548,9 +548,9 @@ export default function DataSecurity() {
 
       <Panel className="danger-zone">
         <div className="danger-title"><AlertTriangle size={23} /><h2>危险操作</h2></div>
-        <p>清空会永久删除本机商品、采集、供应商、账本、成本、利润、历史审计、桌面收件和任务及其证据文件，以及成本草稿、货号组和店铺筛选。不会自动备份，无法撤销。</p>
+        <p>永久删除本机业务数据及采集任务，不会自动备份，无法撤销。</p>
         <div className="danger-action">
-          <div><strong>清空当前本机工作区</strong><span>操作后仅保留空白默认工作区和本次清空记录；既有手动导出文件不受影响。</span></div>
+          <div><strong>清空当前本机工作区</strong><span>已导出文件、账号登录和外观设置保留。</span></div>
           <Button variant="danger" onClick={() => setDangerOpen(true)}>清空数据</Button>
         </div>
       </Panel>
@@ -609,15 +609,14 @@ export default function DataSecurity() {
       <Modal
         open={dangerOpen}
         title="清空当前本机工作区"
-        description="此操作会永久删除本机业务数据，不会自动备份，无法撤销。请输入“清空本机数据”以继续。"
+        description="永久删除本机业务数据及任务，不会自动备份，无法撤销。"
         tone="danger"
         onClose={() => { if (!clearing) { setDangerOpen(false); setDangerText(""); } }}
         footer={<><Button disabled={clearing} onClick={() => { setDangerOpen(false); setDangerText(""); }}>取消</Button><Button variant="danger" loading={clearing} disabled={dangerText !== "清空本机数据" || clearing} onClick={clearWorkspace}>永久清空</Button></>}
       >
-        <div className="form-field"><label className="required" htmlFor="clear-workspace-confirmation">确认文字</label><input id="clear-workspace-confirmation" className="text-input mono" disabled={clearing} value={dangerText} onChange={(event) => setDangerText(event.target.value)} placeholder="清空本机数据" /></div>
+        <div className="form-field"><label className="required" htmlFor="clear-workspace-confirmation">输入“清空本机数据”确认</label><input id="clear-workspace-confirmation" className="text-input mono" disabled={clearing} value={dangerText} onChange={(event) => setDangerText(event.target.value)} placeholder="清空本机数据" /></div>
         {clearProgress?<p role="status">{clearProgress}</p>:null}
         {clearError?<p className="system-check-error" role="alert">{clearError}</p>:null}
-        <p className="modal-note">桌面收件、采集任务和证据文件将一并删除，旧任务不能继续。既有手动导出文件、账号登录和外观设置不受影响。</p>
       </Modal>
     </AppShell>
   );

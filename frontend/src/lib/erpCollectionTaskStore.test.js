@@ -1,0 +1,24 @@
+import { expect, it, vi } from 'vitest';
+vi.mock('./erpInboxTransport', () => ({ listErpCollectionTasks: vi.fn() }));
+import { listErpCollectionTasks } from './erpInboxTransport';
+import { refreshErpTaskState, readErpTaskState, publishErpTaskState, subscribeErpTaskState } from './erpCollectionTaskStore';
+it('shares one in-flight request and isolates late results from another workspace', async () => {
+  let finish;
+  listErpCollectionTasks.mockImplementationOnce(() => new Promise(resolve => { finish=resolve; }));
+  const listener=vi.fn(), remove=subscribeErpTaskState(listener);
+  const first=refreshErpTaskState({workspaceId:'TASK-A'});
+  const second=refreshErpTaskState({workspaceId:'TASK-A'});
+  expect(first).toBe(second);
+  expect(listErpCollectionTasks).toHaveBeenCalledTimes(1);
+  publishErpTaskState({workspaceId:'TASK-B',tasks:[{workspaceId:'TASK-B',taskId:'B'}]});
+  finish({tasks:[{workspaceId:'TASK-A',taskId:'A'},{workspaceId:'FOREIGN',taskId:'F'}]});
+  await first;
+  expect(readErpTaskState('TASK-A').tasks.map(task=>task.taskId)).toEqual(['A']);
+  expect(readErpTaskState('TASK-B').tasks.map(task=>task.taskId)).toEqual(['B']);
+  listErpCollectionTasks.mockRejectedValueOnce(Error('offline'));
+  await expect(refreshErpTaskState({workspaceId:'TASK-A'})).rejects.toThrow('offline');
+  expect(readErpTaskState('TASK-A')).toMatchObject({error:'offline',tasks:[{taskId:'A'}]});
+  remove();const before=listener.mock.calls.length;
+  publishErpTaskState({workspaceId:'TASK-A',tasks:[]});
+  expect(listener).toHaveBeenCalledTimes(before);
+});

@@ -1,3 +1,9 @@
+## 1.0.9 — 候选验收与发布
+
+修复 ERP 退出后重登无法继续、停止任务误显示等待登录、多月份缓存重读；优化当前利润/扣款提示、收件响应、旧草稿恢复提示，并精简危险操作文案。定向回归、原生扩展重登采集和合成 UI 金额/布局验收通过。[本批记录](../docs/integration/RESPONSE_OPTIMIZATION_1.0.9.md)。
+
+规范候选 `releases/candidates/1.0.9/`。通过同批 PR 必需 CI 与隐藏候选 smoke 后，发布状态以 [v1.0.9 Release](https://github.com/love70805/lworkstation/releases/tag/v1.0.9) 服务记录为准。未安装、重启或清空用户软件与数据。
+
 ## 1.0.8 — 候选验收与发布
 
 修复迟到回传的证据排序、完整性检查、历史采购遗漏、工作区成本隔离及历史补齐入口，复用同请求读取。相关回归 203 项、桌面验证、隔离真实结果稳定性和弹窗窗口布局通过。[本批记录](../docs/integration/ACCOUNTING_LOGIC_1.0.8.md)。

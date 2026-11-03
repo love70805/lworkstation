@@ -8,15 +8,15 @@ export function erpRequestScopeKey({ ledger, platformSkcs, expectedSkus, ledgerV
 }
 
 const chains = new Map();
-export function ensureAutoErpRequest(input, { latest, save, register, prepareHistory, isCurrent = () => true, now = () => Date.now(), activeRequest = null }) {
+export function ensureAutoErpRequest(input, { latest, save, register, prepareHistory, isCurrent = () => true, now = () => Date.now(), activeRequest = null, rejectedRequestId = null }) {
   const key = `${input.ledger.workspaceId}:${input.ledger.id}`;
   const previous = chains.get(key) ?? Promise.resolve();
   const run = previous.catch(() => {}).then(async () => {
     if (!isCurrent()) return null;
-    const existing = activeRequest ?? await latest(input.ledger.id);
+    const existing = activeRequest?.id !== rejectedRequestId ? activeRequest ?? await latest(input.ledger.id) : await latest(input.ledger.id);
     if (!isCurrent()) return null;
     const sameScope = existing && erpRequestScopeKey({ ...existing, ledger: input.ledger }) === erpRequestScopeKey(input);
-    const reusable = sameScope && (existing.ledgerPeriod ?? null) === (input.ledger.period ?? null)
+    const reusable = sameScope && existing.id !== rejectedRequestId && (existing.ledgerPeriod ?? null) === (input.ledger.period ?? null)
       && (activeRequest || (!prepareHistory || existing.historyRecoveryVersion === 1) && now() - Date.parse(existing.requestedAt) < 90 * 60 * 1000);
     const freshRequest = async previousId => ({ ...buildLedgerErpCostRequest(input), supersedesRequestId: previousId,
       ...(prepareHistory ? { historyRecoveryVersion: 1, historyMappings: await prepareHistory({ ledgerId: input.ledger.id, expectedSkus: input.expectedSkus }) } : {}) });

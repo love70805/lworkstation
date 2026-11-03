@@ -14,6 +14,7 @@ const serverPath = path.resolve(root, "../tools/erp-inbox-server.mjs");
 const port = 19790 + Math.floor(Math.random() * 800);
 const capability = crypto.randomBytes(32).toString("base64url");
 const spoolPath = path.join(os.tmpdir(), `shopeers-desktop-inbox-controller-${process.pid}.json`);
+let notifications = 0;
 
 await fs.rm(spoolPath, { force: true });
 const managed = createInboxServiceController({
@@ -22,6 +23,7 @@ const managed = createInboxServiceController({
   spoolPath,
   port,
   capability,
+  onChange: () => { notifications++; },
   pollIntervalMs: 100,
   restartDelayMs: 100,
 });
@@ -31,6 +33,19 @@ try {
   assert.equal(managed.getState().status, "online");
   assert.equal(managed.getState().ownership, "managed");
   assert.ok(managed.getOwnedPid());
+
+  // A real child IPC notification follows the committed HTTP mutation. A
+  // context publication does not trigger a self-sustaining refresh loop.
+  await managed.requestInbox({route:'/erp/v1/extension-status',method:'POST',body:{extensionId:'NOTIFY-EXT',version:'8.0.54'}});
+  await new Promise(resolve=>setTimeout(resolve,50));
+  assert.equal(notifications,0);
+  await managed.requestInbox({route:'/erp/v1/requests',method:'POST',body:{workspaceId:'NOTIFY-W',request:{id:'NOTIFY-R',workspaceId:'NOTIFY-W',ledgerId:'NOTIFY-L',ledgerPeriod:'2026-09',platformSkcs:[{platformSkc:'SKC-N'}],expectedSkus:[{platformSku:'SKU-N',platformSkc:'SKC-N'}]}}});
+  const created=await managed.requestInbox({route:'/erp/v1/collection-tasks',method:'POST',body:{workspaceId:'NOTIFY-W',requestId:'NOTIFY-R',filters:{sku:'SKC-N'}}});
+  const deadline=Date.now()+2000;
+  while(!notifications&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(notifications>0,'durable task creation wakes the workspace without waiting for polling');
+  const persisted=await managed.requestInbox({route:'/erp/v1/collection-tasks',query:{workspaceId:'NOTIFY-W'}});
+  assert.equal(persisted.tasks[0].taskId,created.task.taskId);
 
   const firstPid = managed.getOwnedPid();
   process.kill(firstPid);
