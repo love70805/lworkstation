@@ -72,7 +72,7 @@ async function contentChecks() {
   const intervals=new Map(), errors=[];
   let reset=null,tasks=[oldTask],holdNext=false,releasePoll;
   const delay=()=>new Promise(resolve=>setTimeout(resolve,10));
-  window.setInterval=fn=>{intervals.set(fn.name,fn);return intervals.size;};
+  window.setInterval=(fn,ms)=>{intervals.set(ms,fn);return intervals.size;};
   window.clearInterval=()=>{};
   window.addEventListener('error',event=>errors.push(event.message));
   window.addEventListener('unhandledrejection',event=>errors.push(event.reason?.message||String(event.reason)));
@@ -95,7 +95,7 @@ async function contentChecks() {
     for(const file of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'])window.eval(await fs.readFile(path.join(src,file),'utf8'));
     await until(()=>window.document.querySelector('#erpa-task-status')?.textContent.includes('SKC'));
     assert.match(window.document.querySelector('#erpa-table-body').textContent,/SKC-OLD/,'reproduce prior preview');
-    const report=intervals.get('reportExtensionStatus'),poll=intervals.get('pollCollectionTask');
+    const report=intervals.get(15000),poll=intervals.get(3000);
     assert.ok(report&&poll);
     tasks=[];await poll();
     assert.doesNotMatch(window.document.querySelector('#erpa-task-status').textContent,/TASK-OLD|原范围/,'authoritative empty list clears stale task display');

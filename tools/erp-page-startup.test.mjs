@@ -13,20 +13,32 @@ const origin = 'https://www.zhuolinkeji.cn';
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const sources = await Promise.all(['query-hook.js', 'result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'desktop-task-preview.js', 'content.js'].map(file => readFile(path.join(sourceRoot, file), 'utf8')));
 
-async function createPage(url, { topWindow, connected = true, earlySessionResponse = false, desktopTaskUi = false } = {}) {
+async function createPage(url, { topWindow, connected = true, earlySessionResponse = false, desktopTaskUi = false,
+  storagePending = false, shortStorageTimeout = false, taskRecords = null, html = '' } = {}) {
   const window = new Window({ url });
+  if (html) window.document.body.innerHTML = html;
   if (topWindow) Object.defineProperty(window, 'top', { value: topWindow });
-  const messages = [], calls = [], intervals = [];
+  const messages = [], calls = [], intervals = [], storageCallbacks = [], storageListeners = [];
+  let storageReads = 0;
   const setInterval = window.setInterval.bind(window);
   window.setInterval = (...args) => { intervals.push(args); return setInterval(...args); };
+  if (shortStorageTimeout) {
+    const schedule = window.setTimeout.bind(window);
+    window.setTimeout = (callback, ms, ...args) => schedule(callback, ms === 1500 ? 5 : ms, ...args);
+  }
   window.chrome = { runtime: {
     lastError: null,
     sendMessage(message, callback) {
       messages.push(JSON.parse(JSON.stringify(message)));
-      callback(connected ? { ok: true, status: 'success', tasks: [{ executionTarget: 'desktop', ledgerPeriod: '2026-10', status: 'running', summary: { total: 231, collected: 30, delivered: 25, adopted: 107 }, batches: [] }] } : { ok: false, status: 'failed' });
+      if (message.type === 'shopeers.erp.collectionTask' && message.payload.control === 'claim') return callback({ ok: false, code: 'ERP_TASK_ALREADY_CLAIMED', message: 'isolated claim boundary' });
+      callback(connected ? { ok: true, status: 'success', tasks: taskRecords ?? [{ executionTarget: 'desktop', ledgerPeriod: '2026-10', status: 'running', summary: { total: 231, collected: 30, delivered: 25, adopted: 107 }, batches: [] }] } : { ok: false, status: 'failed' });
     },
   } };
-  window.chrome.storage = { local: { get: (_keys, callback) => callback({ shopeersErpDesktopTaskUi: desktopTaskUi }) } };
+  window.chrome.storage = { local: { get: (_keys, callback) => {
+    storageReads++;
+    if (storagePending) storageCallbacks.push(callback);
+    else callback({ shopeersErpDesktopTaskUi: desktopTaskUi });
+  } }, onChanged: { addListener: listener => storageListeners.push(listener) } };
   window.fetch = async (...args) => {
     calls.push(args);
     return { ok: true, status: 200, headers: { get: () => 'application/json' }, clone() { return this; }, json: async () => ({ code: 0, data: [], count: 0 }) };
@@ -35,10 +47,76 @@ async function createPage(url, { topWindow, connected = true, earlySessionRespon
   if (earlySessionResponse) { await window.fetch('/permission/user/current'); await tick(); }
   for (const source of sources.slice(1)) window.eval(source);
   await tick();
-  return { window, messages, calls, intervals, async destroy() { await window.happyDOM.abort(); window.close(); } };
+  return { window, messages, calls, intervals, get storageReads() { return storageReads; },
+    resolveStorage(value = desktopTaskUi) { for (const callback of storageCallbacks.splice(0)) callback({ shopeersErpDesktopTaskUi: value }); },
+    setStoragePending(value) { storagePending = value; },
+    setDesktopMode(value) {
+      desktopTaskUi = value;
+      for (const listener of storageListeners) listener({ shopeersErpDesktopTaskUi: { newValue: value } }, 'local');
+    },
+    async destroy() { await window.happyDOM.abort(); window.close(); } };
 }
 
 export async function verifyErpPageStartup() {
+  const lateConfig = await createPage(origin + purchasePath, { desktopTaskUi: true, storagePending: true, shortStorageTimeout: true,
+    html: '<div class="layui-laypage-limits"><select id="keep-page"><option value="50">50</option><option value="100" selected>100</option></select></div>' });
+  try {
+    assert.ok(lateConfig.window.document.querySelector('.erpa-task-preview'), 'unknown configuration initializes a passive preview after a bounded wait');
+    assert.equal(lateConfig.window.document.querySelector('#erpa-recalculate'), null);
+    assert.equal(lateConfig.window.document.querySelector('#keep-page').value, '100', 'unknown configuration never changes the foreground query');
+    lateConfig.resolveStorage(); await tick();
+    assert.ok(lateConfig.window.document.querySelector('.erpa-task-preview'), 'a late configuration callback restores the managed preview');
+    assert.equal(lateConfig.window.document.querySelector('#keep-page').value, '100');
+    assert.equal(lateConfig.window.document.querySelector('#erpa-recalculate'), null);
+    lateConfig.setDesktopMode(false); await tick();
+    assert.ok(lateConfig.window.document.querySelector('#erpa-recalculate'));
+    lateConfig.setDesktopMode(true); await tick();
+    assert.equal(lateConfig.window.document.querySelectorAll('.erpa-task-preview').length, 1);
+    assert.equal(lateConfig.window.document.querySelectorAll('#erpa-cost-trigger').length, 1);
+    assert.deepEqual(lateConfig.intervals.map(([,ms])=>ms).toSorted((a,b)=>a-b), [3000,15000], 'configuration changes keep one pair of timers');
+    for (const source of sources) lateConfig.window.eval(source);
+    assert.deepEqual(lateConfig.intervals.map(([,ms])=>ms).toSorted((a,b)=>a-b), [3000,15000]);
+  } finally { await lateConfig.destroy(); }
+
+  const configRace = await createPage(origin + '/view/console/index.html', { storagePending: true, shortStorageTimeout: true });
+  try {
+    configRace.setDesktopMode(true); configRace.resolveStorage(false); await tick();
+    assert.ok(configRace.window.document.querySelector('.erpa-task-preview'), 'an old callback cannot overwrite a newer configuration event');
+  } finally { await configRace.destroy(); }
+
+  const configRetry = await createPage(origin + '/view/console/index.html', { desktopTaskUi: true, storagePending: true, shortStorageTimeout: true });
+  try {
+    configRetry.setStoragePending(false);
+    configRetry.intervals.find(([,ms])=>ms===3000)[0](); await tick();
+    assert.ok(configRetry.window.document.querySelector('.erpa-task-preview'), 'missing callbacks retry using the existing task timer');
+    assert.equal(configRetry.storageReads, 2);
+    assert.equal(configRetry.intervals.length, 2);
+  } finally { await configRetry.destroy(); }
+
+  const tasks = [{ taskId: 'BOUND-TASK', requestId: 'BOUND-REQUEST', resumeRequestId: 'OLD-INTENT', executionTarget: 'desktop',
+    status: 'ready', catalogMode: 'on_demand', executionProtocol: 2, filters: { sku: 'SKC-A' }, queryCapturedAt: new Date().toISOString() }];
+  const oldCollector = await createPage(origin + purchasePath + '?lworkstationRequest=BOUND-REQUEST&lworkstationResume=OLD-INTENT', { storagePending: true, taskRecords: tasks });
+  try {
+    assert.equal(oldCollector.storageReads, 0, 'a bound hidden collector does not wait for preview configuration');
+    const claims = () => oldCollector.messages.filter(message=>message.payload?.control==='claim');
+    assert.equal(claims().length, 1, 'the exact execution intent is claimed immediately after document initialization');
+    assert.equal(claims()[0].payload.resumeRequestId, 'OLD-INTENT');
+    assert.equal(claims()[0].payload.catalogMode, 'on_demand', 'claim inherits the task policy');
+    tasks[0].resumeRequestId = 'NEW-INTENT';
+    oldCollector.intervals.find(([,ms])=>ms===3000)[0](); await tick();
+    assert.equal(claims().length, 1, 'an old page cannot claim a newly fenced intent after reading it');
+    assert.equal(oldCollector.calls.length, 0);
+  } finally { await oldCollector.destroy(); }
+
+  for (const intent of ['', 'NEW-INTENT']) {
+    const collector = await createPage(origin + purchasePath + '?lworkstationRequest=BOUND-REQUEST' + (intent ? '&lworkstationResume=' + intent : ''), { storagePending: true, taskRecords: tasks });
+    try {
+      const claims = collector.messages.filter(message=>message.payload?.control==='claim');
+      assert.equal(claims.length, intent ? 1 : 0, 'only the replacement page with the current execution intent can claim');
+      assert.equal(collector.storageReads, 0);
+    } finally { await collector.destroy(); }
+  }
+
   const desktop = await createPage(origin + '/view/console/index.html', { desktopTaskUi: true });
   try {
     assert.ok(desktop.window.document.querySelector('.erpa-task-preview'));

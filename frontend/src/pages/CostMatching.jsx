@@ -445,7 +445,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
       if (continuing && !requestRecords.some(request => request.id === collectionTask.requestId)) throw new Error('本工作区缺少原任务请求，请停止此任务后从当前账本重新开始。');
       await controlErpCollectionTask(collectionTask.taskId, { workspaceId: collectionTask.workspaceId,
         action: continuing ? 'request_resume' : action, requestId: collectionTask.requestId, scopeHash: collectionTask.scopeHash, filters: collectionTask.filters,
-        ...(continuing ? { mode: action === 'catalog' ? 'catalog' : 'cost', retryFailed: action === 'retry_failed' } : {}) });
+        ...(continuing ? { mode: action === 'catalog' ? 'catalog' : 'cost', catalogMode: 'on_demand', retryFailed: action === 'retry_failed' } : {}) });
       if (continuing && window.shopeersDesktopRuntime?.startErpCollection) {
         const result = await window.shopeersDesktopRuntime.startErpCollection({ workspaceId: collectionTask.workspaceId, ledgerId: snapshot.ledger.id, requestId: collectionTask.requestId, mode: action === 'catalog' ? 'catalog' : 'cost', retryFailed: action === 'retry_failed' });
         if (!result?.ok) throw new Error(result?.error || '后台采集尚未启动。');

@@ -305,10 +305,10 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     evidenceComplete: legacy ? false : Boolean(evidenceComplete),
     completenessScope: meta.completenessScope === "source" || (meta.evidenceComplete === false && meta.completenessScope !== "derived" && !scopedIncomplete) ? "source" : "derived",
   };
-  if (meta.catalogPublication?.mode === 'after_costs') {
+  if (['after_costs', 'on_demand'].includes(meta.catalogPublication?.mode)) {
     const binding = meta.catalogPublication;
     if (![binding.taskId, binding.batchId, binding.attemptId].every(value => typeof value === 'string' && value.trim())) throw new Error('ERP 资料暂存缺少有效任务尝试。');
-    result.catalogPublication = { mode: 'after_costs', taskId: binding.taskId, batchId: binding.batchId, attemptId: binding.attemptId };
+    result.catalogPublication = { mode: binding.mode, taskId: binding.taskId, batchId: binding.batchId, attemptId: binding.attemptId };
   }
   for (const field of numericFields) {
     const value = Number(meta[field]);

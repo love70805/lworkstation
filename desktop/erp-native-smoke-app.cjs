@@ -22,6 +22,8 @@ app.on('window-all-closed',()=>{});
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const checks = [], failures = [], timings = [], requests = [];
 let inbox, host, view, popup, collector, collectorView, automaticLoginRequired = false, permissionRequired = false;
+let dropNextCollectorPage = false, collectorLoads = 0;
+let manualCatalogGate = null;
 async function call(route, body) {
   const started = performance.now();
   const response = await fetch(`http://127.0.0.1:${port}/erp/v1/${route}`, { headers: { authorization: `Bearer ${capability}`, 'content-type': 'application/json' }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(4000) });
@@ -53,11 +55,12 @@ app.whenReady().then(async () => {
     const ses = session.fromPartition('persist:native-erp');
     installExtensionInboxTransport(ses, () => inbox);
     ses.serviceWorkers.on('console-message', (_event, details) => { if (details?.level === 'error') failures.push(details.message); });
-    ses.protocol.handle('https', request => {
+    ses.protocol.handle('https', async request => {
       const url = new URL(request.url);
       if (url.searchParams.has('lworkstationRequest') && automaticLoginRequired) return new Response('<!doctype html><html><body><input type="password"></body></html>', { headers: { 'content-type': 'text/html' } });
       if (!url.pathname.startsWith('/purchase/')) return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离原生 ERP</h1>' + (url.pathname === '/view/console/index.html' ? '<iframe id="procurement" style="width:100%;height:720px" src="/view/system/purchaseOrderModule/purchasingManagement.html"></iframe>' : '') + (url.pathname === '/login.html' ? '<input type="password" aria-label="ERP 密码">' : '') + '</body></html>', { headers: { 'content-type': 'text/html' } });
       requests.push(url.pathname);
+      if (manualCatalogGate && url.pathname.endsWith('product-info-sku')) await manualCatalogGate;
       if (permissionRequired && url.pathname.endsWith('product-info-sku')) return new Response(JSON.stringify({ code: -40102, msg: '校验用户店铺权限失败！' }), { headers: { 'content-type': 'application/json' } });
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-A' }]
         : url.pathname.endsWith('purchase-order-details') ? [{ purchaseOrderDetailId: 'D-A', itemId: 'WH-A', tradeName: '原生隔离商品', creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }]
@@ -111,11 +114,17 @@ app.whenReady().then(async () => {
     collector = createWorkspaceErpCollector({
       getContext: () => ({ workspaceId }),
       requestInbox: input => inbox.requestInbox(input),
+      ackTimeoutMs: 1000,
       createView: async url => {
+        collectorLoads++;
         const hidden = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
         collectorView = hidden;
         hidden.setBounds({ x: 0, y: 0, width: 1280, height: 900 });
-        await hidden.webContents.loadURL(url);
+        // One isolated error origin has no matching content script. The next
+        // view loads the real bound purchase URL through the native extension.
+        const target = dropNextCollectorPage ? 'https://collector-unavailable.example.invalid/' : url;
+        dropNextCollectorPage = false;
+        await hidden.webContents.loadURL(target);
         return hidden;
       },
     });
@@ -160,6 +169,47 @@ app.whenReady().then(async () => {
     assert.equal(resumedPermission.pauseReason, undefined);
     assert.ok((await call(`cost-batches?workspaceId=${workspaceId}`)).records.some(item => item.deliveryId === automatic.deliveryId));
     checks.push({ name: 'native HTTP 200 permission failure pauses with pending costs, closes hidden view, resumes the same task without another login and preserves earlier receipts' });
+    await collector.stop();
+    await call('requests', { request: { id: 'NATIVE-HANDOFF', workspaceId, ledgerId: 'NATIVE-HANDOFF-L', ledgerPeriod: '2026-09', platformSkcs: [{ platformSkc: 'SKC-A' }] }, expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] });
+    await call('requests', { request: { kind: 'catalog', id: 'NATIVE-HANDOFF-CATALOG', workspaceId, ledgerId: 'NATIVE-HANDOFF-L', ledgerPeriod: '2026-09',
+      platformSkcs: ['SKC-A'], confirmedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }], sourceRequestId: 'NATIVE-HANDOFF', sourceProductIds: [],
+      idempotencyKey: 'manual-native-handoff', requestedAt: new Date().toISOString() } });
+    dropNextCollectorPage = true;
+    const loadsBefore = collectorLoads;
+    const handoffInput = { workspaceId, ledgerId: 'NATIVE-HANDOFF-L', requestId: 'NATIVE-HANDOFF' };
+    const pendingHandoff = await collector.start(handoffInput);
+    assert.equal(pendingHandoff.status, 'waiting_ack');
+    await pause(1100); await collector.poll();
+    const handoffReceipt = await waitFor(async () => (await call(`cost-batches?workspaceId=${workspaceId}`)).records?.find(item => item.requestId === handoffInput.requestId), 'unacknowledged native page reconnects without restarting the app');
+    const recoveredHandoff = (await call(`collection-tasks?workspaceId=${workspaceId}`)).tasks.find(task => task.requestId === handoffInput.requestId);
+    assert.equal(recoveredHandoff.taskId, pendingHandoff.taskId);
+    assert.equal(collectorLoads - loadsBefore, 2);
+    assert.equal(recoveredHandoff.catalogMode, 'on_demand');
+    assert.equal(handoffReceipt.envelope.batch.sourceMeta.catalogPublication.mode, 'on_demand');
+    assert.equal(handoffReceipt.envelope.batch.rows[0].unitCost, 4);
+    for (const batch of recoveredHandoff.batches) await call(`collection-tasks/${recoveredHandoff.taskId}/adoption`, { workspaceId, deliveryId: batch.deliveryId, adoptedCount: 1 });
+    const readsAfterCosts = requests.length;
+    await pause(1200); await collector.poll();
+    assert.equal(requests.length, readsAfterCosts, 'cost adoption never starts default catalog business reads');
+    assert.ok((await call(`collection-tasks/${recoveredHandoff.taskId}?workspaceId=${workspaceId}`)).task.batches.every(batch => !batch.catalogStatus));
+    assert.equal(view.webContents.getURL(), foregroundUrl);
+    checks.push({ name: 'native missing-content page auto reconnects once to the same durable task; cost-only defaults issue no catalog reads after adoption' });
+    assert.ok(!(await call(`catalog-batches?workspaceId=${workspaceId}`)).records.some(item => item.requestId === 'NATIVE-HANDOFF-CATALOG'));
+    let releaseCatalog;
+    manualCatalogGate = new Promise(resolve => { releaseCatalog = resolve; });
+    await collector.start({ ...handoffInput, mode: 'catalog' });
+    const manualRunning = await waitFor(async () => (await call(`collection-tasks/${recoveredHandoff.taskId}?workspaceId=${workspaceId}`)).task.batches.some(batch => batch.catalogStatus === 'running'), 'explicit manual catalog starts');
+    assert.equal(manualRunning, true);
+    await collector.poll();
+    assert.equal(collectorView.webContents.isDestroyed(), false, 'cost completion must not close the active manual catalog page');
+    manualCatalogGate = null; releaseCatalog();
+    await waitFor(async () => (await call(`catalog-batches?workspaceId=${workspaceId}`)).records.find(item => item.requestId === 'NATIVE-HANDOFF-CATALOG'), 'manual native catalog delivers its own receipt');
+    const manualFinished = await waitFor(async () => { const task = (await call(`collection-tasks/${recoveredHandoff.taskId}?workspaceId=${workspaceId}`)).task;
+      return task.batches.every(batch => ['completed','failed'].includes(batch.catalogStatus)) && !task.runnerId && task; }, 'manual catalog releases its runner');
+    assert.equal(manualFinished.batches[0].attemptId, recoveredHandoff.batches[0].attemptId);
+    assert.equal(manualFinished.batches[0].deliveryId, handoffReceipt.deliveryId);
+    assert.equal((await call(`cost-batches?workspaceId=${workspaceId}`)).records.filter(item => item.requestId === handoffInput.requestId).length, 1);
+    checks.push({ name: 'explicit native on-demand catalog remains alive while costs are complete, delivers separately and preserves the original cost receipt/attempt' });
     await collector.stop(); collector.dispose(); collector = null;
     checks.push({ name: 'workspace launch, first-login wait/resume, real hidden native collector, fixed scope, complete delivery and unchanged foreground URL/form/pagination/result cache', unitCost: 4 });
     // Selecting another workspace detaches the remote view in the real shell.

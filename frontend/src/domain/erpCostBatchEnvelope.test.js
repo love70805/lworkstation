@@ -63,6 +63,16 @@ function buildFixture() {
 }
 
 describe("ERP cost batch envelope v2", () => {
+  it('preserves cost-only publication intent across validated inbox round trips', () => {
+    const fixture = buildFixture();
+    const binding = { mode: 'on_demand', taskId: 'T', batchId: 'B', attemptId: 'A' };
+    fixture.sourceMeta.catalogPublication = binding;
+    const inbox = buildErpCostInboxEnvelope({ batch: fixture, deliveryId: 'COST-ONLY' });
+    expect(validateErpCostInboxEnvelope(JSON.parse(JSON.stringify(inbox))).batch.sourceMeta.catalogPublication).toEqual(binding);
+    fixture.sourceMeta.catalogPublication.attemptId = '';
+    expect(() => validateErpCostBatchEnvelope(fixture)).toThrow('有效任务尝试');
+  });
+
   it('preserves collection request diagnostics without promoting them to cost evidence', () => {
     const fixture = buildFixture();
     Object.assign(fixture.sourceMeta, { skuLookupCount: 8, recoveredMappingCount: 8, additionalWarehouseHistoryCount: 2,

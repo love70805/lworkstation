@@ -171,7 +171,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   if (method !== 'POST') fail('METHOD_NOT_ALLOWED', '不支持的任务操作。', 405);
   if (parts[1] === 'control') {
     const action = payload.action;
-    if (['request_resume', 'claim', 'release'].includes(action)) {
+    if (['request_resume', 'claim', 'release', 'reconnect'].includes(action)) {
       if (action === 'release') {
         if (!payload.runnerId || payload.runnerId !== task.runnerId) fail('ERP_TASK_RUNNER_CHANGED', '执行者已变化，请刷新任务状态。');
         delete task.runnerId; delete task.runnerLeaseExpiresAt;
@@ -190,18 +190,31 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       if (payload.requestId && payload.requestId !== task.requestId || collectionScopeHash(request) !== task.scopeHash
         || payload.filters && hash(payload.filters) !== hash(task.filters)) fail('ERP_TASK_SCOPE_CHANGED', '任务月份、店铺、SKU/SKC 或导入版本已变化，请从当前账本重新准备采集。');
       if (['stopped', 'completed', 'invalidated'].includes(task.status)) fail('ERP_TASK_STOPPED', '任务已结束，请从当前账本准备新任务。');
+      if (action === 'reconnect') {
+        if (task.executionProtocol !== 2 || task.executionTarget !== 'desktop' || task.status !== 'ready' || task.runnerId
+          || !payload.resumeRequestId || payload.resumeRequestId !== task.resumeRequestId) fail('ERP_TASK_HANDOFF_CHANGED', '任务接收状态已变化，请读取最新状态。');
+        if (payload.catalogMode != null) {
+          if (!['on_demand', 'after_costs'].includes(payload.catalogMode)) fail('ERP_TASK_MODE_INVALID', '商品资料整理方式无效。', 400);
+          task.catalogMode = payload.catalogMode;
+        }
+        task.resumeRequestId = crypto.randomUUID(); task.resumeRequestedAt = timestamp(now);
+        renew(task, request, records, now);
+        return { status: 200, body: { task: refresh(task) } };
+      }
       if (request.status === 'expired' && payload.scopeHash !== task.scopeHash) fail('ERP_TASK_REVALIDATION_REQUIRED', '任务已过期，请在工作台核对当前账本后点击继续原任务。');
       if (action === 'request_resume') {
+        if (payload.catalogMode != null && !['on_demand', 'after_costs'].includes(payload.catalogMode)) fail('ERP_TASK_MODE_INVALID', '商品资料整理方式无效。', 400);
         if (payload.executionTarget === 'desktop') task.executionTarget = 'desktop';
         const mode = payload.mode ?? 'cost';
         if (!['cost', 'catalog'].includes(mode) || payload.retryFailed != null && typeof payload.retryFailed !== 'boolean') fail('ERP_TASK_MODE_INVALID', '任务继续方式无效。', 400);
         if (mode === 'catalog' && task.batches.some(batch => !batch.deliveryId)) fail('ERP_TASK_COST_FIRST', '请先完成成本采集，再按需补齐商品资料。');
         if (mode === 'catalog' && task.catalogMode === 'after_costs' && task.batches.some(batch => batch.status !== 'delivered')) fail('ERP_TASK_COST_FIRST', '成本证据尚未完整，请先重试失败批次。');
         if (task.runnerId && Date.parse(task.runnerLeaseExpiresAt) > now && task.status !== 'paused'
-          || task.status === 'ready' && task.runMode === mode && !payload.retryFailed) return { status: 200, body: { task: refresh(task), idempotent: true } };
+          || task.status === 'ready' && task.runMode === mode && !payload.retryFailed
+            && (!payload.catalogMode || payload.catalogMode === task.catalogMode)) return { status: 200, body: { task: refresh(task), idempotent: true } };
         for (const batch of task.batches) if (batch.status === 'running' || payload.retryFailed && ['failed', 'incomplete'].includes(batch.status)) resetAttempt(batch);
         if (mode === 'cost') splitPendingBatches(task);
-        Object.assign(task, { executionProtocol: 2, catalogMode: task.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: mode, status: 'ready', recoveryRequired: false,
+        Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode ?? (task.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand'), runMode: mode, status: 'ready', recoveryRequired: false,
           resumeRequestId: crypto.randomUUID(), resumeRequestedAt: timestamp(now), instanceId });
         delete task.runnerId; delete task.runnerLeaseExpiresAt; delete task.pauseReason;
       } else {
@@ -212,7 +225,10 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
           && item.runnerId && !['paused', 'stopped', 'completed', 'invalidated'].includes(item.status) && Date.parse(item.runnerLeaseExpiresAt) > now)) fail('ERP_TASK_OTHER_RUNNING', '当前工作区已有任务正在采集，本任务等待执行。');
         // The upgraded helper can continue an older task without rereading its
         // durable cost batches. Older helpers keep their existing protocol.
-        if (payload.catalogMode === 'after_costs') task.catalogMode = 'after_costs';
+        if (payload.catalogMode != null) {
+          if (!['on_demand','after_costs'].includes(payload.catalogMode)) fail('ERP_TASK_MODE_INVALID', '商品资料整理方式无效。', 400);
+          task.catalogMode = payload.catalogMode;
+        }
         task.runnerId = payload.runnerId; task.status = 'running';
       }
       renew(task, request, records, now);

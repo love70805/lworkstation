@@ -190,8 +190,7 @@ export async function verifyErpCatalogTransport({
     };
     for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
       let script = await fs.readFile(path.join(sourceRoot, file), 'utf8');
-      if (!afterCosts && file === 'content.js') script = script.replace("executionProtocol: 2, catalogMode: 'after_costs'", "executionProtocol: 2, catalogMode: 'on_demand'");
-      if (!afterCosts && file === 'content.js') script = script.replace("resumeRequestId: task.resumeRequestId, catalogMode: 'after_costs'", "resumeRequestId: task.resumeRequestId, catalogMode: 'on_demand'");
+      if (afterCosts && file === 'content.js') script = script.replace("executionProtocol: 2, catalogMode: 'on_demand'", "executionProtocol: 2, catalogMode: 'after_costs'");
       window.eval(script);
     }
     window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", { detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-CATALOG" } }));
@@ -231,7 +230,9 @@ export async function verifyErpCatalogTransport({
     assert.equal(catalogProgress.state, catalogSubmitted[0].response.envelope.catalog.status === 'completed' ? 'complete' : 'partial');
     assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
     assert.equal(new Set(requestedPaths).size, 4);
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, legacyScope || afterCosts ? 1 : 3, 'automatic catalog reuses durable complete procurement evidence');
+    const manualWarehouseCount = new Set(expectedSkus.map(item => item.platformSku === 'SKU-RED' ? 'WH-CATALOG' : item.platformSku === 'SKU-BLUE' ? 'WH-BLUE' : null).filter(Boolean)).size;
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, legacyScope || afterCosts ? 1 : 1 + manualWarehouseCount,
+      'automatic catalog reuses procurement evidence; an explicit material attempt reads only the registered warehouse scope');
     assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, legacyScope || afterCosts ? 2 : unresolvedTarget ? 6 : 4,
       'a separate explicit material attempt reads its own mappings instead of assuming account continuity');
     if (!legacyScope) assert.equal(submitted[0].payload.meta.scopeRetrySkcCount, unresolvedTarget ? 1 : 0);
@@ -367,7 +368,7 @@ export async function verifyErpCatalogTransport({
       assert.equal(late.status, 409, 'stopping a task cannot release a queued companion result before all calculations');
       assert.equal((await late.json()).error, 'ERP_TASK_COST_FIRST');
     }
-    return { batch, envelope };
+    return { batch, envelope, catalogEnvelope: catalogSubmitted[0].response.envelope };
   } finally {
     await window?.happyDOM.close();
     child.kill();
