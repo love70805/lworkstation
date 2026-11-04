@@ -4,7 +4,7 @@ import { normalizePurchaseEvidenceRecord, validateCostPeriod } from "./erpPurcha
 import { selectLatestPurchaseRecords } from "./erpPurchaseSelection";
 export { normalizePurchaseEvidenceRecord } from "./erpPurchaseEvidence";
 
-export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@5-unit-4dp-beta-current-month-latest-three";
+export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@6-reversible-anomaly-ignore";
 export const ERP_HISTORY_MIN_SAMPLES = 6;
 export const ERP_PREVIEW_RECORD_LIMIT = 3;
 
@@ -22,6 +22,7 @@ function text(value) {
 }
 
 function finiteNumber(value) {
+  if (value == null || String(value).trim() === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -45,17 +46,19 @@ export function normalizedResolution(resolution, warehouseSku, record) {
   if (canonicalWarehouseSku(resolution.warehouseSku ?? warehouseSku) !== canonicalWarehouseSku(warehouseSku)) return null;
   if (text(resolution.recordId) !== record.recordId) return null;
   const action = text(resolution.action);
-  if (!["correct_price", "confirm_true_price"].includes(action)) return null;
+  if (!["correct_price", "confirm_true_price", "ignore_anomaly"].includes(action)) return null;
   const resolvedAt = text(resolution.resolvedAt);
   const resolvedBy = text(resolution.resolvedBy);
   const originalUnitPrice = finiteNumber(resolution.originalUnitPrice);
-  const resolvedUnitPrice = action === "confirm_true_price" ? finiteNumber(resolution.resolvedUnitPrice) : roundPrice(resolution.resolvedUnitPrice);
+  const resolvedUnitPrice = action !== "correct_price" ? finiteNumber(resolution.resolvedUnitPrice) : roundPrice(resolution.resolvedUnitPrice);
   if (!resolvedAt || !Number.isFinite(Date.parse(resolvedAt)) || !resolvedBy) return null;
   if (originalUnitPrice == null || originalUnitPrice !== record.unitPrice) return null;
-  if (resolvedUnitPrice == null || resolvedUnitPrice <= 0) return null;
-  if (action === "confirm_true_price") {
+  if (resolvedUnitPrice == null || resolvedUnitPrice < 0) return null;
+  if (action === "ignore_anomaly") {
+    if (record.unitPrice < 0 || resolvedUnitPrice !== record.unitPrice) return null;
+  } else if (action === "confirm_true_price") {
     if (record.unitPrice <= 0 || resolvedUnitPrice !== record.unitPrice) return null;
-  } else if (resolvedUnitPrice === record.unitPrice) {
+  } else if (resolvedUnitPrice <= 0 || resolvedUnitPrice === record.unitPrice) {
     return null;
   }
   return {
@@ -157,7 +160,7 @@ export function calculateWarehouseCostDecision({
       ...anomaly,
       warehouseSku: normalizedWarehouseSku,
       resolution,
-      status: resolution ? "resolved" : "pending",
+      status: resolution?.action === "ignore_anomaly" ? "ignored" : resolution ? "resolved" : "pending",
     };
   });
   const resolvedRecords = selectedRecords.map((record) => {
@@ -176,15 +179,16 @@ export function calculateWarehouseCostDecision({
     sum.plus(new Decimal(record.quantity || 0).times(record.effectiveUnitPrice || 0))
   ), new Decimal(0));
   const unresolvedAnomalyCount = anomalies.filter((anomaly) => anomaly.status === "pending").length;
-  const hasNonPositivePrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice) || record.effectiveUnitPrice <= 0);
+  const hasInvalidPrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice)
+    || record.effectiveUnitPrice < 0 || record.effectiveUnitPrice === 0 && record.resolution?.action !== "ignore_anomaly");
   const computedUnitCost = totalQuantity.gt(0)
     ? totalPrice.div(totalQuantity).toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber()
     : null;
   const resolutionStatus = evidenceComplete
     && selectedRecords.length > 0
     && unresolvedAnomalyCount === 0
-    && !hasNonPositivePrice
-    && computedUnitCost > 0
+    && !hasInvalidPrice
+    && (computedUnitCost > 0 || computedUnitCost === 0 && totalPrice.isZero())
     ? "resolved"
     : "pending";
   return {
@@ -205,6 +209,7 @@ export function calculateWarehouseCostDecision({
     anomalyCount: anomalies.length,
     unresolvedAnomalyCount,
     resolvedAnomalyCount: anomalies.length - unresolvedAnomalyCount,
+    ignoredAnomalyCount: anomalies.filter(anomaly => anomaly.status === "ignored").length,
     resolutions: anomalies.map((anomaly) => anomaly.resolution).filter(Boolean),
     resolutionStatus,
   };

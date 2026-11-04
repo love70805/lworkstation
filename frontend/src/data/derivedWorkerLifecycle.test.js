@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { runDerivedComputation } from './repositories/derivedComputationService';
+import { runDerivedComputation, disposeIdleDerivedWorkers } from './repositories/derivedComputationService';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { disposeIdleDerivedWorkers(); vi.unstubAllGlobals(); });
 function workers({ failPost = false } = {}) {
   const instances = [];
   vi.stubGlobal('Worker', class {
@@ -38,5 +38,20 @@ it('finishes parallel workers independently and removes the completed cancellati
   expect(remove).toHaveBeenCalledTimes(1);
   instances[1].onmessage({ data: { value: 2 } }); expect(await second).toBe(2);
   controller.abort();
+  instances.forEach(worker => expect(worker.terminate).not.toHaveBeenCalled());
+  disposeIdleDerivedWorkers();
   instances.forEach(worker => expect(worker.terminate).toHaveBeenCalledTimes(1));
+});
+
+it('reuses an initialized worker, reports progress without resolving and rejects stale job messages', async () => {
+  const instances = workers();
+  const first = runDerivedComputation('cost-coverage', {});
+  instances[0].onmessage({data:{value:1}});await first;
+  const onProgress=vi.fn();
+  const next=runDerivedComputation('profit',{}, {onProgress});
+  expect(instances).toHaveLength(1);
+  instances[0].onmessage({data:{type:'progress',progress:{label:'正在核算'}}});
+  expect(onProgress).toHaveBeenCalledWith({label:'正在核算'});
+  instances[0].onmessage({data:{jobId:-1,value:'stale'}});
+  instances[0].onmessage({data:{value:2}});expect(await next).toBe(2);
 });

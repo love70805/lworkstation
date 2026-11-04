@@ -1,3 +1,4 @@
+import { projectProductArchiveRows } from '../../domain/productArchive';
 import {
   assertUniquePlatformSkus,
   canonicalPlatformSkc,
@@ -1855,6 +1856,27 @@ export async function getSelectionReferenceSnapshot(options = {}) {
     ...independentCatalogRecords.map(record => ({ envelope: record.catalog, batchId: record.catalog.batchId, publishedAt: record.receivedAt, period: record.catalog.ledgerPeriod, coverage: record.catalog.coverage })),
     ...pendingCatalogRecords,
   ];
+  const baseCatalogRows = [...[...publishedCatalogBatches.values()].flatMap(batch => Array.isArray(batch.sourceContract?.catalogRows)
+      ? batch.sourceContract.catalogRows.filter(row => catalogRowMatches(row, batch)).map(row => ({ ...row, catalogQuerySkcs: catalogScope(batch) })) : []),
+      ...independentCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.catalog, { batchId: record.catalog.batchId, publishedAt: record.receivedAt })),
+      ...pendingCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.envelope, record))];
+  const archives = await db.settings.where('key').startsWith('product-archive:' + context.workspaceId + ':').toArray();
+  const privateSkus = new Set(platformSkus.filter(sku => !visibleProductIds.has(sku.productId)).map(sku => canonicalPlatformSku(sku.platformSku)));
+  const archiveRows = archives.length ? projectProductArchiveRows({
+    archives,
+    platformSkus: platformSkus.filter(row => visibleProductIds.has(row.productId)), products: visibleProducts,
+    erpCosts: erpCosts.filter(row => row.platformSku && !privateSkus.has(canonicalPlatformSku(row.platformSku))),
+    erpBatches, workspaceId: context.workspaceId,
+  }).rows : [];
+  const existingMetadata = new Map();
+  for (const row of [...erpCosts.filter(row => row.catalogEligible !== false && publishedCatalogBatches.has(row.batchId)), ...baseCatalogRows]) {
+    if (!row.platformSku) continue;
+    const key = canonicalPlatformSku(row.platformSku), fields = existingMetadata.get(key) ?? new Set();
+    for (const field of ['productName', 'imageUrl', 'attribute']) if (row[field]) fields.add(field);
+    existingMetadata.set(key, fields);
+  }
+  const importedCatalogRows = archiveRows.map(row => ({ ...row, ...Object.fromEntries(
+    [...(existingMetadata.get(canonicalPlatformSku(row.platformSku)) ?? [])].map(field => [field, ''])) }));
   return {
     workspaceId: context.workspaceId,
     ...(options.selectionSalesFacts ? { selectionSalesFacts: options.selectionSalesFacts } : {}),
@@ -1873,10 +1895,7 @@ export async function getSelectionReferenceSnapshot(options = {}) {
       const batch = publishedCatalogBatches.get(row.batchId);
       return { ...row, catalogEligible: catalogRowMatches(row, batch), ...(batch ? { catalogQuerySkcs: catalogScope(batch) } : {}) };
     }),
-    erpCatalogRows: [...[...publishedCatalogBatches.values()].flatMap(batch => Array.isArray(batch.sourceContract?.catalogRows)
-      ? batch.sourceContract.catalogRows.filter(row => catalogRowMatches(row, batch)).map(row => ({ ...row, catalogQuerySkcs: catalogScope(batch) })) : []),
-      ...independentCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.catalog, { batchId: record.catalog.batchId, publishedAt: record.receivedAt })),
-      ...pendingCatalogRecords.flatMap(record => erpProductCatalogRowsFromEnvelope(record.envelope, record))],
+    erpCatalogRows: [...baseCatalogRows, ...importedCatalogRows],
     erpCatalogReferences: catalogEnvelopes.flatMap(source => erpCatalogReferenceCosts(source.envelope, source)),
     catalogCoverage: catalogEnvelopes.map(source => ({ batchId: source.batchId, period: source.period, publishedAt: source.publishedAt, platformSkcs: (source.envelope.query.platformSkcs ?? []).map(item => item.platformSkc ?? item), groups: source.coverage ?? null })),
     profitLines: profitLines.filter(workspaceMatch),
@@ -1942,7 +1961,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
   const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@5-store-tags", revision, revisionReader:selectionReferenceRevision, compute,
+    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@6-product-archive", revision, revisionReader:selectionReferenceRevision, compute,
   }) : await compute();
   assertSourceRevision(revision, selectionReferenceRevision);
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));

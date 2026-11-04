@@ -95,7 +95,7 @@ export function buildErpProductCatalogIndex(erpCosts = []) {
     // Resolve each purchase/link set once and expand it once per catalog SKU.
     const purchaseRecords = row.purchaseRecords?.length ? row.purchaseRecords : [{
       supplierName: row.supplierName,
-      supplier1688Links: (row.supplier1688Links ?? []).filter(link => text(link.supplierName)),
+      supplier1688Links: (row.supplier1688Links ?? []).filter(link => row.metadataSource === "product_archive" || text(link.supplierName)),
       ...(row.purchaseCatalog ? { purchaseCatalog: row.purchaseCatalog } : {}),
     }];
     const directoryNames = [...new Set((row.supplierNames ?? []).map(text).filter(Boolean))];

@@ -4,7 +4,7 @@ import { DEFAULT_CURRENCY } from "./erpCosts";
 import { validManualOverride } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@10-beta-current-month-latest-three";
+export const COST_POLICY_VERSION = "formal-cost-policy@11-explicit-anomaly-ignore";
 
 function text(value) {
   const normalized = String(value ?? "").trim();
@@ -31,13 +31,18 @@ function normalizeCandidate(candidate, expectedCanonicalSku, kind) {
   if (!candidate) return { candidate: null, issues: [] };
 
   const issues = [];
-  const rawAmount = positiveAmount(candidate.unitCost ?? candidate.amount);
+  const explicitZero = kind === "erp" && candidate.unitCost === 0
+    && candidate.costDecision?.resolutionStatus === "resolved"
+    && candidate.costDecision?.selectedRecords?.length > 0
+    && candidate.costDecision.selectedRecords.every(record => record.effectiveUnitPrice === 0
+      && record.unitPrice === 0 && record.resolution?.action === "ignore_anomaly");
+  const rawAmount = explicitZero ? new Decimal(0) : positiveAmount(candidate.unitCost ?? candidate.amount);
   const amount = kind === "erp" && candidate.accountingMode !== 'historical_lowest'
     ? rawAmount?.toDecimalPlaces(4, Decimal.ROUND_DOWN) : rawAmount;
   const currency = String(candidate.currency ?? DEFAULT_CURRENCY).trim().toUpperCase();
   const candidateSku = text(candidate.platformSku);
 
-  if (!amount?.gt(0)) issues.push(`invalid_${kind}_amount`);
+  if (!amount?.gt(0) && !explicitZero) issues.push(`invalid_${kind}_amount`);
   if (currency !== DEFAULT_CURRENCY) issues.push(`unsupported_${kind}_currency`);
   if (kind === "erp" && !isResolvedErpCost(candidate)) {
     issues.push("erp_cost_anomaly_pending");
