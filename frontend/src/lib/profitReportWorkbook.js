@@ -5,6 +5,7 @@ import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
 import { profitReportFileName } from '../domain/profitReportPresentation';
 import { reportThemeXml, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
 import { dispatchColumns, dispatchHeaders, dispatchWidths, mergeDispatchPresentation, visibleDispatchRows } from './dispatchReportLayout';
+import { orderSupplementPresentation } from '../domain/supplementPresentation';
 
 // A small, deterministic OOXML writer for the approved fixed report template.
 // Numbers are computed by the report domain before export; identifier cells are text.
@@ -114,7 +115,7 @@ export function buildProfitReportWorkbook({report,products,dispatchRows=[],deduc
     if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,deductionNumber(store.deductionExact)]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,number(store.financialProfitExact)]));
     sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','right',null,'right','right','right','right']});
   }
-  const dispatchDetails=visibleDispatchRows(dispatchRows);
+  const dispatchDetails=orderSupplementPresentation(visibleDispatchRows(dispatchRows));
   const dispatchTable=mergeDispatchPresentation([headers(dispatchHeaders),...dispatchDetails.map(row=>detailRow([identifier(row.store),identifier(row.platformSkc),identifier(row.businessId),number(row.quantityExact,2),identifier(dispatchOrderNumberForExport(row))]))],dispatchDetails);
   sheets.push({name:"代发表",rows:combine(dispatchTable,[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:dispatchWidths,rowHeight:reportRowHeight,alignment:['center','center','center','center','center',null,'center','right']});
   if(financial)sheets.push(deductionSheet(report,deductionRows));
@@ -144,7 +145,7 @@ export async function prepareReportDownload(report, { dispatchRows, deductionRow
     bytes=restoreSavedDeductions(bytes,report,deductionRows);
   }
   const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
-  bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
+  bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
   const { formatSavedReportLayout } = await import('./savedReportLayout');
   return formatSavedReportLayout(bytes);
 }

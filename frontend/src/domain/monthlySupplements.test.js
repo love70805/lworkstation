@@ -4,6 +4,15 @@ const headers=['日期','登记人','店铺','skc','订单号','sku数量','特�
 const source=cells=>({fileHash:'HASH',fileName:'synthetic.csv',sheetName:'CSV',headerRow:1,cells:[headers,...cells]});
 const context={ledger:{id:'L',workspaceId:'W',period:'2026-08'},stores:['甲']};
 const candidate=(kind,rows,extra={})=>normalizeSupplementCandidate({kind,ledgerId:'L',workspaceId:'W',period:'2026-08',mode:'files',rows,...extra},context);
+it('filters the merged registrant rows in source order after columns move and supported headers are renamed',()=>{
+ const input={fileHash:'MOVED',fileName:'synthetic.xlsx',sheetName:'原表 ',sourceFormat:'xlsx',headerRow:1,
+  cells:[['平台SKC','订单号','件数','姓名','1688订单号','店铺号'],['SH900000000000000001','ORDER-1',2,'合成登记人','9000000000000000001','甲'],['','ORDER-2',3,'','',''],['OTHER','ORDER-3',9,'其他登记人','9000000000000000002','甲']],
+  merges:[0,3,4,5].map(c=>({s:{r:1,c},e:{r:2,c}}))};
+ const parsed=inspectSupplementSource(input,{kind:'dispatch',headerRow:1,ownerMarker:'合成登记人'});
+ expect(parsed.errors).toEqual([]);
+ expect(parsed.rows.map(row=>[row.businessId,row.sourceRow,row.quantityExact])).toEqual([['ORDER-1',2,'2'],['ORDER-2',3,'3']]);
+ expect(parsed.rows[1]).toMatchObject({platformSkc:'SH900000000000000001',store:'甲',order1688:'9000000000000000001',mergedFrom:{owner:2,platformSkc:2,store:2,order1688:2}});
+});
 it('suggests only a unique same-number store alias without removing supplier/channel prefixes',()=>{
  expect(suggestSupplementStore('901',['901店','20店'])).toBe('901店');
  expect(suggestSupplementStore('sh20',['20店'])).toBe('');

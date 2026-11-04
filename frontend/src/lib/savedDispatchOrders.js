@@ -3,6 +3,7 @@ import { exact } from '../domain/profitReports';
 import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
 import { dispatchColumns, dispatchFields, dispatchHeaders, dispatchSourceMerges, visibleDispatchRows } from './dispatchReportLayout';
 import { writeReportArchive } from './profitReportWorkbook';
+import { orderSupplementPresentation } from '../domain/supplementPresentation';
 
 const fail = () => { throw new Error('代发表与冻结来源记录不一致，无法调整下载。原始报告保持不变，请检查完整报告备份。'); };
 const escapeXml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
@@ -42,34 +43,50 @@ export function restoreSavedDispatchOrders(bytes, frozenRows, { allowMissingStor
   };
   const dataRows = [];
   for (let row = 2; row <= XLSX.utils.decode_range(sheet['!ref']).e.r + 1; row++) if (sheet[address(columns.quantityExact,row)]?.t === 'n') dataRows.push(row);
-  const records = Array.isArray(frozenRows) ? visibleDispatchRows(frozenRows) : null;
-  if (records && records.length !== dataRows.length) return fail();
-  const values = new Map(dataRows.map((row,index) => {
+  const rawRecords = Array.isArray(frozenRows) ? visibleDispatchRows(frozenRows) : null;
+  if (rawRecords && rawRecords.length !== dataRows.length) return fail();
+  const loaded = dataRows.map(row => {
     const quantityAddress = address(columns.quantityExact,row), quantityCell = xmlRows.get(row)?.cells.get(columns.quantityExact);
     if (!quantityCell || sheet[quantityAddress].f) return fail();
     const quantity = quantityCell.match(/<v>([^<]+)<\/v>/)?.[1];
     const value = Object.fromEntries(dispatchFields.filter(field => field !== 'quantityExact').map(field => [field, effective(columns[field],row)]));
-    const source = records?.[index];
-    if (source) {
-      if (value.platformSkc !== String(source.platformSkc ?? '') || value.businessId !== String(source.businessId ?? '') || exact(quantity) !== exact(source.quantityExact)) return fail();
-      const sourceStore = String(source.store ?? '');
-      if (columns.store != null && value.store !== sourceStore && !(allowMissingStore && value.store === '')) return fail();
-      value.store = sourceStore;
-      const order = dispatchOrderNumberForExport(source);
-      if (value.order1688 && value.order1688 !== order) return fail();
-      if (!value.order1688) value.order1688 = order;
-    }
-    return [row,value];
+    return { originalRow: row, value, quantity, quantityCell };
+  });
+  // Frozen payload/ordinal integrity is checked by the repository. Match the
+  // complete verified sequence before moving any cell: old storage order or
+  // its deterministic source projection, never an arbitrary partial lookup.
+  const matches = candidates => candidates.every((source,index) => {
+    const {value,quantity}=loaded[index];
+    try {
+      return value.platformSkc===String(source.platformSkc??'') && value.businessId===String(source.businessId??'')
+        && exact(quantity)===exact(source.quantityExact)
+        && (columns.store==null || value.store===String(source.store??'') || allowMissingStore&&value.store==='')
+        && (!value.order1688 || value.order1688===dispatchOrderNumberForExport(source));
+    } catch { return false; }
+  });
+  let records=rawRecords;
+  if(records&&!matches(records)) {
+    records=orderSupplementPresentation(rawRecords);
+    if(!matches(records))return fail();
+  }
+  const entryKey=Symbol('archive-row');
+  const presentation=records?orderSupplementPresentation(records.map((source,index)=>({...source,[entryKey]:loaded[index]}))):null;
+  if(presentation)records=presentation;
+  const values=new Map(dataRows.map((row,index)=>{
+    const entry=presentation?.[index]?.[entryKey]??loaded[index],value={...entry.value},source=records?.[index];
+    if(source){value.store=String(source.store??'');if(!value.order1688)value.order1688=dispatchOrderNumberForExport(source);}
+    return [row,{...entry,value}];
   }));
+  const originalCells=new Map([...xmlRows].map(([row,entry])=>[row,entry.cells]));
   for (const [row,entry] of xmlRows) {
     const cells = entry.cells, result = new Map([...cells].filter(([col]) => col >= 5));
     if (row > 1 && !values.has(row) && Object.values(columns).some(col => sheet[address(col,row)]?.f || (sheet[address(col,row)]?.v != null && sheet[address(col,row)].v !== ''))) return fail();
     if (row === 1 || values.has(row)) dispatchFields.forEach((field,col) => {
-      const from = columns[field], source = from == null ? cells.get(columns.platformSkc) : cells.get(from);
+      const entry=values.get(row),sourceCells=originalCells.get(entry?.originalRow??row);
+      const from = columns[field], source = from == null ? sourceCells.get(columns.platformSkc) : sourceCells.get(from);
       if (field === 'quantityExact' && row > 1) {
-        if (!source) return fail();
-        result.set(col,source.replace(/\br="[A-Z]+\d+"/,`r="${address(col,row)}"`));
-      } else result.set(col,textCell(col,row,row === 1 ? dispatchHeaders[col] : values.get(row)[field],source));
+        result.set(col,entry.quantityCell.replace(/\br="[A-Z]+\d+"/,`r="${address(col,row)}"`));
+      } else result.set(col,textCell(col,row,row === 1 ? dispatchHeaders[col] : entry.value[field],source));
     });
     entry.cells = result;
   }

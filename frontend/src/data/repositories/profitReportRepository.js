@@ -8,6 +8,7 @@ import { makeId } from "../db/utils";
 import { getActiveMemberContext } from "./selectionRepository";
 import { getLatestLedgerCosts } from "./profitRepository";
 import { normalizeSupplementCandidate } from "../../domain/monthlySupplements";
+import { orderSupplementPresentation } from '../../domain/supplementPresentation';
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
 import { PROFIT_FORMULA_VERSION } from "../../domain/profitCalculations";
 import { REPORT_FORMULA_VERSION, REPORT_TEMPLATE_VERSION, buildReportProducts, canonicalJson, displayMoney, exact, legacyReportLine, reportTotals, sha256 } from "../../domain/profitReports";
@@ -47,7 +48,7 @@ async function readMonthlyReportStateOnce(ledgerId){
     if(salesRows.some(row=>row.workspaceId!==ledger.workspaceId))throw new Error("台账存在跨工作区来源记录，请恢复完整备份后再核算。");
     const context={ledger,salesRows,dispatch,deduction,reports};
     const batches=await db.monthlySupplementBatches.where('ledgerId').equals(ledgerId).toArray();
-    const adoptedRows=await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[context.dispatch?.id,context.deduction?.id].includes(row.batchId)).toArray();
+    const adoptedRows=orderSupplementPresentation(await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[context.dispatch?.id,context.deduction?.id].includes(row.batchId)).toArray());
     assertSourceRevision(revision);
     return {ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))],dispatch:context.dispatch,deduction:context.deduction,batches,adoptedRows,reports:context.reports.filter(report=>accountingMode(report.accountingMode)===ledger.accountingMode).toSorted((a,b)=>b.createdAt.localeCompare(a.createdAt))};
 }
@@ -117,7 +118,7 @@ async function reportDraft(input,write=false,source=null){
   if(input.expectedLegacyLines?.some(line=>!line.finalizable))throw new Error('仍有平台 SKU 缺少正式成本。');
   if(input.expectedLegacyLines&&input.legacyFormulaVersion===PROFIT_FORMULA_VERSION&&canonicalJson(comparableProfitLines(input.expectedLegacyLines))!==canonicalJson(comparableProfitLines(calculateFormalLedgerRows(context))))throw new Error('成本或台账已变化，请刷新后重新导出。');
   const products=buildReportProducts(context);
-  const dispatchRows=dispatch?await db.monthlySupplementRows.where('batchId').equals(dispatch.id).toArray():[];
+  const dispatchRows=dispatch?orderSupplementPresentation(await db.monthlySupplementRows.where('batchId').equals(dispatch.id).toArray(),{rememberAdoptedOrdinal:true}):[];
   if(input.kind==='financial'){
     if(!deduction)throw new Error('扣款尚未取得，请登记扣款或明确录入零。');
     if([...new Set(products.map(row=>row.store))].some(store=>!deduction.coveredStores.includes(store)))throw new Error('部分店铺扣款尚未取得，可先导出未扣款报告。');

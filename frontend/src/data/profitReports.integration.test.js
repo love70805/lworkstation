@@ -28,6 +28,20 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('keeps the filtered source sequence after IndexedDB string IDs cross index 9 and freezes the selected order',async()=>{
+ const rows=Array.from({length:15},(_,i)=>({kind:'dispatch',sourceFormat:'xlsx',fileHash:'SOURCE-ORDER',sourceSheet:i<8?'原表二 ':'原表一',sourceRow:i<8?13+i:i-5,ownerMarker:'合成登记人',store:'甲',platformSkc:`SKC-${i}`,businessId:`ORDER-${i}`,quantityExact:String(i+1),order1688:'9000000000000000001'}));
+ const batch=await adopt('dispatch',{mode:'files',rows});
+ const stored=await db.monthlySupplementRows.where('batchId').equals(batch.id).toArray();
+ expect(stored.map(row=>row.businessId)).not.toEqual(rows.map(row=>row.businessId));
+ expect((await readMonthlyReportState('L')).adoptedRows.map(row=>row.businessId)).toEqual(rows.map(row=>row.businessId));
+ const saved=await report(),frozen=await readProfitReportDownload(saved.id);
+ expect(frozen.dispatchRows.map(row=>row.businessId)).toEqual(rows.map(row=>row.businessId));
+ expect(frozen.dispatchRows.map(row=>row.adoptedRowOrdinal)).toEqual(rows.map((_,i)=>i));
+ const before=structuredClone(saved),book=XLSX.read(await prepareReportDownload(saved,{dispatchRows:frozen.dispatchRows}),{type:'array'});
+ expect(XLSX.utils.sheet_to_json(book.Sheets['代发表'],{header:1}).slice(1).map(row=>row[2])).toEqual(rows.map(row=>row.businessId));
+ expect(book.Sheets['代发表'].G2.v).toBe(120);
+ expect(await readSavedProfitReport(saved.id)).toEqual(before);
+});
 it('reads a compact deduplicated overview with accurate deduction readiness and unchanged profits',async()=>{
  const full=await getLedgerSnapshot('L');
  const imports=vi.spyOn(db.importBatches,'where'),history=vi.spyOn(db.profitLines,'where');
