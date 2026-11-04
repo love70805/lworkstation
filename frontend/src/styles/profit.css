@@ -1,4 +1,26 @@
 /* Profit panel */
+.profit-report-top { margin:0 0 14px; }
+.profit-report-top .monthly-report-manager { padding:14px 20px; }
+.profit-report-top .report-primary-actions { margin:0 0 8px; display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.profit-report-top .report-primary-actions > p { flex:1; margin:0; }
+.profit-report-top summary { cursor:pointer; padding:8px 0; }
+.profit-cost-tools { margin:0 0 16px; padding:14px 18px; background:var(--surface); border:1px solid var(--border); border-radius:10px; min-width:0; }
+.profit-cost-tools .erp-collection-progress { margin-top:12px; box-shadow:none; padding:14px; }
+.erp-anomaly-actions { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin:12px 0 8px; }
+.erp-anomaly-actions small { color:var(--text-muted); flex:1 1 240px; line-height:1.6; }
+.profit-table .profit-attribute { display:block; font-size:12px; margin-top:5px; color:var(--text-muted); white-space:normal; }
+.profit-table td:last-child, .profit-table th:last-child { box-shadow:-1px 0 0 var(--border); }
+.anomaly-tabs { display:flex; gap:8px; margin-bottom:14px; }
+.anomaly-tabs [aria-selected="true"] { border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
+.anomaly-select-all { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 0; font-size:13px; }
+.anomaly-select-all span { margin-left:auto; color:var(--text-muted); }
+.anomaly-select-row { display:flex; gap:12px; align-items:center; padding:14px 0; border-top:1px solid var(--border); }
+.anomaly-item-text { flex:1; min-width:0; overflow-wrap:anywhere; }
+.anomaly-item-text .inline-link { text-align:left; }
+.anomaly-item-text small { display:block; color:var(--text-muted); line-height:1.6; margin-top:4px; }
+.anomaly-select-row > .button { flex-shrink:0; }
+.route-loader progress { display:block; width:min(100%,320px); margin:14px auto; }
+@media (max-width:700px) { .profit-cost-tools { padding:12px; } .profit-report-top .monthly-report-manager { padding:12px; } .erp-anomaly-actions .page-actions { flex-wrap:wrap; } }
 .profit-view-tabs, .sales-analytics-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
 .profit-view-tabs { justify-content:flex-start; margin-bottom:8px; }
 .profit-view-tabs label { margin-left:auto; display:flex; align-items:center; gap:8px; white-space:nowrap; }
@@ -333,6 +355,12 @@
 .profit-penalty, .profit-negative { color: var(--danger); }
 .profit-status-actions { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .profit-status-actions .badge { white-space: nowrap; }
+.profit-table-compact .profit-table { min-width: 762px; }
+.profit-skc-group .table-footer:not(:has(.pagination)) { display: none; }
+@media (max-width: 640px) {
+  .profit-table-compact .profit-table th:first-child,
+  .profit-table-compact .profit-table td:first-child { position: static; }
+}
 
 @media (max-width: 1180px) {
   .profit-purpose-strip { align-items: flex-start; flex-wrap: wrap; }

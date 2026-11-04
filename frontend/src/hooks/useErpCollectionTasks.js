@@ -9,8 +9,8 @@ export function useErpCollectionTasks(workspaceId, ledgerId) {
     void refreshErpTaskState({ workspaceId }).catch(() => {});
   }, [workspaceId]);
   useEffect(() => {
-    if (!workspaceId || !ledgerId) return;
+    if (!workspaceId) return;
     void refreshErpTaskState({ workspaceId }).catch(() => {});
   }, [workspaceId, ledgerId]);
-  return { tasks: state.tasks.filter(task => task.ledgerId === ledgerId), loading: Boolean(workspaceId && ledgerId && !state.ready), error: state.error, refresh };
+  return { tasks: state.tasks.filter(task => !ledgerId || task.ledgerId === ledgerId), loading: Boolean(workspaceId && !state.ready), error: state.error, refresh };
 }

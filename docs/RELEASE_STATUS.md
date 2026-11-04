@@ -1,10 +1,10 @@
 # Lworkstation 发布状态
 
-更新时间：2026-11-04
+更新时间：2026-11-05
 
 ## 当前交付入口
 
-1.2.4 整项成本核算与 ERP 助手 8.0.58 的候选和验收见[发布登记](../releases/README.md)与[本批记录](integration/ERP_TASK_FLOW_1.2.4.md)。候选、合并和公开分别记录；当前稳定版及资产以 [GitHub 最新 Release](https://github.com/love70805/lworkstation/releases/latest) 服务元数据为准，历史条目不代表当前版本。
+2.0.0 统一核算、可撤回的单项/多选/全部异常处理、商品资料补齐与加载优化已通过候选验收，内置 ERP 助手 8.0.59。见[发布登记](../releases/README.md)、[本批记录](integration/DESKTOP_WORKFLOW_2.0.0.md)和[使用指南](USER_GUIDE_2.0.md)。账本可随时调整，历史报表独立保留。源码与必需 CI 见 [PR #323](https://github.com/love70805/lworkstation/pull/323)；最新稳定版及资产以 [GitHub 最新 Release](https://github.com/love70805/lworkstation/releases/latest) 服务元数据为准，候选验收不代表已公开。
 
 ## 历史公开稳定：1.0.5
 

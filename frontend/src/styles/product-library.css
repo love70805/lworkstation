@@ -1,4 +1,8 @@
 /* Product library */
+.product-collection-tools { margin:0 0 16px; }
+.product-collection-tools > summary { cursor:pointer; padding:8px 0; font-weight:600; color:var(--primary); }
+.product-collection-tools .panel { margin-top:8px; padding:16px 18px; }
+.product-collection-tools .panel > p { font-size:13px; line-height:1.6; color:var(--text-muted); }
 .product-view-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border-strong); }
 .product-view-tabs button { position: relative; display: inline-flex; min-height: 44px; align-items: center; gap: 8px; padding: 8px 14px; border: 0; background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 600; }
 .product-view-tabs button::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: transparent; content: ""; }

@@ -498,7 +498,7 @@ export default function ImportPreview() {
     : storesWithoutMovements.length ? `${storesWithoutMovements.join('、')}未选变动类型，请勾选后再导入`
     : supplierDirty || !supplierMatched ? '货号已预选；点击“匹配货号”后统一校验并导入'
     : !filesToImport.length ? '尚未选择货号，请先搜索或勾选要导入的货号'
-    : !period ? '请选择账本月份'
+    : periodEvidence.months.length > 1 ? '来源包含多个月份，请按月处理后导入' : !period ? '文件日期不足，请补充月份'
     : error || (storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，本次自动跳过；已选店铺可直接导入` : '已匹配货号，核对预览后可直接导入');
   validateRef.current = validate;
   useEffect(() => {
@@ -529,9 +529,10 @@ export default function ImportPreview() {
         </section>}
         <section className="wizard-card">
           <fieldset disabled={busy || contextBlocked} className="batch-fieldset batch-source-fieldset">
-            <div className="batch-period"><div><label htmlFor="ledger-period">账本月份</label><p id="batch-period-note">{requestedLedgerId ? '沿用当前账本月份' : suggestedPeriod && !periodChoiceRef.current ? `按销售台账“添加时间”识别：${suggestedPeriod}` : '请依据销售台账日期明确选择月份'}</p></div><input id="ledger-period" disabled={Boolean(requestedLedgerId)} aria-describedby="batch-period-note batch-period-evidence" className="text-input" type="month" value={period} onChange={(event) => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} /></div>
+            {requestedLedgerId || suggestedPeriod ? <p className="batch-period-evidence" role="status">账本月份：<strong>{period || suggestedPeriod}</strong> · {requestedLedgerId ? '沿用当前账本' : '按销售台账“添加时间”自动识别'}</p>
+              : files.length > 0 && !periodEvidence.awaitingEvidence && periodEvidence.months.length < 2 ? <div className="batch-period"><div><label htmlFor="ledger-period">补充账本月份</label><p id="batch-period-note">文件日期不足以识别月份，请核对后补充。</p></div><input id="ledger-period" aria-describedby="batch-period-note batch-period-evidence" className="text-input" type="month" value={period} onChange={event => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} /></div> : null}
             {files.length ? <p id="batch-period-evidence" className={periodEvidence.conflictsExisting || periodEvidence.months.length > 1 || periodEvidence.missingCount || periodEvidence.invalidCount ? "batch-period-warning" : "batch-period-evidence"} role="status">
-              {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>来源月份：{periodEvidence.months.length ? periodEvidence.months.map(({ month, count }) => `${month}（${count} 行）`).join("、") : "未识别到有效日期"}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? ` 来源月份与已有账本 ${period} 不一致，仍沿用账本月份。` : !requestedLedgerId && !suggestedPeriod ? "请核对文件并手动选择账本月份。" : ""}</>}
+              {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>来源月份：{periodEvidence.months.length ? periodEvidence.months.map(({ month, count }) => `${month}（${count} 行）`).join("、") : "未识别到有效日期"}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? ` 来源月份与已有账本 ${period} 不一致，仍沿用账本月份。` : periodEvidence.months.length > 1 ? "请按月拆分文件后导入。" : !requestedLedgerId && !suggestedPeriod ? "文件日期不足，请核对后补充月份。" : ""}</>}
             </p> : null}
             <div className="import-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); loadFiles(event.dataTransfer.files); }}>
               <input ref={inputRef} type="file" multiple aria-label="选择月度销售台账文件" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => { loadFiles(event.target.files); event.target.value = ""; }} />

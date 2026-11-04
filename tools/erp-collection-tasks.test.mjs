@@ -228,6 +228,11 @@ try {
   const coordinatedEvidence=await fs.readFile(spool,'utf8');
   await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER'});
   assert.equal(await fs.readFile(spool,'utf8'),coordinatedEvidence,'coordinated heartbeat also leaves evidence untouched');
+  const progress={label:'采购明细',completed:3,total:12,unit:'笔',phase:'cost'};
+  await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER',progress});
+  assert.equal((await request(coordinatedUrl)).task.progress.completed,3,'response-driven progress survives the lightweight heartbeat journal');
+  assert.equal(await fs.readFile(spool,'utf8'),coordinatedEvidence,'progress never rewrites original evidence');
+  await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER',progress:{...progress,completed:13}},400);
   const runnerLease=(await readInboxRecords(`${spool}.leases.json`)).find(item=>item.taskId===coordinated.taskId);
   assert.equal(runnerLease.runnerId,'HTTP-RUNNER');
   assert.ok(Date.parse(runnerLease.runnerLeaseExpiresAt)>Date.now());

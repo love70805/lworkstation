@@ -69,9 +69,9 @@ export function historicalLowestCosts(rows = []) {
       const resolution = resolutions.map(item => normalizedResolution(item, cost.warehouseSku, record)).find(Boolean);
       if (record.unitPrice == null && !resolution) continue;
       const value = new Decimal(resolution?.resolvedUnitPrice ?? record.unitPrice);
-      if (!value.isFinite() || !value.gt(0)) continue;
+      if (!value.isFinite() || value.lt(0) || value.isZero() && resolution?.action !== 'ignore_anomaly') continue;
       const unitCost = value.toNumber();
-      if (!(unitCost > 0)) continue;
+      if (!(unitCost >= 0)) continue;
       const key = JSON.stringify([canonicalPlatformSku(cost.platformSku), canonicalPlatformSkc(cost.platformSkc)]);
       const previous = best.get(key);
       if (previous && (previous.unitCost < unitCost || previous.unitCost === unitCost && compareEvidence(previous, cost) >= 0)) continue;

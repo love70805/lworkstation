@@ -90,7 +90,7 @@ async function persistTaskHeartbeat(task, revision) {
     kind: 'task-heartbeat', taskId: task.taskId, instanceId: task.instanceId,
     workspaceId: task.workspaceId, requestId: task.requestId, scopeHash: task.scopeHash,
     status: task.status, leaseExpiresAt: task.leaseExpiresAt, updatedAt: task.updatedAt,
-    runnerId: task.runnerId, runnerLeaseExpiresAt: task.runnerLeaseExpiresAt,
+    runnerId: task.runnerId, runnerLeaseExpiresAt: task.runnerLeaseExpiresAt, progress: task.progress ?? null,
   };
   const operation = leaseWriteChain.catch(() => {}).then(async () => {
     const committed = await spoolStorage.read();
@@ -128,6 +128,7 @@ async function readSpool() {
     // shorten it using an older journal entry left by the preceding heartbeat.
     if(Date.parse(heartbeat.updatedAt)<Date.parse(task.updatedAt||''))continue;
     task.leaseExpiresAt=heartbeat.leaseExpiresAt;
+    task.progress=heartbeat.progress ?? null;
     if (task.runnerId) task.runnerLeaseExpiresAt=heartbeat.runnerLeaseExpiresAt;
     if(Date.parse(task.updatedAt||'')<Date.parse(heartbeat.updatedAt))task.updatedAt=heartbeat.updatedAt;
     for(const request of records) {

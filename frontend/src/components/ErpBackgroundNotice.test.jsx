@@ -14,7 +14,7 @@ it('reveals and focuses the progress panel even when the user is already on the 
   panel.id='erp-collection-progress';panel.tabIndex=-1;panel.scrollIntoView=vi.fn();document.body.append(container,panel);
   const root=createRoot(container);
   try {
-    await act(async()=>root.render(<MemoryRouter initialEntries={['/profit?ledger=LEDGER-A&view=cost']}><ErpBackgroundNoticeContent tasks={[task]}/></MemoryRouter>));
+    await act(async()=>root.render(<MemoryRouter initialEntries={['/profit?ledger=LEDGER-A&view=cost']}><ErpBackgroundNoticeContent tasks={[{...task, status:'running', phase:'cost', batches:[{platformSkcs:['A'],status:'running'}]}]}/></MemoryRouter>));
     expect(container.querySelector('a').getAttribute('href')).toContain('#erp-collection-progress');
     await act(async()=>{container.querySelector('a').click();await new Promise(resolve=>setTimeout(resolve,10));});
     expect(panel.scrollIntoView).toHaveBeenCalledOnce();expect(document.activeElement).toBe(panel);
@@ -25,7 +25,7 @@ it('shows the actual background stage and links to that task instead of the curr
   const html = renderToStaticMarkup(<MemoryRouter><ErpBackgroundNoticeContent tasks={[task]} /></MemoryRouter>);
   expect(html).toContain('正在后台补充商品资料');
   expect(html).toContain('2026-09 · 成本已送达 1 / 1 个 SKC');
-  expect(html).toContain('/profit?ledger=LEDGER-A&amp;view=cost');
+  expect(html).toContain('/products?collection=1');
   expect(html).not.toContain('继续补充资料');
 });
 
@@ -62,10 +62,10 @@ it('keeps a receipt failure visible after collection completes, through task ref
     await render(workspaceId);
     expect(container.textContent).toContain('成本回传处理遇到问题');
     expect(container.textContent).toContain('已登记请求不一致');
-    expect(container.querySelector('a').getAttribute('href')).toBe('/profit?view=cost');
+    expect(container.querySelector('a').getAttribute('href')).toBe('/profit?view=detail');
     await act(() => publishErpCollectionActivity({ workspaceId, tasks: [{ ...task, workspaceId, batches: task.batches.map(batch => ({ ...batch, catalogStatus: 'completed' })) }] }));
     expect(container.textContent).toContain('成本回传处理遇到问题');
-    expect(container.querySelector('a').getAttribute('href')).toBe('/profit?ledger=LEDGER-A&view=cost');
+    expect(container.querySelector('a').getAttribute('href')).toBe('/profit?ledger=LEDGER-A&view=detail');
     expect(container.querySelector('.spin')).toBeNull();
     await render('RECEIPT-OTHER'); expect(container.textContent).toBe('');
     await render(workspaceId); expect(container.textContent).toContain('成本回传处理遇到问题');

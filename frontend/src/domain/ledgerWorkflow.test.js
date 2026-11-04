@@ -25,23 +25,24 @@ describe('current report projection', () => {
     expect(currentLedgerResult(ledger).profit).toBeNull();
   });
 });
-it('finalized and filtered views use whole-ledger readiness', () => {
-  expect(ledgerNextStep(ledger, { missingCount: 99 }).key).toBe('report');
+it('legacy statuses and filtered views use current whole-ledger readiness', () => {
+  expect(ledgerNextStep(ledger, { missingCount: 99 }).key).toBe('cost');
   expect(ledgerNextStep({ ...ledger, status: 'cost_pending', costSummary: { missingCount: 2 } }).text).toContain('2');
   expect(reportReadiness({ ledger, stores: ['A', 'B'], deduction }).financialReady).toBe(false);
-  expect(reportReadiness({ ledger, stores: ['A'], deduction }).financialReady).toBe(true);
+  expect(reportReadiness({ ledger, stores: ['A'], deduction, missingCount: 0 }).financialReady).toBe(true);
 });
-it('allows a direct formal report when all current sources are ready and blocks partial or locked reports', () => {
+it('allows editing and exporting after old finalization or locking, but still blocks incomplete current sources', () => {
   const ready={ledger:{...ledger,status:'cost_pending',currentBaseReportId:null},stores:['A'],dispatch:{adoptedQuantityExact:'0'},deduction,missingCount:0};
   expect(reportReadiness(ready)).toMatchObject({baseSaved:false,baseReady:true,financialReady:true});
-  for(const patch of [{missingCount:1},{missingCount:null},{deduction:null},{stores:['A','B']},{ledger:{...ledger,status:'locked'}}]){
+  for(const patch of [{missingCount:1},{missingCount:null},{deduction:null},{stores:['A','B']}]){
     expect(reportReadiness({...ready,...patch}).financialReady).toBe(false);
   }
+  for(const status of ['finalized','locked'])expect(reportReadiness({...ready,ledger:{...ledger,status}}).financialReady).toBe(true);
 });
 it('freezes deductions only for a formal report scoped to the current frozen base, including prior-template reports', () => {
   expect(hasSavedFinancialReport(ledger,[base])).toBe(false);
   expect(hasSavedFinancialReport(ledger,[base,financial])).toBe(true);
-  expect(reportReadiness({ledger,reports:[base,financial]}).deductionSaved).toBe(true);
+  expect(reportReadiness({ledger,reports:[base,financial]}).deductionSaved).toBe(false);
   for(const patch of [{workspaceId:'other'},{ledgerId:'other'},{period:'2026-10'},{baseReportId:'old'},{kind:'pre_deduction'}])expect(hasSavedFinancialReport(ledger,[{...financial,...patch}])).toBe(false);
   expect(hasSavedFinancialReport({...ledger,status:'cost_pending'},[financial])).toBe(false);
   expect(hasSavedFinancialReport({...ledger,currentBaseReportId:null},[financial])).toBe(false);

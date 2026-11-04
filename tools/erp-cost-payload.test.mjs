@@ -28,7 +28,7 @@ function fixture(count = 1) {
   const chrome = { storage: { local: {
     get: async keys => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map(key => [key, structuredClone(storage[key])])),
     set: async values => { writes.push(structuredClone(values)); Object.assign(storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.58' }), onMessage: { addListener: listener => { dispatch = listener; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} },
+  } }, runtime: { getManifest: () => ({ version: '8.0.59' }), onMessage: { addListener: listener => { dispatch = listener; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} },
     sendMessage: (message, callback) => dispatch(message, sender, callback),
   }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout, console,
@@ -108,11 +108,11 @@ for (const [name, mutate, code] of [
 
 {
   const sample = fixture();
-  sample.storage[CHECKPOINTS] = ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.28'].map(extensionVersion => ({
+  sample.storage[CHECKPOINTS] = ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.28'].map(extensionVersion => ({
     schemaVersion: 1, extensionVersion, updatedAt: Date.now(), requestId: `SYNTHETIC-${extensionVersion}`, binding: `unchanged-${extensionVersion}`,
   }));
   const preserved = await sample.api.cleanCheckpoints();
-  assert.deepEqual(Array.from(preserved, value => value.extensionVersion), ['8.0.55', '8.0.56', '8.0.57', '8.0.58']);
+  assert.deepEqual(Array.from(preserved, value => value.extensionVersion), ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59']);
   assert.ok(preserved.every(value => value.binding === `unchanged-${value.extensionVersion}`), 'upgrade keeps the exact original binding for later identity checks');
   sample.storage[CHECKPOINTS] = [{ ...preserved[2], requestId: 'REQ', workspaceId: 'WS', state: 'pending', binding: 'wrong-original-scope' }];
   const restored = await sample.message('collectionCheckpoint', { action: 'restore', requestId: 'REQ' });

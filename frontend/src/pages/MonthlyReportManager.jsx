@@ -187,10 +187,11 @@ export function AdoptedDispatchNotice({ rows = [], locked = false }) {
   return inherited.length ? <Panel className="report-source-notice"><p role="status">当前采用包含 {inherited.length} 条由上一登记人顺延归属的 XLSX 记录，共 {exactSum(inherited,'quantityExact')} 件，源表没有明确登记人归属。历史采用值保持不变。</p><p>请核对源表后重新导入；替换已有来源即可应用新的归属规则。</p><details><summary>查看原采用中的未明确归属行</summary>{inherited.slice(0,100).map(row=><p key={supplementRowIdentity(row)}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.quantityExact} 件</p>)}</details></Panel> : null;
 }
 
-export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, onOpenCosts, onState, editor, onEdit }) {
+export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, onOpenCosts, onState, editor, onEdit, compact = false }) {
   const {notify}=useToast();
   const [retry,setRetry]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[orderDownload,setOrderDownload]=useState(null);
   const exportingRef=useRef(false);
+  const [exportStage,setExportStage]=useState('');
   const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,data:await readMonthlyReportState(ledgerId)};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry]);
   useEffect(()=>{onState?.(state);},[state,onState]);
   if(!state||state.ledgerId!==ledgerId)return <Panel>正在读取本月报告...</Panel>;
@@ -207,22 +208,29 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     setBusy(true);setError('');
     try{
       const input={ledgerId,kind:nextKind};
+      setExportStage('正在核对台账与成本…');
       const preview=await previewProfitReport(input);
+      setExportStage('正在生成本次报告…');
       const report=await saveProfitReport(input,{expectedFingerprint:preview.fingerprint});
+      setExportStage('正在生成 Excel 文件…');
       await downloadReportFile(report);
       notify('利润表已导出，数据仍可随时调整并重新核算。');
-    }catch(error){setError(error.message);}finally{exportingRef.current=false;setBusy(false);}
+    }catch(error){setError(error.message);}finally{exportingRef.current=false;setBusy(false);setExportStage('');}
   }
   return <Panel className="monthly-report-manager" id="monthly-reports" tabIndex={-1}>
-    <div className="report-heading"><h2>本月报告 · {data.ledger.period}</h2></div>
+    {!compact ? <div className="report-heading"><h2>本月报告 · {data.ledger.period}</h2></div> : null}
+    <div className="report-primary-actions"><p role="status">{missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>补齐成本</Button>:null}<Button variant="primary" loading={busy} disabled={busy||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
+    {exportStage ? <div className="erp-collection-meter" role="status"><span>{exportStage}</span><progress aria-label="报告导出进度" /></div> : null}
+    <details open={compact ? undefined : true}><summary>代发、扣款与导出记录</summary>
     <p>按当前台账和成本直接导出，数据可随时更新。代发未录入时按 0 计；扣款未齐时导出未扣款报告。</p>
     <AdoptedDispatchNotice rows={data.adoptedRows} />
     <div className="report-sources-summary">
       <div><strong>代发</strong><p>{data.dispatch?'已登记 '+data.dispatch.adoptedQuantityExact+' 件 · ¥'+displayMoney(new Exact(data.dispatch.adoptedQuantityExact).times(data.ledger.warehouseRate??'0.7')):'未录入 · 本次按 0 计'}</p><Button disabled={busy} onClick={()=>onEdit('dispatch')}>{data.dispatch?'更新代发':'登记代发'}</Button></div>
       <div><strong>独立扣款</strong><p>{data.deduction?'已登记 ¥'+displayMoney(data.deduction.signedAmountExact):'未录入'}{readiness.missingStores.length?' · 部分店铺待取得':''}</p><Button disabled={busy} onClick={()=>onEdit('deduction')}>{data.deduction?'更新扣款':'登记扣款'}</Button></div>
     </div>
-    <div className="report-primary-actions"><p role="status">{missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>补齐成本</Button>:null}<Button variant="primary" loading={busy} disabled={busy||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
+
     {data.reports.length?<details><summary>历史导出（{data.reports.length}）</summary>{data.reports.map(report=><div className="report-history-row" key={report.id}><span>{report.kind==='financial'?'利润表':'未扣款报告'} · r{report.revision} · {report.createdAt.slice(0,10)} · ¥{report.displayTotals.profit}</span><Button disabled={busy} onClick={()=>download(report.id)}>下载此报告</Button><Button disabled={busy} onClick={()=>prepareOrderDownload(report.id)}>补齐代发单号</Button></div>)}</details>:null}
+    </details>
     {orderDownload?<DispatchOrderDownload key={orderDownload.report.id} saved={orderDownload} onClose={()=>setOrderDownload(null)} />:null}
     {editor?<SupplementEditor key={ledgerId+'/'+editor} state={data} kind={editor} onClose={()=>onEdit(null)} />:null}
     {error?<p role="alert">{error}</p>:null}

@@ -86,8 +86,10 @@ export async function verifyErpCatalogCollection() {
 
   const originalMappings = [{ platformSku: 'SKU-ONE', platformSkc: 'SKC-TARGET', warehouseSku: 'WH-ONE' }];
   const originalEvidence = completeEvidence('WH-ONE');
-  const optional = create({ policy, apiGet: async endpoint => endpoint.endsWith('product-page') ? response(0, [{ itemId: 'WH-ONE', tradeName: '资料标题' }]) : response(0, [], 1), readWarehouseEvidence: async warehouseSku => ({ warehouseSku, evidenceComplete: false, sourceWarnings: ['detail_failure'], purchaseRecords: [], excludedRecords: [] }) });
+  let redundantMappingReads = 0;
+  const optional = create({ policy, apiGet: async endpoint => { if (endpoint.endsWith('product-page')) return response(0, [{ itemId: 'WH-ONE', tradeName: '资料标题', platformSku: 'truncated'.repeat(128) }]); redundantMappingReads++; return response(0, [], 1); }, readWarehouseEvidence: async warehouseSku => ({ warehouseSku, evidenceComplete: false, sourceWarnings: ['detail_failure'], purchaseRecords: [], excludedRecords: [] }) });
   const preserved = await optional.collect(['SKC-TARGET'], run([{ platformSku: 'SKU-ONE', platformSkc: 'SKC-TARGET' }]), { results: [{ warehouseSku: 'WH-ONE', unitCost: '4.2000', selectedRecordIds: ['WH-ONE:0'], mappings: originalMappings, catalogMappings: originalMappings, catalogMappingsComplete: true }], warehouseEvidence: { warehouses: [originalEvidence] } });
+  assert.equal(redundantMappingReads, 0, 'complete cost mappings survive truncated directory metadata without another SKU request');
   assert.equal(preserved.results[0].unitCost, '4.2000');
   assert.deepEqual(json(preserved.results[0].mappings), originalMappings, 'an incomplete supplemental mapping never replaces a complete original mapping');
   assert.deepEqual(json(preserved.warehouseEvidence.warehouses[0]), originalEvidence, 'an incomplete supplemental warehouse read never replaces complete cost evidence');

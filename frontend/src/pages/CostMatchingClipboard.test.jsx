@@ -166,19 +166,18 @@ it('does not guess a SKU parent by filtering away conflicting ledger rows', asyn
   expect(container.textContent).toContain('归属待核对');
   expect(button('逐项更正')).toBeUndefined();
   await act(async()=>button('详情').click());
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('人工金额不能消除多 SKC 冲突');
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('对应多个平台 SKC');
   expect(button('人工更正')).toBeUndefined();
 });
 
-it('skips conflicting parents in the direct next-item correction flow',async()=>{
+it('saves the selected SKU and closes without opening a correction queue',async()=>{
   await render(['SKC-A','SKC-X','SKC-Y','SKC-Z'],'ready',{ledgerId:'NEXT-IDENTITY',skuIds:['A','B','B','C']});
   await act(async()=>button('人工更正').click());
   expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · A');
-  await act(async()=>{
-    Simulate.change(container.querySelector('#manual-cost-value'),{target:{value:'0'}});
-  });
-  await act(async()=>button('保存并下一项').click());
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · C');
+  await act(async()=>Simulate.change(container.querySelector('#manual-cost-value'),{target:{value:'0'}}));
+  expect(button('保存并下一项')).toBeUndefined();
+  await act(async()=>button('保存更正').click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(mocks.saveManual).toHaveBeenCalledExactlyOnceWith({ledgerId:'NEXT-IDENTITY',store:'甲',platformSku:'A',unitCost:'0',reason:'人工输入单件成本并确认更正'});
 });
 
@@ -197,7 +196,6 @@ it('retains revocation of an existing manual zero while a parent conflict blocks
   const ledgerId='REVOKE-IDENTITY',approval={id:'M',workspaceId:'W',ledgerId,platformSku:'A',status:'approved',currency:'CNY',approvedAmount:0,approvedBy:'finance',approvedAt:'2026-08-31T00:00:00Z',reason:'人工输入单件成本并确认更正',referenceCost:{kind:'manual_override',store:'甲'}};
   await render(['SKC-A','SKC-B'],'ready',{ledgerId,skuIds:['A','A'],approvals:[approval]});
   await act(async()=>button('详情').click());
-  await act(async()=>button('撤销人工更正').click());
   expect(container.querySelector('#manual-cost-value')).toBeNull();
   expect(button('保存更正')).toBeUndefined();
   await act(async()=>button('撤销当前更正').click());
@@ -248,77 +246,41 @@ function exceptionReceipt(ledgerId, number, platformSku, records) {
     adoption: { version: 'erp-auto-adoption@1', state: 'partial', summary: { adoptedCount: 0, remainingCount: 1, anomalyCount: 1 }, items: [{ platformSku, canonicalPlatformSku: platformSku, state: 'anomaly_pending' }] },
   } };
 }
-it('opens one procurement-price dialog at a time and preserves an entered manual correction on return', async () => {
+it('keeps editable cost and expandable evidence in one dialog without procurement confirmation buttons', async () => {
   const ledgerId = 'SINGLE-PRICE-DIALOG', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
   mocks.requests = [request]; mocks.inboxRecords = [{ ...inbox, status: 'loaded' }];
   mocks.switchInbox.mockResolvedValue({});
   await render(['SKC-1'], 'cost_pending', { ledgerId });
-  const first = name => [...container.querySelectorAll('button')].find(item => item.textContent === name);
-  await act(async () => first('查看证据').click());
-  await act(async () => first('确认真实价格').click());
+  await act(async () => button('查看证据').click());
   expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('确认真实采购价');
-  await act(async () => first('取消').click());
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('成本详情');
-  await act(async () => container.querySelector('.cost-detail-modal .modal-footer button:last-child').click());
-  await act(async () => {
-    Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '9.3' } });
-    first('确认真实价格').click();
-  });
-  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-  await act(async () => first('确认并自动采用').click());
-  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
+  await act(async () => Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '9.3' } }));
+  await act(async () => container.querySelector('.cost-correction-evidence summary').click());
   expect(container.querySelector('#manual-cost-value').value).toBe('9.3');
-  expect(container.querySelector('#manual-cost-reason')).toBeNull();
-  expect(container.querySelector('.cost-detail-evidence').textContent).toContain('采购价已确认');
-  expect(mocks.retry).toHaveBeenCalledWith({ inboxId: inbox.id, resolutions: [expect.objectContaining({ recordId: 'ONE', action: 'confirm_true_price', resolvedUnitPrice: 1 })] });
+  expect(container.querySelector('.cost-detail-evidence').textContent).toContain('¥1.00');
+  expect(button('确认真实价格')).toBeUndefined();
+  expect(button('确认本 SKU 全部真实采购价')).toBeUndefined();
+  expect(mocks.retry).not.toHaveBeenCalled();
   expect(mocks.saveManual).not.toHaveBeenCalled();
-  expect(mocks.publish).not.toHaveBeenCalled();
 });
-it('confirms procurement directly from an unloaded receipt without switching or creating a cost draft', async () => {
+
+it('reads original procurement from an unloaded receipt without creating a cost draft or silently adopting it', async () => {
   const ledgerId = 'DIRECT-CONFIRM', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
   mocks.requests = [request]; mocks.inboxRecords = [inbox];
-  mocks.retry.mockResolvedValue({ status: 'applied', adoption: { state: 'applied', items: [{ canonicalPlatformSku: 'SKU-0', state: 'adopted' }] } });
   await render(['SKC-1'], 'cost_pending', { ledgerId });
   await act(async () => button('查看证据').click());
   expect(container.textContent).not.toContain('载入此批采购证据');
-  await act(async () => button('确认真实价格').click());
-  await act(async () => button('确认并自动采用').click());
-  expect(mocks.retry).toHaveBeenCalledExactlyOnceWith({ inboxId: inbox.id, resolutions: [expect.objectContaining({ recordId: 'ONE', resolvedUnitPrice: 1 })] });
+  expect(container.querySelector('.cost-detail-evidence').textContent).toContain('¥1.00');
   expect(mocks.switchInbox).not.toHaveBeenCalled();
   expect(localStorage.getItem(costDraftKey(ledgerId))).toBeNull();
   expect(mocks.saveManual).not.toHaveBeenCalled();
-  expect(mocks.notify).toHaveBeenCalledWith(expect.stringContaining('已自动采用'), 'success');
+  expect(mocks.retry).not.toHaveBeenCalled();
 });
-it('confirms all positive anomalous procurement prices for one SKU together', async () => {
-  const ledgerId = 'CONFIRM-SKU';
-  const records = [1, 2, 3].map(index => ({ recordId: 'ONE-' + index, purchaseDate: '2026-08-0' + index, quantity: index, unitPrice: 1 }));
-  const { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', records);
-  mocks.requests = [request]; mocks.inboxRecords = [inbox];
-  await render(['SKC-1'], 'cost_pending', { ledgerId });
-  await act(async () => button('查看证据').click());
-  await act(async () => button('确认本 SKU 全部真实采购价').click());
-  expect(container.querySelector('.cost-resolution-prices').textContent).toContain('以下 3 笔');
-  await act(async () => button('确认并自动采用').click());
-  expect(mocks.retry.mock.calls[0][0].resolutions.map(row => row.recordId)).toEqual(['ONE-3', 'ONE-2', 'ONE-1']);
-});
-it('keeps the confirmation dialog and reason when adoption fails, allowing a retry', async () => {
-  const ledgerId = 'CONFIRM-RETRY', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
-  mocks.requests = [request]; mocks.inboxRecords = [inbox];
-  mocks.retry.mockRejectedValueOnce(new Error('隔离写入失败'));
-  await render(['SKC-1'], 'cost_pending', { ledgerId });
-  await act(async () => button('查看证据').click());
-  await act(async () => button('确认真实价格').click());
-  await act(async () => Simulate.change(container.querySelector('.cost-resolution-form textarea'), { target: { value: '已核对供应商账单' } }));
-  await act(async () => button('确认并自动采用').click());
-  expect(container.querySelector('.cost-resolution-form textarea').value).toBe('已核对供应商账单');
-  expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
-  expect(mocks.notify).toHaveBeenCalledWith('采购核价保存失败：隔离写入失败', 'error');
-  await act(async () => button('确认并自动采用').click());
-  expect(mocks.retry).toHaveBeenCalledTimes(2);
-  expect(container.querySelector('.cost-resolution-form')).toBeNull();
-});
-it('binds the next missing SKU to its own receipt and skips healthy siblings in the direct exception list', async () => {
+
+
+
+
+
+it('binds separately opened SKU details to their own receipts without a next-item queue', async () => {
   const ledgerId = 'NEXT-RECEIPT';
   const first = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
   const records = [...Array.from({ length: 6 }, (_, i) => ({ recordId: `OLD-${i}`, purchaseDate: `2026-07-0${i + 1}`, quantity: 10, unitPrice: 2.3 })),
@@ -331,7 +293,9 @@ it('binds the next missing SKU to its own receipt and skips healthy siblings in 
   await act(async () => {
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '0' } });
   });
-  await act(async () => button('保存并下一项').click());
+  await act(async () => button('保存更正').click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  await act(async () => container.querySelector('[aria-label="甲 · SKU-2 · 直接人工更正"]').click());
   const dialog = container.querySelector('[role="dialog"]');
   expect(dialog.textContent).toContain('甲 · SKU-2');
   expect(dialog.textContent).toContain('近期采购价格相比历史下降');
@@ -406,12 +370,10 @@ it('refreshes an open cost dialog when the formal ERP cost is adopted', async ()
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('10.0000 · ERP');
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('正式成本已生效');
 });
-it('opens adopted cost details without a correction form and offers correction as a separate action', async () => {
+it('opens adopted cost details with the correction form immediately available', async () => {
   await render(['SKC-1'], 'ready', { ledgerId: 'DETAILS-ONLY', costs: [formalCost] });
   await act(async () => button('详情').click());
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain('成本详情');
-  expect(container.querySelector('#manual-cost-value')).toBeNull();
-  await act(async () => container.querySelector('.modal-footer button:last-child').click());
   expect(container.querySelector('#manual-cost-value')?.value).toBe('10');
   expect(container.querySelector('#manual-cost-reason')).toBeNull();
 });
@@ -420,7 +382,7 @@ it('corrects only missing store SKUs directly without loading a receipt, accepti
   await act(async () => container.querySelector('[aria-label="乙 · SKU-1 · 直接人工更正"]').click());
   const dialog = () => container.querySelector('[role="dialog"]');
   expect(dialog().textContent).toContain('乙 · SKU-1');
-  expect(dialog().textContent).toContain('第 1 / 2 项');
+  expect(dialog().textContent).not.toContain('第 1 / 2 项');
   expect(container.querySelector('#manual-cost-value').value).toBe('');
   expect(container.querySelector('.cost-correction-evidence').open).toBe(false);
   const form = [...container.querySelector('.modal-body').children];
@@ -429,13 +391,15 @@ it('corrects only missing store SKUs directly without loading a receipt, accepti
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: amount } });
   });
   await fill('0');
-  await act(async () => button('保存并下一项').click());
+  await act(async () => button('保存更正').click());
+  expect(dialog()).toBeNull();
+  await act(async () => container.querySelector('[aria-label="丙 · SKU-2 · 直接人工更正"]').click());
   expect(mocks.saveManual).toHaveBeenNthCalledWith(1, { ledgerId: 'DIRECT', store: '乙', platformSku: 'SKU-1', unitCost: '0', reason: '人工输入单件成本并确认更正' });
   expect(dialog().textContent).toContain('丙 · SKU-2');
-  expect(dialog().textContent).toContain('第 2 / 2 项');
+  expect(dialog().textContent).not.toContain('第 2 / 2 项');
   expect(container.querySelector('#manual-cost-reason')).toBeNull();
   await fill('0.00001');
-  await act(async () => button('保存并完成').click());
+  await act(async () => button('保存更正').click());
   expect(mocks.saveManual).toHaveBeenNthCalledWith(2, { ledgerId: 'DIRECT', store: '丙', platformSku: 'SKU-2', unitCost: '0.00001', reason: '人工输入单件成本并确认更正' });
   expect(dialog()).toBeNull();
   expect(mocks.switchInbox).not.toHaveBeenCalled();
@@ -456,17 +420,17 @@ it('counts only the anomalous SKU and keeps healthy siblings out of the missing-
   for (const sku of ['SKU-1', 'SKU-2']) expect(container.querySelector(`[data-platform-sku="${sku}"] .cost-match-current-cell`).textContent).toContain('ERP 已采用');
   await act(async () => container.querySelector('[aria-label="甲 · SKU-0 · 直接人工更正"]').click());
   expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-0');
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('第 1 / 1 项');
+  expect(container.querySelector('[role="dialog"]').textContent).not.toContain('第 1 / 1 项');
   expect(button('保存并下一项')).toBeUndefined();
 });
 it('keeps direct correction within the selected store even when a SKU is shared across stores', async () => {
   await render(['SKC-1', 'SKC-1'], 'ready', { ledgerId: 'STORE-CORRECTION', stores: ['甲', '乙'], skuIds: ['SHARED', 'SHARED'], contextStore: '乙' });
   await act(async () => container.querySelector('[aria-label="乙 · SHARED · 直接人工更正"]').click());
   expect(container.querySelector('[role="dialog"]').textContent).toContain('乙 · SHARED');
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('第 1 / 1 项');
+  expect(container.querySelector('[role="dialog"]').textContent).not.toContain('第 1 / 1 项');
   expect(button('保存并下一项')).toBeUndefined();
 });
-it('skips a queued row that becomes effective while the previous correction is saving', async () => {
+it('closes after saving even when another SKU becomes effective in the meantime', async () => {
   let finishSave;
   mocks.saveManual.mockImplementation(() => new Promise(resolve => { finishSave = resolve; }));
   await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION' });
@@ -474,11 +438,11 @@ it('skips a queued row that becomes effective while the previous correction is s
   await act(async () => {
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '8.5' } });
   });
-  await act(async () => button('保存并下一项').click());
+  await act(async () => button('保存更正').click());
   await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'SKIP-CORRECTION', costs: [{ ...formalCost, platformSku: 'SKU-1', platformSkc: 'SKC-2' }] });
   await act(async () => finishSave({}));
-  expect(container.querySelector('[role="dialog"]').textContent).toContain('甲 · SKU-2');
-  expect(button('保存并完成')).toBeDefined();
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(button('保存并完成')).toBeUndefined();
 });
 it('keeps a failed direct correction and entered amount open for retry', async () => {
   mocks.saveManual.mockRejectedValue(new Error('隔离保存故障'));
@@ -487,7 +451,7 @@ it('keeps a failed direct correction and entered amount open for retry', async (
   await act(async () => {
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '3.5' } });
   });
-  await act(async () => button('保存并完成').click());
+  await act(async () => button('保存更正').click());
   expect(container.querySelector('[role="dialog"]').textContent).toContain('隔离保存故障');
   expect(container.querySelector('#manual-cost-value').value).toBe('3.5');
 });
@@ -502,8 +466,7 @@ it('shows current cost coverage instead of requesting another correction from hi
 });
 it.each(['finalized','locked'])('keeps evidence and manual correction available for a legacy %s month',async status=>{
   await render(['SKC-1'],status,{ledgerId:'DETAILS-'+status,costs:[formalCost]});await act(async()=>button('详情').click());
-  expect(container.querySelector('[role="dialog"]').textContent).not.toContain('已定稿或锁定');expect(button('人工更正')).toBeDefined();
-  await act(async()=>button('人工更正').click());expect(container.querySelector('#manual-cost-value')).not.toBeNull();
+  expect(container.querySelector('[role="dialog"]').textContent).not.toContain('已定稿或锁定');expect(container.querySelector('#manual-cost-value')).not.toBeNull();
 });
 it('recognizes a restored draft already in the automatic inbox and explains its block', async () => {
   const ledgerId = 'RESTORED-INBOX';

@@ -11,6 +11,8 @@ import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
 import { buildErpInboxQueue } from '../domain/erpInboxMatching';
 import { sourceRevision, selectionFactsRevision } from './db/derivedCache';
 import { calculateFormalLedgerRows } from '../domain/ledgerProfit';
+import { setErpCostAnomaliesIgnored, listIgnoredErpCostAnomalies, updateLedgerWarehouseRate } from './repositories/profitRepository';
+import { previewProfitReport, saveProfitReport, readProfitReportDownload } from './repositories/profitReportRepository';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1',recordsB=null}={}){
@@ -21,6 +23,100 @@ async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:0
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:i===1&&recordsB?recordsB:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
+it('ignores actual zero prices without asserting correctness, survives reopening, and revokes only ignored costs', async () => {
+ const {ledger,envelope}=await seed(); await receiveErpCostInboxEnvelope({envelope});
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id});
+ db.close();await db.open();
+ const snapshot=await getLedgerSnapshot(ledger.id);
+ expect(snapshot.costs.map(row=>[row.platformSku,row.unitCost])).toEqual([['A',5],['B',0]]);
+ const profit=calculateFormalLedgerRows({ledger:snapshot.ledger,salesRows:snapshot.rows,erpCosts:snapshot.costs,approvals:snapshot.approvals});
+ expect(profit.every(row=>row.finalizable)).toBe(true);
+ const ignored=await listIgnoredErpCostAnomalies(ledger.id);
+ expect(ignored).toHaveLength(1);expect(ignored[0]).toMatchObject({action:'ignore_anomaly',originalUnitPrice:0,resolvedUnitPrice:0});
+ const counts=await db.auditEvents.count();await setErpCostAnomaliesIgnored({ledgerId:ledger.id});expect(await db.auditEvents.count()).toBe(counts);
+ await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'B',unitCost:0.002,reason:'实际金额'});
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false});
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.platformSku)).toEqual(['A']);
+ expect(await listIgnoredErpCostAnomalies(ledger.id)).toEqual([]);
+ const after=await getLedgerSnapshot(ledger.id);
+ expect(calculateFormalLedgerRows({ledger:after.ledger,salesRows:after.rows,erpCosts:after.costs,approvals:after.approvals}).find(row=>row.platformSku==='B')).toMatchObject({costSource:'manual_override',unitCost:0.002});
+ expect((await db.erpCostInbox.toArray())[0].envelope).toEqual(envelope);
+});
+it('ignoring cannot turn absent, blank, incomplete or precision-lost evidence into a cost',async()=>{
+ for(const [id,options] of Object.entries({empty:{recordsB:[]},blank:{prices:[5,null]},partial:{incomplete:true},tiny:{prices:[5,0.00001]}})){
+  await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});
+  const seeded=await seed({...options,id});
+  if(id==='empty')seeded.envelope.batch.warehouseEvidence[1].purchaseRecords=[];
+  // Invalid envelopes are rejected before reaching anomaly handling.
+  try{await receiveErpCostInboxEnvelope({envelope:seeded.envelope});}catch{}
+  await setErpCostAnomaliesIgnored({ledgerId:seeded.ledger.id});
+  expect((await getLatestLedgerCosts(seeded.ledger.id)).some(row=>row.platformSku==='B'),id).toBe(false);
+ }
+});
+it('enforces financial permission for ignore and revoke',async()=>{
+ const {ledger,envelope}=await seed();await receiveErpCostInboxEnvelope({envelope});
+ await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'viewer',role:'viewer'});
+ await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id})).rejects.toThrow('财务写权限');
+ await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false})).rejects.toThrow('财务写权限');
+});
+it.each(['finalized','locked'])('keeps a legacy %s ledger editable while preserving exported report bytes', async status => {
+ const {ledger,envelope}=await seed();await receiveErpCostInboxEnvelope({envelope});
+ await db.ledgers.update(ledger.id,{status});
+ const snapshot=await getLedgerSnapshot(ledger.id);
+ expect(['finalized','locked']).not.toContain(snapshot.ledger.status);
+ expect((await db.ledgers.get(ledger.id)).status).toBe(status); // Reads never migrate data.
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id});
+ const input={ledgerId:ledger.id,kind:'pre_deduction'};
+ const first=await saveProfitReport(input,{expectedFingerprint:(await previewProfitReport(input)).fingerprint});
+ await db.ledgers.update(ledger.id,{status});
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false});
+ expect((await getLatestLedgerCosts(ledger.id)).some(row=>row.platformSku==='B')).toBe(false);
+ await db.ledgers.update(ledger.id,{status});
+ await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'B',unitCost:2.5,reason:'重新核算'});
+ await updateLedgerWarehouseRate(ledger.id,1);
+ const revised=await saveProfitReport(input,{expectedFingerprint:(await previewProfitReport(input)).fingerprint});
+ expect(revised.revision).toBe(first.revision+1);
+ expect(revised.fileSha256).not.toBe(first.fileSha256);
+ expect((await readProfitReportDownload(first.id)).report.fileBase64).toBe(first.fileBase64);
+ expect((await readProfitReportDownload(first.id)).report.fileSha256).toBe(first.fileSha256);
+ expect((await db.erpCostInbox.toArray())[0].envelope).toEqual(envelope);
+});
+it('scopes single and multiple anomaly decisions to the selected products, with empty selection doing nothing', async () => {
+ const {ledger,envelope}=await seed({prices:[1,0]});const receipt=await receiveErpCostInboxEnvelope({envelope});
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,selectedItems:[]});
+ expect(await listIgnoredErpCostAnomalies(ledger.id)).toEqual([]);
+ const a={inboxId:receipt.id,warehouseSku:'WH-A'},b={inboxId:receipt.id,warehouseSku:'WH-B'};
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,selectedItems:[a]});
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.platformSku)).toEqual(['A']);
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,selectedItems:[a,b,b]});
+ expect(await listIgnoredErpCostAnomalies(ledger.id)).toHaveLength(2);
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false,selectedItems:[a]});
+ expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.platformSku)).toEqual(['B']);
+ await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id,selectedItems:[a,{inboxId:receipt.id,warehouseSku:'NOT-OWNED'}]})).rejects.toThrow('不属于当前回传');
+ expect((await listIgnoredErpCostAnomalies(ledger.id)).map(row=>row.warehouseSku)).toEqual(['WH-B']);
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,selectedItems:[a]});
+ await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'B',unitCost:0.002,reason:'实际金额'});
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false,selectedItems:[a,b]});
+ expect(await listIgnoredErpCostAnomalies(ledger.id)).toEqual([]);
+ expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);
+ const after=await getLedgerSnapshot(ledger.id);
+ expect(calculateFormalLedgerRows({ledger:after.ledger,salesRows:after.rows,erpCosts:after.costs,approvals:after.approvals}).find(row=>row.platformSku==='B')).toMatchObject({costSource:'manual_override',unitCost:0.002});
+ expect((await db.erpCostInbox.get(receipt.id)).envelope).toEqual(envelope);
+});
+it('applies multi-receipt selections atomically and rolls the whole selection back on invalid evidence', async () => {
+ const first=await seed({prices:[1,0]});const a=await receiveErpCostInboxEnvelope({envelope:first.envelope});
+ const second=await seed({prices:[1,0],id:'second',requestAt:'2026-09-02T00:00:00Z'});const b=await receiveErpCostInboxEnvelope({envelope:second.envelope});
+ const selectedItems=[{inboxId:a.id,warehouseSku:'WH-A'},{inboxId:b.id,warehouseSku:'WH-B'}];
+ await db.erpCostInbox.update(b.id,{envelope:{...second.envelope,batch:{...second.envelope.batch,workspaceId:'FOREIGN'}}});
+ await expect(setErpCostAnomaliesIgnored({ledgerId:first.ledger.id,selectedItems})).rejects.toThrow();
+ expect(await listIgnoredErpCostAnomalies(first.ledger.id)).toEqual([]);
+ expect(await db.erpCostRows.count()).toBe(0);
+ await db.erpCostInbox.update(b.id,{envelope:second.envelope});
+ await setErpCostAnomaliesIgnored({ledgerId:first.ledger.id,selectedItems});
+ expect((await listIgnoredErpCostAnomalies(first.ledger.id)).map(row=>[row.inboxId,row.warehouseSku]).sort()).toEqual(selectedItems.map(row=>[row.inboxId,row.warehouseSku]).sort());
+ await setErpCostAnomaliesIgnored({ledgerId:first.ledger.id,ignored:false,selectedItems});
+ expect(await listIgnoredErpCostAnomalies(first.ledger.id)).toEqual([]);
+});
 it('reads sales once when confirming and independently publishing a purchase inside the same transaction', async () => {
  const {ledger,envelope}=await seed({prices:[5,1]});const receipt=await receiveErpCostInboxEnvelope({envelope});
  let readCount=0;const count=row=>{readCount++;return row;};db.salesRows.hook('reading').subscribe(count);

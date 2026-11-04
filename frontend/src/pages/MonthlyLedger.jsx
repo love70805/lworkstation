@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { BarChart3, CalendarDays, Download, FileSpreadsheet, LockKeyhole, Plus, Trash2, TrendingUp } from "lucide-react";
+import { BarChart3, CalendarDays, Download, FileSpreadsheet, Plus, Trash2, TrendingUp } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, ProgressBar, SearchInput, useToast } from "../components/UI";
 import { deleteMonthlyLedger, formatLedgerPeriod, listLedgerSummaries } from "../data/database";
@@ -19,8 +19,8 @@ const ledgerStateLabels = {
   cost_pending: "待核对成本",
   approval_pending: "待确认成本",
   ready: "成本已齐",
-  finalized: "可继续盘点",
-  locked: "已锁定",
+  finalized: "可继续调整",
+  locked: "可继续调整",
 };
 
 const ledgerStateTones = {
@@ -154,31 +154,29 @@ export default function MonthlyLedger() {
         <div className="ledger-card-grid">
           {filteredItems.map((ledger) => {
             const progress = ledgerProgress(ledger);
-            const locked = ledger.status === "locked";
-            const finalized = ledger.status === "finalized";
             const current = ledger.currentResult ?? currentLedgerResult(ledger);
             return (
-              <Panel className={`ledger-card ${locked ? "locked" : ""}`} key={ledger.id}>
+              <Panel className="ledger-card" key={ledger.id}>
                 <div className="ledger-card-head">
                   <span className="month-tile">{Number(ledger.period.slice(5))}月</span>
                   <div><h2>{formatLedgerPeriod(ledger.period)}</h2><Badge tone={ledgerStateTones[ledger.status] ?? "neutral"}>{ledgerStateLabels[ledger.status] ?? ledger.status}</Badge></div>
-                  <span className="ledger-card-head-actions">{locked ? <LockKeyhole size={17} title="已锁定" /> : null}<button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 账本`} title="删除账本" onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button></span>
+                  <span className="ledger-card-head-actions"><button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 账本`} title="删除账本" onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button></span>
                 </div>
                 <div className="ledger-metrics">
                   <span>销售金额 <strong className="mono">{money(ledger.summary?.revenue ?? 0)}</strong></span>
                   <span>总销量 <strong className="mono">{(ledger.summary?.quantity ?? 0).toLocaleString("zh-CN")}</strong></span>
                   <span>月度利润 <strong className="mono">{current.profit != null ? money(current.profit) : "待核算"}</strong></span>
                   <small>{current.label}{current.state === 'deduction_pending' ? ' · 当前金额为未扣款基础' : ''}</small>
-                  {!finalized && !locked ? <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`成本确认进度 ${progress}%`} /> : null}
+                  <ProgressBar value={progress} tone={progress === 100 ? "success" : "warning"} label={`成本确认进度 ${progress}%`} />
                 </div>
-                <div className="ledger-card-footer"><Button icon={locked ? LockKeyhole : BarChart3} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(ledger.id)}`)}>{locked ? "查看归档" : finalized ? "查看本月" : "继续核算"}</Button><Button onClick={() => setSourceLedger(ledger)}>台账来源</Button></div>
+                <div className="ledger-card-footer"><Button icon={BarChart3} onClick={() => navigate(`/profit?ledger=${encodeURIComponent(ledger.id)}`)}>继续核算</Button><Button onClick={() => setSourceLedger(ledger)}>台账来源</Button></div>
               </Panel>
             );
           })}
         </div>
       )}
 
-      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">可继续盘点或已锁定也可以删除。备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
+      <Modal size="small" open={Boolean(deleteTarget)} title="删除月度账本？" description="将删除该月份的销售明细、ERP 回传、成本批次、人工成本、利润结果和报告历史，其他月份不受影响。没有备份将无法恢复。" onClose={() => { if (!deleting) setDeleteTarget(null); }} footer={<><Button disabled={deleting} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteLedger}>确认删除{deleteTarget ? formatLedgerPeriod(deleteTarget.period) : ""}</Button></>}><p className="modal-note">备份不是必需步骤。<button className="inline-link" disabled={deleting} onClick={() => { setDeleteTarget(null); navigate("/data-security"); }}>先去备份中心</button></p></Modal>
       <Modal open={Boolean(sourceLedger)} title={sourceLedger ? `确认台账来源 · ${formatLedgerPeriod(sourceLedger.period)}` : "确认台账来源"} description="仅在原文件包含该店整月全部商品时确认。确认后更新销量参考，不修改销售明细或正式利润。" onClose={() => { if (!confirmingSource) setSourceLedger(null); }}>
         {!sourceState ? <p role="status">正在读取本月台账来源…</p> : sourceState.error ? <div role="alert"><p>台账来源读取失败：{sourceState.error}</p><Button onClick={() => setSourceAttempt(value => value + 1)}>重试读取来源</Button></div> : sourceState.items.length ? sourceState.items.map(source => <div key={source.id}><p>{source.period} · {source.store} · {source.fileName} · {source.rowCount} 行</p>{source.eligible ? <Button disabled={confirmingSource} onClick={() => confirmSource(source.id)}>确认此来源包含本店整月全部商品</Button> : <p>存在分组重导残留、来源不足或当前只读，请核对后重导完整台账。</p>}</div>) : <p>当前来源已确认，或没有可确认的旧批次。</p>}
       </Modal>

@@ -24,7 +24,7 @@ it('does not count a collected idempotency key as a durable delivery or adoption
 it('preserves task scope and offers continued supplement after costs arrive', () => {
   const task = { status: 'cost_complete', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'failed' }] };
   expect(isActiveErpCollection(task)).toBe(true);
-  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
+  const html = renderToStaticMarkup(<ErpCollectionProgress showCatalog task={task} />);
   expect(html).toContain('按需补齐商品资料');
   expect(html).toContain('成本采集已完成');
   expect(html).not.toContain('停止采集');
@@ -40,7 +40,7 @@ it('separates durable cost delivery, finished catalog checks and material comple
     { batchId: '3', platformSkcs: ['C'], status: 'failed', error: '采购列表请求超时' },
   ];
   const inboxes = [{ deliveryId: 'D1', envelope: { batch: { warehouseEvidence: { mappingFailures: [{ warehouseSku: 'WH-A' }] } } } }];
-  const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches }} inboxes={inboxes} />);
+  const html = renderToStaticMarkup(<ErpCollectionProgress showCatalog task={{ status: 'partial', batches }} inboxes={inboxes} />);
   expect(html).toContain('已送达 2 / 3 个 SKC');
   expect(html).toContain('已检查 2 / 3 个 SKC · 已确认齐全 1 个 SKC · 待核对范围 1 个 SKC');
   expect(html).toContain('读取未完成，涉及 1 个 SKC'); expect(html).toContain('SKC：C'); expect(html).toContain('采购列表请求超时');
@@ -57,7 +57,7 @@ it('offers material continuation for a partial task with all cost receipts', () 
 
 it('explains background work and does not ask users to continue an active material read', () => {
   const task = { status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] };
-  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
+  const html = renderToStaticMarkup(<ErpCollectionProgress showCatalog task={task} />);
   expect(html).toContain('正在后台补充商品资料');
   expect(html).toContain('可以继续使用工作台，无需重复启动');
   expect(html).toContain('暂停采集');
@@ -66,7 +66,7 @@ it('explains background work and does not ask users to continue an active materi
 });
 
 it('removes stale pause and continuation controls after all material checks finish', () => {
-  const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'completed' }] }} />);
+  const html = renderToStaticMarkup(<ErpCollectionProgress showCatalog task={{ status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'completed' }] }} />);
   expect(html).toContain('成本采集与资料检查已结束');
   expect(html).not.toContain('当前阶段：补充资料');
   expect(html).not.toContain('暂停采集');
@@ -111,8 +111,8 @@ it('keeps delivered costs distinct from unconfirmed or failed local accounting',
   const task = { executionProtocol: 2, costFlow: 'task', catalogMode: 'on_demand', status: 'cost_complete', workspaceId: 'W',
     batches: [{ batchId: 'B', platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' }] };
   const pending = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'W', deliveryId: 'D', adoptionPending: true }]} />);
-  expect(pending).toContain('成本采集已完成');
-  expect(pending).toContain('本机核算结果尚未确认');
+  expect(pending).toContain('成本已送达，正在核验并更新利润');
+  expect(pending).toContain('正在本机核验并采用成本');
   expect(pending).toContain('采购证据送达不代表核算完成');
   expect(pending).not.toContain('erp-activity-success');
   const failed = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'W', deliveryId: 'D', adoptionFailure: { message: '本机写入暂不可用' } }]} />);

@@ -163,7 +163,12 @@
             if (!catalogDirectory.complete) for (const reason of catalogDirectory.reasons) mark('directory', reason);
             for (const product of catalogDirectory.results) {
                     const previous = results.get(key(product.warehouseSku));
-                    results.set(key(product.warehouseSku), { ...previous, ...product, unitCost: previous?.unitCost ?? null, selectedRecordIds: previous?.selectedRecordIds || [], mappings: previous?.mappings || [], catalogMappings: previous?.catalogMappings || [], name: product.name || previous?.name || '', imageUrl: product.imageUrl || previous?.imageUrl || '', purchaseCatalog: previous?.purchaseCatalog || product.purchaseCatalog, supplierName: previous?.supplierName || product.supplierName, supplier1688Links: previous?.supplier1688Links || [] });
+                    results.set(key(product.warehouseSku), { ...previous, ...product, unitCost: previous?.unitCost ?? null, selectedRecordIds: previous?.selectedRecordIds || [], mappings: previous?.mappings || [], catalogMappings: previous?.catalogMappings || [],
+                        // A directory response must not discard the complete identity
+                        // already verified during cost collection, even when its
+                        // concatenated mapping text is truncated.
+                        catalogMappingsComplete: previous?.catalogMappingsComplete === true,
+                        name: product.name || previous?.name || '', imageUrl: product.imageUrl || previous?.imageUrl || '', purchaseCatalog: previous?.purchaseCatalog || product.purchaseCatalog, supplierName: previous?.supplierName || product.supplierName, supplier1688Links: previous?.supplier1688Links?.length ? previous.supplier1688Links : product.supplier1688Links || [] });
             }
             let completedTargets = 0;
             await targets([...results.values()], 5, async (result, lane) => {

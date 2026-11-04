@@ -63,7 +63,7 @@ it('preserves an in-progress manual draft when a new ERP snapshot triggers recal
   await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
   const group=container.querySelector('.profit-skc-group');
   await act(async()=>{group.open=true;group.dispatchEvent(new Event('toggle'));});
-  await act(async()=>findButton('人工填写').click());
+  await act(async()=>findButton('成本详情').click());
   const input=container.querySelector('#manual-cost-value');
   input.focus();
   await act(async()=>Simulate.change(input,{target:{value:'0.009'}}));
@@ -86,8 +86,8 @@ it('renders initial asynchronous snapshot loading without dereferencing an empty
 
 it("opens the cost details from the missing-cost action", async () => {
   const details = [...container.querySelectorAll("details")].find(el => el.querySelector("summary")?.textContent.startsWith("查看利润明细"));
-  expect(details.open).toBe(false);
-  await act(async () => findButton("填写人工成本").click());
+  expect(details.open).toBe(true);
+  await act(async () => findButton("只看待补成本").click());
   expect(details.open).toBe(true);
   expect(container.querySelector(".profit-table-panel")).not.toBeNull();
 });

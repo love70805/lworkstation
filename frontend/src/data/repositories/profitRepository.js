@@ -565,7 +565,7 @@ export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } 
   }
 }
 
-async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
+async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAction = null }) {
   const member = await getActiveMemberContext();
   return db.transaction('rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const inbox = await db.erpCostInbox.get(inboxId);
@@ -574,7 +574,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     // local default used elsewhere when no explicit member setting is stored.
     const active = await getActiveMemberContext();
     if (active.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(active.role)) throw new Error('当前成员无此账本的财务写权限。');
-    if (['applied', 'rejected', 'voided'].includes(inbox.status)) return { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status, adoption: inbox.adoption, idempotent: true };
+    if (['rejected', 'voided'].includes(inbox.status) || inbox.status === 'applied' && !ignoreAction) return { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status, adoption: inbox.adoption, idempotent: true };
     const ledger = operatingLedger(await db.ledgers.get(inbox.ledgerId)), request = await db.erpCostRequests.get(inbox.requestId);
     const now = new Date().toISOString();
     let costResolutions = inbox.costResolutions ?? [];
@@ -585,14 +585,13 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
         || JSON.stringify(inbox.costResolutions ?? []) !== JSON.stringify(costResolutions)
         || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
       if (changed) {
-        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), ...(costResolutions.length ? { costResolutions } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionPending: false, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
+        const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), ...(costResolutions.length || inbox.costResolutions ? { costResolutions } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionPending: false, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
         await db.erpCostInbox.put(saved);
         await db.auditEvents.add({ workspaceId: inbox.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id, action: 'adoption_processed', actorId: member.memberId, createdAt: now, before: { adoption: inbox.adoption ?? null }, after: { adoption, costResolutions, requestId: inbox.requestId, batchId: inbox.batchId, adoptionMethod: resolutions.length ? 'exception_retry' : 'automatic', systemSource: 'erp-auto-adoption', snapshot: saved } });
       }
       return { id: inbox.id, inboxId: inbox.id, batchId, status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: changed ? now : inbox.adoption?.processedAt }, ...summary, matchedCount: summary.adoptedCount, idempotent: !changed };
     };
     if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return persistResult([], 'blocked', 'request_or_ledger_missing');
-    if (resolutions.length && ['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或已锁定的账本不能确认采购价格。');
     if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
     if (request.ledgerVersion != null && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) return persistResult([], 'blocked', 'ledger_import_changed');
     const [salesRows, approvals, batches] = await Promise.all([
@@ -624,9 +623,40 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     }).toArray();
     const order = erpSourceOrder(request, batch);
     const batchById = new Map(batches.map(row => [row.id, row]));
-    const existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');
+    let existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');
     if (inbox.appliedBatchId && batchById.get(inbox.appliedBatchId)?.status !== 'published') throw new Error('已采用成本批次关联失效，请核对历史记录。');
-    const mergedResolutions = [...existingRows.flatMap(row => row.resolutions ?? []), ...costResolutions, ...resolutions].reduce(upsertCostResolution, []);
+    let mergedResolutions = [...existingRows.flatMap(row => row.resolutions ?? []), ...costResolutions, ...resolutions].reduce(upsertCostResolution, []);
+    if (ignoreAction) {
+      const selectedWarehouses = ignoreAction.warehouseSkus ? new Set(ignoreAction.warehouseSkus.map(canonicalWarehouseSku)) : null;
+      const inScope = item => selectedWarehouses ? selectedWarehouses.has(canonicalWarehouseSku(item.warehouseSku))
+        : !ignoreAction.warehouseSku || canonicalWarehouseSku(item.warehouseSku) === canonicalWarehouseSku(ignoreAction.warehouseSku);
+      const before = mergedResolutions;
+      if (ignoreAction.action === 'revoke') {
+        mergedResolutions = before.filter(item => item.action !== 'ignore_anomaly' || !inScope(item));
+      } else {
+        const preview = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: expected, costRows: validated.rows, resolutions: before });
+        const ignores = preview.matches.flatMap(row => row.costDecision?.anomalies ?? [])
+          .filter(item => item.status === 'pending' && inScope(item) && Number.isFinite(item.originalUnitPrice) && item.originalUnitPrice >= 0)
+          .map(item => ({ warehouseSku: item.warehouseSku, recordId: item.recordId, action: 'ignore_anomaly', originalUnitPrice: item.originalUnitPrice,
+            resolvedUnitPrice: item.originalUnitPrice, reason: '用户忽略异常，保留原价参与核算', resolvedBy: member.memberId, resolvedAt: now }));
+        mergedResolutions = ignores.reduce(upsertCostResolution, before);
+      }
+      if (JSON.stringify(before) === JSON.stringify(mergedResolutions)) return { inboxId, idempotent: true, changedCount: 0 };
+      const retained = new Set(mergedResolutions.map(item => JSON.stringify([item.warehouseSku, item.recordId, item.action])));
+      const removed = before.filter(item => !retained.has(JSON.stringify([item.warehouseSku, item.recordId, item.action])));
+      const affected = existingRows.filter(row => removed.some(item => canonicalWarehouseSku(item.warehouseSku) === canonicalWarehouseSku(row.warehouseSku)));
+      // Only this receipt's derived costs are withdrawn. The immutable receipt,
+      // other sources, manual overrides and frozen reports remain untouched.
+      if (affected.length) await db.erpCostRows.bulkDelete(affected.map(row => row.id));
+      existingRows = existingRows.filter(row => !affected.includes(row));
+      costResolutions = mergedResolutions;
+      inbox.status = 'pending';
+      inbox.adoptionPending = true;
+      await db.erpCostInbox.update(inboxId, { status: 'pending', costResolutions, adoptionPending: true });
+      await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: 'erp_cost_inbox', objectId: inboxId,
+        action: ignoreAction.action === 'revoke' ? 'anomaly_ignore_revoked' : 'anomalies_ignored', actorId: member.memberId, createdAt: now,
+        before: { costResolutions: before, withdrawnRows: affected }, after: { costResolutions } });
+    }
     const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: expected, costRows: validated.rows, resolutions: mergedResolutions });
     const verifiedResolutions = reconciliation.matches.flatMap(row => row.resolutions ?? []).reduce(upsertCostResolution, []);
     const sameResolution = (left, right) => canonicalWarehouseSku(left.warehouseSku) === canonicalWarehouseSku(right.warehouseSku)
@@ -656,7 +686,6 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
       item.manualStores = manualStores;
       const previous = existingRows.find(cost => canonicalPlatformSku(cost.platformSku) === sku);
       if (previous) { items.push({ ...item, state: manualStores.length ? 'manual_effective' : 'adopted', costRowId: previous.id }); continue; }
-      if (['finalized', 'locked'].includes(ledger.status)) { items.push({ ...item, state: 'ledger_protected', reason: ledger.status }); continue; }
       const identityIssue = ledgerCostIdentityIssue(identities.get(sku), row, { requireSkc: true });
       if (identityIssue) { items.push({ ...item, state: 'evidence_incomplete', reason: identityIssue.code, identityIssue }); continue; }
       if (!stores.length) { items.push({ ...item, state: 'evidence_incomplete', reason: 'sku_not_in_ledger' }); continue; }
@@ -685,7 +714,60 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions }) {
     if (appliedBatchId && JSON.stringify(batchById.get(appliedBatchId)?.adoption) !== JSON.stringify(result.adoption)) {
       await db.erpCostBatches.update(appliedBatchId, { adoption: result.adoption });
     }
+    if (ignoreAction) {
+      const coverage = await readLedgerCostCoverage(ledger.id, { ledger, salesRows });
+      await db.ledgers.update(ledger.id, buildLedgerCoveragePatch(ledger, coverage, now));
+    }
     return result;
+  });
+}
+
+export async function listIgnoredErpCostAnomalies(ledgerId) {
+  const member = await getActiveMemberContext();
+  const ledger = await db.ledgers.get(ledgerId);
+  if (!ledger || ledger.workspaceId !== member.workspaceId) return [];
+  const records = await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray();
+  return records.filter(row => row.workspaceId === member.workspaceId && !['voided', 'rejected'].includes(row.status))
+    .flatMap(row => (row.costResolutions ?? []).filter(item => item.action === 'ignore_anomaly')
+      .map(item => ({ ...item, inboxId: row.id })));
+}
+
+// One user action covers the month. Each affected receipt is revalidated in
+// the same transaction, so a failure cannot leave a half-revoked cost state.
+export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inboxId = null, warehouseSku = null, selectedItems } = {}) {
+  return db.transaction('rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+    const member = await getActiveMemberContext();
+    const ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
+    // Current ledgers remain editable, including legacy finalized/locked data.
+    // Saved report files are separate immutable snapshots, never rewritten here.
+    const receipts = (await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray())
+      .filter(row => row.workspaceId === member.workspaceId && ['pending', 'loaded', 'applied'].includes(row.status) && (!inboxId || row.id === inboxId));
+    // An explicit empty selection means no action, never the whole month.
+    // Validate every selected receipt before changing any costs; one selection
+    // may span several receipts and several warehouse products in one receipt.
+    let selection = null;
+    if (selectedItems !== undefined) {
+      if (!Array.isArray(selectedItems) || inboxId || warehouseSku) throw new Error('异常选择范围无效，请重新选择。');
+      selection = new Map();
+      for (const item of selectedItems) {
+        const receipt = receipts.find(row => row.id === item?.inboxId);
+        if (!receipt || !String(item?.warehouseSku ?? '').trim()) throw new Error('所选异常不属于当前账本或已经失效，请刷新后重选。');
+        const sku = canonicalWarehouseSku(item.warehouseSku);
+        const candidates = [...(receipt.envelope?.batch?.rows ?? []), ...(receipt.costResolutions ?? [])];
+        if (!candidates.some(row => row.warehouseSku && canonicalWarehouseSku(row.warehouseSku) === sku)) throw new Error('所选商品不属于当前回传，请刷新后重选。');
+        if (!selection.has(receipt.id)) selection.set(receipt.id, new Set());
+        selection.get(receipt.id).add(sku);
+      }
+    }
+    const results = [];
+    for (const row of receipts) {
+      if (selection && !selection.has(row.id)) continue;
+      results.push(await processErpCostInboxAdoptionOnce({ inboxId: row.id, resolutions: [], ignoreAction: {
+        action: ignored ? 'ignore' : 'revoke', warehouseSku, ...(selection ? { warehouseSkus: [...selection.get(row.id)] } : {}),
+      } }));
+    }
+    return { results, changedCount: results.filter(result => !result.idempotent).length };
   });
 }
 
@@ -872,7 +954,7 @@ async function publishVerifiedErpCostBatch({
     if (decision.unitCost === 0 && decision.selectedRecords.every((record) => record.effectiveUnitPrice > 0)) {
       throw new Error("正式 ERP 单价小于 0.0001 元，超出当前四位小数精度，不能发布。请保留真实采购价格。");
     }
-    if (decision.resolutionStatus !== "resolved" || decision.unresolvedAnomalyCount > 0 || !(decision.formalUnitCost > 0)) {
+    if (decision.resolutionStatus !== "resolved" || decision.unresolvedAnomalyCount > 0 || decision.formalUnitCost == null || decision.formalUnitCost < 0) {
       throw new Error(`仓库 SKU ${row.sourceWarehouseSku || "未知"} 在 ${costPeriod} 及以前的采购证据或异常处置尚未满足正式成本要求。`);
     }
     if (!Number.isFinite(Number(row.unitCost)) || Math.abs(Number(row.unitCost) - decision.formalUnitCost) > 0.00005) {
@@ -923,7 +1005,6 @@ async function publishVerifiedErpCostBatch({
     const ledger = operatingLedger(await db.ledgers.get(ledgerId));
     if (!ledger) throw new Error("找不到对应的月度账本。");
     if (ledger.period !== costPeriod) throw new Error("账本月份已变化，请重新核对 ERP 成本。");
-    if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能直接更新成本。");
     if (String(workspaceId) !== String(ledger.workspaceId)) throw new Error("ERP 成本发布工作区与账本不一致。");
     const [salesRows, approvals] = await Promise.all([
       sharedSales ?? db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
@@ -1189,7 +1270,6 @@ export async function saveApproved1688Fallback({
     async () => {
       const ledger = operatingLedger(await db.ledgers.get(ledgerId));
       if (!ledger) throw new Error("找不到对应的月度账本。");
-      if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能新增成本审批。");
 
       const ledgerRows = await db.salesRows.where("ledgerId").equals(ledgerId).toArray();
       if (!ledgerRows.some((row) => canonicalPlatformSku(row.platformSku ?? row.sku) === canonicalSku)) {
@@ -1324,7 +1404,6 @@ export async function revokeApproved1688Fallback({
     async () => {
       const ledger = operatingLedger(await db.ledgers.get(ledgerId));
       if (!ledger) throw new Error("找不到对应的月度账本。");
-      if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能撤销成本审批。");
       const approval = await db.costApprovals.get(approvalId);
       if (!approval || approval.ledgerId !== ledgerId) throw new Error("找不到对应的成本审批记录。");
       if (manualSnapshot(approval)?.kind === "manual_override") throw new Error("人工更正须通过逐店成本更正入口撤销。");
@@ -1372,7 +1451,7 @@ export async function saveErpCostRequest(request) {
   await db.transaction("rw", db.ledgers, db.importBatches, db.erpCostRequests, db.auditEvents, async () => {
     const ledger = request.ledgerId ? await db.ledgers.get(request.ledgerId) : null;
     if (request.ledgerId && !ledger) throw new Error("找不到对应的月度账本。");
-    if (ledger && ledger.workspaceId !== request.workspaceId) throw new Error("账本工作区不匹配或已定稿，不能登记核算请求。");
+    if (ledger && ledger.workspaceId !== request.workspaceId) throw new Error("账本工作区不匹配，不能登记核算请求。");
     const ledgerPeriod = ledger?.period ?? request.ledgerPeriod ?? null;
     if (ledgerPeriod != null && (typeof ledgerPeriod !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod))) throw new Error("ERP 请求核算月份必须为 YYYY-MM。");
     if (request.ledgerPeriod != null && request.ledgerPeriod !== ledgerPeriod) throw new Error("ERP 请求核算月份与月度账本不匹配。");
@@ -1494,7 +1573,6 @@ export async function rejectErpCostInboxBatches({ ids, rejectedBy = "local-user"
         throw new Error("只有待处理或已载入的 ERP 批次可以删除。");
       }
       const ledger = operatingLedger(await db.ledgers.get(record.ledgerId));
-      if (ledger?.status === "locked") throw new Error("已锁定账本不能删除 ERP 收件批次。");
     }
 
     for (const record of records) {
@@ -1893,21 +1971,14 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
   const calculationReader = accountingMode === LOWEST_ACCOUNTING ? inventoryLowestRevision : inventoryCalculationRevision;
   const calculationRevision = calculationReader();
   const costs = await accountingCosts(ledger, originalCosts, accountingMode, rows);
-  if (!summaryOnly && accountingMode !== LOWEST_ACCOUNTING && originalCosts.length && !Dexie.currentTransaction) {
-    // Prepare both projections from the same captured history. No ERP read is
-    // performed, and later switches reuse the independently versioned cache.
-    // Keep optional history warming outside the ordinary live-query scope:
-    // a pending receipt must not make unchanged ordinary profits reread.
-    await new Promise(resolve => setTimeout(() => {
-      readHistoricalLowestCosts(ledger.workspaceId).then(resolve, resolve);
-    }, 0));
-  }
+  // Compute alternate accounting only when selected. Loading this month must
+  // not wait for a second, workspace-wide history projection.
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
   // Older live ledgers may have a ready summary written before parent identity
   // checks existed. Project current readiness without mutating business data or
   // touching any frozen report/snapshot during an upgrade or ordinary read.
   const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period, accountingMode],
-    formula: 'inventory-cost-coverage@2-source-evidence', revisionReader: calculationReader, revision: calculationRevision, persist: false,
+    formula: 'inventory-cost-coverage@3-anomaly-ignore', revisionReader: calculationReader, revision: calculationRevision, persist: false,
     compute: () => runDerivedComputation('cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
       workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: costEvaluationPeriod(ledger), accountingMode }) });
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
@@ -1941,7 +2012,7 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
     const projected = await Promise.all(ledgers.map(async original => {
       const ledger = operatingLedger(original);
       if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id, { summaryOnly: true }))?.ledger ?? ledger;
-      if (['finalized', 'locked'].includes(ledger.status) || ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
+      if (ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
       const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@1-identity',
         revision, revisionReader: selectionFactsRevision, persist: false, compute: async () => {
           const saleIdentities = new Map(), latest = new Map(), batchStates = new Map();

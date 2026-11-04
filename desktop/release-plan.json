@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.2.4",
+  "version": "2.0.0",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-unified-task-1-2-4",
+  "integrationBranch": "codex/lworkstation-2-0",
   "requiredCommits": [
     {
-      "module": "stable-1.2.3",
-      "commit": "5e5fd354e6e9c4f3f8308b211be16c6c3084a653"
+      "module": "stable-1.2.4",
+      "commit": "f46904224d5573a87a00971c64f9e5fd55b08584"
     }
   ]
 }

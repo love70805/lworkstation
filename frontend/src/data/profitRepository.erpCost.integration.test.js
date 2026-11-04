@@ -158,7 +158,7 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   const saved = await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }), sourceEnvelope: source });
   const cost = (await getLatestLedgerCosts(ledger.id))[0];
   expect(cost).toMatchObject({ unitCost: 0.0097, resolutionStatus: "resolved", resolutions: [] });
-  expect(cost.costDecision.resolutionVersion).toContain("unit-4dp");
+  expect(cost.costDecision.resolutionVersion).toContain("reversible-anomaly-ignore");
   expect(cost.purchaseRecords.map((row) => row.unitPrice)).toEqual([0.01, 0.009, 0.009]);
   const decision = resolveFormalCostDecision({ platformSku: "SKU-AUDIT", erpCost: cost });
   const exact = calculateExactProfitLine({ quantity: 1.234567, revenue: 1, warehouseRate: 0, costDecision: decision });

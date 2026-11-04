@@ -26,7 +26,7 @@ async function upload(selectPeriod = true, files = [new File(['first'], '甲店.
   await act(async()=> { await vi.waitFor(()=>expect(mocks.parse).toHaveBeenCalledTimes(parseCount + files.length)); });
   await click('选中筛选结果');
   await click('匹配货号');
-  if (selectPeriod) await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
+  if (selectPeriod && container.querySelector('#ledger-period')) await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
 }
 beforeEach(async()=>{
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -104,21 +104,20 @@ it('shares a delayed reparse while rapidly editing a store and only inspects the
   expect(mocks.inspectPeriod).toHaveBeenCalledTimes(inspectCount + 2);
   expect(mocks.inspectPeriod.mock.calls.at(-1)[2].defaultStore).toBe('新店铺');
 });
-it('reuses sealed validation after correcting the selected month without retaining workbook jobs', async () => {
+it('reuses sealed validation with its inferred month without retaining workbook jobs', async () => {
   mocks.inspectPeriod.mockResolvedValue({ rowSource: { id: 'sealed', rowCount: 1, chunkCount: 1 }, evidence: {
     distribution: [{ month: '2026-08', count: 1 }], suggestedPeriod: '2026-08', missingCount: 0, invalidCount: 0, errorCount: 0,
     validationSummary: { sourceRowCount: 1, validRowCount: 1, errorCount: 0, ignoredCount: 0, errors: [] },
   } });
   await upload(); await settled();
-  await act(async () => Simulate.change(container.querySelector('#ledger-period'), { target: { value: '2026-07' } }));
-  await settled(); expect(container.textContent).toContain('与账本 2026-07 不一致');
-  await act(async () => Simulate.change(container.querySelector('#ledger-period'), { target: { value: '2026-08' } }));
-  await settled();
+  expect(container.querySelector('#ledger-period')).toBeNull();
+  expect(container.querySelector('.batch-source-fieldset .batch-period-evidence').textContent).toContain('2026-08');
   expect(mocks.parse).toHaveBeenCalledTimes(4);
   expect(mocks.validate).not.toHaveBeenCalled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ rowSource: { id: 'sealed' }, summary: { errorCount: 0 } });
   expect(container.querySelector('.batch-preview')).not.toBeNull();
 });
+
 it('automatically validates and previews all files after explicit supplier choice without any write', async () => {
   await upload(); await settled();
   expect(mocks.validate).toHaveBeenCalledTimes(2);
@@ -250,16 +249,18 @@ it('keeps parse failure visible while the other file remains parsed', async () =
   await click('移除'); await settled();
   expect(mocks.preview).toHaveBeenCalledTimes(1);
 });
-it('blocks cross-month records on their file even when a month was explicitly selected', async () => {
+it('blocks cross-month records without offering a misleading manual month override', async () => {
   mocks.inspectPeriod.mockResolvedValue({evidence:{distribution:[{month:'2026-07',count:1},{month:'2026-08',count:1}],suggestedPeriod:null}});
   await upload(); await settled();
-  expect(container.textContent).toContain('来源含 2026-07，与账本 2026-08 不一致');
+  expect(container.textContent).toContain('包含多个月份');
+  expect(container.querySelector('#ledger-period')).toBeNull();
   expect(mocks.preview).not.toHaveBeenCalled();
 });
 it('auto-selects the reliable source month and requires no extra validation click', async () => {
   mocks.inspectPeriod.mockResolvedValue({evidence:{distribution:[{month:'2026-07',count:1}],suggestedPeriod:'2026-07',missingCount:0,invalidCount:0,errorCount:0}});
   await upload(false); await settled();
-  expect(container.querySelector('#ledger-period').value).toBe('2026-07');
+  expect(container.querySelector('#ledger-period')).toBeNull();
+  expect(container.querySelector('.batch-source-fieldset .batch-period-evidence').textContent).toContain('2026-07');
   expect(mocks.preview).toHaveBeenCalledTimes(1);
   await act(async () => container.querySelector('.batch-overwrite input').click());
   await click('导入');
@@ -491,10 +492,11 @@ it('restores a group and its store exceptions without a new apply click, includi
   const input = container.querySelector('input[type=file]');
   Object.defineProperty(input,'files',{configurable:true,value:[new File(['first'],'甲店.csv')]});
   await act(async () => input.dispatchEvent(new Event('change',{bubbles:true})));
-  await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
+  await settled();
   expect(mocks.preview).not.toHaveBeenCalled();
   expect(container.querySelector('.supplier-selected-list').open).toBe(false);
-  await click('匹配货号');
+  await click('匹配货号'); await settled();
+  await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
   await vi.waitFor(async () => {
     await act(async () => {});
     expect(mocks.preview.mock.calls.at(-1)?.[0].items).toHaveLength(1);
@@ -528,12 +530,13 @@ it('stages page and search selections without rereading files, then matches the 
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:65,previewRows:[{SKU:'001'}],preset:'generic',facets:{supplierNumbers:choices}});
   const input = container.querySelector('input[type=file]'); Object.defineProperty(input,'files',{configurable:true,value:[new File(['source'],'甲店.csv')]});
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
-  await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
+  await settled();
   const parseCount=mocks.parse.mock.calls.length, inspectCount=mocks.inspectPeriod.mock.calls.length;
   await act(async()=>container.querySelector('[aria-label="选中本页货号"]').click());
   expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('20');
   await act(async()=>Simulate.change(container.querySelector('.supplier-filter-table .search-input input'),{target:{value:'货号064'}}));
-  await click('选中筛选结果'); await click('匹配货号');
+  await click('选中筛选结果'); await click('匹配货号'); await settled();
+  await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
   expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('21');
   expect(mocks.parse.mock.calls.length).toBeGreaterThan(parseCount); expect(mocks.inspectPeriod.mock.calls.length).toBeGreaterThan(inspectCount);
    await settled();

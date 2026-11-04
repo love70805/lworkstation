@@ -41,8 +41,8 @@ const ledgerStatusLabels = {
   cost_pending: "待核对成本",
   approval_pending: "待确认成本",
   ready: "待确认利润",
-  finalized: "可继续盘点",
-  locked: "已锁定",
+  finalized: "可继续调整",
+  locked: "可继续调整",
 };
 
 const activityToneLabels = {
