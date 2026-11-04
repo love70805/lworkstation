@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-extension-status-1-2-2",
+  "integrationBranch": "codex/export-summary-layout-1-2-3",
   "requiredCommits": [
     {
-      "module": "dispatch-source-order-1.2.1",
-      "commit": "f37f156d44f755ae959d224a4e87349df7e45767"
+      "module": "erp-extension-status-1.2.2",
+      "commit": "812d897533ec1881d694bd3ccfa880e07d67e51f"
     }
   ]
 }

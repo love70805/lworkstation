@@ -63,7 +63,7 @@ const byStore = (a,b) => String(a.store).localeCompare(String(b.store),'zh-CN',{
 const headers = values => values.map(value=>({value,header:true,format:0,align:'center'}));
 function sheetXml(rows,widths,registry,alignment=[],rowHeight=reportRowHeight){
   if(rows.length>1048576)throw new Error("报告明细超过 Excel 单页上限，请按账本范围核对来源。");
-  return `${declaration}<worksheet xmlns="${ns}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${column(widths.length-1)}${Math.max(rows.length,1)}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="24"/><cols>${widths.map((width,i)=>`<col min="${i+1}" max="${i+1}" width="${width}" customWidth="1"/>`).join("")}</cols><sheetData>${rows.map((cells,i)=>`<row r="${i+1}" ht="${i?rowHeight:reportHeaderHeight}" customHeight="1">${cells.map((cell,j)=>{
+  return `${declaration}<worksheet xmlns="${ns}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${column(widths.length-1)}${Math.max(rows.length,1)}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"></sheetView></sheetViews><sheetFormatPr defaultRowHeight="24"/><cols>${widths.map((width,i)=>`<col min="${i+1}" max="${i+1}" width="${width}" customWidth="1"/>`).join("")}</cols><sheetData>${rows.map((cells,i)=>`<row r="${i+1}" ht="${i?rowHeight:reportHeaderHeight}" customHeight="1">${cells.map((cell,j)=>{
     if(cell==null)return "";const c=typeof cell==="object"?cell:text(cell);const style=registry.id(c,i,alignment[j]);
     if(c.blank)return `<c r="${column(j)}${i+1}" s="${style}"/>`;
     return c.number?`<c r="${column(j)}${i+1}" s="${style}" t="n"><v>${xml(c.value)}</v></c>`:`<c r="${column(j)}${i+1}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xml(c.value)}</t></is></c>`;
@@ -106,7 +106,7 @@ export function buildProfitDeductionSheet(report,rows,registry) {
 
 export function buildProfitReportWorkbook({report,products,dispatchRows=[],deductionRows=[]}) {
   const financial=report.kind==="financial",totals=report.totalsExact;
-  const right=[headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),number(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,deductionNumber(totals.deductionExact)]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,number(financial?totals.profitExact:totals.preDeductionExact)])];
+  const right=[[],headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),number(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),number(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,deductionNumber(totals.deductionExact)]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,number(financial?totals.profitExact:totals.preDeductionExact)])];
   const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right,11),widths:[...productWidths,2,16,12,20],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"center","right"]}];
   // Reserve template names before sanitizing dynamic store tabs.
   const used=new Set(["汇总表","代发表","扣款","核算采购"]);
@@ -145,7 +145,7 @@ export async function prepareReportDownload(report, { dispatchRows, deductionRow
     bytes=restoreSavedDeductions(bytes,report,deductionRows);
   }
   const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
-  bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
+  bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
   const { formatSavedReportLayout } = await import('./savedReportLayout');
   return formatSavedReportLayout(bytes);
 }
