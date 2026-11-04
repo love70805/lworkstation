@@ -24,6 +24,7 @@ const checks = [], failures = [], timings = [], requests = [];
 let inbox, host, view, popup, collector, collectorView, automaticLoginRequired = false, permissionRequired = false;
 let dropNextCollectorPage = false, collectorLoads = 0;
 let manualCatalogGate = null;
+let bulkEnabled = false;
 async function call(route, body) {
   const started = performance.now();
   const response = await fetch(`http://127.0.0.1:${port}/erp/v1/${route}`, { headers: { authorization: `Bearer ${capability}`, 'content-type': 'application/json' }, ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(4000) });
@@ -60,6 +61,18 @@ app.whenReady().then(async () => {
       if (url.searchParams.has('lworkstationRequest') && automaticLoginRequired) return new Response('<!doctype html><html><body><input type="password"></body></html>', { headers: { 'content-type': 'text/html' } });
       if (!url.pathname.startsWith('/purchase/')) return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离原生 ERP</h1>' + (url.pathname === '/view/console/index.html' ? '<iframe id="procurement" style="width:100%;height:720px" src="/view/system/purchaseOrderModule/purchasingManagement.html"></iframe>' : '') + (url.pathname === '/login.html' ? '<input type="password" aria-label="ERP 密码">' : '') + '</body></html>', { headers: { 'content-type': 'text/html' } });
       requests.push(url.pathname);
+      if (bulkEnabled && url.pathname.endsWith('export-purchase-order')) {
+        const xlsx = require('../frontend/node_modules/xlsx');
+        const book = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(book, xlsx.utils.aoa_to_sheet([
+          ['采购单号','仓库SKU','平台SKU','采购数量','采购单价','创建时间','采购状态','1688订单状态','商品名称'],
+          ['PUR-NATIVE-BULK','WH-A','SKU-A',2,4,'2026-08-20 12:00:00','已上架','已付款','原生批量商品'],
+        ]), 'Sheet1');
+        return new Response(xlsx.write(book, { type: 'buffer', bookType: 'xlsx', compression: true }), { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } });
+      }
+      if (bulkEnabled && url.pathname.endsWith('purchase-order-page')) return new Response(JSON.stringify({code:0,count:1,data:[
+        {purchaseOrderId:'PO-NATIVE-BULK',purchaseOrderNo:'PUR-NATIVE-BULK',creationTime:'2026-08-20 12:00:00',purchaseStatus:'7'},
+      ]}), { headers: { 'content-type': 'application/json' } });
       if (manualCatalogGate && url.pathname.endsWith('product-info-sku')) await manualCatalogGate;
       if (permissionRequired && url.pathname.endsWith('product-info-sku')) return new Response(JSON.stringify({ code: -40102, msg: '校验用户店铺权限失败！' }), { headers: { 'content-type': 'application/json' } });
       const data = url.pathname.endsWith('purchase-order-page') ? [{ purchaseOrderId: 'PO-A' }]
@@ -210,6 +223,25 @@ app.whenReady().then(async () => {
     assert.equal(manualFinished.batches[0].deliveryId, handoffReceipt.deliveryId);
     assert.equal((await call(`cost-batches?workspaceId=${workspaceId}`)).records.filter(item => item.requestId === handoffInput.requestId).length, 1);
     checks.push({ name: 'explicit native on-demand catalog remains alive while costs are complete, delivers separately and preserves the original cost receipt/attempt' });
+    await collector.stop();
+    bulkEnabled = true;
+    await call('requests', { request: { id:'NATIVE-BULK',workspaceId,ledgerId:'NATIVE-BULK-L',ledgerPeriod:'2026-09',platformSkcs:[{platformSkc:'SKC-A'}] },expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A'}] });
+    const bulkReadsBefore = requests.length;
+    await collector.start({workspaceId,ledgerId:'NATIVE-BULK-L',requestId:'NATIVE-BULK'});
+    const bulkReceipt = await waitFor(async () => (await call(`cost-batches?workspaceId=${workspaceId}`)).records?.find(item=>item.requestId==='NATIVE-BULK'), 'automatic native bulk export receipt');
+    assert.equal(bulkReceipt.envelope.batch.rows[0].unitCost,4);
+    assert.equal(bulkReceipt.envelope.batch.sourceMeta.collectionMethod,'bulk_export');
+    assert.match(bulkReceipt.envelope.batch.sourceMeta.bulkSourceSha256,/^[a-f0-9]{64}$/);
+    assert.equal(bulkReceipt.envelope.batch.sourceMeta.catalogPublication.mode,'on_demand');
+    const bulkTask = (await call(`collection-tasks?workspaceId=${workspaceId}`)).tasks.find(task=>task.requestId==='NATIVE-BULK');
+    for(const batch of bulkTask.batches)await call(`collection-tasks/${bulkTask.taskId}/adoption`,{workspaceId,deliveryId:batch.deliveryId,adoptedCount:1});
+    await pause(1200);await collector.poll();
+    const bulkReads = requests.slice(bulkReadsBefore);
+    assert.equal(bulkReads.filter(item=>item.endsWith('export-purchase-order')).length,1);
+    assert.ok(!bulkReads.some(item=>item.endsWith('product-info-sku')||item.endsWith('product-page')||item.endsWith('purchase-order-details')));
+    assert.ok((await call(`collection-tasks/${bulkTask.taskId}?workspaceId=${workspaceId}`)).task.batches.every(batch=>!batch.catalogStatus));
+    checks.push({name:'automatic hidden workspace collector downloads and parses bulk evidence, delivers exact cost with provenance, skips short-map/detail reads and leaves catalog on demand'});
+    bulkEnabled = false;
     await collector.stop(); collector.dispose(); collector = null;
     checks.push({ name: 'workspace launch, first-login wait/resume, real hidden native collector, fixed scope, complete delivery and unchanged foreground URL/form/pagination/result cache', unitCost: 4 });
     // Selecting another workspace detaches the remote view in the real shell.

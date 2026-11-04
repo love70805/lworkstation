@@ -93,7 +93,7 @@
     const currentVersion = chrome.runtime.getManifest().version;
     const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -427,6 +427,7 @@
           attribute: catalogText(mapping?.attribute) || (new Set(mappings.map(item => canonical(item?.platformSku)).filter(Boolean)).size === 1 ? catalogText(result?.attribute) : ''),
           ...(Object.hasOwn(purchase, 'purchaseCatalog') ? { purchaseCatalog: purchase.purchaseCatalog } : {}),
           catalogMappings: catalog,
+          ...(typeof result?.catalogMappingsComplete === 'boolean' ? { catalogMappingsComplete: result.catalogMappingsComplete } : {}),
           calcTimes: result?.calcTimes,
           dateRange: result?.dateRange,
           totalQty: result?.totalQty,

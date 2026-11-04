@@ -490,6 +490,8 @@ try {
       orderCount: 12,
       costWarningCount: 1,
       extensionVersion: "8.0.12",
+      collectionMethod: 'bulk_export', bulkSourceSha256: 'a'.repeat(64), bulkSourceRows: 12,
+      bulkExportCount: 1, bulkMappingRequests: 2, bulkBoundaryOrders: 0,
       filters: { token: "must-not-leak" },
       manualDecision: "must-not-leak",
     },
@@ -514,6 +516,13 @@ try {
     mutate(exact);
     response = await post("/erp/v1/cost-results", exact);
     assert.equal(response.status, 400, "exact deliveries cannot widen a registered platform pair");
+  }
+  for (const [index, mutate] of [value => { delete value.sourceMeta.bulkSourceSha256; }, value => { value.sourceMeta.bulkSourceRows = 1.5; }, value => { value.sourceMeta.bulkSourceRows = '12'; }].entries()) {
+    const invalidBulk = structuredClone(acceptedResultPayload);
+    invalidBulk.resultDeliveryId = 'INVALID-BULK-' + index;
+    mutate(invalidBulk);
+    response = await post('/erp/v1/cost-results', invalidBulk);
+    assert.equal(response.status, 400, 'invalid bulk provenance must not enter the durable inbox');
   }
   response = await post("/erp/v1/cost-results", acceptedResultPayload);
   assert.equal(response.status, 202);
@@ -543,6 +552,9 @@ try {
   assert.equal(firstPending.records[0].envelope.batch.rows[0].manualUnitPrice, undefined);
   assert.equal(firstPending.records[0].envelope.batch.rows[0].anomalyConfirmed, undefined);
   assert.equal(firstPending.records[0].envelope.batch.sourceMeta.extensionVersion, "8.0.12");
+  for (const field of ['collectionMethod', 'bulkSourceSha256', 'bulkSourceRows', 'bulkExportCount', 'bulkMappingRequests', 'bulkBoundaryOrders']) {
+    assert.equal(firstPending.records[0].envelope.batch.sourceMeta[field], acceptedResultPayload.sourceMeta[field], field + ' survives HTTP and durable evidence');
+  }
   assert.equal(firstPending.records[0].envelope.batch.sourceMeta.filters, undefined);
   assert.equal(firstPending.records[0].envelope.batch.sourceMeta.manualDecision, undefined);
   assert.equal(firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords.length, 2);

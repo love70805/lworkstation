@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.56';
+    const EXTENSION_VERSION = '8.0.57';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -83,6 +83,8 @@
     // Evidence is isolated to this document and exact task. A restarted document
     // has no verified account/history continuity and must read authoritative APIs.
     const taskCache = new Map();
+    let bulkPurchaseCollector = null;
+    function clearReadCaches() { taskCache.clear(); bulkPurchaseCollector?.clear(); }
     let resumableCheckpoint = null;
     let checkpointMessage = '';
     let taskStage = '';
@@ -253,7 +255,7 @@
         try {
             const url = supportedErpUrl(rawUrl);
             if (url?.pathname === LIST_PATH) {
-                taskCache.clear();
+                clearReadCaches();
                 catalogAction = null; catalogActionRevision++;
                 capturedListUrl = url.href;
                 capturedQueryCapturedAt = new Date().toISOString();
@@ -353,7 +355,7 @@
         return url.href;
     }
 
-    async function apiGet(path, params, parentSignal, context) {
+    async function apiGet(path, params, parentSignal, context, options = {}) {
         if (parentSignal?.aborted) throw parentSignal.reason || new DOMException('请求已中止', 'AbortError');
         if (parentSignal?.deadlineAt && Date.now() >= parentSignal.deadlineAt) throw new CostError('本批读取时间已到', '已完成结果保留；未完成证据需要继续读取。');
         if (parentSignal?.requestBudget != null && --parentSignal.requestBudget < 0) throw new CostError('本次资料请求预算已到', '已完成成本保持；再次补充资料时重新核验采购历史。');
@@ -381,17 +383,17 @@
         try {
             const metrics = parentSignal?.readMetrics;
             if (metrics) { metrics.requestCount += 1; metrics.peakRequestConcurrency = Math.max(metrics.peakRequestConcurrency, requestSlots); }
-            const response = await Promise.race([nativeFetch(buildUrl(path, params), {
+            const response = await Promise.race([nativeFetch(buildUrl(path, params, { preserveEmpty: Boolean(options.workbook) }), {
                 credentials: 'include',
                 cache: 'no-store',
                 signal: controller.signal,
                 headers: {
-                    Accept: 'application/json',
+                    Accept: options.workbook ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json' : 'application/json',
                     'X-Requested-With': 'XMLHttpRequest'
                 }
             }), aborted]);
 
-            if (response.status === 401 || response.status === 403) { taskCache.clear(); erpSessionState = 'login_required'; throw Object.assign(new CostError('ERP 登录已失效', '请登录 ERP 并重新查询后重试。'), { code: 'ERP_LOGIN_REQUIRED' }); }
+            if (response.status === 401 || response.status === 403) { clearReadCaches(); erpSessionState = 'login_required'; throw Object.assign(new CostError('ERP 登录已失效', '请登录 ERP 并重新查询后重试。'), { code: 'ERP_LOGIN_REQUIRED' }); }
             if (!response.ok) {
                 let body;
                 try { body = response.json ? await Promise.race([response.json(), aborted]) : null; } catch { body = { message: 'ERP 未返回 JSON 业务数据' }; }
@@ -410,14 +412,27 @@
                 if (/html/i.test(response.headers?.get?.('content-type') || '') && response.text) {
                     const html = await Promise.race([response.text(), aborted]);
                     if (/维护|maintenance|temporarily unavailable|service unavailable/i.test(html)) throw serviceUnavailable(context, 'ERP 返回了维护页面');
+                    if (/<input\b[^>]*\btype\s*=\s*["']?password|<form\b[^>]*login|登录已失效|请重新登录/i.test(html)) {
+                        erpSessionState = 'login_required'; clearReadCaches();
+                        throw Object.assign(new CostError('ERP 登录已失效', '请登录 ERP 后继续原任务。'), { code: 'ERP_LOGIN_REQUIRED' });
+                    }
                     throw new CostError(context + '数据格式异常', 'ERP 返回了网页，未取得接口数据。');
                 }
-                const body = await Promise.race([response.json(), aborted]);
+                let workbookBody;
+                if (options.workbook && !/json/i.test(response.headers?.get?.('content-type') || '')) {
+                    if (Number(response.headers?.get?.('content-length')) > window.ShopeersErpBulkPurchase.MAX_BYTES) throw new CostError('采购导出文件过大');
+                    const buffer = await Promise.race([response.arrayBuffer(), aborted]);
+                    const bytes = new Uint8Array(buffer);
+                    if (bytes[0] === 80 && bytes[1] === 75) return { code: 0, buffer };
+                    try { workbookBody = JSON.parse(new TextDecoder().decode(bytes)); }
+                    catch { throw new CostError('采购导出格式异常', '未取得可校验的采购工作簿，将使用原方式读取。'); }
+                }
+                const body = workbookBody || await Promise.race([response.json(), aborted]);
                 if (body && typeof body === 'object') Object.defineProperty(body, '__erpDiagnostic', { value: resultPolicy.diagnosticResponse({ stage: context, httpStatus: response.status, code: body.code, msg: body.msg ?? body.message, count: body.count, data: body.data }) });
                 if (Number(body?.code) === 429) throw Object.assign(new CostError(context + '请求失败', 'HTTP 429 · ERP 请求过于频繁'), { status: 429, retryAfter: 1000 });
                 if (response.status === 401 || response.status === 403 || [401, 403].includes(Number(body?.code)) || /登录|login|session.*expired/i.test(String(body?.msg || body?.message || ''))) {
                     erpSessionState = 'login_required';
-                    taskCache.clear();
+                    clearReadCaches();
                     throw Object.assign(new CostError('ERP 登录已失效', '请登录 ERP 并重新查询后重试。'), { code: 'ERP_LOGIN_REQUIRED' });
                 }
                 if (Number(body?.code) !== 0 && (Number(body?.code) === -40102
@@ -500,7 +515,7 @@
         });
     }
 
-    async function apiGetRetry(path, params, parentSignal, context) {
+    async function apiGetRetry(path, params, parentSignal, context, options = {}) {
         const owner = activeRun, ownerController = owner?.controller;
         // Fast/cache-backed responses must still allow stop controls and budget
         // timers to run; an unbroken promise chain can starve browser events.
@@ -517,7 +532,7 @@
                 renderReadProgress();
                 try {
                     if (parentSignal?.aborted) throw parentSignal.reason || new DOMException('请求已中止', 'AbortError');
-                    const result = await apiGet(path, params, parentSignal, context);
+                    const result = await apiGet(path, params, parentSignal, context, options);
                     if (Number(result?.code) === 0 && ++healthyRequests >= 16 && Date.now() >= requestRecoveryAt) {
                         requestLimit = Math.min(MAX_REQUEST_CONCURRENCY, requestLimit + 2);
                         healthyRequests = 0;
@@ -535,7 +550,7 @@
                 healthyRequests = 0;
                 if (error.code === 'ERP_PERMISSION_REQUIRED') {
                     if (owner && activeRun === owner && owner.controller === ownerController) {
-                        taskCache.clear();
+                        clearReadCaches();
                         rememberSourcePause(owner, error);
                         ownerController.abort(error);
                     }
@@ -584,7 +599,7 @@
             activeRun.cancelledByUser = true;
             activeRun.controller.abort();
         }
-        taskCache.clear();
+        clearReadCaches();
         resumableCheckpoint = null; collectionTaskState = null;
         checkpointMessage = ''; taskStage = '本机数据已清空，请从工作台重新登记采集';
         catalogAction = null; catalogActionRevision++;
@@ -668,7 +683,7 @@
                 await refreshCheckpoint(); renderPageContext();
                 return;
             }
-            taskCache.clear();
+            clearReadCaches();
             // Restore the exact captured defaults too. API reads omit blank
             // parameters, but stripping them here would change the bound query
             // on the first post-restart checkpoint save.
@@ -1398,7 +1413,7 @@
     async function supplementCatalog() {
         if (activeRun || !isPurchasePage() || needsLogin() || !catalogCollector) return;
         const requestId = catalogAction?.requestId;
-        taskCache.clear();
+        clearReadCaches();
         const run = { controller: new AbortController(), cancelledByUser: false, filters: capturedListUrl ? parseCapturedFilters() : null };
         activeRun = run;
         renderPageContext();
@@ -1454,7 +1469,52 @@
         return { failedMappings };
     }
 
+
     async function runCalculation(filters, run) {
+        const module = window.ShopeersErpBulkPurchase;
+        if (!module || !window.XLSX) return runLegacyCalculation(filters, run);
+        const startedAt = Date.now();
+        const preview = run.previewContext || await readPreviewContext(extractQuerySkcs(filters), run.queryCapturedAt);
+        const context = { ...preview, expectedSkus: preview.expectedSkus || run.task?.expectedSkus || run.task?.requestSnapshot?.expectedSkus };
+        if (!context.ledgerPeriod || !context.expectedSkus?.length) return runLegacyCalculation(filters, run);
+        const querySkcs = (run.batchSkcs || context.platformSkcs || extractQuerySkcs(filters)).map(item => String(item?.platformSkc ?? item).trim());
+        if (!querySkcs.length || querySkcs.some(value => !value)) throw new CostError('核算目标格式无效');
+        Object.assign(run, { requestId: context.requestId, requestSnapshot: context.requestSnapshot, ledgerPeriod: context.ledgerPeriod,
+            expectedSkus: context.expectedSkus, querySkcs, detailReadPromises: new Map(), completedTargets: [] });
+        if (run.expectedRequestId && run.requestId !== run.expectedRequestId) throw new CostError('原采集请求已变化');
+        run.readMetrics = { requestCount: 0, requestRetryCount: 0, requestErrorCount: 0, rateLimitCount: 0, peakRequestConcurrency: 0, requestDurationMs: 0 };
+        run.controller.signal.readMetrics = run.readMetrics;
+        if (!bulkPurchaseCollector) bulkPurchaseCollector = module.create({ policy: resultPolicy,
+            requestExport: (query, owner) => apiGetRetry(module.EXPORT_PATH, query, owner.controller.signal, '后台批量采购导出', { workbook: true }),
+            requestList: (query, owner) => apiGetRetry(LIST_PATH, query, owner.controller.signal, '采购范围核验'),
+            readMappings: (warehouse, owner) => catalogCollector.mappings(warehouse, owner, true),
+            readDetails: readOrderDetails, aggregate: aggregateDetails,
+            hash: async buffer => [...new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))].map(value => value.toString(16).padStart(2, '0')).join(''),
+            onProgress: setLoading,
+        });
+        if (!run.task) { bulkPurchaseCollector.clear(); clearReadCaches(); await saveCheckpoint(run); }
+        try {
+            const state = await bulkPurchaseCollector.collect(completeHistoryFilters(filters), run, { ...context, platformSkcs: context.platformSkcs || querySkcs });
+            run.completedTargets = querySkcs;
+            state.meta = { ...state.meta, ...run.readMetrics, ...buildWarningMeta(state.results), filters,
+                queryCapturedAt: run.queryCapturedAt, registeredBefore: run.queryCapturedAt,
+                extensionVersion: EXTENSION_VERSION, durationMs: Date.now() - startedAt,
+                ledgerMonthCutoffStatus: 'applied', previewScope: 'ledger_month' };
+            return state;
+        } catch (error) {
+            if (run.controller.signal.aborted || run.pauseRequested || module.interrupted(error)) throw error;
+            const attempted = { ...run.readMetrics };
+            setLoading('正在使用原方式采集成本', '批量结果需要核验，当前批次改用原读取方式');
+            const state = await runLegacyCalculation(filters, run);
+            for (const field of ['requestCount', 'requestRetryCount', 'requestErrorCount', 'rateLimitCount', 'requestDurationMs']) state.meta[field] = (state.meta[field] || 0) + (attempted[field] || 0);
+            state.meta.peakRequestConcurrency = Math.max(state.meta.peakRequestConcurrency || 0, attempted.peakRequestConcurrency || 0);
+            Object.assign(state.meta, { collectionMethod: 'legacy', bulkFallbackCount: 1,
+                bulkFallbackReason: /^[a-z_]{1,80}$/.test(error.reason || '') ? error.reason : 'bulk_source_unavailable', durationMs: Date.now() - startedAt });
+            return state;
+        }
+    }
+
+    async function runLegacyCalculation(filters, run) {
         const startedAt = Date.now();
         run.detailReadPromises = new Map();
         run.readMetrics = { requestCount: 0, requestRetryCount: 0, requestErrorCount: 0, rateLimitCount: 0, peakRequestConcurrency: 0, requestDurationMs: 0 };
@@ -1477,7 +1537,7 @@
         if (run.expectedRequestId && run.requestId !== run.expectedRequestId) throw new CostError('原采集请求已变化', '请重新查询；不能将原任务恢复到其他请求。');
         // A page remaining open is not proof of the same signed-in account or
         // unchanged history. Every new attempt starts from authoritative reads.
-        if (!run.task) taskCache.clear();
+        if (!run.task) clearReadCaches();
         run.completedTargets = [];
         if (!run.task) await saveCheckpoint(run);
         const historyFilters = completeHistoryFilters(filters);
@@ -1755,7 +1815,7 @@
     }
 
     async function runBatchedCalculation(run) {
-        taskCache.clear(); requestLimit = 8; throttleUntil = 0; requestRecoveryAt = 0; healthyRequests = 0;
+        clearReadCaches(); requestLimit = 8; throttleUntil = 0; requestRecoveryAt = 0; healthyRequests = 0;
         const bridge = window.ShopeersErpDeliveryBridge;
         let task = run.task;
         if (task.status !== 'ready') task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'request_resume', filters: run.filters, mode: 'cost' })).task;
@@ -2597,7 +2657,7 @@
         const button = document.getElementById('erpa-history-export'); button.disabled = true;
         const evidence = [];
         try {
-            taskCache.clear();
+            clearReadCaches();
             for (const warehouse of warehouses) {
                 setLoading('仓库历史核价', `只读取 ${warehouse} · ${evidence.length + 1}/${warehouses.length} 个仓库`);
                 evidence.push(await readWarehouseEvidence(warehouse, run));
@@ -2845,7 +2905,7 @@
         const changed = currentPageUrl !== window.location.href;
         currentPageUrl = window.location.href;
         if (changed) {
-            taskCache.clear(); resumableCheckpoint = null; taskStage = '';
+            clearReadCaches(); resumableCheckpoint = null; taskStage = '';
             catalogAction = null; catalogActionRevision++;
             querySnapshotRestoreAllowed = false;
             capturedListUrl = '';
@@ -2874,7 +2934,7 @@
     window.addEventListener('shopeers:erp-v8-session-observed', (event) => {
         if (!['authenticated', 'login_required'].includes(event.detail?.state)) return;
         erpSessionState = event.detail.state;
-        if (erpSessionState === 'login_required') { taskCache.clear(); if (activeRun) activeRun.controller.abort(new CostError('ERP 登录已失效', '请重新登录后继续，目标证据将重新核验。')); }
+        if (erpSessionState === 'login_required') { clearReadCaches(); if (activeRun) activeRun.controller.abort(new CostError('ERP 登录已失效', '请重新登录后继续，目标证据将重新核验。')); }
         if (!isTopFrame) {
             try { window.top.postMessage({ type: 'shopeers.erp.sessionState', state: erpSessionState }, new URL(window.top.location.href).origin); } catch { /* unsupported parent origins receive no signal */ }
         }

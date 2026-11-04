@@ -86,6 +86,7 @@ export function normalizeErpPurchaseCatalog(value) {
 
 export function normalizeErpCatalogFields(value, { includeMappings = true } = {}) {
   const fields = {};
+  if (typeof value?.catalogMappingsComplete === 'boolean') fields.catalogMappingsComplete = value.catalogMappingsComplete;
   if (hasOwn(value, "supplierNames")) fields.supplierNames = [...new Set((Array.isArray(value.supplierNames) ? value.supplierNames : []).map(text).filter(Boolean))];
   if (hasOwn(value, "unitConversion")) fields.unitConversion = normalizeErpUnitConversion(value.unitConversion);
   if (hasOwn(value, "imageUrl")) fields.imageUrl = normalizeErpCatalogUrl(value.imageUrl);

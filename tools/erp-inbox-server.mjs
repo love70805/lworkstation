@@ -443,6 +443,7 @@ function sanitizeCatalogFields(source, { includeMappings = false } = {}) {
     ...(Array.isArray(source?.supplierNames) ? { supplierNames: uniqueStrings(source.supplierNames) } : {}),
     ...(source?.imageUrl !== undefined ? { imageUrl: catalogImageUrl(source.imageUrl) } : {}),
     ...(source?.attribute !== undefined ? { attribute: catalogText(source.attribute) } : {}),
+    ...(typeof source?.catalogMappingsComplete === 'boolean' ? { catalogMappingsComplete: source.catalogMappingsComplete } : {}),
     ...(includeMappings && Array.isArray(source?.catalogMappings) ? { catalogMappings: sanitizeCatalogMappings(source.catalogMappings) } : {}),
     ...(Array.isArray(source?.supplier1688Links) ? { supplier1688Links: sanitizeSupplierLinks(source.supplier1688Links) } : {}),
     ...(source && Object.hasOwn(source, "purchaseCatalog") ? { purchaseCatalog: sanitizePurchaseCatalog(source.purchaseCatalog) } : {}),
@@ -585,7 +586,8 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
   expectedSkus = null,
 } = {}) {
   const numericFields = ["orderCount", "validOrderCount", "skippedOrderCount", "detailCount", "skippedCancelledOrderCount", "skippedCurrentMonth", "skippedInvalid", "warehouseSkuCount", "platformSkuCount", "costWarningCount", "durationMs", "detailFailureCount", "mappingFailureCount", "targetMappingFailureCount", "ignoredDetailCount", "evidenceRecordCount", "excludedEvidenceCount", "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount",
-    "skuLookupCount", "recoveredMappingCount", "additionalWarehouseHistoryCount", "requestCount", "requestRetryCount", "requestErrorCount", "rateLimitCount", "peakRequestConcurrency", "requestDurationMs"];
+    "skuLookupCount", "recoveredMappingCount", "additionalWarehouseHistoryCount", "requestCount", "requestRetryCount", "requestErrorCount", "rateLimitCount", "peakRequestConcurrency", "requestDurationMs",
+    "bulkSourceRows", "bulkExportCount", "bulkMappingRequests", "bulkBoundaryOrders", "bulkFallbackCount"];
   const topLevelWarnings = sourceWarningsContract(meta, { strict: strictSourceWarnings });
   const evidenceByRef = new Map(warehouseEvidence.map((entry) => [entry.evidenceRef, entry]));
   const expectedScope = normalizedExpectedSkus(expectedSkus);
@@ -613,6 +615,14 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
     if (value) result[field] = value;
   }
   if (typeof meta?.scopeDirectoryComplete === 'boolean') result.scopeDirectoryComplete = meta.scopeDirectoryComplete;
+  if (['bulk_export', 'legacy'].includes(meta?.collectionMethod)) result.collectionMethod = meta.collectionMethod;
+  if (meta?.collectionMethod === 'bulk_export') {
+    if (!/^[a-f0-9]{64}$/.test(meta.bulkSourceSha256 ?? '') || !Number.isSafeInteger(meta.bulkSourceRows) || meta.bulkSourceRows < 0) {
+      throw Object.assign(new Error('ERP 批量采购证据缺少有效来源校验。'), { status: 400, code: 'INVALID_ERP_EVIDENCE' });
+    }
+    result.bulkSourceSha256 = meta.bulkSourceSha256;
+  }
+  if (/^[a-z_]{1,80}$/.test(meta?.bulkFallbackReason ?? '')) result.bulkFallbackReason = meta.bulkFallbackReason;
   for (const field of ["detailFailures", "mappingFailures", "scopeDirectoryFailures", "exclusionStats", "failureStats"]) {
     if (Array.isArray(meta?.[field])) result[field] = meta[field].map((item) => {
       if (typeof item === "string") return item.slice(0, 500);

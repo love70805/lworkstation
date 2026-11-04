@@ -21,6 +21,13 @@ const canonicalExtensionDir = path.join(toolsRoot, "..", "integrations", "erp-as
 const canonicalSourceDir = path.join(canonicalExtensionDir, "src");
 const canonicalManifest = JSON.parse(await fs.readFile(path.join(canonicalExtensionDir, "manifest.json"), "utf8"));
 const frontendRequire = createRequire(path.join(toolsRoot, "..", "frontend", "package.json"));
+const xlsxRoot = path.dirname(frontendRequire.resolve('xlsx'));
+const xlsxPackage = JSON.parse(await fs.readFile(path.join(xlsxRoot, 'package.json'), 'utf8'));
+if (xlsxPackage.version !== '0.20.3') throw new Error('Unexpected workbook parser version');
+const xlsxReader = (await fs.readFile(path.join(xlsxRoot, 'dist', 'xlsx.mini.min.js'), 'utf8')).replace(/\/\/# sourceMappingURL=.*$/gm, '');
+const xlsxReaderTarget = path.join(canonicalSourceDir, 'xlsx-reader.js');
+if (await fs.readFile(xlsxReaderTarget, 'utf8').catch(() => '') !== xlsxReader) await fs.writeFile(xlsxReaderTarget, xlsxReader, 'utf8');
+await fs.copyFile(path.join(xlsxRoot, 'LICENSE'), path.join(canonicalExtensionDir, 'LICENSE.sheetjs'));
 const esbuild = createRequire(frontendRequire.resolve("vite/package.json"))("esbuild");
 const catalogBundle = await esbuild.build({ entryPoints: [path.join(toolsRoot, "..", "frontend", "src", "domain", "erpCatalogRequest.js")], bundle: true, absWorkingDir: path.join(toolsRoot, ".."), format: "esm", platform: "node", write: false, legalComments: "none" });
 const contractPath=path.join(toolsRoot,'erp-inbox-server-catalog-contract.mjs');
@@ -31,6 +38,8 @@ if(previousContract===null||previousContract.replace(/\r\n/g,'\n')!==generatedCo
 }
 const secureModules = [
   "background.js",
+  "xlsx-reader.js",
+  "bulk-purchase.js",
   "catalog-collector.js",
   "content.css",
   "content.js",
@@ -48,6 +57,7 @@ await Promise.all(secureModules.map((file) => fs.copyFile(
   path.join(outputDir, "src", file),
 )));
 await fs.copyFile(path.join(canonicalExtensionDir, "README.md"), path.join(outputDir, "README.md"));
+await fs.copyFile(path.join(canonicalExtensionDir, 'LICENSE.sheetjs'), path.join(outputDir, 'LICENSE.sheetjs'));
 await fs.rm(path.join(outputDir, "src", "inbox-config.js"), { force: true });
 
 const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));

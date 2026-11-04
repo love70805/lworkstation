@@ -63,6 +63,29 @@ function buildFixture() {
 }
 
 describe("ERP cost batch envelope v2", () => {
+  it('binds bulk evidence to its workbook hash without changing on-demand publication', () => {
+    const fixture = buildFixture();
+    Object.assign(fixture.sourceMeta, { collectionMethod: 'bulk_export', bulkSourceSha256: 'a'.repeat(64), bulkSourceRows: 3149,
+      bulkExportCount: 1, bulkMappingRequests: 10, bulkBoundaryOrders: 2,
+      catalogPublication: { mode: 'on_demand', taskId: 'T', batchId: 'B', attemptId: 'A' } });
+    fixture.rows[0].catalogMappingsComplete = false;
+    const inbox = buildErpCostInboxEnvelope({ batch: fixture, deliveryId: 'BULK' });
+    const restored = validateErpCostInboxEnvelope(JSON.parse(JSON.stringify(inbox)));
+    expect(restored.batch.rows[0].catalogMappingsComplete).toBe(false);
+    expect(restored.batch.sourceMeta).toMatchObject({ collectionMethod: 'bulk_export', bulkSourceSha256: 'a'.repeat(64),
+      bulkSourceRows: 3149, bulkExportCount: 1, bulkMappingRequests: 10, bulkBoundaryOrders: 2, catalogPublication: { mode: 'on_demand' } });
+    fixture.sourceMeta.bulkSourceSha256 = '';
+    expect(() => validateErpCostBatchEnvelope(fixture)).toThrow('来源校验');
+  });
+
+  it('retains a bounded legacy fallback reason without trusting diagnostic text', () => {
+    const fixture = buildFixture();
+    Object.assign(fixture.sourceMeta, { collectionMethod: 'legacy', bulkFallbackCount: 1, bulkFallbackReason: 'export_scope_changed' });
+    expect(validateErpCostBatchEnvelope(fixture).envelope.sourceMeta).toMatchObject({ collectionMethod: 'legacy', bulkFallbackCount: 1, bulkFallbackReason: 'export_scope_changed' });
+    fixture.sourceMeta.bulkFallbackReason = 'http://private/?token=discard';
+    expect(validateErpCostBatchEnvelope(fixture).envelope.sourceMeta).not.toHaveProperty('bulkFallbackReason');
+  });
+
   it('preserves cost-only publication intent across validated inbox round trips', () => {
     const fixture = buildFixture();
     const binding = { mode: 'on_demand', taskId: 'T', batchId: 'B', attemptId: 'A' };

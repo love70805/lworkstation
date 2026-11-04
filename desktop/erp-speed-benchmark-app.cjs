@@ -7,8 +7,9 @@ const { createHash } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 const { prepareRuntimeExtension, extensionStorageConfig } = require('./extension-runtime.cjs');
 const { createInboxServiceController, installExtensionInboxTransport } = require('./inbox-service.cjs');
-const { targets, ORDERS, fixture, assertBusinessResult } = require('../tools/fixtures/erp-speed-fixture.cjs');
-const { instrument } = require('../tools/fixtures/erp-speed-instrumentation.cjs');
+const bulkBench = process.env.ERP_BENCH_KIND === 'bulk';
+const { targets, ORDERS, fixture, assertBusinessResult } = require(bulkBench ? '../tools/fixtures/erp-bulk-fixture.cjs' : '../tools/fixtures/erp-speed-fixture.cjs');
+const { instrument } = require(bulkBench ? '../tools/fixtures/erp-bulk-instrumentation.cjs' : '../tools/fixtures/erp-speed-instrumentation.cjs');
 const root = path.resolve(__dirname, '..');
 const out = path.resolve(process.env.ERP_BENCH_OUTPUT);
 const scratch = path.join(out, 'scratch');
@@ -72,7 +73,7 @@ async function runCase(cap, mode, repetition, extensionDir) {
   inbox = createInboxServiceController({ executable: process.execPath, scriptPath: path.join(root, 'tools/erp-inbox-server.mjs'), runAsNode: true, port, capability, spoolPath: path.join(profile, id, 'inbox.json') });
   assert.equal((await inbox.start()).ok, true);
   await waitFor(() => call('status').catch(() => false), `${id} isolated inbox`);
-  const baseDelay = mode === 'slow' ? 110 : 35;
+  const baseDelay = mode.endsWith('slow') ? 110 : 35;
   const timeoutMs = mode === 'timeout' ? 500 : 120000;
   const faultMode = ['timeout', 'timeout-real'].includes(mode) ? 'timeout' : mode === 'limited' ? 'limited' : '';
   const ses = session.fromPartition(`persist:benchmark-erp-${id}`);
@@ -89,10 +90,16 @@ async function runCase(cap, mode, repetition, extensionDir) {
     network.push(entry);
     const selectedFault = inTask && !faultUsed && entry.endpoint === 'purchase-order-details' && url.searchParams.get('purchaseOrderId') === 'PO-SKC-0-0' && faultMode;
     if (selectedFault) faultUsed = true;
-    await pause(selectedFault && faultMode === 'timeout' ? timeoutMs + 100 : baseDelay);
+    await pause(selectedFault && faultMode === 'timeout' ? timeoutMs + 100 : bulkBench && entry.endpoint === 'export-purchase-order' ? 250 : baseDelay);
     entry.end = performance.now();
     if (selectedFault && faultMode === 'limited') { entry.status = 429; return new Response('limited', { status: 429, headers: { 'retry-after': '1' } }); }
-    entry.status = 200; return new Response(JSON.stringify(fixture(url)), { headers: { 'content-type': 'application/json' } });
+    entry.status = 200;
+    const body = fixture(url);
+    if (body.binary) {
+      const bytes = mode === 'fallback' ? require('../tools/fixtures/erp-bulk-fixture.cjs').exportBytes(true) : body.binary;
+      return new Response(bytes, { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } });
+    }
+    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   });
   localSession.protocol.handle('https', async request => {
     const url = new URL(request.url); assert.equal(url.hostname, 'benchmark.invalid');
@@ -105,14 +112,14 @@ async function runCase(cap, mode, repetition, extensionDir) {
     const loaded = await ses.extensions.loadExtension(extensionDir, { allowFileAccess: true });
     extensionId = loaded.id;
     popup = hidden(ses); await popup.loadURL(`chrome-extension://${loaded.id}/popup/popup.html`);
-    await evalIn(popup, `chrome.storage.local.set(${JSON.stringify(extensionStorageConfig({ port, capability, workspaceId: 'workspace-default' }))})`);
+    await evalIn(popup, `chrome.storage.local.set(${JSON.stringify(extensionStorageConfig({ port, capability, workspaceId: 'workspace-default', desktopTaskUi: false }))})`);
     local = hidden(localSession); await local.loadURL('https://benchmark.invalid/');
     const context = await evalIn(local, `ERPBenchmarkLocal.setup(${JSON.stringify('BENCH-' + id)},${JSON.stringify(targets)})`);
     const request = { ...context.request, ledgerVersion: context.request.ledgerVersion };
     await call('requests', { request, expectedSkus: targets });
     browser = hidden(ses);
     browser.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
-    await browser.loadURL(`${purchase}?benchmarkTimeout=${timeoutMs}`);
+    await browser.loadURL(`${purchase}?benchmarkTimeout=${timeoutMs}&bulkMode=${mode.startsWith('legacy') ? 'legacy' : 'bulk'}`);
     await waitFor(() => evalIn(browser, 'Boolean(document.querySelector("#erpa-cost-trigger"))'), 'extension mount');
     await evalIn(browser, 'fetch("/purchase/purchase/v1/purchase-order-page?sku=SKC-0&storeId=BENCH").then(x=>x.json())');
     inTask = true;
@@ -162,7 +169,7 @@ async function runCase(cap, mode, repetition, extensionDir) {
     const semantics = trace.calculations.map(x => JSON.parse(x.semantic));
     const cold = stats(trace, 'cold'), warm = stats(trace, 'warm');
     assert.ok(cold.peak <= cap);
-    assert.equal(cold.requestCount, 560 + (faultMode ? 1 : 0));
+    assert.equal(cold.requestCount, bulkBench ? (mode.startsWith('legacy') ? 560 : mode === 'fallback' ? 562 : 4) : 560 + (faultMode ? 1 : 0));
     assert.equal(warm.requestCount, 0, 'Same-task complete evidence reuse performs no ERP fetch');
     const endCosts = adoption.at(-1).costs.sort((a, b) => a.platformSku.localeCompare(b.platformSku));
     assert.equal(endCosts.length, targets.length);
@@ -196,16 +203,17 @@ app.whenReady().then(async () => {
   try {
     await fs.mkdir(out, { recursive: true }); port = await freePort();
     const caps = process.env.ERP_BENCH_CAPS ? process.env.ERP_BENCH_CAPS.split(',').map(Number) : [8, 10, 12];
-    const modes = process.env.ERP_BENCH_MODES?.split(',') || ['normal', 'slow', 'limited', 'timeout'];
+    const modes = process.env.ERP_BENCH_MODES?.split(',') || (bulkBench ? ['legacy-normal', 'bulk-normal', 'legacy-slow', 'bulk-slow', 'fallback'] : ['normal', 'slow', 'limited', 'timeout']);
     const repeats = Number(process.env.ERP_BENCH_REPEATS || 3);
     assert.ok(caps.length && caps.every(x => [8,10,12].includes(x)));
-    assert.ok(modes.length && modes.every(x => ['normal','slow','limited','timeout','timeout-real'].includes(x)));
+    assert.ok(modes.length && modes.every(x => (bulkBench ? ['legacy-normal', 'bulk-normal', 'legacy-slow', 'bulk-slow', 'fallback'] : ['normal','slow','limited','timeout','timeout-real']).includes(x)));
     assert.ok(Number.isInteger(repeats) && repeats >= 1 && repeats <= 3);
     const directories = new Map();
     for (const cap of caps) {
       const directory = await prepareRuntimeExtension({ sourceDirectory: path.join(root, 'integrations/erp-assistant-extension'), userDataPath: path.join(scratch, `cap-${cap}`), port, runtimeId: 'erp' });
       const sourceFile = path.join(directory, 'src/content.js');
-      await fs.writeFile(sourceFile, instrument((await fs.readFile(sourceFile, 'utf8')).replace(/\r\n/g, '\n'), cap));
+      const instrumented = instrument((await fs.readFile(sourceFile, 'utf8')).replace(/\r\n/g, '\n'), cap);
+      await fs.writeFile(sourceFile, (bulkBench ? '' : 'window.ShopeersErpBulkPurchase=null;\n') + instrumented);
       directories.set(cap, directory);
     }
     // Rotate the configuration order to reduce systematic warm-machine bias.

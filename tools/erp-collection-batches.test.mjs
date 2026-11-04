@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(path.join(root, 'frontend/package.json'));
 const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
 const sourceDir = path.join(root, 'integrations/erp-assistant-extension/src');
-const source = Object.fromEntries(await Promise.all(['background.js','result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js'].map(async name => [name, await readFile(path.join(sourceDir,name),'utf8')])));
+const source = Object.fromEntries(await Promise.all(['background.js','result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js','xlsx-reader.js','bulk-purchase.js'].map(async name => [name, await readFile(path.join(sourceDir,name),'utf8')])));
 const extensionVersion=JSON.parse(await readFile(path.join(root,'integrations/erp-assistant-extension/manifest.json'),'utf8')).version;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -86,13 +86,13 @@ export async function scenario(size, mode = '', options = {}) {
       inflight--; if(endpoint==='purchase-order-page'){lists--;listTimes.get(timeKey).end=performance.now();}
       if(['throttle','speed-recovery'].includes(mode)&&!limited&&endpoint==='purchase-order-page'){limited=true;return {ok:false,status:429,statusText:'Limited',headers:{get:()=> '1'}};}
       if(permissionCatalogBlocked&&endpoint==='product-info-sku')return {ok:true,status:200,json:async()=>({code:-40102,msg:'校验用户店铺权限失败！'})};
-      if(options.fixture){const value=await options.fixture(url);return {ok:true,status:200,json:async()=>value};}
+      if(options.fixture){const value=await options.fixture(url);if(value?.binary)return {ok:true,status:200,headers:{get:name=>name==='content-type'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':null},arrayBuffer:async()=>value.binary};return {ok:true,status:200,json:async()=>value};}
       const id=target.split('-').at(-1);
       const data=endpoint==='product-page'?[{itemId:`WH-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
       return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
     };
     const lanes = mode==='benchmark-serial' ? 1 : mode==='benchmark-two-lanes' ? 2 : 4;
-    for(const name of ['result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
+    for(const name of [...(options.bulk?['xlsx-reader.js','bulk-purchase.js']:[]),'result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
       let script=options.sources?.[name]??source[name];
       if(options.afterCosts&&name==='content.js')script=script.replace("executionProtocol: 2, catalogMode: 'on_demand'", "executionProtocol: 2, catalogMode: 'after_costs'");
       if(mode.startsWith('benchmark')&&name==='content.js')script=script.replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`);
@@ -167,6 +167,7 @@ export async function scenario(size, mode = '', options = {}) {
       await until(()=>catalogs.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled);
       if(options.catalogAmbiguity)assert.ok(catalogs.every(item=>item.requestId==='REQ-CATALOG'),'task materials use their exact companion despite historical requests with the same SKCs');
       if(options.permissionCatalog){assert.equal(costReads(),costReadsBefore);assert.equal(records[1].pauseReason,undefined);}
+      else if(options.bulk) assert.ok(calls.slice(before).every(call=>call.endpoint==='product-info-sku'),'on-demand bulk catalog only supplements missing platform metadata');
       else assert.equal(calls.length,before,'durable seeds reuse directory, mapping and complete history even after the task cache is gone');
     }
     await until(()=>{
@@ -176,7 +177,7 @@ export async function scenario(size, mode = '', options = {}) {
     assert.equal(records[1].summary.delivered,size);
     assert.equal(new Set(deliveries.map(item=>item.resultDeliveryId)).size,deliveries.length);
     assert.ok(deliveries[0].listCount<=(options.firstBatchListLimit??(mode==='throttle'?6:5)),'first five SKCs are durable before the remaining targets');
-    assert.equal(maxLists,mode==='benchmark-serial'?1:mode==='benchmark-two-lanes'?2:4);assert.ok(maxInflight<=12);
+    assert.equal(maxLists,options.maxLists??(mode==='benchmark-serial'?1:mode==='benchmark-two-lanes'?2:4));assert.ok(maxInflight<=12);
     assert.ok(deliveries.every(item=>item.querySkcs.length<=5&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
     assert.equal(records[1].catalogMode,options.afterCosts?'after_costs':'on_demand');
     assert.ok(records[1].batches.every(batch=>options.afterCosts?['completed','failed'].includes(batch.catalogStatus):!batch.catalogStatus),'material execution follows the task policy');
@@ -205,7 +206,7 @@ export async function scenario(size, mode = '', options = {}) {
       assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,size*2,'explicit new task rereads authoritative history');
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
-    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
+    console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,...(options.bulk?{}:{duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4)}),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
     return options.returnMetrics ? {listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries,catalogs} : listMs;
   } finally {await Promise.all(windows.map(item=>item.happyDOM.close()));}
 }
