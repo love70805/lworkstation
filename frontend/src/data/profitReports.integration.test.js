@@ -201,10 +201,10 @@ it('replaces a legacy shared-order source without changing source identities and
  expect(saved.totalsExact.dispatchQuantityExact).toBe('25');
  for(const exportedBytes of [base64ToBytes(saved.fileBase64),await prepareReportDownload(saved)]){
   const exported=XLSX.read(exportedBytes,{type:'array'}),sheet=exported.Sheets['代发表'];
-  expect(XLSX.utils.sheet_to_json(sheet,{header:1}).slice(1,4).map(row=>row.slice(0,4))).toEqual([
-   ['S2','ORDER-A',15,purchase],['S3','ORDER-B',10,purchase],['S4','ZERO',0,purchase],
+  expect(XLSX.utils.sheet_to_json(sheet,{header:1}).slice(1,4).map(row=>row.slice(0,5))).toEqual([
+   ['甲','S2','ORDER-A',15,purchase],['甲','S3','ORDER-B',10,purchase],['甲','S4','ZERO',0,purchase],
   ]);
-  for(const cell of ['D2','D3','D4'])expect(sheet[cell]).toMatchObject({t:'s',v:purchase});
+  for(const cell of ['E2','E3','E4'])expect(sheet[cell]).toMatchObject({t:'s',v:purchase});
  }
  await (previewMonthlySupplement(input));
  expect((await readSavedProfitReport(saved.id)).fileBase64).toBe(saved.fileBase64);
@@ -440,6 +440,6 @@ it('saves a direct financial report without dispatch while keeping shop dispatch
  await adopt('dispatch',{rows:[{kind:'dispatch',manual:true,store:'甲',sourceRow:1,quantityExact:'2'},{kind:'dispatch',manual:true,store:'乙',sourceRow:1,quantityExact:'3'}],adoptedQuantityExact:'5'});
  const updated=await report();const download=await readProfitReportDownload(updated.id);
  const book=XLSX.read(await prepareReportDownload(download.report,download),{type:'array'});
- expect(book.Sheets['代发表'].E1.v).toBe('店铺号');expect(book.Sheets['代发表'].E2.v).toBe('甲');expect(book.Sheets['代发表'].E3.v).toBe('乙');
+ expect(book.Sheets['代发表'].A1.v).toBe('店铺');expect(book.Sheets['代发表'].A2.v).toBe('甲');expect(book.Sheets['代发表'].A3.v).toBe('乙');
  expect(updated.totalsExact.dispatchQuantityExact).toBe('5');
 });

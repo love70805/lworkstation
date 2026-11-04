@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.12",
+  "version": "1.2.0",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-bulk-cost-1-0-12",
+  "integrationBranch": "codex/export-layout-1-2-0",
   "requiredCommits": [
     {
-      "module": "verified-main",
-      "commit": "8c0230083fa95126ce139add3493f5b67e665605"
+      "module": "erp-bulk-cost-1.0.12",
+      "commit": "96bbf237c3b386092fcbdf11ca9cea1579838bc0"
     }
   ]
 }
