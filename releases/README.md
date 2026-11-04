@@ -2,7 +2,7 @@
 
 表头使用更易区分的浅蓝底色，汇总表右侧两块汇总下移一行，全部报告工作表取消冻结。新导出、历史下载及重复处理一致，编号、数量、金额和原合并保持；展示模板追加 @13，保留 @12 下载兼容。[本批记录](../docs/integration/EXPORT_SUMMARY_LAYOUT_1.2.3.md)。
 
-规范候选 `releases/candidates/1.2.3/`，116,357,379 字节，SHA256 `991C2A0C3DE6E1CDC002C13685B989B42610E48719FE95447B4140FFEBCC78B1`。37 项定向检查、真实报告只读逐格/合并对照及视觉预览、生产构建与包内一致性核对通过。必需 CI、合并和公开稳定状态沿用同批 PR 与 [v1.2.3 Release](https://github.com/love70805/lworkstation/releases/tag/v1.2.3) 服务元数据，未代安装或改写真实业务库。
+规范候选 `releases/candidates/1.2.3/`，116,357,379 字节，SHA256 `991C2A0C3DE6E1CDC002C13685B989B42610E48719FE95447B4140FFEBCC78B1`。43 项定向检查、真实报告只读逐格/合并对照及视觉预览、生产构建与包内一致性核对通过。必需 CI、合并和公开稳定状态沿用同批 PR 与 [v1.2.3 Release](https://github.com/love70805/lworkstation/releases/tag/v1.2.3) 服务元数据，未代安装或改写真实业务库。
 
 ## 1.2.2 — 内置扩展历史回执误报修复
 
