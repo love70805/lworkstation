@@ -297,7 +297,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       {calculation.loading ? <p className="profit-refresh-status" role="status">正在更新计算，当前显示上次结果；更新完成后可导出。</p> : null}
       {!suppliedSnapshot ? <section className="profit-next-step" aria-label="本月下一步">
         <div><strong>本月下一步</strong><span>{nextStep.text}</span></div>
-        {nextStep.action ? <Button disabled={Boolean(calculation.loading || calculation.error)} onClick={() => nextStep.key === 'cost' ? navigate(allMissingCostsHref) : finalizeLedger()}>{nextStep.action}</Button> : null}
+        {nextStep.action ? <Button disabled={Boolean(calculation.loading || calculation.error)} onClick={() => navigate(nextStep.key === 'cost' ? allMissingCostsHref : buildProfitHref({ ledgerId: snapshot.ledger.id, view: 'detail' }))}>{nextStep.action}</Button> : null}
       </section> : null}
       <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
         <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
@@ -362,7 +362,7 @@ export function ProfitViewsContent({ monthControl = null }) {
   if (!snapshot?.ledger) return <Panel><EmptyState icon={CalendarDays} title="开始本月利润核算" description="导入销售台账后，在这里采集成本、处理异常并导出利润表。" action={<Button variant="primary" onClick={() => navigate('/import-preview')}>导入月度台账</Button>} /></Panel>;
   if (store !== 'all' && !stores.includes(store)) return <Panel><p role="alert">当前账本没有此店铺。</p><Button onClick={() => changeScope({storeFilter:'all'})}>查看全部店铺</Button></Panel>;
   return <>
-    <PageHeader title="利润核算" eyebrow={snapshot.ledger.period} description="查看利润、补齐成本、导出报表。"
+    <PageHeader title="利润核算" eyebrow={snapshot.ledger.period} description="随时调整台账与成本，重新核算并导出；历史报表保留原样。"
       actions={<div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={event => changeScope({storeFilter:event.target.value})}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label><Button icon={CalendarDays} onClick={() => navigate('/ledger')}>月度账本</Button></div>} />
     <section id="monthly-report-section" className="profit-report-section profit-report-top" tabIndex={-1} aria-label="本月报告">
       <MonthlyReportManager compact key={'report/'+snapshot.ledger.id} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId}

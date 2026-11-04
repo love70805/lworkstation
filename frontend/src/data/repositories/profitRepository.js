@@ -575,7 +575,6 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
     const active = await getActiveMemberContext();
     if (active.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(active.role)) throw new Error('当前成员无此账本的财务写权限。');
     if (['rejected', 'voided'].includes(inbox.status) || inbox.status === 'applied' && !ignoreAction) return { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status, adoption: inbox.adoption, idempotent: true };
-    if (ignoreAction && ['finalized', 'locked'].includes((await db.ledgers.get(inbox.ledgerId))?.status)) throw new Error('已定稿或已锁定账本不能改变异常处理。');
     const ledger = operatingLedger(await db.ledgers.get(inbox.ledgerId)), request = await db.erpCostRequests.get(inbox.requestId);
     const now = new Date().toISOString();
     let costResolutions = inbox.costResolutions ?? [];
@@ -593,7 +592,6 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
       return { id: inbox.id, inboxId: inbox.id, batchId, status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: changed ? now : inbox.adoption?.processedAt }, ...summary, matchedCount: summary.adoptedCount, idempotent: !changed };
     };
     if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return persistResult([], 'blocked', 'request_or_ledger_missing');
-    if (resolutions.length && ['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或已锁定的账本不能确认采购价格。');
     if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
     if (request.ledgerVersion != null && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) return persistResult([], 'blocked', 'ledger_import_changed');
     const [salesRows, approvals, batches] = await Promise.all([
@@ -688,7 +686,6 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
       item.manualStores = manualStores;
       const previous = existingRows.find(cost => canonicalPlatformSku(cost.platformSku) === sku);
       if (previous) { items.push({ ...item, state: manualStores.length ? 'manual_effective' : 'adopted', costRowId: previous.id }); continue; }
-      if (['finalized', 'locked'].includes(ledger.status)) { items.push({ ...item, state: 'ledger_protected', reason: ledger.status }); continue; }
       const identityIssue = ledgerCostIdentityIssue(identities.get(sku), row, { requireSkc: true });
       if (identityIssue) { items.push({ ...item, state: 'evidence_incomplete', reason: identityIssue.code, identityIssue }); continue; }
       if (!stores.length) { items.push({ ...item, state: 'evidence_incomplete', reason: 'sku_not_in_ledger' }); continue; }
@@ -742,7 +739,8 @@ export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inb
     const member = await getActiveMemberContext();
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
-    if (['finalized', 'locked'].includes(ledger.status)) throw new Error('已定稿或已锁定账本不能改变异常处理。');
+    // Current ledgers remain editable, including legacy finalized/locked data.
+    // Saved report files are separate immutable snapshots, never rewritten here.
     const receipts = (await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray())
       .filter(row => row.workspaceId === member.workspaceId && ['pending', 'loaded', 'applied'].includes(row.status) && (!inboxId || row.id === inboxId));
     // An explicit empty selection means no action, never the whole month.
@@ -1007,7 +1005,6 @@ async function publishVerifiedErpCostBatch({
     const ledger = operatingLedger(await db.ledgers.get(ledgerId));
     if (!ledger) throw new Error("找不到对应的月度账本。");
     if (ledger.period !== costPeriod) throw new Error("账本月份已变化，请重新核对 ERP 成本。");
-    if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定的账本不能直接更新成本。");
     if (String(workspaceId) !== String(ledger.workspaceId)) throw new Error("ERP 成本发布工作区与账本不一致。");
     const [salesRows, approvals] = await Promise.all([
       sharedSales ?? db.salesRows.where("ledgerId").equals(ledgerId).toArray(),
@@ -1273,7 +1270,6 @@ export async function saveApproved1688Fallback({
     async () => {
       const ledger = operatingLedger(await db.ledgers.get(ledgerId));
       if (!ledger) throw new Error("找不到对应的月度账本。");
-      if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能新增成本审批。");
 
       const ledgerRows = await db.salesRows.where("ledgerId").equals(ledgerId).toArray();
       if (!ledgerRows.some((row) => canonicalPlatformSku(row.platformSku ?? row.sku) === canonicalSku)) {
@@ -1408,7 +1404,6 @@ export async function revokeApproved1688Fallback({
     async () => {
       const ledger = operatingLedger(await db.ledgers.get(ledgerId));
       if (!ledger) throw new Error("找不到对应的月度账本。");
-      if (["finalized", "locked"].includes(ledger.status)) throw new Error("已定稿或已锁定账本不能撤销成本审批。");
       const approval = await db.costApprovals.get(approvalId);
       if (!approval || approval.ledgerId !== ledgerId) throw new Error("找不到对应的成本审批记录。");
       if (manualSnapshot(approval)?.kind === "manual_override") throw new Error("人工更正须通过逐店成本更正入口撤销。");
@@ -1456,7 +1451,7 @@ export async function saveErpCostRequest(request) {
   await db.transaction("rw", db.ledgers, db.importBatches, db.erpCostRequests, db.auditEvents, async () => {
     const ledger = request.ledgerId ? await db.ledgers.get(request.ledgerId) : null;
     if (request.ledgerId && !ledger) throw new Error("找不到对应的月度账本。");
-    if (ledger && ledger.workspaceId !== request.workspaceId) throw new Error("账本工作区不匹配或已定稿，不能登记核算请求。");
+    if (ledger && ledger.workspaceId !== request.workspaceId) throw new Error("账本工作区不匹配，不能登记核算请求。");
     const ledgerPeriod = ledger?.period ?? request.ledgerPeriod ?? null;
     if (ledgerPeriod != null && (typeof ledgerPeriod !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledgerPeriod))) throw new Error("ERP 请求核算月份必须为 YYYY-MM。");
     if (request.ledgerPeriod != null && request.ledgerPeriod !== ledgerPeriod) throw new Error("ERP 请求核算月份与月度账本不匹配。");
@@ -1578,7 +1573,6 @@ export async function rejectErpCostInboxBatches({ ids, rejectedBy = "local-user"
         throw new Error("只有待处理或已载入的 ERP 批次可以删除。");
       }
       const ledger = operatingLedger(await db.ledgers.get(record.ledgerId));
-      if (ledger?.status === "locked") throw new Error("已锁定账本不能删除 ERP 收件批次。");
     }
 
     for (const record of records) {
@@ -2018,7 +2012,7 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
     const projected = await Promise.all(ledgers.map(async original => {
       const ledger = operatingLedger(original);
       if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id, { summaryOnly: true }))?.ledger ?? ledger;
-      if (['finalized', 'locked'].includes(ledger.status) || ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
+      if (ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
       const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@1-identity',
         revision, revisionReader: selectionFactsRevision, persist: false, compute: async () => {
           const saleIdentities = new Map(), latest = new Map(), batchStates = new Map();

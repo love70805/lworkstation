@@ -233,7 +233,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
           <div><span>02</span><p><strong>卓麟 ERP → 采购管理</strong><small>将平台 SKC 粘贴到查询框，点击“查询”，再点击“核算 SKU 成本”。</small></p></div>
           <div><span>03</span><p><strong>回到 Lworkstation</strong><small>正常回传通过范围和证据校验后自动采用；查看异常项，需要时明确人工更正。</small></p></div>
         </div>
-        <div className="erp-flow-note"><Check size={17} />人工有效更正优先；后续 ERP 回传不会覆盖人工更正或静默改变已定稿利润。</div>
+        <div className="erp-flow-note"><Check size={17} />人工有效更正优先；账本可随时调整，已导出报表保留当时快照。</div>
       </Panel>
     </>
   );

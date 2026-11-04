@@ -8,12 +8,12 @@ afterEach(async()=>{await db.delete();});
 it('persists metadata alone and exposes it through existing product prefill without changing costs or relationships',async()=>{
   await saveProductCatalogRecord({draft:{name:'已人工命名',platformSkc:'K',variants:[{platformSku:'S',warehouseSku:'WH'}]},status:'draft'});
   const before=await db.platformSkus.toArray();
-  const archive={fileName:'合成商品档案.xlsx',hash:'a'.repeat(64),rows:[{warehouseSku:'WH',productName:'ERP 名称',imageUrl:'https://example.com/a.jpg',attribute:'红色',supplier1688Links:[{url:'https://detail.1688.com/offer/123456789.html'}]}]};
+  const archive={fileName:'合成商品档案.xlsx',hash:'a'.repeat(64),rows:[{warehouseSku:'WH',productName:'ERP 名称',imageUrl:'https://example.com/a.jpg',attribute:'红色',supplier1688Links:[{url:'https://detail.1688.com/offer/900000000001.html'}]}]};
   expect((await previewProductArchive(archive)).rows).toHaveLength(1);
   await saveProductArchive(archive,'W');
   const result=buildSelectionReferenceRows(await getSelectionReferenceSnapshot());
   expect(result[0].erpCatalogFields.imageUrl.value).toBe(archive.rows[0].imageUrl);
-  expect(result[0].erpCatalogSuppliers[0].sourceUrl).toContain('/offer/123456789.html');
+  expect(result[0].erpCatalogSuppliers[0].sourceUrl).toContain('/offer/900000000001.html');
   expect(result[0].referenceUnitCost).toBeNull();
   expect(await db.platformSkus.toArray()).toEqual(before);
   expect(await db.erpCostRows.count()).toBe(0);expect(await db.profitLines.count()).toBe(0);

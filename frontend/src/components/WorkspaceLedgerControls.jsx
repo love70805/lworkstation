@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Badge, Button, Panel } from './UI';
 import { CalendarDays } from 'lucide-react';
-const labels = { draft: '草稿', cost_pending: '待核对成本', approval_pending: '待确认成本', ready: '待确认利润', finalized: '已定稿', locked: '已锁定' };
+const labels = { draft: '草稿', cost_pending: '待核对成本', approval_pending: '待确认成本', ready: '成本已齐', finalized: '可继续调整', locked: '可继续调整' };
 
 export default function WorkspaceLedgerControls({ scope, onError, children }) {
   const context = scope.context;

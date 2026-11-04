@@ -5,7 +5,7 @@ import { projectProductArchiveRows } from '../domain/productArchive';
 
 it('reads real cells despite a broken dimension, extracts literal IMAGE URLs and ignores prices and truncated mapping fragments', () => {
   const sheet=XLSX.utils.aoa_to_sheet([['图片链接','商品ID','商品名称','商品颜色','采购单价','平台SKU片段','1688链接片段'],
-    ['', 'WH-A','商品甲','红色',999,'X'.repeat(1024),'https://detail.1688.com/offer/123456789.html']]);
+    ['', 'WH-A','商品甲','红色',999,'X'.repeat(1024),'https://detail.1688.com/offer/900000000001.html']]);
   sheet.A2={t:'s',f:'_xlfn.IMAGE("https://example.com/product.jpg")'};
   sheet['!ref']='A1:A1';
   const rows=productArchiveRows(sheet,XLSX);

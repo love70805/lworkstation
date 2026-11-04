@@ -1,4 +1,4 @@
-const labels = { catalog: "商品档案", erp: "ERP", ledger: "台账", profit: "定稿利润" };
+const labels = { catalog: "商品档案", erp: "ERP", ledger: "台账", profit: "历史报表" };
 
 export default function ReferenceIdentityEvidence({ variant }) {
   const conflict = variant.platformSkcConflict || variant.attributeConflict || variant.erpCatalogRelationshipConflict;

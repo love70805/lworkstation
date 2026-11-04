@@ -11,7 +11,8 @@ import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
 import { buildErpInboxQueue } from '../domain/erpInboxMatching';
 import { sourceRevision, selectionFactsRevision } from './db/derivedCache';
 import { calculateFormalLedgerRows } from '../domain/ledgerProfit';
-import { setErpCostAnomaliesIgnored, listIgnoredErpCostAnomalies } from './repositories/profitRepository';
+import { setErpCostAnomaliesIgnored, listIgnoredErpCostAnomalies, updateLedgerWarehouseRate } from './repositories/profitRepository';
+import { previewProfitReport, saveProfitReport, readProfitReportDownload } from './repositories/profitReportRepository';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1',recordsB=null}={}){
@@ -52,13 +53,33 @@ it('ignoring cannot turn absent, blank, incomplete or precision-lost evidence in
   expect((await getLatestLedgerCosts(seeded.ledger.id)).some(row=>row.platformSku==='B'),id).toBe(false);
  }
 });
-it('enforces ownership, financial permission and finalized protection for ignore and revoke',async()=>{
+it('enforces financial permission for ignore and revoke',async()=>{
  const {ledger,envelope}=await seed();await receiveErpCostInboxEnvelope({envelope});
- await db.ledgers.update(ledger.id,{status:'finalized'});
- await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id})).rejects.toThrow('已定稿');
- await db.ledgers.update(ledger.id,{status:'ready'});
  await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'viewer',role:'viewer'});
  await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id})).rejects.toThrow('财务写权限');
+ await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false})).rejects.toThrow('财务写权限');
+});
+it.each(['finalized','locked'])('keeps a legacy %s ledger editable while preserving exported report bytes', async status => {
+ const {ledger,envelope}=await seed();await receiveErpCostInboxEnvelope({envelope});
+ await db.ledgers.update(ledger.id,{status});
+ const snapshot=await getLedgerSnapshot(ledger.id);
+ expect(['finalized','locked']).not.toContain(snapshot.ledger.status);
+ expect((await db.ledgers.get(ledger.id)).status).toBe(status); // Reads never migrate data.
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id});
+ const input={ledgerId:ledger.id,kind:'pre_deduction'};
+ const first=await saveProfitReport(input,{expectedFingerprint:(await previewProfitReport(input)).fingerprint});
+ await db.ledgers.update(ledger.id,{status});
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false});
+ expect((await getLatestLedgerCosts(ledger.id)).some(row=>row.platformSku==='B')).toBe(false);
+ await db.ledgers.update(ledger.id,{status});
+ await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'B',unitCost:2.5,reason:'重新核算'});
+ await updateLedgerWarehouseRate(ledger.id,1);
+ const revised=await saveProfitReport(input,{expectedFingerprint:(await previewProfitReport(input)).fingerprint});
+ expect(revised.revision).toBe(first.revision+1);
+ expect(revised.fileSha256).not.toBe(first.fileSha256);
+ expect((await readProfitReportDownload(first.id)).report.fileBase64).toBe(first.fileBase64);
+ expect((await readProfitReportDownload(first.id)).report.fileSha256).toBe(first.fileSha256);
+ expect((await db.erpCostInbox.toArray())[0].envelope).toEqual(envelope);
 });
 it('scopes single and multiple anomaly decisions to the selected products, with empty selection doing nothing', async () => {
  const {ledger,envelope}=await seed({prices:[1,0]});const receipt=await receiveErpCostInboxEnvelope({envelope});
