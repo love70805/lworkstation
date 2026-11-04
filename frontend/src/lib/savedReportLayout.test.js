@@ -37,7 +37,7 @@ it('keeps tables compact while separating counts, identifiers and amounts with p
  expect(alignment(book,'20店','E2')).toContain('borderId="1"');
  expect(alignment(book,'代发表','E2')).toContain('fontId="5"');
  expect(alignment(book,'代发表','D2')).toContain('fontId="0"');
- expect(source(book,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');
+ expect(source(book,'xl/styles.xml')).toContain('rgb="FFCADFF2"');
  expect(source(book,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
  expect(book.Sheets['代发表'].E2).toMatchObject({t:'s',v:dispatchRows[0].order1688});
  expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.152509999,z:'General'});
@@ -50,7 +50,7 @@ it.each(['profit-zebra@7-deductions-compact','profit-zebra@8-spaced-general-dedu
  const built=buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}),files=read(built.bytes);
  const archive=new Map(Object.entries(files.files).filter(([name,row])=>name&&row.type===2&&name!=='\u0001Sh33tJ5').map(([name,row])=>[name,new Uint8Array(row.content)]));
  // Emulate the old quantity/right and identifier/left edge alignment and two-decimal format.
- archive.set('xl/styles.xml',new TextEncoder().encode(source(files,'xl/styles.xml').replace(/numFmtId="0"(?=[^>]*fontId="[34]")/g,'numFmtId="168"').replace(/ indent="1"/g,'').replaceAll('FFE9EEF4','FF284B6B').replaceAll('FF344459','FFFFFFFF').replaceAll('fontId="5"','fontId="0"').replace(/borderId="[1-4]"/g,'borderId="0"')));
+ archive.set('xl/styles.xml',new TextEncoder().encode(source(files,'xl/styles.xml').replace(/numFmtId="0"(?=[^>]*fontId="[34]")/g,'numFmtId="168"').replace(/ indent="1"/g,'').replaceAll('FFCADFF2','FF284B6B').replaceAll('FF344459','FFFFFFFF').replaceAll('fontId="5"','fontId="0"').replace(/borderId="[1-4]"/g,'borderId="0"')));
  const bytes=writeReportArchive(archive),before=read(bytes),saved={...report,templateVersion,fileBase64:bytesToBase64(bytes),fileSha256:await sha256(bytes)},snapshot=structuredClone(saved);
  const after=read(await prepareReportDownload(saved));
  for(const name of before.SheetNames){
@@ -63,7 +63,7 @@ it.each(['profit-zebra@7-deductions-compact','profit-zebra@8-spaced-general-dedu
   else expect(new Uint8Array(after.files[file].content)).toEqual(row);
  }
  expect(after.Sheets['扣款'].D2.z).toBe('General');expect(alignment(after,'代发表','D2')).toContain('horizontal="center"');expect(alignment(after,'代发表','E2')).toContain('horizontal="center"');expect(saved).toEqual(snapshot);
- expect(source(after,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');expect(alignment(after,'代发表','D2')).toContain('borderId="1"');
+ expect(source(after,'xl/styles.xml')).toContain('rgb="FFCADFF2"');expect(alignment(after,'代发表','D2')).toContain('borderId="1"');
  expect(after.Sheets['代发表']['!cols']).toEqual(files.Sheets['代发表']['!cols']);
  expect(source(after,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
 });

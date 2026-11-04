@@ -54,8 +54,14 @@ it.each(['pre_deduction', 'financial'])('adds merges when re-downloading frozen 
   expect(result.Sheets['甲店'].C2.v).toBe('白色 $1 & <细款>');
   for (const name of original.SheetNames) {
     const a = original.Sheets[name], b = result.Sheets[name];
-    for (const address of Object.keys(a).filter(address => /^[L-Z]+\d+$/.test(address))) expect(b[address]?.v).toBe(a[address]?.v);
+    for (const address of Object.keys(a).filter(address => /^[L-Z]+\d+$/.test(address))) {
+      const target = name === '汇总表' && /^[LMN]\d+$/.test(address) ? address[0] + (Number(address.slice(1)) + 1) : address;
+      expect(b[target]?.v).toBe(a[address]?.v);
+      if (a[address]?.v != null) expect(b[target]?.t).toBe(a[address].t);
+    }
   }
+  expect(result.Sheets['汇总表'].L1).toBeUndefined();
+  expect(result.Sheets['汇总表'].L2.v).toBe('店铺');
   expect(literalNumbers(result)).toEqual(literalNumbers(original));
   const aStyles=new TextDecoder().decode(original.files['xl/styles.xml'].content),bStyles=new TextDecoder().decode(result.files['xl/styles.xml'].content);
   const withoutCellStyles=xml=>xml.replace(/<(cellXfs|fonts|fills|borders)\b[^>]*>[\s\S]*?<\/\1>/g,'');

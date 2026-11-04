@@ -3,6 +3,7 @@ import { profitReportSheetWidths, writeReportArchive } from './profitReportWorkb
 import { reportThemeXml, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
 import { dispatchColumns } from './dispatchReportLayout';
 import { clearReportMergeValues } from './reportMergedCells';
+import { lowerSavedReportSummary, unfreezeReportSheet } from './reportSummaryLayout';
 
 const attribute=(tag,name)=>tag.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1];
 const fail=()=>{throw new Error('报告样式信息不足，无法调整下载布局。原始存档保持不变。');};
@@ -42,7 +43,7 @@ export function formatSavedReportLayout(bytes){
     const sheet=book.Sheets[name],widths=profitReportSheetWidths(sheet,name);
     const tag=tags[book.SheetNames.indexOf(name)],relation=relations.find(row=>attribute(row,'Id')===attribute(tag,'r:id')),target=relation&&attribute(relation,'Target');
     if(!target||!/^worksheets\/sheet\d+\.xml$/.test(target))return fail();
-    if(!widths){files.set('xl/'+target,new TextEncoder().encode(clearReportMergeValues(read('xl/'+target),sheet)));continue;}
+    if(!widths){files.set('xl/'+target,new TextEncoder().encode(unfreezeReportSheet(clearReportMergeValues(read('xl/'+target),sheet))));continue;}
     const file='xl/'+target,product=sheet.B1?.v==='SKU',dispatch=dispatchColumns(sheet);
     const lastRow=XLSX.utils.decode_range(sheet['!ref']).e.r+1;
     const lastLabel=(column,label)=>{let last=0;for(let row=2;row<=lastRow;row++)if(sheet[column+row]?.v===label)last=row;return last;};
@@ -59,7 +60,8 @@ export function formatSavedReportLayout(bytes){
       const id=style(Number(attribute(cell,'s')??0),horizontal,general,numeric,identifier);
       return /\bs="[^"]*"/.test(cell)?cell.replace(/\bs="[^"]*"/,`s="${id}"`):cell.replace(/\/?>(?=$)/,end=>` s="${id}"${end}`);
     });
-    files.set(file,new TextEncoder().encode(xml));
+    if(name==='汇总表')xml=lowerSavedReportSummary(xml,sheet);
+    files.set(file,new TextEncoder().encode(unfreezeReportSheet(xml)));
   }
   let themed=styles.replace(block[0],`<cellXfs count="${originals.length+variants.length}">${block[1]}${variants.join('')}</cellXfs>`);
   for(const [tag,xml] of Object.entries(reportThemeXml)){
