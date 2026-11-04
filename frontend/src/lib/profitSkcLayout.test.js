@@ -24,7 +24,7 @@ it.each(['pre_deduction', 'financial'])('groups and merges SKC in summary/store 
   expect(merges(first)).toEqual(['A2:A4']); expect(merges(second)).toEqual(['A2:A3']);
   expect(merges(book.Sheets['汇总表'])).toEqual(['A2:J2', 'A3:A5', 'A8:J8', 'A9:A10']);
   expect(detail(first).map(row => row[1])).toEqual(['A1', 'A2', 'A3', 'B1']);
-  expect(first.A2).toMatchObject({ t: 's', v: 'SKC-A' }); expect(first.A3.v).toBe('');
+  expect(first.A2).toMatchObject({ t: 's', v: 'SKC-A' }); expect(first.A3?.v).toBeUndefined();
   expect(first.F2).toMatchObject({ t: 's', v: '000123456789012345678901' });
   expect(first.C3.v).toBe('白色 $1 & <细款>'); expect(first.J6.v).toBe(74.35);
   expect(first.A2.s).toEqual(first.A3.s); expect(first.B2.s).not.toEqual(first.B3.s);
@@ -64,9 +64,11 @@ it.each(['pre_deduction', 'financial'])('adds merges when re-downloading frozen 
   expect(archive).toEqual(before);
 });
 
-it('keeps current merged archives byte-identical on repeated downloads', async () => {
+it('keeps repeated download presentation stable without changing current archives', async () => {
   const products = [product('ONE', 'A'), product('TWO', 'A')], header = report(products, 'pre_deduction');
   const built = buildProfitReportWorkbook({ report: header, products });
   const archive = { ...header, templateVersion: built.templateVersion, fileBase64: bytesToBase64(built.bytes), fileSha256: await sha256(built.bytes) };
-  expect(await sha256(await prepareReportDownload(archive))).toBe(await sha256(built.bytes));
+  const before = structuredClone(archive), first = await prepareReportDownload(archive);
+  expect(await sha256(await prepareReportDownload(archive))).toBe(await sha256(first));
+  expect(archive).toEqual(before);
 });

@@ -17,7 +17,7 @@ export function mergeProfitSkcRows(rows) {
   const finish = end => {
     if (start >= 0 && end - start > 1) {
       rows[start][0] = { ...rows[start][0], mergeDown: end - start };
-      for (let index = start + 1; index < end; index++) rows[index][0] = { ...rows[index][0], value: '', stripeRow: start };
+      for (let index = start + 1; index < end; index++) rows[index][0] = { ...rows[index][0], value: null, blank: true, stripeRow: start };
     }
   };
   for (let index = 0; index <= rows.length; index++) {
@@ -51,7 +51,7 @@ export function mergeArchivedSkcSheet(source, sheet) {
         const target = block[offset], items = cells(group[index].xml).filter(left).map(cell => cell.replace(/\br="([A-Z]+)\d+"/, `r="$1${target.number}"`));
         if (group.length > 1 && index > 0) {
           const style = anchor?.match(/\bs="(\d+)"/)?.[1];
-          items[0] = `<c r="A${target.number}"${style ? ` s="${style}"` : ''} t="inlineStr"><is><t></t></is></c>`;
+          items[0] = `<c r="A${target.number}"${style ? ` s="${style}"` : ''}/>`;
         }
         replacements.set(target.number, target.xml.replace(/(<row\b[^>]*>)[\s\S]*(<\/row>)/, (_, open, close) => `${open}${items.join('')}${cells(target.xml).filter(cell => !left(cell)).join('')}${close}`));
       }

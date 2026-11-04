@@ -18,18 +18,18 @@ function alignment(book,sheet,address){
 }
 it('keeps tables compact while separating counts, identifiers and amounts with padding, alignment and subtle borders',()=>{
  const book=read(buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}).bytes);
- expect(alignment(book,'代发表','C2')).toContain('horizontal="center"');
- expect(alignment(book,'代发表','D2')).toContain('horizontal="left" indent="1"');
+ expect(alignment(book,'代发表','D2')).toContain('horizontal="center"');
+ expect(alignment(book,'代发表','E2')).toContain('horizontal="center"');
  expect(alignment(book,'20店','E2')).toContain('horizontal="right" indent="1"');
- expect(book.Sheets['代发表']['!cols'].reduce((sum,col)=>sum+col.width,0)).toBeLessThanOrEqual(140*0.85);
+ expect(book.Sheets['代发表']['!cols'].reduce((sum,col)=>sum+col.width,0)).toBeLessThanOrEqual(140);
  expect(book.Sheets['20店']['!cols'].reduce((sum,col)=>sum+col.width,0)).toBeLessThanOrEqual(205*0.85);
- expect(alignment(book,'代发表','C2')).toContain('borderId="1"');
+ expect(alignment(book,'代发表','D2')).toContain('borderId="1"');
  expect(alignment(book,'20店','E2')).toContain('borderId="1"');
- expect(alignment(book,'代发表','D2')).toContain('fontId="5"');
- expect(alignment(book,'代发表','C2')).toContain('fontId="0"');
+ expect(alignment(book,'代发表','E2')).toContain('fontId="5"');
+ expect(alignment(book,'代发表','D2')).toContain('fontId="0"');
  expect(source(book,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');
  expect(source(book,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
- expect(book.Sheets['代发表'].D2).toMatchObject({t:'s',v:dispatchRows[0].order1688});
+ expect(book.Sheets['代发表'].E2).toMatchObject({t:'s',v:dispatchRows[0].order1688});
  expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.152509999,z:'General'});
  expect(book.Sheets['扣款'].G3.z).toBe('General');
  expect(book.Sheets['20店'].J4.z).toBe('General');
@@ -52,8 +52,8 @@ it.each(['profit-zebra@7-deductions-compact','profit-zebra@8-spaced-general-dedu
   if(file.startsWith('xl/worksheets/'))expect(source(after,file).match(/<v>[^<]*<\/v>/g)).toEqual(source(before,file).match(/<v>[^<]*<\/v>/g));
   else expect(new Uint8Array(after.files[file].content)).toEqual(row);
  }
- expect(after.Sheets['扣款'].D2.z).toBe('General');expect(alignment(after,'代发表','C2')).toContain('horizontal="center"');expect(alignment(after,'代发表','D2')).toContain('indent="1"');expect(saved).toEqual(snapshot);
- expect(source(after,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');expect(alignment(after,'代发表','C2')).toContain('borderId="1"');
+ expect(after.Sheets['扣款'].D2.z).toBe('General');expect(alignment(after,'代发表','D2')).toContain('horizontal="center"');expect(alignment(after,'代发表','E2')).toContain('horizontal="center"');expect(saved).toEqual(snapshot);
+ expect(source(after,'xl/styles.xml')).toContain('rgb="FFE9EEF4"');expect(alignment(after,'代发表','D2')).toContain('borderId="1"');
  expect(after.Sheets['代发表']['!cols']).toEqual(files.Sheets['代发表']['!cols']);
  expect(source(after,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
 });

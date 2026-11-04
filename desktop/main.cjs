@@ -1147,6 +1147,15 @@ async function writeSmokeReport() {
   const tabSwitches = [];
   for (const tabId of ["erp", "workspace"]) {
     await setActiveTab(tabId);
+    // The ERP view is created lazily. Its initialization promise does not wait
+    // for navigation, so smoke must observe readiness before checking layout.
+    const contents = views.get(tabId)?.webContents;
+    while (contents && !contents.isDestroyed()
+      && (tabState[tabId].status !== "ready" || contents.isLoadingMainFrame())
+      && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    resizeViews();
     tabSwitches.push({
       activeTab,
       attachedViews: [...attachedViews],

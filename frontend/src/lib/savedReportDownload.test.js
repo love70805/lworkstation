@@ -53,7 +53,7 @@ it.each(['pre_deduction', 'financial'])('projects saved %s amounts and warehouse
   expect(book.Sheets['甲店'].I2.v).toBe(1.4);
   expect(book.Sheets['甲店'].J2.v).toBe(18.58);
   expect(book.Sheets['甲店'].J5.v).toBe(55.76);
-  expect(book.Sheets['代发表'].B2.v).toBe('000012345678901234567890');
+  expect(book.Sheets['代发表'].C2.v).toBe('000012345678901234567890');
   if(kind==='financial') expect(book.Sheets['扣款'].D2.v).toBe(-0.002);
   expect(report).toEqual(before);
 });
