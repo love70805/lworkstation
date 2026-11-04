@@ -10,6 +10,16 @@ const deductionRows=[{store:'20店',businessId:'0001',platformSkc:products[0].gr
 const report={kind:'financial',period:'2026-09',revision:1,totalsExact:reportTotals(products,'35','0.7',deductionRows)};
 const read=bytes=>XLSX.read(bytes,{type:'array',bookFiles:true,cellStyles:true});
 const source=(book,file)=>new TextDecoder().decode(book.files[file].content);
+function expectTableBorders(bytes){
+ const book=read(bytes),styles=source(book,'xl/styles.xml');
+ const definitions=[...styles.match(/<borders\b[^>]*>([\s\S]*?)<\/borders>/)[1].matchAll(/<border\b[^>]*>[\s\S]*?<\/border>/g)].map(match=>match[0]);
+ const formats=[...styles.match(/<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/)[1].matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map(match=>match[0]);
+ for(let index=0;index<book.SheetNames.length;index++)for(const cell of source(book,`xl/worksheets/sheet${index+1}.xml`).matchAll(/<c\b([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g)){
+  const id=Number(cell[1].match(/\bs="(\d+)"/)?.[1]??0),border=definitions[Number(formats[id].match(/\bborderId="(\d+)"/)[1])];
+  for(const side of ['left','right','top','bottom'])expect(border,`${book.SheetNames[index]} ${cell[1]}`).toContain(`<${side} style="thin">`);
+ }
+ expect(definitions[0]).not.toContain('style="thin"'); // Outside-table blanks remain unframed.
+}
 function alignment(book,sheet,address){
  const file='xl/worksheets/sheet'+(book.SheetNames.indexOf(sheet)+1)+'.xml';
  const id=Number(source(book,file).match(new RegExp(`<c\\b(?=[^>]*\\br="${address}")[^>]*\\bs="(\\d+)"`))?.[1]);
@@ -65,4 +75,13 @@ it('keeps zero and tiny signed deductions numeric and rejects missing styles ins
  }
  const book=read(buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}).bytes),files=new Map(Object.entries(book.files).filter(([name,row])=>name&&row.type===2&&name!=='\u0001Sh33tJ5'&&name!=='xl/styles.xml').map(([name,row])=>[name,new Uint8Array(row.content)]));
  expect(()=>formatSavedReportLayout(writeReportArchive(files))).toThrow('样式信息不足');
+});
+it('frames every table cell in new reports and frozen downloads without changing any figures',async()=>{
+ const built=buildProfitReportWorkbook({report,products,dispatchRows,deductionRows});
+ expectTableBorders(built.bytes);
+ const saved={...report,templateVersion:'profit-zebra@9-compact-neutral',fileBase64:bytesToBase64(built.bytes),fileSha256:await sha256(built.bytes)},before=structuredClone(saved);
+ const output=await prepareReportDownload(saved,{dispatchRows});
+ expectTableBorders(output);
+ expect(saved).toEqual(before);
+ for(const name of read(built.bytes).SheetNames)for(const [address,cell] of Object.entries(read(built.bytes).Sheets[name]))if(cell.t==='n')expect(read(output).Sheets[name][address]).toMatchObject({t:'n',v:cell.v});
 });

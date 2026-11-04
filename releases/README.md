@@ -1,8 +1,8 @@
-## 1.2.0 — 报告展示候选
+## 1.2.0 — 报告展示验收与发布
 
-统一报告黑字，代发表店铺首列，各字段独立按明确来源合并，真正清空合并覆盖格并保持长编号文本；新导出与历史下载共用布局，核算范围和存档保持。[本批记录](../docs/integration/EXPORT_LAYOUT_1.2.0.md)。
+统一报告黑字及完整细边框，代发表店铺首列，各字段独立按明确来源合并，真正清空合并覆盖格并保持长编号文本；新导出与历史下载共用布局，核算范围和存档保持。[本批记录](../docs/integration/EXPORT_LAYOUT_1.2.0.md)。
 
-规范候选 `releases/candidates/1.2.0/`。定向回归与只读来源对照通过，实际表格复制、隐藏候选及必需 CI 验收完成后按同批 PR/Release 发布，当前未公开、未安装。
+规范候选 `releases/candidates/1.2.0/`，116,355,866 字节，SHA256 `21834B65014EDB27A84F31FFFD56F86907D79BE5F3D22489E34766D4BF640EA7`。122 项定向回归、只读来源与原生 XML、生产构建和隐藏候选通过，WPS 实际复制由用户自行核对。源码、仓库必需 CI、合并与公开稳定 Latest 状态以 [PR #318](https://github.com/love70805/lworkstation/pull/318) 和 [v1.2.0 Release](https://github.com/love70805/lworkstation/releases/tag/v1.2.0) 服务结果为准；未安装。
 
 ## 1.0.12 — 候选验收与发布
 
