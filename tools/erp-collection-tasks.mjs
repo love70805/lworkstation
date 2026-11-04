@@ -74,12 +74,14 @@ export function collectionCatalogSeed(batch) {
         supplierName: row.supplierName, supplierNames: row.supplierNames,
         supplier1688Links: row.supplier1688Links, purchaseCatalog: row.purchaseCatalog,
         mappings: [], catalogMappings: [], catalogMappingsComplete: batch.sourceMeta?.scopeDirectoryComplete === true
-          && !batch.sourceMeta?.mappingFailureCount };
+          && !batch.sourceMeta?.mappingFailureCount
+          && (row.catalogMappingsComplete === true || row.catalogMappingsComplete !== false && batch.sourceMeta?.collectionMethod !== 'bulk_export') };
       results.set(key, result);
     }
     const mapping = { platformSku: row.platformSku, platformSkc: row.platformSkc, warehouseSku: row.warehouseSku,
       productName: row.productName ?? row.name, imageUrl: row.imageUrl, attribute: row.attribute };
     result.mappings.push(mapping);
+    if (row.catalogMappingsComplete === false || batch.sourceMeta?.collectionMethod === 'bulk_export' && row.catalogMappingsComplete !== true) result.catalogMappingsComplete = false;
     result.catalogMappings.push(...(row.catalogMappings?.length ? row.catalogMappings : [mapping]));
   }
   return { results: [...results.values()], warehouseEvidence: { formatVersion: 1, warehouses: Array.isArray(batch.warehouseEvidence) ? batch.warehouseEvidence : batch.warehouseEvidence?.warehouses ?? [] },

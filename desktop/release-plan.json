@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-task-sync-1-0-11",
+  "integrationBranch": "codex/erp-bulk-cost-1-0-12",
   "requiredCommits": [
     {
       "module": "verified-main",
-      "commit": "62d2471d95504267194e10670b47068c7ee1a2f5"
+      "commit": "8c0230083fa95126ce139add3493f5b67e665605"
     }
   ]
 }

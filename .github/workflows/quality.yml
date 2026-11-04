@@ -74,3 +74,9 @@ jobs:
 
       - name: Verify native ERP extension startup, refresh, collection and reconnect
         run: pnpm --dir desktop smoke:erp-native
+
+      - name: Verify native bulk export, exact cost adoption and legacy fallback
+        run: node desktop/erp-bulk-benchmark.mjs
+        env:
+          ERP_BENCH_REPEATS: '1'
+          ERP_BENCH_MODES: legacy-normal,bulk-normal,fallback

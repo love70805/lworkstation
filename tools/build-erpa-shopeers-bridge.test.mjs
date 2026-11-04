@@ -213,8 +213,10 @@ async function verifyManifestAndGenerator() {
   assert.equal(main.all_frames, true);
   assert.deepEqual(main.matches, ["https://*.zhuolinkeji.cn/*"], "the query hook follows ERP home and SPA documents only");
   assert.deepEqual(isolated.js, [
+    "src/xlsx-reader.js",
     "src/catalog-collector.js",
     "src/result-policy.js",
+    "src/bulk-purchase.js",
     "src/request-context.js",
     "src/shopeers-bridge.js",
     "src/desktop-task-preview.js",
@@ -267,7 +269,7 @@ async function verifyPublishedPackage() {
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
     assert.equal(main.all_frames, true);
-    assert.deepEqual(isolated.js, ["src/catalog-collector.js", "src/result-policy.js", "src/request-context.js", "src/shopeers-bridge.js", "src/desktop-task-preview.js", "src/content.js"]);
+    assert.deepEqual(isolated.js, ["src/xlsx-reader.js", "src/catalog-collector.js", "src/result-policy.js", "src/bulk-purchase.js", "src/request-context.js", "src/shopeers-bridge.js", "src/desktop-task-preview.js", "src/content.js"]);
     assert.equal(isolated.all_frames, true);
     const background = await readFile(path.join(root, "src", "background.js"), "utf8");
     const content = await readFile(path.join(root, "src", "content.js"), "utf8");

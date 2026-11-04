@@ -50,6 +50,13 @@ const restored = collectionCatalogSeed({ rows: [{ warehouseSku: 'WH', platformSk
 assert.equal(restored.results[0].name, '暂存资料');
 assert.equal(restored.results[0].unitCost, undefined);
 assert.equal(restored.warehouseEvidence.warehouses[0].evidenceComplete, true);
+const bulkSeed = collectionCatalogSeed({ rows: [
+  { warehouseSku:'WH-SHORT',platformSku:'SHORT',platformSkc:'C',catalogMappingsComplete:false },
+  { warehouseSku:'WH-LONG',platformSku:'LONG',platformSkc:'C',catalogMappingsComplete:true },
+], sourceMeta:{scopeDirectoryComplete:true,collectionMethod:'bulk_export'},warehouseEvidence:[] });
+assert.equal(bulkSeed.directoryComplete,true);
+assert.equal(bulkSeed.results.find(row=>row.warehouseSku==='WH-SHORT').catalogMappingsComplete,false,'cost identity does not falsely mark platform attributes complete');
+assert.equal(bulkSeed.results.find(row=>row.warehouseSku==='WH-LONG').catalogMappingsComplete,true,'verified full mapping remains reusable on demand');
 await verifyErpCatalogTransport({ legacyScope: false, afterCosts: true, includeConflict: false,
   expectedSkus: ['RED', 'BLUE'].map(id => ({ platformSku: `SKU-${id}`, platformSkc: 'SKC-CATALOG' })) });
 await scenario(10, 'cost-before-catalog', { afterCosts: true });

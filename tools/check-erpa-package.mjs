@@ -20,6 +20,7 @@ export async function checkErpPackage() {
   assert.equal(frontend.version, desktop.version, 'Desktop and workbench versions differ');
   const files = ['manifest.json', 'README.md', ...(await readdir(path.join(source, 'src'))).filter(name => /\.(js|css)$/.test(name)).map(name => `src/${name}`),
     ...(await readdir(path.join(source, 'popup'))).map(name => `popup/${name}`)];
+  files.push('LICENSE.sheetjs');
   for (const file of files) {
     const { stdout } = await run(process.platform === 'win32' ? 'tar' : 'unzip', process.platform === 'win32'
       ? ['-xOf', archive, file] : ['-p', archive, file], { windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });

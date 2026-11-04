@@ -299,6 +299,7 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     "orderPageCount", "reportedOrderCount", "pageSize", "firstPageRowCount", "scopeRetrySkcCount",
     "skuLookupCount", "recoveredMappingCount", "additionalWarehouseHistoryCount",
     "requestCount", "requestRetryCount", "requestErrorCount", "rateLimitCount", "peakRequestConcurrency", "requestDurationMs",
+    "bulkSourceRows", "bulkExportCount", "bulkMappingRequests", "bulkBoundaryOrders", "bulkFallbackCount",
   ];
   const result = {
     evidenceVersion: legacy ? 0 : (Number(meta.evidenceVersion) || ERP_COST_EVIDENCE_VERSION),
@@ -318,6 +319,14 @@ function normalizeSourceMeta(meta, { evidenceComplete, legacy, scopedIncomplete 
     if (optionalText(meta[field])) result[field] = optionalText(meta[field]);
   }
   if (typeof meta.scopeDirectoryComplete === 'boolean') result.scopeDirectoryComplete = meta.scopeDirectoryComplete;
+  if (['bulk_export', 'legacy'].includes(meta.collectionMethod)) result.collectionMethod = meta.collectionMethod;
+  if (meta.collectionMethod === 'bulk_export') {
+    if (!/^[a-f0-9]{64}$/.test(meta.bulkSourceSha256 ?? '') || !Number.isSafeInteger(meta.bulkSourceRows) || meta.bulkSourceRows < 0) {
+      throw new Error('ERP 批量采购证据缺少有效来源校验。');
+    }
+    result.bulkSourceSha256 = meta.bulkSourceSha256;
+  }
+  if (/^[a-z_]{1,80}$/.test(meta.bulkFallbackReason ?? '')) result.bulkFallbackReason = meta.bulkFallbackReason;
   for (const field of ["detailFailures", "mappingFailures", "scopeDirectoryFailures", "exclusionStats", "failureStats", "sourceWarnings"]) {
     if (Array.isArray(meta[field])) result[field] = meta[field].map((item) => {
       if (typeof item === "string") return item.slice(0, 500);
