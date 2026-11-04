@@ -6,7 +6,7 @@ import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostO
 import { costEvaluationPeriod } from './inventoryAccounting';
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
-export const REPORT_TEMPLATE_VERSION = "profit-zebra@11-black-source-merges";
+export const REPORT_TEMPLATE_VERSION = "profit-zebra@12-source-row-order";
 export const REPORT_TABLES = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
 export const Exact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 export function exact(value, { nonnegative = false } = {}) {

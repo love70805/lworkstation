@@ -110,12 +110,25 @@ it('clears native covered inline values and formulas rather than relying on a me
   verify(await prepareReportDownload(await saved(writeReportArchive(files)), { dispatchRows: rows }), rows);
 });
 
-it('rejects mismatched frozen row order, scope, store, purchase ID or quantity without changing saved bytes', async () => {
+it('rejects mismatched frozen scope, store, purchase ID or quantity without changing saved bytes', async () => {
   const archive = await saved(build(rows).bytes), before = structuredClone(archive);
-  for (const records of [rows.slice(1), rows.toReversed(), rows.map((row, index) => index ? row : { ...row, quantityExact: '99' }), rows.map((row, index) => index ? row : { ...row, order1688: 'OTHER' }), rows.map((row, index) => index ? row : { ...row, store: 'OTHER' })]) {
+  for (const records of [rows.slice(1), rows.map((row, index) => index ? row : { ...row, quantityExact: '99' }), rows.map((row, index) => index ? row : { ...row, order1688: 'OTHER' }), rows.map((row, index) => index ? row : { ...row, store: 'OTHER' })]) {
     await expect(prepareReportDownload(archive, { dispatchRows: records })).rejects.toThrow('冻结来源记录不一致');
   }
   expect(archive).toEqual(before);
+});
+
+it('restores a storage-shuffled 1.2.0 archive and its original merge groups without changing the saved file',async()=>{
+ const shuffled=[rows[0],rows[1],rows[4],rows[2],rows[3]],before=structuredClone(shuffled);
+ // Old output used the storage order. Remove position metadata only from the
+ // builder input to reproduce that output with the current writer.
+ const legacy=build(shuffled.map(({sourceRow,fileHash,sourceSheet,mergedFrom,...row})=>row));
+ const archive=await saved(legacy.bytes,'profit-zebra@11-black-source-merges'),original=structuredClone(archive);
+ const output=await prepareReportDownload(archive,{dispatchRows:shuffled});
+ expect(mergeRefs(verify(output,rows))).toEqual(['A2:A4','B2:B3','E2:E5']);
+ expect(archive).toEqual(original);expect(shuffled).toEqual(before);
+ const again=await prepareReportDownload(await saved(output),{dispatchRows:shuffled});
+ expect(await sha256(again)).toBe(await sha256(output));
 });
 
 it('writes the application-generated independent native-copy QA fixture when requested', () => {
