@@ -1175,7 +1175,7 @@ const server = http.createServer(async (req, res) => {
         const now = Date.now();
         const extensionRecords = records
           .filter((item) => item.kind === "extension-status")
-          .map((item) => ({ ...item, online: extensionIsOnline(item, now) }))
+          .map((item) => ({ ...item, online: item.inboxInstanceId === inboxInstanceId && extensionIsOnline(item, now) }))
           .toSorted((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)));
         return json(res, 200, { records: extensionRecords, online: extensionRecords.some((item) => item.online), ttlMs: extensionTtlMs });
       }

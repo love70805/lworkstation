@@ -259,6 +259,22 @@ try {
   assert.equal(extensionStatus.online, true);
   assert.equal(extensionStatus.records[0].version, "8.0.1");
 
+  // A fresh timestamp from a previous service instance is history, not a
+  // current installation/page signal after an application update/restart.
+  const priorSessionSpool=await persistedRecords();
+  priorSessionSpool.push({kind:'extension-status',extensionId:'erp-assistant-installation',version:'8.0.55',ready:false,context:'extension-background',inboxInstanceId:'previous-service-instance',lastSeenAt:new Date().toISOString()});
+  await fs.writeFile(spoolPath,JSON.stringify(priorSessionSpool));
+  response=await fetch(`${base}/erp/v1/extension-status`);
+  extensionStatus=await response.json();
+  assert.equal(extensionStatus.records.find(item=>item.extensionId==='erp-assistant-installation').online,false);
+  assert.equal(extensionStatus.records.find(item=>item.extensionId==='erp-assistant-installation').version,'8.0.55');
+  assert.equal(extensionStatus.records.find(item=>item.extensionId==='erp-assistant').online,true);
+  await post('/erp/v1/extension-status',{extensionId:'erp-assistant-installation',version:'8.0.57',ready:false});
+  response=await fetch(`${base}/erp/v1/extension-status`);
+  extensionStatus=await response.json();
+  assert.equal(extensionStatus.online,true);
+  assert.equal(extensionStatus.records.find(item=>item.extensionId==='erp-assistant-installation').online,true);
+
   const legacyBytes = await fs.readFile(spoolPath, "utf8");
   for (const [method, route] of [["POST", "/selection/v1/extension-status"], ["GET", "/selection/v1/extension-status"], ["POST", "/selection/v1/context"], ["GET", "/selection/v1/context"], ["POST", "/selection/v1/captures"]]) {
     response = method === "GET" ? await fetch(base + route) : await post(route, selectionCapture);
