@@ -90,6 +90,7 @@ test('one snapshot feeds multiple result batches without repeated exports', asyn
     const first = await h.collect();
     h.run.querySkcs = ['SKC-B'];
     const second = await h.collect();
+    assert.equal(h.exportQueries[0].sku, 'SKC-A SKC-B', 'full task uses the live-verified space-separated query format');
     assert.equal(first.results[0].mappings[0].platformSku, 'SKU-A');
     assert.equal(second.results[0].mappings[0].platformSku, 'SKU-B');
     assert.equal(second.meta.bulkExportCount, 0);
@@ -197,6 +198,11 @@ test('rejects malformed workbooks, missing columns and lossy order identities', 
     assert.throws(() => module.parseWorkbook(numeric, digest(numeric)), error => error.reason === 'purchase_identity_missing');
     const invalidDate = workbook(standard([{ date: '2026-02-30 12:00:00' }]));
     assert.throws(() => module.parseWorkbook(invalidDate, digest(invalidDate)), error => error.reason === 'invalid_purchase_date');
+    const alternateCalendar = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(alternateCalendar, xlsx.utils.aoa_to_sheet([headers]), 'Sheet1');
+    alternateCalendar.Workbook = { WBProps: { date1904: true } };
+    const alternateBytes = xlsx.write(alternateCalendar, { type: 'array', bookType: 'xlsx', compression: true });
+    assert.throws(() => module.parseWorkbook(alternateBytes, digest(alternateBytes)), error => error.reason === 'unsupported_workbook');
 });
 
 test('changed historical warehouse relationships stay on the original path', async () => {

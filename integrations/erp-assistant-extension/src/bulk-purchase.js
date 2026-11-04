@@ -50,6 +50,7 @@
         if (!xlsx?.read || !/^[a-f0-9]{64}$/.test(digest)) throw fallback('workbook_reader_unavailable');
         inspectZip(buffer);
         const book = xlsx.read(new Uint8Array(buffer), { type: 'array', cellFormula: true, cellHTML: false, cellStyles: false, cellDates: false });
+        if (book.Workbook?.WBProps?.date1904) throw fallback('unsupported_workbook');
         let sheet, sheetName, rows, headers;
         for (const name of book.SheetNames) {
             const candidate = book.Sheets[name];
@@ -225,7 +226,7 @@
             const whole = run.task?.requestSnapshot || context;
             const scopeSkcs = (whole.platformSkcs || context.platformSkcs).map(item => text(item?.platformSkc ?? item));
             const expectedSkus = whole.expectedSkus || context.expectedSkus;
-            const query = { ...filters, sku: scopeSkcs.join(',') };
+            const query = { ...filters, sku: scopeSkcs.join(' ') };
             const cacheKey = JSON.stringify([run.task?.taskId || run.requestId, run.task?.scopeHash, run.runnerId, run.queryCapturedAt, expectedSkus, query]);
             const reused = snapshots.has(cacheKey);
             if (!reused) { snapshots.clear(); snapshots.set(cacheKey, load(query, run, { platformSkcs: scopeSkcs, expectedSkus }).then(value => ({ value }), error => {

@@ -30,7 +30,7 @@ function fixture(url) {
         { associatedProductId: `WH-${scope}`, barcodeSkuid: `FOREIGN-${scope}`, barcodeSkcid: 'FOREIGN-SKC' },
     ];
     else if (endpoint === 'purchase-order-page') {
-        const selected = target.split(',').map(value => Number(value.split('-').at(-1)));
+        const selected = target.split(/[,\s]+/).map(value => Number(value.split('-').at(-1)));
         const matching = rows.filter(row => selected.includes(row.scope));
         const page = Number(url.searchParams.get('page') || 1);
         data = matching.slice((page - 1) * 8, page * 8);
