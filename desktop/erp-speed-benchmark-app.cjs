@@ -176,6 +176,10 @@ async function runCase(cap, mode, repetition, extensionDir) {
     const combinedSemantics = Object.fromEntries([...new Set(semantics.flatMap(value => Object.keys(value)))].sort().map(key =>
       [key, semantics.flatMap(value => value[key] || []).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]));
     const cold = stats(trace, 'cold'), warm = stats(trace, 'warm');
+    // Recovery can add the failed bulk attempt after a calculation returns.
+    // Compare real delivered counters with network observations, rather than
+    // the earlier calculation snapshot retained by the timing instrumentation.
+    const reportedMetrics = actualBodies.map(envelope => envelope.batch.sourceMeta);
     assert.ok(cold.peak <= cap);
     assert.equal(cold.requestCount, bulkBench ? (mode.startsWith('legacy') ? 560 : mode === 'fallback' ? 562 : 4) : 560 + (faultMode ? 1 : 0));
     assert.equal(warm.requestCount, 0, 'Same-task complete evidence reuse performs no ERP fetch');
@@ -186,12 +190,12 @@ async function runCase(cap, mode, repetition, extensionDir) {
     assert.equal(products.length, targets.length);
     assert.deepEqual(products.map(x => x.platformSku), targets.map(x => x.platformSku).sort());
     assert.ok(products.every(x => x.unitCostExact === '5' && x.profitExact === '88.6' && x.costSource === 'erp'));
-    const result = { id, cap, mode, repetition, receiptCount: envelopes.length, baseDelayMs: baseDelay, requestTimeoutMs: timeoutMs, acceleratedTimeout: mode === 'timeout', wallMs, taskMs: trace.taskEnd - trace.taskStart, coldCalculationMs: trace.calculations.reduce((n, x) => n + x.end - x.start, 0), warmCalculationMs: trace.warm.reduce((n, x) => n + x.end - x.start, 0), cold, warm, retryCount: trace.calculations.reduce((n, x) => n + x.meta.requestRetryCount, 0), rateLimitCount: trace.calculations.reduce((n, x) => n + x.meta.rateLimitCount, 0), localAdoptionMs: adoption.reduce((n, x) => n + x.receiveAndAdoptMs, 0), localProfitMs: adoption.reduce((n, x) => n + x.profitReadAndComputeMs, 0), semanticDigest: digest(combinedSemantics), finalCostDigest: digest(endCosts), nativeVisibleWindows: BrowserWindow.getAllWindows().filter(x => x.isVisible()).length };
+    const result = { id, cap, mode, repetition, receiptCount: envelopes.length, baseDelayMs: baseDelay, requestTimeoutMs: timeoutMs, acceleratedTimeout: mode === 'timeout', wallMs, taskMs: trace.taskEnd - trace.taskStart, coldCalculationMs: trace.calculations.reduce((n, x) => n + x.end - x.start, 0), warmCalculationMs: trace.warm.reduce((n, x) => n + x.end - x.start, 0), cold, warm, retryCount: reportedMetrics.reduce((n, x) => n + x.requestRetryCount, 0), rateLimitCount: reportedMetrics.reduce((n, x) => n + x.rateLimitCount, 0), localAdoptionMs: adoption.reduce((n, x) => n + x.receiveAndAdoptMs, 0), localProfitMs: adoption.reduce((n, x) => n + x.profitReadAndComputeMs, 0), semanticDigest: digest(combinedSemantics), finalCostDigest: digest(endCosts), nativeVisibleWindows: BrowserWindow.getAllWindows().filter(x => x.isVisible()).length };
     result.costAndAdoptionWallMs = adoption.at(-1).end - started;
     result.adoptionPollMs = adoptionPollMs;
     result.finalProfitDigest = digest(products);
     result.adoptionPollIdleAfterLastAdoptionMs = trace.spans.filter(x => x.kind === 'adoption-poll-wait').reduce((n, x) => n + Math.max(0, x.end - Math.max(x.start, adoption.at(-1).end + performance.timeOrigin - trace.timeOrigin)), 0);
-    assert.equal(trace.calculations.reduce((n, x) => n + x.meta.requestCount, 0), cold.requestCount);
+    assert.equal(reportedMetrics.reduce((n, x) => n + x.requestCount, 0), cold.requestCount, 'Delivered request counters include failed bulk attempts');
     assert.equal(result.nativeVisibleWindows, 0);
     assertBusinessResult({ envelopes: actualBodies, calculations: trace.calculations, adoption });
     await fs.writeFile(path.join(out, `${id}.json`), JSON.stringify({ result, trace, network, adoption, envelopes: actualBodies }, null, 2));
