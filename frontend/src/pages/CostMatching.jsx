@@ -1,3 +1,4 @@
+import ErpAnomalyActions from '../components/ErpAnomalyActions';
 import { revealErpCollectionProgress } from '../components/ErpBackgroundNotice';
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { erpLedgerVersion } from '../domain/erpLedgerVersion';
@@ -52,11 +53,11 @@ import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchi
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 const costViewCache = new Map();
 
-export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot }) {
+export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose }) {
   const snapshot = useLatestSalesImport(validatedContext?.ledgerId, suppliedSnapshot);
   if (snapshot === undefined) return <Panel>正在验证成本核对范围...</Panel>;
   if (!validatedContext?.ledgerId || snapshot?.ledger?.id !== validatedContext.ledgerId || snapshot?.ledger?.workspaceId !== validatedContext.workspaceId || (validatedContext.store !== "all" && !snapshot.rows.some((row) => row.store === validatedContext.store))) return <Panel><p role="alert">账本或店铺不属于当前工作区，请重新选择。</p></Panel>;
-  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} />;
+  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} compact={compact} reviewTarget={reviewTarget} onReviewClose={onReviewClose} />;
 }
 
 export default function CostMatching() {
@@ -148,7 +149,7 @@ function SelectedPurchaseEvidence({ match }) {
   </details>;
 }
 
-function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
+function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose }) {
   const desktop = isDesktopRuntime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -810,6 +811,8 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
     return { ...row, match, unitCost: manualOverride?.approvedAmount ?? decision.unitCost ?? match?.unitCost };
   }), [formalSalesLines, reviewMatchBySku]);
   const inboxReview = useMemo(() => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows, includeEvidence: false }), [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
+  const readPendingAnomalies = useMemo(() => () => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows }).exceptions,
+    [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
   const viewedEvidenceBatch = inboxReview.batches.find(batch => batch.id === currentInbox?.id);
   const filteredReviewRowIds = useMemo(() => new Set(filteredSalesLines.map(row => row.id)), [filteredSalesLines]);
   const reviewRows = useMemo(() => allReviewRows.filter(row => filteredReviewRowIds.has(row.id)), [allReviewRows, filteredReviewRowIds]);
@@ -826,9 +829,14 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const openReviewItem = (entry, mode = 'details', returnToBatches = false) => {
     if (!allReviewRows.some(row => row.id === entry.reviewRowId)) return;
     setInboxQueueOpen(false);
-    setManualTarget({ id: entry.reviewRowId, mode, inboxId: entry.inboxId, returnToBatches, ...(!returnToBatches && entry.currentMissing ? { queueIds: pendingReviewEntries.filter(item => item.canCorrect !== false).map(item => item.reviewRowId) } : {}) });
+    setManualTarget({ id: entry.reviewRowId, mode: "edit", inboxId: entry.inboxId, returnToBatches });
   };
-  const closeCostDetails = () => { if (manualTarget?.returnToBatches) setInboxQueueOpen(true); setManualTarget(null); };
+  const closeCostDetails = () => { if (manualTarget?.returnToBatches) setInboxQueueOpen(true); setManualTarget(null); onReviewClose?.(); };
+  useEffect(() => {
+    if (!reviewTarget) return;
+    const row = allReviewRows.find(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(reviewTarget.platformSku) && item.store === reviewTarget.store);
+    if (row) setManualTarget(previous => previous?.id === row.id ? previous : { id: row.id, mode: 'edit' });
+  }, [reviewTarget, allReviewRows]);
   const baseTargetRow = manualTarget ? allReviewRows.find(row => row.id === manualTarget.id) ?? null : null;
   const targetReviewSummary = manualTarget?.inboxId ? inboxReview.batches.find(batch => batch.id === manualTarget.inboxId)?.entries.find(entry => entry.reviewRowId === manualTarget.id) : inboxReview.exceptions.find(entry => entry.reviewRowId === manualTarget?.id);
   const targetReviewEntry = useMemo(() => {
@@ -948,23 +956,6 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
   const groupedMatches = useMemo(() => groupCostMatchesBySkc(reviewMatches), [reviewMatches]);
   const visibleGroupedMatches = groupedMatches;
   const visibleReviewRows = useMemo(() => visibleGroupedMatches.flatMap(group => group.variants.flatMap(item => reviewRowsBySku.get(item.canonicalPlatformSku) ?? [])), [visibleGroupedMatches, reviewRowsBySku]);
-  const correctionIds = manualTarget?.queueIds ?? visibleReviewRows.map(row => row.id);
-  const targetIndex = targetRow ? correctionIds.indexOf(targetRow.id) : -1;
-  const findNextTarget = (rows) => {
-    const byId = new Map(rows.map(row => [row.id, row]));
-    for (let index = targetIndex + 1; index < correctionIds.length; index++) {
-      const row = byId.get(correctionIds[index]);
-      if (row && row.decision.identityIssue?.code !== 'ledger_sku_skc_conflict' && (!manualTarget?.queueIds || !row.decision.eligibleForExactProfit)) return row;
-    }
-    return null;
-  };
-  const nextTarget = targetIndex >= 0 ? findNextTarget(allReviewRows) : null;
-  const nextCorrection = () => {
-    const next = findNextTarget(reviewRowsRef.current);
-    const nextEntry = next ? inboxReview.exceptions.find(entry => entry.reviewRowId === next.id) : null;
-    setManualTarget(next ? { ...manualTarget, id: next.id, mode: "edit", inboxId: nextEntry?.inboxId ?? null } : null);
-  };
-
   const resolutionDialog = (
     <Modal
       open={Boolean(resolutionDraft)}
@@ -1096,14 +1087,44 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
           {targetRow.match && targetRow.match.status !== "missing" ? <>
             <p>仓库 SKU：{targetRow.match.sourceWarehouseSku || "未映射"} · {snapshot.ledger.period} 及以前</p>
             <SelectedPurchaseEvidence match={targetRow.match} /><EvidenceDetails match={targetRow.match} />
-            {!locked && targetEvidenceReady && (targetRow.match.costDecision?.anomalies ?? []).filter(item => item.status !== 'resolved' && item.originalUnitPrice > 0).length > 1 ? <Button variant="primary" onClick={() => openResolution(targetRow.match, null, 'confirm_true_price')}>确认本 SKU 全部真实采购价</Button> : null}
             {(targetRow.match.costDecision?.anomalies ?? []).map(anomaly => <div className="cost-resolution-record" key={anomaly.recordId}>
               <div><strong>{purchaseCurrency(anomaly.originalUnitPrice)}</strong><small>{anomaly.reasons.map(reason => ERP_COST_ANOMALY_LABELS[reason] ?? reason).join("；")}</small></div>
-              {anomaly.status === "resolved" ? <Badge tone="success">{anomaly.resolution?.action === 'confirm_true_price' ? '采购价已确认' : '采购价已修正'}</Badge> : !locked && targetEvidenceReady ? <div className="cost-resolution-actions"><Button onClick={() => openResolution(targetRow.match, anomaly, "correct_price")}>修正采购价</Button>{anomaly.originalUnitPrice > 0 ? <Button onClick={() => openResolution(targetRow.match, anomaly, "confirm_true_price")}>确认真实价格</Button> : null}</div> : <Badge tone="warning">原证据待复核</Badge>}
+              {anomaly.status === "ignored" ? <Badge tone="warning">异常已忽略</Badge> : anomaly.status === "resolved" ? <Badge tone="success">{anomaly.resolution?.action === 'confirm_true_price' ? '采购价已确认' : '采购价已修正'}</Badge>  : <Badge tone="warning">原证据待复核</Badge>}
             </div>)}
           </> : <p>当前没有可用 ERP 证据；历史回传仍在批次记录中，人工成本仅用于当前店铺。</p>}
         </section>
   </> : null;
+
+  const costDialog = targetRow ? <ManualCostDialog key={targetRow.id} open={!resolutionDraft} ledger={snapshot.ledger} row={targetRow}
+    readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)}
+    className="cost-detail-modal" title="成本详情" formFirst onClose={closeCostDetails}>
+    <details className="cost-correction-evidence"><summary>采购证据与异常原因</summary>{targetDetails}</details>
+  </ManualCostDialog> : null;
+  const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} readPending={readPendingAnomalies} locked={locked} onReview={item => {
+    const row = allReviewRows.find(row => item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku)
+      || (row.match?.sourceWarehouseSku ?? row.erpCost?.warehouseSku) === item.warehouseSku);
+    if (row) setManualTarget({ id: row.id, mode: 'edit', inboxId: item.inboxId });
+  }} />;
+  if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
+    <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
+      ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
+    {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
+      <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? '正在采集成本' : '成本采集记录'}</summary>
+      <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}
+        locked={locked} error={collectionError || collection.error} statusError={collection.error} />
+    </details> : null}
+    {anomalyActions}
+    {registrationState.status === 'failed' ? <p role="alert">{registrationState.message}<Button onClick={() => setRegistrationRetry(value => value + 1)}>重试连接</Button></p> : null}
+    {scopeHasIdentityConflict ? <p role="alert">部分 SKU 的台账归属有冲突，请先检查导入映射。</p> : null}
+    <details className="profit-purpose-help"><summary>导入旧成本证据</summary>
+      <Button onClick={() => setManualInputOpen(true)}>导入成本文件</Button>
+      <input ref={fileInputRef} className="visually-hidden" type="file" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={event => loadFile(event.target.files[0])} />
+      {hasNewBatch && !isAutomaticInbox ? <Button loading={publishing} disabled={publishing || !adoption.canAdopt} onClick={publish}>保存导入成本</Button> : null}
+      {parseError ? <p role="alert">{parseError}</p> : null}
+    </details>
+    {reviewTarget && !targetRow ? <p role="status">正在读取此商品的成本证据…</p> : null}
+    {costDialog}{manualInputDialog}{resolutionDialog}{erpAssistantDialog}
+  </section>;
 
   return (
     <>
@@ -1158,14 +1179,9 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot }) {
           {(hasNewBatch || isAutomaticInbox) ? <p className="cost-audit-note">回传按原登记范围核对；查看筛选不改已收到批次的采用范围。人工有效值始终优先，异常证据保留。</p> : null}
         </Panel>
       </div>
+      {anomalyActions}
       {inboxQueueDialog}
-      {targetRow ? manualTarget.mode === "details" ? <Modal open={!resolutionDraft} className="cost-detail-modal" title="成本详情"
-        description={`${snapshot.ledger.period} · ${targetRow.store} · ${targetRow.platformSku}。${targetIdentityConflict ? "请先核对台账父级归属；人工金额不能消除多 SKC 冲突。" : "直接核对采购价格，确认后自动采用合格 ERP 成本；需要指定成本时再人工更正。"}`}
-        onClose={closeCostDetails} footer={<><Button onClick={closeCostDetails}>{manualTarget.returnToBatches ? "返回批次详情" : "关闭"}</Button>{!locked && (!targetIdentityConflict || targetRow.manualOverride) ? <Button onClick={() => setManualTarget({ ...manualTarget, mode: "edit" })}>{targetIdentityConflict ? "撤销人工更正" : targetRow.manualOverride ? "更正 / 撤销" : "人工更正"}</Button> : null}</>}>
-        {targetDetails}
-      </Modal> : <ManualCostDialog key={targetRow.id} open={!resolutionDraft} ledger={snapshot.ledger} row={targetRow} readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)} className="cost-detail-modal" title="人工更正成本" formFirst queueProgress={manualTarget.queueIds ? { index: targetIndex + 1, total: correctionIds.length } : null} saveLabel={manualTarget.queueIds && !nextTarget ? "保存并完成" : "保存更正"} onClose={closeCostDetails} onNext={manualTarget.returnToBatches ? undefined : nextTarget ? nextCorrection : undefined}>
-        <details className="cost-correction-evidence"><summary>查看当前成本、ERP 采购证据与异常原因</summary>{targetDetails}</details>
-      </ManualCostDialog> : null}
+      {costDialog}
       {deleteBatchDialog}
       {voidBatchDialog}
       {manualInputDialog}

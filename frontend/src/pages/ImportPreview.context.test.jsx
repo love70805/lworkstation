@@ -22,8 +22,8 @@ afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); 
 it('holds the selected ledger month and returns to the original page and filters', async () => {
   mocks.ledgers.mockResolvedValue([{ id: 'june', workspaceId: 'w', period: '2026-06', status: 'cost_pending' }]);
   await mount('june');
-  expect(host.querySelector('#ledger-period').value).toBe('2026-06');
-  expect(host.querySelector('#ledger-period').disabled).toBe(true);
+  expect(host.querySelector('#ledger-period')).toBeNull();
+  expect(host.querySelector('.batch-source-fieldset .batch-period-evidence').textContent).toContain('2026-06');
   await act(async () => host.querySelector('.wizard-topbar button').click());
   expect(host.querySelector('output').textContent).toBe('/workspace?ledger=june&store=A&q=sku');
 });
@@ -31,7 +31,7 @@ it.each([[], [{ id: 'june', workspaceId: 'other', period: '2026-06' }], [{ id: '
   mocks.ledgers.mockResolvedValue(ledgers);
   await mount('june');
   expect(host.querySelector('[role=alert]')).not.toBeNull();
-  expect(host.querySelector('#ledger-period').value).toBe('');
+  expect(host.querySelector('#ledger-period')).toBeNull();
   expect(host.querySelector('.batch-fieldset').disabled).toBe(true);
 });
 it('only accepts internal return destinations and replaces the new ledger id', () => {

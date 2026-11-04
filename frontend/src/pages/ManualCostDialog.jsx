@@ -4,7 +4,7 @@ import { saveManualCostOverride, revokeManualCostOverride } from "../data/reposi
 import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { previewRecoveredWarehouseCost, saveRecoveredWarehouseCost } from '../data/repositories/warehouseHistoryRecoveryRepository';
 
-export default function ManualCostDialog({ ledger, row, onClose, onNext, children, open = true, readOnly = false, hasEffectiveErpCost = false, className = "", title = "人工更正成本", formFirst = false, queueProgress = null, saveLabel = "保存更正" }) {
+export default function ManualCostDialog({ ledger, row, onClose, children, open = true, readOnly = false, hasEffectiveErpCost = false, className = "", title = "人工更正成本", formFirst = false, saveLabel = "保存更正" }) {
   const identityIssue = row.decision?.identityIssue ?? row.costIdentityIssue;
   const identityConflict = identityIssue?.code === 'ledger_sku_skc_conflict';
   const [amount, setAmount] = useState(row.unitCost == null || row.decision?.eligibleForExactProfit === false ? "" : String(row.unitCost));
@@ -29,7 +29,7 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
     }).catch(() => { /* Ordinary manual correction remains available. */ });
     return () => { canceled = true; };
   }, [open, readOnly, identityConflict, hasEffectiveErpCost, ledger.id, row.store, row.platformSku, row.manualOverride]);
-  const act = async (revoke, next = false) => {
+  const act = async (revoke) => {
     if (saving || readOnly || (!revoke && identityConflict)) return;
     setSaving(true); setError("");
     try {
@@ -40,14 +40,12 @@ export default function ManualCostDialog({ ledger, row, onClose, onNext, childre
       else if (historyCandidate && Number(amount) === historyCandidate.unitCost) await saveRecoveredWarehouseCost({
         ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, inboxId: historyCandidate.inboxId, expectedUnitCost: amount, reason, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
       else await saveManualCostOverride({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount, reason, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
-      if (next && onNext) onNext();
-      else onClose();
+      onClose();
     } catch (failure) { setError(failure.message); } finally { setSaving(false); }
   };
   const invalid = saving || amount.trim() === "" || !Number.isFinite(Number(amount)) || Number(amount) < 0;
   return <Modal open={open} title={title} className={className} description={`${ledger.period} · ${row.store} · ${row.platformSku}。${readOnly ? "当前只读。" : identityConflict ? "当前台账归属存在冲突，已保存的人工金额可撤销。" : hasEffectiveErpCost ? "ERP 成本已生效；如需更正，输入单件成本后确认即可。" : "输入单件成本后确认，仅对当前店铺月份生效，操作自动留痕。"}`} onClose={() => !saving && onClose()}
-    footer={<>{!readOnly && row.manualOverride ? <Button disabled={saving} onClick={() => act(true)}>撤销当前更正</Button> : null}<Button disabled={saving} onClick={onClose}>{readOnly || identityConflict ? "关闭" : "取消"}</Button>{!readOnly && !identityConflict ? <><Button variant={onNext ? "secondary" : "primary"} loading={saving} disabled={invalid} onClick={() => act(false)}>{saveLabel}</Button>{onNext ? <Button variant="primary" disabled={invalid} onClick={() => act(false, true)}>保存并下一项</Button> : null}</> : null}</>}>
-    {queueProgress ? <p className="cost-correction-progress" role="status">待补成本 · 第 {queueProgress.index} / {queueProgress.total} 项</p> : null}
+    footer={<>{!readOnly && row.manualOverride ? <Button disabled={saving} onClick={() => act(true)}>撤销当前更正</Button> : null}<Button disabled={saving} onClick={onClose}>{readOnly || identityConflict ? "关闭" : "取消"}</Button>{!readOnly && !identityConflict ? <Button variant="primary" loading={saving} disabled={invalid} onClick={() => act(false)}>{saveLabel}</Button> : null}</>}>
     {!formFirst ? children : null}
     {identityConflict ? <p role="alert">{describeLedgerCostIdentityIssue(identityIssue)}</p> : null}
     {historyCandidate ? <div className="cost-correction-help" role="status"><strong>已自动补查历史仓库采购</strong><p>{historyCandidate.warehouseSku} · ¥{historyCandidate.unitCost}/件。当前映射缺失，保存后按可撤销人工更正生效。</p><details><summary>核对采购证据</summary>{historyCandidate.historyEvidence.warehouseEvidence.decision.selectedRecords.map(record => <p key={record.recordId}>{record.purchaseDate} · 数量 {record.quantity} · 单价 ¥{record.unitPrice}</p>)}</details></div> : null}

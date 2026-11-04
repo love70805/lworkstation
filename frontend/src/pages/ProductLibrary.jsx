@@ -12,6 +12,7 @@ import ReferenceGroupRows, { ReferenceTableHeader } from "./ReferenceGroupRows";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
+import ProductCollectionTools from '../components/ProductCollectionTools';
 import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionPrestorageSnapshot, promoteSelectionPrestorageRecords, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
@@ -665,6 +666,7 @@ function ProductLibraryView({ workspaceId, view }) {
         ) : null}
       />
 
+      <ProductCollectionTools workspaceId={workspaceId} />
       <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
         <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
         <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>预存区</span><small>{referenceRead.status === "ready" && catalogState.status === "ready" ? pendingGroupCount : "—"}</small></button>

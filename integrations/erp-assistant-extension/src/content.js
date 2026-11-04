@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.58';
+    const EXTENSION_VERSION = '8.0.59';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1873,7 +1873,7 @@
             heartbeatBusy = true;
             try {
                 let fresh = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
-                if (!['paused','stopped','invalidated'].includes(fresh.status)) fresh = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'heartbeat' })).task;
+                if (!['paused','stopped','invalidated'].includes(fresh.status)) fresh = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'heartbeat', progress: run.readProgress ? { label: run.readProgress.label, completed: run.readProgress.completed, total: run.readProgress.total, unit: run.readProgress.unit, phase: run.catalogPhase ? 'catalog' : 'cost' } : null })).task;
                 task = fresh; run.task = fresh;
                 if (fresh.status === 'paused') { run.pauseRequested = true; run.controller.abort(Object.assign(new CostError('采集已暂停'), { code: 'ERP_COLLECTION_PAUSED' })); }
                 if (['stopped','invalidated'].includes(fresh.status)) { run.cancelledByUser = true; run.controller.abort(); }

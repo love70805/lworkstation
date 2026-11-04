@@ -283,6 +283,17 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       const request = requestFor(records, payload.requestId ?? task.requestId);
       if (collectionScopeHash(request) !== task.scopeHash || (payload.filters && hash(payload.filters) !== hash(task.filters))) fail('ERP_TASK_SCOPE_CHANGED', '店铺、月份、SKU/SKC、查询条件或台账导入版本已变化，请新建采集任务。');
       if (action === 'heartbeat' && (task.status === 'stopped' || task.recoveryRequired || request.status !== 'registered')) fail('ERP_TASK_RESUME_REQUIRED', '需要核对范围并点击继续。');
+      if (action === 'heartbeat' && payload.progress !== undefined) {
+        const progress = payload.progress;
+        if (progress == null) task.progress = null;
+        else {
+          if (typeof progress.label !== 'string' || !Number.isSafeInteger(progress.completed) || progress.completed < 0
+            || progress.completed > 100000000 || progress.total != null && (!Number.isSafeInteger(progress.total) || progress.total < progress.completed || progress.total > 100000000)
+            || !['cost', 'catalog'].includes(progress.phase)) fail('ERP_TASK_PROGRESS_INVALID', '采集进度格式无效。', 400);
+          task.progress = { label: progress.label.slice(0, 100), completed: progress.completed, total: progress.total ?? null,
+            unit: String(progress.unit ?? '').slice(0, 20), phase: progress.phase, updatedAt: timestamp(now) };
+        }
+      }
       if (task.status === 'stopped') fail('ERP_TASK_STOPPED', '任务已停止，请新建采集任务。');
       if (request.status === 'expired' && payload.scopeHash !== task.scopeHash) fail('ERP_TASK_REVALIDATION_REQUIRED', '过期任务需要工作台核对当前账本范围。');
       task.requestId = request.requestId; task.requestSnapshot = structuredClone(request); task.instanceId = instanceId;
