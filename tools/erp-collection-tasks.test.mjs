@@ -236,7 +236,39 @@ try {
   await request(`${coordinatedUrl}/control`,{action:'heartbeat',runnerId:'HTTP-RUNNER'},409);
   await request(`${coordinatedUrl}/control`,{action:'stop'});
   await request('requests',{request:{...scope,id:'R-four',replaceLedgerScope:true},expectedSkus:[]},202);
-  console.log('ERP task persistence, restart, batching scale, receipts, adoption, lease, scope, pause and attempt-fencing tests passed');
+
+  // The normal task is whole-scope. Only an explicit, fenced partition creates
+  // retry/transport units, and their identities survive an actual restart.
+  const unifiedSkcs = Array.from({length:12},(_,index)=>`UNIFIED-SKC-${index}`);
+  await request('requests',{request:{...scope,id:'R-unified',platformSkcs:unifiedSkcs,replaceLedgerScope:true},
+    expectedSkus:unifiedSkcs.map((platformSkc,index)=>({platformSkc,platformSku:`UNIFIED-SKU-${index}`}))},202);
+  const unified=(await request('collection-tasks',{requestId:'R-unified',executionProtocol:2,costFlow:'task',filters:{}},201)).task;
+  assert.equal(unified.batches.length,1);
+  const unifiedUrl=`collection-tasks/${unified.taskId}`;
+  const pending=(await request(`${unifiedUrl}/control`,{action:'request_resume'})).task;
+  await request(`${unifiedUrl}/control`,{action:'claim',runnerId:'UNIFIED-RUNNER',resumeRequestId:pending.resumeRequestId});
+  const unifiedBatchUrl=`${unifiedUrl}/batches/${encodeURIComponent(unified.batches[0].batchId)}`;
+  const started=(await request(unifiedBatchUrl,{state:'running',runnerId:'UNIFIED-RUNNER'})).batch;
+  const partition={state:'partition',attemptId:started.attemptId,runnerId:'UNIFIED-RUNNER',groups:[
+    {platformSkcs:unifiedSkcs.slice(0,10),sourceMode:'bulk'},
+    {platformSkcs:unifiedSkcs.slice(10),sourceMode:'legacy',fallbackReason:'target_mapping_unresolved'}]};
+  await request(unifiedBatchUrl,{...partition,groups:partition.groups.slice(0,1)},400);
+  assert.equal((await request(unifiedUrl)).task.batches.length,1);
+  const partitioned=(await request(unifiedBatchUrl,partition)).task;
+  assert.equal(partitioned.batches.length,2);
+  assert.equal(partitioned.summary.total,12);
+  await request(unifiedBatchUrl,{state:'collected',attemptId:started.attemptId,runnerId:'UNIFIED-RUNNER'},404);
+  await stop(); await start();
+  const restoredUnified=(await request(unifiedUrl)).task;
+  assert.equal(restoredUnified.status,'paused');
+  assert.equal(restoredUnified.costFlow,'task');
+  assert.deepEqual(restoredUnified.batches,partitioned.batches);
+  const resumedUnified=(await request(`${unifiedUrl}/control`,{action:'request_resume'})).task;
+  assert.equal(resumedUnified.batches.length,2,'resume must not recreate fixed five-SKC units');
+  assert.equal(resumedUnified.batches[0].platformSkcs.length,10);
+  assert.equal(resumedUnified.batches[1].sourceMode,'legacy');
+  await request(`${unifiedUrl}/control`,{action:'stop'});
+  console.log('ERP task persistence, whole-scope partition, restart, batching compatibility, receipts, adoption, lease, scope, pause and attempt-fencing tests passed');
 } finally {
   if(child?.exitCode===null) await stop();
   await fs.rm(dir,{recursive:true,force:true});

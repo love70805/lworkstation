@@ -101,14 +101,20 @@ async function prepareRuntimeExtension({ sourceDirectory, port, runtimeId, userD
       movedPrevious = true;
     }
     await renameRuntimeDirectory(staging, target);
-    await fs.rm(previous, { recursive: true, force: true });
-    return target;
   } catch (error) {
-    await fs.rm(target, { recursive: true, force: true }).catch(() => {});
-    if (movedPrevious && fsSync.existsSync(previous)) await fs.rename(previous, target).catch(() => {});
+    // A failed rename can leave the current extension completely intact. It
+    // must not be removed unless a preserved previous directory exists.
+    if (movedPrevious) {
+      await fs.rm(target, { recursive: true, force: true }).catch(() => {});
+      if (fsSync.existsSync(previous)) await renameRuntimeDirectory(previous, target).catch(() => {});
+    }
     await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
     throw error;
   }
+  // Promotion has committed. Cleanup can fail after deleting only part of the
+  // old directory; never replace the valid new runtime with that partial copy.
+  await fs.rm(previous, { recursive: true, force: true }).catch(() => {});
+  return target;
 }
 
 async function renameRuntimeDirectory(source, target) {

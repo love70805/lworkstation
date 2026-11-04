@@ -59,6 +59,7 @@ test('starts one immutable desktop task with no foreground form or clipboard ope
   const create=h.calls.find(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST');
   assert.equal(create.body.executionTarget,'desktop');assert.deepEqual(create.body.filters,{...PURCHASE_FILTERS,sku:'SKC-A'});
   assert.equal(create.body.catalogMode,'on_demand');
+  assert.equal(create.body.costFlow,'task');
   assert.equal(h.collector.snapshot().status,'waiting_ack');h.collector.dispose();
 });
 test('waits for first login and resumes only that fixed task after login',async()=>{

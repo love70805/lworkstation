@@ -13,6 +13,7 @@
   // A durable business receipt waits for earlier accepted writes and fsync.
   // Connection probes retain their short deadline so offline recovery stays prompt.
   const LOOPBACK_COMMIT_TIMEOUT_MS = 60000;
+  const MAX_COST_PAYLOAD_BYTES = 25 * 1024 * 1024;
   const ERP_PAGE_PATH = '/view/system/purchaseOrderModule/purchasingManagement.html';
   const activeDeliveries = new Set();
   const CHECKPOINT_KEY = 'shopeersErpCollectionCheckpointsV1';
@@ -91,9 +92,9 @@
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
     const currentVersion = chrome.runtime.getManifest().version;
-    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55'];
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -602,6 +603,31 @@
     };
   }
 
+  function deliveryPayload(record, workspaceId = record.workspaceId) {
+    return {
+      resultDeliveryId: record.resultDeliveryId,
+      requestId: record.requestId,
+      ledgerId: record.ledgerId,
+      workspaceId,
+      querySkcs: record.querySkcs,
+      rows: record.rows,
+      sourceMeta: record.sourceMeta,
+      ...(record.collectionTask ? { collectionTask: record.collectionTask } : {}),
+      ...(record.requestKind === 'catalog' ? { catalogCoverage: record.catalogCoverage, platformScopePolicy: record.platformScopePolicy } : {}),
+      warehouseEvidence: record.warehouseEvidence,
+    };
+  }
+
+  function costPayloadBytes(record) {
+    return new TextEncoder().encode(JSON.stringify(deliveryPayload(record))).byteLength;
+  }
+
+  function assertCostPayloadSize(record) {
+    if (record.requestKind !== 'catalog' && costPayloadBytes(record) > MAX_COST_PAYLOAD_BYTES) {
+      throw loopbackError('ERP_COST_PAYLOAD_TOO_LARGE', '成本证据超过本机单次收件上限（25 MiB），请缩小任务范围后重试；不会截断采购历史。', 413);
+    }
+  }
+
   async function deliver(record, attempt = 1) {
     const attemptsTotalBeforeDelivery = record.attemptsTotal;
     let initialConfig;
@@ -630,24 +656,14 @@
     await savePending(retryRecord);
     try {
       retryRecord = await hydrate(retryRecord, initialConfig);
+      assertCostPayloadSize(retryRecord);
       await savePending(retryRecord);
       const config = await runtimeConfig();
       assertRecordWorkspace(retryRecord, config);
       const payload = await fetchLoopbackJson(retryRecord.requestKind === 'catalog' ? '/erp/v1/catalog-results' : '/erp/v1/cost-results', {
         method: 'POST',
         config,
-        body: {
-          resultDeliveryId: retryRecord.resultDeliveryId,
-          requestId: retryRecord.requestId,
-          ledgerId: retryRecord.ledgerId,
-          workspaceId: config.workspaceId,
-          querySkcs: retryRecord.querySkcs,
-          rows: retryRecord.rows,
-          sourceMeta: retryRecord.sourceMeta,
-          ...(retryRecord.collectionTask ? { collectionTask: retryRecord.collectionTask } : {}),
-          ...(retryRecord.requestKind === 'catalog' ? { catalogCoverage: retryRecord.catalogCoverage, platformScopePolicy: retryRecord.platformScopePolicy } : {}),
-          warehouseEvidence: retryRecord.warehouseEvidence,
-        },
+        body: deliveryPayload(retryRecord, config.workspaceId),
       });
       // Retire/rotate the task before removing its exact queued payload. If the
       // worker exits in this gap, retrying that payload remains idempotent.
@@ -729,13 +745,16 @@
     return { ...result, workspaceReset: marker || result.workspaceReset, ok: true };
   }
 
-  async function prepareTaskCostResult(input) {
+  async function prepareTaskCostResult(input, { persist = true } = {}) {
     const config = await runtimeConfig();
     const identity = input.collectionTask;
+    if (!identity?.taskId || !identity.batchId || !identity.attemptId) throw loopbackError('ERP_TASK_ATTEMPT_STALE', '任务尝试标识缺失，请按原范围重新采集。', 409);
     const { task } = await fetchLoopbackJson('/erp/v1/collection-tasks/' + encodeURIComponent(identity.taskId), { config, query: { workspaceId: config.workspaceId } });
     assertRecordWorkspace(task, config);
+    if (task.taskId !== identity.taskId || task.recoveryRequired || ['stopped', 'invalidated'].includes(task.status)) throw loopbackError('ERP_TASK_ATTEMPT_STALE', '任务已变化或需要恢复，不能使用旧采集结果。', 409);
     const batch = task.batches.find(item => item.batchId === identity.batchId);
-    if (!batch || batch.attemptId !== identity.attemptId || !sameSkcs(batch.platformSkcs, input.querySkcs)) throw loopbackError('ERP_TASK_ATTEMPT_STALE', '批次尝试或商品范围已变化。', 409);
+    if (!batch || !['running', 'collected', 'delivered', 'incomplete'].includes(batch.status)
+      || batch.attemptId !== identity.attemptId || !sameSkcs(batch.platformSkcs, input.querySkcs)) throw loopbackError('ERP_TASK_ATTEMPT_STALE', '任务尝试或商品范围已变化。', 409);
     const request = task.requestSnapshot;
     const evidence = stripUntrustedControl(input.warehouseEvidence || { warehouses: [] });
     const expectedSkus = normalizedExpectedSkus(request.expectedSkus);
@@ -746,8 +765,18 @@
       sourceMeta: stripUntrustedControl(input.meta), warehouseEvidence: evidence };
     if (!record.rows.length) throw loopbackError('EMPTY_COST_RESULTS', '没有可识别仓库 SKU 的成本或排除证据。', 400);
     assertExactPlatformRows(record.rows, expectedSkus, batch.platformSkcs, record.sourceMeta.platformScopePolicy, request.historyMappings);
-    await savePending(record);
+    assertRecordWorkspace(record, await runtimeConfig());
+    if (persist) {
+      assertCostPayloadSize(record);
+      await savePending(record);
+    }
     return { record };
+  }
+
+  async function measureCostResult(input, sender) {
+    if (!senderAllowed(sender)) throw loopbackError('ERP_UNTRUSTED_SENDER', '只允许 ERP 采购管理页的隔离脚本核对成本载荷。', 403);
+    const { record } = await prepareTaskCostResult(input ?? {}, { persist: false });
+    return { ok: true, bytes: costPayloadBytes(record) };
   }
 
   async function prepareCostResult(input) {
@@ -755,7 +784,7 @@
     const existing = (await readPending()).find(item => item.resultDeliveryId === resultDeliveryId);
     // Once retained, only this exact original payload may be retried. It must
     // never be rebuilt from a newly active page, workspace or request.
-    if (existing) return { record: existing };
+    if (existing) { assertCostPayloadSize(existing); return { record: existing }; }
     if (input.collectionTask?.taskId) return prepareTaskCostResult(input);
     const checkpoints = await cleanCheckpoints();
     const checkpoint = checkpoints.find(item => item.resultDeliveryId === resultDeliveryId);
@@ -815,6 +844,7 @@
         configurationError = error;
       }
     }
+    assertCostPayloadSize(record);
     checkpoint.submittedHash = record.payloadHash;
     await chrome.storage.local.set({ [CHECKPOINT_KEY]: checkpoints });
     await savePending(record);
@@ -940,6 +970,8 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const operation = message?.type === 'shopeers.erp.submitCostResult'
       ? submitCostResult(message.payload, sender)
+      : message?.type === 'shopeers.erp.measureCostResult'
+        ? measureCostResult(message.payload, sender)
       : message?.type === 'shopeers.erp.collectionTask'
         ? collectionTask(message.payload, sender)
       : message?.type === 'shopeers.erp.collectionCheckpoint'
@@ -1014,6 +1046,7 @@
       senderAllowed,
       stripUntrustedControl,
       submitCostResult,
+      measureCostResult,
       retryPending,
     };
   } else {

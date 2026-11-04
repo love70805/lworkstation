@@ -1,5 +1,6 @@
 import { Exact } from './profitReports';
 import { currentLedgerResult, hasSavedFinancialReport } from './ledgerWorkflow';
+import { accountingMode } from './inventoryAccounting';
 
 // A read-only, whole-ledger projection. Filtered product subtotals never enter it.
 export function monthlyProfitSummary({ ledger, reportState, productProfitExact, missingCostCount }) {
@@ -7,6 +8,9 @@ export function monthlyProfitSummary({ ledger, reportState, productProfitExact, 
   if (reportState.error) return { status: 'error', error: reportState.error };
   const data = reportState.data;
   if (!data || data.ledger.id !== ledger.id || data.ledger.workspaceId !== ledger.workspaceId || data.ledger.period !== ledger.period) return { status: 'loading' };
+  // Product calculations and supplemental sources refresh independently.
+  // Wait until both refer to the same accounting context after a switch.
+  if (accountingMode(data.ledger.accountingMode) !== accountingMode(ledger.accountingMode)) return { status: 'loading' };
   const frozen = ['finalized', 'locked'].includes(ledger.status);
   const belongs = row => row?.workspaceId === ledger.workspaceId && row.ledgerId === ledger.id && row.period === ledger.period;
   const base = frozen ? data.reports.find(report => belongs(report) && report.id === ledger.currentBaseReportId && report.kind === 'pre_deduction') : null;

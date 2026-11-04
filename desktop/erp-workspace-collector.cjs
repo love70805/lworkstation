@@ -126,7 +126,7 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
     const existing = await requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId: input.workspaceId, requestId: input.requestId } });
     const retained = existing.tasks?.find(task => task.requestId === input.requestId && task.status !== 'stopped');
     const initialSku = String(request.platformSkcs[0]?.platformSkc ?? request.platformSkcs[0]).trim();
-    const created = retained ? { task: retained } : await requestInbox({ route: '/erp/v1/collection-tasks', method: 'POST', body: { workspaceId: input.workspaceId, requestId: input.requestId, executionProtocol: 2, executionTarget: 'desktop', catalogMode: 'on_demand', filters: { ...PURCHASE_FILTERS, sku: initialSku } } });
+    const created = retained ? { task: retained } : await requestInbox({ route: '/erp/v1/collection-tasks', method: 'POST', body: { workspaceId: input.workspaceId, requestId: input.requestId, executionProtocol: 2, costFlow: 'task', executionTarget: 'desktop', catalogMode: 'on_demand', filters: { ...PURCHASE_FILTERS, sku: initialSku } } });
     if (revision !== generation || getContext()?.workspaceId !== input.workspaceId) throw new Error('工作区已改变，采集未启动。');
     const previous = current;
     const owner = { ...input, request, task: created.task, view: previous?.view ?? null, hasRun: false, reconnects: 0, ackStartedAt: now() }; current = owner;

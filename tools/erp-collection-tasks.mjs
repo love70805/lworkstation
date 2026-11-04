@@ -111,6 +111,7 @@ function resetAttempt(batch) {
 }
 
 function splitPendingBatches(task) {
+  if (task.costFlow === 'task') return;
   task.batches = task.batches.flatMap(batch => {
     if (batch.status !== 'pending' || batch.platformSkcs.length <= COST_BATCH_SIZE || batch.resultDeliveryId || batch.deliveryId) return [batch];
     const chunks = [];
@@ -120,6 +121,44 @@ function splitPendingBatches(task) {
     });
     return chunks;
   });
+}
+
+function partitionRunningBatch(task, batch, payload, now) {
+  if (task.executionProtocol !== 2 || task.costFlow !== 'task') fail('ERP_TASK_PARTITION_UNSUPPORTED', '当前任务不支持按异常范围拆分。');
+  if (task.status !== 'running' || task.runMode !== 'cost'
+    || !Number.isFinite(Date.parse(task.runnerLeaseExpiresAt)) || Date.parse(task.runnerLeaseExpiresAt) <= now) {
+    fail('ERP_TASK_NOT_RUNNING', '任务未在有效的成本执行期间，不能拆分范围。');
+  }
+  if (!payload.attemptId || payload.attemptId !== batch.attemptId) fail('ERP_TASK_STALE_ATTEMPT', '旧尝试不能拆分当前范围。');
+  if (batch.status !== 'running' || batch.deliveryId || batch.resultDeliveryId || batch.collectedAt) fail('ERP_TASK_BATCH_TERMINAL', '已采集或已送达的结果不能拆分。');
+  const groups = payload.groups;
+  const original = new Map(batch.platformSkcs.map(skc => [canonical(skc), skc]));
+  if (!Array.isArray(groups) || groups.length < 2 || groups.length > original.size) fail('ERP_TASK_PARTITION_INVALID', '拆分必须包含至少两个非空范围。', 400);
+  const seen = new Set();
+  const normalized = groups.map(group => {
+    if (!group || !Array.isArray(group.platformSkcs) || !group.platformSkcs.length
+      || !['bulk', 'legacy'].includes(group.sourceMode)
+      || group.fallbackReason != null && (typeof group.fallbackReason !== 'string' || !/^[a-z_]{1,80}$/.test(group.fallbackReason))) {
+      fail('ERP_TASK_PARTITION_INVALID', '拆分范围、来源方式或原因格式无效。', 400);
+    }
+    const platformSkcs = group.platformSkcs.map(value => {
+      if (typeof value !== 'string' || !canonical(value)) fail('ERP_TASK_PARTITION_INVALID', '拆分范围缺少有效的 SKC。', 400);
+      const key = canonical(value);
+      if (!original.has(key) || seen.has(key)) fail('ERP_TASK_PARTITION_INVALID', '拆分范围重复或超出原任务。', 400);
+      seen.add(key);
+      return original.get(key);
+    });
+    return { platformSkcs, sourceMode: group.sourceMode,
+      ...(group.fallbackReason == null ? {} : { fallbackReason: group.fallbackReason }) };
+  });
+  if (seen.size !== original.size) fail('ERP_TASK_PARTITION_INVALID', '拆分范围未覆盖全部原目标。', 400);
+  // Validate every group before touching the task. Retire the original attempt
+  // so a delayed result cannot overlap any newly assigned scope.
+  const batches = normalized.map(group => ({ ...group, batchId: `${task.taskId}:part:${crypto.randomUUID()}`,
+    parentBatchId: batch.batchId, status: 'pending', attemptId: null }));
+  task.batches.splice(task.batches.indexOf(batch), 1, ...batches);
+  task.updatedAt = timestamp(now);
+  return { status: 200, body: { task: refresh(task), batches } };
 }
 
 export function handleCollectionTaskRequest(records, { method, url, payload = {}, instanceId, now = Date.now() }) {
@@ -132,6 +171,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
     return { status: 200, body: { tasks: tasks.toSorted((left,right) => String(right.createdAt).localeCompare(String(left.createdAt))).map(task => refresh(structuredClone(task))) } };
   }
   if (!parts.length && method === 'POST') {
+    if (payload.costFlow != null && (payload.executionProtocol !== 2 || payload.costFlow !== 'task')) fail('ERP_TASK_MODE_INVALID', '成本任务执行方式无效。', 400);
     const request = requestFor(records, payload.requestId);
     if (requestedWorkspace !== request.workspaceId) fail('ERP_TASK_WORKSPACE_MISMATCH', '任务工作区不匹配。', 403);
     if (request.status !== 'registered') fail('ERP_TASK_REQUEST_EXPIRED', '请求已过期，请在工作台重新核对范围后继续。');
@@ -149,8 +189,9 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       requestSnapshot: structuredClone(request), expectedSkus: structuredClone(request.expectedSkus ?? []), scopeHash: collectionScopeHash(request),
       filters: structuredClone(filters), queryCapturedAt: payload.queryCapturedAt ?? timestamp(now), status: 'paused', phase: 'cost',
       createdAt: timestamp(now), updatedAt: timestamp(now), instanceId, batches: [] };
-    if (coordinated) Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: 'cost', ...(payload.executionTarget === 'desktop' ? { executionTarget: 'desktop' } : {}) });
-    const batchSize = coordinated ? COST_BATCH_SIZE : 20;
+    if (coordinated) Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand', runMode: 'cost',
+      ...(payload.costFlow === 'task' ? { costFlow: 'task' } : {}), ...(payload.executionTarget === 'desktop' ? { executionTarget: 'desktop' } : {}) });
+    const batchSize = task.costFlow === 'task' ? Math.max(1, skcs.length) : coordinated ? COST_BATCH_SIZE : 20;
     for (let i = 0; i < skcs.length; i += batchSize) task.batches.push({ batchId: `${task.taskId}:${i / batchSize + 1}`, platformSkcs: skcs.slice(i,i+batchSize), status: 'pending', attemptId: null });
     records.push(refresh(task));
     return { status: 201, body: { task } };
@@ -267,7 +308,11 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
     if (!batch) fail('ERP_TASK_BATCH_NOT_FOUND', '任务批次不存在。', 404);
     if (task.status === 'stopped' || task.recoveryRequired) fail('ERP_TASK_NOT_RUNNING', '任务已经停止或等待恢复。');
     if (task.executionProtocol === 2 && (!task.runnerId || payload.runnerId !== task.runnerId)) fail('ERP_TASK_RUNNER_CHANGED', '执行者已变化，旧页面不能继续写入任务。');
-    requestFor(records, task.requestId);
+    const request = requestFor(records, task.requestId);
+    if (payload.state === 'partition') {
+      if (request.status !== 'registered' || collectionScopeHash(request) !== task.scopeHash) fail('ERP_TASK_SCOPE_CHANGED', '任务账本范围或有效期已变化，不能拆分旧范围。');
+      return partitionRunningBatch(task, batch, payload, now);
+    }
     if (['catalog_running','catalog_completed','catalog_failed'].includes(payload.state)) {
       if (task.catalogMode === 'after_costs' && !collectionCostsSettled(task)) fail('ERP_TASK_COST_FIRST', '全部成本采集和本机核算完成后才能统一整理资料。');
       if (!payload.attemptId || payload.attemptId !== batch.attemptId) fail('ERP_TASK_STALE_ATTEMPT', '旧尝试不能更新当前资料批次。');
@@ -280,12 +325,17 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
     }
     if (payload.state === 'running') {
       if (task.status !== 'running' || batch.status !== 'pending') fail('ERP_TASK_BATCH_NOT_PENDING', '批次不在等待执行状态。');
+      if (batch.deliveryId) fail('ERP_TASK_BATCH_TERMINAL', '已送达结果不能重新开始读取。');
+      // Older pending records may still carry an abandoned collected identity.
+      // Starting a new attempt must not inherit that unsent result or outcome.
+      resetAttempt(batch);
       batch.attemptId = crypto.randomUUID(); batch.status = 'running'; batch.startedAt = timestamp(now); batch.error = null;
     } else {
       if (!payload.attemptId || payload.attemptId !== batch.attemptId) fail('ERP_TASK_STALE_ATTEMPT', '旧尝试不能更新当前批次。');
-      if (!['running','collected'].includes(batch.status)) fail('ERP_TASK_BATCH_TERMINAL', '批次已经完成，请通过重试操作开始新尝试。');
+      if (!['running','collected'].includes(batch.status) || batch.deliveryId) fail('ERP_TASK_BATCH_TERMINAL', '批次已经完成，请通过重试操作开始新尝试。');
       if (!['collected','failed','pending'].includes(payload.state)) fail('ERP_TASK_STATE_INVALID', '未知批次状态。', 400);
-      batch.status = payload.state;
+      if (payload.state === 'pending') resetAttempt(batch);
+      else batch.status = payload.state;
       if (payload.state === 'collected') {
         batch.collectedAt = timestamp(now); batch.evidenceComplete = payload.evidenceComplete !== false;
         batch.error = batch.evidenceComplete ? null : String(payload.error || '成本证据未齐，请展开本批回传结果核对。').slice(0,2000);

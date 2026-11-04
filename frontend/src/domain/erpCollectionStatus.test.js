@@ -105,3 +105,24 @@ it('shows local calculation before automatic catalog and keeps pause available',
   expect(paused.description).toContain('全部成本核算回执');
   expect(paused.canResume).toBe(true);
 });
+
+it('marks delivered on-demand work as collection-only until local calculation is confirmed', () => {
+  const task = { executionProtocol: 2, costFlow: 'task', catalogMode: 'on_demand', status: 'cost_complete', batches: [delivered] };
+  const pending = erpCollectionPresentation(task);
+  expect(pending).toMatchObject({ state: 'cost_completed', running: false, tone: 'info', adoptionUnconfirmed: true });
+  expect(pending.title).toBe('成本采集已完成');
+  expect(pending.description).toContain('本机核算结果尚未确认');
+  const confirmed = erpCollectionPresentation({ ...task, batches: [{ ...delivered, adoptionReportedAt: '2026-11-04T00:00:00Z' }] });
+  expect(confirmed).toMatchObject({ tone: 'success', adoptionUnconfirmed: false });
+  expect(confirmed.description).not.toContain('尚未确认');
+});
+
+it('explains task-wide collection and avoids batch instructions for recovery and exceptions', () => {
+  const task = { costFlow: 'task', status: 'running', batches: [{ platformSkcs: ['A', 'B', 'C'], status: 'running' }] };
+  expect(erpCollectionPresentation(task).description).toContain('整项任务的采购表');
+  expect(erpCollectionPresentation(task).description).toContain('缺项与异常按需补查');
+  for (const value of [task, { ...task, status: 'paused' }, { ...task, status: 'partial', batches: [{ ...delivered, status: 'incomplete' }] },
+    { ...task, status: 'paused', pauseReason: { code: 'ERP_SERVICE_UNAVAILABLE' } }]) {
+    expect(erpCollectionPresentation(value).description).not.toContain('批次');
+  }
+});

@@ -41,17 +41,18 @@ it('separates durable cost delivery, finished catalog checks and material comple
   ];
   const inboxes = [{ deliveryId: 'D1', envelope: { batch: { warehouseEvidence: { mappingFailures: [{ warehouseSku: 'WH-A' }] } } } }];
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches }} inboxes={inboxes} />);
-  expect(html).toContain('已送达 2 / 3 批');
-  expect(html).toContain('已检查 2 / 3 批 · 资料齐全 1 批 · 待补齐 1 批');
-  expect(html).toContain('1 批请求失败'); expect(html).toContain('采购列表请求超时');
-  expect(html).toContain('1 批成本已送达，证据待补齐'); expect(html).toContain('平台 SKU 映射不完整 1 个仓库 SKU');
-  expect(html).toContain('1 批资料待补齐'); expect(html).toContain('图片缺项 1');
+  expect(html).toContain('已送达 2 / 3 个 SKC');
+  expect(html).toContain('已检查 2 / 3 个 SKC · 已确认齐全 1 个 SKC · 待核对范围 1 个 SKC');
+  expect(html).toContain('读取未完成，涉及 1 个 SKC'); expect(html).toContain('SKC：C'); expect(html).toContain('采购列表请求超时');
+  expect(html).toContain('成本证据待补齐，涉及 1 个 SKC'); expect(html).toContain('平台 SKU 映射不完整 1 个仓库 SKU');
+  expect(html).toContain('商品资料待核对，涉及 1 个 SKC'); expect(html).toContain('图片缺项 1');
+  expect(html).not.toContain('批次');
   expect(html).not.toContain('采集未完成'); expect(html).not.toContain('NaN');
 });
 
 it('offers material continuation for a partial task with all cost receipts', () => {
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches: [{ platformSkcs: ['A'], status: 'incomplete', deliveryId: 'D', catalogStatus: 'failed' }] }} />);
-  expect(html).toContain('继续原任务'); expect(html).toContain('重试失败批次');
+  expect(html).toContain('继续原任务'); expect(html).toContain('重试未完成项');
 });
 
 it('explains background work and does not ask users to continue an active material read', () => {
@@ -81,4 +82,49 @@ it('reports an unavailable service without claiming cached reads are still runni
   expect(html).not.toContain('暂停采集');
   expect(html).not.toContain('继续补充资料');
   expect(html).not.toContain('class="spin"');
+});
+
+it('shows whole-task scope and weights progress by SKCs when exception ranges have unequal sizes', () => {
+  const task = { costFlow: 'task', status: 'partial', ledgerPeriod: '2026-10',
+    expectedSkus: [
+      { platformSku: 'SKU-A1', platformSkc: 'A', store: '甲店' },
+      { platformSku: 'SKU-A2', platformSkc: 'A', store: '甲店' },
+      { platformSku: 'SKU-B', platformSkc: 'B', store: '甲店' },
+      { platformSku: 'SKU-C', platformSkc: 'C', store: '乙店' },
+      { platformSku: 'SKU-D', platformSkc: 'D', store: '乙店' },
+    ],
+    batches: [
+      { batchId: 'ready', platformSkcs: ['A', 'B', 'C'], status: 'delivered', deliveryId: 'D1' },
+      { batchId: 'missing', platformSkcs: ['D'], status: 'failed', error: '仓库映射待补查' },
+    ] };
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
+  expect(html).toContain('范围 4 个 SKC / 5 个 SKU');
+  expect(html).toContain('已送达 3 / 4 个 SKC');
+  expect(html).toContain('max="4" value="3" aria-label="ERP 成本送达进度"');
+  expect(html).toContain('剩余 1 个 SKC');
+  expect(html).toContain('SKC：D · 仓库映射待补查');
+  expect(html).toContain('重试未完成项');
+  expect(html).not.toMatch(/批次|\d+ \/ \d+ 批|固定/);
+});
+
+it('keeps delivered costs distinct from unconfirmed or failed local accounting', () => {
+  const task = { executionProtocol: 2, costFlow: 'task', catalogMode: 'on_demand', status: 'cost_complete', workspaceId: 'W',
+    batches: [{ batchId: 'B', platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' }] };
+  const pending = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'W', deliveryId: 'D', adoptionPending: true }]} />);
+  expect(pending).toContain('成本采集已完成');
+  expect(pending).toContain('本机核算结果尚未确认');
+  expect(pending).toContain('采购证据送达不代表核算完成');
+  expect(pending).not.toContain('erp-activity-success');
+  const failed = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'W', deliveryId: 'D', adoptionFailure: { message: '本机写入暂不可用' } }]} />);
+  expect(failed).toContain('本机核算未完成：本机写入暂不可用');
+  expect(failed).toContain('erp-activity-warning');
+  expect(failed).not.toContain('erp-activity-success');
+});
+
+it('does not use another workspace receipt as this task accounting progress', () => {
+  const task = { workspaceId: 'W', status: 'cost_complete', batches: [{ batchId: 'B', platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' }] };
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'OTHER', deliveryId: 'D',
+    adoptionFailure: { message: '另一工作区失败' }, adoption: { items: [{ state: 'adopted', platformSku: 'SKU-A' }] } }]} />);
+  expect(html).toContain('已采用 <strong>0</strong>');
+  expect(html).not.toContain('另一工作区失败');
 });

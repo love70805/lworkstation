@@ -154,7 +154,7 @@ async function scenario(mode) {
         assert.match(deliveries[0].sourceMeta.scopeDirectoryFailures[0].message, /product_count_mismatch/);
         assert.equal(deliveries[0].sourceMeta.scopeDirectoryComplete, false);
         assert.equal(counters.get('product-page:SKC-0'), 4, 'persistent omission is checked only twice, including page 2');
-        assert.match(window.document.getElementById('erpa-statusbar').textContent, /整批仍有 1 批/);
+        assert.match(window.document.getElementById('erpa-statusbar').textContent, /仍有 5 个 SKC 成本证据待核对/);
         assert.doesNotMatch(window.document.getElementById('erpa-statusbar').textContent, /校验通过/);
         const old = deliveries[0]; healthy = true;
         window.document.getElementById('erpa-retry-batches').click();
@@ -167,7 +167,7 @@ async function scenario(mode) {
         assert.equal(old.sourceMeta.scopeDirectoryComplete, false, 'old evidence remains unchanged');
         assert.equal(window.document.querySelectorAll('.erpa-result-row').length, 21, 'replacement does not leave an obsolete warehouse preview');
         assert.doesNotMatch(window.document.getElementById('erpa-table-body').textContent, /WH-0\b/);
-        assert.match(window.document.getElementById('erpa-statusbar').textContent, /整批成本证据校验通过/);
+        assert.match(window.document.getElementById('erpa-statusbar').textContent, /任务成本证据校验通过/);
       } else {
         assert.equal(task().batches[0].status, 'delivered');
         assert.equal(deliveries[0].sourceMeta.scopeRetrySkcCount, 1);

@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.57';
+    const EXTENSION_VERSION = '8.0.58';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1471,8 +1471,18 @@
 
 
     async function runCalculation(filters, run) {
+        if (run.batchSourceMode === 'legacy') {
+            const state = await runLegacyCalculation(filters, run);
+            Object.assign(state.meta, { collectionMethod: 'legacy', bulkFallbackCount: 1, bulkFallbackReason: run.batchFallbackReason || 'bulk_source_unavailable' });
+            return state;
+        }
         const module = window.ShopeersErpBulkPurchase;
-        if (!module || !window.XLSX) return runLegacyCalculation(filters, run);
+        if (!module || !window.XLSX) {
+            if (run.task?.costFlow === 'task' && run.batchSkcs?.length > 1) {
+                throw Object.assign(new CostError('批量读取器暂不可用，正在转为原方式'), { code: 'ERP_BULK_FALLBACK', reason: 'workbook_reader_unavailable' });
+            }
+            return runLegacyCalculation(filters, run);
+        }
         const startedAt = Date.now();
         const preview = run.previewContext || await readPreviewContext(extractQuerySkcs(filters), run.queryCapturedAt);
         const context = { ...preview, expectedSkus: preview.expectedSkus || run.task?.expectedSkus || run.task?.requestSnapshot?.expectedSkus };
@@ -1503,8 +1513,11 @@
             return state;
         } catch (error) {
             if (run.controller.signal.aborted || run.pauseRequested || module.interrupted(error)) throw error;
+            if (run.task?.costFlow === 'task' && querySkcs.length > 1) {
+                throw Object.assign(error, { code: 'ERP_BULK_FALLBACK', readMetrics: { ...run.readMetrics, ...error.bulkMetrics, durationMs: Date.now() - startedAt } });
+            }
             const attempted = { ...run.readMetrics };
-            setLoading('正在使用原方式采集成本', '批量结果需要核验，当前批次改用原读取方式');
+            setLoading('正在补查采购成本', '当前范围需要核验，改用原读取方式');
             const state = await runLegacyCalculation(filters, run);
             for (const field of ['requestCount', 'requestRetryCount', 'requestErrorCount', 'rateLimitCount', 'requestDurationMs']) state.meta[field] = (state.meta[field] || 0) + (attempted[field] || 0);
             state.meta.peakRequestConcurrency = Math.max(state.meta.peakRequestConcurrency || 0, attempted.peakRequestConcurrency || 0);
@@ -1799,22 +1812,50 @@
         const costEnd = costFinished ? (receiptTimes.length ? Math.max(...receiptTimes) : NaN) : Date.now();
         const duration = costEnd - Date.parse(task.createdAt || new Date().toISOString());
         const elapsed = Number.isFinite(duration) ? Math.max(0, Math.floor(duration / 1000)) + ' 秒' : '暂无记录';
-        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'ready' ? '继续请求已保存，等待 ERP 接续' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '已暂停 · 可在工作台继续原任务' : activeRun?.catalogPhase ? '统一整理商品资料' : delivered === total && total ? task.catalogMode === 'after_costs' ? task.phase === 'cost_adoption' ? '成本全部送达 · 等待本机核算' : '成本核算已完成 · 统一整理暂存资料' : '成本全部送达 · 商品资料按需补齐' : '分批采集成本 · 顺带资料暂存')
+        taskStage = (task.status === 'stopped' ? '已停止' : task.status === 'invalidated' ? '范围已变化' : task.status === 'ready' ? '继续请求已保存，等待 ERP 接续' : task.status === 'paused' ? task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE' ? 'ERP 服务暂不可用，采集已暂停' : '已暂停 · 可在工作台继续原任务' : activeRun?.catalogPhase ? '统一整理商品资料' : delivered === total && total ? task.catalogMode === 'after_costs' ? task.phase === 'cost_adoption' ? '成本全部送达 · 等待本机核算' : '成本核算已完成 · 统一整理暂存资料' : '成本全部送达 · 商品资料按需补齐' : '正在采集与核验采购成本')
             + ' · 任务 ' + task.taskId.slice(-8)
             + ' · 已采集 ' + collected + '/' + total + ' SKC · 已送达 ' + delivered + '/' + total
             + ' SKC · 已采用 ' + (task.summary?.adopted ?? 0) + ' SKU'
             + ' · 原范围 ' + (task.ledgerPeriod || '月份待关联') + (stores.length ? ' / ' + stores.join('、') : '')
-            + ' · 已送达 ' + batches.filter(batch => batch.deliveryId).length + '/' + batches.length + ' 批'
             + ' · 成本历时 ' + elapsed
-            + (failed.length ? ' · ' + failed.length + ' 批待核对：' + (failed[0].error?.message || failed[0].error || '证据不完整') : '')
-            + (batches.some(batch => batch.catalogStatus) ? ' · 资料已检查 ' + batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).length + '/' + batches.length + ' 批，齐全 ' + batches.filter(batch => batch.catalogStatus === 'completed').length + ' 批' : '');
+            + (failed.length ? ' · ' + failed.reduce((count, batch) => count + batch.platformSkcs.length, 0) + ' 个 SKC 待核对：' + (failed[0].error?.message || failed[0].error || '证据不完整') : '')
+            + (batches.some(batch => batch.catalogStatus) ? ' · 资料已检查 ' + batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).reduce((count, batch) => count + batch.platformSkcs.length, 0) + '/' + total + ' SKC' : '');
         if (task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') taskStage += ' · 已送达结果保留，服务恢复后继续原任务';
         if (task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED') taskStage = 'ERP 店铺权限校验未通过，采集已暂停 · 已送达结果保留，请检查 ERP 采购查询后继续原任务';
         renderPageContext();
         renderStatus();
     }
 
-    async function runBatchedCalculation(run) {
+    function addCollectionMetrics(target, source) {
+        for (const field of ['requestCount', 'requestRetryCount', 'requestErrorCount', 'rateLimitCount', 'requestDurationMs', 'durationMs', 'bulkExportCount', 'bulkMappingRequests', 'bulkBoundaryOrders']) {
+            if (Number.isFinite(source?.[field])) target[field] = (target[field] || 0) + source[field];
+        }
+        target.peakRequestConcurrency = Math.max(target.peakRequestConcurrency || 0, source?.peakRequestConcurrency || 0);
+        return target;
+    }
+
+    function partitionCostScope(batch, error) {
+        const skcs = batch.platformSkcs;
+        if (skcs.length < 2) return [];
+        if (error.code === 'ERP_COST_PAYLOAD_LARGE') {
+            const middle = Math.ceil(skcs.length / 2);
+            return [skcs.slice(0, middle), skcs.slice(middle)].map(platformSkcs => ({ platformSkcs,
+                sourceMode: batch.sourceMode || 'bulk', ...(batch.fallbackReason ? { fallbackReason: batch.fallbackReason } : {}) }));
+        }
+        const reason = /^[a-z_]{1,80}$/.test(error.reason || '') ? error.reason : 'bulk_source_unavailable';
+        const failed = new Set((error.fallbackSkcs || []).map(resultPolicy.canonical));
+        if (failed.size && skcs.some(skc => !failed.has(resultPolicy.canonical(skc)))) {
+            return [{ platformSkcs: skcs.filter(skc => !failed.has(resultPolicy.canonical(skc))), sourceMode: 'bulk' },
+                ...skcs.filter(skc => failed.has(resultPolicy.canonical(skc))).map(skc => ({ platformSkcs: [skc], sourceMode: 'legacy', fallbackReason: reason }))];
+        }
+        // Only the slower native fallback needs recovery boundaries. Successful
+        // exports have one cost receipt regardless of the number of SKCs.
+        const size = Math.min(5, Math.ceil(skcs.length / 2)), groups = [];
+        for (let i = 0; i < skcs.length; i += size) groups.push({ platformSkcs: skcs.slice(i, i + size), sourceMode: 'legacy', fallbackReason: reason });
+        return groups;
+    }
+
+    async function runTaskCalculation(run) {
         clearReadCaches(); requestLimit = 8; throttleUntil = 0; requestRecoveryAt = 0; healthyRequests = 0;
         const bridge = window.ShopeersErpDeliveryBridge;
         let task = run.task;
@@ -1841,7 +1882,9 @@
             finally { heartbeatBusy = false; }
         }, 3000);
         try {
-            for (const initial of task.runMode === 'catalog' ? [] : task.batches) {
+            const pending = task.runMode === 'catalog' ? [] : [...task.batches];
+            while (pending.length) {
+                const initial = pending.shift();
                 if (run.cancelledByUser || run.pauseRequested) break;
                 task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                 let batch = task.batches.find(item => item.batchId === initial.batchId);
@@ -1861,18 +1904,37 @@
                 const started = await taskOperation({ action: 'batch', taskId: task.taskId, batchId: batch.batchId, state: 'running', phase: 'cost' });
                 batch = started.batch; task = started.task; run.task = task;
                 run.batchId = batch.batchId;
+                run.batchSourceMode = batch.sourceMode;
+                run.batchFallbackReason = batch.fallbackReason;
                 run.catalogPhase = false; run.readProgress = null;
                 run.batchSkcs = batch.platformSkcs; run.controller = new AbortController();
                 run.controller.signal.deadlineAt = Date.now() + COST_STAGE_BUDGET_MS;
                 run.resultDeliveryId = makeResultDeliveryId();
                 const identity = { taskId: task.taskId, batchId: batch.batchId, attemptId: batch.attemptId };
-                const budget = window.setTimeout(() => run.controller.abort(new CostError('本批成本读取时间已到', '60分钟时限已到；可重试此批次。')), COST_STAGE_BUDGET_MS);
+                const budget = window.setTimeout(() => run.controller.abort(new CostError('成本读取时间已到', '60分钟时限已到；已送达结果保留，可继续未完成范围。')), COST_STAGE_BUDGET_MS);
                 let deliveryAttempted = false;
                 try {
                     updateTaskStatus(task);
                     const state = await runCalculation(run.filters, run);
                     window.clearTimeout(budget);
                     if (run.cancelledByUser) break;
+                    const deliveryMeta = addCollectionMetrics({ ...state.meta, collectionTaskId: task.taskId }, run.deferredReadMetrics);
+                    if (task.costFlow === 'task') {
+                        // Rows can grow when many platform SKUs share one
+                        // warehouse. Measure the actual bridge payload before
+                        // persisting a collected identity, not the source state.
+                        const measured = await bridge.measureCost({ ...state, meta: deliveryMeta, collectionTask: identity,
+                            resultDeliveryId: run.resultDeliveryId, querySkcs: batch.platformSkcs });
+                        if (!measured?.ok || !Number.isSafeInteger(measured.bytes) || measured.bytes < 0) {
+                            throw Object.assign(new CostError('成本回传体积尚未确认', measured?.message || '请继续原任务重试，结果尚未标记为已送达。'), { code: measured?.code });
+                        }
+                        const limit = (batch.platformSkcs.length > 1 ? 20 : 25) * 1024 * 1024;
+                        if (measured.bytes > limit) {
+                            throw Object.assign(new CostError(batch.platformSkcs.length > 1 ? '正在分段保存完整采购证据' : '当前 SKC 的完整采购证据超过传输上限',
+                                '完整证据保留，未截断或采用；请核对该商品范围。'), { code: batch.platformSkcs.length > 1 ? 'ERP_COST_PAYLOAD_LARGE' : 'ERP_COST_PAYLOAD_TOO_LARGE', readMetrics: state.meta });
+                        }
+                    }
+                    state.meta = deliveryMeta;
                     const evidenceComplete = state.meta.scopeDirectoryComplete && !state.meta.orderCountMismatch && !state.meta.detailFailureCount && !state.meta.mappingFailureCount;
                     const issues = [];
                     if (state.meta.orderCountMismatch) issues.push('采购列表数量未核对一致');
@@ -1883,6 +1945,7 @@
                         issues.push('已使用的平台规格映射未确认 ' + state.meta.mappingFailureCount + ' 项' + (empty ? '（ERP 返回空映射 ' + empty + ' 项）' : ''));
                     }
                     const saved = await taskOperation({ action: 'batch', ...identity, state: 'collected', resultDeliveryId: run.resultDeliveryId, evidenceComplete, error: issues.join('；') });
+                    run.deferredReadMetrics = null;
                     task = saved.task;
                     state.meta.collectionTaskId = task.taskId;
                     const deliveryState = { createdAt: new Date().toISOString(), queryCapturedAt: run.queryCapturedAt };
@@ -1901,14 +1964,26 @@
                     lastWarehouseEvidence = { ...state.warehouseEvidence, warehouses: [...new Map([...(lastWarehouseEvidence?.warehouses || []).filter(row => combined.has(resultPolicy.canonical(row.warehouseSku))), ...state.warehouseEvidence.warehouses].map(row => [resultPolicy.canonical(row.warehouseSku), row])).values()] };
                     setResultCache(state.results, state.meta, state.warehouseEvidence, capturedListUrl, run.resultDeliveryId, deliveryState);
                     run.readProgress = null;
-                    setLoading('本批成本已采集，正在回传', '等待本机持久收件确认');
+                    setLoading('成本已采集，正在回传', '等待本机持久收件确认');
                     deliveryAttempted = true;
                     const response = await bridge.submit({ ...deliveryState, ...state, resultDeliveryId: run.resultDeliveryId, querySkcs: batch.platformSkcs, collectionTask: identity });
-                    if (response.status !== 'success' && !response.retained) throw new CostError('此批成本尚未送达', response.message || '请重试失败批次。');
+                    if (response.status !== 'success' && !response.retained) throw new CostError('成本尚未送达', response.message || '请重试未完成项。');
                     task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                     updateTaskStatus(task); renderResults(); renderStatus(); updateActionState();
                 } catch (error) {
                     if (run.cancelledByUser) break;
+                    if (!deliveryAttempted && task.costFlow === 'task' && !run.pauseRequested && !run.controller.signal.aborted
+                        && ['ERP_BULK_FALLBACK', 'ERP_COST_PAYLOAD_LARGE'].includes(error.code)) {
+                        const groups = partitionCostScope(batch, error);
+                        if (groups.length > 1) {
+                            const partition = await taskOperation({ action: 'batch', ...identity, state: 'partition', groups });
+                            run.deferredReadMetrics = addCollectionMetrics(run.deferredReadMetrics || {}, error.readMetrics);
+                            task = partition.task; run.task = task;
+                            pending.unshift(...partition.batches);
+                            updateTaskStatus(task);
+                            continue;
+                        }
+                    }
                     if (deliveryAttempted) {
                         // A lost ACK or status read cannot demote a durable receipt.
                         // Preserve the collected identity for receipt reconciliation.
@@ -1928,7 +2003,7 @@
                 // Wait for durable local calculation outcomes, not just HTTP
                 // delivery. Heartbeats/pause stay active while the app adopts.
                 while (!task.batches.every(batch => batch.adoptionReportedAt)) {
-                    setLoading('成本已送达，等待本机核算完成', '全部批次处理完成后统一整理暂存资料');
+                    setLoading('成本已送达，等待本机核算完成', '成本处理完成后统一整理暂存资料');
                     await new Promise(resolve => window.setTimeout(resolve, 1000));
                     try { task = (await taskOperation({ action: 'get', taskId: task.taskId })).task; }
                     catch {
@@ -2019,11 +2094,11 @@
             if (window.ShopeersErpDeliveryBridge.collectionTask) {
                 const context = previewContext || await readPreviewContext(extractQuerySkcs(filters), run.queryCapturedAt);
                 if (context.requestId || restoredTask) {
-                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2, catalogMode: 'on_demand' });
+                    const response = restoredTask ? { ok: true, task: restoredTask } : await taskOperation({ action: 'create', requestId: context.requestId, filters, queryCapturedAt: run.queryCapturedAt, executionProtocol: 2, costFlow: 'task', catalogMode: 'on_demand' });
                     if (response.task) {
                         window.clearTimeout(budgetTimer); budgetTimer = null;
                         run.task = response.task; run.previewContext = context;
-                        await runBatchedCalculation(run);
+                        await runTaskCalculation(run);
                         return;
                     }
                 }
@@ -2398,9 +2473,10 @@
             const issues = batches.filter(batch => ['failed', 'incomplete'].includes(batch.status) || batch.evidenceComplete === false);
             const confirmed = batches.length > 0 && batches.every(batch => batch.status === 'delivered' && batch.evidenceComplete !== false);
             const paused = collectionTaskState.status === 'paused';
-            const label = paused ? '采集已暂停' : issues.length ? '整批仍有 ' + issues.length + ' 批成本证据待核对' : confirmed ? '整批成本证据校验通过' : '整批成本证据仍在读取';
+            const countSkcs = values => values.reduce((count, batch) => count + batch.platformSkcs.length, 0);
+            const label = paused ? '采集已暂停' : issues.length ? '仍有 ' + countSkcs(issues) + ' 个 SKC 成本证据待核对' : confirmed ? '任务成本证据校验通过' : '任务成本证据仍在读取';
             status.innerHTML = '<span class="erpa-status-item ' + (issues.length || paused ? 'erpa-status-warn' : confirmed ? 'erpa-status-ok' : '') + '"><strong>' + escapeHtml(label) + '</strong></span>'
-                + '<span class="erpa-status-item">已送达 <strong>' + batches.filter(batch => batch.deliveryId).length + '/' + batches.length + ' 批</strong></span>'
+                + '<span class="erpa-status-item">已送达 <strong>' + countSkcs(batches.filter(batch => batch.deliveryId)) + '/' + countSkcs(batches) + ' SKC</strong></span>'
                 + '<span class="erpa-status-item">已采用 <strong>' + (collectionTaskState.summary?.adopted || 0) + ' SKU</strong></span>'
                 + '<span class="erpa-status-item">当前预览 <strong>' + lastResults.length + ' 个仓库 SKU / ' + lastResults.reduce((count, row) => count + row.mappings.length, 0) + ' 个平台映射</strong></span>';
             footerLeft.textContent = issues.length ? '历史补查项回工作台确认；读取失败或证据缺项才需重试。' : '范围：原工作区、台账月份、店铺及平台 SKU/SKC';
@@ -2486,7 +2562,7 @@
             const total = batches.reduce((n, batch) => n + batch.platformSkcs.length, 0);
             const delivered = batches.filter(batch => batch.deliveryId).reduce((n, batch) => n + batch.platformSkcs.length, 0);
             html += progressRow('成本总回传', delivered, total, 'SKC');
-            if (run.catalogPhase) html += progressRow('资料批次检查', batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).length, batches.length, '批');
+            if (run.catalogPhase) html += progressRow('商品资料检查', batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).reduce((count, batch) => count + batch.platformSkcs.length, 0), total, 'SKC');
         }
         const state = run.readProgress;
         const stageId = run.catalogPhase ? 'erpa-catalog-stage-progress' : 'erpa-progress-bar';
@@ -2503,9 +2579,7 @@
 
     function setLoading(title, meta) {
         const stage = activeRun?.readProgress;
-        const batches = activeRun?.task?.batches || [];
-        const batchIndex = batches.findIndex(batch => batch.batchId === activeRun?.batchId);
-        const description = (batchIndex >= 0 ? '第 ' + (batchIndex + 1) + '/' + batches.length + ' 批 · 本批 ' + activeRun.batchSkcs.length + ' SKC · ' : '') + (stage ? stage.completed + ' / ' + stage.total + ' ' + stage.unit + '已处理' : '');
+        const description = (activeRun?.batchSkcs?.length ? '正在处理 ' + activeRun.batchSkcs.length + ' 个 SKC · ' : '') + (stage ? stage.completed + ' / ' + stage.total + ' ' + stage.unit + '已处理' : '');
         if (activeRun?.catalogPhase) {
             const status = document.getElementById('erpa-catalog-progress');
             if (status) { status.hidden = false; document.getElementById('erpa-catalog-message').textContent = title + ' · ' + [description, meta].filter(Boolean).join(' · '); }
@@ -2711,7 +2785,7 @@
                     '<button class="erpa-button erpa-button-primary" id="erpa-recalculate" type="button"><b aria-hidden="true">↻</b><span>重新采集全部</span></button>' +
                     '<button class="erpa-button" id="erpa-supplement-catalog" type="button" hidden><span>补取商品资料</span></button>' +
                     '<button class="erpa-button erpa-button-primary" id="erpa-resume" type="button" hidden>继续原任务</button>' +
-                    '<button class="erpa-button" id="erpa-retry-batches" type="button" hidden>重试失败批次</button>' +
+                    '<button class="erpa-button" id="erpa-retry-batches" type="button" hidden>重试未完成项</button>' +
                     '<button class="erpa-button" id="erpa-copy" type="button"><b aria-hidden="true">⎘</b><span>复制成本</span></button>' +
                     '<button class="erpa-button" id="erpa-retry-delivery" type="button"><span>重试回传</span></button>' +
                     '<button class="erpa-button" id="erpa-export" type="button"><b aria-hidden="true">⇩</b><span>导出 CSV</span></button></div>' +

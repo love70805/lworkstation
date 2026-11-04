@@ -13,7 +13,9 @@ const { instrument } = require(bulkBench ? '../tools/fixtures/erp-bulk-instrumen
 const root = path.resolve(__dirname, '..');
 const out = path.resolve(process.env.ERP_BENCH_OUTPUT);
 const scratch = path.join(out, 'scratch');
-const profile = path.join(scratch, `native-profile-${process.pid}`);
+// A short isolated profile avoids Chromium LevelDB path limits on Windows;
+// evidence and bundled fixture assets still stay under the selected output.
+const profile = path.join(path.resolve(process.env.ERP_BENCH_PROFILE_ROOT || scratch), `native-profile-${process.pid}`);
 const site = path.join(scratch, 'site');
 const adoptionPollMs = Number(process.env.ERP_BENCH_ADOPTION_POLL_MS || 25);
 assert.ok(Number.isInteger(adoptionPollMs) && adoptionPollMs >= 25 && adoptionPollMs <= 5000);
@@ -152,13 +154,15 @@ async function runCase(cap, mode, repetition, extensionDir) {
       return false;
     }, id, mode === 'timeout-real' ? 190000 : 90000);
     const wallMs = performance.now() - started;
-    assert.equal(envelopes.length, 2);
-    assert.equal(trace.calculations.length, 2);
+    const wholeTaskExport = bulkBench && mode.startsWith('bulk');
+    const expectedReceipts = wholeTaskExport ? 1 : 2;
+    assert.equal(envelopes.length, expectedReceipts);
+    assert.equal(trace.calculations.length, expectedReceipts);
     assert.equal(trace.costComplete, true);
     assert.deepEqual(errors, []);
     for (const batch of actualBodies) {
       assert.equal(batch.batch.evidenceStatus, 'complete');
-      assert.equal(batch.batch.rows.length, 5);
+      assert.equal(batch.batch.rows.length, wholeTaskExport ? targets.length : 5);
       assert.ok(batch.batch.rows.every(row => row.unitCost === 5 && /^SKU-\d+$/.test(row.platformSku)));
       assert.ok(batch.batch.warehouseEvidence.every(row => row.purchaseRecords.length === ORDERS));
     }
@@ -167,7 +171,15 @@ async function runCase(cap, mode, repetition, extensionDir) {
     assert.deepEqual(trace.errors, []);
     assert.ok(trace.warm.every(x => x.equal), 'Warm cache preserves every business result and history record');
     const semantics = trace.calculations.map(x => JSON.parse(x.semantic));
+    // Compare the same business evidence independently of its transport units.
+    // Keep duplicate rows (the fixture also asserts exact unique coverage).
+    const combinedSemantics = Object.fromEntries([...new Set(semantics.flatMap(value => Object.keys(value)))].sort().map(key =>
+      [key, semantics.flatMap(value => value[key] || []).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))]));
     const cold = stats(trace, 'cold'), warm = stats(trace, 'warm');
+    // Recovery can add the failed bulk attempt after a calculation returns.
+    // Compare real delivered counters with network observations, rather than
+    // the earlier calculation snapshot retained by the timing instrumentation.
+    const reportedMetrics = actualBodies.map(envelope => envelope.batch.sourceMeta);
     assert.ok(cold.peak <= cap);
     assert.equal(cold.requestCount, bulkBench ? (mode.startsWith('legacy') ? 560 : mode === 'fallback' ? 562 : 4) : 560 + (faultMode ? 1 : 0));
     assert.equal(warm.requestCount, 0, 'Same-task complete evidence reuse performs no ERP fetch');
@@ -178,12 +190,12 @@ async function runCase(cap, mode, repetition, extensionDir) {
     assert.equal(products.length, targets.length);
     assert.deepEqual(products.map(x => x.platformSku), targets.map(x => x.platformSku).sort());
     assert.ok(products.every(x => x.unitCostExact === '5' && x.profitExact === '88.6' && x.costSource === 'erp'));
-    const result = { id, cap, mode, repetition, baseDelayMs: baseDelay, requestTimeoutMs: timeoutMs, acceleratedTimeout: mode === 'timeout', wallMs, taskMs: trace.taskEnd - trace.taskStart, coldCalculationMs: trace.calculations.reduce((n, x) => n + x.end - x.start, 0), warmCalculationMs: trace.warm.reduce((n, x) => n + x.end - x.start, 0), cold, warm, retryCount: trace.calculations.reduce((n, x) => n + x.meta.requestRetryCount, 0), rateLimitCount: trace.calculations.reduce((n, x) => n + x.meta.rateLimitCount, 0), localAdoptionMs: adoption.reduce((n, x) => n + x.receiveAndAdoptMs, 0), localProfitMs: adoption.reduce((n, x) => n + x.profitReadAndComputeMs, 0), semanticDigest: digest(semantics), finalCostDigest: digest(endCosts), nativeVisibleWindows: BrowserWindow.getAllWindows().filter(x => x.isVisible()).length };
+    const result = { id, cap, mode, repetition, receiptCount: envelopes.length, baseDelayMs: baseDelay, requestTimeoutMs: timeoutMs, acceleratedTimeout: mode === 'timeout', wallMs, taskMs: trace.taskEnd - trace.taskStart, coldCalculationMs: trace.calculations.reduce((n, x) => n + x.end - x.start, 0), warmCalculationMs: trace.warm.reduce((n, x) => n + x.end - x.start, 0), cold, warm, retryCount: reportedMetrics.reduce((n, x) => n + x.requestRetryCount, 0), rateLimitCount: reportedMetrics.reduce((n, x) => n + x.rateLimitCount, 0), localAdoptionMs: adoption.reduce((n, x) => n + x.receiveAndAdoptMs, 0), localProfitMs: adoption.reduce((n, x) => n + x.profitReadAndComputeMs, 0), semanticDigest: digest(combinedSemantics), finalCostDigest: digest(endCosts), nativeVisibleWindows: BrowserWindow.getAllWindows().filter(x => x.isVisible()).length };
     result.costAndAdoptionWallMs = adoption.at(-1).end - started;
     result.adoptionPollMs = adoptionPollMs;
     result.finalProfitDigest = digest(products);
     result.adoptionPollIdleAfterLastAdoptionMs = trace.spans.filter(x => x.kind === 'adoption-poll-wait').reduce((n, x) => n + Math.max(0, x.end - Math.max(x.start, adoption.at(-1).end + performance.timeOrigin - trace.timeOrigin)), 0);
-    assert.equal(trace.calculations.reduce((n, x) => n + x.meta.requestCount, 0), cold.requestCount);
+    assert.equal(reportedMetrics.reduce((n, x) => n + x.requestCount, 0), cold.requestCount, 'Delivered request counters include failed bulk attempts');
     assert.equal(result.nativeVisibleWindows, 0);
     assertBusinessResult({ envelopes: actualBodies, calculations: trace.calculations, adoption });
     await fs.writeFile(path.join(out, `${id}.json`), JSON.stringify({ result, trace, network, adoption, envelopes: actualBodies }, null, 2));

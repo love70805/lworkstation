@@ -23,6 +23,7 @@ const code = await new Promise((resolve, reject) => { child.once('exit', resolve
 await writeFile(path.join(out, 'native-stdout.log'), stdout);
 await writeFile(path.join(out, 'native-stderr.log'), stderr);
 process.exitCode = code || 0;
+if (code) process.stderr.write(stderr);
 if (!code) {
   const result = JSON.parse(await readFile(path.join(out, 'results.json'), 'utf8'));
   if (!result.ok || result.runId !== runId) throw new Error('No completed result from this native benchmark process');

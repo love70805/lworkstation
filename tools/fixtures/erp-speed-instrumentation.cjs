@@ -6,6 +6,9 @@ function instrument(source, cap) {
   const replace = (before, after) => { assert.equal(source.split(before).length, 2, `Benchmark anchor: ${before}`); source = source.replace(before, after); };
   replace('const MAX_REQUEST_CONCURRENCY = 12;', `const MAX_REQUEST_CONCURRENCY = ${cap};`);
   replace('const REQUEST_TIMEOUT = 120000;', 'const REQUEST_TIMEOUT = Number(new URL(location.href).searchParams.get("benchmarkTimeout")) || 120000;');
+  // The legacy control retains its historical recovery units. The normal
+  // export and damaged-export cases exercise the new whole-task protocol.
+  replace("costFlow: 'task',", "...(window.ShopeersErpBulkPurchase ? { costFlow: 'task' } : {}),");
   replace('await acquireRequestSlot(parentSignal);', 'const queuedAt = performance.now();\n                await acquireRequestSlot(parentSignal);\n                window.__erpBench.spans.push({kind:"queue",endpoint:path.split("/").at(-1),start:queuedAt,end:performance.now(),phase:window.__erpBench.phase});');
   replace('const previewResults = resultPolicy.previewForLedger(aggregateState.results, warehouseEvidence, previewContext.ledgerPeriod);', 'const previewStarted = performance.now();\n        const previewResults = resultPolicy.previewForLedger(aggregateState.results, warehouseEvidence, previewContext.ledgerPeriod);\n        window.__erpBench.spans.push({kind:"preview-cost",start:previewStarted,end:performance.now(),phase:window.__erpBench.phase});');
   replace('await wait(Math.min(1000, Math.max(500 * (attempt + 1), error.retryAfter || 0)), parentSignal);', 'const backoffStarted = performance.now();\n                    await wait(Math.min(1000, Math.max(500 * (attempt + 1), error.retryAfter || 0)), parentSignal);\n                    window.__erpBench.spans.push({kind:"retry-backoff",start:backoffStarted,end:performance.now(),phase:window.__erpBench.phase});');
@@ -41,8 +44,8 @@ window.__erpBench = {phase:'cold',spans:[],cache:[],calculations:[],warm:[],erro
     const semantic=state=>JSON.stringify(stable({results:state.results.map(row=>({warehouseSku:row.warehouseSku,unitCost:row.unitCost,mappings:row.mappings,selectedRecordIds:row.selectedRecordIds})),warehouses:state.warehouseEvidence.warehouses,excludedOrders:state.warehouseEvidence.excludedOrders,excludedDetails:state.warehouseEvidence.excludedDetails,detailFailures:state.warehouseEvidence.detailFailures,mappingFailures:state.warehouseEvidence.mappingFailures}));
     runCalculation=async function(filters,run){const start=performance.now();const state=await originalCalculation(filters,run);const end=performance.now();
       const value={start,end,meta:state.meta,semantic:semantic(state)};bench.calculations.push(value);contexts.push({filters,run:{...run,batchSkcs:[...run.batchSkcs]},semantic:value.semantic});saveBench();return state;};
-    const originalBatched=runBatchedCalculation;
-    runBatchedCalculation=async function(run){bench.taskStart=performance.now();try{return await originalBatched(run);}finally{bench.taskEnd=performance.now();bench.costComplete=run.costReadComplete;saveBench();}};
+    const originalTask=runTaskCalculation;
+    runTaskCalculation=async function(run){bench.taskStart=performance.now();try{return await originalTask(run);}finally{bench.taskEnd=performance.now();bench.costComplete=run.costReadComplete;saveBench();}};
     window.addEventListener('erp-benchmark-warm',async()=>{
       const previous=activeRun;bench.phase='warm';bench.warmStart=performance.now();
       try {for(const context of contexts){activeRun=context.run;const start=performance.now();const value=await originalCalculation(context.filters,context.run);const sem=semantic(value);bench.warm.push({start,end:performance.now(),meta:value.meta,semantic:sem,equal:sem===context.semantic});}}
