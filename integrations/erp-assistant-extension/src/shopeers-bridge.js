@@ -17,8 +17,8 @@
     });
   }
 
-  async function submit(input = {}) {
-    const payload = {
+  function costInput(input = {}) {
+    return {
       collectionTask: input.collectionTask,
       results: Array.isArray(input.results) ? input.results : [],
       meta: input.meta && typeof input.meta === 'object' ? input.meta : {},
@@ -30,6 +30,18 @@
       createdAt: String(input.createdAt || '').trim(),
       queryCapturedAt: String(input.queryCapturedAt || input.registeredBefore || '').trim(),
     };
+  }
+
+  async function measureCost(input = {}) {
+    try {
+      return await sendMessage({ type: 'shopeers.erp.measureCostResult', payload: costInput(input) });
+    } catch (error) {
+      return { ok: false, status: 'failed', code: 'ERP_EXTENSION_ERROR', message: error?.message || '成本证据大小核对失败。' };
+    }
+  }
+
+  async function submit(input = {}) {
+    const payload = costInput(input);
     try {
       return await sendMessage({ type: 'shopeers.erp.submitCostResult', payload });
     } catch (error) {
@@ -95,5 +107,5 @@
   const retry = (resultDeliveryId) => sendMessage({ type: 'shopeers.erp.retryPending', payload: { resultDeliveryId } });
   const collectionCheckpoint = (input) => sendMessage({ type: 'shopeers.erp.collectionCheckpoint', payload: input });
   const collectionTask = (input) => sendMessage({ type: 'shopeers.erp.collectionTask', payload: input });
-  window.ShopeersErpDeliveryBridge = Object.freeze({ collectionTask, submit, submitCatalog, catalogContext, previewContext, reportStatus, retry, collectionCheckpoint });
+  window.ShopeersErpDeliveryBridge = Object.freeze({ collectionTask, measureCost, submit, submitCatalog, catalogContext, previewContext, reportStatus, retry, collectionCheckpoint });
 })();

@@ -83,14 +83,20 @@ try {
       await controller.maintenanceRequest({ action: 'end', maintenanceId: snapshot.maintenanceId });
       const task = snapshot.snapshot.records.find(record => record.kind === 'collection-task' && record.workspaceId === workspaceId);
       assert.equal(task.filters.changePrice, filters.changePrice, 'the saved task retains the exact captured condition');
-      const delivery = snapshot.snapshot.records.find(record => record.kind === 'batch' && record.workspaceId === workspaceId);
-      assert.ok(delivery);
-      const batch = delivery.envelope.batch;
-      assert.equal(batch.historyMappings[0].warehouseSku, 'WH-HISTORY');
-      assert.deepEqual(batch.rows.filter(row => row.platformSku).map(row => row.platformSku), onlyHistory ? [] : ['SKU-LIVE']);
-      assert.ok(batch.rows.some(row => !row.platformSku && row.warehouseSku === 'WH-HISTORY'));
-      assert.ok(!batch.rows.some(row => row.warehouseSku === 'UNRELATED'));
-      const history = batch.warehouseEvidence.find(row => row.warehouseSku === 'WH-HISTORY');
+      const deliveries = snapshot.snapshot.records.filter(record => record.kind === 'batch' && record.workspaceId === workspaceId);
+      assert.ok(deliveries.length > 0);
+      // A missing bulk reader can split recovery scopes. Verify all persisted
+      // receipts together without assuming their order or a fixed receipt count.
+      const batches = deliveries.map(delivery => delivery.envelope.batch);
+      const mappings = batches.flatMap(batch => batch.historyMappings || []);
+      assert.deepEqual(mappings.map(mapping => mapping.warehouseSku), ['WH-HISTORY']);
+      const rows = batches.flatMap(batch => batch.rows);
+      assert.deepEqual(rows.filter(row => row.platformSku).map(row => row.platformSku), onlyHistory ? [] : ['SKU-LIVE']);
+      assert.equal(rows.filter(row => !row.platformSku && row.warehouseSku === 'WH-HISTORY').length, 1);
+      assert.ok(!rows.some(row => row.warehouseSku === 'UNRELATED'));
+      const histories = batches.flatMap(batch => batch.warehouseEvidence || []).filter(row => row.warehouseSku === 'WH-HISTORY');
+      assert.equal(histories.length, 1);
+      const [history] = histories;
       assert.equal(history.evidenceComplete, true); assert.equal(history.purchaseRecords.length, 1);
       assert.equal(reads.filter(url => url.pathname.endsWith('purchase-order-details')).length, 1, 'shared details are read once');
       assert.equal(reads.filter(url => url.pathname.endsWith('purchase-order-page') && url.searchParams.get('sku') === 'WH-HISTORY').length, 1);

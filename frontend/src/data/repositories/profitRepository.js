@@ -1920,7 +1920,9 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
 }
 
 export async function getLatestLedgerSnapshot() {
-  const ledger = await db.ledgers.orderBy("updatedAt").last();
+  const member = await getActiveMemberContext();
+  if (!member.workspaceId) return null;
+  const ledger = (await db.ledgers.where("workspaceId").equals(member.workspaceId).sortBy("updatedAt")).at(-1);
   return ledger ? getLedgerSnapshot(ledger.id) : null;
 }
 

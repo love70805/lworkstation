@@ -240,22 +240,38 @@
             const previousBoundaryOrders = snapshot.boundaryOrders;
             const targets = policy.platformScope(context.expectedSkus, run.querySkcs);
             const warehouses = new Set();
-            for (const [sku] of targets) {
+            const failures = new Map(), warehouseTargets = new Map();
+            const rejectTarget = (target, reason) => failures.set(key(target.platformSkc), { platformSkc: target.platformSkc, reason });
+            for (const [sku, target] of targets) {
                 const choices = snapshot.bySku.get(sku);
-                if (!choices || choices.size !== 1 || snapshot.conflicts.has(sku)) throw fallback('target_mapping_unresolved');
+                if (!choices || choices.size !== 1 || snapshot.conflicts.has(sku)) { rejectTarget(target, 'target_mapping_unresolved'); continue; }
                 const warehouse = [...choices][0];
-                if (snapshot.duplicateWarehouses.has(warehouse)) throw fallback('duplicate_purchase_lines');
+                if (snapshot.duplicateWarehouses.has(warehouse)) { rejectTarget(target, 'duplicate_purchase_lines'); continue; }
                 const historical = (whole.historyMappings || []).filter(hint => key(hint.platformSku) === sku && hint.warehouseSku);
-                if (historical.some(hint => key(hint.warehouseSku) !== warehouse)) throw fallback('historical_mapping_changed');
+                if (historical.some(hint => key(hint.warehouseSku) !== warehouse)) { rejectTarget(target, 'historical_mapping_changed'); continue; }
                 warehouses.add(warehouse);
+                if (!warehouseTargets.has(warehouse)) warehouseTargets.set(warehouse, []);
+                warehouseTargets.get(warehouse).push(target);
             }
             for (const warehouse of warehouses) {
-                const records = snapshot.byRecordWarehouse.get(warehouse);
-                if (!records?.length) throw fallback('purchase_history_missing');
-                const nextMonth = new Date(Date.UTC(Number(context.ledgerPeriod.slice(0, 4)), Number(context.ledgerPeriod.slice(5, 7)), 1));
-                if (records.some(row => Math.abs(Date.parse(row.creationTime.replace(' ', 'T') + 'Z') - nextMonth.getTime()) <= 1000)) throw fallback('purchase_month_boundary');
-                await resolveBoundary(snapshot, warehouse, records, run, context.ledgerPeriod);
+                try {
+                    const records = snapshot.byRecordWarehouse.get(warehouse);
+                    if (!records?.length) throw fallback('purchase_history_missing');
+                    const nextMonth = new Date(Date.UTC(Number(context.ledgerPeriod.slice(0, 4)), Number(context.ledgerPeriod.slice(5, 7)), 1));
+                    if (records.some(row => Math.abs(Date.parse(row.creationTime.replace(' ', 'T') + 'Z') - nextMonth.getTime()) <= 1000)) throw fallback('purchase_month_boundary');
+                    await resolveBoundary(snapshot, warehouse, records, run, context.ledgerPeriod);
+                } catch (error) {
+                    if (interrupted(error) || run.controller.signal.aborted) throw error;
+                    for (const target of warehouseTargets.get(warehouse)) rejectTarget(target, error.reason || 'bulk_source_unavailable');
+                }
             }
+            // Separate only the affected scopes. Valid targets reuse this same
+            // snapshot, while uncertain identities return to native reads.
+            if (failures.size) throw Object.assign(fallback([...failures.values()][0].reason), {
+                fallbackSkcs: [...failures.values()].map(item => item.platformSkc),
+                bulkMetrics: { bulkExportCount: reused ? 0 : 1, bulkMappingRequests: reused ? 0 : snapshot.mappingRequests,
+                    bulkBoundaryOrders: snapshot.boundaryOrders - previousBoundaryOrders },
+            });
             const details = [...warehouses].flatMap(warehouse => snapshot.byRecordWarehouse.get(warehouse));
             const aggregated = aggregate(details, { allowEmpty: true });
             const products = [...warehouses].map(warehouse => {

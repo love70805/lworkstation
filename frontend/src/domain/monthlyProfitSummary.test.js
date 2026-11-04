@@ -47,3 +47,26 @@ it('marks the saved formal result current only while its adopted deduction still
   expect(summary({...options,deduction:{...deduction,id:'REPLACEMENT'}})).toMatchObject({formalSaved:false,deductionSaved:true});
   expect(summary({...options,ledger:{...ledger,status:'cost_pending',currentBaseReportId:null}}).deductionSaved).toBe(false);
 });
+
+it.each([
+  ['historical_lowest', 'weighted'],
+  ['weighted', 'historical_lowest'],
+  ['historical_lowest', undefined],
+  [undefined, 'historical_lowest'],
+])('waits for sources in the current accounting context instead of mixing %s products with %s deductions', (currentMode, sourceMode) => {
+  const current = { ...ledger, accountingMode: currentMode };
+  const source = { ...ledger, accountingMode: sourceMode };
+  const state = { ledgerId: 'L', workspaceId: 'W', data: { ledger: source, stores: ['甲'], dispatch: null,
+    deduction: batch({ signedAmountExact: '5', coveredStores: ['甲'] }), reports: [] } };
+  expect(monthlyProfitSummary({ ledger: current, reportState: state, productProfitExact: '100', missingCostCount: 0 })).toEqual({ status: 'loading' });
+  state.data.ledger = current;
+  state.data.deduction = batch({ signedAmountExact: '40', coveredStores: ['甲'] });
+  expect(monthlyProfitSummary({ ledger: current, reportState: state, productProfitExact: '100', missingCostCount: 0 })).toMatchObject({ status: 'ready', profitExact: '60' });
+});
+
+it.each([[undefined, 'weighted'], ['weighted', undefined], ['historical_lowest', 'historical_lowest']])('keeps default-mode compatibility and inherited source batches for %s / %s', (currentMode, sourceMode) => {
+  const current = { ...ledger, accountingMode: currentMode };
+  const state = { ledgerId: 'L', workspaceId: 'W', data: { ledger: { ...ledger, accountingMode: sourceMode }, stores: ['甲'],
+    dispatch: batch({ adoptedQuantityExact: '10' }), deduction: batch({ signedAmountExact: '5', coveredStores: ['甲'] }), reports: [] } };
+  expect(monthlyProfitSummary({ ledger: current, reportState: state, productProfitExact: '100', missingCostCount: 0 })).toMatchObject({ status: 'ready', profitExact: '102' });
+});

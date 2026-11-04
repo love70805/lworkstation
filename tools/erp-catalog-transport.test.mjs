@@ -190,7 +190,7 @@ export async function verifyErpCatalogTransport({
     };
     for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
       let script = await fs.readFile(path.join(sourceRoot, file), 'utf8');
-      if (afterCosts && file === 'content.js') script = script.replace("executionProtocol: 2, catalogMode: 'on_demand'", "executionProtocol: 2, catalogMode: 'after_costs'");
+      if (afterCosts && file === 'content.js') script = script.replace("costFlow: 'task', catalogMode: 'on_demand'", "costFlow: 'task', catalogMode: 'after_costs'");
       window.eval(script);
     }
     window.dispatchEvent(new window.CustomEvent("shopeers:erp-v8-query-captured", { detail: { url: "https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=SKC-CATALOG" } }));

@@ -16,17 +16,22 @@ const extensionVersion=JSON.parse(await readFile(path.join(root,'integrations/er
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function scenario(size, mode = '', options = {}) {
+  const expectedDeliveries = options.expectedDeliveries ?? (options.taskFlow ? 1 : Math.ceil(size / 5));
   const skcs = Array.from({length:size},(_,i) => `SKC-${i}`);
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
   const records = [request], deliveries = [], catalogs = [], calls = [], errors = [], listTimes = new Map(), windows = [], claims = [];
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
-  let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false, permissionCatalogBlocked = false;
+  let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false, permissionCatalogBlocked = false, partitionInterrupted = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
   const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
     const url = new URL(raw), payload = init.body ? JSON.parse(init.body) : {};
+    // The longstanding scenarios exercise saved/older five-SKC tasks. New
+    // task-flow scenarios opt in explicitly and run the shipped default.
+    if (url.pathname === '/erp/v1/collection-tasks' && init.method === 'POST' && !options.taskFlow) delete payload.costFlow;
     let body;
     try {
+      if(options.pausePartition && !partitionInterrupted && payload.state==='partition') { partitionInterrupted=true; records[1].status='paused'; }
       if(options.receiverRestart && url.pathname.endsWith('/'+records[1]?.taskId) && window.document.body.textContent.includes('等待本机核算完成')) throw Object.assign(new Error('isolated receiver restart'),{status:503});
       const result = handleCollectionTaskRequest(records,{method:init.method||'GET',url,payload,instanceId:'test'});
       if (result) {
@@ -38,13 +43,13 @@ export async function scenario(size, mode = '', options = {}) {
         }
       }
       else if(url.pathname==='/erp/v1/requests') body={records:[request,...(options.afterCosts?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[]),
-        ...(options.catalogAmbiguity&&deliveries.length===Math.ceil(size/5)?[
+        ...(options.catalogAmbiguity&&deliveries.length===expectedDeliveries?[
           {...request,requestId:'OLDER-REQ',ledgerId:'OLDER-LEDGER',ledgerPeriod:'2026-07'},
           {...request,requestId:'OLDER-REQ-CATALOG',sourceRequestId:'OLDER-REQ',requestKind:'catalog',ledgerId:'OLDER-LEDGER',ledgerPeriod:'2026-07',confirmedSkus:request.expectedSkus},
         ]:[])]};
       else if(url.pathname==='/erp/v1/extension-status') body={ok:true};
       else if(url.pathname==='/erp/v1/catalog-results') {
-        assert.equal(deliveries.length,Math.ceil(size/5));
+        assert.equal(deliveries.length,expectedDeliveries);
         assert.ok(records[1].batches.every(batch=>batch.adoptionReportedAt),'no materials before every local calculation outcome');
         catalogs.push(payload);body={deliveryId:`CAT-${catalogs.length}`,batchId:`CAT-B-${catalogs.length}`,resultDeliveryId:payload.resultDeliveryId};
       }
@@ -66,9 +71,10 @@ export async function scenario(size, mode = '', options = {}) {
     windows.push(window);
     window.confirm=()=>true;
     const schedule=window.setTimeout.bind(window);
-    if(mode==='lost-ack')window.setTimeout=(fn,ms,...args)=>schedule(fn,[15000,210000].includes(ms)?100:ms,...args);
+    if(mode==='lost-ack'||options.lostPartition)window.setTimeout=(fn,ms,...args)=>schedule(fn,[15000,70000,210000].includes(ms)?100:ms,...args);
     window.chrome={runtime:{sendMessage:(message,done)=>dispatch(message,sender,response=>{
       if(mode==='lost-ack'&&!lostAck&&message.type==='shopeers.erp.submitCostResult'){lostAck=true;return;}
+      if(options.lostPartition&&!partitionInterrupted&&message.type==='shopeers.erp.collectionTask'&&message.payload.state==='partition'&&response.ok){partitionInterrupted=true;return;}
       done(response);
     })}};
     window.fetch=async (raw,init={})=>{
@@ -94,7 +100,7 @@ export async function scenario(size, mode = '', options = {}) {
     const lanes = mode==='benchmark-serial' ? 1 : mode==='benchmark-two-lanes' ? 2 : 4;
     for(const name of [...(options.bulk?['xlsx-reader.js','bulk-purchase.js']:[]),'result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
       let script=options.sources?.[name]??source[name];
-      if(options.afterCosts&&name==='content.js')script=script.replace("executionProtocol: 2, catalogMode: 'on_demand'", "executionProtocol: 2, catalogMode: 'after_costs'");
+      if(options.afterCosts&&name==='content.js')script=script.replace("costFlow: 'task', catalogMode: 'on_demand'", "costFlow: 'task', catalogMode: 'after_costs'");
       if(mode.startsWith('benchmark')&&name==='content.js')script=script.replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`);
       if(mode==='speed-recovery'&&name==='content.js')script=script.replace('const REQUEST_RECOVERY_DELAY_MS = 30000;','const REQUEST_RECOVERY_DELAY_MS = 100;');
       window.eval(script);
@@ -111,6 +117,13 @@ export async function scenario(size, mode = '', options = {}) {
       assert.equal(calls.length,0,'paused tasks do not restart merely because ERP pages open');
       handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${task.taskId}/control`),payload:{workspaceId:'WS',action:'request_resume',scopeHash:task.scopeHash},instanceId:'test'});
     } else { await open(); window.document.getElementById('erpa-cost-trigger').click(); }
+    if(options.lostPartition || options.pausePartition) {
+      await until(()=>partitionInterrupted&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(deliveries.length,0,'no receipt from the retired or paused attempt');
+      assert.equal(records[1].status,'paused');
+      if(options.lostPartition)assert.equal(records[1].batches.length,2,'durable partition survives its missing response');
+      window.document.getElementById('erpa-resume').click();
+    }
     if(mode==='remote-stop'){
       await until(()=>remoteStopped&&!window.document.getElementById('erpa-recalculate').disabled);
       assert.equal(records[1].status,'stopped');assert.equal(deliveries.length,0);assert.equal(calls.filter(call=>call.endpoint==='purchase-order-page').length,4,'remote stop aborts active purchase requests and prevents new work');assert.equal(calls.filter(call=>call.endpoint==='purchase-order-details').length,0);
@@ -133,7 +146,7 @@ export async function scenario(size, mode = '', options = {}) {
       } else window.document.getElementById('erpa-resume').click();
     }
     if(options.afterCosts) {
-      await until(()=>deliveries.length===Math.ceil(size/5));
+      await until(()=>deliveries.length===expectedDeliveries);
       assert.equal(catalogs.length,0);assert.ok(records[1].batches.every(batch=>!batch.catalogStatus));
       if(options.receiverRestart) {
         await until(()=>!window.document.getElementById('erpa-recalculate').disabled);
@@ -158,13 +171,13 @@ export async function scenario(size, mode = '', options = {}) {
         permissionCatalogBlocked=true;
         window.document.getElementById('erpa-resume').click();
         await until(()=>records[1].pauseReason?.code==='ERP_PERMISSION_REQUIRED'&&!window.document.getElementById('erpa-recalculate').disabled);
-        assert.equal(records[1].status,'paused');assert.equal(deliveries.length,Math.ceil(size/5));assert.equal(catalogs.length,0);
+        assert.equal(records[1].status,'paused');assert.equal(deliveries.length,expectedDeliveries);assert.equal(catalogs.length,0);
         assert.equal(costReads(),costReadsBefore,'a material permission failure never restarts completed costs');
         assert.equal(records[1].batches[1].catalogStatus,undefined,'no following material batch starts after a permission failure');
         permissionCatalogBlocked=false;
         window.document.getElementById('erpa-resume').click();
       }
-      await until(()=>catalogs.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled);
+      await until(()=>catalogs.length===expectedDeliveries&&!window.document.getElementById('erpa-recalculate').disabled);
       if(options.catalogAmbiguity)assert.ok(catalogs.every(item=>item.requestId==='REQ-CATALOG'),'task materials use their exact companion despite historical requests with the same SKCs');
       if(options.permissionCatalog){assert.equal(costReads(),costReadsBefore);assert.equal(records[1].pauseReason,undefined);}
       else if(options.bulk) assert.ok(calls.slice(before).every(call=>call.endpoint==='product-info-sku'),'on-demand bulk catalog only supplements missing platform metadata');
@@ -172,13 +185,14 @@ export async function scenario(size, mode = '', options = {}) {
     }
     await until(()=>{
       if(options.fixture && records[1]?.batches.some(batch=>batch.status==='failed') && !window.document.getElementById('erpa-recalculate').disabled)throw Error(JSON.stringify(records[1].batches));
-      return deliveries.length===Math.ceil(size/5)&&!window.document.getElementById('erpa-recalculate').disabled;
+      return deliveries.length===expectedDeliveries&&!window.document.getElementById('erpa-recalculate').disabled;
     });
     assert.equal(records[1].summary.delivered,size);
     assert.equal(new Set(deliveries.map(item=>item.resultDeliveryId)).size,deliveries.length);
     assert.ok(deliveries[0].listCount<=(options.firstBatchListLimit??(mode==='throttle'?6:5)),'first five SKCs are durable before the remaining targets');
     assert.equal(maxLists,options.maxLists??(mode==='benchmark-serial'?1:mode==='benchmark-two-lanes'?2:4));assert.ok(maxInflight<=12);
-    assert.ok(deliveries.every(item=>item.querySkcs.length<=5&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
+    assert.ok(deliveries.every(item=>(options.taskFlow || item.querySkcs.length<=5)&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
+    if(options.taskFlow)assert.equal(records[1].costFlow,'task');
     assert.equal(records[1].catalogMode,options.afterCosts?'after_costs':'on_demand');
     assert.ok(records[1].batches.every(batch=>options.afterCosts?['completed','failed'].includes(batch.catalogStatus):!batch.catalogStatus),'material execution follows the task policy');
     if(mode==='two-pages') {
@@ -190,8 +204,7 @@ export async function scenario(size, mode = '', options = {}) {
       const target=calls.find(item=>item.endpoint==='purchase-order-page').target,attempts=calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target===target);
       assert.equal(attempts.length,2);assert.ok(attempts[1].at-attempts[0].at>=1000,'Retry-After is honored');assert.ok(maxInflightAfterLimit<=2,'rate limiting reduces global concurrency after the 429 response');
     }
-    if(mode==='lost-ack')assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'lost ACK recovery does not reread delivered first batch');
-    if(['pause','workstation'].includes(mode))assert.equal(calls.filter(item=>item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'delivered batch not reread after restart');
+    if(['lost-ack','pause','workstation'].includes(mode))assert.equal(calls.filter(item=>options.bulk ? item.endpoint==='export-purchase-order' : item.endpoint==='purchase-order-page'&&item.target==='SKC-0').length,1,'recovery does not reread delivered costs');
     if(mode==='shared-orders'){
       assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,20,'shared orders are read once across batches');
       assert.equal(calls.filter(item=>item.endpoint==='product-info-sku').length,20,'shared warehouse mappings are read once across batches');
@@ -201,13 +214,13 @@ export async function scenario(size, mode = '', options = {}) {
     }
     if(mode==='recalculate'){
       listTimes.clear();const oldId=records[1].taskId;window.document.getElementById('erpa-recalculate').click();
-      await until(()=>deliveries.length===Math.ceil(size/5)*2&&!window.document.getElementById('erpa-recalculate').disabled);
+      await until(()=>deliveries.length===expectedDeliveries*2&&!window.document.getElementById('erpa-recalculate').disabled);
       assert.equal(records[1].status,'stopped');assert.notEqual(records[2].taskId,oldId);
       assert.equal(calls.filter(item=>item.endpoint==='purchase-order-details').length,size*2,'explicit new task rereads authoritative history');
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
     console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,...(options.bulk?{}:{duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4)}),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
-    return options.returnMetrics ? {listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries,catalogs} : listMs;
+    return options.returnMetrics ? {task:structuredClone(records[1]),body:window.document.body.textContent,listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries,catalogs} : listMs;
   } finally {await Promise.all(windows.map(item=>item.happyDOM.close()));}
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

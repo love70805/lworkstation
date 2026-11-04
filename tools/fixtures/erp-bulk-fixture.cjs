@@ -45,6 +45,8 @@ function fixture(url) {
 }
 function assertBusinessResult({ envelopes, adoption }) {
     const results = envelopes.flatMap(envelope => envelope.batch.rows);
+    assert.equal(results.length, TARGETS);
+    assert.equal(new Set(results.map(row => row.platformSku)).size, TARGETS, 'every target has exactly one cost row');
     assert.deepEqual(results.map(row => row.platformSku).sort(), targets.map(row => row.platformSku).sort());
     for (const row of results) {
         const scope = Number(row.platformSku.split('-').at(-1));
@@ -57,10 +59,13 @@ function assertBusinessResult({ envelopes, adoption }) {
         assert.equal(warehouse.purchaseRecords.length, ORDERS);
         assert.deepEqual(warehouse.purchaseRecords.filter(record => row.selectedRecordIds.includes(record.recordId)).map(record => record.purchaseOrderNo).sort(), [45, 46, 47].map(index => businessOrder(scope, index)));
     }
-    for (const value of adoption) {
+    assert.equal(adoption.length, envelopes.length);
+    for (const [index, value] of adoption.entries()) {
         assert.equal(value.adoptionError, null);
-        assert.equal(value.adoption.summary.adoptedCount, 5);
+        const covered = new Set(envelopes[index].batch.rows.map(row => row.platformSku));
+        assert.equal(value.adoption.summary.adoptedCount, covered.size);
         for (const field of ['anomalyCount', 'evidenceIncompleteCount', 'missingCount', 'remainingCount']) assert.equal(value.adoption.summary[field], 0);
     }
+    assert.equal(adoption.reduce((sum, value) => sum + value.adoption.summary.adoptedCount, 0), TARGETS);
 }
 module.exports = { TARGETS, ORDERS, targets, fixture, assertBusinessResult, businessOrder, exportBytes };

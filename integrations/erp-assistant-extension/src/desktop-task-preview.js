@@ -3,7 +3,7 @@
   if (window.ShopeersErpTaskPreview) return;
   let busy = false;
   const rootId = 'erpa-cost-root';
-  const stages = { ready: '等待后台接续', running: '正在采集采购成本', paused: '采集已暂停', pausing: '正在暂停', stopped: '采集已停止', invalidated: '采集范围已变化', completed: '任务已完成', partial: '部分批次待处理', cost_complete: '成本已送达，正在核算与整理资料' };
+  const stages = { ready: '等待后台接续', running: '正在采集与核验采购成本', paused: '采集已暂停', pausing: '正在暂停', stopped: '采集已停止', invalidated: '采集范围已变化', completed: '任务已完成', partial: '部分成本待核对', cost_complete: '成本已送达，正在核算与整理资料' };
   function mount() {
     if (window.top !== window || !document.body) return false;
     if (document.getElementById(rootId)?.classList.contains('erpa-task-preview')) return true;
@@ -38,11 +38,10 @@
       line(`${task.ledgerPeriod || ''} · 成本已送达 ${delivered} / ${total} 个 SKC`);
       const progress = document.createElement('progress'); progress.max = Math.max(1,total); progress.value = delivered; progress.setAttribute('aria-label','成本回传进度'); body.append(progress);
       line(`已采集 ${task.summary?.collected ?? delivered} 个 SKC · 已采用 ${task.summary?.adopted ?? 0} 个 SKU`);
-      line(`回传 ${batches.filter(batch=>batch.deliveryId).length} / ${batches.length} 批` + (task.catalogMode === 'after_costs' || task.runMode === 'catalog'
-        ? ` · 资料完成 ${batches.filter(batch=>batch.catalogStatus==='completed').length} / ${batches.length} 批` : ''));
+      if (task.catalogMode === 'after_costs' || task.runMode === 'catalog') line(`商品资料已完成 ${batches.filter(batch=>batch.catalogStatus==='completed').reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0)} / ${total} 个 SKC`);
       const current = batches.find(batch => ['running','collecting'].includes(batch.status) || batch.catalogStatus === 'running');
-      if (current) line('当前批次：' + (current.platformSkcs || []).slice(0,5).join('、'));
-      if (batches.some(batch=>['failed','incomplete'].includes(batch.status)||batch.catalogStatus==='failed')) line('部分批次待处理，可在工作台查看原因并继续。');
+      if (current) line('当前范围：' + (current.platformSkcs || []).slice(0,5).join('、') + ((current.platformSkcs?.length || 0) > 5 ? ` 等 ${current.platformSkcs.length} 个 SKC` : ''));
+      if (batches.some(batch=>['failed','incomplete'].includes(batch.status)||batch.catalogStatus==='failed')) line('部分成本或资料待处理，可在工作台查看具体原因并继续。');
       line('进度每 3 秒刷新；暂停、继续和核对在工作台操作。');
     } catch { body.textContent = '暂时无法读取任务进度，后台任务不受影响；连接恢复后自动更新。'; }
     finally { busy = false; }
