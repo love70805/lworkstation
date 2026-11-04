@@ -22,6 +22,19 @@ function isOlderVersion(version, targetVersion = ERP_ASSISTANT_VERSION) {
   return false;
 }
 
+export function selectCurrentErpExtension(records = []) {
+  const current = Array.isArray(records) ? records.filter(record => record.online === true) : [];
+  return current.find(record => record.extensionId === 'erp-assistant')
+    ?? current.find(record => record.extensionId === 'erp-assistant-installation') ?? null;
+}
+
+export function erpAssistantSetupState(serviceStatus, extension) {
+  if (serviceStatus !== 'online') return 'service-offline';
+  if (!extension?.online) return 'not-detected';
+  if (isOlderVersion(extension.version)) return 'outdated';
+  return extension.ready ? 'connected' : 'waiting-refresh';
+}
+
 async function checkInboxService() {
   const context = await getActiveMemberContext();
   const [payload, extensionPayload] = await Promise.all([
@@ -30,13 +43,11 @@ async function checkInboxService() {
   ]);
   const records = Array.isArray(payload?.records) ? payload.records : [];
   const extensionRecords = Array.isArray(extensionPayload?.records) ? extensionPayload.records : [];
-  const pageExtension = extensionRecords.find((record) => record.extensionId === "erp-assistant") ?? null;
-  const installedExtension = extensionRecords.find((record) => record.extensionId === "erp-assistant-installation") ?? null;
   return {
     requestCount: records.length,
     registeredCount: records.filter((record) => record.status === "registered").length,
     latestRequestAt: records.map((record) => record.registeredAt ?? record.requestedAt).filter(Boolean).sort().at(-1) ?? null,
-    extension: pageExtension?.online ? pageExtension : installedExtension ?? pageExtension,
+    extension: selectCurrentErpExtension(extensionRecords),
   };
 }
 
@@ -77,13 +88,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
       setServiceInfo(info);
       setServiceStatus("online");
       setCheckedAt(new Date());
-      const currentExtensionState = isOlderVersion(info.extension?.version)
-        ? "outdated"
-        : info.extension?.online && info.extension?.ready
-          ? "connected"
-          : info.extension
-            ? "waiting-refresh"
-            : "not-detected";
+      const currentExtensionState = erpAssistantSetupState('online', info.extension);
       if (currentExtensionState === "connected" && previousExtensionState.current !== "connected") {
         notify("ERP Assistant 已连接。打开 ERP 助手查看登录和采购查询条件。", "success");
       }
@@ -120,33 +125,25 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
     : serviceStatus === "offline" ? "本机收件服务未启动" : "正在检查本机收件服务";
   const serviceTone = serviceStatus === "online" ? "success" : serviceStatus === "offline" ? "danger" : "neutral";
   const extension = serviceInfo?.extension;
-  const extensionStatus = serviceStatus !== "online"
-    ? "service-offline"
-    : isOlderVersion(extension?.version)
-      ? "outdated"
-    : extension?.online && extension?.ready
-      ? "connected"
-      : extension
-        ? "waiting-refresh"
-        : "not-detected";
+  const extensionStatus = erpAssistantSetupState(serviceStatus, extension);
   const extensionLabel = {
     connected: desktop ? "内置扩展已运行" : "扩展已安装并运行",
-    outdated: desktop ? "内置扩展版本待随应用更新" : "扩展版本需要更新",
+    outdated: desktop ? "收到旧版扩展回执，待刷新 ERP" : "扩展版本需要更新",
     "waiting-refresh": desktop ? "内置扩展已加载，等待刷新卓麟 ERP" : "已发现扩展，等待刷新卓麟 ERP",
-    "not-detected": desktop ? "暂未收到内置扩展状态" : "未检测到浏览器扩展",
+    "not-detected": desktop ? "等待内置 ERP 页面连接" : "未检测到浏览器扩展",
     "service-offline": "无法检测扩展状态",
   }[extensionStatus];
-  const extensionTone = extensionStatus === "connected" ? "success" : extensionStatus === "service-offline" || extensionStatus === "not-detected" ? "danger" : "warning";
+  const extensionTone = extensionStatus === "connected" ? "success" : extensionStatus === "service-offline" || !desktop && extensionStatus === "not-detected" ? "danger" : "warning";
   const extensionHint = extensionStatus === "connected"
     ? `${extension.version ? `v${extension.version} · ` : ""}助手已连接工作台；登录和采购查询条件请在 ERP 助手中查看`
     : extensionStatus === "outdated"
       ? desktop
-        ? `当前 v${extension.version}，桌面版会随应用版本统一更新；无需手工下载扩展包。`
+        ? `回执 v${extension.version}，程序内置 v${ERP_ASSISTANT_VERSION}。请打开软件顶部 ERP 标签页并刷新后复检。`
         : `当前 v${extension.version}，最新 v${ERP_ASSISTANT_VERSION}。下载更新包并在 Chrome 重新加载扩展后，再刷新卓麟 ERP。`
     : extensionStatus === "waiting-refresh"
       ? `${extension.version ? `v${extension.version} · ` : ""}请打开卓麟 ERP 任一页面，必要时刷新以恢复助手连接`
       : extensionStatus === "not-detected"
-        ? desktop ? "请先打开桌面版的卓麟 ERP 标签页，再重新检查" : "请在 Chrome 扩展管理页加载并启用 ERP Assistant"
+        ? desktop ? `程序内置 v${ERP_ASSISTANT_VERSION}；打开软件顶部 ERP 标签页后自动启用，再重新检查连接。` : "请在 Chrome 扩展管理页加载并启用 ERP Assistant"
         : "先启动本机收件服务，再检查扩展连接";
   const checkedLabel = checkedAt ? `最近检查 ${checkedAt.toLocaleTimeString("zh-CN", { hour12: false })}` : "等待检查";
 
@@ -155,7 +152,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
       <Panel className="erp-assistant-status-card">
         <div className={`erp-assistant-status-icon ${extensionTone}`}>{extensionStatus === "outdated" ? <TriangleAlert size={21} /> : <PlugZap size={21} />}</div>
         <div><span>{desktop ? "内置 ERP 扩展" : "浏览器扩展"}</span><strong>{extensionLabel}</strong><small>{extensionHint}{extension?.lastSeenAt ? ` · 最近检测 ${new Date(extension.lastSeenAt).toLocaleTimeString("zh-CN", { hour12: false })}` : ""}</small>{!desktop && extensionStatus === "outdated" ? <a className="erp-extension-update-link" href={extensionDownload} download={`ERP-Assistant-v${ERP_ASSISTANT_VERSION}-shopeers-bridge.zip`}><Download size={14} />下载 v{ERP_ASSISTANT_VERSION} 更新包</a> : null}</div>
-        <Badge tone={extensionTone}>{extensionStatus === "connected" ? "已连接" : extensionStatus === "outdated" ? "需更新" : extensionStatus === "waiting-refresh" ? "待刷新" : extensionStatus === "service-offline" ? "待检查" : "未检测到"}</Badge>
+        <Badge tone={extensionTone}>{extensionStatus === "connected" ? "已连接" : extensionStatus === "outdated" ? desktop ? "待刷新" : "需更新" : extensionStatus === "waiting-refresh" ? "待刷新" : extensionStatus === "service-offline" ? "待检查" : desktop ? "待连接" : "未检测到"}</Badge>
       </Panel>
       <Panel className="erp-assistant-status-card">
         <div className={`erp-assistant-status-icon ${serviceTone}`}><ShieldCheck size={21} /></div>
@@ -187,7 +184,7 @@ export default function ErpAssistantSetup({ compact = false, diagnostics = false
     </Panel>
   );
 
-  const extensionBadge = extensionStatus === "connected" ? "已连接" : extensionStatus === "outdated" ? "需更新" : extensionStatus === "waiting-refresh" ? "待刷新" : extensionStatus === "service-offline" ? "待检查" : "未检测到";
+  const extensionBadge = extensionStatus === "connected" ? "已连接" : extensionStatus === "outdated" ? desktop ? "待刷新" : "需更新" : extensionStatus === "waiting-refresh" ? "待刷新" : extensionStatus === "service-offline" ? "待检查" : desktop ? "待连接" : "未检测到";
 
   if (compact && desktop && !diagnostics) {
     return (
