@@ -42,6 +42,17 @@ async function slowCollection(cancel) {
   } } };
   window.fetch = raw => {
     const url = new URL(raw), endpoint = url.pathname.split('/').at(-1);
+    if (endpoint === 'export-select-goods') {
+      calls.push({ endpoint, elapsed });
+      assert.equal(url.searchParams.get('exportMode'), '2');
+      const XLSX = require('xlsx'), book = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['商品ID','商品名称'],
+        ...url.searchParams.get('skuList').split(',').map(id => [id, '延时获取的商品 ' + id])]), '商品档案');
+      const bytes = XLSX.write(book, { type: 'array', bookType: 'xlsx' });
+      return new Promise(resolve => window.setTimeout(() => resolve({ ok: true, status: 200,
+        headers: { get: name => name === 'content-type' ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : null },
+        arrayBuffer: async () => bytes }), 80000));
+    }
     const target = url.searchParams.get('sku') || url.searchParams.get('purchaseOrderId') || url.searchParams.get('productId') || url.searchParams.get('skuGroup');
     const id = target.split('-').at(-1); calls.push({ endpoint, elapsed });
     const data = endpoint === 'purchase-order-page' ? [{ purchaseOrderId: `PO-${id}` }]
@@ -51,7 +62,7 @@ async function slowCollection(cancel) {
     return new Promise(resolve => window.setTimeout(() => resolve({ ok: true, status: 200, json: async () => ({ code: 0, count: data.length, data }) }), 80000));
   };
   try {
-    for (const file of ['result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) {
+    for (const file of ['xlsx-reader.js', 'product-archive.js', 'result-policy.js', 'catalog-collector.js', 'request-context.js', 'shopeers-bridge.js', 'content.js']) {
       window.eval(await readFile(path.join(root, 'integrations/erp-assistant-extension/src', file), 'utf8'));
     }
     await pause();
@@ -78,6 +89,7 @@ async function slowCollection(cancel) {
       assert.ok(cost?.elapsed > 300000, 'costs complete after five minutes');
       assert.equal(cost.payload.results.length, 6);
       assert.ok(catalog?.elapsed - cost.elapsed > 60000, 'catalog continues beyond one minute');
+      assert.equal(calls.filter(call => call.endpoint === 'export-select-goods').length, 1);
       assert.equal(catalog.payload.catalogCoverage.directory.state, 'complete');
       assert.ok(armed.includes(60 * 60 * 1000) && armed.includes(30 * 60 * 1000) && armed.includes(120000));
     }

@@ -58,6 +58,22 @@ async function createPage(url, { topWindow, connected = true, earlySessionRespon
 }
 
 export async function verifyErpPageStartup() {
+  const archiveTask = { executionTarget: 'desktop', catalogMode: 'on_demand', runMode: 'catalog', status: 'cost_complete', runnerId: 'ARCHIVE-RUNNER',
+    ledgerPeriod: '2026-10', progress: { phase: 'catalog', label: '获取商品表格档案', completed: 20, total: 50, unit: '个仓库 SKU' }, batches: [{ status: 'delivered', deliveryId: 'D', platformSkcs: ['A'], catalogStatus: 'running' }] };
+  const archivePreview = await createPage(origin + '/view/console/index.html', { desktopTaskUi: true, taskRecords: [archiveTask] });
+  try {
+    const doc=archivePreview.window.document;
+    assert.equal(doc.querySelectorAll('[role=progressbar]').length, 1);
+    assert.equal(doc.querySelector('[role=progressbar]').getAttribute('aria-valuenow'), '20');
+    assert.equal(doc.querySelector('.erpa-collection-fill').style.width, '40%');
+    assert.ok(doc.querySelector('.erpa-collection-pulse'));
+    assert.match(doc.body.textContent, /正在后台获取商品档案/); assert.doesNotMatch(doc.body.textContent, /已采用/);
+    archiveTask.status='paused'; await archivePreview.window.ShopeersErpTaskPreview.refresh();
+    assert.equal(doc.querySelector('.erpa-collection-pulse'), null); assert.match(doc.body.textContent, /采集已暂停/);
+    archiveTask.status='cost_complete'; delete archiveTask.runnerId; archiveTask.batches[0].catalogStatus='failed'; await archivePreview.window.ShopeersErpTaskPreview.refresh();
+    assert.match(doc.body.textContent, /商品档案仍有缺项/);
+  } finally { await archivePreview.destroy(); }
+
   const lateConfig = await createPage(origin + purchasePath, { desktopTaskUi: true, storagePending: true, shortStorageTimeout: true,
     html: '<div class="layui-laypage-limits"><select id="keep-page"><option value="50">50</option><option value="100" selected>100</option></select></div>' });
   try {

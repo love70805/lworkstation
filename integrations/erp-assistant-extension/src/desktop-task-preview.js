@@ -30,15 +30,27 @@
       const line = (text, strong = false) => { const element = document.createElement(strong ? 'strong' : 'p'); element.textContent = text; body.append(element); };
       if (!task) { line('暂无后台任务'); line('从工作台开始成本核算后，这里会自动显示进度。'); return; }
       const permissionPaused = task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED';
-      line(permissionPaused ? 'ERP 店铺权限校验未通过，采集已暂停' : task.status === 'cost_complete' && task.catalogMode === 'on_demand' && task.runMode !== 'catalog'
+      const catalog = task.runMode === 'catalog' || task.phase === 'catalog';
+      const active = !task.recoveryRequired && ['ready', 'running', 'cost_complete', 'partial'].includes(task.status) && (task.status === 'ready' || Boolean(task.runnerId));
+      line(permissionPaused ? 'ERP 店铺权限校验未通过，采集已暂停' : catalog && active ? '正在后台获取商品档案' : catalog && ['cost_complete', 'completed', 'partial'].includes(task.status) ? (task.batches?.every(batch => batch.catalogStatus === 'completed') ? '商品档案检查已结束' : '商品档案仍有缺项，待继续补齐') : task.status === 'cost_complete' && task.catalogMode === 'on_demand' && task.runMode !== 'catalog'
         ? '成本已送达' : stages[task.status] || '等待后台处理', true);
       if (permissionPaused) line('请确认 ERP 采购管理可正常查询，再回工作台继续原任务；已送达结果保留。');
       const batches = task.batches || [], total = task.summary?.total ?? batches.reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0);
       const delivered = task.summary?.delivered ?? batches.filter(batch=>batch.deliveryId).reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0);
-      line(`${task.ledgerPeriod || ''} · 成本已送达 ${delivered} / ${total} 个 SKC`);
-      const progress = document.createElement('progress'); progress.max = Math.max(1,total); progress.value = delivered; progress.setAttribute('aria-label','成本回传进度'); body.append(progress);
-      line(`已采集 ${task.summary?.collected ?? delivered} 个 SKC · 已采用 ${task.summary?.adopted ?? 0} 个 SKU`);
-      if (task.catalogMode === 'after_costs' || task.runMode === 'catalog') line(`商品资料已完成 ${batches.filter(batch=>batch.catalogStatus==='completed').reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0)} / ${total} 个 SKC`);
+      const checked = batches.filter(batch=>['completed','failed'].includes(batch.catalogStatus)).reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0);
+      line(`${task.ledgerPeriod || ''} · ${catalog ? '商品资料已检查 ' + checked : '成本已送达 ' + delivered} / ${total} 个 SKC`);
+      const stage = active && task.progress && (!catalog || task.progress.phase === 'catalog') ? task.progress : null;
+      const maximum = active ? stage?.total : total, completed = active ? stage?.completed : catalog ? checked : delivered;
+      const known = Number.isFinite(maximum) && maximum > 0 && Number.isFinite(completed);
+      line(stage ? `${stage.label} · ${known ? completed + ' / ' + maximum + ' ' + (stage.unit || '') : '等待进度确认'}` : active ? '等待 ERP 返回进度' : '本次处理进度');
+      const progress = document.createElement('div'); progress.className = 'erpa-collection-track'; progress.setAttribute('role','progressbar'); progress.setAttribute('aria-label', catalog ? '商品档案获取进度' : '成本采集进度');
+      if (known) { progress.setAttribute('aria-valuemin','0'); progress.setAttribute('aria-valuemax',String(maximum)); progress.setAttribute('aria-valuenow',String(Math.min(maximum,Math.max(0,completed)))); }
+      else progress.setAttribute('aria-valuetext','等待进度确认');
+      const fill = document.createElement('span'); fill.className = 'erpa-collection-fill'; fill.style.width = (known ? Math.min(100,Math.max(0,completed / maximum * 100)) : 0) + '%'; progress.append(fill);
+      if (active) { const pulse = document.createElement('span'); pulse.className='erpa-collection-pulse'; progress.append(pulse); }
+      body.append(progress);
+      if (!catalog) line(`已采集 ${task.summary?.collected ?? delivered} 个 SKC · 已采用 ${task.summary?.adopted ?? 0} 个 SKU`);
+      if (catalog) line(`资料齐全 ${batches.filter(batch=>batch.catalogStatus==='completed').reduce((sum,batch)=>sum+(batch.platformSkcs?.length||0),0)} / ${total} 个 SKC · 匹配后自动补齐商品资料`);
       const current = batches.find(batch => ['running','collecting'].includes(batch.status) || batch.catalogStatus === 'running');
       if (current) line('当前范围：' + (current.platformSkcs || []).slice(0,5).join('、') + ((current.platformSkcs?.length || 0) > 5 ? ` 等 ${current.platformSkcs.length} 个 SKC` : ''));
       if (batches.some(batch=>['failed','incomplete'].includes(batch.status)||batch.catalogStatus==='failed')) line('部分成本或资料待处理，可在工作台查看具体原因并继续。');

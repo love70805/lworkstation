@@ -29,6 +29,8 @@ const xlsxReaderTarget = path.join(canonicalSourceDir, 'xlsx-reader.js');
 if (await fs.readFile(xlsxReaderTarget, 'utf8').catch(() => '') !== xlsxReader) await fs.writeFile(xlsxReaderTarget, xlsxReader, 'utf8');
 await fs.copyFile(path.join(xlsxRoot, 'LICENSE'), path.join(canonicalExtensionDir, 'LICENSE.sheetjs'));
 const esbuild = createRequire(frontendRequire.resolve("vite/package.json"))("esbuild");
+const archiveBundle = await esbuild.build({ absWorkingDir: path.join(toolsRoot, '..'), entryPoints: [path.join(toolsRoot, '..', 'frontend', 'src', 'domain', 'productArchiveWorkbook.js')], bundle: true, format: 'iife', globalName: 'ShopeersErpProductArchive', platform: 'browser', write: false, legalComments: 'none' });
+await fs.writeFile(path.join(canonicalSourceDir, 'product-archive.js'), archiveBundle.outputFiles[0].text, 'utf8');
 const catalogBundle = await esbuild.build({ entryPoints: [path.join(toolsRoot, "..", "frontend", "src", "domain", "erpCatalogRequest.js")], bundle: true, absWorkingDir: path.join(toolsRoot, ".."), format: "esm", platform: "node", write: false, legalComments: "none" });
 const contractPath=path.join(toolsRoot,'erp-inbox-server-catalog-contract.mjs');
 const generatedContract=catalogBundle.outputFiles[0].text;
@@ -40,6 +42,7 @@ const secureModules = [
   "background.js",
   "xlsx-reader.js",
   "bulk-purchase.js",
+  "product-archive.js",
   "catalog-collector.js",
   "content.css",
   "content.js",

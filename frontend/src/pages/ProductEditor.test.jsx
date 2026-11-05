@@ -195,11 +195,11 @@ describe("product editing workflow", () => {
     await waitFor(() => input("商品图片链接").value === "https://images.example.invalid/late.png");
     expect(input("商品名称").value).toBe("手工未保存标题");
   });
-  it("does not request groups whose coverage state is complete", async () => {
+  it("keeps the unified archive entry available for refreshing complete metadata", async () => {
     const { product } = await saveProductCatalogRecord({ draft: { name: "已有商品", platformSkc: "SKC-A", variants: [{ platformSku: "SKU-A" }] } });
     editorSnapshotOverride.value = { mode: "product", product, capture: null, draft: { name: "已有商品", platformSkc: "SKC-A", variants: [{ platformSku: "SKU-A" }], suppliers: [], tags: [] }, prefill: { source: "erp", skuCount: 1, warnings: [], sources: [], purchases: [], referencePeriod: "2026-08", catalogCoverage: Object.fromEntries(["directory", "mappings", "images", "suppliers", "purchaseEvidence"].map(group => [group, { state: "complete" }])) } };
     await mount(`/products/edit?product=${product.id}`);
-    expect(button("补充 ERP 资料").disabled).toBe(true);
+    expect(button("获取 ERP 商品档案").disabled).toBe(false);
   });
 
   it("requires a title candidate and explicit identity-branch exclusion, then saves the clear SKU in one step", async () => {
@@ -217,17 +217,14 @@ describe("product editing workflow", () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("requests optional ERP catalog data for a saved unsold product using an explicit month and keeps registration retryable", async () => {
+  it("routes saved product metadata collection to the unified background archive entry", async () => {
     const { product } = await saveProductCatalogRecord({ draft: { name: "无销售档案", platformSkc: "UNSOLD-SKC", variants: [{ platformSku: "UNSOLD-SKU" }] } });
     await mount(`/products/edit?product=${product.id}`);
-    expect(input("资料采购截止月份").value).toBe("");
-    expect(button("补充 ERP 资料").disabled).toBe(true);
-    await change(input("资料采购截止月份"), "2026-08"); await click("补充 ERP 资料");
-    await waitFor(() => container.textContent.includes("尚未送达 ERP"));
-    expect(catalogRequests.input).toMatchObject({ productId: product.id, platformSkcs: ["UNSOLD-SKC"], period: "2026-08" });
-    expect(button("重试补充资料").disabled).toBe(false);
-    catalogRequests.registered = true; await click("重试补充资料");
-    await waitFor(() => container.textContent.includes("资料请求已登记"));
+    expect(input("资料采购截止月份")).toBeNull();
+    await click("获取 ERP 商品档案");
+    await waitFor(() => router.state.location.pathname === '/products');
+    expect(router.state.location.search).toBe('?collection=1');
+    expect(catalogRequests.input).toBeNull();
     expect(await db.salesRows.count()).toBe(0);
   });
 

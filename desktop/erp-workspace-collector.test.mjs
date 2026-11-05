@@ -274,3 +274,11 @@ test('a ready task from an older external helper can be taken over by desktop in
   assert.equal(h.calls.filter(call=>call.route==='/erp/v1/collection-tasks'&&call.method==='POST').length,0);
   h.collector.dispose();
 });
+
+test('keeps archive mode after first login instead of restarting cost collection', async()=>{
+  const h=harness(); h.login(true); await h.collector.start({...h.input,mode:'catalog'});
+  h.login(false); await h.collector.sessionChanged();
+  const resume=h.calls.filter(call=>call.body?.action==='request_resume').at(-1);
+  assert.equal(resume.body.mode,'catalog'); assert.equal(resume.body.retryFailed,false);
+  h.collector.dispose();
+});

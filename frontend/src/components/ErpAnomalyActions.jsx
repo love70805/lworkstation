@@ -67,17 +67,17 @@ export default function ErpAnomalyActions({ ledgerId, locked = false, onReview, 
   }
   if (!hasPendingAnomalies && !ignoredGroups.length && !open && !busy && !error) return null;
   return <div className="erp-anomaly-actions">
-    <div className="page-actions">{hasPendingAnomalies ? <><Button disabled={locked || busy} loading={busy} onClick={() => apply(true)}>一键忽略异常</Button>
-      <Button variant="ghost" onClick={() => show('pending')}>选择忽略</Button></> : null}
+    <div className="page-actions">{hasPendingAnomalies ? <><Button onClick={() => show('pending')}>核对价格异常</Button>
+      <Button disabled={locked || busy} loading={busy} onClick={() => apply(true)}>一键忽略异常</Button></> : null}
       {ignoredGroups.length ? <Button variant="ghost" onClick={() => show('ignored')}>已忽略异常 · {ignoredGroups.length}</Button> : null}</div>
-    {hasPendingAnomalies ? <small>已发现采购价格异常。可核对后选择保留原价核算（含 0 元），支持单选、多选或全部处理。无采购数据的项目仍需补齐成本。</small> : null}
+    {hasPendingAnomalies ? <small>本月全部店铺 · 忽略后按原始采购价核算（含 0 元），可逐项或多选处理；无采购数据的项目仍需补齐。</small> : null}
     {error && !open ? <p role="alert">{error}</p> : null}
     <Modal open={open} title="价格异常" description="忽略不代表价格已核实。原始证据保留，恢复提醒后重新判断成本；人工更正不受影响。按同一次回传的仓库商品处理，共用采购的 SKU 一同生效。" onClose={() => !busy && setOpen(false)}
       footer={<><Button disabled={busy} onClick={() => setOpen(false)}>关闭</Button>
         {tab === 'ignored' ? <Button disabled={locked || busy || !groups.length} onClick={() => apply(false)}>恢复本月全部提醒</Button> : null}
         <Button variant="primary" loading={busy} disabled={locked || busy || loading && tab === 'pending' || !chosen.length} onClick={() => apply(tab === 'pending', chosen)}>{tab === 'pending' ? '忽略选中' : '恢复选中'}（{chosen.length} 项）</Button></>}>
       <div className="anomaly-tabs" role="tablist" aria-label="异常处理状态">
-        <Button role="tab" aria-selected={tab === 'pending'} disabled={busy} onClick={() => show('pending')}>待忽略</Button>
+        <Button role="tab" aria-selected={tab === 'pending'} disabled={busy} onClick={() => show('pending')}>待核对</Button>
         <Button role="tab" aria-selected={tab === 'ignored'} disabled={busy} onClick={() => show('ignored')}>已忽略 · {ignoredGroups.length}</Button>
       </div>
       {error ? <p role="alert">{error}</p> : null}

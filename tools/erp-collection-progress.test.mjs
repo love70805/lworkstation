@@ -37,7 +37,10 @@ async function reply(key, data, count) {
 }
 const orders = (...ids) => ids.map(purchaseOrderId => ({ purchaseOrderId }));
 const stage = () => window.document.getElementById('erpa-progress-bar');
-const lane = id => window.document.querySelector(`[data-progress-lane="${id}"] progress`);
+const lane = id => window.document.querySelector(`[data-progress-lane="${id}"]`)?.textContent || '';
+const value = () => Number(stage().getAttribute('aria-valuenow'));
+const max = () => Number(stage().getAttribute('aria-valuemax'));
+const pageCount = id => Number(lane(id).match(/(\d+) \/ \d+ 页/)?.[1]);
 try {
   for (const file of files) window.eval(source[file]);
   window.dispatchEvent(new window.CustomEvent('shopeers:erp-v8-query-captured', { detail: { url: 'https://www.zhuolinkeji.cn/purchase/purchase/v1/purchase-order-page?sku=A,B,C' } }));
@@ -48,9 +51,9 @@ try {
   for (const skc of skcs) await reply('product-page:' + skc + ':1', ids.filter(id => id[0] === skc).map(id => ({ itemId: 'W-' + id })), ids.filter(id => id[0] === skc).length);
   await until(() => pending.size === 5);
   await until(() => /平台 SKU 映射/.test(stage().getAttribute('aria-label')));
-  assert.match(stage().getAttribute('aria-label'), /平台 SKU 映射/); assert.equal(stage().value, 0); assert.equal(stage().max, 9);
+  assert.match(stage().getAttribute('aria-label'), /平台 SKU 映射/); assert.equal(value(), 0); assert.equal(max(), 9);
   await reply('product-info-sku:W-A1:', '查询结果为空', 0);
-  await until(() => stage().value === 1);
+  await until(() => value() === 1);
   for (let i = 0; i < 8; i++) {
     await until(() => pending.size > 0);
     const key = [...pending.keys()].find(key => key.startsWith('product-info-sku:'));
@@ -64,41 +67,43 @@ try {
   for (const id of ids.filter(id => id[0] === 'A' && id !== 'A1')) await reply('product-info-sku:W-' + id + ':', [{ associatedProductId: 'W-' + id, barcodeSkuid: 'SKU-W-' + id, barcodeSkcid: 'A' }], 1);
   await reply('product-page:SKU-W-A1:1', [], 0);
   await until(() => pending.size === 2 && [...pending.keys()].every(key => key.startsWith('purchase-order-page:')));
-  await until(() => stage().max === 3 && stage().value === 0);
-  assert.equal(stage().getAttribute('value'), '0'); assert.equal(stage().max, 3);
-  assert.equal(lane(0).hasAttribute('value'), false, 'total pages remain unknown until ERP responds');
+  await until(() => max() === 3 && value() === 0);
+  assert.equal(stage().getAttribute('aria-valuenow'), '0'); assert.equal(max(), 3);
+  assert.match(lane(0), /总量待确认/, 'total pages remain unknown until ERP responds');
+  assert.equal(window.document.querySelectorAll('#erpa-loading-meters [role=progressbar]').length, 1, 'one stage meter; lane counts remain text');
+  assert.ok(stage().querySelector('.erpa-collection-pulse'));
   await reply('purchase-order-page:A:1', orders('A1', 'A2'), 5);
   await reply('purchase-order-page:B:1', orders('B1'), 3);
   await until(() => pending.has('purchase-order-page:B:2') && pending.has('purchase-order-page:A:2'));
-  await until(() => lane(0)?.value === 1 && lane(1)?.value === 1);
-  assert.equal(lane(0).value, 1); assert.equal(lane(0).max, 3);
-  assert.equal(lane(1).value, 1); assert.equal(stage().value, 0, 'started targets are not completed targets');
+  await until(() => pageCount(0) === 1 && pageCount(1) === 1);
+  assert.equal(pageCount(0), 1); assert.match(lane(0), /1 \/ 3 页/);
+  assert.equal(pageCount(1), 1); assert.equal(value(), 0, 'started targets are not completed targets');
   await reply('purchase-order-page:B:2', orders('B2'), 3);
-  await until(() => lane(1).value === 2);
-  assert.equal(lane(0).value, 1, 'a faster worker cannot overwrite the slower worker page count');
+  await until(() => pageCount(1) === 2);
+  assert.equal(pageCount(0), 1, 'a faster worker cannot overwrite the slower worker page count');
   await reply('purchase-order-page:B:3', orders('B3'), 3);
   await until(() => pending.has('purchase-order-page:C:1'));
-  await until(() => stage().value === 1 && !lane(1)?.hasAttribute('value'));
-  assert.equal(stage().value, 1); assert.equal(stage().max, 3);
-  assert.equal(lane(1).hasAttribute('value'), false);
+  await until(() => value() === 1 && /总量待确认/.test(lane(1)));
+  assert.equal(value(), 1); assert.equal(max(), 3);
+  assert.match(lane(1), /总量待确认/);
   await reply('purchase-order-page:C:1', orders('C1'));
   await until(() => pending.has('purchase-order-page:C:2'));
   await until(() => /已读 1 页/.test(window.document.querySelector('[data-progress-lane="1"]')?.textContent));
-  assert.equal(lane(1).hasAttribute('value'), false);
+  assert.match(lane(1), /总量待确认/);
   assert.match(window.document.querySelector('[data-progress-lane="1"]').textContent, /已读 1 页.*总量待确认/);
   await reply('purchase-order-page:C:2', []);
-  await until(() => stage().value === 2);
+  await until(() => value() === 2);
   await reply('purchase-order-page:A:2', orders('A3', 'A4'), 5);
   await reply('purchase-order-page:A:3', orders('A5'), 5);
   await until(() => pending.size === 9 && /采购明细/.test(stage().getAttribute('aria-label')));
-  assert.match(stage().getAttribute('aria-label'), /采购明细/); assert.equal(stage().max, 9); assert.equal(stage().value, 0);
+  assert.match(stage().getAttribute('aria-label'), /采购明细/); assert.equal(max(), 9); assert.equal(value(), 0);
   const details = id => [{ purchaseOrderDetailId: 'D-' + id, itemId: 'W-' + id, creationTime: '2026-08-20', purchaseQuantity: 2, purchaseUnitPrice: 4 }];
   for (let i = 0; i < 7; i++) {
     const key = [...pending.keys()].find(key => key.startsWith('purchase-order-details:'));
     await reply(key, details(key.split(':')[1]), 1);
-    await until(() => stage().value === i + 1);
+    await until(() => value() === i + 1);
   }
-  assert.equal(stage().value, 7); assert.equal(window.document.querySelectorAll('[data-progress-lane]').length, 2);
+  assert.equal(value(), 7); assert.equal(window.document.querySelectorAll('[data-progress-lane]').length, 2);
   for (const key of [...pending.keys()]) await reply(key, details(key.split(':')[1]), 1);
   await until(() => sent.length && !window.document.getElementById('erpa-recalculate').disabled);
   assert.equal(sent[0].meta.mappingFailureCount, 1);

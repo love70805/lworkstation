@@ -8,6 +8,18 @@
 .profit-cost-tools .erp-collection-progress { margin-top:12px; box-shadow:none; padding:14px; }
 .erp-anomaly-actions { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin:12px 0 8px; }
 .erp-anomaly-actions small { color:var(--text-muted); flex:1 1 240px; line-height:1.6; }
+.cost-attention { margin:14px 0; border-radius:8px; }
+.cost-attention:empty { display:none; }
+.cost-attention.needs-attention { padding:14px; border:1px solid var(--warning-border); background:var(--warning-bg); }
+.cost-attention .profit-cost-alert { padding:0; margin:0; border:0; background:none; }
+.cost-attention .profit-cost-alert > svg { flex-shrink:0; }
+.cost-attention .profit-cost-alert strong { font-size:15px; }
+.cost-attention .profit-cost-alert small { font-size:12px; line-height:1.6; }
+.cost-attention .erp-anomaly-actions { margin:12px 0 0; padding-top:12px; border-top:1px solid var(--warning-border); }
+.cost-attention .erp-anomaly-actions:first-child { margin-top:0; padding-top:0; border:0; }
+.profit-table-panel { scroll-margin-top:calc(var(--topbar-height) + 16px); }
+.profit-table-panel:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
+@media (max-width:760px) { .cost-attention .profit-cost-alert { flex-wrap:wrap; } .cost-attention .profit-cost-alert > .button { width:100%; } }
 .profit-table .profit-attribute { display:block; font-size:12px; margin-top:5px; color:var(--text-muted); white-space:normal; }
 .profit-table td:last-child, .profit-table th:last-child { box-shadow:-1px 0 0 var(--border); }
 .anomaly-tabs { display:flex; gap:8px; margin-bottom:14px; }

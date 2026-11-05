@@ -491,6 +491,11 @@
 #erpa-task-status:not(:empty) { padding: 5px 18px; color: var(--erpa-muted); font-size: 12px; overflow-wrap: anywhere; }
 
 .erpa-button-primary, #erpa-cost-trigger { color: var(--erpa-on-primary); }
+.erpa-collection-track { position:relative; height:9px; overflow:hidden; border-radius:6px; background:var(--erpa-border); width:100%; }
+.erpa-collection-fill { position:absolute; inset:0 auto 0 0; background:var(--erpa-primary); border-radius:inherit; transition:width 450ms ease; }
+.erpa-collection-pulse { position:absolute; inset:0 auto 0 0; width:28%; background:linear-gradient(90deg,transparent,var(--erpa-primary),transparent); animation:erpa-progress-pulse 1.8s linear infinite; }
+@keyframes erpa-progress-pulse { from { transform:translateX(-100%); } to { transform:translateX(360%); } }
+@media (prefers-reduced-motion:reduce) { .erpa-collection-fill { transition:none; } .erpa-collection-pulse { animation:none; opacity:.35; } }
 .erpa-button-primary:hover { color: var(--erpa-on-primary); }
 .erpa-loading { padding: 24px; }
 .erpa-loading-box { width: min(640px, 100%); padding: 24px; text-align: left; border: 1px solid var(--erpa-border); border-radius: 14px; background: var(--erpa-surface); box-shadow: 0 12px 32px rgba(15,23,42,.12); }

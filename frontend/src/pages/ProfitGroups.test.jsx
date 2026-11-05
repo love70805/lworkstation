@@ -22,4 +22,12 @@ it('mounts only opened variants and reveals the page list after paging', async()
   expect(list.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' });
   expect(host.querySelector('summary').textContent).toContain('SKC12');
   expect(host.querySelector('table')).toBeNull();
+  await act(async()=>root.render(<ProfitGroups groups={groups} columns={[]} prepareRows={prepareRows} expandRequest={1}/>));
+  expect(host.querySelector('summary').textContent).toContain('SKC0');
+  expect(host.querySelectorAll('table')).toHaveLength(12);
+  const firstMissing = host.querySelector('details');
+  await act(async()=>{firstMissing.open=false;firstMissing.dispatchEvent(new Event('toggle'));});
+  expect(host.querySelectorAll('table')).toHaveLength(11);
+  await act(async()=>root.render(<ProfitGroups groups={groups} columns={[]} prepareRows={prepareRows} expandRequest={2}/>));
+  expect(host.querySelectorAll('table')).toHaveLength(12);
 });

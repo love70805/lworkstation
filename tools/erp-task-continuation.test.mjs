@@ -95,6 +95,23 @@ const rejects = (operation, code) => assert.throws(operation, error => error.cod
   control(records, task, 'release', { runnerId: 'RUNNER-C' });
   assert.equal(first.deliveryId, 'DELIVERY');
   assert.equal(first.catalogStatus, 'completed');
+  const costReceipt = { ...first }; delete costReceipt.catalogStatus; delete costReceipt.catalogUpdatedAt; delete costReceipt.catalogError;
+  rejects(() => control(records, task, 'request_resume', { mode: 'cost', refreshCatalog: true }), 'ERP_TASK_MODE_INVALID');
+  task.status = 'completed';
+  control(records, task, 'request_resume', { mode: 'catalog', catalogMode: 'on_demand', refreshCatalog: true });
+  assert.equal(first.catalogStatus, undefined);
+  assert.deepEqual(first, costReceipt, 'refresh resets only catalog state, retaining the original cost attempt and receipt');
+  control(records, task, 'claim', { runnerId: 'RUNNER-REFRESH', resumeRequestId: task.resumeRequestId });
+  records.push({ kind: 'batch', workspaceId: 'WS', requestId: 'REQ', deliveryId: first.deliveryId });
+  const seed = (attemptId = first.attemptId, runnerId = 'RUNNER-REFRESH', workspaceId = 'WS') => handleCollectionTaskRequest(records, {
+    method: 'GET', url: new URL('http://localhost/erp/v1/collection-tasks/' + task.taskId + '/batches/' + first.batchId + '/catalog-seed?workspaceId=' + workspaceId + '&attemptId=' + attemptId + '&runnerId=' + runnerId), instanceId: 'INSTANCE', now,
+  }).body;
+  assert.equal(seed().catalogSeedReceipt, 'DELIVERY', 'explicit catalog can reuse delivered evidence before formal cost adoption');
+  rejects(() => seed('STALE'), 'ERP_TASK_STALE_ATTEMPT');
+  rejects(() => seed(first.attemptId, 'OTHER'), 'ERP_TASK_RUNNER_CHANGED');
+  rejects(() => seed(first.attemptId, 'RUNNER-REFRESH', 'FOREIGN'), 'ERP_TASK_WORKSPACE_MISMATCH');
+  control(records, task, 'pause');
+  rejects(() => seed(), 'ERP_TASK_COST_FIRST');
 }
 
 console.log('ERP continuation: durable intent, unique executor, short lease recovery, old-task splitting, preserved receipts, scope rejection and explicit material mode passed.');

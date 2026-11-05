@@ -23,8 +23,8 @@ it('reveals and focuses the progress panel even when the user is already on the 
 
 it('shows the actual background stage and links to that task instead of the current page month', () => {
   const html = renderToStaticMarkup(<MemoryRouter><ErpBackgroundNoticeContent tasks={[task]} /></MemoryRouter>);
-  expect(html).toContain('正在后台补充商品资料');
-  expect(html).toContain('2026-09 · 成本已送达 1 / 1 个 SKC');
+  expect(html).toContain('正在后台获取商品档案');
+  expect(html).toContain('2026-09 · 商品资料已检查 0 / 1 个 SKC');
   expect(html).toContain('/products?collection=1');
   expect(html).not.toContain('继续补充资料');
 });
@@ -33,7 +33,7 @@ it('retains task context but stops claiming it is running when the status source
   const html = renderToStaticMarkup(<MemoryRouter><ErpBackgroundNoticeContent tasks={[task]} error="本机服务连接失败" /></MemoryRouter>);
   expect(html).toContain('后台采集状态暂无法确认');
   expect(html).toContain('本机服务连接失败');
-  expect(html).not.toContain('正在后台补充商品资料');
+  expect(html).not.toContain('正在后台获取商品档案');
   expect(html).not.toContain('class="spin"');
 });
 
@@ -44,9 +44,9 @@ it('shares updates across page mounts, isolates workspaces and removes completed
   try {
     publishErpCollectionActivity({ workspaceId: 'NOTICE-W', tasks: [task, { ...task, workspaceId: 'OTHER-W' }] });
     expect(readErpCollectionActivity('NOTICE-W').tasks).toHaveLength(1);
-    await render('NOTICE-W'); expect(container.textContent).toContain('正在后台补充商品资料');
+    await render('NOTICE-W'); expect(container.textContent).toContain('正在后台获取商品档案');
     await render('OTHER-W'); expect(container.textContent).toBe('');
-    await render('NOTICE-W'); expect(container.textContent).toContain('正在后台补充商品资料');
+    await render('NOTICE-W'); expect(container.textContent).toContain('正在后台获取商品档案');
     await act(() => publishErpCollectionActivity({ workspaceId: 'NOTICE-W', tasks: [{ ...task, batches: task.batches.map(batch => ({ ...batch, catalogStatus: 'completed' })) }] }));
     expect(container.textContent).toBe('');
   } finally { await act(() => root.unmount()); container.remove(); }

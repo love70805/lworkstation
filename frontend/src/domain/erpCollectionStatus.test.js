@@ -20,7 +20,7 @@ it('shows actual background material reads without offering resume, including pa
   for (const status of ['cost_complete', 'partial']) {
     const view = erpCollectionPresentation({ status, phase: 'catalog', batches: [{ ...delivered, catalogStatus: 'running' }] });
     expect(view).toMatchObject({ state: 'catalog_running', running: true, canResume: false, canRetry: false });
-    expect(view.description).toContain('不阻塞已采用成本');
+    expect(view.description).toContain('已采用成本保持有效');
   }
 });
 
@@ -125,4 +125,10 @@ it('explains task-wide collection and avoids batch instructions for recovery and
     { ...task, status: 'paused', pauseReason: { code: 'ERP_SERVICE_UNAVAILABLE' } }]) {
     expect(erpCollectionPresentation(value).description).not.toContain('批次');
   }
+});
+
+it('keeps explicit archive pause and missing metadata visible without a cost-success message', () => {
+  const task = { catalogMode: 'on_demand', runMode: 'catalog', status: 'paused', batches: [{ ...delivered, catalogStatus: 'running' }] };
+  expect(erpCollectionPresentation(task)).toMatchObject({ state: 'paused', tone: 'warning', canResume: true });
+  expect(erpCollectionPresentation({ ...task, status: 'cost_complete', batches: [{ ...delivered, catalogStatus: 'failed' }] })).toMatchObject({ state: 'attention', tone: 'warning', canResume: true });
 });

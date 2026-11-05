@@ -57,7 +57,7 @@ it('ignores only the checked items and allows a single item directly', async () 
     { warehouseSku: `W-${i}`, recordId: `R-${i}`, status: 'pending', originalUnitPrice: i ? 1 : 0, reasons: ['unit_price_one'] },
   ] } } }));
   await act(async () => root.render(<ErpAnomalyActions ledgerId="L" hasPendingAnomalies readPending={readPending} />));
-  await act(async () => button('选择忽略').click());
+  await act(async () => button('核对价格异常').click());
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
   expect(button('忽略选中（0 项）').disabled).toBe(true);
   await act(async () => { const boxes = host.querySelectorAll('.anomaly-select-row input'); boxes[0].click(); boxes[2].click(); });

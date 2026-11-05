@@ -99,10 +99,15 @@ it('renders initial asynchronous snapshot loading without dereferencing an empty
 
 it("opens the cost details from the missing-cost action", async () => {
   const details = [...container.querySelectorAll("details")].find(el => el.querySelector("summary")?.textContent.startsWith("查看利润明细"));
-  expect(details.open).toBe(true);
+  await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
   await act(async () => findButton("只看待补成本").click());
+  await act(async () => new Promise(resolve => requestAnimationFrame(resolve)));
   expect(details.open).toBe(true);
-  expect(container.querySelector(".profit-table-panel")).not.toBeNull();
+  expect(container.querySelector('.profit-skc-group table')).not.toBeNull();
+  expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
+  expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  scroll.mockRestore();
 });
 it('retains same-number store exclusions in current profit display and saved filters', async()=>{
   await act(async()=>root.unmount());

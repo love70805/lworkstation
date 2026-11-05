@@ -18,6 +18,7 @@ const commands = [
   ["ERP 统一继续与成本优先", "node", ["../tools/erp-task-continuation.test.mjs"]],
   ["全部成本核算后统一整理资料与持久复用", "node", ["../tools/erp-cost-before-catalog.test.mjs"]],
   ["ERP 真实进度与并发任务", "node", ["../tools/erp-collection-progress.test.mjs"]],
+  ["ERP 商品表格后台获取与自动回传", "node", ["../tools/erp-product-archive.test.mjs"]],
   ["ERP 资料目标实际并发", "node", ["../tools/erp-catalog-concurrency.test.mjs"]],
   ["ERP 服务维护、缺项复核与批次恢复", "node", ["../tools/erp-collection-resilience.test.mjs"]],
   ["ERP 平台 SKU/SKC 精确采集范围", "node", ["../tools/erp-platform-scope.test.mjs"]],

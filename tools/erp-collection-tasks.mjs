@@ -205,7 +205,9 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
     const batch = task.batches.find(item => item.batchId === parts[2]);
     if (!batch || batch.attemptId !== url.searchParams.get('attemptId')) fail('ERP_TASK_STALE_ATTEMPT', '资料种子的批次尝试已变化。');
     if (!task.runnerId || task.runnerId !== url.searchParams.get('runnerId')) fail('ERP_TASK_RUNNER_CHANGED', '执行者已变化。');
-    if (!collectionCostsSettled(task)) fail('ERP_TASK_COST_FIRST', '全部成本采集和本机核算完成后才能统一整理资料。');
+    const onDemand = task.catalogMode === 'on_demand' && task.runMode === 'catalog' && !task.recoveryRequired
+      && !['paused', 'stopped', 'invalidated'].includes(task.status) && batch.deliveryId && ['delivered', 'incomplete'].includes(batch.status);
+    if (!onDemand && !collectionCostsSettled(task)) fail('ERP_TASK_COST_FIRST', '全部成本采集和本机核算完成后才能统一整理资料。');
     const receipt = records.find(item => item.kind === 'batch' && item.deliveryId === batch.deliveryId
       && item.workspaceId === task.workspaceId && item.requestId === task.requestId);
     if (!receipt) fail('ERP_TASK_RECEIPT_NOT_FOUND', '资料种子没有对应的持久成本收件。');
@@ -232,7 +234,8 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       const request = requestFor(records, task.requestId);
       if (payload.requestId && payload.requestId !== task.requestId || collectionScopeHash(request) !== task.scopeHash
         || payload.filters && hash(payload.filters) !== hash(task.filters)) fail('ERP_TASK_SCOPE_CHANGED', '任务月份、店铺、SKU/SKC 或导入版本已变化，请从当前账本重新准备采集。');
-      if (['stopped', 'completed', 'invalidated'].includes(task.status)) fail('ERP_TASK_STOPPED', '任务已结束，请从当前账本准备新任务。');
+      const refreshCompletedCatalog = task.status === 'completed' && action === 'request_resume' && payload.mode === 'catalog' && payload.refreshCatalog === true;
+      if (['stopped', 'completed', 'invalidated'].includes(task.status) && !refreshCompletedCatalog) fail('ERP_TASK_STOPPED', '任务已结束，请从当前账本准备新任务。');
       if (action === 'reconnect') {
         if (task.executionProtocol !== 2 || task.executionTarget !== 'desktop' || task.status !== 'ready' || task.runnerId
           || !payload.resumeRequestId || payload.resumeRequestId !== task.resumeRequestId) fail('ERP_TASK_HANDOFF_CHANGED', '任务接收状态已变化，请读取最新状态。');
@@ -249,13 +252,17 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         if (payload.catalogMode != null && !['on_demand', 'after_costs'].includes(payload.catalogMode)) fail('ERP_TASK_MODE_INVALID', '商品资料整理方式无效。', 400);
         if (payload.executionTarget === 'desktop') task.executionTarget = 'desktop';
         const mode = payload.mode ?? 'cost';
-        if (!['cost', 'catalog'].includes(mode) || payload.retryFailed != null && typeof payload.retryFailed !== 'boolean') fail('ERP_TASK_MODE_INVALID', '任务继续方式无效。', 400);
+        if (!['cost', 'catalog'].includes(mode) || payload.retryFailed != null && typeof payload.retryFailed !== 'boolean'
+          || payload.refreshCatalog != null && (typeof payload.refreshCatalog !== 'boolean' || mode !== 'catalog')) fail('ERP_TASK_MODE_INVALID', '任务继续方式无效。', 400);
         if (mode === 'catalog' && task.batches.some(batch => !batch.deliveryId)) fail('ERP_TASK_COST_FIRST', '请先完成成本采集，再按需补齐商品资料。');
         if (mode === 'catalog' && task.catalogMode === 'after_costs' && task.batches.some(batch => batch.status !== 'delivered')) fail('ERP_TASK_COST_FIRST', '成本证据尚未完整，请先重试失败批次。');
-        if (task.runnerId && Date.parse(task.runnerLeaseExpiresAt) > now && task.status !== 'paused'
+        if (!refreshCompletedCatalog && (task.runnerId && Date.parse(task.runnerLeaseExpiresAt) > now && task.status !== 'paused'
           || task.status === 'ready' && task.runMode === mode && !payload.retryFailed
-            && (!payload.catalogMode || payload.catalogMode === task.catalogMode)) return { status: 200, body: { task: refresh(task), idempotent: true } };
+            && (!payload.catalogMode || payload.catalogMode === task.catalogMode))) return { status: 200, body: { task: refresh(task), idempotent: true } };
         for (const batch of task.batches) if (batch.status === 'running' || payload.retryFailed && ['failed', 'incomplete'].includes(batch.status)) resetAttempt(batch);
+        if (payload.refreshCatalog) for (const batch of task.batches) {
+          delete batch.catalogStatus; delete batch.catalogError; delete batch.catalogUpdatedAt;
+        }
         if (mode === 'cost') splitPendingBatches(task);
         Object.assign(task, { executionProtocol: 2, catalogMode: payload.catalogMode ?? (task.catalogMode === 'after_costs' ? 'after_costs' : 'on_demand'), runMode: mode, status: 'ready', recoveryRequired: false,
           resumeRequestId: crypto.randomUUID(), resumeRequestedAt: timestamp(now), instanceId });

@@ -9,8 +9,8 @@ import { ProfitViewsContent } from './ProfitPanel';
 import { ToastProvider } from '../components/UI';
 const state=vi.hoisted(()=>({snapshot:{ledger:{id:'L',workspaceId:'W',period:'2026-08',status:'draft',warehouseRate:0.7},rows:[{store:'甲',supplierNumber:'货号A',platformSku:'A',platformSkc:'S',quantity:2,amount:10,sourceAddedDate:'2026-08-01'},{store:'乙',supplierNumber:'货号B',platformSku:'B',platformSkc:'T',quantity:3,amount:30,sourceAddedDate:'2026-08-01'}],costs:[],approvals:[],profitLines:[]}}));
 vi.mock('../hooks/useLatestSalesImport',()=>({useLatestSalesImport:()=>state.snapshot}));
-vi.mock('./MonthlyReportManager',()=>({default:()=>null}));
-vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext,suppliedSnapshot})=>{state.costSnapshot=suppliedSnapshot;return <div data-testid="cost-scope">{validatedContext.store}</div>;}}));
+vi.mock('./MonthlyReportManager',()=>({default:({onOpenCosts})=><button onClick={onOpenCosts}>补齐本月成本</button>}));
+vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext,suppliedSnapshot,onShowMissing})=>{state.costSnapshot=suppliedSnapshot;return <><div data-testid="cost-scope">{validatedContext.store}</div><button onClick={onShowMissing}>查看当前待补</button></>;}}));
 let root,container;
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.restoreAllMocks();});
 it('replaces profit scope through all → 甲 → 乙 and never renders sales analytics',async()=>{
@@ -68,4 +68,23 @@ it('keeps export above the unified details for a legacy cost URL while preservin
  expect(container.querySelector('#monthly-report-section').compareDocumentPosition(container.querySelector('[data-testid="cost-scope"]')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  expect(container.querySelector('.profit-sales-disclosure')).toBeNull();
  expect(container.querySelector('.sales-analytics')).toBeNull();
+});
+
+it('reveals scoped missing rows from the cost section and the whole month from the report action', async () => {
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true; localStorage.clear();
+ container=document.createElement('div');document.body.append(container);root=createRoot(container);
+ await act(async()=>root.render(<MemoryRouter initialEntries={['/profit?ledger=L&store=乙&missing=0&q=T']}><ToastProvider><ProfitViewsContent/></ToastProvider></MemoryRouter>));
+ const button = label => [...container.querySelectorAll('button')].find(node => node.textContent === label);
+ await act(async()=>button('查看当前待补').click());
+ await act(async()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+ expect(container.querySelectorAll('.profit-skc-group table')).toHaveLength(1);
+ expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
+ expect(container.querySelector('.profit-workspace-controls select').value).toBe('乙');
+ expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('T');
+ await act(async()=>button('补齐本月成本').click());
+ await act(async()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+ expect(container.querySelectorAll('.profit-skc-group table')).toHaveLength(2);
+ expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
+ expect(container.querySelector('.profit-workspace-controls select').value).toBe('all');
+ expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('');
 });

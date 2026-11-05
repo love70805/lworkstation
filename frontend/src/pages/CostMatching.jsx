@@ -1,4 +1,5 @@
 import ErpAnomalyActions from '../components/ErpAnomalyActions';
+import CostAttention from '../components/CostAttention';
 import { revealErpCollectionProgress } from '../components/ErpBackgroundNotice';
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { erpLedgerVersion } from '../domain/erpLedgerVersion';
@@ -53,11 +54,11 @@ import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchi
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 const costViewCache = new Map();
 
-export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose }) {
+export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose, onShowMissing }) {
   const snapshot = useLatestSalesImport(validatedContext?.ledgerId, suppliedSnapshot);
   if (snapshot === undefined) return <Panel>正在验证成本核对范围...</Panel>;
   if (!validatedContext?.ledgerId || snapshot?.ledger?.id !== validatedContext.ledgerId || snapshot?.ledger?.workspaceId !== validatedContext.workspaceId || (validatedContext.store !== "all" && !snapshot.rows.some((row) => row.store === validatedContext.store))) return <Panel><p role="alert">账本或店铺不属于当前工作区，请重新选择。</p></Panel>;
-  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} compact={compact} reviewTarget={reviewTarget} onReviewClose={onReviewClose} />;
+  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} compact={compact} reviewTarget={reviewTarget} onReviewClose={onReviewClose} onShowMissing={onShowMissing} />;
 }
 
 export default function CostMatching() {
@@ -149,7 +150,7 @@ function SelectedPurchaseEvidence({ match }) {
   </details>;
 }
 
-function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose }) {
+function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose, onShowMissing }) {
   const desktop = isDesktopRuntime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1100,8 +1101,9 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     className="cost-detail-modal" title="成本详情" formFirst onClose={closeCostDetails}>
     <details className="cost-correction-evidence"><summary>采购证据与异常原因</summary>{targetDetails}</details>
   </ManualCostDialog> : null;
+  const hasPendingAnomalies = inboxReview.exceptions.some(item => item.inboxId && item.state === 'anomaly_pending');
   const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} readPending={readPendingAnomalies}
-    hasPendingAnomalies={inboxReview.exceptions.some(item => item.inboxId && item.state === 'anomaly_pending')} locked={locked} onReview={item => {
+    hasPendingAnomalies={hasPendingAnomalies} locked={locked} onReview={item => {
     const row = allReviewRows.find(row => item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku)
       || (row.match?.sourceWarehouseSku ?? row.erpCost?.warehouseSku) === item.warehouseSku);
     if (row) setManualTarget({ id: row.id, mode: 'edit', inboxId: item.inboxId });
@@ -1109,12 +1111,13 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
     <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
       ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
+    <CostAttention missing={missingReviewRows.length} hasAnomalies={hasPendingAnomalies}
+      collected={Boolean(workspaceInboxRecords.length)} onShowMissing={onShowMissing}>{anomalyActions}</CostAttention>
     {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
       <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? '正在采集成本' : '成本采集记录'}</summary>
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}
         locked={locked} error={collectionError || collection.error} statusError={collection.error} />
     </details> : null}
-    {anomalyActions}
     {registrationState.status === 'failed' ? <p role="alert">{registrationState.message}<Button onClick={() => setRegistrationRetry(value => value + 1)}>重试连接</Button></p> : null}
     {scopeHasIdentityConflict ? <p role="alert">部分 SKU 的台账归属有冲突，请先检查导入映射。</p> : null}
     <details className="profit-purpose-help"><summary>导入旧成本证据</summary>

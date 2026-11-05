@@ -216,7 +216,7 @@ async function verifyManifestAndGenerator() {
     "src/xlsx-reader.js",
     "src/catalog-collector.js",
     "src/result-policy.js",
-    "src/bulk-purchase.js",
+    "src/bulk-purchase.js", "src/product-archive.js",
     "src/request-context.js",
     "src/shopeers-bridge.js",
     "src/desktop-task-preview.js",
@@ -269,7 +269,7 @@ async function verifyPublishedPackage() {
     const isolated = manifest.content_scripts.find((entry) => !entry.world);
     assert.deepEqual(main.js, ["src/query-hook.js"]);
     assert.equal(main.all_frames, true);
-    assert.deepEqual(isolated.js, ["src/xlsx-reader.js", "src/catalog-collector.js", "src/result-policy.js", "src/bulk-purchase.js", "src/request-context.js", "src/shopeers-bridge.js", "src/desktop-task-preview.js", "src/content.js"]);
+    assert.deepEqual(isolated.js, ["src/xlsx-reader.js", "src/catalog-collector.js", "src/result-policy.js", "src/bulk-purchase.js", "src/product-archive.js", "src/request-context.js", "src/shopeers-bridge.js", "src/desktop-task-preview.js", "src/content.js"]);
     assert.equal(isolated.all_frames, true);
     const background = await readFile(path.join(root, "src", "background.js"), "utf8");
     const content = await readFile(path.join(root, "src", "content.js"), "utf8");
@@ -277,7 +277,7 @@ async function verifyPublishedPackage() {
     assert.equal(content.replace(/\r\n/g, "\n"), canonicalContent.replace(/\r\n/g, "\n"), "recommended packages must include the canonical collection and cache policy");
     assert.match(content, /const RESULT_CACHE_KEY = 'latest_cost_result_v7';/);
     assert.ok(content.includes(`const EXTENSION_VERSION = '${version}';`));
-    for (const file of ["background.js", "catalog-collector.js", "content.css", "desktop-task-preview.js", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
+    for (const file of ["background.js", "product-archive.js", "catalog-collector.js", "content.css", "desktop-task-preview.js", "query-hook.js", "request-context.js", "result-policy.js", "shopeers-bridge.js"]) {
       assert.equal(
         (await readFile(path.join(root, "src", file), "utf8")).replace(/\r\n/g, "\n"),
         (await readFile(sourcePath(file), "utf8")).replace(/\r\n/g, "\n"),
