@@ -26,6 +26,27 @@ assert.ok(result.results.every(item => item.name === `档案${item.warehouseSku}
 assert.equal(JSON.stringify(seed), before, 'catalog enrichment leaves the durable cost source unchanged');
 assert.deepEqual(progress.filter(([label]) => label === '获取商品表格档案').map(([,done]) => done), [0, 50, 50, 51]);
 
+// A short cost mapping is completed by the canonical SKU API before exporting.
+// Its warehouse attribute fills a blank platform attribute, never a different SKU.
+const shortSeed = structuredClone(seed);
+shortSeed.results = [{ ...shortSeed.results[0], catalogMappingsComplete: false }, { ...shortSeed.results[1], catalogMappingsComplete: false }];
+const verifiedExports = [];
+const checked = await create({ ...base, apiGet: async (endpoint, params) => {
+  assert.ok(endpoint.endsWith('product-info-sku'));
+  const data = params.productId === ids[0]
+    ? [{ barcodeSkuid: 'SKU-0' }, { barcodeSkuid: 'VARIANT', barcodeAttributeSet: '红色 / 大号' }]
+    : [{ barcodeSkuid: 'FOREIGN' }];
+  return { code: 0, data: data.map(item => ({ ...item, associatedProductId: params.productId, barcodeSkcid: 'SKC' })), count: data.length };
+}, readProductArchive: async ids => { verifiedExports.push(...ids); return ids.map(row); } }).collect(['SKC'], {
+  controller: new AbortController(), expectedSkus: [expectedSkus[0], { ...expectedSkus[0], platformSku: 'VARIANT' }],
+}, shortSeed);
+assert.deepEqual(verifiedExports, [ids[0]], 'foreign directory matches are not requested from the export endpoint');
+for (const field of ['mappings', 'catalogMappings']) {
+  const mappings = checked.results[0][field];
+  assert.equal(mappings.find(item => item.platformSku === 'SKU-0').attribute, '红色', 'fresh mapping lookup must not discard the workbook attribute');
+  assert.equal(mappings.find(item => item.platformSku === 'VARIANT').attribute, '红色 / 大号', 'the specific platform variation takes priority');
+}
+
 const partial = await create({ ...base, readProductArchive: async ids => ids.slice(1).map(row) }).collect(['SKC'], run(), seed);
 assert.equal(partial.coverage.directory.state, 'partial');
 assert.equal(partial.coverage.directory.missingCount, 2);

@@ -170,41 +170,6 @@
                         catalogMappingsComplete: previous?.catalogMappingsComplete === true,
                         name: product.name || previous?.name || '', imageUrl: product.imageUrl || previous?.imageUrl || '', purchaseCatalog: previous?.purchaseCatalog || product.purchaseCatalog, supplierName: previous?.supplierName || product.supplierName, supplier1688Links: previous?.supplier1688Links?.length ? previous.supplier1688Links : product.supplier1688Links || [] });
             }
-            // Export only registered warehouse identities, in bounded batches.
-            // The workbook's concatenated platform identifiers and prices are
-            // never used as identity or financial evidence.
-            if (readProductArchive && results.size) {
-                const warehouses = [...results.values()].map(result => result.warehouseSku);
-                let done = 0;
-                for (let offset = 0; offset < warehouses.length; offset += 50) {
-                    const ids = warehouses.slice(offset, offset + 50);
-                    onProgress('获取商品表格档案', done, warehouses.length, { unit: '个仓库 SKU' });
-                    try {
-                        const rows = await bounded(() => readProductArchive(ids, run), run);
-                        const expected = new Set(ids.map(key)), received = new Set();
-                        if (!Array.isArray(rows) || rows.some(row => !expected.has(key(row.warehouseSku)))) throw new Error('商品档案返回了范围外的仓库 SKU');
-                        for (const row of rows) {
-                            const result = results.get(key(row.warehouseSku));
-                            received.add(key(row.warehouseSku));
-                            result.name = row.productName || result.name || '';
-                            result.imageUrl = row.imageUrl || result.imageUrl || '';
-                            for (const field of ['mappings', 'catalogMappings']) result[field] = (result[field] || []).map(mapping => ({ ...mapping,
-                                productName: row.productName || mapping.productName, imageUrl: row.imageUrl || mapping.imageUrl,
-                                attribute: row.attribute || mapping.attribute }));
-                            result.supplier1688Links = policy.normalizeSupplier1688Links([...(row.supplier1688Links || []), ...(result.supplier1688Links || [])]);
-                            result.purchaseCatalog = { ...result.purchaseCatalog,
-                                ...(row.color ? { productColor: row.color } : {}),
-                                ...(row.attribute ? { specificationAndModel: row.attribute } : {}) };
-                        }
-                        if (received.size !== expected.size) mark('directory', '商品档案缺少 ' + (expected.size - received.size) + ' 个仓库 SKU', expected.size - received.size);
-                    } catch (error) {
-                        if ((run.controller.signal.aborted && !run.budgetExpired) || interrupted(error)) throw error;
-                        mark('directory', '商品档案获取未完成：' + String(error?.message || error), ids.length);
-                    }
-                    done += ids.length;
-                    onProgress('获取商品表格档案', done, warehouses.length, { unit: '个仓库 SKU' });
-                }
-            }
             let completedTargets = 0;
             await targets([...results.values()], 5, async (result, lane) => {
                 const report = () => onProgress('资料与采购证据', completedTargets, results.size, { lane, active: true, target: result.warehouseSku, unit: '个仓库 SKU' });
@@ -246,13 +211,6 @@
                     result.supplier1688Links = policy.normalizeSupplier1688Links([...(result.supplier1688Links || []), ...purchaseRecords.flatMap(record => record.supplier1688Links || [])]);
                     if (!result.supplierName && result.supplierNames.length === 1) result.supplierName = result.supplierNames[0];
                     if (!result.imageUrl) result.imageUrl = purchaseRecords.map(record => policy.purchaseImageUrl(record)).find(Boolean) || '';
-                    if (!(result.supplierNames || []).length) mark('suppliers', result.warehouseSku + ':supplier_missing');
-                    else coverage.suppliers.recordCount += 1;
-                    if (!result.supplier1688Links.length) mark('suppliers', result.warehouseSku + ':supplier1688_link_missing');
-                    for (const mapping of scoped.mappings) {
-                        if (!mapping.imageUrl && !result.imageUrl) mark('images', mapping.platformSku + ':image_missing');
-                        else coverage.images.recordCount += 1;
-                    }
                     completedTargets += 1;
                 } finally { onProgress('资料与采购证据', completedTargets, results.size, { lane, active: false, unit: '个仓库 SKU' }); }
             }, run);
@@ -262,6 +220,51 @@
             for (const result of scoped.results) {
                 const targetSkus = new Set(result.mappings.map(mapping => key(mapping.platformSku)));
                 result.catalogMappings = result.catalogMappings.filter(mapping => targetSkus.has(key(mapping.platformSku)) && key(mapping.warehouseSku) === key(result.warehouseSku));
+            }
+            // Export only registered warehouse identities, in bounded batches.
+            // The workbook's concatenated platform identifiers and prices are
+            // never used as identity or financial evidence.
+            if (readProductArchive && scoped.results.length) {
+                const byWarehouse = new Map(scoped.results.map(result => [key(result.warehouseSku), result]));
+                const warehouses = scoped.results.map(result => result.warehouseSku);
+                let done = 0;
+                for (let offset = 0; offset < warehouses.length; offset += 50) {
+                    const ids = warehouses.slice(offset, offset + 50);
+                    onProgress('获取商品表格档案', done, warehouses.length, { unit: '个仓库 SKU' });
+                    try {
+                        const rows = await bounded(() => readProductArchive(ids, run), run);
+                        const expected = new Set(ids.map(key)), received = new Set();
+                        if (!Array.isArray(rows) || rows.some(row => !expected.has(key(row.warehouseSku)))) throw new Error('商品档案返回了范围外的仓库 SKU');
+                        for (const row of rows) {
+                            const result = byWarehouse.get(key(row.warehouseSku));
+                            received.add(key(row.warehouseSku));
+                            result.name = row.productName || result.name || '';
+                            result.imageUrl = row.imageUrl || result.imageUrl || '';
+                            for (const field of ['mappings', 'catalogMappings']) result[field] = (result[field] || []).map(mapping => ({ ...mapping,
+                                productName: row.productName || mapping.productName, imageUrl: row.imageUrl || mapping.imageUrl,
+                                attribute: mapping.attribute || row.attribute }));
+                            result.supplier1688Links = policy.normalizeSupplier1688Links([...(row.supplier1688Links || []), ...(result.supplier1688Links || [])]);
+                            result.purchaseCatalog = { ...result.purchaseCatalog,
+                                ...(row.color ? { productColor: row.color } : {}),
+                                ...(row.attribute ? { specificationAndModel: row.attribute } : {}) };
+                        }
+                        if (received.size !== expected.size) mark('directory', '商品档案缺少 ' + (expected.size - received.size) + ' 个仓库 SKU', expected.size - received.size);
+                    } catch (error) {
+                        if ((run.controller.signal.aborted && !run.budgetExpired) || interrupted(error)) throw error;
+                        mark('directory', '商品档案获取未完成：' + String(error?.message || error), ids.length);
+                    }
+                    done += ids.length;
+                    onProgress('获取商品表格档案', done, warehouses.length, { unit: '个仓库 SKU' });
+                }
+            }
+            for (const result of scoped.results) {
+                if (!(result.supplierNames || []).length) mark('suppliers', result.warehouseSku + ':supplier_missing');
+                else coverage.suppliers.recordCount += 1;
+                if (!result.supplier1688Links.length) mark('suppliers', result.warehouseSku + ':supplier1688_link_missing');
+                for (const mapping of result.mappings) {
+                    if (!mapping.imageUrl && !result.imageUrl) mark('images', mapping.platformSku + ':image_missing');
+                    else coverage.images.recordCount += 1;
+                }
             }
             const warehouseScope = new Set(scoped.results.map(result => key(result.warehouseSku)));
             if (!scoped.results.length) { mark('mappings', 'no_target_skc_mapping', 0); mark('images', 'no_target_skc_mapping'); mark('suppliers', 'no_target_skc_mapping'); mark('purchaseEvidence', 'no_target_skc_mapping'); }
