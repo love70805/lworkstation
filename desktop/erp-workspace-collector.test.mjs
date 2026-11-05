@@ -11,7 +11,7 @@ function harness(options={}){
   let context={workspaceId:'W'},task=null,login=false,created=0,closed=0,reloads=0,requestStatus='registered',clock=0;
   let nextRead=null,nextCreation=null,nextProbe=null,nextReconnectError=null,claimOnReconnect=false;
   const calls=[],views=[];
-  const collector=createWorkspaceErpCollector({getContext:()=>context,now:()=>clock,ackTimeoutMs:100,...options,interval:()=>1,clear:()=>{},createView:async url=>{
+  const collector=createWorkspaceErpCollector({getContext:()=>context,now:()=>clock,ackTimeoutMs:100,checkSession:async()=>!login,...options,interval:()=>1,clear:()=>{},createView:async url=>{
     created++;assert.equal(new URL(url).searchParams.get('lworkstationRequest'),input.requestId);
     assert.equal(new URL(url).searchParams.get('lworkstationResume'),task.resumeRequestId,'the page is bound to the exact execution intent');
     const view={url,destroyed:false,webContents:{isDestroyed:()=>view.destroyed,close:()=>{view.destroyed=true;closed++;},
@@ -280,5 +280,38 @@ test('keeps archive mode after first login instead of restarting cost collection
   h.login(false); await h.collector.sessionChanged();
   const resume=h.calls.filter(call=>call.body?.action==='request_resume').at(-1);
   assert.equal(resume.body.mode,'catalog'); assert.equal(resume.body.retryFailed,false);
+  assert.equal(h.calls.filter(call=>call.body?.action==='request_resume').length,1);
+  assert.equal(h.calls.filter(call=>call.body?.action==='reconnect').length,1);
   h.collector.dispose();
+});
+
+test('a successful shared ERP session wakes a stale hidden login document without a cookie event', async()=>{
+  let authenticated=false, probes=0;
+  const h=harness({loginProbeIntervalMs:50,checkSession:async()=>{probes++;return authenticated;}});
+  h.login(true);await h.collector.start(h.input);
+  await h.collector.poll();assert.equal(probes,1);assert.equal(h.reloads,0);
+  authenticated=true;h.advance(51);await h.collector.poll();
+  assert.equal(h.reloads,1);assert.equal(h.collector.snapshot().status,'waiting_ack');
+  h.running();h.login(false);await h.collector.poll();assert.equal(h.collector.snapshot().status,'running');
+  assert.equal(h.created,1);assert.equal(h.calls.filter(c=>c.body?.action==='request_resume').length,1);h.collector.dispose();
+});
+test('manual login recheck is bounded to the same waiting task', async()=>{
+  const h=harness({checkSession:async()=>false});
+  h.login(true);await h.collector.start(h.input);
+  await h.collector.start({...h.input,checkLogin:true});assert.equal(h.reloads,1);assert.equal(h.created,1);
+  h.update({status:'paused'});await h.collector.poll();
+  assert.equal(h.collector.snapshot().status,'paused');assert.equal(h.reloads,1);h.collector.dispose();
+});
+test('a pause racing a verified login wins, and a late first-login notification cannot cancel its new runner', async()=>{
+  const hold=deferred(),entered=deferred();let probing=false;
+  const h=harness({loginProbeIntervalMs:1,checkSession:async()=>{if(!probing)return false;entered.resolve();return hold.promise;}});
+  h.login(true);await h.collector.start(h.input);probing=true;h.advance(2);
+  const poll=h.collector.poll();await entered.promise;h.update({status:'paused'});hold.resolve(true);await poll;
+  assert.equal(h.reloads,0);assert.equal(h.collector.snapshot().status,'paused');h.collector.dispose();
+  const r=harness({loginProbeIntervalMs:1});r.login(true);await r.collector.start(r.input);
+  const read=r.holdRead(),notification=r.collector.sessionChanged();await read.entered.promise;
+  r.login(false);r.advance(2);await r.collector.poll();r.running();await r.collector.poll();
+  read.release.resolve();await notification;
+  assert.equal(r.collector.snapshot().status,'running');assert.equal(r.closed,0);
+  assert.equal(r.calls.some(call=>call.body?.request?.cancel),false);r.collector.dispose();
 });

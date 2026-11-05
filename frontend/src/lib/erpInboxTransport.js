@@ -55,8 +55,16 @@ export function getErpExtensionStatus() {
   return requestInbox({ route: "/erp/v1/extension-status" });
 }
 
-export function listErpCollectionTasks({ workspaceId, ledgerId, requestId, signal } = {}) {
-  return requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId, ledgerId, requestId } }, { signal });
+export async function listErpCollectionTasks({ workspaceId, ledgerId, requestId, signal } = {}) {
+  const payload = await requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId, ledgerId, requestId } }, { signal });
+  const runtime = globalThis.window?.shopeersDesktopRuntime;
+  if (!runtime?.getErpCollection || !payload.tasks?.some(task => task.executionTarget === 'desktop' && ['ready','paused'].includes(task.status))) return payload;
+  // Presentation only: never write a desktop snapshot back to a durable task.
+  let desktop;
+  try { desktop = await runtime.getErpCollection(); } catch { return payload; }
+  if (!['waiting_login','sync_error'].includes(desktop?.status)) return payload;
+  return { ...payload, tasks: payload.tasks.map(task => task.workspaceId === workspaceId && task.taskId === desktop.taskId && task.requestId === desktop.requestId && task.executionTarget === 'desktop'
+    ? { ...task, desktopStatus: desktop.status } : task) };
 }
 
 export function controlErpCollectionTask(taskId, { workspaceId, action, requestId, filters, scopeHash, mode, retryFailed, catalogMode, refreshCatalog } = {}) {
