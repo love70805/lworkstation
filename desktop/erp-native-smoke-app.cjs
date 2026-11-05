@@ -58,6 +58,7 @@ app.whenReady().then(async () => {
     ses.serviceWorkers.on('console-message', (_event, details) => { if (details?.level === 'error') failures.push(details.message); });
     ses.protocol.handle('https', async request => {
       const url = new URL(request.url);
+      if (url.pathname === '/authority/store/v1/store-page') return new Response(JSON.stringify(automaticLoginRequired ? { code: 401 } : { code: '0', data: [] }), { headers: { 'content-type': 'text/plain; charset=utf-8' } });
       if (url.searchParams.has('lworkstationRequest') && automaticLoginRequired) return new Response('<!doctype html><html><body><input type="password"></body></html>', { headers: { 'content-type': 'text/html' } });
       if (!url.pathname.startsWith('/purchase/')) return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离原生 ERP</h1>' + (url.pathname === '/view/console/index.html' ? '<iframe id="procurement" style="width:100%;height:720px" src="/view/system/purchaseOrderModule/purchasingManagement.html"></iframe>' : '') + (url.pathname === '/login.html' ? '<input type="password" aria-label="ERP 密码">' : '') + '</body></html>', { headers: { 'content-type': 'text/html' } });
       requests.push(url.pathname);
@@ -154,7 +155,9 @@ app.whenReady().then(async () => {
     const waiting = await collector.start({ workspaceId, ledgerId: 'NATIVE-AUTO-L', requestId: 'NATIVE-AUTO-R' });
     assert.equal(waiting.status, 'waiting_login');
     automaticLoginRequired = false;
-    await collector.sessionChanged();
+    // The already-open hidden document still has a password form; no cookie
+    // change is signalled. The real shared-session probe must wake this task.
+    await collector.poll();
     const automatic = await waitFor(async () => { const result = await call(`cost-batches?workspaceId=${workspaceId}`); return (result.batches ?? result.records)?.find(item => item.requestId === 'NATIVE-AUTO-R'); }, 'workspace-only collection without a query or clipboard', 45000);
     assert.equal(automatic.envelope.batch.rows[0].unitCost, 4);
     assert.equal(automatic.envelope.batch.evidenceStatus, 'complete');

@@ -58,6 +58,12 @@ export function erpCollectionPresentation(task) {
   } else if (task?.status === 'pausing') {
     state = 'pausing'; title = '正在暂停后台采集';
     description = '等待当前操作结束；已送达结果保留。';
+  } else if (task?.executionTarget === 'desktop' && (queued && !task.runnerId || task.status === 'paused' && task.pauseReason?.code === 'ERP_LOGIN_REQUIRED') && task.desktopStatus === 'waiting_login') {
+    state = 'waiting_login'; title = '等待软件内 ERP 登录'; tone = 'warning';
+    description = '请在工作台上方的 ERP 标签页登录。后台确认后自动接续原任务；已经登录可点击“核验登录并继续”。';
+  } else if (queued && !task.runnerId && task?.desktopStatus === 'sync_error') {
+    state = 'sync_error'; title = '后台 ERP 尚未接单'; tone = 'warning';
+    description = '请在采集入口点击“重新连接 ERP”，继续当前的月份和商品范围。';
   } else if (task?.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED') {
     state = 'paused'; title = 'ERP 店铺权限校验未通过，采集已暂停';
     description = '请在软件内 ERP 确认采购管理可正常查询，再点击继续原任务。已送达结果和已采用成本保留，未完成部分会重新核验。'; tone = 'warning';

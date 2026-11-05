@@ -2,7 +2,25 @@ const PURCHASE_PAGE = 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModul
 // Full-history evidence is narrowed by the task's immutable SKC/SKU snapshot.
 const PURCHASE_FILTERS = Object.freeze({ sku: '', storeId: '', queryRange: '0', createTimePeriod: '', orderNo: '', supplierName: '', organizationName: '', createdBy: '', warehouseId: '0', paymentType: '0', paymentStatus: '0', purchaseStatus: '', exceptionSheetStatus: '', tradeName: '', inTransitTime: '', exceptionHandlingStatus: '', emergencySign: '', purchasingPersonnel: '', accountName1688: '', storeAssociatedAccountName1688: '', suggestedPayment: '', orderType: '', buildType: '', mineableType: '', changePrice: '', adjacentToTheSameSupplier: '0', sort: '', limit: '50' });
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,160}$/.test(value);
-function createWorkspaceErpCollector({ requestInbox, createView, getContext, interval = setInterval, clear = clearInterval, now = Date.now, ackTimeoutMs = 15000, probeTimeoutMs = 5000, viewTimeoutMs = 30000 }) {
+// The hidden document can stay on yesterday's login form after the visible
+// ERP signs in. Probe the same partition as the worker, without reading or
+// copying credentials. The ERP itself uses this protected GET after sign-in.
+async function authenticatedErpSession(session, timeoutMs) {
+  if (!session?.fetch) return false;
+  const response = await session.fetch('https://www.zhuolinkeji.cn/authority/store/v1/store-page?state=1&page=1&limit=1', {
+    credentials: 'include', cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs),
+    headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+  });
+  if (!response.ok || /text\/html/i.test(response.headers.get('content-type') || '')) return false;
+  const body = await response.json();
+  return (body?.code === 0 || body?.code === '0') && Array.isArray(body.data);
+}
+const loginDocumentProbe = `(() => {
+  if (/(?:^|\\/)(?:login|signin)(?:[/.]|$)/i.test(location.pathname)) return true;
+  if ([...document.querySelectorAll('input[type="password"]')].some(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')) return true;
+  return /登录.*过期/.test(document.title) && !!document.querySelector('a[href*="/login"]');
+})()`;
+function createWorkspaceErpCollector({ requestInbox, createView, getContext, checkSession = authenticatedErpSession, interval = setInterval, clear = clearInterval, now = Date.now, ackTimeoutMs = 15000, probeTimeoutMs = 5000, viewTimeoutMs = 30000, loginProbeIntervalMs = 9000 }) {
   let current = null, starting = null, timer = null, polling = false, generation = 0;
   let state = { status: 'idle' };
   const snapshot = () => ({ ...state });
@@ -95,9 +113,30 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
       if (task.runnerId || task.status === 'running') owner.hasRun = true;
       if (['stopped','invalidated','completed'].includes(task.status)) { publish(owner, task.status); closeView(owner); return; }
       if (task.status === 'paused' && task.pauseReason?.code !== 'ERP_LOGIN_REQUIRED') { publish(owner, 'paused'); closeView(owner); return; }
-      const login = owner.view && !owner.view.webContents.isDestroyed() && await bounded(owner.view.webContents.executeJavaScript("Boolean(new RegExp('(^|/)(login|signin)([/.]|$)', 'i').test(location.pathname)||document.querySelector('input[type=\"password\"]'))"), probeTimeoutMs, 'ERP 页面响应超时');
+      const login = owner.view && !owner.view.webContents.isDestroyed() && await bounded(owner.view.webContents.executeJavaScript(loginDocumentProbe), probeTimeoutMs, 'ERP 页面响应超时');
       if (!owns(owner, revision)) return;
-      if (login || task.pauseReason?.code === 'ERP_LOGIN_REQUIRED') { owner.ackStartedAt = now(); publish(owner, 'waiting_login'); return; }
+      if (login || task.pauseReason?.code === 'ERP_LOGIN_REQUIRED' || owner.loginPending && queued(task)) {
+        owner.ackStartedAt = now();
+        publish(owner, 'waiting_login');
+        if (!owner.view || owner.hasRun || !queued(task)) return;
+        owner.loginPending = true;
+        const manual = owner.checkLoginNow === true; owner.checkLoginNow = false;
+        if (!manual && now() < (owner.nextLoginCheck ?? 0)) return;
+        owner.nextLoginCheck = now() + loginProbeIntervalMs;
+        const authenticated = await bounded(checkSession(owner.view.webContents.session, probeTimeoutMs), probeTimeoutMs, 'ERP 登录核验超时').catch(() => false);
+        if (!owns(owner, revision) || getContext()?.workspaceId !== owner.workspaceId || (!authenticated && !manual)) return;
+        if (owner.loginReloads >= 2 && !manual) {
+          closeView(owner); publish(owner, 'sync_error', { error: 'ERP 已登录，但后台采购页未就绪。请重新连接原任务。' }); return;
+        }
+        // Atomic handoff rotates only the waiting intent. A concurrent claim,
+        // user pause, scope change or stop wins; no result or retry is reset.
+        if (!await fence(owner, revision) || !owns(owner, revision) || !owner.view) return;
+        owner.loginReloads = (owner.loginReloads || 0) + 1; owner.loginPending = false;
+        publish(owner, 'waiting_ack');
+        await bounded(owner.view.webContents.loadURL(pageUrl(owner)), viewTimeoutMs, 'ERP 页面加载超时');
+        if (owns(owner, revision)) owner.ackStartedAt = now();
+        return;
+      }
       publish(owner, queued(task) ? 'waiting_ack' : task.status);
       if (queued(task) && now() - owner.ackStartedAt >= ackTimeoutMs) { await reconnect(owner, revision); return; }
       const catalogActive = task.runnerId && task.runMode === 'catalog' && task.batches.some(batch => batch.catalogStatus !== 'completed');
@@ -113,6 +152,9 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
   async function launch(input) {
     if (!validId(input?.requestId) || !validId(input?.workspaceId) || !validId(input?.ledgerId) || getContext()?.workspaceId !== input.workspaceId) throw new Error('采集请求不属于当前工作区。');
     if (current?.view && current.requestId === input.requestId) {
+      if (input.checkLogin === true && state.status === 'waiting_login' && !current.hasRun) {
+        current.checkLoginNow = true; await poll(); return snapshot();
+      }
       await poll();
       if (['starting','running','waiting_ack','reconnecting','ready'].includes(state.status) && !state.error) return snapshot();
       if (current?.task?.runnerId && !['paused','stopped','invalidated'].includes(current.task.status)) return snapshot();
@@ -157,14 +199,20 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
   async function sessionChanged() {
     if (!current?.task || current.sessionInvalidated) return;
     const owner = current, revision = generation;
+    const waitingIntent = !owner.hasRun && queued(owner.task) ? owner.task.resumeRequestId : null;
     const { task } = await readTask(owner);
     if (!owns(owner, revision)) return;
+    // The first-login fence may have finished while this notification read
+    // the inbox. Never invalidate the new intent for a pre-handoff change.
+    if (waitingIntent && owner.task.resumeRequestId !== waitingIntent) return;
     owner.task = task; if (task.status === 'running') owner.hasRun = true;
     if (task.status === 'completed') { publish(owner, 'completed'); closeView(owner); return; }
-    if (owner.view && state.status === 'waiting_login' && !owner.hasRun && !['stopped','invalidated','completed'].includes(task.status)) {
-      owner.task = (await control('request_resume', { executionTarget: 'desktop', catalogMode: 'on_demand', mode: owner.mode === 'catalog' ? 'catalog' : 'cost', retryFailed: owner.mode !== 'catalog' }, owner)).task;
-      if (!owns(owner, revision)) return;
-      await bounded(owner.view.webContents.loadURL(pageUrl(owner)), viewTimeoutMs, 'ERP 页面加载超时'); owner.ackStartedAt = now(); await poll(); return;
+    if (!owner.hasRun && queued(task)) {
+      // A login cookie can arrive before the hidden document finishes
+      // loading. It is a wake-up hint, never evidence that login succeeded.
+      owner.nextLoginCheck = 0;
+      if (owner.view) await poll();
+      return;
     }
     owner.sessionInvalidated = true; await stop('session_changed');
     if (owner.request) await requestInbox({ route: '/erp/v1/requests', method: 'POST', body: { workspaceId: owner.workspaceId, request: { ...owner.request, id: owner.requestId, cancel: true } } }).catch(() => {});

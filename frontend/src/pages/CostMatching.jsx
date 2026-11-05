@@ -4,7 +4,7 @@ import { revealErpCollectionProgress } from '../components/ErpBackgroundNotice';
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { erpLedgerVersion } from '../domain/erpLedgerVersion';
 import { runDerivedComputation } from '../data/repositories/derivedComputationService';
-import { isActiveErpCollection } from '../domain/erpCollectionStatus';
+import { erpCollectionPresentation, isActiveErpCollection } from '../domain/erpCollectionStatus';
 import { useErpCollectionTasks } from '../hooks/useErpCollectionTasks';
 import ErpCollectionProgress from '../components/ErpCollectionProgress';
 import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
@@ -419,7 +419,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     const timer = registrationStartedRef.current ? window.setTimeout(registerScope, 300) : null;
     if (timer === null) registerScope();
     return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
-  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionScopeChanged]);
+  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionRequest?.id, collectionScopeChanged]);
   const retryCollectionRegistration = async result => {
     if (!['ERP_SESSION_CHANGED', 'ERP_REQUEST_INVALID', 'ERP_TASK_STOPPED'].includes(result?.code)) {
       setRegistrationRetry(value => value + 1);
@@ -1114,7 +1114,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     <CostAttention missing={missingReviewRows.length} hasAnomalies={hasPendingAnomalies}
       collected={Boolean(workspaceInboxRecords.length)} onShowMissing={onShowMissing}>{anomalyActions}</CostAttention>
     {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
-      <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? '正在采集成本' : '成本采集记录'}</summary>
+      <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? erpCollectionPresentation(collectionTask).title : '成本采集记录'}</summary>
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}
         locked={locked} error={collectionError || collection.error} statusError={collection.error} />
     </details> : null}

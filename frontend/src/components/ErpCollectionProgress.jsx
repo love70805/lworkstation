@@ -75,7 +75,7 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
   return <Panel className="erp-collection-progress" id="erp-collection-progress" tabIndex={-1}>
     <div className="panel-header"><div><h2>{catalogOnly ? '商品档案获取进度' : 'ERP 采集任务'}</h2><p>{task.ledgerPeriod} · 范围 {total} 个 SKC{skuCount ? ` / ${skuCount} 个 SKU` : ''}</p></div>
       <div className="page-actions">
-        {!awaitingLocal && (view.running || view.state === 'queued') ? <Button disabled={busy || Boolean(statusError) || task.status === 'pausing'} onClick={() => onControl('pause')}>暂停采集</Button> : null}
+        {!awaitingLocal && (view.running || view.state === 'queued' || task.status === 'ready' && ['waiting_login','sync_error'].includes(view.state)) ? <Button disabled={busy || Boolean(statusError) || task.status === 'pausing'} onClick={() => onControl('pause')}>暂停采集</Button> : null}
         {view.canStop && (!view.catalogOnly || view.running) ? <Button disabled={busy || Boolean(statusError)} onClick={() => onControl('stop')}>停止采集</Button> : null}
         {view.canResume && !catalogOnly && (showCatalog || !view.catalogOnly) ? <Button disabled={busy || locked} onClick={() => onControl(view.catalogOnly ? 'catalog' : 'resume')}>{view.catalogOnly ? '继续获取商品档案' : '继续原任务'}</Button> : null}
         {!catalogOnly && failures.length ? <Button disabled={busy || locked || !view.canRetry} onClick={() => onControl('retry_failed')}>重试未完成项</Button> : null}

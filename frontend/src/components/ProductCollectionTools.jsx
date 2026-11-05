@@ -40,7 +40,7 @@ export default function ProductCollectionTools({ workspaceId }) {
         <p>可继续使用工作台；已有人工资料优先，采购单价不进入月度正式成本。</p>
       </div>
       <div className="product-archive-action"><ErpCollectionLauncher workspaceId={workspaceId} ledgerId={task?.ledgerId} requestId={task?.requestId}
-        mode="catalog" task={task} ready={Boolean(task) && !busy && !collection.error && !view.running && view.state !== 'queued'}
+        mode="catalog" task={task} ready={Boolean(task) && !busy && !collection.error}
         onStart={() => control('catalog', task.batches.every(batch => batch.catalogStatus === 'completed'))} onStarted={collection.refresh} /></div>
     </div>
     {task ? <>

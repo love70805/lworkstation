@@ -2,6 +2,10 @@
 
 更新时间：2026-11-05（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
 
+## 2.0.3 ERP 登录续接
+
+修复桌面版 ERP 已登录但原任务未接单的问题。确认软件内会话可读取受保护数据后，只接续等待中的原任务；成本和商品档案共用这个流程。全局通知、利润页和任务明细区分等待登录、等待接单及实际读取。候选验收见[候选登记](../releases/README.md)，公开稳定状态以 [v2.0.3 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.3) 为准。
+
 ## 2.0.2 本批交付
 
 商品档案一键后台获取并自动写入资料；待补成本与异常处理集中上移，待补入口直接定位明细；工作台和 ERP 统一单条阶段进度。内置助手 8.0.60。候选验证、源码集成和公开上传分别核对，当前公开状态以 [最新稳定 Release](https://github.com/love70805/lworkstation/releases/latest) 元数据为准。[本批契约与验证](integration/COST_ARCHIVE_WORKFLOW_2.0.2.md)，[候选登记](../releases/README.md)。

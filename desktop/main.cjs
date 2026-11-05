@@ -117,7 +117,6 @@ const remoteViewLoader = createRemoteViewLoader({
   discard: discardRemoteView,
 });
 let collectorCookieSession;
-let collectorCookieTimer;
 const workspaceErpCollector = createWorkspaceErpCollector({
   getContext: () => workspaceContextCoordinator.getCommittedContext(),
   requestInbox: input => inboxService.requestInbox(input),
@@ -127,9 +126,10 @@ const workspaceErpCollector = createWorkspaceErpCollector({
     if (!collectorCookieSession) {
       collectorCookieSession = targetSession;
       targetSession.cookies.on('changed', (_event, cookie) => {
-        if (!/(token|session|auth|user|tenant|company|org)/i.test(cookie.name)) return;
-        clearTimeout(collectorCookieTimer);
-        collectorCookieTimer = setTimeout(() => { void workspaceErpCollector.sessionChanged().catch(() => {}); }, 1000);
+        if (!/(^|\.)zhuolinkeji\.cn$/i.test(cookie.domain || '') || !/(jwt|token|session|auth|user|tenant|company|org)/i.test(cookie.name)) return;
+        // Observe the change at the time it happens. A delayed login callback
+        // could otherwise invalidate the executor that has just claimed.
+        void workspaceErpCollector.sessionChanged().catch(() => {});
       });
     }
     const view = new WebContentsView({ webPreferences: { session: targetSession, backgroundThrottling: false, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
@@ -412,7 +412,6 @@ async function shutdownDesktop() {
   clearInterval(diagnosticTimer);
   diagnostics.record('shutdown', { page: 'main' });
   remoteViewLoader.stop();
-  clearTimeout(collectorCookieTimer);
   workspaceErpCollector.dispose();
   desktopLifecycle?.dispose();
   workspaceRecovery.dispose();

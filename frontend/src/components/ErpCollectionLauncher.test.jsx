@@ -27,6 +27,14 @@ it('offers the existing ERP login entry and tells the user that this scope will 
   expect(host.textContent).toContain('登录后自动继续本次采集');
   await act(async () => button('登录 ERP').click()); expect(runtime.openErpLogin).toHaveBeenCalledOnce();
 });
+it.each(['cost','catalog'])('lets a queued %s task recheck the same login without retrying a batch', async mode => {
+  props.mode=mode;props.task={requestId:'R',taskId:'T',executionProtocol:2,executionTarget:'desktop',status:'ready',batches:[mode==='catalog'?{deliveryId:'D'}:{status:'pending'}]};
+  runtime.getErpCollection.mockResolvedValue({ok:true,requestId:'R',taskId:'T',status:'waiting_login'});
+  await render();
+  expect(button('核验登录并继续').disabled).toBe(false);expect(host.textContent).not.toContain('正在采集成本');
+  await act(async()=>button('核验登录并继续').click());
+  expect(runtime.startErpCollection).toHaveBeenCalledExactlyOnceWith({workspaceId:'W',ledgerId:'L',requestId:'R',mode,checkLogin:true});
+});
 it('keeps a failed registration actionable with its actual reason', async () => {
   runtime.startErpCollection.mockResolvedValue({ ok: false, error: '采集请求已失效' }); await render();
   await act(async () => button('开始成本核算').click());
