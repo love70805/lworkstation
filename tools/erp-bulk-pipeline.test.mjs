@@ -33,6 +33,8 @@ assert.equal(catalog.calls.filter(row=>row.endpoint==='export-purchase-order').l
 assert.equal(catalog.calls.filter(row=>row.endpoint==='product-info-sku').length,10,'one long map during costs plus nine short maps only when materials are requested');
 assert.equal(catalog.calls.filter(row=>row.endpoint==='purchase-order-details'||row.endpoint==='product-page').length,0);
 assert.equal(catalog.catalogs.length,2);
+assert.equal(catalog.calls.filter(row=>row.endpoint==='export-select-goods').length,2);
+assert.ok(catalog.catalogs.flatMap(item=>item.rows).every(row=>row.productName.startsWith('表格商品')));
 process.env.ERP_BULK_BROKEN = '1';
 try {
     const fallback = await scenario(10, 'bulk-fallback', { fixture, bulk: true, maxLists: 4, returnMetrics: true, firstBatchListLimit: 31 });

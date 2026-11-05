@@ -9,7 +9,7 @@
     const unique = values => [...new Set(values.filter(Boolean))];
     const interrupted = error => ['ERP_LOGIN_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED'].includes(error?.code);
 
-    function create({ apiGet: requestApi, readWarehouseEvidence: requestEvidence, policy, budgetMs = 30 * 60 * 1000, maxRequests = Infinity, getCache = () => null, setCache = () => {}, onProgress = () => {} }) {
+    function create({ apiGet: requestApi, readWarehouseEvidence: requestEvidence, readProductArchive, policy, budgetMs = 30 * 60 * 1000, maxRequests = Infinity, getCache = () => null, setCache = () => {}, onProgress = () => {} }) {
         // Parallel targets share the same budget and request limiter. Pages of
         // one target remain ordered so count drift/repeated pages still fail.
         // After a material deadline, bounded() prevents new network reads while
@@ -169,6 +169,41 @@
                         // concatenated mapping text is truncated.
                         catalogMappingsComplete: previous?.catalogMappingsComplete === true,
                         name: product.name || previous?.name || '', imageUrl: product.imageUrl || previous?.imageUrl || '', purchaseCatalog: previous?.purchaseCatalog || product.purchaseCatalog, supplierName: previous?.supplierName || product.supplierName, supplier1688Links: previous?.supplier1688Links?.length ? previous.supplier1688Links : product.supplier1688Links || [] });
+            }
+            // Export only registered warehouse identities, in bounded batches.
+            // The workbook's concatenated platform identifiers and prices are
+            // never used as identity or financial evidence.
+            if (readProductArchive && results.size) {
+                const warehouses = [...results.values()].map(result => result.warehouseSku);
+                let done = 0;
+                for (let offset = 0; offset < warehouses.length; offset += 50) {
+                    const ids = warehouses.slice(offset, offset + 50);
+                    onProgress('获取商品表格档案', done, warehouses.length, { unit: '个仓库 SKU' });
+                    try {
+                        const rows = await bounded(() => readProductArchive(ids, run), run);
+                        const expected = new Set(ids.map(key)), received = new Set();
+                        if (!Array.isArray(rows) || rows.some(row => !expected.has(key(row.warehouseSku)))) throw new Error('商品档案返回了范围外的仓库 SKU');
+                        for (const row of rows) {
+                            const result = results.get(key(row.warehouseSku));
+                            received.add(key(row.warehouseSku));
+                            result.name = row.productName || result.name || '';
+                            result.imageUrl = row.imageUrl || result.imageUrl || '';
+                            for (const field of ['mappings', 'catalogMappings']) result[field] = (result[field] || []).map(mapping => ({ ...mapping,
+                                productName: row.productName || mapping.productName, imageUrl: row.imageUrl || mapping.imageUrl,
+                                attribute: row.attribute || mapping.attribute }));
+                            result.supplier1688Links = policy.normalizeSupplier1688Links([...(row.supplier1688Links || []), ...(result.supplier1688Links || [])]);
+                            result.purchaseCatalog = { ...result.purchaseCatalog,
+                                ...(row.color ? { productColor: row.color } : {}),
+                                ...(row.attribute ? { specificationAndModel: row.attribute } : {}) };
+                        }
+                        if (received.size !== expected.size) mark('directory', '商品档案缺少 ' + (expected.size - received.size) + ' 个仓库 SKU', expected.size - received.size);
+                    } catch (error) {
+                        if ((run.controller.signal.aborted && !run.budgetExpired) || interrupted(error)) throw error;
+                        mark('directory', '商品档案获取未完成：' + String(error?.message || error), ids.length);
+                    }
+                    done += ids.length;
+                    onProgress('获取商品表格档案', done, warehouses.length, { unit: '个仓库 SKU' });
+                }
             }
             let completedTargets = 0;
             await targets([...results.values()], 5, async (result, lane) => {

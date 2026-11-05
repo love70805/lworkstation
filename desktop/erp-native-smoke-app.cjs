@@ -61,6 +61,16 @@ app.whenReady().then(async () => {
       if (url.searchParams.has('lworkstationRequest') && automaticLoginRequired) return new Response('<!doctype html><html><body><input type="password"></body></html>', { headers: { 'content-type': 'text/html' } });
       if (!url.pathname.startsWith('/purchase/')) return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><h1>隔离原生 ERP</h1>' + (url.pathname === '/view/console/index.html' ? '<iframe id="procurement" style="width:100%;height:720px" src="/view/system/purchaseOrderModule/purchasingManagement.html"></iframe>' : '') + (url.pathname === '/login.html' ? '<input type="password" aria-label="ERP 密码">' : '') + '</body></html>', { headers: { 'content-type': 'text/html' } });
       requests.push(url.pathname);
+      if (url.pathname.endsWith('export-select-goods')) {
+        if (manualCatalogGate) await manualCatalogGate;
+        assert.equal(url.searchParams.get('exportMode'), '2'); assert.equal(url.searchParams.get('skuList'), 'WH-A');
+        const xlsx = require('../frontend/node_modules/xlsx'), book = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(book, xlsx.utils.aoa_to_sheet([
+          ['商品ID','商品名称','图片链接','商品颜色','1688链接片段','采购单价','平台SKU片段'],
+          ['WH-A','原生表格商品','https://images.example.invalid/archive.png','红色','https://detail.1688.com/offer/900000000001.html',999,'UNTRUSTED-SKU'],
+        ]), '商品档案');
+        return new Response(xlsx.write(book, {type:'buffer',bookType:'xlsx',compression:true}), {headers:{'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}});
+      }
       if (bulkEnabled && url.pathname.endsWith('export-purchase-order')) {
         const xlsx = require('../frontend/node_modules/xlsx');
         const book = xlsx.utils.book_new();
@@ -210,19 +220,25 @@ app.whenReady().then(async () => {
     assert.ok(!(await call(`catalog-batches?workspaceId=${workspaceId}`)).records.some(item => item.requestId === 'NATIVE-HANDOFF-CATALOG'));
     let releaseCatalog;
     manualCatalogGate = new Promise(resolve => { releaseCatalog = resolve; });
-    await collector.start({ ...handoffInput, mode: 'catalog' });
+    automaticLoginRequired = true;
+    assert.equal((await collector.start({ ...handoffInput, mode: 'catalog' })).status, 'waiting_login');
+    automaticLoginRequired = false; await collector.sessionChanged();
     const manualRunning = await waitFor(async () => (await call(`collection-tasks/${recoveredHandoff.taskId}?workspaceId=${workspaceId}`)).task.batches.some(batch => batch.catalogStatus === 'running'), 'explicit manual catalog starts');
     assert.equal(manualRunning, true);
     await collector.poll();
     assert.equal(collectorView.webContents.isDestroyed(), false, 'cost completion must not close the active manual catalog page');
     manualCatalogGate = null; releaseCatalog();
-    await waitFor(async () => (await call(`catalog-batches?workspaceId=${workspaceId}`)).records.find(item => item.requestId === 'NATIVE-HANDOFF-CATALOG'), 'manual native catalog delivers its own receipt');
+    const archiveReceipt = await waitFor(async () => (await call(`catalog-batches?workspaceId=${workspaceId}`)).records.find(item => item.requestId === 'NATIVE-HANDOFF-CATALOG'), 'manual native catalog delivers its own receipt');
+    assert.equal(archiveReceipt.envelope.catalog.rows[0].productName, '原生表格商品');
+    assert.equal(archiveReceipt.envelope.catalog.rows[0].platformSku, 'SKU-A');
+    assert.equal(archiveReceipt.envelope.catalog.rows[0].unitCost, undefined);
+    assert.ok(requests.slice(readsAfterCosts).every(endpoint => endpoint.endsWith('export-select-goods')), 'archive mode never rereads completed costs or mappings');
     const manualFinished = await waitFor(async () => { const task = (await call(`collection-tasks/${recoveredHandoff.taskId}?workspaceId=${workspaceId}`)).task;
       return task.batches.every(batch => ['completed','failed'].includes(batch.catalogStatus)) && !task.runnerId && task; }, 'manual catalog releases its runner');
     assert.equal(manualFinished.batches[0].attemptId, recoveredHandoff.batches[0].attemptId);
     assert.equal(manualFinished.batches[0].deliveryId, handoffReceipt.deliveryId);
     assert.equal((await call(`cost-batches?workspaceId=${workspaceId}`)).records.filter(item => item.requestId === handoffInput.requestId).length, 1);
-    checks.push({ name: 'explicit native on-demand catalog remains alive while costs are complete, delivers separately and preserves the original cost receipt/attempt' });
+    checks.push({ name: 'native one-click archive survives login, downloads and parses the workbook, delivers metadata separately and preserves the original cost receipt/attempt' });
     await collector.stop();
     bulkEnabled = true;
     await call('requests', { request: { id:'NATIVE-BULK',workspaceId,ledgerId:'NATIVE-BULK-L',ledgerPeriod:'2026-09',platformSkcs:[{platformSkc:'SKC-A'}] },expectedSkus:[{platformSku:'SKU-A',platformSkc:'SKC-A'}] });

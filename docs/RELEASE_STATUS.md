@@ -2,7 +2,15 @@
 
 更新时间：2026-11-05（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
 
-## 当前公开稳定 Latest：2.0.0
+## 2.0.2 本批交付
+
+商品档案一键后台获取并自动写入资料；待补成本与异常处理集中上移，待补入口直接定位明细；工作台和 ERP 统一单条阶段进度。内置助手 8.0.60。候选验证、源码集成和公开上传分别核对，当前公开状态以 [最新稳定 Release](https://github.com/love70805/lworkstation/releases/latest) 元数据为准。[本批契约与验证](integration/COST_ARCHIVE_WORKFLOW_2.0.2.md)，[候选登记](../releases/README.md)。
+
+## 已核对的前一稳定版：2.0.1
+
+2026-11-05 本批开始和交付前均通过发布服务确认 [v2.0.1](https://github.com/love70805/lworkstation/releases/tag/v2.0.1) 为稳定 Latest，远端 main 为 `dff4791b8812f29f797a66abc6016f2eb6994fe9`。本批以该提交为实际基线。
+
+## 历史稳定版：2.0.0
 
 2.0.0 已于 **2026-11-05 01:09:54（北京时间）**[公开发布](https://github.com/love70805/lworkstation/releases/tag/v2.0.0)，非草稿、非预发布。2026-11-05 本轮直接核对发布服务：Latest 为 v2.0.0，标签固定于 `caf95151157ab1ffd5bdf148a176f398c1e39d82`，5 个资产均为 uploaded。公开下载无需再次验证。
 

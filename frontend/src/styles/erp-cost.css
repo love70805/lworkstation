@@ -429,6 +429,11 @@
 .erp-collection-progress p { color: var(--text-muted); overflow-wrap: anywhere; }
 .erp-collection-progress progress { width: 100%; accent-color: var(--primary); }
 .erp-collection-meter { display: grid; gap: 5px; margin-block: 12px; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.collection-progress-track { position:relative; height:9px; overflow:hidden; border-radius:999px; background:var(--surface-bg); border:1px solid var(--border); }
+.collection-progress-fill { height:100%; border-radius:inherit; background:var(--primary); transition:width 450ms ease-out; }
+.collection-progress-pulse { position:absolute; inset:0 auto 0 0; width:28%; background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--primary) 65%,white),transparent); animation:collection-pulse-right 1.8s linear infinite; }
+@keyframes collection-pulse-right { from { transform:translateX(-100%); } to { transform:translateX(360%); } }
+@media (prefers-reduced-motion:reduce) { .collection-progress-fill { transition:none; } .collection-progress-pulse { animation:none; left:auto; right:0; } }
 .erp-collection-progress details { margin-block: 10px; }
 .erp-collection-progress summary { cursor: pointer; color: var(--text); overflow-wrap: anywhere; }
 .erp-collection-counts { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-block: 14px; }

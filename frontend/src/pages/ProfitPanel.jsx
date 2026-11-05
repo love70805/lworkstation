@@ -10,6 +10,7 @@ import { displayMoney } from "../domain/profitReports";
 import ProfitGroups from "./ProfitGroups";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
 import ProfitScopeFilters from "../components/ProfitScopeFilters";
+import CostAttention from "../components/CostAttention";
 import {
   updateLedgerWarehouseRate,
 } from "../data/database";
@@ -26,6 +27,7 @@ import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { readProfitViewState, saveProfitViewState } from "../lib/profitViewState";
 
 const currency = (value) => `¥${displayMoney(value)}`;
+const filterIdentity = value => JSON.stringify([value.query, value.storeFilter, value.supplierSelection ?? null, value.supplierStoreSelection ?? null, value.missingOnly, value.supplierScopeError ?? '']);
 
 const ledgerStatusLabels = {
   draft: "草稿",
@@ -51,10 +53,12 @@ function prepareProfitTableRows(rows) {
   });
 }
 
-export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportState, onEditSupplement, onCostDetails } = {}) {
+export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportState, onEditSupplement, onCostDetails, detailsRequest } = {}) {
   const [manualTarget, setManualTarget] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [showAllColumns, setShowAllColumns] = useState(false);
+  const [revealSequence, setRevealSequence] = useState(0);
+  const pendingReveal = useRef(null), handledRequest = useRef(null), detailsPanel = useRef(null);
   const openCost = row => onCostDetails ? onCostDetails(row) : setManualTarget(row);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -128,6 +132,30 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
   };
+  const showMissingCosts = (allStores = false) => {
+    const patch = { missingOnly: true, ...(allStores ? { storeFilter: 'all', query: '', supplierSelection: null, supplierStoreSelection: null, supplierScopeError: undefined } : {}) };
+    pendingReveal.current = filterIdentity({ ...filterState, ...patch });
+    changeFilter(patch);
+    setDetailsOpen(true);
+    saveProfitViewState(detailsStateKey, { detailsOpen: true });
+    setRevealSequence(value => value + 1);
+  };
+  useEffect(() => {
+    if (!detailsRequest || detailsRequest.ledgerId !== snapshot?.ledger?.id || handledRequest.current === detailsRequest) return;
+    handledRequest.current = detailsRequest;
+    showMissingCosts(detailsRequest.allStores);
+  }, [detailsRequest]);
+  useEffect(() => {
+    if (!pendingReveal.current || pendingReveal.current !== filterIdentity(filterState) || !detailsOpen || calculation.loading) return;
+    const frame = requestAnimationFrame(() => {
+      const panel = detailsPanel.current;
+      if (!panel) return;
+      pendingReveal.current = null;
+      panel.focus({ preventScroll: true });
+      panel.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [filterState, detailsOpen, calculation.loading, revealSequence]);
   const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, supplierStoreSelection, missingOnly }), [calculated, storeFilter, supplierSelection, supplierStoreSelection, missingOnly]);
   const filtered = useMemo(() => searchProfitRows(scopedRows, query), [scopedRows, query]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
@@ -266,15 +294,6 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     }
   };
 
-  const openReports = () => document.getElementById("monthly-reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  const openCostDetails = () => {
-    setDetailsOpen(true);
-    saveProfitViewState(detailsStateKey, { detailsOpen: true });
-    requestAnimationFrame(() => document.querySelector(".profit-table-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  };
-
-
-
   if (snapshot === undefined) {
     return <><Panel className="route-loader">正在读取月度账本...</Panel></>;
   }
@@ -299,6 +318,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
         <div><strong>本月下一步</strong><span>{nextStep.text}</span></div>
         {nextStep.action ? <Button disabled={Boolean(calculation.loading || calculation.error)} onClick={() => navigate(nextStep.key === 'cost' ? allMissingCostsHref : buildProfitHref({ ledgerId: snapshot.ledger.id, view: 'detail' }))}>{nextStep.action}</Button> : null}
       </section> : null}
+      {!suppliedSnapshot && missing ? <CostAttention missing={missing} onShowMissing={() => showMissingCosts()} /> : null}
       <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
         <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
         <span className="profit-purpose-arrow">→</span>
@@ -317,15 +337,13 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       </div>
       {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={snapshot.ledger} onEdit={onEditSupplement} /> : null}
 
-      {missing ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>先采集成本，再核对收到的异常；无采购数据的项目可在明细中补成本。</small></span><Button onClick={() => { changeFilter({ missingOnly: true }); setDetailsOpen(true); }}>只看待补成本</Button></div> : null}
-
-      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary>{detailsOpen ? <Panel className={`profit-table-panel${showAllColumns ? '' : ' profit-table-compact'}`}>
+      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary>{detailsOpen ? <section ref={detailsPanel} tabIndex={-1} aria-label="月度利润明细" className={`panel profit-table-panel${showAllColumns ? '' : ' profit-table-compact'}`}>
         <div className="profit-table-heading">
           <div><h2>月度利润明细</h2><p>每个 SKU 一行，SKC 用分组标识；金额和成本均为人民币 CNY。</p></div>
           <div className="page-actions"><span className="profit-filter-count">当前 {groupedFiltered.length} 个 SKC · {filtered.length} 个 SKU</span><Button variant="ghost" aria-pressed={showAllColumns} onClick={() => setShowAllColumns(value => !value)}>{showAllColumns ? "精简列" : "展开全部列"}</Button></div>
         </div>
-        <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} showAllColumns={showAllColumns} columns={showAllColumns ? columns : columns.filter(column => ["platformSku", "qty", "revenue", "unitCost", "profit", "costStatus"].includes(column.id ?? column.accessorKey))} prepareRows={prepareProfitTableRows} />
-      </Panel> : null}
+        <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} showAllColumns={showAllColumns} expandRequest={missingOnly ? revealSequence : 0} columns={showAllColumns ? columns : columns.filter(column => ["platformSku", "qty", "revenue", "unitCost", "profit", "costStatus"].includes(column.id ?? column.accessorKey))} prepareRows={prepareProfitTableRows} />
+      </section> : null}
       </details>
 
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本，可随时调整。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
@@ -340,6 +358,7 @@ export function ProfitViewsContent({ monthControl = null }) {
   const [reportState, setReportState] = useState(null);
   const [supplementEditor, setSupplementEditor] = useState(null);
   const [costTarget, setCostTarget] = useState(null);
+  const [detailsRequest, setDetailsRequest] = useState(null);
   const [retry, setRetry] = useState(0);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -368,14 +387,14 @@ export function ProfitViewsContent({ monthControl = null }) {
       <MonthlyReportManager compact key={'report/'+snapshot.ledger.id} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId}
         onState={setReportState} editor={supplementEditor} onEdit={setSupplementEditor}
         missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null}
-        onOpenCosts={() => changeScope({storeFilter:'all', missingOnly:true})} />
+        onOpenCosts={() => setDetailsRequest({ allStores: true, ledgerId: snapshot.ledger.id })} />
     </section>
     <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={snapshot.ledger.workspaceId} scopeRows={snapshot.rows ?? []} onChange={changeScope} showStore={false} />
     <CostMatchingContent compact suppliedSnapshot={snapshot} key={'cost/'+snapshot.ledger.id}
       validatedContext={{workspaceId:snapshot.ledger.workspaceId, ledgerId:snapshot.ledger.id, store}}
-      reviewTarget={costTarget} onReviewClose={() => setCostTarget(null)} />
+      reviewTarget={costTarget} onReviewClose={() => setCostTarget(null)} onShowMissing={() => setDetailsRequest({ allStores: false, ledgerId: snapshot.ledger.id })} />
     <ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} reportState={reportState}
-      onEditSupplement={setSupplementEditor} onCostDetails={setCostTarget} key={'profit/'+snapshot.ledger.id} />
+      onEditSupplement={setSupplementEditor} onCostDetails={setCostTarget} detailsRequest={detailsRequest} key={'profit/'+snapshot.ledger.id} />
   </>;
 }
 

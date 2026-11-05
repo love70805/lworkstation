@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(path.join(root, 'frontend/package.json'));
 const { Window } = await import(pathToFileURL(require.resolve('happy-dom')).href);
 const sourceDir = path.join(root, 'integrations/erp-assistant-extension/src');
-const source = Object.fromEntries(await Promise.all(['background.js','result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js','xlsx-reader.js','bulk-purchase.js'].map(async name => [name, await readFile(path.join(sourceDir,name),'utf8')])));
+const source = Object.fromEntries(await Promise.all(['background.js','result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js','xlsx-reader.js','bulk-purchase.js','product-archive.js'].map(async name => [name, await readFile(path.join(sourceDir,name),'utf8')])));
 const extensionVersion=JSON.parse(await readFile(path.join(root,'integrations/erp-assistant-extension/manifest.json'),'utf8')).version;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -42,7 +42,7 @@ export async function scenario(size, mode = '', options = {}) {
           if(options.permissionCatalog)for(const row of body.seed.results)row.catalogMappingsComplete=false;
         }
       }
-      else if(url.pathname==='/erp/v1/requests') body={records:[request,...(options.afterCosts?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[]),
+      else if(url.pathname==='/erp/v1/requests') body={records:[request,...((options.afterCosts||options.archive)?[{...request,requestId:'REQ-CATALOG',sourceRequestId:'REQ',requestKind:'catalog',confirmedSkus:request.expectedSkus}]:[]),
         ...(options.catalogAmbiguity&&deliveries.length===expectedDeliveries?[
           {...request,requestId:'OLDER-REQ',ledgerId:'OLDER-LEDGER',ledgerPeriod:'2026-07'},
           {...request,requestId:'OLDER-REQ-CATALOG',sourceRequestId:'OLDER-REQ',requestKind:'catalog',ledgerId:'OLDER-LEDGER',ledgerPeriod:'2026-07',confirmedSkus:request.expectedSkus},
@@ -50,7 +50,7 @@ export async function scenario(size, mode = '', options = {}) {
       else if(url.pathname==='/erp/v1/extension-status') body={ok:true};
       else if(url.pathname==='/erp/v1/catalog-results') {
         assert.equal(deliveries.length,expectedDeliveries);
-        assert.ok(records[1].batches.every(batch=>batch.adoptionReportedAt),'no materials before every local calculation outcome');
+        if(options.afterCosts)assert.ok(records[1].batches.every(batch=>batch.adoptionReportedAt),'no materials before every local calculation outcome');
         catalogs.push(payload);body={deliveryId:`CAT-${catalogs.length}`,batchId:`CAT-B-${catalogs.length}`,resultDeliveryId:payload.resultDeliveryId};
       }
       else if(url.pathname==='/erp/v1/cost-results') {
@@ -59,7 +59,7 @@ export async function scenario(size, mode = '', options = {}) {
         if(existing) return {ok:true,status:200,json:async()=>({deliveryId:existing.deliveryId,batchId:existing.batchId,resultDeliveryId:payload.resultDeliveryId})};
         body={deliveryId:`DEL-${deliveries.length}`,batchId:`IMPORT-${deliveries.length}`,resultDeliveryId:payload.resultDeliveryId};
         recordCollectionDelivery(task,body); deliveries.push({...payload,...body,elapsedMs:Date.now()-began,listCount:calls.filter(x=>x.endpoint==='purchase-order-page').length});
-        if(options.afterCosts)records.push({kind:'batch',deliveryId:body.deliveryId,workspaceId:'WS',requestId:'REQ'});
+        if(options.afterCosts||options.archive)records.push({kind:'batch',deliveryId:body.deliveryId,workspaceId:'WS',requestId:'REQ'});
       } else throw Error(url.pathname);
       return {ok:true,status:200,json:async()=>structuredClone(body)};
     } catch(error) {return {ok:false,status:error.status||400,json:async()=>({code:error.code,message:error.message})};}
@@ -78,7 +78,7 @@ export async function scenario(size, mode = '', options = {}) {
       done(response);
     })}};
     window.fetch=async (raw,init={})=>{
-      const url=new URL(raw),endpoint=url.pathname.split('/').at(-1),target=url.searchParams.get('sku')||url.searchParams.get('purchaseOrderId')||url.searchParams.get('productId')||url.searchParams.get('skuGroup');
+      const url=new URL(raw),endpoint=url.pathname.split('/').at(-1),target=url.searchParams.get('sku')||url.searchParams.get('purchaseOrderId')||url.searchParams.get('productId')||url.searchParams.get('skuGroup')||url.searchParams.get('skuList');
       assert.notEqual(target,'[object Object]'); calls.push({endpoint,target,page:Number(url.searchParams.get('page')||0),cache:init.cache,at:Date.now()});
       const timeKey = Math.floor(Number(target.split('-').at(-1)) / 5);
       if(endpoint==='purchase-order-page'&&!listTimes.has(timeKey))listTimes.set(timeKey,{start:performance.now()});
@@ -92,13 +92,20 @@ export async function scenario(size, mode = '', options = {}) {
       inflight--; if(endpoint==='purchase-order-page'){lists--;listTimes.get(timeKey).end=performance.now();}
       if(['throttle','speed-recovery'].includes(mode)&&!limited&&endpoint==='purchase-order-page'){limited=true;return {ok:false,status:429,statusText:'Limited',headers:{get:()=> '1'}};}
       if(permissionCatalogBlocked&&endpoint==='product-info-sku')return {ok:true,status:200,json:async()=>({code:-40102,msg:'校验用户店铺权限失败！'})};
+      if((options.archive||options.bulk)&&endpoint==='export-select-goods') {
+        assert.equal(url.searchParams.get('exportMode'),'2');
+        const xlsx=require('xlsx'), book=xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(book,xlsx.utils.aoa_to_sheet([['商品ID','商品名称','图片链接','1688链接片段','采购单价','平台SKU片段'],...target.split(',').map(id=>[id,'表格商品'+id,'https://images.example.invalid/'+id+'.jpg','https://detail.1688.com/offer/900000000001.html',999,'WRONG'])]),'商品档案');
+        const binary=xlsx.write(book,{type:'array',bookType:'xlsx'});
+        return {ok:true,status:200,headers:{get:name=>name==='content-type'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':null},arrayBuffer:async()=>binary};
+      }
       if(options.fixture){const value=await options.fixture(url);if(value?.binary)return {ok:true,status:200,headers:{get:name=>name==='content-type'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':null},arrayBuffer:async()=>value.binary};return {ok:true,status:200,json:async()=>value};}
       const id=target.split('-').at(-1);
       const data=endpoint==='product-page'?[{itemId:`WH-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
       return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};
     };
     const lanes = mode==='benchmark-serial' ? 1 : mode==='benchmark-two-lanes' ? 2 : 4;
-    for(const name of [...(options.bulk?['xlsx-reader.js','bulk-purchase.js']:[]),'result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
+    for(const name of [...(options.bulk?['xlsx-reader.js','bulk-purchase.js','product-archive.js']:options.archive?['xlsx-reader.js','product-archive.js']:[]),'result-policy.js','catalog-collector.js','request-context.js','shopeers-bridge.js','content.js']){
       let script=options.sources?.[name]??source[name];
       if(options.afterCosts&&name==='content.js')script=script.replace("costFlow: 'task', catalogMode: 'on_demand'", "costFlow: 'task', catalogMode: 'after_costs'");
       if(mode.startsWith('benchmark')&&name==='content.js')script=script.replace('run.task?.executionProtocol === 2 ? 4 : 2',`run.task?.executionProtocol === 2 ? ${lanes} : 2`);
@@ -145,6 +152,14 @@ export async function scenario(size, mode = '', options = {}) {
         assert.equal(records[1].status,'ready','workstation persists intent before the ERP page starts');
       } else window.document.getElementById('erpa-resume').click();
     }
+    if(options.archive&&!options.afterCosts) {
+      await until(()=>deliveries.length===expectedDeliveries&&!window.document.getElementById('erpa-recalculate').disabled);
+      const task=records[1], before=calls.length;
+      handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${task.taskId}/control`),payload:{workspaceId:'WS',action:'request_resume',mode:'catalog',catalogMode:'on_demand'},instanceId:'test'});
+      await until(()=>catalogs.length===expectedDeliveries&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.ok(calls.slice(before).every(call=>call.endpoint==='export-select-goods'),'catalog acquisition reuses persisted identities and evidence');
+      assert.equal(calls.slice(before).length,expectedDeliveries);
+    }
     if(options.afterCosts) {
       await until(()=>deliveries.length===expectedDeliveries);
       assert.equal(catalogs.length,0);assert.ok(records[1].batches.every(batch=>!batch.catalogStatus));
@@ -180,7 +195,7 @@ export async function scenario(size, mode = '', options = {}) {
       await until(()=>catalogs.length===expectedDeliveries&&!window.document.getElementById('erpa-recalculate').disabled);
       if(options.catalogAmbiguity)assert.ok(catalogs.every(item=>item.requestId==='REQ-CATALOG'),'task materials use their exact companion despite historical requests with the same SKCs');
       if(options.permissionCatalog){assert.equal(costReads(),costReadsBefore);assert.equal(records[1].pauseReason,undefined);}
-      else if(options.bulk) assert.ok(calls.slice(before).every(call=>call.endpoint==='product-info-sku'),'on-demand bulk catalog only supplements missing platform metadata');
+      else if(options.bulk) assert.ok(calls.slice(before).every(call=>['product-info-sku','export-select-goods'].includes(call.endpoint)),'catalog exports registered warehouse metadata and only supplements missing platform mappings');
       else assert.equal(calls.length,before,'durable seeds reuse directory, mapping and complete history even after the task cache is gone');
     }
     await until(()=>{
@@ -194,7 +209,7 @@ export async function scenario(size, mode = '', options = {}) {
     assert.ok(deliveries.every(item=>(options.taskFlow || item.querySkcs.length<=5)&&item.warehouseEvidence.warehouses.every(row=>row.evidenceComplete)));
     if(options.taskFlow)assert.equal(records[1].costFlow,'task');
     assert.equal(records[1].catalogMode,options.afterCosts?'after_costs':'on_demand');
-    assert.ok(records[1].batches.every(batch=>options.afterCosts?['completed','failed'].includes(batch.catalogStatus):!batch.catalogStatus),'material execution follows the task policy');
+    assert.ok(records[1].batches.every(batch=>(options.afterCosts||options.archive)?['completed','failed'].includes(batch.catalogStatus):!batch.catalogStatus),'material execution follows the task policy');
     if(mode==='two-pages') {
       assert.equal(claims.length,1,'two ERP pages can claim the workstation command only once');
       assert.equal(calls.length,size*4,'a second page does not duplicate any authoritative ERP read');

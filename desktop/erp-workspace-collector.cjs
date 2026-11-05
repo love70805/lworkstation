@@ -162,7 +162,7 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, int
     owner.task = task; if (task.status === 'running') owner.hasRun = true;
     if (task.status === 'completed') { publish(owner, 'completed'); closeView(owner); return; }
     if (owner.view && state.status === 'waiting_login' && !owner.hasRun && !['stopped','invalidated','completed'].includes(task.status)) {
-      owner.task = (await control('request_resume', { executionTarget: 'desktop', catalogMode: 'on_demand', retryFailed: true }, owner)).task;
+      owner.task = (await control('request_resume', { executionTarget: 'desktop', catalogMode: 'on_demand', mode: owner.mode === 'catalog' ? 'catalog' : 'cost', retryFailed: owner.mode !== 'catalog' }, owner)).task;
       if (!owns(owner, revision)) return;
       await bounded(owner.view.webContents.loadURL(pageUrl(owner)), viewTimeoutMs, 'ERP 页面加载超时'); owner.ackStartedAt = now(); await poll(); return;
     }

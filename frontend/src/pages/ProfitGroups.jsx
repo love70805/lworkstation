@@ -13,14 +13,23 @@ function ProfitGroup({ group, columns, prepareRows, open, onToggle }) {
   </details>;
 }
 
-export default function ProfitGroups({ groups, columns, prepareRows, stateKey, showAllColumns = false }) {
+export default function ProfitGroups({ groups, columns, prepareRows, stateKey, showAllColumns = false, expandRequest = 0 }) {
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
   const [expanded, setExpanded] = useState(() => readProfitViewState(stateKey).expanded);
   const scroll = useRef(null);
   const previousPage = useRef(page);
   const previousColumnView = useRef('');
+  const handledExpansion = useRef(0);
   const count = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const current = Math.min(page, count - 1);
+  useLayoutEffect(() => {
+    if (!expandRequest || handledExpansion.current === expandRequest) return;
+    handledExpansion.current = expandRequest;
+    const next = groups.slice(0, PAGE_SIZE).map(group => group.id);
+    setPage(0);
+    setExpanded(next);
+    saveProfitViewState(stateKey, { page: 0, expanded: next });
+  }, [expandRequest, groups, stateKey]);
   useLayoutEffect(() => {
     const view = JSON.stringify([stateKey, current, showAllColumns]);
     if (previousColumnView.current === view) return;

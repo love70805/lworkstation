@@ -69,7 +69,7 @@ export function erpCollectionPresentation(task) {
     description = task.executionTarget === 'desktop'
       ? '工作台正在等待后台 ERP 确认接收；请保持 ERP 已登录。若连接未确认，可使用重新连接 ERP 接续原任务。'
       : '无需重复点击。请保持 ERP 采购管理页已打开且已登录；连接恢复后会接续这个任务。';
-  } else if (catalogOnly && !running) {
+  } else if (catalogOnly && !running && task.runMode !== 'catalog') {
     state = 'cost_completed'; title = '成本采集已完成';
     description = task.catalogMode === 'after_costs'
       ? '继续原任务后，待全部成本核算回执确认，再统一复用暂存资料补全商品并自动建档。'
@@ -83,19 +83,19 @@ export function erpCollectionPresentation(task) {
     state = 'paused'; title = '后台采集已暂停，等待继续';
     description = '点击继续原任务，自动核验原月份、店铺和商品范围并接续；已送达结果不重采，已采用成本保持有效。'; tone = 'warning';
   } else if (catalogRunning || preparingCatalog) {
-    state = 'catalog_running'; title = catalogRunning ? '正在后台补充商品资料' : '正在准备后台补充商品资料';
-    description = '可以继续使用工作台，无需重复启动。图片和链接用于商品建档，不阻塞已采用成本的利润核算。';
+    state = 'catalog_running'; title = catalogRunning ? '正在后台获取商品档案' : '正在准备获取商品档案';
+    description = '后台获取 ERP 表格档案，匹配后自动补齐商品资料。可以继续使用工作台，已采用成本保持有效。';
   } else if (costRunning || delivering) {
     state = 'cost_running'; title = delivering ? '正在后台确认成本送达' : '正在后台采集采购成本';
     description = task.costFlow === 'task'
       ? '优先读取整项任务的采购表，缺项与异常按需补查。可以继续使用工作台；完整证据核验后自动采用。'
       : '可以继续使用工作台，无需重复启动。已送达结果通过证据校验后自动采用，异常项单独核对。';
   } else if ((costDelivered && !catalogPending && !costIssues) || task?.status === 'completed') {
-    state = 'completed'; title = '成本采集与资料检查已结束';
+    state = 'completed'; title = task.runMode === 'catalog' ? '商品档案检查已结束' : '成本采集与资料检查已结束';
     description = adoptionUnconfirmed ? '采集与资料检查已结束，本机核算结果尚未确认；请以成本采用明细为准。'
       : '成本是否已采用以明细为准；无需继续采集。'; tone = adoptionUnconfirmed ? 'info' : 'success';
   } else if (costIssues || batches.some(batch => batch.catalogStatus === 'failed')) {
-    state = 'attention'; title = costIssues ? '采集已结束，成本证据仍需核对' : '成本已回传，商品资料仍需处理';
+    state = 'attention'; title = task.runMode === 'catalog' ? '商品档案仍有缺项，待继续补齐' : costIssues ? '采集已结束，成本证据仍需核对' : '成本已回传，商品资料仍需处理';
     description = '请查看具体 SKU、SKC 和异常原因。图片、链接缺项单独补齐，已采用成本可继续核算利润。'; tone = 'warning';
   }
   return { state, title, description, tone, running, catalogPending, catalogOnly, canResume, adoptionUnconfirmed,

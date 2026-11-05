@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.59';
+    const EXTENSION_VERSION = '8.0.60';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -47,7 +47,7 @@
         return;
     }
 
-    const catalogCollector = window.ShopeersErpCatalogCollector?.create({ apiGet: apiGetRetry, readWarehouseEvidence, policy: resultPolicy, getCache, setCache, onProgress: (stage, completed, total, detail = {}) => {
+    const catalogCollector = window.ShopeersErpCatalogCollector?.create({ apiGet: apiGetRetry, readWarehouseEvidence, readProductArchive, policy: resultPolicy, getCache, setCache, onProgress: (stage, completed, total, detail = {}) => {
         if (!activeRun) return;
         if (activeRun.readProgress?.label !== stage) beginReadProgress(activeRun, stage, total, detail.unit || '个目标');
         activeRun.readProgress.completed = completed;
@@ -420,12 +420,13 @@
                 }
                 let workbookBody;
                 if (options.workbook && !/json/i.test(response.headers?.get?.('content-type') || '')) {
-                    if (Number(response.headers?.get?.('content-length')) > window.ShopeersErpBulkPurchase.MAX_BYTES) throw new CostError('采购导出文件过大');
+                    if (Number(response.headers?.get?.('content-length')) > (32 * 1024 * 1024)) throw new CostError('ERP 导出文件过大');
                     const buffer = await Promise.race([response.arrayBuffer(), aborted]);
                     const bytes = new Uint8Array(buffer);
+                    if (bytes.byteLength > (32 * 1024 * 1024)) throw new CostError('ERP 导出文件过大');
                     if (bytes[0] === 80 && bytes[1] === 75) return { code: 0, buffer };
                     try { workbookBody = JSON.parse(new TextDecoder().decode(bytes)); }
-                    catch { throw new CostError('采购导出格式异常', '未取得可校验的采购工作簿，将使用原方式读取。'); }
+                    catch { throw new CostError('ERP 导出格式异常', '未取得可校验的工作簿，请重试或使用手动导入。'); }
                 }
                 const body = workbookBody || await Promise.race([response.json(), aborted]);
                 if (body && typeof body === 'object') Object.defineProperty(body, '__erpDiagnostic', { value: resultPolicy.diagnosticResponse({ stage: context, httpStatus: response.status, code: body.code, msg: body.msg ?? body.message, count: body.count, data: body.data }) });
@@ -1722,6 +1723,13 @@
         };
     }
 
+    async function readProductArchive(warehouseSkus, run) {
+        if (!window.ShopeersErpProductArchive || !window.XLSX) throw new CostError('商品档案读取模块未加载');
+        const response = await apiGetRetry('/purchase/product/v1/export-select-goods', { exportMode: 2, skuList: warehouseSkus.join(',') }, run.controller.signal, '商品表格档案', { workbook: true });
+        if (response?.code !== 0 || !response.buffer) throw new CostError('商品档案导出未成功', response?.msg || response?.message || 'ERP 未返回商品档案表格。');
+        return window.ShopeersErpProductArchive.parseProductArchiveWorkbook(response.buffer, window.XLSX);
+    }
+
     async function completeOptionalCatalog(state, run) {
         try {
             hideLoading();
@@ -1736,7 +1744,7 @@
             if (run.controller.signal.aborted) return;
             run.expectedSkus = context.request.expectedSkus;
             run.catalogPhase = true;
-            setLoading('成本已完成，正在补充资料', '资料最多30分钟；可取消，成本结果已保留');
+            setLoading('正在后台获取商品档案', '自动匹配并写入商品资料；可暂停后继续');
             const catalog = await catalogCollector.collect(state.meta.querySkcs, run, state.catalogInitial);
             if (run.controller.signal.aborted) return;
             if (context.request.platformSkcs.length !== state.meta.querySkcs.length) {
@@ -2031,7 +2039,7 @@
                     task = (await taskOperation({ action: 'batch', ...identity, state: 'catalog_running', phase: 'catalog' })).task;
                     run.task = task; run.batchSkcs = batch.platformSkcs; run.batchId = batch.batchId;
                     let seed;
-                    if (task.catalogMode === 'after_costs') {
+                    if (task.catalogMode === 'after_costs' || task.runMode === 'catalog') {
                         seed = (await taskOperation({ action: 'catalogSeed', ...identity })).seed;
                         if (!seed) throw new CostError('暂存资料尚未就绪', '成本收件缺少可复用资料，请继续原任务重试。');
                     }
@@ -2537,10 +2545,10 @@
     }
 
     function progressRow(label, completed, total, unit = '', id = '') {
-        const known = Number.isFinite(total) && total >= 0 && completed != null;
+        const known = Number.isFinite(total) && total > 0 && completed != null;
         const amount = known ? completed + ' / ' + total + ' ' + unit : completed != null ? '已读 ' + completed + ' ' + unit + ' · 总量待确认' : '等待响应';
         return '<div class="erpa-progress-row"><div><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(amount) + '</strong></div>' +
-            '<progress ' + (id ? 'id="' + id + '" ' : '') + 'aria-label="' + escapeHtml(label) + '" max="' + (known ? Math.max(1, total) : 1) + '"' + (known ? ' value="' + (total ? Math.min(total, Math.max(0, completed)) : 1) + '"' : '') + '></progress></div>';
+            (id ? '<div id="' + id + '" class="erpa-collection-track" role="progressbar" aria-label="' + escapeHtml(label) + '"' + (known ? ' aria-valuemin="0" aria-valuemax="' + total + '" aria-valuenow="' + Math.min(total, Math.max(0, completed)) + '"' : ' aria-valuetext="等待进度确认"') + '><span class="erpa-collection-fill" style="width:' + (known ? Math.min(100, Math.max(0, completed / total * 100)) : 0) + '%"></span><span class="erpa-collection-pulse"></span></div>' : '') + '</div>';
     }
 
     function renderReadProgress() {

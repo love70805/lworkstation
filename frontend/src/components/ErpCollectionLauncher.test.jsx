@@ -83,3 +83,9 @@ it('shows a failed renewal and leaves the action retryable without a start loop'
   expect(host.querySelector('[role="alert"]').textContent).toContain('本机服务不可用');
   expect(runtime.startErpCollection).toHaveBeenCalledOnce();expect(button('开始成本核算').disabled).toBe(false);
 });
+
+it('uses the registered archive task activity when the runtime snapshot has not caught up', async () => {
+  props.mode='catalog'; props.task={requestId:'R',runMode:'catalog',catalogMode:'on_demand',status:'cost_complete',runnerId:'RUNNER',batches:[{status:'delivered',deliveryId:'D',catalogStatus:'running'}]};
+  await render(); expect(button('正在获取商品档案').disabled).toBe(true);
+  props.task.requestId='OLD'; await render(); expect(button('继续获取商品档案').disabled).toBe(false);
+});

@@ -21,14 +21,16 @@ export function ErpBackgroundNoticeContent({ tasks = [], error = '', receiptErro
   const Icon = hasError ? AlertCircle : view.running ? LoaderCircle : view.tone === 'warning' ? AlertCircle : Info;
   const count = (task?.batches ?? []).reduce((sum, batch) => sum + (batch.deliveryId ? batch.platformSkcs.length : 0), 0);
   const total = (task?.batches ?? []).reduce((sum, batch) => sum + batch.platformSkcs.length, 0);
+  const catalog = !receiptError && (task?.runMode === 'catalog' || view.state === 'catalog_running');
+  const checked = (task?.batches ?? []).filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).reduce((sum, batch) => sum + batch.platformSkcs.length, 0);
   return <div className={`erp-background-notice erp-activity-${hasError ? 'warning' : view.tone}`} role="status" aria-live="polite">
     <Icon size={20} className={!hasError && view.running ? 'spin' : ''} aria-hidden="true" />
     <div className="erp-background-copy"><strong>{receiptError ? '成本回传处理遇到问题' : error ? '后台采集状态暂无法确认' : view.title}</strong>
-      {task && <span>{task.ledgerPeriod} · 成本已送达 {count} / {total} 个 SKC{active.length > 1 ? ` · 另有 ${active.length - 1} 个任务` : ''}</span>}
+      {task && <span>{task.ledgerPeriod} · {catalog ? `商品资料已检查 ${checked} / ${total}` : `成本已送达 ${count} / ${total}`} 个 SKC{active.length > 1 ? ` · 另有 ${active.length - 1} 个任务` : ''}</span>}
       <small>{receiptError ? `${receiptError} 系统会自动重试；是否计入利润请查看成本采用明细。` : error ? `连接检查失败：${error}。已收到结果保留，连接恢复后自动刷新状态。` : view.description}</small>
     </div>
     {receiptError ? <button type="button" className="button button-ghost" onClick={requestErpInboxRefresh}>重试处理</button> : null}
-    <Link className="button button-ghost" to={!receiptError && view.state === 'catalog_running' ? '/products?collection=1' : profitWorkspaceHref(task ? `ledger=${encodeURIComponent(task.ledgerId)}` : '', 'detail') + (receiptError ? '' : '#erp-collection-progress')} onClick={() => { if (!receiptError) window.setTimeout(revealErpCollectionProgress, 0); }}>{receiptError ? '查看待处理成本' : view.state === 'catalog_running' ? '查看资料补齐' : '查看采集状态'}</Link>
+    <Link className="button button-ghost" to={catalog ? '/products?collection=1' : profitWorkspaceHref(task ? `ledger=${encodeURIComponent(task.ledgerId)}` : '', 'detail') + (receiptError ? '' : '#erp-collection-progress')} onClick={() => { if (!receiptError) window.setTimeout(revealErpCollectionProgress, 0); }}>{receiptError ? '查看待处理成本' : catalog ? '查看商品档案进度' : '查看采集状态'}</Link>
   </div>;
 }
 

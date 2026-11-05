@@ -99,7 +99,7 @@ export async function verifyErpCatalogTransport({
         async set(values) { Object.assign(stored, structuredClone(values)); },
       } },
       runtime: {
-        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.47' }),
+        getManifest: () => ({ version: legacyScope ? '8.0.37' : '8.0.60' }),
         onMessage: { addListener: (listener) => listeners.push(listener) },
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
@@ -142,6 +142,15 @@ export async function verifyErpCatalogTransport({
     window.fetch = async (rawUrl) => {
       const url = new URL(rawUrl);
       requestedPaths.push(url.pathname);
+      if (!legacyScope && url.pathname.endsWith('/export-select-goods')) {
+        assert.equal(url.searchParams.get('exportMode'), '2');
+        const XLSX = frontendRequire('xlsx'), book = XLSX.utils.book_new();
+        const rows = url.searchParams.get('skuList').split(',').map(id => [id, '表格档案' + id,
+          id === 'WH-CATALOG' ? 'https://images.example.invalid/catalog-red.jpg' : 'https://images.example.invalid/1688-blue.jpg',
+          'https://detail.1688.com/offer/900000000001.html', 999, 'UNTRUSTED-PLATFORM-SKU']);
+        XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([['商品ID','商品名称','图片链接','1688链接片段','采购单价','平台SKU片段'], ...rows]), '商品档案');
+        return { ok: true, status: 200, headers: { get: () => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, arrayBuffer: async () => XLSX.write(book, { type: 'array', bookType: 'xlsx' }) };
+      }
       let data;
       if (url.pathname === "/purchase/purchase/v1/purchase-order-page") {
         data = [
@@ -188,7 +197,7 @@ export async function verifyErpCatalogTransport({
       if (url.pathname === "/purchase/product/v1/product-info-sku") data = data.map(item => ({ ...item, associatedProductId: url.searchParams.get("productId") }));
       return { ok: true, json: async () => ({ code: 0, count: data.length, data }) };
     };
-    for (const file of ["result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
+    for (const file of [...(legacyScope ? [] : ["xlsx-reader.js", "product-archive.js"]), "result-policy.js", "catalog-collector.js", "request-context.js", "shopeers-bridge.js", "content.js"]) {
       let script = await fs.readFile(path.join(sourceRoot, file), 'utf8');
       if (afterCosts && file === 'content.js') script = script.replace("costFlow: 'task', catalogMode: 'on_demand'", "costFlow: 'task', catalogMode: 'after_costs'");
       window.eval(script);
@@ -229,12 +238,16 @@ export async function verifyErpCatalogTransport({
     assert.equal(catalogProgress.totalSkcCount, 1);
     assert.equal(catalogProgress.state, catalogSubmitted[0].response.envelope.catalog.status === 'completed' ? 'complete' : 'partial');
     assert.deepEqual(submissionOrder, ["shopeers.erp.submitCostResult", "shopeers.erp.submitCatalogResult"]);
-    assert.equal(new Set(requestedPaths).size, 4);
-    const manualWarehouseCount = new Set(expectedSkus.map(item => item.platformSku === 'SKU-RED' ? 'WH-CATALOG' : item.platformSku === 'SKU-BLUE' ? 'WH-BLUE' : null).filter(Boolean)).size;
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, legacyScope || afterCosts ? 1 : 1 + manualWarehouseCount,
-      'automatic catalog reuses procurement evidence; an explicit material attempt reads only the registered warehouse scope');
-    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, legacyScope || afterCosts ? 2 : unresolvedTarget ? 6 : 4,
-      'a separate explicit material attempt reads its own mappings instead of assuming account continuity');
+    assert.equal(new Set(requestedPaths).size, legacyScope ? 4 : 5);
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('purchase-order-page')).length, 1,
+      'catalog reuses the exact durable procurement receipt without reading costs again');
+    assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('product-info-sku')).length, unresolvedTarget ? 6 : 2,
+      'complete persisted identities are reused; unresolved identities are still rechecked');
+    if (!legacyScope) {
+      assert.equal(requestedPaths.filter(endpoint => endpoint.endsWith('export-select-goods')).length, 1);
+      assert.ok(catalogSubmitted[0].response.envelope.catalog.rows.every(row => row.productName.startsWith('表格档案')));
+      assert.ok(catalogSubmitted[0].response.envelope.catalog.rows.every(row => row.platformSku !== 'UNTRUSTED-PLATFORM-SKU' && row.unitCost === undefined));
+    }
     if (!legacyScope) assert.equal(submitted[0].payload.meta.scopeRetrySkcCount, unresolvedTarget ? 1 : 0);
     const retryCatalog = await window.ShopeersErpDeliveryBridge.submitCatalog(catalogSubmitted[0].payload);
     assert.equal(retryCatalog.status, "success", 'same independently delivered catalog is retry-idempotent');

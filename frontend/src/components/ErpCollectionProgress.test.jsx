@@ -25,7 +25,7 @@ it('preserves task scope and offers continued supplement after costs arrive', ()
   const task = { status: 'cost_complete', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'failed' }] };
   expect(isActiveErpCollection(task)).toBe(true);
   const html = renderToStaticMarkup(<ErpCollectionProgress showCatalog task={task} />);
-  expect(html).toContain('按需补齐商品资料');
+  expect(html).toContain('继续获取商品档案');
   expect(html).toContain('成本采集已完成');
   expect(html).not.toContain('停止采集');
   expect(html).not.toContain('当前阶段：');
@@ -58,8 +58,8 @@ it('offers material continuation for a partial task with all cost receipts', () 
 it('explains background work and does not ask users to continue an active material read', () => {
   const task = { status: 'cost_complete', phase: 'catalog', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] };
   const html = renderToStaticMarkup(<ErpCollectionProgress showCatalog task={task} />);
-  expect(html).toContain('正在后台补充商品资料');
-  expect(html).toContain('可以继续使用工作台，无需重复启动');
+  expect(html).toContain('正在后台获取商品档案');
+  expect(html).toContain('匹配后自动补齐商品资料');
   expect(html).toContain('暂停采集');
   expect(html).not.toContain('继续补充资料');
   expect(html).not.toContain('恢复后请在 ERP 助手点击继续采集');
@@ -78,10 +78,12 @@ it('reports an unavailable service without claiming cached reads are still runni
   const html = renderToStaticMarkup(<ErpCollectionProgress error="本机服务未连接" statusError="本机服务未连接" task={{ status: 'cost_complete', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'running' }] }} />);
   expect(html).toContain('采集状态暂无法确认');
   expect(html).toContain('本机服务未连接');
-  expect(html).not.toContain('正在后台补充商品资料');
+  expect(html).not.toContain('正在后台获取商品档案');
   expect(html).not.toContain('暂停采集');
   expect(html).not.toContain('继续补充资料');
   expect(html).not.toContain('class="spin"');
+  const queued = renderToStaticMarkup(<ErpCollectionProgress statusError="服务断开" task={{ executionProtocol: 2, status: 'ready', batches: [{ platformSkcs: ['A'], status: 'pending' }] }} />);
+  expect(queued).not.toContain('collection-progress-pulse');
 });
 
 it('shows whole-task scope and weights progress by SKCs when exception ranges have unequal sizes', () => {
@@ -100,7 +102,7 @@ it('shows whole-task scope and weights progress by SKCs when exception ranges ha
   const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
   expect(html).toContain('范围 4 个 SKC / 5 个 SKU');
   expect(html).toContain('已送达 3 / 4 个 SKC');
-  expect(html).toContain('max="4" value="3" aria-label="ERP 成本送达进度"');
+  expect(html).toContain('aria-label="ERP 成本送达进度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="3"');
   expect(html).toContain('剩余 1 个 SKC');
   expect(html).toContain('SKC：D · 仓库映射待补查');
   expect(html).toContain('重试未完成项');
@@ -127,4 +129,34 @@ it('does not use another workspace receipt as this task accounting progress', ()
     adoptionFailure: { message: '另一工作区失败' }, adoption: { items: [{ state: 'adopted', platformSku: 'SKU-A' }] } }]} />);
   expect(html).toContain('已采用 <strong>0</strong>');
   expect(html).not.toContain('另一工作区失败');
+});
+
+it('uses a single progressive bar for actual stage counts and a forward pulse only while active', () => {
+  const task = { status: 'running', batches: [{ platformSkcs: ['A'], status: 'running' }], progress: { phase: 'cost', label: '采购明细', completed: 2, total: 10, unit: '订单' } };
+  const render = () => renderToStaticMarkup(<ErpCollectionProgress task={task} />);
+  let html = render();
+  expect(html.match(/role="progressbar"/g)).toHaveLength(1);
+  expect(html).toContain('width:20%');
+  expect(html).toContain('collection-progress-pulse');
+  task.progress.completed = 7;
+  expect(render()).toContain('width:70%');
+  task.progress = null;
+  html = render();
+  expect(html).not.toContain('aria-valuenow');
+  expect(html).toContain('等待进度确认');
+  task.status = 'paused';
+  expect(render()).not.toContain('collection-progress-pulse');
+});
+
+it('shows only material progress on the product page, including missing material after a finished check', () => {
+  const task = { status: 'cost_complete', phase: 'catalog', batches: [
+    { platformSkcs: ['A'], deliveryId: 'D', status: 'delivered', catalogStatus: 'failed', catalogError: '图片缺失' },
+  ] };
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} showCatalog catalogOnly />);
+  expect(html).toContain('商品档案获取进度');
+  expect(html).toContain('待补资料');
+  expect(html).toContain('图片缺失');
+  expect(html).not.toContain('已采用');
+  expect(html).not.toContain('成本回传 ·');
+  expect(html.match(/role="progressbar"/g)).toHaveLength(1);
 });

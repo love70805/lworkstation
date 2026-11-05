@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "candidateOnly": true,
-  "integrationBranch": "codex/import-month-anomaly-2-0-1",
+  "integrationBranch": "codex/cost-progress-workflow-2-0-2",
   "requiredCommits": [
     {
-      "module": "stable-2.0.0",
-      "commit": "caf95151157ab1ffd5bdf148a176f398c1e39d82"
+      "module": "stable-2.0.1",
+      "commit": "dff4791b8812f29f797a66abc6016f2eb6994fe9"
     }
   ]
 }

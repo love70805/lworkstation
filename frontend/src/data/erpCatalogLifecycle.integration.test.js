@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { db, saveProductCatalogRecord, getProductEditorSnapshot, getSelectionReferenceSnapshot, createWorkspaceBackupPayload, restoreWorkspaceBackupPayload, createOrGetMonthlyLedger, saveErpCostRequest } from "./database";
-import { saveErpCatalogRequest, receiveErpCatalogInboxEnvelope, registerCostCatalogCompanion } from "./repositories/erpCatalogRepository";
+import { saveErpCatalogRequest, receiveErpCatalogInboxEnvelope, registerCostCatalogCompanion, prepareProductArchiveCollection } from "./repositories/erpCatalogRepository";
 import { buildErpCatalogRequest, buildErpCatalogInboxEnvelope, ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
 import { buildSelectionReferenceRows } from "../lib/selectionReferences";
 import { buildErpCostRequest } from "../domain/erpCosts";
@@ -187,7 +187,8 @@ it("persists the cost catalog companion before registration and reuses it across
   try {
     await registerCostCatalogCompanion(source);
     db.close(); await db.open();
-    await registerCostCatalogCompanion(source);
+    await prepareProductArchiveCollection({ requestId: source.id, workspaceId: source.workspaceId, ledgerId: source.ledgerId });
+    await expect(prepareProductArchiveCollection({ requestId: source.id, workspaceId: "FOREIGN", ledgerId: source.ledgerId })).rejects.toThrow("范围已变化");
     expect((await db.settings.toArray()).filter(item => item.kind === "erp_catalog_request")).toHaveLength(1);
     expect((await db.auditEvents.toArray()).filter(item => item.action === "catalog_requested")).toHaveLength(1);
     expect(spy).toHaveBeenCalledTimes(2);

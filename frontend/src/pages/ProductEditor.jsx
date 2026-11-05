@@ -12,7 +12,6 @@ import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
 import { getActiveMemberContext, getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
 import { productPrestorageReadiness } from "../domain/productPrestorage";
 import { normalizeProductTags, productDraftReferences, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
-import { requestErpProductCatalog } from "../data/repositories/erpCatalogRepository";
 import { ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
 import { erpSupplierLinks } from "../domain/erpCatalogPresentation";
 import { mergeErpCatalogSuppliers } from "../domain/erpProductCatalog";
@@ -178,10 +177,6 @@ function ProductEditor() {
   const [manualCostAmount, setManualCostAmount] = useState("");
   const [manualCostNote, setManualCostNote] = useState("");
   const [savingManualCost, setSavingManualCost] = useState(false);
-  const [catalogRequestPeriod, setCatalogRequestPeriod] = useState("");
-  const [requestingCatalog, setRequestingCatalog] = useState(false);
-  const [catalogRequestMessage, setCatalogRequestMessage] = useState("");
-  const [catalogRequestFailed, setCatalogRequestFailed] = useState(false);
   const [saveFieldErrors, setSaveFieldErrors] = useState({});
   const [queueError, setQueueError] = useState("");
   const [advancing, setAdvancing] = useState(false);
@@ -297,8 +292,6 @@ function ProductEditor() {
     setSavedFingerprint(JSON.stringify({ draft: nextDraft, tagsText: nextTags }));
     setPersistedProduct(snapshot.product ?? null);
     setSaved(false);
-    const sourcePeriod = snapshot.prefill?.referencePeriod ?? snapshot.draft.referencePeriod ?? snapshot.draft.variants?.map(variant => variant.referencePeriod).filter(Boolean).sort().at(-1) ?? "";
-    setCatalogRequestPeriod(current => sameRecord && current ? current : sourcePeriod);
   }, [snapshot, saving]);
 
   const historicalRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows(referenceSnapshot) : [], [referenceSnapshot]);
@@ -593,17 +586,7 @@ function ProductEditor() {
   };
   const catalogCoverage = prefill?.catalogCoverage ?? draft.catalogCoverage ?? {};
   const missingCatalogGroups = ERP_CATALOG_GROUPS.filter(group => (catalogCoverage[group]?.state ?? catalogCoverage[group]) !== "complete");
-  const requestCatalog = async () => {
-    if (requestingCatalog || !draft.platformSkc || !catalogRequestPeriod) return;
-    setRequestingCatalog(true); setCatalogRequestFailed(false);
-    try {
-      const result = await requestErpProductCatalog({ platformSkcs: [draft.platformSkc], productId: currentProductId ?? null, period: catalogRequestPeriod, missingGroups: missingCatalogGroups });
-      setCatalogRequestMessage(result.registered ? "资料请求已登记，等待 ERP 返回资料。" : "资料请求已保存在本机，尚未送达 ERP；请重试登记。");
-      setCatalogRequestFailed(!result.registered);
-    } catch (error) {
-      setCatalogRequestMessage(`资料请求未完成：${error.message}`); setCatalogRequestFailed(true);
-    } finally { setRequestingCatalog(false); }
-  };
+
 
 
   return (
@@ -701,10 +684,9 @@ function ProductEditor() {
         </Panel>
 
         {prefill?.source === "erp" || prefill?.warnings?.length || currentProductId && draft.platformSkc ? <Panel className="erp-catalog-prefill"><details><summary>ERP 档案资料与来源详情</summary>
-          <div className="catalog-request-controls"><label className="form-field"><span>资料采购截止月份</span><input aria-label="资料采购截止月份" className="text-input" type="month" value={catalogRequestPeriod} onChange={event => setCatalogRequestPeriod(event.target.value)} /></label><Button variant="ghost" loading={requestingCatalog} disabled={requestingCatalog || !draft.platformSkc || !catalogRequestPeriod || !missingCatalogGroups.length} onClick={requestCatalog}>{catalogRequestFailed ? "重试补充资料" : "补充 ERP 资料"}</Button></div>
-          {!catalogRequestPeriod ? <p className="editor-inline-note">请选择明确的采购截止月份；没有销量也可以为已确认身份的档案补充资料。</p> : null}
-          {!missingCatalogGroups.length ? <p className="editor-inline-note">ERP 基础资料已收齐；参考成本仍按对应仓库商品的有效采购证据单独判定。</p> : null}
-          {catalogRequestMessage ? <p className={`editor-inline-note ${catalogRequestFailed ? "field-error" : ""}`} role="status">{catalogRequestMessage}</p> : null}
+          <div className="catalog-request-controls"><Button variant="ghost" onClick={() => navigate('/products?collection=1')}>获取 ERP 商品档案</Button></div>
+          <p className="editor-inline-note">在商品资料页一键后台获取表格档案，匹配后自动补齐；手动导入也集中在那里。当前已编辑的字段优先保留。</p>
+          {!missingCatalogGroups.length ? <p className="editor-inline-note">ERP 基础资料已收齐；参考成本仍按有效采购证据单独判定。</p> : null}
           {(prefill?.warnings ?? []).map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
           <ErpCatalogEvidence sources={prefill?.sources} purchases={prefill?.purchases} />
         </details></Panel> : null}

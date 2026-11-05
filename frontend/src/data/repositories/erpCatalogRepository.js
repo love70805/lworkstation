@@ -136,6 +136,15 @@ export async function registerCostCatalogCompanion(source) {
   return registerErpBridgeRequest({ request, expectedSkus: request.confirmedSkus });
 }
 
+export async function prepareProductArchiveCollection(task) {
+  const context = await getActiveMemberContext();
+  const source = await db.erpCostRequests.get(task?.requestId);
+  if (!source || source.workspaceId !== context.workspaceId || task.workspaceId !== context.workspaceId || source.ledgerId !== task.ledgerId
+    || ['cancelled', 'voided'].includes(source.status)) throw new Error('商品范围已变化，请重新选择有效的采集记录。');
+  const registration = await registerCostCatalogCompanion(source);
+  if (registration?.accepted !== true) throw new Error('商品档案请求尚未登记，请重试。');
+}
+
 export async function requestErpProductCatalog({ platformSkcs = [], productId = null, period = null, missingGroups = ERP_CATALOG_GROUPS } = {}) {
   const context = await getActiveMemberContext(), local = await confirmedIdentities(context);
   const targets = [...new Set(platformSkcs.filter(Boolean).map(value => String(value).trim()))];

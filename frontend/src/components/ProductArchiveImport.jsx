@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Button, Modal, useToast } from './UI';
 import { readProductArchive } from '../lib/productArchiveImport';
 import { previewProductArchive, saveProductArchive } from '../data/repositories/productArchiveRepository';
+import CollectionProgressBar from './CollectionProgressBar';
 
 export default function ProductArchiveImport() {
   const input = useRef(null), { notify } = useToast();
@@ -25,8 +26,8 @@ export default function ProductArchiveImport() {
   }
   return <>
     <input ref={input} type="file" accept=".xlsx,.xls" className="visually-hidden" aria-label="选择 ERP 商品档案" onChange={event => { void read(event.target.files[0]); event.target.value = ''; }} />
-    <Button disabled={busy} loading={busy} onClick={() => input.current?.click()}>导入商品档案</Button>
-    {stage ? <p role="status">{stage}<progress aria-label="商品档案导入进度" /></p> : null}
+    <Button disabled={busy} loading={busy} onClick={() => input.current?.click()}>导入 ERP 商品档案</Button>
+    {stage ? <div role="status">{stage}<CollectionProgressBar label="商品档案导入进度" active /></div> : null}
     {error ? <p role="alert">{error}</p> : null}
     <Modal open={Boolean(candidate)} title="导入商品档案" description="只补齐名称、图片、属性和 1688 链接。文件中的采购单价不参与本月利润核算。" onClose={() => !busy && setCandidate(null)}
       footer={<><Button disabled={busy} onClick={() => setCandidate(null)}>取消</Button><Button variant="primary" loading={busy} disabled={busy} onClick={save}>导入资料</Button></>}>
