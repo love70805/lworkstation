@@ -4,6 +4,8 @@
 
 规范候选 `releases/candidates/2.0.0/`：安装包 116,368,853 字节，SHA256 `9850E597E5F563748B571D96484CC558F22DB962AC1C8B54D7F4CE364E47BB8C`；配图说明 7 页，SHA256 `45F0ADD12CA5B9278E2313B3CC823568D43BC91721C8CC4B96AF10971F6693C3`。完整前端 243 文件 / 1,920 项、生产构建、39 项本地门禁、桌面及原生采集验证、12 组实际界面布局通过；安装器 241 文件与生产输入一致，隐藏 smoke 通过。候选验收与公开发布分别核对；源码集成和必需 CI 见 [PR #323](https://github.com/love70805/lworkstation/pull/323)，稳定通道与上传资产以 [v2.0.0 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.0) 服务元数据为准。未安装或操作真实业务库。
 
+公开结果补核（2026-11-05）：[v2.0.0](https://github.com/love70805/lworkstation/releases/tag/v2.0.0) 已于北京时间 2026-11-05 01:09:54 发布为稳定 Latest；标签与 PR #323 合并提交均为 `caf95151157ab1ffd5bdf148a176f398c1e39d82`，[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/41872909985) 成功。安装包、blockmap、latest.yml、SHA256SUMS.txt 和配图指南共 5 个资产均为 uploaded，服务 digest 与本节登记的安装包及 PDF 哈希一致。此段只补记发布结果，不重复执行候选验收或安装。
+
 ## 1.2.4 — 整项成本核算与插件适配
 
 移除固定小批次主流程，正常范围整项核算，缺项和超大回传自动按需处理；工作台与 ERP 助手 8.0.58 同步显示实际商品进度。修复插件更新回滚、跨工作区账本读取及切换核算模式的汇总显示问题。[本批契约与验收](../docs/integration/ERP_TASK_FLOW_1.2.4.md)。
