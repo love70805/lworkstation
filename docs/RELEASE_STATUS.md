@@ -1,10 +1,20 @@
 # Lworkstation 发布状态
 
-更新时间：2026-11-05
+更新时间：2026-11-05（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
 
-## 当前交付入口
+## 当前公开稳定 Latest：2.0.0
 
-2.0.0 统一核算、可撤回的单项/多选/全部异常处理、商品资料补齐与加载优化已通过候选验收，内置 ERP 助手 8.0.59。见[发布登记](../releases/README.md)、[本批记录](integration/DESKTOP_WORKFLOW_2.0.0.md)和[使用指南](USER_GUIDE_2.0.md)。账本可随时调整，历史报表独立保留。源码与必需 CI 见 [PR #323](https://github.com/love70805/lworkstation/pull/323)；最新稳定版及资产以 [GitHub 最新 Release](https://github.com/love70805/lworkstation/releases/latest) 服务元数据为准，候选验收不代表已公开。
+2.0.0 已于 **2026-11-05 01:09:54（北京时间）**[公开发布](https://github.com/love70805/lworkstation/releases/tag/v2.0.0)，非草稿、非预发布。2026-11-05 本轮直接核对发布服务：Latest 为 v2.0.0，标签固定于 `caf95151157ab1ffd5bdf148a176f398c1e39d82`，5 个资产均为 uploaded。公开下载无需再次验证。
+
+统一核算工作流，异常支持单项、多选、全部忽略及恢复；账本可随时调整和重新导出，历史报告保持原快照。导入月份自动识别，商品资料独立补齐，内置 ERP 助手 8.0.59。见[2.0 使用指南](USER_GUIDE_2.0.md)与[本批契约及验收边界](integration/DESKTOP_WORKFLOW_2.0.0.md)。
+
+[PR #323](https://github.com/love70805/lworkstation/pull/323) 已合并，[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/41872909985) 成功。交付记录为 243 个前端测试文件 / 1,920 项、生产构建、39 项本地门禁、桌面/原生采集、12 组实际界面布局及实际安装包验收通过；本轮仅核对历史证据和文档，没有重跑这些软件检查。
+
+安装包 116,368,853 字节，SHA256 `9850e597e5f563748b571d96484cc558f22db962ac1c8b54d7f4ce364e47bb8c`，与发布服务 digest 及既有候选登记一致。规范候选、7 页配图指南和全部资产说明见[发布登记](../releases/README.md)。
+
+## 近期历史版本
+
+1.0.6—1.0.12、1.2.0—1.2.4 均已有公开稳定 Release；逐版本内容、日期、PR 与实施契约统一见[近期版本时间线](DEVELOPMENT_HISTORY.md#近期版本与对应-pr)。其余可见发布见[完整索引](archive/RELEASE_INDEX_2026_11_05.md)。以下保留 1.0.5 及更早的原始交付记录，不作为当前操作指南。
 
 ## 历史公开稳定：1.0.5
 
