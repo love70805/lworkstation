@@ -27,6 +27,9 @@ function sampleFile() {
   return new File(["供方货号,SKC,平台SKU,数量,金额\nSUP-001,SKC-001,000123,23,1245.50"], "示例店铺.csv", { type: "text/csv" });
 }
 const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const sourceMonthText = (months = [], period) => months.length === 1 && months[0].month === period
+  ? `月份与账本一致 · ${months[0].count.toLocaleString('zh-CN')} 行`
+  : `来源月份：${months.length ? months.map(({ month, count }) => `${month}（${count.toLocaleString('zh-CN')} 行）`).join('、') : '未识别到有效日期'}`;
 function sourceIsFiltered(item) {
   if (!item.facets || !item.filterOptions) return false;
   const full = (key, expected) => !Array.isArray(item.filterOptions[key]) || expected.every(value => item.filterOptions[key].includes(value));
@@ -173,6 +176,7 @@ export default function ImportPreview() {
   const periodFiles = files.filter(item => item.status !== 'parsed' || item.filterOptions?.supplierNumbers?.length);
   const periodEvidence = summarizeImportPeriod(periodFiles.length ? periodFiles : files, requestedLedgerId ? period : null);
   const suggestedPeriod = periodEvidence.suggestedPeriod;
+  const needsPeriodInput = files.length > 0 && !requestedLedgerId && !suggestedPeriod && !periodEvidence.awaitingEvidence && periodEvidence.months.length < 2;
   useEffect(() => {
     if (!result && !requestedLedgerId && !periodChoiceRef.current) setPeriod(suggestedPeriod ?? "");
   }, [requestedLedgerId, suggestedPeriod, result]);
@@ -522,17 +526,18 @@ export default function ImportPreview() {
       </details>
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
-        {!!files.length && <section className="batch-action-bar" aria-label="本次导入操作">
-          <div className="batch-action-summary"><strong>{period || '月份待确认'} · {files.length} 个文件</strong><span id="batch-import-status" role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组${preview.requiresOverwrite && overwriteSignature !== preview.targetSignature ? ' · 请确认替换范围后导入' : ''}` : importPreparation}</span></div>
+        {(files.length > 0 || requestedLedgerId && !contextBlocked) && <section className="batch-action-bar" aria-label="本次导入操作">
+          <div className="batch-month-focus"><label htmlFor={needsPeriodInput ? 'ledger-period' : undefined}>账本月份</label>{needsPeriodInput
+            ? <input id="ledger-period" aria-describedby="batch-period-evidence" className="text-input" type="month" value={period} disabled={busy || contextBlocked} onChange={event => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} />
+            : <strong>{period || '月份待确认'}</strong>}</div>
+          <div className="batch-action-summary"><strong>{files.length} 个文件{requestedLedgerId ? ' · 沿用当前账本' : suggestedPeriod ? ' · 按台账日期识别' : ''}</strong><span id="batch-import-status" role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组${preview.requiresOverwrite && overwriteSignature !== preview.targetSignature ? ' · 请确认替换范围后导入' : ''}` : importPreparation}</span></div>
           {preview?.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={event => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />确认本次全部替换范围（含分页内容）与移除旧分组；可展开下方 SKC 明细核对。</label>}
           <Button variant="primary" aria-describedby="batch-import-status" disabled={busy || supplierDirty || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
         </section>}
         <section className="wizard-card">
           <fieldset disabled={busy || contextBlocked} className="batch-fieldset batch-source-fieldset">
-            {requestedLedgerId || suggestedPeriod ? <p className="batch-period-evidence" role="status">账本月份：<strong>{period || suggestedPeriod}</strong> · {requestedLedgerId ? '沿用当前账本' : '按销售台账“添加时间”自动识别'}</p>
-              : files.length > 0 && !periodEvidence.awaitingEvidence && periodEvidence.months.length < 2 ? <div className="batch-period"><div><label htmlFor="ledger-period">补充账本月份</label><p id="batch-period-note">文件日期不足以识别月份，请核对后补充。</p></div><input id="ledger-period" aria-describedby="batch-period-note batch-period-evidence" className="text-input" type="month" value={period} onChange={event => { periodChoiceRef.current = true; setPeriod(event.target.value); invalidate(); }} /></div> : null}
             {files.length ? <p id="batch-period-evidence" className={periodEvidence.conflictsExisting || periodEvidence.months.length > 1 || periodEvidence.missingCount || periodEvidence.invalidCount ? "batch-period-warning" : "batch-period-evidence"} role="status">
-              {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>来源月份：{periodEvidence.months.length ? periodEvidence.months.map(({ month, count }) => `${month}（${count} 行）`).join("、") : "未识别到有效日期"}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? ` 来源月份与已有账本 ${period} 不一致，仍沿用账本月份。` : periodEvidence.months.length > 1 ? "请按月拆分文件后导入。" : !requestedLedgerId && !suggestedPeriod ? "文件日期不足，请核对后补充月份。" : ""}</>}
+              {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>{sourceMonthText(periodEvidence.months, period)}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? '来源月份与上方账本月份不一致，仍沿用账本月份。' : periodEvidence.months.length > 1 ? "请按月拆分文件后导入。" : !requestedLedgerId && !suggestedPeriod ? "文件日期不足，请核对后补充月份。" : ""}</>}
             </p> : null}
             <div className="import-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); loadFiles(event.dataTransfer.files); }}>
               <input ref={inputRef} type="file" multiple aria-label="选择月度销售台账文件" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => { loadFiles(event.target.files); event.target.value = ""; }} />
@@ -546,7 +551,7 @@ export default function ImportPreview() {
             <div className="batch-file-heading"><span className="batch-file-icon"><FileSpreadsheet size={21} /></span><div><strong>{item.fileName}</strong><span className="batch-file-status">文件 {index + 1}{item.rowCount != null ? ` · ${item.rowCount.toLocaleString("zh-CN")} 行` : ""} · {item.status === "error" ? "解析失败" : item.status === "queued" ? (item.progressLabel || "等待解析") : item.validation ? item.validation.summary.errorCount || !item.validation.summary.validRowCount ? "需要处理" : "已校验" : item.status === "sheet_required" ? "请选择明细页" : "自动校验中"}</span></div><div className="batch-store form-field"><label htmlFor={`store-${item.itemId}`}>所属店铺</label><input id={`store-${item.itemId}`} aria-describedby={`store-note-${item.itemId}`} aria-invalid={!item.storeName.trim()} className="text-input" disabled={busy} value={item.storeName} onChange={(event) => update(item.itemId, { storeName: event.target.value })} /><small id={`store-note-${item.itemId}`}>{item.storeName.trim() ? "文件名仅作建议，请核对店铺归属。" : "请填写所属店铺后再校验。"}</small></div><Button disabled={busy} variant="ghost" aria-label={`移除 ${item.fileName}`} onClick={() => remove(item)}>移除</Button></div>
             {item.status === "error" ? <p role="alert" className="import-error">解析失败：{item.error}</p> : item.status === "queued" ? <p role="status">{item.progressLabel || "等待或正在读取工作簿…"}</p> : item.status === "sheet_required" ? <div className="form-field"><label htmlFor={`sheet-${item.itemId}`}>发现多个明细页，请选择本次来源</label><select id={`sheet-${item.itemId}`} className="text-input" defaultValue="" onChange={event => loadFiles([item.file], item, event.target.value)}><option value="" disabled>选择明细页</option>{item.sheetCandidates.map(name => <option key={name}>{name}</option>)}</select></div> : <fieldset disabled={busy} className="batch-fieldset">
               {files.some((other) => other.itemId !== item.itemId && other.fileHash === item.fileHash) && <p className="import-error" role="alert">相同文件内容重复，请移除重复文件并核对店铺。</p>}
-              <p className="batch-period-evidence">{item.selectedSheet ? `明细页：${item.selectedSheet} · ` : ""}来源月份：{item.periodEvidence?.distribution?.length ? item.periodEvidence.distribution.map(entry => `${entry.month}（${entry.count.toLocaleString("zh-CN")} 行）`).join("、") : "待核对"}</p>
+              <p className="batch-period-evidence">{item.selectedSheet ? `明细页：${item.selectedSheet} · ` : ""}{item.periodEvidence ? sourceMonthText(item.periodEvidence.distribution, period) : '月份待核对'}</p>
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
@@ -556,7 +561,7 @@ export default function ImportPreview() {
                 selected={item.filterOptions?.movementTypes ?? item.facets?.movementTypes ?? []}
                 defaults={item.preset === "ledger_report" ? LEDGER_REPORT_MOVEMENT_TYPES.filter(type => item.facets?.movementTypes?.includes(type)) : item.facets?.movementTypes ?? []}
                 onChange={movementTypes => update(item.itemId, { filterOptions: { ...item.filterOptions, movementTypes } })} />
-              <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? `所选货号完整月台账：${period || "待确认月份"}` : `部分来源：${period || "待确认月份"}`} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
+              <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? '所选货号完整月台账' : '本月部分来源'} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
               <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions?.movementTypes ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
               <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : "replace_store_month" })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期来源</option></select>{sourceIsFiltered(item) && <small>已缩小销售变动类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
               <div className="form-field"><label htmlFor={`import-mode-${item.itemId}`}>导入方式</label><select id={`import-mode-${item.itemId}`} className="text-input" value={sourceScope(item) === "partial" ? "append" : item.importMode ?? "append"} onChange={event => update(item.itemId, { importMode: event.target.value })}><option value="append">追加并替换重叠分组</option><option value="replace_store_month" disabled={sourceScope(item) !== "full_month"}>完整替换本店本月</option></select><small>完整月默认替换本店本月为此次选择；部分日期仅追加或替换重叠分组。请核对下方移除范围。</small></div>
@@ -572,12 +577,12 @@ export default function ImportPreview() {
           <div className="wizard-card-footer"><span>{files.length ? `${files.length} 个文件 · 已自动解析与校验` : "添加文件后自动校验"}</span>{(error || preview) && ready && <Button disabled={busy || supplierDirty} onClick={() => { invalidate(); void validate(); }}>重新校验</Button>}</div>
         </section>
         {error && <div className="import-error" role="alert"><AlertCircle size={18} />{error}</div>}
-        {preview && !supplierDirty && supplierMatched && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览 · {period}</h2>
-          {preview.items.map((item) => <article key={item.itemId}><h3>{item.storeName} · {item.fileName}</h3><p>{item.status === "skipped_duplicate" ? "已生效重复，本次跳过" : `新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组`} · {item.removedGroupCount ? `移除 ${item.removedGroupCount} 个旧分组 · ` : ""}有效 {item.validRowCount} / 跳过 {item.ignoredRowCount} / 错误 {item.errorCount}</p><p>{item.sourceCoverage?.scope === "full_month" ? "完整月台账" : "部分或旧来源"} · {period}{item.replacementScope === "store_month" ? " · 本店本月完整替换" : " · 按分组追加或替换"}</p><Totals summary={item.summary} />
+        {preview && !supplierDirty && supplierMatched && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览</h2>
+          {preview.items.map((item) => <article key={item.itemId}><h3>{item.storeName} · {item.fileName}</h3><p>{item.status === "skipped_duplicate" ? "已生效重复，本次跳过" : `新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组`} · {item.removedGroupCount ? `移除 ${item.removedGroupCount} 个旧分组 · ` : ""}有效 {item.validRowCount} / 跳过 {item.ignoredRowCount} / 错误 {item.errorCount}</p><p>{item.sourceCoverage?.scope === "full_month" ? "完整月台账" : "部分或旧来源"}{item.replacementScope === "store_month" ? " · 本店本月完整替换" : " · 按分组追加或替换"}</p><Totals summary={item.summary} />
             <OverlapPreview item={item} />
           </article>)}
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
-          <p>核对文件、店铺及 {period} 月份后，可在上方操作区导入。修改配置后会自动重新校验。</p>
+          <p>核对文件、店铺及上方账本月份后，即可导入。修改配置后会自动重新校验。</p>
         </section>}
       </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>
         <section className="batch-next-step" aria-label="继续本月利润核算">

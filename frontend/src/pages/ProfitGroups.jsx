@@ -13,13 +13,27 @@ function ProfitGroup({ group, columns, prepareRows, open, onToggle }) {
   </details>;
 }
 
-export default function ProfitGroups({ groups, columns, prepareRows, stateKey }) {
+export default function ProfitGroups({ groups, columns, prepareRows, stateKey, showAllColumns = false }) {
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
   const [expanded, setExpanded] = useState(() => readProfitViewState(stateKey).expanded);
   const scroll = useRef(null);
   const previousPage = useRef(page);
+  const previousColumnView = useRef('');
   const count = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const current = Math.min(page, count - 1);
+  useLayoutEffect(() => {
+    const view = JSON.stringify([stateKey, current, showAllColumns]);
+    if (previousColumnView.current === view) return;
+    previousColumnView.current = view;
+    if (!showAllColumns) return;
+    // Reveal the current page so changing columns also has a visible result
+    // when every SKC was collapsed. Keep rendering bounded by pagination.
+    setExpanded(previous => {
+      const next = [...new Set([...previous, ...groups.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE).map(group => group.id)])];
+      saveProfitViewState(stateKey, { expanded: next });
+      return next;
+    });
+  }, [showAllColumns, current, stateKey, groups]);
   useLayoutEffect(() => {
     const position = readProfitViewState(stateKey).windowScrollY;
     if (Number.isFinite(position)) window.scrollTo({ top: position, behavior: 'auto' });
