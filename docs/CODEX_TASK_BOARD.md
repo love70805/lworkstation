@@ -31,7 +31,7 @@
 - **实际基线**：2026-11-05 实际核对远端 `caf95151157ab1ffd5bdf148a176f398c1e39d82`。本机旧 checkout 与原有未提交材料单独保留，不能作为当前软件版本。
 - **完成信号**：主线可辨识，已完成对话归档，未决事项可见；版本可追到 PR、Release、标签与 CI，公开状态有服务元数据依据。
 - **验证**：检查候选文档差异、相对链接、版本/PR 对应、公开数据边界；文档 PR 仍走强制 CI。未启动桌面、安装软件、迁移或清理真实数据。
-- **保全**：整理前本机看板与对话索引在忽略归档 `archive/history-organize-20261105/`；[整理前公开看板](https://github.com/love70805/lworkstation/blob/caf95151157ab1ffd5bdf148a176f398c1e39d82/docs/CODEX_TASK_BOARD.md)通过 Git 保留，其他未提交材料及工作树保持。
+- **保全**：整理前本机看板与对话索引在忽略归档 `archive/history-organize-20261105/`；[整理前公开看板](https://github.com/love70805/lworkstation/blob/caf95151157ab1ffd5bdf148a176f398c1e39d82/docs/CODEX_TASK_BOARD.md)通过 Git 保留，主目录未提交材料保持。应用随对话归档的两个旧执行树另记恢复提交，规范候选与必要项目归档已核对保留，当前主目录及 2.0 工作树保留。
 
 ## 后续边界
 
