@@ -456,7 +456,13 @@
 .workspace-ledger-controls .workspace-flow-heading h2 { font-size: 14px; }
 .workspace-ledger-controls .workspace-flow-step { min-height: 54px; background: var(--surface); }
 .workspace-ledger-controls .workspace-flow-step.active { background: var(--primary-soft); }
-.workspace-page .dashboard-metric-card { min-height: 88px; box-shadow: none; }
+.workspace-page .dashboard-metric-card { min-height: 88px; box-shadow: none; container-type: inline-size; }
+.workspace-page .dashboard-metric-card strong { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: clamp(20px, 12cqi, 26px); }
+.workspace-page .dashboard-metric-card em { overflow: visible; text-overflow: clip; white-space: normal; }
+@container (max-width: 240px) {
+  .workspace-page .dashboard-metric-card > .overview-icon { display: none; }
+  .workspace-page .dashboard-metric-card > span:last-child { grid-column: 1 / -1; }
+}
 .workspace-page .dashboard-metric-grid { gap: 10px; }
 .workspace-status-strip { color: var(--text); }
 .workspace-page .task-list { padding: 0 14px 12px; }

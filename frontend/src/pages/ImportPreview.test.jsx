@@ -111,7 +111,7 @@ it('reuses sealed validation with its inferred month without retaining workbook 
   } });
   await upload(); await settled();
   expect(container.querySelector('#ledger-period')).toBeNull();
-  expect(container.querySelector('.batch-source-fieldset .batch-period-evidence').textContent).toContain('2026-08');
+  expect(container.querySelector('.batch-month-focus strong').textContent).toContain('2026-08');
   expect(mocks.parse).toHaveBeenCalledTimes(4);
   expect(mocks.validate).not.toHaveBeenCalled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ rowSource: { id: 'sealed' }, summary: { errorCount: 0 } });
@@ -260,7 +260,7 @@ it('auto-selects the reliable source month and requires no extra validation clic
   mocks.inspectPeriod.mockResolvedValue({evidence:{distribution:[{month:'2026-07',count:1}],suggestedPeriod:'2026-07',missingCount:0,invalidCount:0,errorCount:0}});
   await upload(false); await settled();
   expect(container.querySelector('#ledger-period')).toBeNull();
-  expect(container.querySelector('.batch-source-fieldset .batch-period-evidence').textContent).toContain('2026-07');
+  expect(container.querySelector('.batch-month-focus strong').textContent).toContain('2026-07');
   expect(mocks.preview).toHaveBeenCalledTimes(1);
   await act(async () => container.querySelector('.batch-overwrite input').click());
   await click('导入');

@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 it('ignores the whole displayed month with one click without describing prices as verified', async () => {
-  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" />));
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" hasPendingAnomalies />));
   await act(async () => button('一键忽略异常').click());
   expect(state.save).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', ignored: true });
   expect(host.textContent).toContain('含 0 元');
@@ -40,7 +40,7 @@ it('groups ignored evidence, opens details and supports individual and full revo
 });
 it('retains failures for retry and disables changes while saving or locked', async () => {
   state.save.mockRejectedValueOnce(new Error('写入失败'));
-  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" />));
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" hasPendingAnomalies />));
   await act(async () => button('一键忽略异常').click());
   expect(host.querySelector('[role="alert"]').textContent).toBe('写入失败');
   let finish; state.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
@@ -48,7 +48,7 @@ it('retains failures for retry and disables changes while saving or locked', asy
   expect(button('一键忽略异常').disabled).toBe(true);
   await act(async () => finish({ changedCount: 1 }));
   expect(host.querySelector('[role="alert"]')).toBeNull();
-  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" locked />));
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" hasPendingAnomalies locked />));
   expect(button('一键忽略异常').disabled).toBe(true);
 });
 
@@ -56,7 +56,7 @@ it('ignores only the checked items and allows a single item directly', async () 
   const readPending = () => [0, 1, 2].map(i => ({ inboxId: 'I', platformSku: `SKU-${i}`, match: { costDecision: { anomalies: [
     { warehouseSku: `W-${i}`, recordId: `R-${i}`, status: 'pending', originalUnitPrice: i ? 1 : 0, reasons: ['unit_price_one'] },
   ] } } }));
-  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" readPending={readPending} />));
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" hasPendingAnomalies readPending={readPending} />));
   await act(async () => button('选择忽略').click());
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
   expect(button('忽略选中（0 项）').disabled).toBe(true);
@@ -66,6 +66,22 @@ it('ignores only the checked items and allows a single item directly', async () 
   expect(button('忽略选中（0 项）').disabled).toBe(true);
   await act(async () => host.querySelectorAll('.anomaly-select-row button')[1].click());
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'I', warehouseSku: 'W-1' }] });
+});
+
+it('shows no ignore actions before anomalies arrive, and keeps only history after they are handled', async () => {
+  const readPending = vi.fn();
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" readPending={readPending} />));
+  expect(host.textContent).toBe('');
+  expect(state.save).not.toHaveBeenCalled();
+  expect(readPending).not.toHaveBeenCalled();
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" hasPendingAnomalies readPending={readPending} />));
+  expect(button('一键忽略异常')).toBeDefined();
+  expect(button('已忽略异常 · 0')).toBeUndefined();
+  state.rows = [{ inboxId: 'I', warehouseSku: 'W', originalUnitPrice: 0 }];
+  await act(async () => root.render(<ErpAnomalyActions ledgerId="L" readPending={readPending} />));
+  expect(button('一键忽略异常')).toBeUndefined();
+  expect(button('已忽略异常 · 1')).toBeDefined();
+  expect(state.save).not.toHaveBeenCalled();
 });
 
 it('restores multiple selected items, makes select-all include unloaded rows, and clears selection across months', async () => {

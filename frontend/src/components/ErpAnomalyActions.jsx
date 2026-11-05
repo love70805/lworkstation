@@ -26,7 +26,7 @@ function groupAnomalies(items, inboxes = []) {
   return [...groups.values()];
 }
 
-export default function ErpAnomalyActions({ ledgerId, locked = false, onReview, inboxes, readPending }) {
+export default function ErpAnomalyActions({ ledgerId, locked = false, onReview, inboxes, readPending, hasPendingAnomalies = false }) {
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [tab, setTab] = useState('pending'), [selected, setSelected] = useState(new Set()), [limit, setLimit] = useState(30);
   const [pending, setPending] = useState([]), [loading, setLoading] = useState(false);
@@ -65,11 +65,12 @@ export default function ErpAnomalyActions({ ledgerId, locked = false, onReview, 
       notify(value ? result.changedCount ? '已忽略价格异常，可用原价参与核算。没有可用采购数据的项目仍待补齐。' : '没有可忽略的价格异常；缺少采购数据的项目请另行补齐。' : '已恢复异常提醒。人工更正保留，ERP 成本已重新核对。');
     } catch (failure) { setError(failure.message); } finally { setBusy(false); }
   }
+  if (!hasPendingAnomalies && !ignoredGroups.length && !open && !busy && !error) return null;
   return <div className="erp-anomaly-actions">
-    <div className="page-actions"><Button disabled={locked || busy} loading={busy} onClick={() => apply(true)}>一键忽略异常</Button>
-      <Button variant="ghost" onClick={() => show('pending')}>选择忽略</Button>
-      <Button variant="ghost" onClick={() => show('ignored')}>已忽略异常 · {ignoredGroups.length}</Button></div>
-    <small>对本月已收到的采购价格异常保留原价核算（含 0 元），可单选、多选或全部处理。无采购数据等无法核算的项目仍会提示。</small>
+    <div className="page-actions">{hasPendingAnomalies ? <><Button disabled={locked || busy} loading={busy} onClick={() => apply(true)}>一键忽略异常</Button>
+      <Button variant="ghost" onClick={() => show('pending')}>选择忽略</Button></> : null}
+      {ignoredGroups.length ? <Button variant="ghost" onClick={() => show('ignored')}>已忽略异常 · {ignoredGroups.length}</Button> : null}</div>
+    {hasPendingAnomalies ? <small>已发现采购价格异常。可核对后选择保留原价核算（含 0 元），支持单选、多选或全部处理。无采购数据的项目仍需补齐成本。</small> : null}
     {error && !open ? <p role="alert">{error}</p> : null}
     <Modal open={open} title="价格异常" description="忽略不代表价格已核实。原始证据保留，恢复提醒后重新判断成本；人工更正不受影响。按同一次回传的仓库商品处理，共用采购的 SKU 一同生效。" onClose={() => !busy && setOpen(false)}
       footer={<><Button disabled={busy} onClick={() => setOpen(false)}>关闭</Button>

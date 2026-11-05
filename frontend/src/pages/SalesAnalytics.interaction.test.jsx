@@ -75,7 +75,7 @@ it('search changes reset pagination without destroying the input element', async
 
 it('keeps monthly data lazy, stacks daily stores on a shared column, and keeps hidden filters visual', async () => {
   expect(container.textContent).not.toContain('对比月份');
-  expect(find('月度')).toBeDefined();
+  expect(container.querySelector('[aria-label="趋势周期：每日，点击切换为月度"]')).not.toBeNull();
   expect(mock.read).toHaveBeenCalledTimes(1);
   expect(mock.read.mock.calls[0][0].ledgerId).toBe('L');
   const segments = [...container.querySelector('.sales-daily-bar').querySelectorAll('.sales-stack-segment')];

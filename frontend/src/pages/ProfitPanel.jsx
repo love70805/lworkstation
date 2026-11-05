@@ -317,14 +317,14 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       </div>
       {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={snapshot.ledger} onEdit={onEditSupplement} /> : null}
 
-      {missing ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>价格异常可在上方一键忽略；无采购数据的项目可在明细中补成本。</small></span><Button onClick={() => { changeFilter({ missingOnly: true }); setDetailsOpen(true); }}>只看待补成本</Button></div> : null}
+      {missing ? <div className="profit-cost-alert" role="status"><AlertCircle size={18} /><span><strong>还有 {missing} 条店铺 SKU 待确认成本</strong><small>先采集成本，再核对收到的异常；无采购数据的项目可在明细中补成本。</small></span><Button onClick={() => { changeFilter({ missingOnly: true }); setDetailsOpen(true); }}>只看待补成本</Button></div> : null}
 
       <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{filtered.length} 条店铺 SKU）</summary>{detailsOpen ? <Panel className={`profit-table-panel${showAllColumns ? '' : ' profit-table-compact'}`}>
         <div className="profit-table-heading">
           <div><h2>月度利润明细</h2><p>每个 SKU 一行，SKC 用分组标识；金额和成本均为人民币 CNY。</p></div>
-          <div className="page-actions"><span className="profit-filter-count">当前 {groupedFiltered.length} 个 SKC · {filtered.length} 个 SKU</span><Button variant="ghost" onClick={() => setShowAllColumns(value => !value)}>{showAllColumns ? "精简列" : "展开全部列"}</Button></div>
+          <div className="page-actions"><span className="profit-filter-count">当前 {groupedFiltered.length} 个 SKC · {filtered.length} 个 SKU</span><Button variant="ghost" aria-pressed={showAllColumns} onClick={() => setShowAllColumns(value => !value)}>{showAllColumns ? "精简列" : "展开全部列"}</Button></div>
         </div>
-        <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={showAllColumns ? columns : columns.filter(column => ["platformSku", "qty", "revenue", "unitCost", "profit", "costStatus"].includes(column.id ?? column.accessorKey))} prepareRows={prepareProfitTableRows} />
+        <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} showAllColumns={showAllColumns} columns={showAllColumns ? columns : columns.filter(column => ["platformSku", "qty", "revenue", "unitCost", "profit", "costStatus"].includes(column.id ?? column.accessorKey))} prepareRows={prepareProfitTableRows} />
       </Panel> : null}
       </details>
 

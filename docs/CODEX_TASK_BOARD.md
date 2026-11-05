@@ -2,7 +2,11 @@
 
 更新时间：2026-11-05。现行规则：[AGENTS.md](../AGENTS.md)。版本沿革见[开发历史](DEVELOPMENT_HISTORY.md)，软件用法见[2.0 指南](USER_GUIDE_2.0.md)。
 
-## 当前已交付：2.0.0
+## 2.0.1 同批界面小修
+
+按用户截图集中修复导入月份重复且不醒目、未核算就显示忽略异常、全部列切换看不到明细、趋势周期单按钮切换及首页金额截断。实际软件基线为 `caf95151157ab1ffd5bdf148a176f398c1e39d82`，已同步主线文档整理 `3fcdd13b0eb129d197e1ab840e0cb262d304478e`。84 项定向检查、完整前端 243 文件 / 1,922 项、桌面 verify、18 组浅深色与窗口布局和实际导入路径通过；不改业务计算或真实数据。实现、候选和发布边界见[本批记录](integration/IMPORT_PROFIT_UI_2.0.1.md)与[候选登记](../releases/README.md)。
+
+## 2.0.0 已交付内容
 
 [2.0.0](https://github.com/love70805/lworkstation/releases/tag/v2.0.0) 已公开为稳定 Latest。2026-11-05 本轮联网核对：远端 main 与标签均为 `caf95151157ab1ffd5bdf148a176f398c1e39d82`；[PR #323](https://github.com/love70805/lworkstation/pull/323) 已合并，[软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/41872909985) 成功，5 个发布资产均已上传。
 

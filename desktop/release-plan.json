@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "candidateOnly": true,
-  "integrationBranch": "codex/lworkstation-2-0",
+  "integrationBranch": "codex/import-month-anomaly-2-0-1",
   "requiredCommits": [
     {
-      "module": "stable-1.2.4",
-      "commit": "f46904224d5573a87a00971c64f9e5fd55b08584"
+      "module": "stable-2.0.0",
+      "commit": "caf95151157ab1ffd5bdf148a176f398c1e39d82"
     }
   ]
 }

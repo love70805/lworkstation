@@ -37,6 +37,19 @@ it('keeps old months editable without a reopen dialog',async()=>{
   expect(container.querySelector('.profit-summary-action').disabled).toBe(false);
 });
 
+it('reveals actual SKU rows and additional fields when expanding all columns from collapsed groups', async () => {
+  const details = container.querySelector('details:has(.profit-table-panel)') ?? [...container.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent.includes('查看利润明细'));
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
+  expect(container.querySelector('.profit-skc-group table')).toBeNull();
+  await act(async () => findButton('展开全部列').click());
+  expect(container.querySelector('.profit-skc-group').open).toBe(true);
+  expect(container.querySelector('.profit-skc-group table').textContent).toContain('总采购成本');
+  expect(container.querySelector('.profit-skc-group table').textContent).toContain('仓储成本');
+  await act(async () => findButton('精简列').click());
+  expect(container.querySelector('.profit-skc-group table').textContent).not.toContain('总采购成本');
+  expect(container.querySelector('.profit-skc-group table').textContent).toContain('成本详情');
+});
+
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 it("opens the warehouse dialog outside collapsed details, cancels, and applies through the visible action", async () => {
   expect(container.querySelector("details").open).toBe(false);

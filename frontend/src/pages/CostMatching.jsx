@@ -1100,7 +1100,8 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     className="cost-detail-modal" title="成本详情" formFirst onClose={closeCostDetails}>
     <details className="cost-correction-evidence"><summary>采购证据与异常原因</summary>{targetDetails}</details>
   </ManualCostDialog> : null;
-  const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} readPending={readPendingAnomalies} locked={locked} onReview={item => {
+  const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} readPending={readPendingAnomalies}
+    hasPendingAnomalies={inboxReview.exceptions.some(item => item.inboxId && item.state === 'anomaly_pending')} locked={locked} onReview={item => {
     const row = allReviewRows.find(row => item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku)
       || (row.match?.sourceWarehouseSku ?? row.erpCost?.warehouseSku) === item.warehouseSku);
     if (row) setManualTarget({ id: row.id, mode: 'edit', inboxId: item.inboxId });

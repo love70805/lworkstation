@@ -23,7 +23,7 @@ it('holds the selected ledger month and returns to the original page and filters
   mocks.ledgers.mockResolvedValue([{ id: 'june', workspaceId: 'w', period: '2026-06', status: 'cost_pending' }]);
   await mount('june');
   expect(host.querySelector('#ledger-period')).toBeNull();
-  expect(host.querySelector('.batch-source-fieldset .batch-period-evidence').textContent).toContain('2026-06');
+  expect(host.querySelector('.batch-month-focus strong').textContent).toContain('2026-06');
   await act(async () => host.querySelector('.wizard-topbar button').click());
   expect(host.querySelector('output').textContent).toBe('/workspace?ledger=june&store=A&q=sku');
 });
