@@ -1,25 +1,25 @@
 # Lworkstation 开发历史
 
-整理日期：2026-11-05（北京时间）。本页记录开发阶段、已交付结果及追溯入口；当前执行范围以[任务看板](CODEX_TASK_BOARD.md)为准。
+本页按北京时间记录已发布的版本，最近核对日期为 2026-11-06。当前工作和待确认项见[任务看板](CODEX_TASK_BOARD.md)。
 
 ## 当前交付与 GitHub
 
-- 当前公开稳定版：[2.0.0](https://github.com/love70805/lworkstation/releases/tag/v2.0.0)，2026-11-05 01:09 发布。发布服务返回非草稿、非预发布，5 个资产均已上传。
-- 软件标签和本轮核对的远端 main 同为 `caf95151157ab1ffd5bdf148a176f398c1e39d82`。[PR #323](https://github.com/love70805/lworkstation/pull/323) 已合并，[该软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/41872909985) 成功。
-- 截至本次核对，GitHub 可见 116 个 Release、203 个分支、10 个开放 PR、0 个独立开放 Issue。10 个 PR 均为依赖更新；数量是整理前快照，不包括本次文档 PR。
-- 本次整理文档与对话索引，不改变软件版本、发布资产、业务数据或依赖。GitHub 的当前值可在[仓库](https://github.com/love70805/lworkstation)、[开放 PR](https://github.com/love70805/lworkstation/pulls)、[Actions](https://github.com/love70805/lworkstation/actions)查看。
+2026-11-06 核实时，最新稳定版为 2.0.4，当日 15:30 公开，4 个资产均已上传。软件标签指向 PR #332 的合并提交 `a8d2de2`，该提交的主线 CI 已通过。[2.0.4 发布记录](https://github.com/love70805/lworkstation/releases/tag/v2.0.4) · [PR #332](https://github.com/love70805/lworkstation/pull/332) · [软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/42180217990)
+
+此次整理时，GitHub 共有 120 个公开 Release。以后查当前稳定版和待审改动，可直接打开[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)和[开放 PR](https://github.com/love70805/lworkstation/pulls)。
 
 ## 开发阶段
 
 | 阶段 | 交付重点 | 追溯入口 |
 | --- | --- | --- |
-| 0.2 系列，2026-09 | 建立选品资料、ERP 证据、台账和月度利润的基础工作流；逐步完善桌面交付 | [0.2.19](RELEASE_0.2.19.md)、[完整发布索引](archive/RELEASE_INDEX_2026_11_05.md) |
+| 0.2 系列，2026-09 | 建立选品资料、ERP 证据、台账和月度利润的基础工作流，逐步完善桌面交付 | [0.2.19](RELEASE_0.2.19.md) · [早期发布索引](archive/RELEASE_INDEX_2026_11_05.md) |
 | 0.3 Beta / RC / 稳定版，2026-09 至 10 月初 | 梳理导入、成本恢复、采购历史和桌面稳定流程，明确候选与稳定通道 | [0.3.0](RELEASE_0.3.0.md)、[0.3.13](RELEASE_0.3.13.md) |
 | 0.4 系列，2026-10 | 负责货号范围、商品资料、正式成本核对、代发/扣款导出、任务接续和大数据响应；后期补齐备份恢复与清空边界 | [0.4.0](RELEASE_0.4.0.md)、[0.4.44](RELEASE_0.4.44.md)、[0.4.54](RELEASE_0.4.54.md) |
 | 1.0 RC 与 1.0.0，2026-10-22 至 23 | 加固恢复、更新安装与成本任务，统一模糊/精准货号识别，进入 1.0 稳定版 | [RC1](RELEASE_1.0.0-rc.1.md)、[1.0.0](RELEASE_1.0.0.md) |
 | 1.0.1 至 1.0.11，2026-10-24 至 11-03 | 降低后台内存；修复跨范围、历史成本、任务接收和权限恢复；简化导入与日常核算 | 下表及各批契约 |
 | 1.0.12 与 1.2 系列，2026-11-04 | 采购表批量采集、异常补查；来源合并与顺序、导出布局；整项核算和插件适配 | 下表及各批契约 |
 | 2.0.0，2026-11-05 | 合并核算入口，账本随时调整，异常单项/多选/全部忽略和恢复，商品资料独立补齐，优化加载与反馈 | [2.0 实施记录](integration/DESKTOP_WORKFLOW_2.0.0.md)、[使用指南](USER_GUIDE_2.0.md) |
+| 2.0.1 至 2.0.4，2026-11-05 至 06 | 改进月份与明细显示、商品资料后台补齐、ERP 登录后接续和成本核对 | 下表列出四个稳定版及对应 PR |
 
 ## 近期版本与对应 PR
 
@@ -27,6 +27,10 @@
 
 | 版本 | 公开日期 | 交付结果 | PR / 实施证据 |
 | --- | --- | --- | --- |
+| [2.0.4](https://github.com/love70805/lworkstation/releases/tag/v2.0.4) | 11-06 | 查看成本与人工更正分开，待补行显示原因，跨店范围和计数明确 | [#332](https://github.com/love70805/lworkstation/pull/332) |
+| [2.0.3](https://github.com/love70805/lworkstation/releases/tag/v2.0.3) | 11-05 | 桌面 ERP 登录后核验会话，接续原来等待中的成本或商品资料任务 | [#327](https://github.com/love70805/lworkstation/pull/327) |
+| [2.0.2](https://github.com/love70805/lworkstation/releases/tag/v2.0.2) | 11-05 | 待补入口定位到 SKU，商品资料支持一键后台获取档案并补齐 | [#326](https://github.com/love70805/lworkstation/pull/326) · [契约](integration/COST_ARCHIVE_WORKFLOW_2.0.2.md) |
+| [2.0.1](https://github.com/love70805/lworkstation/releases/tag/v2.0.1) | 11-05 | 调整导入月份、异常按钮、利润明细展开和首页趋势显示 | [#325](https://github.com/love70805/lworkstation/pull/325) · [契约](integration/IMPORT_PROFIT_UI_2.0.1.md) |
 | [2.0.0](https://github.com/love70805/lworkstation/releases/tag/v2.0.0) | 11-05 | 统一核算工作流、可撤回异常处理、移除定稿锁定、商品资料补齐 | [#323](https://github.com/love70805/lworkstation/pull/323) · [契约](integration/DESKTOP_WORKFLOW_2.0.0.md) |
 | [1.2.4](https://github.com/love70805/lworkstation/releases/tag/v1.2.4) | 11-04 | 整项核算、助手 8.0.58、插件回滚/工作区读取/汇总显示修复 | [#322](https://github.com/love70805/lworkstation/pull/322) · [契约](integration/ERP_TASK_FLOW_1.2.4.md) |
 | [1.2.3](https://github.com/love70805/lworkstation/releases/tag/v1.2.3) | 11-04 | 浅蓝表头、汇总下移、取消冻结 | [#321](https://github.com/love70805/lworkstation/pull/321) · [契约](integration/EXPORT_SUMMARY_LAYOUT_1.2.3.md) |
@@ -47,7 +51,7 @@
 | [1.0.1](https://github.com/love70805/lworkstation/releases/tag/v1.0.1) | 10-24 | 后台证据内存及重新打开等待优化 | [#293](https://github.com/love70805/lworkstation/pull/293) · [记录](RELEASE_1.0.1.md) |
 | [1.0.0](https://github.com/love70805/lworkstation/releases/tag/v1.0.0) | 10-23 | 模糊/精准货号识别与逐店范围隔离 | [#289](https://github.com/love70805/lworkstation/pull/289) · [记录](RELEASE_1.0.0.md) |
 
-其余版本见[完整发布索引](archive/RELEASE_INDEX_2026_11_05.md)。缺少单独 `RELEASE_*.md` 的新批次，直接沿用同批 PR、Release 和 `docs/integration/` 契约，不补造一次软件发布。
+2.0.0 及以前的 116 个公开发布可查 11 月 5 日保留的快照。各版本的安装包和说明可在 GitHub 按标签查找。[历史发布索引](archive/RELEASE_INDEX_2026_11_05.md) · [全部 Releases](https://github.com/love70805/lworkstation/releases)
 
 ## 已被后续决策替代的历史流程
 
@@ -63,7 +67,7 @@
 
 ## GitHub 仍开放的依赖 PR
 
-这些是待评估的依赖更新，不表示当前稳定版有同数量的故障。本次不安装、合并或关闭它们。
+2026-11-06 清理分支后复核，下列 10 个依赖 PR 仍开放，其中 9 个面向 `main`，#76 面向历史保护分支。
 
 | PR | 依赖 | 目标分支 |
 | --- | --- | --- |
@@ -78,7 +82,19 @@
 | [#73](https://github.com/love70805/lworkstation/pull/73) | react / react-dom | main |
 | [#71](https://github.com/love70805/lworkstation/pull/71) | @fontsource/inter | main |
 
-分支名称和创建时间不能证明任务未完成，也不能证明可以删除。源码恢复优先使用已合并 PR、软件标签与提交；本次保留历史分支和标签，未重写 Git 历史。
+## 2026-11-06 远端分支整理
+
+清理前有 211 个远端分支。以 `v2.0.4` 的提交 `a8d2de2` 为基线，逐一核对各分支的完整提交是否已进入 `main` 的历史，并排除受保护、开放 PR 使用和本机工作树使用的分支。GitHub 在一次原子推送中删除了符合条件的 186 个分支。逐个比对后，保留的 25 个分支和全部 126 个标签均指向清理前的提交或标签对象。[分支名与完整提交号](archive/MERGED_BRANCHES_2026_11_06.tsv)
+
+如需恢复单个分支，在已取得完整 `main` 历史的仓库根目录运行以下 PowerShell 命令，将第一行换为清单中的分支名。推送只在远端尚无同名分支时创建它。
+
+```powershell
+$name = 'codex/1.0-rc-hardening'
+$row = Import-Csv -LiteralPath 'docs/archive/MERGED_BRANCHES_2026_11_06.tsv' -Delimiter ([char]9) |
+    Where-Object branch -CEQ $name
+if ($null -eq $row -or $row.commit -cnotmatch '^[0-9a-f]{40}$') { throw '请检查分支名和恢复清单' }
+git -c push.followTags=false push "--force-with-lease=refs/heads/${name}:" origin "$($row.commit):refs/heads/$name"
+```
 
 ## 资料入口与维护
 
@@ -87,9 +103,9 @@
 | 当前软件用法 | [2.0 使用指南](USER_GUIDE_2.0.md) |
 | 当前版本、通道、安装包哈希 | [发布状态](RELEASE_STATUS.md)、[候选登记](../releases/README.md) |
 | 当前范围和未决事项 | [任务看板](CODEX_TASK_BOARD.md) |
-| 各版本交付 | 本页近期时间线、[全部 Release 索引](archive/RELEASE_INDEX_2026_11_05.md)、GitHub PR / Release |
+| 各版本交付 | [近期版本与对应 PR](#近期版本与对应-pr) · [截至 2.0.0 的发布索引](archive/RELEASE_INDEX_2026_11_05.md) · [全部 Releases](https://github.com/love70805/lworkstation/releases) |
 | 历史审查及撤回结论 | [AI 讨论区](agent-discussions/README.md) |
-| 本轮整理前公开看板 | [固定提交快照](https://github.com/love70805/lworkstation/blob/caf95151157ab1ffd5bdf148a176f398c1e39d82/docs/CODEX_TASK_BOARD.md) |
-| 本机对话对应关系、未提交记录和私有证据 | 本机忽略归档 `archive/history-organize-20261105/`，不上传 GitHub |
+| 历次整理前的看板 | [11 月 5 日](https://github.com/love70805/lworkstation/blob/caf95151157ab1ffd5bdf148a176f398c1e39d82/docs/CODEX_TASK_BOARD.md) · [11 月 6 日](https://github.com/love70805/lworkstation/blob/a8d2de2cb26e99e9ee667daee9a2ab155a1da903/docs/CODEX_TASK_BOARD.md) |
+| 本机对话与私有证据 | 从项目置顶主线、已归档对话和本机项目归档追溯 |
 
 后续每批只在看板保留当前结果与真实未决项，详细交付沿用同批 PR / Release。历史事实可追溯，过时的“待办”不能自动恢复为新任务。聊天记录继续保留；应用随对话归档的旧执行工作树另记源码恢复入口，规范候选与必要项目归档保留，真实业务数据不在整理范围。
