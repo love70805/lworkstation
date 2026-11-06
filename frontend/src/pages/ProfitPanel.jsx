@@ -164,7 +164,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       cell: ({ getValue, row }) => <div>
         <strong className="mono table-code" title={getValue()}>{getValue()}</strong>
         {row.original.attribute && <small className="profit-attribute">{row.original.attribute}</small>}
-        {row.original.orderNumber && <small className="profit-attribute">1688 单号 {row.original.orderNumber}</small>}
+        {row.original.orderNumber && <small className="profit-attribute">采购单号 {row.original.orderNumber}</small>}
       </div>,
     },
     {
@@ -213,10 +213,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       enableSorting: false,
       size: 118,
       meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
-      cell: ({ getValue, row }) => <>
-        {getValue() == null ? <span className="pending-text" aria-label="待补成本后计算利润">—</span> : <strong className={`mono table-number ${Number(getValue()) < 0 ? "profit-negative" : "profit-positive"}`}>{formatProfitAmount(getValue())}</strong>}
-        {Number(row.original.penalty ?? 0) !== 0 && <small className="profit-attribute">客退罚款 {currency(row.original.penalty)}</small>}
-      </>,
+      cell: ({ getValue }) => getValue() == null ? <span className="pending-text" aria-label="待补成本后计算利润">—</span> : <strong className={`mono table-number ${Number(getValue()) < 0 ? "profit-negative" : "profit-positive"}`}>{formatProfitAmount(getValue())}</strong>,
     },
     {
       id: "costStatus",

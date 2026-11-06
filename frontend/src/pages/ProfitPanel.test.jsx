@@ -111,6 +111,12 @@ it("opens the cost details from the missing-cost action", async () => {
   expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
   expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
   scroll.mockRestore();
+  await act(async () => container.querySelector('.profit-group-toggle').click());
+  for (const open of [false, true]) {
+    await act(async () => { details.open = open; details.dispatchEvent(new Event('toggle')); });
+  }
+  expect(container.querySelector('.profit-group-toggle').getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('.profit-variant-row')).toBeNull();
 });
 it('retains same-number store exclusions in current profit display and saved filters', async()=>{
   await act(async()=>root.unmount());
