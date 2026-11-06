@@ -62,9 +62,12 @@ export default function ProfitScopeFilters({ filter, stores = [], suppliers = []
     {showStore ? <label className="profit-scope-field"><span>店铺</span><select className="select-input" aria-label="查询店铺" value={filter.storeFilter} onChange={event => onChange({ storeFilter: event.target.value })}><option value="all">全部店铺</option>{stores.map(store => <option value={store} key={store}>{store}</option>)}</select></label> : null}
     <div className="profit-scope-field"><span>供方货号</span><SupplierMultiSelect options={suppliers} selection={filter.supplierSelection} storeSelection={filter.supplierStoreSelection} onChange={(supplierSelection, supplierStoreSelection) => onChange({ supplierSelection, supplierStoreSelection, supplierScopeError: undefined })} workspaceId={workspaceId} scopeRows={scopeRows} store={filter.storeFilter} /></div>
     <div className="profit-scope-field profit-scope-search"><span>SKC / SKU 搜索</span><SearchInput value={filter.query} onChange={event => onChange({ query: event.target.value })} label="在当前范围搜索 SKC、SKU" placeholder={searchCosts ? "搜索 SKC、SKU、仓库 SKU、供应商或采购单..." : "搜索 SKC、SKU、属性、供方货号或店铺..."} /></div>
-    <label className="profit-filter-check"><input type="checkbox" checked={filter.missingOnly} onChange={event => onChange({ missingOnly: event.target.checked })} />只看缺成本</label>
+    <div role="group" aria-label="明细成本状态" className="profit-status-switch">
+      <Button aria-pressed={!filter.missingOnly} onClick={() => onChange({ missingOnly: false })}>全部</Button>
+      <Button aria-pressed={filter.missingOnly} onClick={() => onChange({ missingOnly: true })}>只看缺成本</Button>
+    </div>
     <button className="profit-filter-reset" type="button" onClick={() => onChange({ query: '', storeFilter: 'all', supplierSelection: null, supplierStoreSelection: undefined, missingOnly: false, supplierScopeError: undefined })}>重置筛选</button>
-    <p className="profit-scope-help">台账完整保留，搜索与 ERP 采集按当前范围；报告包含本月全部店铺。</p>
+    <p className="profit-scope-help">商品小计、明细和 ERP 采集使用当前筛选。导出包含本月全部店铺。</p>
     {filter.supplierScopeError && <p role="alert" className="profit-scope-warning">{filter.supplierScopeError}</p>}
   </div>;
 }

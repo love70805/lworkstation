@@ -1525,3 +1525,31 @@ textarea::placeholder {
 .main-canvas:focus { outline: none; }
 
 .sidebar-bottom { margin-top: auto; border-top: 1px solid var(--border-strong); padding-top: 10px; }
+
+/* Use the desktop browser’s accessible picker with the workspace theme. */
+@supports (appearance: base-select) {
+  :is(.profit-page, .product-collection-tools) select.select-input,
+  :is(.profit-page, .product-collection-tools) select.select-input::picker(select) { appearance: base-select; }
+  :is(.profit-page, .product-collection-tools) select.select-input::picker(select) {
+    margin-block: 4px;
+    padding: 4px;
+    max-height: min(320px, 55vh);
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--control-border);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgb(20 34 50 / 16%);
+  }
+  :is(.profit-page, .product-collection-tools) select.select-input::picker-icon { color: var(--text-muted); }
+  :is(.profit-page, .product-collection-tools) select.select-input:open::picker-icon { rotate: 180deg; }
+  :is(.profit-page, .product-collection-tools) select.select-input option {
+    min-height: 34px;
+    padding: 6px 10px;
+    gap: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  :is(.profit-page, .product-collection-tools) select.select-input option:checked { background: var(--primary-soft); color: var(--primary); }
+  :is(.profit-page, .product-collection-tools) select.select-input option:is(:hover, :focus-visible) { background: var(--surface-hover); }
+  :is(.profit-page, .product-collection-tools) select.select-input option::checkmark { order: 1; margin-inline-start: auto; }
+}

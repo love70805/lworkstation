@@ -685,7 +685,7 @@ function ProductEditor() {
 
         {prefill?.source === "erp" || prefill?.warnings?.length || currentProductId && draft.platformSkc ? <Panel className="erp-catalog-prefill"><details><summary>ERP 档案资料与来源详情</summary>
           <div className="catalog-request-controls"><Button variant="ghost" onClick={() => navigate('/products?collection=1')}>获取 ERP 商品档案</Button></div>
-          <p className="editor-inline-note">在商品资料页一键后台获取表格档案，匹配后自动补齐；手动导入也集中在那里。当前已编辑的字段优先保留。</p>
+          <p className="editor-inline-note">在商品资料页一键后台获取表格档案，匹配后自动补齐。当前已编辑的字段优先保留。</p>
           {!missingCatalogGroups.length ? <p className="editor-inline-note">ERP 基础资料已收齐；参考成本仍按有效采购证据单独判定。</p> : null}
           {(prefill?.warnings ?? []).map(warning => <p className="erp-catalog-warning" key={warning}><AlertCircle size={15} />{warning}</p>)}
           <ErpCatalogEvidence sources={prefill?.sources} purchases={prefill?.purchases} />

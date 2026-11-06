@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Plus, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
@@ -102,12 +102,20 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const calculation = computed?.snapshot === snapshot && computed?.warehouseRate === warehouseRate ? computed : { rows: sameLedger ? computed.rows : [], loading: Boolean(snapshot?.rows?.length) };
   const calculated = calculation.rows;
 
-  const stores = useMemo(() => [...new Set(calculated.map((row) => row.store).filter(Boolean))].toSorted(), [calculated]);
-  const suppliers = useMemo(() => [...new Set(calculated.filter((row) => storeFilter === "all" || row.store === storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [calculated, storeFilter]);
+  const scopeRows = suppliedSnapshot?.rows ?? calculated;
+  const stores = useMemo(() => [...new Set(scopeRows.map((row) => row.store).filter(Boolean))].toSorted(), [scopeRows]);
+  const suppliers = useMemo(() => [...new Set(scopeRows.filter((row) => storeFilter === "all" || row.store === storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [scopeRows, storeFilter]);
   const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, supplierStoreSelection, missingOnly, ...(supplierScopeError ? { supplierScopeError } : {}) }), [missingOnly, query, storeFilter, supplierSelection, supplierStoreSelection, supplierScopeError]);
   const viewStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, filterState]);
   const detailsStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, 'details']);
   useEffect(() => { setDetailsOpen(readProfitViewState(detailsStateKey).detailsOpen !== false); }, [detailsStateKey]);
+  const readyForDetails = Boolean(snapshot?.ledger && calculated.length);
+  useLayoutEffect(() => {
+    if (!readyForDetails) return;
+    const position = readProfitViewState(detailsStateKey).windowScrollY;
+    if (Number.isFinite(position)) window.scrollTo({ top: position, behavior: 'auto' });
+    return () => saveProfitViewState(detailsStateKey, { windowScrollY: window.scrollY });
+  }, [detailsStateKey, readyForDetails]);
   const changeFilter = (patch) => {
     const next = { ...filterState, ...patch };
     const params = buildProfitQuery({ ledgerId: snapshot?.ledger?.id, workspaceId: snapshot?.ledger?.workspaceId, ...next, view: "detail" });
@@ -115,8 +123,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
   };
-  const showMissingCosts = (allStores = false) => {
-    const patch = { missingOnly: true, ...(allStores ? { storeFilter: 'all', query: '', supplierSelection: null, supplierStoreSelection: null, supplierScopeError: undefined } : {}) };
+  const showMissingCosts = () => {
+    const patch = { missingOnly: true, storeFilter: 'all', query: '', supplierSelection: null, supplierStoreSelection: null, supplierScopeError: undefined };
     pendingReveal.current = filterIdentity({ ...filterState, ...patch });
     changeFilter(patch);
     setDetailsOpen(true);
@@ -126,7 +134,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   useEffect(() => {
     if (!detailsRequest || detailsRequest.ledgerId !== snapshot?.ledger?.id || handledRequest.current === detailsRequest) return;
     handledRequest.current = detailsRequest;
-    showMissingCosts(detailsRequest.allStores);
+    showMissingCosts();
   }, [detailsRequest]);
   useEffect(() => {
     if (!pendingReveal.current || pendingReveal.current !== filterIdentity(filterState) || !detailsOpen || calculation.loading) return;
@@ -134,7 +142,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       const panel = detailsPanel.current;
       if (!panel) return;
       pendingReveal.current = null;
-      panel.focus({ preventScroll: true });
+      panel.querySelector('.profit-status-switch [aria-pressed="true"]')?.focus({ preventScroll: true });
       panel.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
     });
     return () => cancelAnimationFrame(frame);
@@ -259,9 +267,17 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     return <><Panel className="route-loader">正在读取月度账本...</Panel></>;
   }
 
-  if (calculation.loading && !calculated.length && !manualTarget) return <Panel className="route-loader" role="status">{calculationStatus.startsWith('正在') ? calculationStatus : calculationStatus === "recalculating" ? "正在后台计算本月利润…" : "正在读取本月利润…"}<progress aria-label="本月利润计算进度" /></Panel>;
+  const scopeFilters = <ProfitScopeFilters filter={filterState} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId}
+    scopeRows={scopeRows} showStore={!suppliedSnapshot} onChange={patch => {
+      if (patch.missingOnly === true) {
+        setDetailsOpen(true);
+        saveProfitViewState(detailsStateKey, { detailsOpen: true });
+      }
+      changeFilter(patch);
+    }} />;
+  if (calculation.loading && !calculated.length && !manualTarget) return <>{scopeFilters}<Panel className="route-loader" role="status">{calculationStatus.startsWith('正在') ? calculationStatus : calculationStatus === "recalculating" ? "正在后台计算本月利润…" : "正在读取本月利润…"}<progress aria-label="本月利润计算进度" /></Panel></>;
   if (calculation.error && !calculated.length) {
-    return <Panel><div role="alert"><h2>本月利润待处理</h2><p>{calculation.error}</p><p>尚未计算商品利润，请按上方原因处理。若为来源数据错误，请核对台账；旧扣款需登记为独立扣款来源。</p></div><Button onClick={() => { setRetryCalculation(value => value + 1); }}>重新读取</Button><Button onClick={() => navigate("/ledger")}>核对月度账本</Button><Button disabled>导出利润表</Button></Panel>;
+    return <>{scopeFilters}<Panel><div role="alert"><h2>本月利润待处理</h2><p>{calculation.error}</p><p>尚未计算商品利润，请按上方原因处理。若为来源数据错误，请核对台账；旧扣款需登记为独立扣款来源。</p></div><Button onClick={() => { setRetryCalculation(value => value + 1); }}>重新读取</Button><Button onClick={() => navigate("/ledger")}>核对月度账本</Button><Button disabled>导出利润表</Button></Panel></>;
   }
   if (!snapshot?.ledger || !snapshot.rows?.length) {
     return (
@@ -279,7 +295,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
         <div><strong>本月下一步</strong><span>{nextStep.text}</span></div>
         {nextStep.action ? <Button disabled={Boolean(calculation.loading || calculation.error)} onClick={() => navigate(nextStep.key === 'cost' ? allMissingCostsHref : buildProfitHref({ ledgerId: snapshot.ledger.id, view: 'detail' }))}>{nextStep.action}</Button> : null}
       </section> : null}
-      {!suppliedSnapshot && missing ? <CostAttention missing={missing} store={storeFilter} onShowMissing={() => showMissingCosts()} /> : null}
+      {!suppliedSnapshot && missing ? <CostAttention missing={missing} /> : null}
       <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
         <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
         <span className="profit-purpose-arrow">→</span>
@@ -289,21 +305,24 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
         <div className="profit-purpose-formula mono">商品利润 = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元)</div>
       </Panel></details>
 
-      {!suppliedSnapshot ? <ProfitScopeFilters filter={filterState} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={calculated} onChange={changeFilter} /> : null}
+      {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={snapshot.ledger} onEdit={onEditSupplement} /> : null}
+      <p className="profit-subtotal-label">商品小计 · 当前筛选范围</p>
       <div className="profit-summary-strip profit-summary-products">
         <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
         <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
         <button className="profit-summary-item profit-summary-action" onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
         <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>商品利润</span><strong>{missing ? "待确认成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : "金额 − 采购 − 仓储"}</small></div>
       </div>
-      {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={snapshot.ledger} onEdit={onEditSupplement} /> : null}
 
-      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section ref={detailsPanel} tabIndex={-1} aria-label="月度利润明细" className="panel profit-table-panel">
+      <div className="profit-detail-area" ref={detailsPanel}>
+      {scopeFilters}
+      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section aria-label="月度利润明细" className="panel profit-table-panel">
         <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns}
           skcCount={skcCount} storeSkuCount={storeSkuCount}
-          expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
+          initiallyExpanded={missingOnly} expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
       </section> : null}
       </details>
+      </div>
 
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本，可随时调整。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
       {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={calculated.find(row => row.id === manualTarget.id) ?? manualTarget} viewFirst={manualTarget.mode === 'details'} onClose={() => setManualTarget(null)} /> : null}
@@ -327,7 +346,6 @@ export function ProfitViewsContent({ monthControl = null }) {
   const filter = useMemo(() => readProfitFilter(params, snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId }), [params, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const store = filter.storeFilter;
   const stores = useMemo(() => [...new Set((snapshot?.rows ?? []).map(row => row.store))], [snapshot?.rows]);
-  const suppliers = useMemo(() => [...new Set((snapshot?.rows ?? []).filter(row => store === "all" || row.store === store).map(row => row.supplierNumber).filter(Boolean))].toSorted(), [snapshot?.rows, store]);
   const changeScope = patch => {
     const next = { ...filter, ...patch };
     const nextParams = buildProfitQuery({ ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId, ...next, view: "detail" });
@@ -347,12 +365,11 @@ export function ProfitViewsContent({ monthControl = null }) {
       <MonthlyReportManager compact key={'report/'+snapshot.ledger.id} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId}
         onState={setReportState} editor={supplementEditor} onEdit={setSupplementEditor}
         missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null}
-        onOpenCosts={() => setDetailsRequest({ allStores: true, ledgerId: snapshot.ledger.id })} />
+        onOpenCosts={() => setDetailsRequest({ ledgerId: snapshot.ledger.id })} />
     </section>
-    <ProfitScopeFilters filter={filter} suppliers={suppliers} workspaceId={snapshot.ledger.workspaceId} scopeRows={snapshot.rows ?? []} onChange={changeScope} showStore={false} />
     <CostMatchingContent compact suppliedSnapshot={snapshot} key={'cost/'+snapshot.ledger.id}
       validatedContext={{workspaceId:snapshot.ledger.workspaceId, ledgerId:snapshot.ledger.id, store}}
-      reviewTarget={costTarget} onReviewReasons={setReviewReasons} onReviewClose={() => setCostTarget(null)} onShowMissing={() => setDetailsRequest({ allStores: false, ledgerId: snapshot.ledger.id })} />
+      reviewTarget={costTarget} onReviewReasons={setReviewReasons} onReviewClose={() => setCostTarget(null)} />
     <ProfitWorkspaceContent suppliedSnapshot={snapshot} onReadiness={setReadiness} reportState={reportState}
       reviewReasons={reviewReasons?.ledgerId === snapshot.ledger.id && reviewReasons.workspaceId === snapshot.ledger.workspaceId ? reviewReasons.byStoreSku : null}
       onEditSupplement={setSupplementEditor} onCostDetails={setCostTarget} detailsRequest={detailsRequest} key={'profit/'+snapshot.ledger.id} />

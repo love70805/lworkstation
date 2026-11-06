@@ -134,7 +134,10 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   return <Panel className="sales-analytics" style={assignSalesStoreColors([...storeNames, ...stores], colorAssignments.current)}>
     <div className="sales-analytics-heading"><div><h2>销售趋势</h2><p>台账 · {view === 'daily' ? `${data.period} · ` : ''}{store === 'all' ? '全部店铺' : store}</p></div><div className="sales-analysis-controls">
       {onStoreChange ? <label htmlFor={storeId}>店铺<select id={storeId} aria-label="每日销售店铺" value={store} disabled={changing} onChange={event => void changeStore(event.target.value)}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label> : null}
-      <Button aria-label={`趋势周期：${view === 'daily' ? '每日' : '月度'}，点击切换为${view === 'daily' ? '月度' : '每日'}`} title="点击切换每日 / 月度" onClick={() => { setView(value => value === 'daily' ? 'monthly' : 'daily'); setSelection(null); setHovered(null); }}>{view === 'daily' ? '每日' : '月度'} <span aria-hidden="true">⇄</span></Button>
+      <div role="group" aria-label="趋势周期" className="sales-period-switch">
+        {[['daily', '按日'], ['monthly', '按月']].map(([period, label]) => <Button key={period} aria-pressed={view === period}
+          onClick={() => { if (view !== period) { setView(period); setSelection(null); setHovered(null); } }}>{label}</Button>)}
+      </div>
       <div role="group" aria-label="趋势指标"><Button aria-pressed={metric === 'revenueExact'} onClick={() => setMetric('revenueExact')}>销售额</Button><Button aria-pressed={metric === 'quantityExact'} onClick={() => setMetric('quantityExact')}>销量</Button></div>
     </div></div>
     {changing ? <p role="status">正在切换店铺...</p> : null}{storeError ? <p role="alert">{storeError}</p> : null}

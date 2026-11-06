@@ -94,14 +94,13 @@ function LedgerAnomalyActions({ ledgerId, locked = false, onReview, inboxes, rev
   if (!pendingGroups.length && !ignoredGroups.length && !open && !busy && !error && !current?.error) return null;
   const readError = current?.error ? <div role="alert">读取价格异常失败。{current.error} <Button onClick={() => setAttempt(value => value + 1)}>重试</Button></div> : null;
   return <div className="erp-anomaly-actions">
-    <div className="page-actions">{pendingGroups.length ? <><Button onClick={() => show('pending')}>核对价格异常</Button>
-      <Button disabled={locked || busy} loading={busy} onClick={() => apply(true, pendingGroups)}>忽略全部店铺异常（{pendingGroups.length}）</Button></> : null}
+    <div className="page-actions">{pendingGroups.length ? <Button onClick={() => show('pending')}>核对价格异常</Button> : null}
       {ignoredGroups.length ? <Button variant="ghost" onClick={() => show('ignored')}>已忽略异常 · {ignoredGroups.length}</Button> : null}</div>
-    {pendingGroups.length ? <small>忽略后按原始采购价核算（含 0 元）。缺少采购数据的项目仍需补齐。</small> : null}
     {!open && readError}
     {error && !open ? <p role="alert">{error}</p> : null}
-    <Modal open={open} title="价格异常" description="同一次回传的同一仓库商品计一项，关联的店铺和平台 SKU 一起生效。忽略后保留原始采购价，可随时恢复提醒。" onClose={() => !busy && setOpen(false)}
+    <Modal open={open} title="价格异常" description="同一次回传的同一仓库商品计一项，关联的店铺和平台 SKU 一起生效。忽略后按原始采购价核算（含 0 元），缺少采购数据的项目仍需补齐。" onClose={() => !busy && setOpen(false)}
       footer={<><Button disabled={busy} onClick={() => setOpen(false)}>关闭</Button>
+        {tab === 'pending' && pendingGroups.length > 0 && <Button disabled={locked || busy} onClick={() => apply(true, pendingGroups)}>忽略全部店铺异常（{pendingGroups.length}）</Button>}
         {tab === 'ignored' ? <Button disabled={locked || busy || !groups.length} onClick={() => apply(false)}>恢复本月全部提醒</Button> : null}
         <Button variant="primary" loading={busy} disabled={locked || busy || !chosen.length} onClick={() => apply(tab === 'pending', chosen)}>{tab === 'pending' ? '忽略选中' : '恢复选中'}（{chosen.length} 项）</Button></>}>
       <div className="anomaly-tabs" role="tablist" aria-label="异常处理状态">

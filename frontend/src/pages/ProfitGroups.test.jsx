@@ -99,26 +99,28 @@ it('pages large groups separately and uses the same column layout for every visi
   expect(host.querySelectorAll('.profit-variant-row')).toHaveLength(0);
 });
 
-it('expands a mixed page and collapses only that page, preserving other pages and the saved view', async () => {
+it('keeps the bulk expansion across pages and remembers individual exceptions when returning', async () => {
   const props = { groups: Array.from({ length: 14 }, (_, index) => makeGroup(index)), stateKey: 'ledger-and-filter' };
   await render(props);
   const pages = host.querySelector('.profit-groups-pagination');
   const visibleRows = () => host.querySelectorAll('.profit-variant-row').length;
   await click(host.querySelector('.profit-group-toggle'));
-  expect(pageToggle().textContent).toBe('展开本页明细');
+  expect(pageToggle().textContent).toBe('展开全部明细');
   await click(pageToggle());
   expect(visibleRows()).toBe(12);
-  expect(pageToggle().textContent).toBe('收起本页明细');
+  expect(pageToggle().textContent).toBe('收起全部明细');
   await click(pages.querySelector('button:last-child'));
-  expect(visibleRows()).toBe(0);
-  await click(pageToggle());
   expect(visibleRows()).toBe(2);
+  await click(host.querySelector('.profit-group-toggle'));
+  expect(visibleRows()).toBe(1);
   await click(pages.querySelector('button:first-of-type'));
-  await click(pageToggle());
-  expect(visibleRows()).toBe(0);
+  expect(visibleRows()).toBe(12);
   await click(pages.querySelector('button:last-child'));
   await act(async () => root.render(null));
   await render(props);
   expect(host.querySelector('.profit-group-toggle').textContent).toContain('SKC12');
-  expect(visibleRows()).toBe(2);
+  expect(visibleRows()).toBe(1);
+  await click(pageToggle());
+  await click(host.querySelector('.profit-groups-pagination button:first-of-type'));
+  expect(visibleRows()).toBe(0);
 });

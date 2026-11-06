@@ -5,7 +5,6 @@ import { controlErpCollectionTask } from '../lib/erpInboxTransport';
 import { erpCollectionPresentation } from '../domain/erpCollectionStatus';
 import ErpCollectionProgress from './ErpCollectionProgress';
 import ErpCollectionLauncher from './ErpCollectionLauncher';
-import ProductArchiveImport from './ProductArchiveImport';
 import { prepareProductArchiveCollection } from '../data/repositories/erpCatalogRepository';
 
 export default function ProductCollectionTools({ workspaceId }) {
@@ -46,13 +45,8 @@ export default function ProductCollectionTools({ workspaceId }) {
     {task ? <>
       <label className="product-catalog-source">获取范围 <select className="select-input" disabled={busy || view.running || view.state === 'queued'} value={task.taskId} onChange={event => setSelected(event.target.value)}>{tasks.map(item => <option key={item.taskId} value={item.taskId}>{item.ledgerPeriod} · {item.expectedSkus?.length ?? item.requestSnapshot?.expectedSkus?.length ?? 0} 个 SKU</option>)}</select></label>
       {task.runMode === 'catalog' || task.batches.some(batch => batch.catalogStatus) ? <ErpCollectionProgress task={task} showCatalog catalogOnly onControl={control} busy={busy} error={error || collection.error} statusError={collection.error} /> : null}
-    </> : <p role="status">{collection.loading ? '正在读取可复用的商品范围…' : '暂无可复用的 SKU 对应关系。完成成本采集后即可一键获取，也可先手动导入档案。'}</p>}
-    {!runtime?.startErpCollection ? <p role="status">后台获取在 Windows 桌面版中使用；当前可手动导入文件。</p> : null}
+    </> : <p role="status">{collection.loading ? '正在读取可复用的商品范围…' : '暂无可复用的 SKU 对应关系。完成成本采集后即可一键获取。'}</p>}
+    {!runtime?.startErpCollection ? <p role="status">后台获取在 Windows 桌面版中使用。</p> : null}
     {(error || collection.error) && task?.runMode !== 'catalog' ? <p role="alert">{error || collection.error}</p> : null}
-    <details className="product-catalog-supplement">
-      <summary>手动导入档案（备用）</summary>
-      <ol className="product-archive-steps"><li>ERP → 商品档案 → 选择商品 → 批量导出 → <strong>导出多行</strong></li><li>导入导出的 Excel 文件，预览后保存；未匹配资料保留，取得对应关系后再补齐。</li></ol>
-      <ProductArchiveImport />
-    </details>
   </Panel>;
 }
