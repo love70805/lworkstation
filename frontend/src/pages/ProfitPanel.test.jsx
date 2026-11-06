@@ -37,17 +37,21 @@ it('keeps old months editable without a reopen dialog',async()=>{
   expect(container.querySelector('.profit-summary-action').disabled).toBe(false);
 });
 
-it('reveals actual SKU rows and additional fields when expanding all columns from collapsed groups', async () => {
-  const details = container.querySelector('details:has(.profit-table-panel)') ?? [...container.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent.includes('查看利润明细'));
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
+it('opens and closes SKU rows under a single group with fixed accounting columns', async () => {
+  const headers = () => [...container.querySelectorAll('.profit-table thead th')].map(th => th.textContent);
+  const initialHeaders = headers();
+  expect(initialHeaders).toEqual(['平台 SKU', '数量', '销售金额', '单件平均成本', '总采购成本', '仓储成本', '总利润', '成本状态']);
   expect(container.querySelector('.profit-variant-row')).toBeNull();
-  await act(async () => findButton('展开全部列').click());
-  expect(container.querySelector('.profit-group-toggle').getAttribute('aria-expanded')).toBe('true');
-  expect(container.querySelector('.profit-table thead').textContent).toContain('总采购成本');
-  expect(container.querySelector('.profit-table thead').textContent).toContain('仓储成本');
-  await act(async () => findButton('精简列').click());
-  expect(container.querySelector('.profit-table thead').textContent).not.toContain('总采购成本');
-  expect(container.querySelector('.profit-variant-row').textContent).toContain('补录成本');
+  expect(container.querySelector('.profit-table-heading button')).toBeNull();
+  const group = container.querySelector('.profit-group-toggle');
+  await act(async () => group.click());
+  const row = container.querySelector('.profit-variant-row');
+  expect(row.textContent).toContain('补录成本');
+  expect(row.textContent).not.toContain('SKC');
+  expect(row.cells).toHaveLength(initialHeaders.length);
+  await act(async () => group.click());
+  expect(container.querySelector('.profit-variant-row')).toBeNull();
+  expect(headers()).toEqual(initialHeaders);
 });
 
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
