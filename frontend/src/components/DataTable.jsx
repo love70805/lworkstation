@@ -59,21 +59,22 @@ function TableHeader({ table }) {
   );
 }
 
+export function DataTableRows({ table, rows, getRowProps }) {
+  return rows.map((row) => (
+    <tr key={row.id} {...getRowProps?.(row.original)}>
+      {row.getAllCells().map((cell) => (
+        <td key={cell.id} style={{ width: getColumnSize(cell.column), ...cell.column.columnDef.meta?.cellStyle }}>
+          <table.FlexRender cell={cell} />
+        </td>
+      ))}
+    </tr>
+  ));
+}
+
 function StandardBody({ table, rows, emptyState, getRowProps }) {
   return (
     <tbody>
-      {rows.map((row) => {
-        const rowProps = getRowProps?.(row.original) ?? {};
-        return (
-          <tr key={row.id} {...rowProps}>
-            {row.getAllCells().map((cell) => (
-              <td key={cell.id} style={{ width: getColumnSize(cell.column), ...cell.column.columnDef.meta?.cellStyle }}>
-                <table.FlexRender cell={cell} />
-              </td>
-            ))}
-          </tr>
-        );
-      })}
+      <DataTableRows table={table} rows={rows} getRowProps={getRowProps} />
       {!rows.length ? <tr><td colSpan={table.getAllLeafColumns().length} className="no-results"><span className="no-results-message">{emptyState}</span></td></tr> : null}
     </tbody>
   );

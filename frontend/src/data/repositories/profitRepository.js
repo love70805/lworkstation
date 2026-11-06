@@ -47,6 +47,7 @@ import { summarizeProfitRows } from "../../lib/profitPrecision";
 import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
 import { ERP_ADOPTION_VERSION, erpSourceOrder, compareErpSourceOrder, erpBatchAdoptionBoundary, legacyExpectedSkusForRequest, summarizeErpAdoption } from "../../domain/erpAutomaticAdoption";
+import { readAdoptionEvidence, ignorableErpPriceAnomaly } from "../../domain/erpAnomalyPreview";
 import { operatingLedger, costEvaluationPeriod, accountingMode, accountingApprovals, LOWEST_ACCOUNTING } from '../../domain/inventoryAccounting';
 import { readAccountingMode, accountingCosts, projectAccountingLedger, accountingRateKey, readHistoricalLowestCosts } from './inventoryAccountingRepository';
 import { inventoryCalculationRevision, inventoryLowestRevision, observeInventoryRevision, publishedCostRevision, observePublishedCostRevision } from '../db/inventoryRevisions';
@@ -565,6 +566,15 @@ export async function processErpCostInboxAdoption({ inboxId, resolutions = [] } 
   }
 }
 
+function erpAdoptionScopeIssue(inbox, ledger, request, ledgerVersion) {
+  if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return 'request_or_ledger_missing';
+  if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return 'ledger_period_mismatch';
+  if (request.ledgerVersion != null && request.ledgerVersion !== ledgerVersion) return 'ledger_import_changed';
+  return null;
+}
+
+const activeAnomalyReceipt = inbox => ['pending', 'loaded', 'applied'].includes(inbox.status);
+
 async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAction = null }) {
   const member = await getActiveMemberContext();
   return db.transaction('rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
@@ -591,24 +601,18 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
       }
       return { id: inbox.id, inboxId: inbox.id, batchId, status: state === 'applied' ? 'applied' : inbox.status, adoption: { ...adoption, processedAt: changed ? now : inbox.adoption?.processedAt }, ...summary, matchedCount: summary.adoptedCount, idempotent: !changed };
     };
-    if (!ledger || !request || ledger.workspaceId !== inbox.workspaceId || request.workspaceId !== inbox.workspaceId || request.ledgerId !== ledger.id) return persistResult([], 'blocked', 'request_or_ledger_missing');
-    if (request.ledgerPeriod && request.ledgerPeriod !== ledger.period) return persistResult([], 'blocked', 'ledger_period_mismatch');
-    if (request.ledgerVersion != null && request.ledgerVersion !== erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray())) return persistResult([], 'blocked', 'ledger_import_changed');
+    const ledgerVersion = ledger && request?.ledgerVersion != null ? erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray()) : null;
+    const scopeIssue = erpAdoptionScopeIssue(inbox, ledger, request, ledgerVersion);
+    if (scopeIssue) return persistResult([], 'blocked', scopeIssue);
     const [salesRows, approvals, batches] = await Promise.all([
       db.salesRows.where('ledgerId').equals(ledger.id).toArray(), db.costApprovals.where('ledgerId').equals(ledger.id).toArray(),
       db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
     ]);
     const ownedSales = salesRows.filter(row => row.workspaceId === ledger.workspaceId);
     const identities = buildLedgerSkuIdentityIndex(ownedSales);
-    const legacyScope = request.expectedSkus?.length ? null : legacyExpectedSkusForRequest({ request, salesRows: ownedSales, workspaceId: ledger.workspaceId });
-    if (legacyScope?.reason) return persistResult([], 'blocked', legacyScope.reason);
-    const expectedSkus = legacyScope?.expectedSkus ?? request.expectedSkus;
-    const validated = validateErpCostInboxEnvelope(inbox.envelope, { expectedWorkspaceId: ledger.workspaceId, expectedLedgerId: ledger.id, expectedRequestId: request.id, expectedPlatformSkcs: request.platformSkcs, expectedSkus, expectedHistoryMappings: request.historyMappings ?? [] });
-    const batch = validated.batch;
-    if (batch.batchId !== inbox.batchId || batch.requestId !== inbox.requestId) throw new Error('ERP 收件记录与原始封装不一致。');
+    const { validated, batch, expected, reason } = readAdoptionEvidence(inbox, ledger, request, ownedSales);
+    if (reason) return persistResult([], 'blocked', reason);
     const boundary = erpBatchAdoptionBoundary(batch);
-    const queried = new Set(batch.query.platformSkcs.map(row => canonicalPlatformSkc(row.platformSkc)));
-    const expected = expectedSkus.filter(row => queried.has(canonicalPlatformSkc(row.platformSkc)));
     const expectedSkuKeys = new Set(expected.map(row => canonicalPlatformSku(row.platformSku)));
     // Retain COMPLETE records, including evidenceComplete, costDecision,
     // purchaseRecords and resolutions. The two consumers below inspect only:
@@ -636,7 +640,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
       } else {
         const preview = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus: expected, costRows: validated.rows, resolutions: before });
         const ignores = preview.matches.flatMap(row => row.costDecision?.anomalies ?? [])
-          .filter(item => item.status === 'pending' && inScope(item) && Number.isFinite(item.originalUnitPrice) && item.originalUnitPrice >= 0)
+          .filter(item => ignorableErpPriceAnomaly(item) && inScope(item))
           .map(item => ({ warehouseSku: item.warehouseSku, recordId: item.recordId, action: 'ignore_anomaly', originalUnitPrice: item.originalUnitPrice,
             resolvedUnitPrice: item.originalUnitPrice, reason: '用户忽略异常，保留原价参与核算', resolvedBy: member.memberId, resolvedAt: now }));
         mergedResolutions = ignores.reduce(upsertCostResolution, before);
@@ -722,6 +726,64 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
   });
 }
 
+// The bulk write handles every active receipt, including older receipts for a
+// SKU already covered by a newer source. The store-filtered review is narrower.
+export async function listPendingErpCostAnomalies(ledgerId, suppliedInboxes) {
+  if (suppliedInboxes?.length === 0) return [];
+  const input = await db.transaction('r', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, async () => {
+    const member = await getActiveMemberContext();
+    const ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || ledger.workspaceId !== member.workspaceId) return null;
+    const inboxes = suppliedInboxes ?? await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray();
+    const active = inboxes.filter(inbox => inbox.ledgerId === ledgerId && inbox.workspaceId === member.workspaceId && activeAnomalyReceipt(inbox));
+    if (!active.length) return null;
+    const requests = await db.erpCostRequests.bulkGet([...new Set(active.map(inbox => inbox.requestId))]);
+    const byId = new Map(requests.filter(Boolean).map(request => [request.id, request]));
+    const ledgerVersion = requests.some(request => request?.ledgerVersion != null)
+      ? erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledgerId).toArray()) : null;
+    const candidates = active.filter(inbox => {
+      const request = byId.get(inbox.requestId);
+      if (erpAdoptionScopeIssue(inbox, ledger, request, ledgerVersion)) return false;
+      // For an immutable, explicit SKU scope, these recorded states already
+      // establish that there were no pending purchases. A superseded or
+      // incomplete SKU still needs its original prices checked.
+      const items = inbox.adoption?.items;
+      return !request.expectedSkus?.length || inbox.adoption?.version !== ERP_ADOPTION_VERSION || inbox.adoptionPending || inbox.adoptionFailure
+        || !items?.length || items.some(item => !['adopted', 'manual_effective', 'missing'].includes(item.state));
+    });
+    if (!candidates.length) return null;
+    const sales = [];
+    if (candidates.some(inbox => !byId.get(inbox.requestId).expectedSkus?.length)) {
+      await db.salesRows.where('ledgerId').equals(ledgerId).each(({ workspaceId, platformSku, platformSkc, importedAt }) => {
+        if (workspaceId === member.workspaceId) sales.push({ workspaceId, platformSku, platformSkc, importedAt });
+      });
+    }
+    const sourceIds = new Set(candidates.map(inbox => inbox.batchId));
+    const publishedIds = new Set(), batchIds = [];
+    await db.erpCostBatches.where('ledgerId').equals(ledgerId).each(batch => {
+      if (batch.status !== 'published') return;
+      publishedIds.add(batch.id);
+      if (!batch.sourceContract?.batchId || sourceIds.has(batch.sourceContract.batchId)) batchIds.push(batch.id);
+    });
+    const sourceResolutions = new Map();
+    if (batchIds.length) {
+      const rows = await db.erpCostRows.where('batchId').anyOf(batchIds)
+        .filter(row => row.ledgerId === ledgerId && sourceIds.has(row.sourceEnvelopeBatchId) && row.resolutions?.length).sortBy('id');
+      for (const row of rows) {
+        if (!sourceResolutions.has(row.sourceEnvelopeBatchId)) sourceResolutions.set(row.sourceEnvelopeBatchId, []);
+        sourceResolutions.get(row.sourceEnvelopeBatchId).push(...row.resolutions);
+      }
+    }
+    const receipts = candidates.map(inbox => {
+      if (inbox.appliedBatchId && !publishedIds.has(inbox.appliedBatchId)) throw new Error('已采用成本批次关联失效，请核对历史记录。');
+      return { inbox: { id: inbox.id, requestId: inbox.requestId, batchId: inbox.batchId, envelope: inbox.envelope },
+        request: byId.get(inbox.requestId), resolutions: [...(sourceResolutions.get(inbox.batchId) ?? []), ...(inbox.costResolutions ?? [])] };
+    });
+    return { ledger: { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period }, receipts, sales };
+  });
+  return input ? runDerivedComputation('pending-erp-anomalies', input) : [];
+}
+
 export async function listIgnoredErpCostAnomalies(ledgerId) {
   const member = await getActiveMemberContext();
   const ledger = await db.ledgers.get(ledgerId);
@@ -742,7 +804,7 @@ export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inb
     // Current ledgers remain editable, including legacy finalized/locked data.
     // Saved report files are separate immutable snapshots, never rewritten here.
     const receipts = (await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray())
-      .filter(row => row.workspaceId === member.workspaceId && ['pending', 'loaded', 'applied'].includes(row.status) && (!inboxId || row.id === inboxId));
+      .filter(row => row.workspaceId === member.workspaceId && activeAnomalyReceipt(row) && (!inboxId || row.id === inboxId));
     // An explicit empty selection means no action, never the whole month.
     // Validate every selected receipt before changing any costs; one selection
     // may span several receipts and several warehouse products in one receipt.
@@ -750,14 +812,18 @@ export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inb
     if (selectedItems !== undefined) {
       if (!Array.isArray(selectedItems) || inboxId || warehouseSku) throw new Error('异常选择范围无效，请重新选择。');
       selection = new Map();
+      const receiptById = new Map(receipts.map(row => [row.id, row]));
       for (const item of selectedItems) {
-        const receipt = receipts.find(row => row.id === item?.inboxId);
+        const receipt = receiptById.get(item?.inboxId);
         if (!receipt || !String(item?.warehouseSku ?? '').trim()) throw new Error('所选异常不属于当前账本或已经失效，请刷新后重选。');
-        const sku = canonicalWarehouseSku(item.warehouseSku);
-        const candidates = [...(receipt.envelope?.batch?.rows ?? []), ...(receipt.costResolutions ?? [])];
-        if (!candidates.some(row => row.warehouseSku && canonicalWarehouseSku(row.warehouseSku) === sku)) throw new Error('所选商品不属于当前回传，请刷新后重选。');
         if (!selection.has(receipt.id)) selection.set(receipt.id, new Set());
-        selection.get(receipt.id).add(sku);
+        selection.get(receipt.id).add(canonicalWarehouseSku(item.warehouseSku));
+      }
+      for (const [id, warehouses] of selection) {
+        const receipt = receiptById.get(id);
+        const candidates = [...(receipt.envelope?.batch?.rows ?? []), ...(receipt.costResolutions ?? [])];
+        const known = new Set(candidates.filter(row => row.warehouseSku).map(row => canonicalWarehouseSku(row.warehouseSku)));
+        for (const sku of warehouses) if (!known.has(sku)) throw new Error('所选商品不属于当前回传，请刷新后重选。');
       }
     }
     const results = [];

@@ -1,6 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { aggregateLedgerRows } from "../domain/ledgerImport";
-import { groupImportedSales, groupProfitRowsBySkc } from "./profit";
+import { countProfitIdentities, groupImportedSales, groupProfitRowsBySkc } from "./profit";
+
+it("counts platform SKCs across stores and store/SKU pairs across attributes and suppliers", () => {
+  const rows = [
+    { store: "Ａ店", platformSkc: "父-a", platformSku: "sku-1", supplierNumber: "甲", attribute: "蓝" },
+    { store: " A店 ", platformSkc: " 父-Ａ ", platformSku: "ＳＫＵ-１", supplierNumber: "乙", attribute: "红" },
+    { store: "B店", platformSkc: "父-A", platformSku: "SKU-1" },
+    { store: "B店", platformSkc: " ", groupSkc: "供应商代号", platformSku: "SKU-2" },
+    { store: "", platformSkc: "父-B", platformSku: "SKU-3" },
+    { store: "B店", platformSku: null },
+  ];
+  expect(countProfitIdentities(rows)).toEqual({ skcCount: 2, storeSkuCount: 3 });
+  expect(countProfitIdentities([])).toEqual({ skcCount: 0, storeSkuCount: 0 });
+  const [group] = groupProfitRowsBySkc([
+    { store: "A店", groupSkc: "父-A", platformSku: "SKU-1", attribute: "红" },
+    { store: "A店", groupSkc: "父-A", platformSku: "SKU-1", attribute: "蓝" },
+  ]);
+  expect(group.skuCount).toBe(1);
+  expect(group.variants).toHaveLength(2);
+});
 
 describe("legacy-compatible profit grouping", () => {
   it("groups by shop/SKC/supplier then platform SKU/attribute and applies ERP costs", () => {

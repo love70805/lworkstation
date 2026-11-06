@@ -73,6 +73,24 @@ describe("ERP inbox review display projection", () => {
     expect(readErpInboxReviewEvidence({ ...item, ledger: { ...ledger, workspaceId: 'FOREIGN' }, platformSku: 'A' }).match).toBeNull();
     expect(readErpInboxReviewEvidence({ ...item, ledger, platformSku: 'UNREGISTERED' }).match).toBeNull();
   });
+  it('labels each current store SKU from its latest complete receipt without trusting preview prices', () => {
+    const older = receipt(1, [{ sku: 'EMPTY', price: 1 }]);
+    const latest = receipt(2, [
+      { sku: 'EMPTY', price: null, state: 'missing', records: [] },
+      { sku: 'ONE', price: 9, state: 'anomaly_pending', records: [record('one', 1)] },
+      { sku: 'ZERO', price: 1, records: [record('zero', 0)] },
+      { sku: 'MIXED', price: 1, records: [record('large', 6), record('small', 1)] },
+      { sku: 'FAIL', state: 'evidence_incomplete', evidenceComplete: false, records: [] },
+    ]);
+    latest.inbox.adoption.items.find(item => item.platformSku === 'FAIL').identityIssue = { code: 'erp_cost_skc_mismatch' };
+    const rows = ['EMPTY', 'ONE', 'ZERO', 'MIXED', 'FAIL', 'UNKNOWN'].map(sku => row(sku));
+    rows.push(row('ONE', false, { id: '乙店/ONE', store: '乙店' }));
+    const { exceptions } = review([older, latest], rows, { includeEvidence: false, includeRowReasons: true });
+    expect(exceptions.map(item => item.inlineReason)).toEqual(['无可用采购记录', '1 元采购价待核实', '0 元采购价待核实', '采购价异常待核实', undefined, undefined, '1 元采购价待核实']);
+    expect(exceptions[0].inboxId).toBe(latest.inbox.id);
+    expect(exceptions.find(item => item.platformSku === 'FAIL').mappingIssue).toBe(true);
+    expect(exceptions.every(item => !item.match)).toBe(true);
+  });
   it('does not describe deferred legacy evidence as absent', () => {
     const item = receipt(1, [{ sku: 'A', price: 4.59 }], { status: 'pending', inboxFields: { adoption: null } });
     const summary = review([item], [row('A')], { includeEvidence: false });
