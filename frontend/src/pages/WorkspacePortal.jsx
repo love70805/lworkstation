@@ -156,7 +156,7 @@ export default function WorkspacePortal() {
         <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近月度利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已核算账本"}</em></span></Panel>
       </div> : null}
 
-      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
+      <WorkspaceLedgerControls scope={ledgerScope} refresh={refresh} onError={message => notify(`切换账本失败：${message}`, 'error')}>
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
           <div><h2 id="workspace-flow-title">{workflowLedger ? `${workflowLedger.period} 核算流程` : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>

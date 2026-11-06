@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom';
 import { Badge, Button, Panel } from './UI';
 import { CalendarDays } from 'lucide-react';
+import PendingSkuStatus from './PendingSkuStatus';
 const labels = { draft: '草稿', cost_pending: '待核对成本', approval_pending: '待确认成本', ready: '成本已齐', finalized: '可继续调整', locked: '可继续调整' };
 
-export default function WorkspaceLedgerControls({ scope, onError, children }) {
+export default function WorkspaceLedgerControls({ scope, onError, refresh = 0, children }) {
   const context = scope.context;
   const ready = scope.ready && !context?.error;
   const ledger = ready ? context.selected : null;
@@ -15,6 +16,8 @@ export default function WorkspaceLedgerControls({ scope, onError, children }) {
         <label>核算月份<select className="select-input" aria-label="首页核算月份" value={ledger.id} onChange={event => change('ledger', event.target.value)}>{context.ledgers.map(item => <option key={item.id} value={item.id}>{item.period}</option>)}</select></label>
         <label>店铺<select className="select-input" aria-label="首页店铺" value={context.store} onChange={event => change('store', event.target.value)}><option value="all">全部店铺</option>{context.stores.map(store => <option key={store} value={store}>{store}</option>)}</select></label>
         <div className="workspace-ledger-status"><span>整月账本状态</span><Badge tone={['finalized', 'locked'].includes(ledger.status) ? 'success' : 'info'}>{labels[ledger.status] || '待核对'}</Badge></div>
+        <PendingSkuStatus key={JSON.stringify([context.workspaceId, ledger.id, context.store, refresh])}
+          workspaceId={context.workspaceId} ledgerId={ledger.id} store={context.store} />
       </div>
     </>}
     {children}
