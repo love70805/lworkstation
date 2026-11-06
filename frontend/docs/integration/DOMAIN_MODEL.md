@@ -1,6 +1,6 @@
 # 本机核算领域模型
 
-这份模型沿月度台账、采购证据、正式成本和报告描述当前数据关系。业务决策以[项目约束](../../../AGENTS.md)为准。早期云端同步事件、旧审批类型和旧账本状态的字段说明可在[原阶段模型](https://github.com/love70805/lworkstation/blob/b481149e05f0747e24624f70ebe66ce4d0354477/frontend/docs/integration/DOMAIN_MODEL.md)追溯。
+这份模型定义月度台账、采购证据、正式成本与报告之间应满足的数据关系。业务决策以[项目约束](../../../AGENTS.md)为准。早期云端同步事件、旧审批类型和旧账本状态的字段说明可在[原阶段模型](https://github.com/love70805/lworkstation/blob/b481149e05f0747e24624f70ebe66ce4d0354477/frontend/docs/integration/DOMAIN_MODEL.md)追溯。
 
 ## 从台账到商品草稿
 
@@ -12,11 +12,11 @@
 
 - 请求关联工作区、目标账本、SKC/SKU 范围和核算上下文。收件保存格式版本、请求标识、实际范围、证据和异常。工作台核对归属、完整性和时效，再采用合格成本。送达与采用是两个可独立核对的结果。
 - 正常 ERP 成本自动采用。异常可以按当前回执和适用范围处理或恢复。可计算的异常价格与空白、无采购记录、缺映射分别处理。实际零价必须有对应证据和适用的处置记录。
-- 显式人工更正按本工作区、月份、店铺、平台 SKU 和核算方式记录。单件成本允许零和微小正数，系统记录数值、操作者、说明、时间和撤销。有效更正优先于任何后续 ERP 回传。旧参考审批保留来源身份，不能提升为正式成本。
-- 两种核算方式复用原始台账、完整采购历史和身份映射，各自记录调整和导出。当前实现对初值的继承单列在[任务看板](../../../docs/CODEX_TASK_BOARD.md)。[成本策略](../../src/domain/costPolicy.js) · [人工更正](../../src/domain/manualCostOverride.js) · [核算模式](../../src/domain/inventoryAccounting.js) · [回传包](../../src/domain/erpCostBatchEnvelope.js)
+- 同一工作区、月份、店铺、平台 SKU 的有效人工单价供两种核算方式取用。允许零和微小正数，系统记录数值、操作者、说明、时间和撤销。常规核算优先用有效人工价，否则用常规 ERP 正式成本。最低模式在有效人工价与全历史合格 ERP 采购最低价中取低。只有一项可用时取该项，两项都缺时保留缺成本状态。撤销后移除人工候选，保留原采购证据与审计。1688 报价和旧参考审批只供选品参考。
+- 两种核算方式复用原始台账、完整采购历史和身份映射。同一工作区的同一月度账本只有一份有效仓储费率、一套已采用的代发和扣款来源。任一模式采用、替换或调整后，两个模式下次计算都读取同一版本。现有实现与目标的差异见[任务看板](../../../docs/CODEX_TASK_BOARD.md#软件实现与项目约束的差异)。[成本策略](../../src/domain/costPolicy.js) · [人工更正](../../src/domain/manualCostOverride.js) · [核算模式](../../src/domain/inventoryAccounting.js) · [回传包](../../src/domain/erpCostBatchEnvelope.js)
 
 ## 从当前账本到历史报告
 
 本月结果由最新的有效数据重算。台账、仓储费率、人工成本及补充来源可继续调整。旧 `finalized` 和 `locked` 状态在当前操作路径按可编辑账本读取，读取时保留历史原件。
 
-导出保存当时的结果和来源快照。后续调整和再次导出形成当次结果，历史文件依其自身来源重读。各核算方式的人工调整、仓储、补充来源与报告分别归属。[利润数据仓库](../../src/data/repositories/profitRepository.js) · [报告仓库](../../src/data/repositories/profitReportRepository.js) · [报告验证用例](../../src/data/profitReports.integration.test.js)
+导出保存当时的结果和来源快照。后续调整和再次导出形成当次结果，历史文件依其自身来源重读。每份报告保留本次取价方式、实际采用的单件成本和共用月度输入的当时版本。[利润数据仓库](../../src/data/repositories/profitRepository.js) · [报告仓库](../../src/data/repositories/profitReportRepository.js) · [报告验证用例](../../src/data/profitReports.integration.test.js)
