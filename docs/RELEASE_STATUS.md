@@ -4,19 +4,21 @@
 
 ## 2.0.4 成本核对与人工更正
 
-已有成本先看采用金额及采购依据，缺成本可直接补录。待补行标明原因，按钮区分当前店铺与全月异常；跨店明细去重计数，各分组共用表头。候选与验证见[候选登记](../releases/README.md)，稳定标签、公开时间与资产见 [v2.0.4 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.4)。
+2026-11-06 15:30（北京时间）公开为稳定版。标签 `v2.0.4` 固定在软件合并提交 `a8d2de2`，4 个发布资产均已上传。[2.0.4 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.4) · [PR #332](https://github.com/love70805/lworkstation/pull/332) · [主线 CI](https://github.com/love70805/lworkstation/actions/runs/42180217990)
+
+已有成本先看采用金额及采购依据，缺成本可直接补录。待补行标明原因，按钮区分当前店铺与全月异常。跨店明细去重计数，各分组共用表头。[候选与验证](../releases/README.md)
 
 ## 2.0.3 ERP 登录续接
 
 修复桌面版 ERP 已登录但原任务未接单的问题。确认软件内会话可读取受保护数据后，只接续等待中的原任务；成本和商品档案共用这个流程。全局通知、利润页和任务明细区分等待登录、等待接单及实际读取。候选验收见[候选登记](../releases/README.md)，公开稳定状态以 [v2.0.3 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.3) 为准。
 
-## 2.0.2 本批交付
+## 2.0.2 成本处理与商品档案
 
-商品档案一键后台获取并自动写入资料；待补成本与异常处理集中上移，待补入口直接定位明细；工作台和 ERP 统一单条阶段进度。内置助手 8.0.60。候选验证、源码集成和公开上传分别核对，当前公开状态以 [最新稳定 Release](https://github.com/love70805/lworkstation/releases/latest) 元数据为准。[本批契约与验证](integration/COST_ARCHIVE_WORKFLOW_2.0.2.md)，[候选登记](../releases/README.md)。
+商品档案可一键后台获取并自动写入资料。待补成本与异常处理集中上移，待补入口直接定位明细。工作台和 ERP 统一显示阶段进度，内置助手为 8.0.60。[2.0.2 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.2) · [本批契约与验证](integration/COST_ARCHIVE_WORKFLOW_2.0.2.md) · [候选登记](../releases/README.md)
 
-## 已核对的前一稳定版：2.0.1
+## 2.0.1 导入月份与明细显示
 
-2026-11-05 本批开始和交付前均通过发布服务确认 [v2.0.1](https://github.com/love70805/lworkstation/releases/tag/v2.0.1) 为稳定 Latest，远端 main 为 `dff4791b8812f29f797a66abc6016f2eb6994fe9`。本批以该提交为实际基线。
+2026-11-05 公开为稳定版，软件标签固定在 `dff4791b8812f29f797a66abc6016f2eb6994fe9`。改动涉及导入月份、异常操作、利润明细展开和首页趋势显示。[2.0.1 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.1) · [同批验收](integration/IMPORT_PROFIT_UI_2.0.1.md)
 
 ## 历史稳定版：2.0.0
 
@@ -30,7 +32,7 @@
 
 ## 近期历史版本
 
-1.0.6—1.0.12、1.2.0—1.2.4 均已有公开稳定 Release；逐版本内容、日期、PR 与实施契约统一见[近期版本时间线](DEVELOPMENT_HISTORY.md#近期版本与对应-pr)。其余可见发布见[完整索引](archive/RELEASE_INDEX_2026_11_05.md)。以下保留 1.0.5 及更早的原始交付记录，不作为当前操作指南。
+1.0.6 至 1.0.12、1.2.0 至 1.2.4 均已公开发布稳定版。下方保留 1.0.5 及更早的原始交付记录。[近期版本与对应 PR](DEVELOPMENT_HISTORY.md#近期版本与对应-pr) · [截至 2.0.0 的发布索引](archive/RELEASE_INDEX_2026_11_05.md)
 
 ## 历史公开稳定：1.0.5
 
