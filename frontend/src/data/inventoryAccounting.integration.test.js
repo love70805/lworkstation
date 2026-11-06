@@ -6,6 +6,7 @@ import { setActiveMemberContext } from './repositories/selectionRepository';
 import { getLedgerSnapshot, saveManualCostOverride, revokeManualCostOverride, updateLedgerWarehouseRate } from './repositories/profitRepository';
 import { readAccountingMode, toggleAccountingMode, readHistoricalLowestCosts } from './repositories/inventoryAccountingRepository';
 import { readCachedReportProducts } from './repositories/derivedComputationService';
+import { readPendingSkuCount } from './repositories/ledgerOverviewRepository';
 import { previewProfitReport, saveProfitReport, readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement } from './repositories/profitReportRepository';
 import { createWorkspaceBackupPayload, restoreWorkspaceBackupPayload } from './repositories/workspaceRepository';
 import { calculateWarehouseCostDecision } from '../domain/erpCostResolution';
@@ -28,6 +29,20 @@ beforeEach(async () => {
 afterEach(async () => { await db.delete(); vi.unstubAllGlobals(); });
 const lines = snapshot => buildReportProducts({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
 async function exportReport() { const input = { ledgerId: 'L', kind: 'pre_deduction' }, preview = await previewProfitReport(input); return saveProfitReport(input, { expectedFingerprint: preview.fingerprint }); }
+
+it('counts scoped missing store SKUs with the same current-mode prices used by the detail report', async () => {
+  await db.ledgers.put({ id: 'older', workspaceId: 'W', period: '2025-01', status: 'draft', warehouseRate: 0.7 });
+  const row = { ledgerId: 'older', workspaceId: 'W', store: '甲', platformSku: 'SKU', platformSkc: 'SKC', quantity: 1, amount: 20 };
+  await db.salesRows.bulkAdd([row, { ...row, attribute: '另一销售行' }, { ...row, store: '乙' }, { ...row, store: '乙', platformSku: 'B' }]);
+  expect(await readPendingSkuCount('W', 'older', 'all')).toBe(3);
+  expect(await readPendingSkuCount('W', 'older', '乙')).toBe(2);
+  await saveManualCostOverride({ ledgerId: 'older', store: '乙', platformSku: 'B', unitCost: 0, reason: '赠品' });
+  expect(await readPendingSkuCount('W', 'older', '乙')).toBe(1);
+  await toggleAccountingMode('W');
+  expect(await readPendingSkuCount('W', 'older', 'all')).toBe(0);
+  await expect(readPendingSkuCount('另一工作区', 'older', 'all')).rejects.toThrow('账本已不可用');
+  await expect(readPendingSkuCount('W', '已删除', 'all')).rejects.toThrow('账本已不可用');
+});
 
 it('reuses both computed results and purchase evidence across mode switches without another ERP read', async () => {
   const ordinary=await getLedgerSnapshot('L'),normalLines=await readCachedReportProducts({snapshot:ordinary});

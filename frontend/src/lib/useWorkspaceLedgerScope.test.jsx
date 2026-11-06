@@ -8,9 +8,10 @@ import { useWorkspaceLedgerScope } from './useWorkspaceLedgerScope';
 import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
 import { buildProfitQuery, filterProfitRowsByScope, readProfitFilter } from './profitFilter';
 
-const mocks = vi.hoisted(() => ({ member: vi.fn(), ledgers: vi.fn(), rows: vi.fn(), error: vi.fn(), targetRows: [] }));
+const mocks = vi.hoisted(() => ({ member: vi.fn(), ledgers: vi.fn(), rows: vi.fn(), pending: vi.fn(), error: vi.fn(), targetRows: [] }));
 vi.mock('../data/database', () => ({ getActiveMemberContext: mocks.member, listLedgerSummaries: mocks.ledgers }));
 vi.mock('../data/repositories/ledgerReadCache', () => ({ readLedgerSalesRows: mocks.rows }));
+vi.mock('../data/repositories/ledgerOverviewRepository', () => ({ readPendingSkuCount: mocks.pending }));
 
 function Harness() {
   const scope = useWorkspaceLedgerScope(), { search } = useLocation(), params = new URLSearchParams(search);
@@ -96,4 +97,31 @@ it('defaults an ordinary home entry to the first ledger and all rows', async () 
   expect(params.has('supplier_scope')).toBe(false);
   expect(JSON.parse(output.textContent)).toEqual(rows);
   expect(output.hasAttribute('data-scope-error')).toBe(false);
+});
+
+it('keeps unverified pending counts out of the link and retries a failed read', async () => {
+  const first = Promise.withResolvers();
+  mocks.pending.mockImplementation(async () => { await first.promise; throw new Error('模拟读取失败'); });
+  await mount({ withScope: false });
+  const status = () => host.querySelector('.workspace-pending-skus');
+  expect(status().textContent).toContain('读取中');
+  expect(status().querySelector('a')).toBeNull();
+  await act(async () => first.resolve());
+  await vi.waitFor(async () => {
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(status().querySelector('[role=alert]')).not.toBeNull();
+  });
+  expect(status().querySelector('[role=alert]').textContent).toBe('模拟读取失败');
+  expect(status().querySelector('a')).toBeNull();
+  mocks.pending.mockResolvedValue(2);
+  await act(async () => status().querySelector('button').click());
+  await vi.waitFor(async () => {
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)));
+    expect(status().querySelector('a')).not.toBeNull();
+  });
+  const target = new URL(status().querySelector('a').href);
+  expect(target.searchParams.get('ledger')).toBe('L1');
+  expect(target.searchParams.get('missing')).toBe('1');
+  expect(target.hash).toBe('#profit-detail-area');
+  expect(mocks.pending).toHaveBeenLastCalledWith('W', 'L1', 'all');
 });

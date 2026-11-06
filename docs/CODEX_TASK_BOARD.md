@@ -2,6 +2,10 @@
 
 2026-11-06 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
 
+## 2.0.7-beta.1 · 经营概览待核对入口
+
+本批从 2.0.6 主线 `385f9f5` 制作完整 Windows Beta。经营概览沿用现版侧栏、四张指标卡和核算流程，在「当前核算范围」增加待核对 SKU 入口，按所选月份和店铺进入缺成本明细。模拟账本中，某店的 2 条待核对 SKU 在补录 0.00001 元后降至 1 条，撤销更正后恢复为 2 条。候选和更新清单使用 Beta 通道，公开状态见 [Beta 发布页](https://github.com/love70805/lworkstation/releases/tag/v2.0.7-beta.1)。
+
 ## 软件实现与项目约束的差异
 
 | 场景 | 当前主线行为 | 已定口径与待处理项 |

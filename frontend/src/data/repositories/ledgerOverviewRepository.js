@@ -2,6 +2,7 @@ import { readAccountingSupplement } from './inventoryAccountingRepository';
 import { getLedgerSnapshot } from './profitRepository';
 import { readCachedReportProducts } from './derivedComputationService';
 import { Exact } from '../../domain/profitReports';
+import { countProfitIdentities } from '../../lib/profit';
 import { db } from '../db/clientDatabase';
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 
@@ -11,6 +12,16 @@ export async function readLedgerReportHeaders(ledger, revision = sourceRevision(
     compute: async () => (await db.profitReports.where('ledgerId').equals(ledger.id).toArray())
       .filter(report => report.workspaceId === ledger.workspaceId)
       .map(({ fileBase64, ...report }) => report),
+  });
+}
+
+export function readPendingSkuCount(workspaceId, ledgerId, store) {
+  return retrySourceRead(async () => {
+    const snapshot = await getLedgerSnapshot(ledgerId, { summaryOnly: true });
+    if (!snapshot || snapshot.ledger.workspaceId !== workspaceId) throw new Error('所选账本已不可用。');
+    const lines = await readCachedReportProducts({ snapshot });
+    const pending = lines.filter(line => line.unitCostExact == null && (store === 'all' || line.store === store));
+    return countProfitIdentities(pending).storeSkuCount;
   });
 }
 
