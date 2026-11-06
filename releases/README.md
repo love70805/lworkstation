@@ -1,3 +1,7 @@
+## 2.0.5 — 月度利润明细按行展开
+
+软件提交 `96ab006`，规范候选位于 `releases/candidates/2.0.5/`。安装包、差分映射和稳定更新清单的校验值随版本保存。[2.0.5 发布资产与 SHA256.txt](https://github.com/love70805/lworkstation/releases/tag/v2.0.5)
+
 ## 2.0.4 — 成本核对与人工更正
 
 软件提交 `22eb553`。规范候选 `releases/candidates/2.0.4/`，安装包 116,391,012 字节，SHA256 `CC4E6C233B67ECFDC468E62152DD08FFF8318DC28F23890DDF2E45C8B59628D9`。完整前端 245 文件、1,942 项与桌面 verify 通过。实际双店样本验证查看不写入、零值与微小正数、全月批量范围、待补原因、映射入口及六组布局。隐藏桌面 smoke 通过，安装包内 242 个文件与候选逐文件核对一致。源码集成以同批 PR 为准，稳定渠道与上传资产以 [v2.0.4 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.4) 为准。

@@ -1,6 +1,6 @@
 # Codex 当前任务看板
 
-2026-11-06 核对。当前稳定版为 2.0.4。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
+2026-11-06 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
 
 ## 软件实现与项目约束的差异
 
@@ -26,6 +26,8 @@
 云端方案保持暂停。10 个开放依赖 PR 可按依赖和目标分支查阅。[依赖 PR 清单](DEVELOPMENT_HISTORY.md#github-仍开放的依赖-pr)
 
 ## 最近交付
+
+2.0.5 基于 `b5397f7` 调整月度利润明细。默认显示分组汇总，逐组或按本页展开 SKU 行，所有状态共用一套列。验收覆盖跨页收起与展开、组内分页、筛选和待补成本直达。[2.0.5 发布记录](RELEASE_STATUS.md#205-月度利润明细)
 
 2.0.1 至 2.0.4 均已公开发布。最近的 2.0.4 改进了成本详情、人工更正入口、待补原因和跨店计数。逐版发布、PR 和验收材料从开发历史进入。[近期版本与对应 PR](DEVELOPMENT_HISTORY.md#近期版本与对应-pr) · [2.0.4 成本核对页逐项验收](https://github.com/love70805/lworkstation/blob/a8d2de2cb26e99e9ee667daee9a2ab155a1da903/docs/CODEX_TASK_BOARD.md#204-成本核对页)
 
