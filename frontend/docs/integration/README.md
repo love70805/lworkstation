@@ -1,18 +1,22 @@
 # Lworkstation 集成开发文档
 
-阅读顺序：
+桌面版的业务口径与开发决策见[项目约束](../../../AGENTS.md)。现行实体关系见[领域模型](DOMAIN_MODEL.md)，模块入口、验证与发布见[开发指南](../../../docs/DEVELOPMENT_WORKSPACE.md)。
 
-1. [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)：当前生效的产品范围和业务规则。
-2. [`BASELINES.md`](BASELINES.md)：两个旧项目的权威文件、哈希和冻结边界。
-3. [`LEGACY_COMPATIBILITY.md`](LEGACY_COMPATIBILITY.md)：必须保留的 ERP 成本与利润行为。
-4. [`DOMAIN_MODEL.md`](DOMAIN_MODEL.md)：统一的商品、SKU、成本、审批和账本模型。
+## 历史集成资料
+
+下列规格、基线和里程碑按原阶段归档，供定位旧字段、协议和迁移背景。
+
+1. [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)：初次集成时的产品范围和业务规则。
+2. [`BASELINES.md`](BASELINES.md)：初次集成采用的两个来源版本及其哈希。
+3. [`LEGACY_COMPATIBILITY.md`](LEGACY_COMPATIBILITY.md)：原有 ERP 与利润工具的兼容约定。
+4. [原阶段领域模型](https://github.com/love70805/lworkstation/blob/b481149e05f0747e24624f70ebe66ce4d0354477/frontend/docs/integration/DOMAIN_MODEL.md)：当时的模型与持久化背景。
 5. [`CLOUD_ARCHITECTURE.md`](CLOUD_ARCHITECTURE.md)：团队协作、数据库、权限和部署路线。
 6. [`MILESTONE_1_AUDIT.md`](MILESTONE_1_AUDIT.md)：第一阶段完成情况与剩余风险。
 7. [`MILESTONE_2_AUDIT.md`](MILESTONE_2_AUDIT.md)：本地 outbox 与云端部署基线。
 8. [`MILESTONE_3_AUDIT.md`](MILESTONE_3_AUDIT.md)：ERP v8.0 成本批次与利润核算衔接。
 9. [`MILESTONE_4_AUDIT.md`](MILESTONE_4_AUDIT.md)：云端同步合同开发联调。
 10. [`MILESTONE_5_AUDIT.md`](MILESTONE_5_AUDIT.md)：PostgreSQL/Supabase 数据层迁移草案。
-11. [`DEV_SYNC_SERVER.md`](DEV_SYNC_SERVER.md)：本地同步服务启动和联调说明。
+11. [`DEV_SYNC_SERVER.md`](../../../docs/integration/DEV_SYNC_SERVER.md)：本地同步服务启动和联调说明。
 12. [`MILESTONE_9_AUDIT.md`](MILESTONE_9_AUDIT.md)：ERP Assistant 桥接合同与成本请求可追溯性。
 13. [`MILESTONE_10_AUDIT.md`](MILESTONE_10_AUDIT.md)：ERP v8.0 批次输入和成本证据链。
 14. [`MILESTONE_11_AUDIT.md`](MILESTONE_11_AUDIT.md)：云端种子包、部署门禁和审计边界。

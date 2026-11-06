@@ -1,6 +1,20 @@
 # Codex 当前任务看板
 
-更新时间：2026-11-05。现行规则：[AGENTS.md](../AGENTS.md)。版本沿革见[开发历史](DEVELOPMENT_HISTORY.md)，软件用法见[2.0 指南](USER_GUIDE_2.0.md)。
+更新时间：2026-11-06。现行规则：[AGENTS.md](../AGENTS.md)。版本沿革见[开发历史](DEVELOPMENT_HISTORY.md)，软件用法见[2.0 指南](USER_GUIDE_2.0.md)。
+
+## 项目约束重构（仅文档）
+
+本批基线 `b481149`。经逐项问答，月度台账、ERP 核算、核对和导出是主线；导入自动建最小草稿，台账已有且一致的属性可带入，其他资料按需补齐。长期决定按用户的“以后、默认、今后”替换相应条款，单批决定只入看板。根规则只保留决策口径，操作归开发指南；初次集成规格与固定版本的验收转为历史入口。
+
+### 软件实现中的差异，单列供决定
+
+| 场景 | 当前主线行为 | 需要决定的边界 |
+| --- | --- | --- |
+| 两种核算方式的起始值 | 最低成本核算还没有自身记录时，会取常规核算的同店 SKU 人工成本、仓储费率和已采用的代发或扣款。独立调整及报告另存。 | 确定“隔离”指独立写入且可沿用初值，还是所有调整从一开始独立读取。这项选择会影响利润金额。[人工成本](../frontend/src/domain/inventoryAccounting.js) · [费率和补充来源](../frontend/src/data/repositories/inventoryAccountingRepository.js) |
+| 新 SKU 只有属性冲突 | 同一店铺、SKC 和 SKU 的两行属性不同，导入保留销售明细，但跳过整条草稿并记录属性冲突。缺属性或属性一致可以建草稿。 | 待决定是保留整条跳过，还是身份明确时建草稿并留空冲突属性。[草稿逻辑](../frontend/src/domain/ledgerCatalogDraft.js) · [导入用例](../frontend/src/data/ledgerCatalogDraft.integration.test.js) |
+| 利润页未选中账本时的说明 | 页头把 ERP、历史和人工成本一起描述为“供你确认”。正常 ERP 项实际自动采用，异常与缺失才需核对。 | 页面说明是否随主线流程更新。本批仅记录文案差异。[页面入口](../frontend/src/pages/ProfitWorkspacePage.jsx) · [自动采用用例](../frontend/src/data/erpAutomaticAdoption.integration.test.js) |
+
+验证覆盖现行入口、文档引用、项目技能和上述对应关系。与主线相同的源码树上，最小草稿、人工更正、跨核算方式与月度报告的 4 组隔离测试共 48 项通过；另用三组合成台账核对属性一致、缺少和冲突的草稿结果。此批只交付规则文档，软件实现差异另行决定。
 
 ## 2.0.3 ERP 登录续接
 
