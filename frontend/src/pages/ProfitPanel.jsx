@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Plus, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { CostMatchingContent } from "./CostMatching";
@@ -8,7 +8,8 @@ import MonthlyProfitSummary from "./MonthlyProfitSummary";
 import { monthlyProfitSummary } from "../domain/monthlyProfitSummary";
 import { displayMoney } from "../domain/profitReports";
 import ProfitGroups from "./ProfitGroups";
-import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
+import { Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
+import { BoardChip } from "../components/BoardChip";
 import ProfitScopeFilters from "../components/ProfitScopeFilters";
 import CostAttention from "../components/CostAttention";
 import {
@@ -43,6 +44,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [revealSequence, setRevealSequence] = useState(0);
   const pendingReveal = useRef(null), handledRequest = useRef(null), detailsPanel = useRef(null);
+  const handledEntry = useRef(null);
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { notify } = useToast();
@@ -123,18 +126,23 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     params.set("missing", next.missingOnly ? "1" : "0");
     setSearchParams(params, { replace: true });
   };
-  const showMissingCosts = () => {
-    const patch = { missingOnly: true, storeFilter: 'all', query: '', supplierSelection: null, supplierStoreSelection: null, supplierScopeError: undefined };
-    pendingReveal.current = filterIdentity({ ...filterState, ...patch });
-    changeFilter(patch);
+  const revealDetails = (filter) => {
+    pendingReveal.current = filterIdentity(filter);
     setDetailsOpen(true);
     saveProfitViewState(detailsStateKey, { detailsOpen: true });
     setRevealSequence(value => value + 1);
   };
   useEffect(() => {
+    if (location.hash !== '#profit-detail-area' || !missingOnly || !snapshot?.ledger || handledEntry.current === location.key) return;
+    handledEntry.current = location.key;
+    revealDetails(filterState);
+  }, [location.hash, location.key, missingOnly, snapshot?.ledger?.id, filterState]);
+  useEffect(() => {
     if (!detailsRequest || detailsRequest.ledgerId !== snapshot?.ledger?.id || handledRequest.current === detailsRequest) return;
     handledRequest.current = detailsRequest;
-    showMissingCosts();
+    const patch = { missingOnly: true, storeFilter: 'all', query: '', supplierSelection: null, supplierStoreSelection: null, supplierScopeError: undefined };
+    revealDetails({ ...filterState, ...patch });
+    changeFilter(patch);
   }, [detailsRequest]);
   useEffect(() => {
     if (!pendingReveal.current || pendingReveal.current !== filterIdentity(filterState) || !detailsOpen || calculation.loading) return;
@@ -244,7 +252,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
           if (onCostDetails) onCostDetails({ store: item.store, platformSku: item.platformSku, mode, ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId });
           else setManualTarget({ ...item, mode });
         };
-        return <div className="profit-status-actions"><Badge tone={item.finalizable && !ignored ? 'success' : 'warning'}>{status}</Badge><button className="inline-link" onClick={open}>{action}</button></div>;
+        return <div className="profit-status-actions"><BoardChip color={item.finalizable && !ignored ? 'lime' : 'orange'}>{status}</BoardChip><button className="inline-link" onClick={open}>{action}</button></div>;
       },
     },
   ], [costBySku, onCostDetails, reviewReasons, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
@@ -314,7 +322,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
         <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>商品利润</span><strong>{missing ? "待确认成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : "金额 − 采购 − 仓储"}</small></div>
       </div>
 
-      <div className="profit-detail-area" ref={detailsPanel}>
+      <div id="profit-detail-area" className="profit-detail-area" ref={detailsPanel}>
       {scopeFilters}
       <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section aria-label="月度利润明细" className="panel profit-table-panel">
         <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns}

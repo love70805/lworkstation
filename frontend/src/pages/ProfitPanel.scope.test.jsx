@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ProfitViewsContent } from './ProfitPanel';
 import { ToastProvider } from '../components/UI';
+import { saveProfitViewState } from '../lib/profitViewState';
 const state=vi.hoisted(()=>({snapshot:{ledger:{id:'L',workspaceId:'W',period:'2026-08',status:'draft',warehouseRate:0.7},rows:[{store:'甲',supplierNumber:'货号A',platformSku:'A',platformSkc:'S',quantity:2,amount:10,sourceAddedDate:'2026-08-01'},{store:'乙',supplierNumber:'货号B',platformSku:'B',platformSkc:'T',quantity:3,amount:30,sourceAddedDate:'2026-08-01'}],costs:[],approvals:[],profitLines:[]}}));
 vi.mock('../hooks/useLatestSalesImport',()=>({useLatestSalesImport:()=>state.snapshot}));
 vi.mock('./MonthlyReportManager',()=>({default:({onOpenCosts})=><button onClick={onOpenCosts}>补齐本月成本</button>}));
@@ -90,4 +91,25 @@ it('reveals scoped missing rows from the adjacent filter and the whole month fro
  expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('');
  await act(async()=>button('全部').click());
  expect(button('全部').getAttribute('aria-pressed')).toBe('true');
+});
+
+it('opens a collapsed detail section at the missing rows of just the dashboard store', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
+  saveProfitViewState(JSON.stringify(['W', 'L', 'details']), { detailsOpen: false });
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={['/profit?view=detail&ledger=L&store=乙&missing=1#profit-detail-area']}>
+      <ToastProvider><ProfitViewsContent /></ToastProvider>
+    </MemoryRouter>
+  ));
+  await act(async () => new Promise(resolve => requestAnimationFrame(resolve)));
+  const details = container.querySelector('#profit-detail-area');
+  expect(details.querySelector('details').open).toBe(true);
+  expect(details.querySelectorAll('.profit-variant-row')).toHaveLength(1);
+  expect(details.querySelector('.profit-variant-row').textContent).toContain('B');
+  expect(container.querySelector('.profit-workspace-controls select').value).toBe('乙');
+  expect(document.activeElement).toBe(details.querySelector('.profit-status-switch [aria-pressed="true"]'));
 });
