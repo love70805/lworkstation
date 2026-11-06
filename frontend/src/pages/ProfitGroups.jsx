@@ -91,7 +91,7 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
   return <>
     <div className="profit-table-heading">
       <div><h2>月度利润明细</h2><p>点分组查看 SKU 明细。金额单位为人民币（CNY）。</p></div>
-      <div className="page-actions">
+      <div className="profit-table-tools">
         <span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span>
         {pageGroups.length > 1 && <Button variant="ghost" aria-controls={tableId} onClick={() => setGroupsOpen(pageGroups.map(group => group.id), !allOpen)}>
           {allOpen ? '收起本页明细' : '展开本页明细'}

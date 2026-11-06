@@ -212,7 +212,7 @@
 .profit-filter-check input { width: 15px; height: 15px; accent-color: var(--primary); }
 .profit-filter-count { margin-left: auto; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .profit-warning { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger); font-size: 12px; }
-.profit-table { width: 100%; min-width: 944px; table-layout: fixed; }
+.profit-table { width: 100%; min-width: 830px; table-layout: fixed; }
 .profit-table th, .profit-table td { padding: 12px 10px; }
 .profit-table th:first-child, .profit-table td:first-child { width: 170px; padding-left: 20px; }
 .profit-table th:last-child, .profit-table td:last-child { width: 190px; padding-right: 18px; }
@@ -318,6 +318,7 @@
 .profit-table-heading h2 { font-size: 16px; line-height: 22px; }
 .profit-table-heading p { margin-top: 3px; color: var(--text-muted); font-size: 12px; }
 .profit-table-heading .profit-filter-count { margin-left: 0; }
+.profit-table-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 .profit-filter-bar { min-height: 62px; padding: 12px 16px; background: var(--surface-soft); }
 .profit-filter-bar .search-input { flex: 1 1 280px; width: auto; max-width: 360px; }
 .profit-filter-reset { min-height: 36px; padding: 0 10px; border: 0; background: transparent; color: var(--primary); cursor: pointer; font-size: 12px; }
