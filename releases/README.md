@@ -1,6 +1,6 @@
 ## 2.0.5 — 月度利润明细按行展开
 
-软件提交 `96ab006`，规范候选位于 `releases/candidates/2.0.5/`。安装包、差分映射和稳定更新清单的校验值随版本保存。[2.0.5 发布资产与 SHA256.txt](https://github.com/love70805/lworkstation/releases/tag/v2.0.5)
+软件提交 `9089bd8`，规范候选位于 `releases/candidates/2.0.5/`。安装包、差分映射和稳定更新清单的校验值随版本保存。[2.0.5 发布资产与 SHA256.txt](https://github.com/love70805/lworkstation/releases/tag/v2.0.5)
 
 ## 2.0.4 — 成本核对与人工更正
 
