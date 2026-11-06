@@ -2,6 +2,10 @@
 
 更新时间：2026-11-06（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
 
+## 2.0.5 月度利润明细
+
+月度利润明细按店铺与 SKC 分组，点分组看 SKU，也可一次展开或收起本页。店铺、SKC 和供方货号在分组行显示，属性和已有的采购单号在 SKU 下方显示。固定表头列出销售、单件成本、采购合计、仓储和利润，行右侧可核对或补录成本。[2.0.5 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.5) · [规范候选](../releases/README.md)
+
 ## 2.0.4 成本核对与人工更正
 
 2026-11-06 15:30（北京时间）公开为稳定版。标签 `v2.0.4` 固定在软件合并提交 `a8d2de2`，4 个发布资产均已上传。[2.0.4 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.4) · [PR #332](https://github.com/love70805/lworkstation/pull/332) · [主线 CI](https://github.com/love70805/lworkstation/actions/runs/42180217990)

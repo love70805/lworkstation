@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "candidateOnly": true,
-  "integrationBranch": "codex/cost-review-ui-2-0-4",
+  "integrationBranch": "codex/profit-detail-rows-2-0-5",
   "requiredCommits": [
     {
-      "module": "cost-review-plan",
-      "commit": "3297c048b9c4ce6abdf682579eb84137e8e24ad4"
+      "module": "profit-details-baseline",
+      "commit": "b5397f771b769dda063cf9b20a83c349e6904535"
     }
   ]
 }

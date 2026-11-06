@@ -38,22 +38,9 @@ const ledgerStatusLabels = {
   locked: "可继续盘点",
 };
 
-function prepareProfitTableRows(rows) {
-  let previousGroupKey = null;
-  return rows.map((row) => {
-    const groupStart = row.groupKey !== previousGroupKey;
-    previousGroupKey = row.groupKey;
-    return {
-      ...row,
-      groupStart,
-    };
-  });
-}
-
 export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportState, onEditSupplement, onCostDetails, detailsRequest, reviewReasons } = {}) {
   const [manualTarget, setManualTarget] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(true);
-  const [showAllColumns, setShowAllColumns] = useState(false);
   const [revealSequence, setRevealSequence] = useState(0);
   const pendingReveal = useRef(null), handledRequest = useRef(null), detailsPanel = useRef(null);
   const navigate = useNavigate();
@@ -169,104 +156,71 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
 
   const columns = useMemo(() => [
     {
-      accessorKey: "groupSkc",
-      header: "平台 SKC",
-      enableSorting: false,
-      size: 190,
-      meta: { headerStyle: { width: "190px" } },
-      cell: ({ row }) => row.original.groupStart ? (
-        <div className="profit-flat-skc">
-          <strong className="mono" title={row.original.groupSkc}>{row.original.groupSkc}</strong>
-          <small>{row.original.store} · {row.original.supplierNumber || "未填供方货号"}</small>
-        </div>
-      ) : <span className="profit-skc-continuation" aria-label="同一平台 SKC">↳</span>,
-    },
-    {
       accessorKey: "platformSku",
       header: "平台 SKU",
       enableSorting: false,
-      size: 180,
-      meta: { headerStyle: { width: "180px" } },
-      cell: ({ getValue, row }) => <div><strong className="mono table-code" title={getValue()}>{getValue()}</strong><small className="profit-attribute">{row.original.attribute || "未提供属性"}</small></div>,
-    },
-    {
-      accessorKey: "attribute",
-      header: "属性",
-      enableSorting: false,
-      size: 210,
-      meta: { headerStyle: { width: "210px" } },
-      cell: ({ getValue }) => <span className="profit-attribute" title={getValue() || "未提供属性"}>{getValue() || "未提供属性"}</span>,
+      size: 166,
+      meta: { headerStyle: { width: "166px" } },
+      cell: ({ getValue, row }) => <div>
+        <strong className="mono table-code" title={getValue()}>{getValue()}</strong>
+        {row.original.attribute && <small className="profit-attribute">{row.original.attribute}</small>}
+        {row.original.orderNumber && <small className="profit-attribute">采购单号 {row.original.orderNumber}</small>}
+      </div>,
     },
     {
       id: "qty", accessorFn: row => row.quantityExact ?? row.qty,
       header: "数量",
       enableSorting: false,
-      size: 78,
-      meta: { headerStyle: { width: "78px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
+      size: 55,
+      meta: { headerStyle: { width: "55px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
       cell: ({ getValue }) => <span className="mono table-number">{Number(getValue() ?? 0).toLocaleString("zh-CN")}</span>,
     },
     {
       id: "revenue", accessorFn: row => row.revenueExact ?? row.revenue,
-      header: "金额",
+      header: "销售金额",
       enableSorting: false,
-      size: 112,
-      meta: { headerStyle: { width: "112px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
+      size: 90,
+      meta: { headerStyle: { width: "90px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
       cell: ({ getValue }) => <span className="mono table-number profit-revenue">{currency(getValue() ?? 0)}</span>,
-    },
-    {
-      accessorKey: "orderNumber",
-      header: "1688 单号",
-      enableSorting: false,
-      size: 170,
-      meta: { headerStyle: { width: "170px" } },
-      cell: ({ getValue }) => <span className="mono table-code table-code-muted" title={getValue() || "暂无采购单号"}>{getValue() || "--"}</span>,
     },
     {
       id: "unitCost",
       header: "单件平均成本",
       enableSorting: false,
-      size: 118,
-      meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
+      size: 100,
+      meta: { headerStyle: { width: "100px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
       cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{row.original.costSource === "manual_override" ? formatManualUnitCost(row.original.unitCost) : row.original.costSource === "erp" ? formatErpUnitCost(row.original.unitCost) : currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <span className="pending-text" aria-label="缺少单件成本">—</span>,
     },
     {
       id: "purchaseCost", accessorFn: row => row.purchaseCostExact ?? row.purchaseCost,
       header: "总采购成本",
       enableSorting: false,
-      size: 118,
-      meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
+      size: 94,
+      meta: { headerStyle: { width: "94px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
       cell: ({ getValue }) => getValue() != null ? <span className="mono table-number">{formatProfitAmount(getValue())}</span> : <span className="pending-text">待成本</span>,
     },
     {
       id: "warehouseCost", accessorFn: row => row.warehouseCostExact ?? row.warehouseCost,
       header: "仓储成本",
       enableSorting: false,
-      size: 108,
-      meta: { headerStyle: { width: "108px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
+      size: 88,
+      meta: { headerStyle: { width: "88px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
       cell: ({ getValue }) => <span className="mono table-number">{currency(getValue() ?? 0)}</span>,
-    },
-    {
-      accessorKey: "penalty",
-      header: "客退罚款",
-      enableSorting: false,
-      size: 108,
-      meta: { headerStyle: { width: "108px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
-      cell: ({ getValue }) => <span className={`mono table-number ${Number(getValue() ?? 0) > 0 ? "profit-penalty" : ""}`}>{currency(getValue() ?? 0)}</span>,
     },
     {
       id: "profit", accessorFn: row => row.profitExact ?? row.profit,
       header: "总利润",
       enableSorting: false,
-      size: 118,
-      meta: { headerStyle: { width: "118px", textAlign: "right", justifyContent: "flex-end" }, cellStyle: { textAlign: "right" } },
+      size: 95,
+      meta: { headerStyle: { width: "95px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
       cell: ({ getValue }) => getValue() == null ? <span className="pending-text" aria-label="待补成本后计算利润">—</span> : <strong className={`mono table-number ${Number(getValue()) < 0 ? "profit-negative" : "profit-positive"}`}>{formatProfitAmount(getValue())}</strong>,
     },
     {
       id: "costStatus",
       header: "成本状态",
       enableSorting: false,
-      size: 156,
-      meta: { headerStyle: { width: "156px", position: "sticky", right: 0, zIndex: 2, background: "var(--surface)" }, cellStyle: { position: "sticky", right: 0, zIndex: 1, background: "var(--surface)" } },
+      size: 142,
+      meta: { headerStyle: { width: "142px", position: "sticky", right: 0, zIndex: 2, background: "var(--surface)" }, cellStyle: { position: "sticky", right: 0, zIndex: 1, background: "var(--surface)" } },
       cell: ({ row }) => {
         const item = row.original;
         const ignored = costBySku.get(canonicalPlatformSku(item.platformSku))?.resolutions?.some(resolution => resolution.action === 'ignore_anomaly');
@@ -344,12 +298,10 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       </div>
       {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={snapshot.ledger} onEdit={onEditSupplement} /> : null}
 
-      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section ref={detailsPanel} tabIndex={-1} aria-label="月度利润明细" className={`panel profit-table-panel${showAllColumns ? '' : ' profit-table-compact'}`}>
-        <div className="profit-table-heading">
-          <div><h2>月度利润明细</h2><p>每个 SKU 一行，SKC 用分组标识；金额和成本均为人民币 CNY。</p></div>
-          <div className="page-actions"><span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span><Button variant="ghost" aria-pressed={showAllColumns} onClick={() => setShowAllColumns(value => !value)}>{showAllColumns ? "精简列" : "展开全部列"}</Button></div>
-        </div>
-        <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} showAllColumns={showAllColumns} expandRequest={missingOnly ? revealSequence : 0} columns={showAllColumns ? columns : columns.filter(column => ["platformSku", "qty", "revenue", "unitCost", "profit", "costStatus"].includes(column.id ?? column.accessorKey))} prepareRows={prepareProfitTableRows} />
+      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section ref={detailsPanel} tabIndex={-1} aria-label="月度利润明细" className="panel profit-table-panel">
+        <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns}
+          skcCount={skcCount} storeSkuCount={storeSkuCount}
+          expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
       </section> : null}
       </details>
 
