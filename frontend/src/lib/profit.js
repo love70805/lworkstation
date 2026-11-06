@@ -1,5 +1,6 @@
-import { canonicalPlatformSku } from "../domain/identifiers";
+import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifiers";
 import { aggregateLedgerRows, flattenLedgerGroups } from "../domain/ledgerImport";
+import { storeIdentity, storeSkuKey } from "../domain/manualCostOverride";
 import { sumMoney } from "./money";
 import Decimal from "decimal.js";
 const GroupExact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
@@ -21,6 +22,18 @@ export function groupImportedSales(rows, knownCosts = []) {
       status: cost?.unitCost != null ? "Matched" : "Missing",
     };
   });
+}
+
+export function countProfitIdentities(rows = []) {
+  const skcs = new Set();
+  const storeSkus = new Set();
+  for (const { platformSkc, store, platformSku } of rows) {
+    if (String(platformSkc ?? "").normalize("NFKC").trim()) skcs.add(canonicalPlatformSkc(platformSkc));
+    if (storeIdentity(store) && String(platformSku ?? "").normalize("NFKC").trim()) {
+      storeSkus.add(storeSkuKey(store, platformSku));
+    }
+  }
+  return { skcCount: skcs.size, storeSkuCount: storeSkus.size };
 }
 
 export function groupProfitRowsBySkc(rows = []) {
@@ -52,7 +65,7 @@ export function groupProfitRowsBySkc(rows = []) {
     return {
       ...group,
       variants,
-      skuCount: variants.length,
+      skuCount: countProfitIdentities(variants).storeSkuCount,
       qty: variants.reduce((sum, row) => sum + Number(row.qty ?? 0), 0),
       revenue: sumMoney(variants.map((row) => row.revenue)),
       purchaseCost: allFinalizable ? sumMoney(variants.map((row) => row.purchaseCost)) : null,

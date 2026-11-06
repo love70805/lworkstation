@@ -167,6 +167,8 @@ function reviewEntry({ batch, request, ledger, item, row, match, boundary, error
     canonicalPlatformSku: sku,
     platformSkc: row?.platformSkc ?? match?.platformSkc ?? sourceRow?.platformSkc ?? null,
     warehouseSku: match?.sourceWarehouseSku ?? sourceRow?.warehouseSku ?? null,
+    evidenceRef: ['anomaly_pending', 'missing'].includes(item?.state) && !sourceRow?.sourceWarnings?.length ? sourceRow?.evidenceRef : null,
+    mappingIssue: Boolean(row?.decision?.identityIssue || item?.identityIssue || sourceRow?.sourceWarnings?.some(warning => String(warning).startsWith('mapping_failure:'))),
     store: row?.store ?? null,
     attribute: row?.attribute ?? match?.attribute ?? sourceRow?.attribute ?? "",
     productName: match?.productName ?? sourceRow?.productName ?? "",
@@ -177,6 +179,21 @@ function reviewEntry({ batch, request, ledger, item, row, match, boundary, error
     canCorrect: Boolean(row && row.id != null && row.decision?.identityIssue?.code !== "ledger_sku_skc_conflict"),
     match: match ?? null,
   };
+}
+
+// Only classify a price when the durable adoption outcome and its source agree.
+// Mixed purchase prices need the full selected sample in the detail dialog.
+function inlineReason(entry, evidence) {
+  if (!evidence?.evidenceComplete || evidence.sourceWarnings?.length || !Array.isArray(evidence.purchaseRecords)) return null;
+  if (!entry.warehouseSku || !text(evidence.warehouseSku) || canonicalWarehouseSku(evidence.warehouseSku) !== canonicalWarehouseSku(entry.warehouseSku)) return null;
+  const records = evidence.purchaseRecords;
+  if (entry.state === 'missing' && !records.length) return '无可用采购记录';
+  if (entry.state !== 'anomaly_pending') return null;
+  const firstPrice = finiteAmount(records[0]?.unitPrice);
+  if ((firstPrice === 0 || firstPrice === 1) && records.every(record => finiteAmount(record.unitPrice) === firstPrice)) {
+    return `${firstPrice} 元采购价待核实`;
+  }
+  return '采购价异常待核实';
 }
 
 function missingWithoutEvidence(row, latest = null) {
@@ -194,7 +211,7 @@ function missingWithoutEvidence(row, latest = null) {
 
 // Display-only projection. Decisions supplied by the parent remain authoritative;
 // historical receipts and their adoption states are never edited or re-adopted.
-export function buildErpInboxReview({ inboxes = [], requests = [], ledger, reviewRows = [], includeEvidence = true } = {}) {
+export function buildErpInboxReview({ inboxes = [], requests = [], ledger, reviewRows = [], includeEvidence = true, includeRowReasons = false } = {}) {
   if (!ledger?.workspaceId || !ledger?.id || !/^\d{4}-(0[1-9]|1[0-2])$/.test(ledger.period ?? "")) return { batches: [], exceptions: [] };
   const requestById = new Map(requests.map(request => [text(request.id ?? request.requestId), request]));
   const currentRows = scopedReviewRows(reviewRows, ledger);
@@ -211,7 +228,13 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
     const request = requestById.get(text(inbox.requestId));
     const source = inbox.envelope?.batch ?? {};
     const scope = expectedScope(inbox, request);
-    const historical = new Map(list(inbox.adoption?.items).filter(item => EXCEPTION_STATES.has(item.state) && skuOf(item)).map(item => [skuOf(item), item]));
+    const items = new Map(list(inbox.adoption?.items).map(item => [skuOf(item), item]));
+    const historical = new Map([...items].filter(([sku, item]) => sku && EXCEPTION_STATES.has(item.state)));
+    const sourceRows = new Map();
+    for (const row of list(source.rows)) {
+      const sku = skuOf(row);
+      if (sku && row.ledgerScopeRole !== 'auxiliary' && !sourceRows.has(sku)) sourceRows.set(sku, row);
+    }
     const wantedSkus = new Set([...historical.keys(), ...[...scope.keys()].filter(sku => (rowsBySku.get(sku) ?? []).some(currentMissing))]);
     const { matches, boundary, error } = includeEvidence
       ? matchesForReview(inbox, request, ledger, scope, wantedSkus)
@@ -224,8 +247,8 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
       automaticCount, currentMissingCount: 0, coveredCount: 0, historicalExceptionCount: historical.size, entries: [] };
     const sourceOrder = erpSourceOrder(request ?? { requestedAt: inbox.receivedAt ?? inbox.envelope?.sentAt }, { generatedAt: source.generatedAt, batchId: inbox.batchId });
     for (const sku of wantedSkus) {
-      const item = historical.get(sku) ?? list(inbox.adoption?.items).find(candidate => skuOf(candidate) === sku);
-      const sourceRow = list(source.rows).find(row => skuOf(row) === sku && row.ledgerScopeRole !== "auxiliary");
+      const item = items.get(sku);
+      const sourceRow = sourceRows.get(sku);
       const rows = rowsBySku.get(sku) ?? [];
       const relevantRows = historical.has(sku) ? rows : rows.filter(currentMissing);
       if (!rows.length && historical.has(sku)) relevantRows.push(null);
@@ -243,9 +266,18 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
     batch.currentMissingCount = batch.entries.filter(entry => entry.currentMissing).length;
     return batch;
   });
+  const evidenceByInbox = new Map();
   const exceptions = [...currentRows].filter(([, row]) => currentMissing(row)).map(([key, row]) => {
     const latest = latestByStoreSku.get(key);
-    return latest && !RETIRED_STATUSES.has(latest.inbox.status) ? latest.entry : missingWithoutEvidence(row, latest);
+    if (!latest || RETIRED_STATUSES.has(latest.inbox.status)) return missingWithoutEvidence(row, latest);
+    const { entry, inbox } = latest;
+    if (!includeRowReasons || !entry.evidenceRef || !requestById.has(text(inbox.requestId)) || inbox.adoptionPending || inbox.adoptionFailure || !inbox.adoption || inbox.adoption.state === 'blocked') return entry;
+    if (!evidenceByInbox.has(inbox.id)) {
+      const evidence = list(inbox.envelope?.batch?.warehouseEvidence);
+      evidenceByInbox.set(inbox.id, new Map(evidence.map(item => [item.evidenceRef, item])));
+    }
+    const reason = inlineReason(entry, evidenceByInbox.get(inbox.id).get(entry.evidenceRef));
+    return reason ? { ...entry, inlineReason: reason } : entry;
   });
   return { batches, exceptions };
 }

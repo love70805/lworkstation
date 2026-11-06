@@ -29,6 +29,34 @@ async function edit(selector, value) {
   });
 }
 const saveButton = () => [...document.querySelectorAll('button')].find(button => button.textContent === '保存更正');
+it('opens adopted ERP costs for inspection and only accepts Enter after an explicit edit', async () => {
+  const onClose = vi.fn();
+  const props = { ledger, onClose, formFirst: true, viewFirst: true, hasEffectiveErpCost: true, children: <p>采购单 DEMO-56</p> };
+  const adopted = { ...row, unitCost: 5, decision: { eligibleForExactProfit: true } };
+  await render({ ...props, row: adopted });
+  expect(document.querySelector('[role="dialog"]').textContent).toContain('采购单 DEMO-56');
+  expect(document.querySelector('.cost-correction-evidence')).toBeNull();
+  expect(document.querySelector('#manual-cost-value')).toBeNull();
+  expect(saveButton()).toBeUndefined();
+  await act(async () => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(mocks.manualSave).not.toHaveBeenCalled();
+
+  // A new ERP return while browsing must be the amount presented for editing.
+  await act(async () => root.render(<ManualCostDialog {...props} row={{ ...adopted, unitCost: 4.6 }} />));
+  const correction = [...document.querySelectorAll('button')].find(button => button.textContent === '人工更正');
+  await act(async () => correction.click());
+  const input = document.querySelector('#manual-cost-value');
+  await vi.waitFor(() => expect(document.activeElement).toBe(input));
+  expect(input.value).toBe('4.6');
+  expect(document.querySelector('.cost-correction-evidence').open).toBe(false);
+  await edit('#manual-cost-value', '0.0000001');
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(mocks.preview).not.toHaveBeenCalled();
+  expect(mocks.manualSave).toHaveBeenCalledExactlyOnceWith({
+    ledgerId: 'L', store: '甲店', platformSku: 'SKU-A', unitCost: '0.0000001', reason: '人工输入单件成本并确认更正',
+  });
+  expect(onClose).toHaveBeenCalledOnce();
+});
 it('shows the automatically collected suggestion in the existing correction dialog and waits for Save', async () => {
   await render();
   expect(document.body.textContent).toContain('已自动补查历史仓库采购');

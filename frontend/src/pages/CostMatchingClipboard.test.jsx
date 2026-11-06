@@ -29,7 +29,7 @@ vi.mock('../data/database', async importOriginal => {
 
 let container, root, writeText;
 const collectionButton = () => button('开始成本核算') || button('继续成本核算') || button('正在采集成本');
-const button = text => [...container.querySelectorAll('button')].find(item => item.textContent === text);
+const button = (text, scope = container) => [...scope.querySelectorAll('button')].find(item => item.textContent === text);
 function ScopeControls({ nextScopeHref }) {
   const [params, setParams] = useSearchParams();
   return <><input aria-label="测试查询范围" value={params.get('q') ?? ''} onChange={event => { const next = new URLSearchParams(params); next.set('q', event.target.value); setParams(next); }} />{nextScopeHref && <button onClick={()=>setParams(new URL(nextScopeHref,'http://localhost').searchParams)}>测试切换逐店范围</button>}</>;
@@ -367,15 +367,37 @@ it('refreshes an open cost dialog when the formal ERP cost is adopted', async ()
   await act(async () => button('详情').click());
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('缺少有效成本');
   await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH', costs: [formalCost] });
-  expect(container.querySelector('.cost-detail-current')?.textContent).toContain('10.0000 · ERP');
+  expect(container.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.0000/件');
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('正式成本已生效');
 });
-it('opens adopted cost details with the correction form immediately available', async () => {
-  await render(['SKC-1'], 'ready', { ledgerId: 'DETAILS-ONLY', costs: [formalCost] });
+it('shows adopted purchase evidence and saves with Enter only after explicit manual correction', async () => {
+  const ledgerId = 'DETAILS-ONLY';
+  await render(['SKC-1'], 'ready', { ledgerId, costs: [formalCost] });
   await act(async () => button('详情').click());
-  expect(container.querySelector('[role="dialog"]')?.textContent).toContain('成本详情');
-  expect(container.querySelector('#manual-cost-value')?.value).toBe('10');
-  expect(container.querySelector('#manual-cost-reason')).toBeNull();
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain('成本详情');
+  expect(dialog.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.0000/件');
+  const purchases = dialog.querySelector('.cost-evidence-details');
+  expect(purchases.open).toBe(true);
+  expect(purchases.textContent).toContain('2026-08-10');
+  expect(purchases.textContent).toContain('1 件 × ¥10.0000');
+  expect(dialog.querySelector('#manual-cost-value')).toBeNull();
+  expect(button('保存更正', dialog)).toBeUndefined();
+  await act(async () => {
+    purchases.querySelector('summary').focus();
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  expect(mocks.saveManual).not.toHaveBeenCalled();
+  expect(mocks.publish).not.toHaveBeenCalled();
+
+  await act(async () => button('人工更正', dialog).click());
+  const input = dialog.querySelector('#manual-cost-value');
+  expect(input.value).toBe('10');
+  expect(dialog.querySelector('#manual-cost-reason')).toBeNull();
+  await act(async () => Simulate.change(input, { target: { value: '9.3' } }));
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  expect(mocks.saveManual).toHaveBeenCalledExactlyOnceWith({ ledgerId, store: '甲', platformSku: 'SKU-0', unitCost: '9.3', reason: '人工输入单件成本并确认更正' });
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 it('corrects only missing store SKUs directly without loading a receipt, accepting zero and tiny real costs', async () => {
   await render(['SKC-1', 'SKC-2', 'SKC-3'], 'ready', { ledgerId: 'DIRECT', stores: ['甲', '乙', '丙'], costs: [formalCost] });
@@ -464,9 +486,14 @@ it('shows current cost coverage instead of requesting another correction from hi
   expect(container.querySelector('.cost-anomaly-warning')).toBeNull();
   expect(mocks.inboxRecords[0].adoption).toBe(adoption);
 });
-it.each(['finalized','locked'])('keeps evidence and manual correction available for a legacy %s month',async status=>{
-  await render(['SKC-1'],status,{ledgerId:'DETAILS-'+status,costs:[formalCost]});await act(async()=>button('详情').click());
-  expect(container.querySelector('[role="dialog"]').textContent).not.toContain('已定稿或锁定');expect(container.querySelector('#manual-cost-value')).not.toBeNull();
+it.each(['finalized', 'locked'])('keeps evidence and manual correction available for a legacy %s month', async status => {
+  await render(['SKC-1'], status, { ledgerId: `DETAILS-${status}`, costs: [formalCost] });
+  await act(async () => button('详情').click());
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).not.toContain('已定稿或锁定');
+  expect(dialog.querySelector('.cost-evidence-details').open).toBe(true);
+  await act(async () => button('人工更正', dialog).click());
+  expect(dialog.querySelector('#manual-cost-value').value).toBe('10');
 });
 it('recognizes a restored draft already in the automatic inbox and explains its block', async () => {
   const ledgerId = 'RESTORED-INBOX';

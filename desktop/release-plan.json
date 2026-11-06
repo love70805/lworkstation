@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "candidateOnly": true,
-  "integrationBranch": "codex/erp-login-resume-2-0-3",
+  "integrationBranch": "codex/cost-review-ui-2-0-4",
   "requiredCommits": [
     {
-      "module": "stable-2.0.2",
-      "commit": "dcd33c7ea8e6f2ad9bdca1386adb37f4f04e836f"
+      "module": "cost-review-plan",
+      "commit": "3297c048b9c4ce6abdf682579eb84137e8e24ad4"
     }
   ]
 }

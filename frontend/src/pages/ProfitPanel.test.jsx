@@ -40,14 +40,14 @@ it('keeps old months editable without a reopen dialog',async()=>{
 it('reveals actual SKU rows and additional fields when expanding all columns from collapsed groups', async () => {
   const details = container.querySelector('details:has(.profit-table-panel)') ?? [...container.querySelectorAll('details')].find(item => item.querySelector('summary')?.textContent.includes('查看利润明细'));
   await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
-  expect(container.querySelector('.profit-skc-group table')).toBeNull();
+  expect(container.querySelector('.profit-variant-row')).toBeNull();
   await act(async () => findButton('展开全部列').click());
-  expect(container.querySelector('.profit-skc-group').open).toBe(true);
-  expect(container.querySelector('.profit-skc-group table').textContent).toContain('总采购成本');
-  expect(container.querySelector('.profit-skc-group table').textContent).toContain('仓储成本');
+  expect(container.querySelector('.profit-group-toggle').getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('.profit-table thead').textContent).toContain('总采购成本');
+  expect(container.querySelector('.profit-table thead').textContent).toContain('仓储成本');
   await act(async () => findButton('精简列').click());
-  expect(container.querySelector('.profit-skc-group table').textContent).not.toContain('总采购成本');
-  expect(container.querySelector('.profit-skc-group table').textContent).toContain('成本详情');
+  expect(container.querySelector('.profit-table thead').textContent).not.toContain('总采购成本');
+  expect(container.querySelector('.profit-variant-row').textContent).toContain('补录成本');
 });
 
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
@@ -74,9 +74,8 @@ it("opens the warehouse dialog outside collapsed details, cancels, and applies t
 it('preserves an in-progress manual draft when a new ERP snapshot triggers recalculation', async()=>{
   const details=[...container.querySelectorAll('details')].find(el=>el.querySelector('summary')?.textContent.startsWith('查看利润明细'));
   await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
-  const group=container.querySelector('.profit-skc-group');
-  await act(async()=>{group.open=true;group.dispatchEvent(new Event('toggle'));});
-  await act(async()=>findButton('成本详情').click());
+  await act(async()=>container.querySelector('.profit-group-toggle').click());
+  await act(async()=>findButton('补录成本').click());
   const input=container.querySelector('#manual-cost-value');
   input.focus();
   await act(async()=>Simulate.change(input,{target:{value:'0.009'}}));
@@ -86,7 +85,7 @@ it('preserves an in-progress manual draft when a new ERP snapshot triggers recal
   expect(container.querySelector('#manual-cost-value')).toBe(input);
   expect(input.value).toBe('0.009');
   expect(container.querySelector('#manual-cost-reason')).toBeNull();
-  expect(container.querySelector('.profit-skc-group').open).toBe(true);
+  expect(container.querySelector('.profit-group-toggle').getAttribute('aria-expanded')).toBe('true');
 });
 
 it('renders initial asynchronous snapshot loading without dereferencing an empty calculation', async()=>{
@@ -101,10 +100,10 @@ it("opens the cost details from the missing-cost action", async () => {
   const details = [...container.querySelectorAll("details")].find(el => el.querySelector("summary")?.textContent.startsWith("查看利润明细"));
   await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
   const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
-  await act(async () => findButton("只看待补成本").click());
+  await act(async () => findButton("查看待补（1）").click());
   await act(async () => new Promise(resolve => requestAnimationFrame(resolve)));
   expect(details.open).toBe(true);
-  expect(container.querySelector('.profit-skc-group table')).not.toBeNull();
+  expect(container.querySelector('.profit-variant-row')).not.toBeNull();
   expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
   expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
   scroll.mockRestore();
@@ -121,7 +120,7 @@ it('retains same-number store exclusions in current profit display and saved fil
   await act(async()=>root.render(<MemoryRouter initialEntries={[href]}><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
   const details=[...container.querySelectorAll('details')].find(element=>element.querySelector('summary')?.textContent.startsWith('查看利润明细'));
   await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
-  await act(async()=>{for(const group of container.querySelectorAll('.profit-skc-group')){group.open=true;group.dispatchEvent(new Event('toggle'));}});
+  await act(async()=>{for(const toggle of container.querySelectorAll('.profit-group-toggle[aria-expanded="false"]')) toggle.click();});
   expect(container.textContent).toContain('SKU-1');
   expect(container.textContent).not.toContain('SKU-0');
   expect(readProfitFilter(new URLSearchParams(),'L').supplierStoreSelection).toEqual(supplierStoreSelection);

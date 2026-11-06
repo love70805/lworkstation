@@ -77,13 +77,14 @@ it('reveals scoped missing rows from the cost section and the whole month from t
  const button = label => [...container.querySelectorAll('button')].find(node => node.textContent === label);
  await act(async()=>button('查看当前待补').click());
  await act(async()=>new Promise(resolve=>requestAnimationFrame(resolve)));
- expect(container.querySelectorAll('.profit-skc-group table')).toHaveLength(1);
+ expect(container.querySelectorAll('.profit-variant-row')).toHaveLength(1);
  expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
  expect(container.querySelector('.profit-workspace-controls select').value).toBe('乙');
  expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('T');
  await act(async()=>button('补齐本月成本').click());
  await act(async()=>new Promise(resolve=>requestAnimationFrame(resolve)));
- expect(container.querySelectorAll('.profit-skc-group table')).toHaveLength(2);
+ expect(container.querySelectorAll('.profit-variant-row')).toHaveLength(2);
+ expect(container.querySelectorAll('.profit-table thead')).toHaveLength(1);
  expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
  expect(container.querySelector('.profit-workspace-controls select').value).toBe('all');
  expect(container.querySelector('[aria-label="在当前范围搜索 SKC、SKU"]').value).toBe('');

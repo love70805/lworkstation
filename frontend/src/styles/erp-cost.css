@@ -410,6 +410,7 @@
 .cost-detail-modal .modal-body { display: grid; gap: 18px; }
 .cost-detail-current { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-bg); }
 .cost-detail-current small { color: var(--text-muted); line-height: 1.6; }
+.cost-purchase-summary { white-space: pre-line; overflow-wrap: anywhere; }
 .cost-detail-evidence { min-width: 0; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
 .cost-detail-evidence h3 { margin: 0 0 8px; font-size: 14px; }
 .cost-detail-evidence p { color: var(--text-muted); font-size: 13px; line-height: 1.6; }

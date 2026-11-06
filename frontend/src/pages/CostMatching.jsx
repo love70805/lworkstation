@@ -11,7 +11,7 @@ import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision"
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
 import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
-import { createManualOverrideLookup } from "../domain/manualCostOverride";
+import { createManualOverrideLookup, storeSkuKey } from "../domain/manualCostOverride";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { costEvaluationPeriod } from '../domain/inventoryAccounting';
 import ErpCollectionLauncher from '../components/ErpCollectionLauncher';
@@ -42,7 +42,7 @@ import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifier
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { useLedgerIdentity } from "../hooks/useLedgerIdentity";
 import { buildErpCostTemplate, parseErpCostInput } from "../lib/erpCostImport";
-import { groupImportedSales } from "../lib/profit";
+import { countProfitIdentities, groupImportedSales } from "../lib/profit";
 import { registerErpBridgeRequest, controlErpCollectionTask } from "../lib/erpInboxTransport";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, saveProfitFilter } from "../lib/profitFilter";
 import { buildErpInboxHistory, describeEvidenceIssues, evidenceRepairGuidance, matchesCostQuery, groupAuxiliaryCostRows, groupCostMatchesBySkc, isUnmappedCostMatch, rejectErpInboxBatchesForCostMatching, switchLoadedErpInboxDraft, withLedgerAttributes } from "../lib/costMatching";
@@ -54,11 +54,11 @@ import { CostMatchingDeleteBatchDialog, CostMatchingInboxQueueDialog, CostMatchi
 const currency = (value) => value.toLocaleString("zh-CN", { style: "currency", currency: "CNY", minimumFractionDigits: 2 });
 const costViewCache = new Map();
 
-export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose, onShowMissing }) {
+export function CostMatchingContent({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose, onShowMissing, onReviewReasons }) {
   const snapshot = useLatestSalesImport(validatedContext?.ledgerId, suppliedSnapshot);
   if (snapshot === undefined) return <Panel>正在验证成本核对范围...</Panel>;
   if (!validatedContext?.ledgerId || snapshot?.ledger?.id !== validatedContext.ledgerId || snapshot?.ledger?.workspaceId !== validatedContext.workspaceId || (validatedContext.store !== "all" && !snapshot.rows.some((row) => row.store === validatedContext.store))) return <Panel><p role="alert">账本或店铺不属于当前工作区，请重新选择。</p></Panel>;
-  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} compact={compact} reviewTarget={reviewTarget} onReviewClose={onReviewClose} onShowMissing={onShowMissing} />;
+  return <CostMatchingBody key={`${validatedContext.workspaceId}/${validatedContext.ledgerId}`} validatedContext={validatedContext} onPublished={onPublished} suppliedSnapshot={snapshot} compact={compact} reviewTarget={reviewTarget} onReviewClose={onReviewClose} onShowMissing={onShowMissing} onReviewReasons={onReviewReasons} />;
 }
 
 export default function CostMatching() {
@@ -134,10 +134,10 @@ function EvidencePreview({ variants }) {
   );
 }
 
-function SelectedPurchaseEvidence({ match }) {
+function SelectedPurchaseEvidence({ match, expanded }) {
   const records = match.costDecision?.selectedRecords ?? adoptedCostEvidence(match.raw ?? match).selected.filter(Boolean);
   if (!records.length) return <span className="pending-text">{match.periodReviewRequired ? "选样待复核" : match.costDecision ? "无合格采购" : "兼容输入"}</span>;
-  return <details className="cost-evidence-details">
+  return <details open={expanded} className="cost-evidence-details">
     <summary>{match.periodReviewRequired ? "原采用" : "参与核算"} {records.length} 笔采购</summary>
     <div className="cost-evidence-details-body">
       {records.map(record => <div key={record.recordId} className="cost-selected-purchase">
@@ -150,7 +150,7 @@ function SelectedPurchaseEvidence({ match }) {
   </details>;
 }
 
-function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose, onShowMissing }) {
+function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, compact = false, reviewTarget = null, onReviewClose, onShowMissing, onReviewReasons }) {
   const desktop = isDesktopRuntime();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -811,13 +811,17 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     const match = reviewMatchBySku.get(row.canonicalPlatformSku);
     return { ...row, match, unitCost: manualOverride?.approvedAmount ?? decision.unitCost ?? match?.unitCost };
   }), [formalSalesLines, reviewMatchBySku]);
-  const inboxReview = useMemo(() => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows, includeEvidence: false }), [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
-  const readPendingAnomalies = useMemo(() => () => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: allReviewRows }).exceptions,
-    [workspaceInboxRecords, requestRecords, snapshot?.ledger, allReviewRows]);
+  const inboxReview = useMemo(() => buildErpInboxReview({ inboxes: workspaceInboxRecords, requests: requestRecords, ledger: snapshot?.ledger, reviewRows: formalSalesLines, includeEvidence: false, includeRowReasons: compact }), [workspaceInboxRecords, requestRecords, snapshot?.ledger, formalSalesLines, compact]);
+  useEffect(() => {
+    if (!onReviewReasons || !snapshot?.ledger) return;
+    const byStoreSku = new Map(inboxReview.exceptions.map(entry => [storeSkuKey(entry.store, entry.platformSku), entry]));
+    onReviewReasons({ ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId, byStoreSku });
+  }, [onReviewReasons, inboxReview, snapshot?.ledger]);
   const viewedEvidenceBatch = inboxReview.batches.find(batch => batch.id === currentInbox?.id);
   const filteredReviewRowIds = useMemo(() => new Set(filteredSalesLines.map(row => row.id)), [filteredSalesLines]);
   const reviewRows = useMemo(() => allReviewRows.filter(row => filteredReviewRowIds.has(row.id)), [allReviewRows, filteredReviewRowIds]);
   const missingReviewRows = useMemo(() => reviewRows.filter(row => !row.decision.eligibleForExactProfit), [reviewRows]);
+  const missingStoreSkus = useMemo(() => countProfitIdentities(missingReviewRows).storeSkuCount, [missingReviewRows]);
   const correctableMissingRows = useMemo(() => missingReviewRows.filter(row => row.decision.identityIssue?.code !== 'ledger_sku_skc_conflict'), [missingReviewRows]);
   const reviewRowsRef = useRef(allReviewRows);
   reviewRowsRef.current = allReviewRows;
@@ -830,14 +834,14 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   const openReviewItem = (entry, mode = 'details', returnToBatches = false) => {
     if (!allReviewRows.some(row => row.id === entry.reviewRowId)) return;
     setInboxQueueOpen(false);
-    setManualTarget({ id: entry.reviewRowId, mode: "edit", inboxId: entry.inboxId, returnToBatches });
+    setManualTarget({ id: entry.reviewRowId, mode: mode === 'details' && !entry.currentMissing ? 'details' : 'edit', inboxId: entry.inboxId, returnToBatches });
   };
   const closeCostDetails = () => { if (manualTarget?.returnToBatches) setInboxQueueOpen(true); setManualTarget(null); onReviewClose?.(); };
   useEffect(() => {
-    if (!reviewTarget) return;
+    if (!reviewTarget || reviewTarget.ledgerId !== snapshot?.ledger?.id || reviewTarget.workspaceId !== snapshot?.ledger?.workspaceId) return;
     const row = allReviewRows.find(item => canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(reviewTarget.platformSku) && item.store === reviewTarget.store);
-    if (row) setManualTarget(previous => previous?.id === row.id ? previous : { id: row.id, mode: 'edit' });
-  }, [reviewTarget, allReviewRows]);
+    if (row) setManualTarget(previous => previous?.id === row.id && previous.mode === reviewTarget.mode ? previous : { id: row.id, mode: reviewTarget.mode });
+  }, [reviewTarget, allReviewRows, snapshot?.ledger]);
   const baseTargetRow = manualTarget ? allReviewRows.find(row => row.id === manualTarget.id) ?? null : null;
   const targetReviewSummary = manualTarget?.inboxId ? inboxReview.batches.find(batch => batch.id === manualTarget.inboxId)?.entries.find(entry => entry.reviewRowId === manualTarget.id) : inboxReview.exceptions.find(entry => entry.reviewRowId === manualTarget?.id);
   const targetReviewEntry = useMemo(() => {
@@ -848,7 +852,8 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     const evidence = readErpInboxReviewEvidence({ inbox, request, ledger: snapshot?.ledger, platformSku: targetReviewSummary.platformSku, reviewRow: baseTargetRow });
     return { ...targetReviewSummary, match: evidence.match, reasonText: evidence.error || evidence.reasonText || targetReviewSummary.reasonText };
   }, [targetReviewSummary, baseTargetRow, workspaceInboxRecords, requestRecords, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId, snapshot?.ledger?.period]);
-  const targetRow = baseTargetRow ? { ...baseTargetRow, match: targetReviewEntry?.inboxId === currentInbox?.id && baseTargetRow.match?.status !== 'missing' ? baseTargetRow.match ?? targetReviewEntry?.match : targetReviewEntry?.match ?? baseTargetRow.match } : null;
+  const targetRow = baseTargetRow ? { ...baseTargetRow, match: targetReviewEntry?.match ?? baseTargetRow.match } : null;
+  const viewFirst = manualTarget?.mode === 'details';
   const targetIdentityConflict = targetRow?.decision.identityIssue?.code === 'ledger_sku_skc_conflict';
   const targetAdoptionItem = targetRow ? adoptionItemsBySku.get(targetRow.canonicalPlatformSku) : null;
   const targetCostExplanation = targetRow?.decision.identityIssue
@@ -1082,13 +1087,17 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   }
   renderedCostScope.current = costScope;
 
+  const adoptedMatch = targetRow?.decision.eligibleForExactProfit && targetRow.erpCost && !manualTarget?.inboxId
+    ? { ...targetRow.erpCost, status: 'matched', sourcePlatformSku: targetRow.erpCost.platformSku, sourceWarehouseSku: targetRow.erpCost.warehouseSku } : null;
+  const evidenceMatch = adoptedMatch ?? targetRow?.match;
   const targetDetails = targetRow ? <>
-        <div className="cost-detail-current"><strong>当前采用：{targetRow.decision.eligibleForExactProfit ? targetRow.manualOverride ? `${formatManualUnitCost(targetRow.decision.unitCost)} · 人工更正` : `${formatErpUnitCost(targetRow.decision.unitCost)} · ERP` : "缺少有效成本"}</strong><small>{targetCostExplanation}</small>{targetRow.manualOverride ? <small>人工更正未关联可用采购凭证时，导出单号留空。可在下方核对原始 ERP 返回。</small> : null}</div>
+        <div className="cost-detail-current"><strong>{targetRow.decision.eligibleForExactProfit ? targetRow.manualOverride ? `人工更正 · ${formatManualUnitCost(targetRow.decision.unitCost)}/件` : `ERP 已采用 · ${formatErpUnitCost(targetRow.decision.unitCost)}/件` : "缺少有效成本"}</strong><small>{targetCostExplanation}</small>{targetRow.manualOverride ? <small>人工更正未关联可用采购凭证时，导出单号留空。可在下方核对原始 ERP 返回。</small> : null}
+          {targetRow.decision.identityIssue || targetReviewEntry?.mappingIssue ? <Button onClick={openLedgerImport}>检查导入映射</Button> : null}</div>
         <section className="cost-detail-evidence"><h3>ERP 采购证据</h3><ErpResponseDetails failures={erpFailures.filter(item => item.platformSku ? canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(targetRow.platformSku) : !item.warehouseSku || item.warehouseSku === targetRow.match?.sourceWarehouseSku)} />
-          {targetRow.match && targetRow.match.status !== "missing" ? <>
-            <p>仓库 SKU：{targetRow.match.sourceWarehouseSku || "未映射"} · {snapshot.ledger.period} 及以前</p>
-            <SelectedPurchaseEvidence match={targetRow.match} /><EvidenceDetails match={targetRow.match} />
-            {(targetRow.match.costDecision?.anomalies ?? []).map(anomaly => <div className="cost-resolution-record" key={anomaly.recordId}>
+          {evidenceMatch && evidenceMatch.status !== "missing" ? <>
+            <p>仓库 SKU：{evidenceMatch.sourceWarehouseSku || "未映射"} · {snapshot.ledger.period} 及以前</p>
+            <SelectedPurchaseEvidence match={evidenceMatch} expanded={viewFirst} /><EvidenceDetails match={evidenceMatch} />
+            {(evidenceMatch.costDecision?.anomalies ?? []).map(anomaly => <div className="cost-resolution-record" key={anomaly.recordId}>
               <div><strong>{purchaseCurrency(anomaly.originalUnitPrice)}</strong><small>{anomaly.reasons.map(reason => ERP_COST_ANOMALY_LABELS[reason] ?? reason).join("；")}</small></div>
               {anomaly.status === "ignored" ? <Badge tone="warning">异常已忽略</Badge> : anomaly.status === "resolved" ? <Badge tone="success">{anomaly.resolution?.action === 'confirm_true_price' ? '采购价已确认' : '采购价已修正'}</Badge>  : <Badge tone="warning">原证据待复核</Badge>}
             </div>)}
@@ -1098,20 +1107,19 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
 
   const costDialog = targetRow ? <ManualCostDialog key={targetRow.id} open={!resolutionDraft} ledger={snapshot.ledger} row={targetRow}
     readOnly={locked} hasEffectiveErpCost={targetRow.decision.eligibleForExactProfit && !targetRow.manualOverride && Boolean(targetRow.erpCost)}
-    className="cost-detail-modal" title="成本详情" formFirst onClose={closeCostDetails}>
-    <details className="cost-correction-evidence"><summary>采购证据与异常原因</summary>{targetDetails}</details>
+    className="cost-detail-modal" title={viewFirst || targetRow.decision.eligibleForExactProfit ? "成本详情" : "补录成本"} formFirst viewFirst={viewFirst} onClose={closeCostDetails}>
+    {targetDetails}
   </ManualCostDialog> : null;
-  const hasPendingAnomalies = inboxReview.exceptions.some(item => item.inboxId && item.state === 'anomaly_pending');
-  const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} readPending={readPendingAnomalies}
-    hasPendingAnomalies={hasPendingAnomalies} locked={locked} onReview={item => {
-    const row = allReviewRows.find(row => item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku)
-      || (row.match?.sourceWarehouseSku ?? row.erpCost?.warehouseSku) === item.warehouseSku);
-    if (row) setManualTarget({ id: row.id, mode: 'edit', inboxId: item.inboxId });
+  const hasPendingAnomalies = pendingReviewEntries.some(item => item.inboxId && item.state === 'anomaly_pending');
+  const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} reviewRows={allReviewRows}
+    locked={locked} onReview={item => {
+    const row = allReviewRows.find(row => row.store === item.store && item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku));
+    if (row) setManualTarget({ id: row.id, mode: 'details', inboxId: item.inboxId });
   }} />;
   if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
     <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
       ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
-    <CostAttention missing={missingReviewRows.length} hasAnomalies={hasPendingAnomalies}
+    <CostAttention missing={missingStoreSkus} store={profitFilter.storeFilter} hasAnomalies={hasPendingAnomalies}
       collected={Boolean(workspaceInboxRecords.length)} onShowMissing={onShowMissing}>{anomalyActions}</CostAttention>
     {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
       <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? erpCollectionPresentation(collectionTask).title : '成本采集记录'}</summary>
