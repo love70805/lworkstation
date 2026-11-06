@@ -1,6 +1,6 @@
 # Lworkstation 发布状态
 
-更新时间：2026-11-06（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
+2026-11-07（北京时间）以 [2.0.6](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) 作为新的稳定基线，安装包和两份中文版图文指南在同一发布页。本页较早条目记载当时的发布情况。旧安装包已归档，查旧版源码可按[版本标签](https://github.com/love70805/lworkstation/tags)定位，版本沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
 
 ## 2.0.6 利润核对与导出
 

@@ -41,6 +41,8 @@
 
 ## 对话与远端仓库整理
 
+2026-11-07 本批以 `v2.0.6` 为新的稳定基线。归档并校验其余 121 个公开 Release 的 485 个附件后整理了发布页，保留 Git 标签。[稳定版安装包与两份图文指南](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) · [发布沿革](DEVELOPMENT_HISTORY.md#当前交付与-github)
+
 本次保留了主线和跟进核算、建档规则的对话。已交付的讨论按版本整理，关联在用工作树的对话单独归类。聊天记录和私有核对材料保存在本机。
 
 本批以远端 `a8d2de2` 为基线，删除了已完整进入主线的 186 个旧分支，每个分支均有恢复记录。[分支清单与恢复方法](DEVELOPMENT_HISTORY.md#2026-11-06-远端分支整理) · [整理前的完整看板](https://github.com/love70805/lworkstation/blob/a8d2de2cb26e99e9ee667daee9a2ab155a1da903/docs/CODEX_TASK_BOARD.md)

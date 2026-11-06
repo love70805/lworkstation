@@ -1,12 +1,10 @@
 # Lworkstation 开发历史
 
-本页按北京时间记录已发布的版本，最近核对日期为 2026-11-06。当前工作和待确认项见[任务看板](CODEX_TASK_BOARD.md)。
+本页按北京时间记录已发布的版本，最近核对日期为 2026-11-07。当前工作和待确认项见[任务看板](CODEX_TASK_BOARD.md)。
 
 ## 当前交付与 GitHub
 
-2026-11-06 核实时，最新稳定版为 2.0.4，当日 15:30 公开，4 个资产均已上传。软件标签指向 PR #332 的合并提交 `a8d2de2`，该提交的主线 CI 已通过。[2.0.4 发布记录](https://github.com/love70805/lworkstation/releases/tag/v2.0.4) · [PR #332](https://github.com/love70805/lworkstation/pull/332) · [软件主线 CI](https://github.com/love70805/lworkstation/actions/runs/42180217990)
-
-此次整理时，GitHub 共有 120 个公开 Release。以后查当前稳定版和待审改动，可直接打开[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)和[开放 PR](https://github.com/love70805/lworkstation/pulls)。
+2026-11-07 整理发布页时，在当时的 122 个公开 Release 中保留了 [2.0.6 稳定基线](https://github.com/love70805/lworkstation/releases/tag/v2.0.6)。其余 121 个版本的发布说明和 485 个附件已归档，附件逐件校验。历史源码可按[版本标签](https://github.com/love70805/lworkstation/tags)查看。后续交付见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)和[开放 PR](https://github.com/love70805/lworkstation/pulls)。
 
 ## 开发阶段
 
