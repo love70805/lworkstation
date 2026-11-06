@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { profitReportSheetWidths, writeReportArchive } from './profitReportWorkbook';
-import { reportThemeXml, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
+import { profitThemeXml, reportThemeXml, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
 import { dispatchColumns } from './dispatchReportLayout';
 import { clearReportMergeValues } from './reportMergedCells';
 import { lowerSavedReportSummary, unfreezeReportSheet } from './reportSummaryLayout';
@@ -64,7 +64,8 @@ export function formatSavedReportLayout(bytes){
     files.set(file,new TextEncoder().encode(unfreezeReportSheet(xml)));
   }
   let themed=styles.replace(block[0],`<cellXfs count="${originals.length+variants.length}">${block[1]}${variants.join('')}</cellXfs>`);
-  for(const [tag,xml] of Object.entries(reportThemeXml)){
+  const theme = styles.includes(profitThemeXml.fonts) ? profitThemeXml : reportThemeXml;
+  for(const [tag,xml] of Object.entries(theme)){
     const pattern=new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`);if(!pattern.test(themed))return fail();
     themed=themed.replace(pattern,xml);
   }

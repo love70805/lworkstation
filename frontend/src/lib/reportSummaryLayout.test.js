@@ -47,11 +47,11 @@ it('removes frozen/split panes and their selections while preserving zoom and no
 it.each(['pre_deduction', 'financial'])('exports %s with distinct blue headers, both summary tables lowered and no frozen panes', async kind => {
   const report = reportFor(kind), snapshot = structuredClone({ report, products, dispatchRows, deductions });
   const built = buildProfitReportWorkbook({ report, products, dispatchRows, deductionRows: deductions }), book = read(built.bytes), summary = book.Sheets['汇总表'];
-  expect(REPORT_TEMPLATE_VERSION).toBe('profit-zebra@13-summary-layout');expect(built.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
+  expect(REPORT_TEMPLATE_VERSION).toBe('profit-zebra@14-profit-colors');expect(built.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
   expect(summary.L1).toBeUndefined();expect(summary.L2.v).toBe('店铺');expect(summary.M2.v).toBe('销量');expect(summary.N2.v).toBe('利润');
   expect(summary.L3).toMatchObject({ t: 's', v: '00027' });expect(summary.M3).toMatchObject({ t: 'n', v: 35 });expect(summary.N3).toMatchObject({ t: 'n', v: 8.5 });
   expect(summary.L6.v).toBe('项目');expect(summary.L7.v).toBe('代发');
-  expect(xmlFile(book, 'xl/styles.xml')).toContain('rgb="FFCADFF2"');expect(xmlFile(book, 'xl/styles.xml')).toContain('rgb="FFF0F6F6"');
+  expect(xmlFile(book, 'xl/styles.xml')).toContain('rgb="FFDCE8F1"');expect(xmlFile(book, 'xl/styles.xml')).toContain('rgb="FFEAF1F1"');
   for (let index = 0; index < book.SheetNames.length; index++) expect(xmlFile(book, `xl/worksheets/sheet${index + 1}.xml`)).not.toMatch(/<pane\b|state="frozen/);
   const stored = { ...report, templateVersion: built.templateVersion, fileBase64: bytesToBase64(built.bytes), fileSha256: await sha256(built.bytes) }, original = structuredClone(stored);
   const output = await prepareReportDownload(stored, { dispatchRows, ...(kind === 'financial' ? { deductionRows: deductions } : {}) });

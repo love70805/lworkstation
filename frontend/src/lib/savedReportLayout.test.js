@@ -37,7 +37,7 @@ it('keeps tables compact while separating counts, identifiers and amounts with p
  expect(alignment(book,'20店','E2')).toContain('borderId="1"');
  expect(alignment(book,'代发表','E2')).toContain('fontId="5"');
  expect(alignment(book,'代发表','D2')).toContain('fontId="0"');
- expect(source(book,'xl/styles.xml')).toContain('rgb="FFCADFF2"');
+ expect(source(book,'xl/styles.xml')).toContain('rgb="FFDCE8F1"');
  expect(source(book,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
  expect(book.Sheets['代发表'].E2).toMatchObject({t:'s',v:dispatchRows[0].order1688});
  expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.152509999,z:'General'});
@@ -46,8 +46,8 @@ it('keeps tables compact while separating counts, identifiers and amounts with p
  const summary=book.Sheets['汇总表'],row=Object.keys(summary).find(key=>/^L\d+$/.test(key)&&summary[key].v==='扣款').slice(1);
  expect(summary['N'+row].z).toBe('General');expect(book.Sheets['20店'].E2.z).toBe('0.00');
 });
-it.each(['profit-zebra@7-deductions-compact','profit-zebra@8-spaced-general-deductions'])('formats frozen %s without rewriting text, numeric literals, row order, merges or non-style files',async templateVersion=>{
- const built=buildProfitReportWorkbook({report,products,dispatchRows,deductionRows}),files=read(built.bytes);
+it.each(['profit-zebra@7-deductions-compact','profit-zebra@8-spaced-general-deductions','profit-zebra@13-summary-layout'])('formats frozen %s without rewriting text, numeric literals, row order, merges or non-style files',async templateVersion=>{
+ const built=buildProfitReportWorkbook({report,products,dispatchRows,deductionRows,legacyLayout:true}),files=read(built.bytes);
  const archive=new Map(Object.entries(files.files).filter(([name,row])=>name&&row.type===2&&name!=='\u0001Sh33tJ5').map(([name,row])=>[name,new Uint8Array(row.content)]));
  // Emulate the old quantity/right and identifier/left edge alignment and two-decimal format.
  archive.set('xl/styles.xml',new TextEncoder().encode(source(files,'xl/styles.xml').replace(/numFmtId="0"(?=[^>]*fontId="[34]")/g,'numFmtId="168"').replace(/ indent="1"/g,'').replaceAll('FFCADFF2','FF284B6B').replaceAll('FF344459','FFFFFFFF').replaceAll('fontId="5"','fontId="0"').replace(/borderId="[1-4]"/g,'borderId="0"')));
@@ -84,4 +84,26 @@ it('frames every table cell in new reports and frozen downloads without changing
  expectTableBorders(output);
  expect(saved).toEqual(before);
  for(const name of read(built.bytes).SheetNames)for(const [address,cell] of Object.entries(read(built.bytes).Sheets[name]))if(cell.t==='n')expect(read(output).Sheets[name][address]).toMatchObject({t:'n',v:cell.v});
+});
+
+it.each(['pre_deduction','financial'])('colors only numeric losses in new %s exports and their saved downloads', async kind => {
+  const items = ['-10.12','2.50','0','-0.001'].map((profitExact, i) => ({
+    ...products[0], platformSku: 'SKU-' + i, groupSkc: 'G-' + i, profitExact,
+  }));
+  const deductions = kind === 'financial' ? deductionRows : [];
+  const saved = { ...report, kind, totalsExact: reportTotals(items, '0', '0.7', deductions) };
+  const built = buildProfitReportWorkbook({ report: saved, products: items, deductionRows: deductions });
+  const archive = { ...saved, templateVersion: built.templateVersion, fileBase64: bytesToBase64(built.bytes), fileSha256: await sha256(built.bytes) };
+  const download = await prepareReportDownload(archive, kind === 'financial' ? { deductionRows: deductions } : {});
+  for (const bytes of [built.bytes, download]) {
+    const book = read(bytes);
+    expect(source(book, 'xl/styles.xml')).toContain('rgb="FF9B4B50"');
+    expect(book.Sheets['20店'].J2).toMatchObject({ t:'n', v:-10.12 });
+    for (const [sheet, address, font] of [
+      ['20店','J2',6], ['20店','J3',0], ['20店','J4',0], ['20店','J5',0], ['20店','J6',7],
+      ['汇总表','J3',6], ['汇总表','J7',7], ['汇总表','J8',7], ['汇总表','N3',6], ['汇总表','N4',7],
+      ['汇总表',kind === 'financial' ? 'N9' : 'N8',7],
+      ...(kind === 'financial' ? [['20店','J7',4], ['20店','J8',7], ['扣款','D2',3]] : []),
+    ]) expect(alignment(book,sheet,address), sheet + ' ' + address).toContain('fontId="' + font + '"');
+  }
 });

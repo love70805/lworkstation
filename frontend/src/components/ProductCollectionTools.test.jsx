@@ -19,11 +19,11 @@ beforeEach(() => {
   host=document.createElement('div'); document.body.append(host); root=createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); delete window.shopeersDesktopRuntime; });
-it('shows automatic acquisition first and keeps file import usable without mappings', async () => {
+it('offers automatic acquisition when mappings become available', async () => {
   await render();
   expect(button('一键获取商品档案').disabled).toBe(true);
-  expect(button('导入 ERP 商品档案').closest('details').open).toBe(false);
-  expect(button('导入 ERP 商品档案').disabled).toBe(false);
+  expect(button('导入 ERP 商品档案')).toBeUndefined();
+  expect(host.textContent).not.toContain('手动导入档案');
   expect(mocks.control).not.toHaveBeenCalled();
   mocks.tasks=[task()]; await render();
   expect(button('一键获取商品档案').disabled).toBe(false);

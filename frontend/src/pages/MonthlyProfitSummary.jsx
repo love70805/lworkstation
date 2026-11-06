@@ -6,7 +6,7 @@ export default function MonthlyProfitSummary({ summary, ledger, onEdit }) {
   const ready = summary.status === 'ready';
   const frozen = ['finalized', 'locked'].includes(ledger.status);
   return <section className="profit-monthly-summary" aria-label="整月利润汇总">
-    <p>整月合计 · 全部店铺<span>不随上方商品筛选变化</span></p>
+    <p>整月合计 · 全部店铺<span>按整月台账计算</span></p>
     {summary.status === 'error' ? <p role="alert">整月汇总读取失败：{summary.error} 请在本月报告中重新读取。</p> : null}
     <div className="profit-summary-strip profit-summary-monthly" aria-live="polite">
       <div className="profit-summary-item"><span>代发金额</span><strong>{ready ? summary.dispatchAmountExact === null ? '待登记' : money(summary.dispatchAmountExact) : summary.status === 'error' ? '读取失败' : '正在读取…'}</strong><small>{ready && summary.dispatchQuantityExact !== null ? summary.dispatchRecorded === false ? '未录入，本次按 0 计 · 可直接导出' : `${summary.dispatchQuantityExact} 件 × 每件 ${summary.rateExact} 元${summary.frozen ? ' · 已随基础保存' : ''}` : '未录入也可导出，本次代发按 0 计'}</small>{onEdit && !frozen ? <button className="inline-link" disabled={!ready} onClick={() => onEdit('dispatch')}>{ready && summary.dispatchRecorded !== false && summary.dispatchQuantityExact !== null ? '更新代发' : '登记代发'}</button> : null}</div>

@@ -46,7 +46,7 @@ function ProfitGroup({ group, columns, open, onToggle }) {
   const label = group.platformSkc ? `SKC ${group.platformSkc}` : group.supplierNumber ? `供方货号 ${group.supplierNumber}` : group.groupSkc || '未填平台 SKC';
   return <tbody className="profit-skc-group" aria-labelledby={headingId} ref={groupRef}>
     <tr><th scope="rowgroup" className="profit-group-label" colSpan={columns.length}>
-      <button type="button" className="profit-group-toggle" aria-expanded={open} onClick={() => onToggle([group.id], !open)}>
+      <button type="button" className="profit-group-toggle" aria-expanded={open} onClick={() => onToggle(group.id)}>
         <ChevronRight size={15} aria-hidden="true" />
         <strong id={headingId}>{group.store} · {label}{group.platformSkc && group.supplierNumber && <small>供方货号 {group.supplierNumber}</small>}</strong>
         <span>{group.skuCount} 个 SKU · {group.quantityExact ?? group.qty} 件 · 销售 ¥{displayMoney(group.revenueExact ?? group.revenue)} · 利润 {group.finalizable ? `¥${displayMoney(group.profitExact ?? group.profit)}` : '待核对'}</span>
@@ -56,9 +56,12 @@ function ProfitGroup({ group, columns, open, onToggle }) {
   </tbody>;
 }
 
-export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, expandRequest = 0 }) {
+export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, expandRequest = 0 }) {
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
-  const [expanded, setExpanded] = useState(() => readProfitViewState(stateKey).expanded);
+  const [expandAll, setExpandAll] = useState(() => readProfitViewState(stateKey).expandAll ?? initiallyExpanded);
+  const [exceptions, setExceptions] = useState(() => readProfitViewState(stateKey).exceptions ?? []);
+  const tableRef = useRef(null);
+  const hasRows = groups.length > 0;
   const scroll = useRef(null);
   const tableId = useId();
   const previousPage = useRef(page);
@@ -66,43 +69,65 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
   const count = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
   const current = Math.min(page, count - 1);
   const pageGroups = groups.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
-  const allOpen = pageGroups.every(group => expanded.includes(group.id));
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    const topbar = document.querySelector('.topbar');
+    let frame;
+    // The horizontal scroll frame clips native sticky positioning. Move the real header
+    // within the table so its columns also follow horizontal scrolling and resizing.
+    const alignHeader = () => {
+      const bounds = table.getBoundingClientRect();
+      const top = topbar?.getBoundingClientRect().bottom ?? 0;
+      const limit = Math.max(0, bounds.height - table.tHead.offsetHeight);
+      const offset = Math.min(Math.max(0, top - bounds.top), limit);
+      table.tHead.style.transform = 'translateY(' + offset + 'px)';
+      frame = undefined;
+    };
+    const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(alignHeader); };
+    alignHeader();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
+    observer?.observe(table);
+    observer?.observe(document.body);
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      cancelAnimationFrame(frame);
+    };
+  }, [hasRows]);
   useLayoutEffect(() => {
     if (!expandRequest || handledExpansion.current === expandRequest) return;
     handledExpansion.current = expandRequest;
     setPage(0);
-    setExpanded(groups.slice(0, PAGE_SIZE).map(group => group.id));
-  }, [expandRequest, groups]);
+    setExpandAll(true);
+    setExceptions([]);
+  }, [expandRequest]);
   useLayoutEffect(() => {
-    saveProfitViewState(stateKey, { page, expanded });
-  }, [stateKey, page, expanded]);
-  useLayoutEffect(() => {
-    const position = readProfitViewState(stateKey).windowScrollY;
-    if (Number.isFinite(position)) window.scrollTo({ top: position, behavior: 'auto' });
-    return () => saveProfitViewState(stateKey, { windowScrollY: window.scrollY });
-  }, [stateKey]);
+    saveProfitViewState(stateKey, { page, expandAll, exceptions });
+  }, [stateKey, page, expandAll, exceptions]);
   useLayoutEffect(() => {
     if (previousPage.current !== current) revealListStart(scroll.current);
     previousPage.current = current;
   }, [current]);
-  const setGroupsOpen = (ids, open) => setExpanded(previous => open
-    ? [...new Set([...previous, ...ids])]
-    : previous.filter(id => !ids.includes(id)));
+  const toggleGroup = id => setExceptions(previous => previous.includes(id) ? previous.filter(key => key !== id) : [...previous, id]);
   return <>
     <div className="profit-table-heading">
       <div><h2>月度利润明细</h2><p>点分组查看 SKU 明细。金额单位为人民币（CNY）。</p></div>
       <div className="profit-table-tools">
         <span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span>
-        {pageGroups.length > 1 && <Button variant="ghost" aria-controls={tableId} onClick={() => setGroupsOpen(pageGroups.map(group => group.id), !allOpen)}>
-          {allOpen ? '收起本页明细' : '展开本页明细'}
+        {groups.length > 1 && <Button variant="ghost" aria-controls={tableId} onClick={() => { setExpandAll(!expandAll); setExceptions([]); }}>
+          {expandAll ? '收起全部明细' : '展开全部明细'}
         </Button>}
       </div>
     </div>
     <div className="profit-groups-list" ref={scroll}>
       {groups.length ? <TableScrollArea label="商品成本明细">
-        <table id={tableId} className="data-table profit-table" aria-label="商品成本明细">
+        <table ref={tableRef} id={tableId} className="data-table profit-table" aria-label="商品成本明细">
           <thead><tr>{columns.map(column => <th key={column.id ?? column.accessorKey} scope="col" style={column.meta?.headerStyle}>{column.header}</th>)}</tr></thead>
-          {pageGroups.map(group => <ProfitGroup key={group.id} group={group} columns={columns} open={expanded.includes(group.id)} onToggle={setGroupsOpen} />)}
+          {pageGroups.map(group => <ProfitGroup key={group.id} group={group} columns={columns} open={expandAll !== exceptions.includes(group.id)} onToggle={toggleGroup} />)}
         </table>
       </TableScrollArea> : <p className="no-results">没有符合筛选条件的商品。</p>}
     </div>

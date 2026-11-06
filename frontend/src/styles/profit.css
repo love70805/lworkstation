@@ -18,7 +18,6 @@
 .cost-attention .erp-anomaly-actions { margin:12px 0 0; padding-top:12px; border-top:1px solid var(--warning-border); }
 .cost-attention .erp-anomaly-actions:first-child { margin-top:0; padding-top:0; border:0; }
 .profit-table-panel { scroll-margin-top:calc(var(--topbar-height) + 16px); }
-.profit-table-panel:focus-visible { outline:2px solid var(--primary); outline-offset:3px; }
 @media (max-width:760px) { .cost-attention .profit-cost-alert { flex-wrap:wrap; } .cost-attention .profit-cost-alert > .button { width:100%; } }
 .profit-table .profit-attribute { display:block; font-size:12px; margin-top:5px; color:var(--text-muted); white-space:normal; }
 .profit-table td:last-child, .profit-table th:last-child { box-shadow:-1px 0 0 var(--border); }
@@ -208,8 +207,6 @@
 .profit-multi-select-option:hover { background: var(--surface-bg); }
 .profit-multi-select-option input { width: 15px; height: 15px; accent-color: var(--primary); }
 .profit-multi-select-option code { flex: 1; color: var(--text); }
-.profit-filter-check { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.profit-filter-check input { width: 15px; height: 15px; accent-color: var(--primary); }
 .profit-filter-count { margin-left: auto; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .profit-warning { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger); font-size: 12px; }
 .profit-table { width: 100%; min-width: 830px; table-layout: fixed; }
@@ -328,7 +325,7 @@
 .profit-scope-field > span { color: var(--text-muted); font-size: 12px; font-weight: 600; }
 .profit-scope-search { flex: 1 1 280px; }
 .profit-scope-search .search-input { flex: none; width: 100%; min-height: 40px; max-width: none; }
-.profit-scope-filters .profit-filter-check, .profit-scope-filters .profit-filter-reset { min-height: 40px; }
+.profit-scope-filters .profit-filter-reset { min-height: 40px; }
 .profit-scope-help { flex: 1 1 100%; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .profit-scope-filters .profit-multi-select-menu { width: min(300px, calc(100vw - 64px)); }
 .profit-page .table-scroll-frame {
@@ -389,7 +386,6 @@
   .profit-summary-monthly .profit-summary-item:last-child { border-bottom:0; }
   .profit-summary-products .profit-summary-item:nth-child(n+3) { border-bottom:0; }
   .profit-filter-bar > * { flex: 1 1 100%; }
-  .profit-filter-check { justify-content: flex-start; }
 }
 
 @media (max-width:600px) {
@@ -505,3 +501,63 @@
   .profit-page .page-heading .workspace-month-picker > span { display: none; }
   .profit-page .page-heading .profit-workspace-controls > a { flex: 0 0 auto; min-height: 44px; }
 }
+
+.profit-detail-area { scroll-margin-top: calc(var(--topbar-height) + 12px); }
+.profit-detail-area > .profit-scope-filters { margin-bottom: 6px; }
+.profit-subtotal-label, .profit-collection-scope {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.profit-table thead { position: relative; z-index: 4; }
+.profit-table thead th { box-shadow: inset 0 -1px var(--border); }
+.profit-skc-group { scroll-margin-top: calc(var(--topbar-height) + 58px); }
+.profit-status-switch, .sales-period-switch {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-soft);
+}
+.profit-status-switch .button, .sales-period-switch .button {
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: transparent;
+}
+.profit-status-switch .button[aria-pressed="true"], .sales-period-switch .button[aria-pressed="true"] {
+  color: var(--primary);
+  border-color: var(--border);
+  background: var(--surface);
+}
+.profit-page details > summary, .product-collection-tools details > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.profit-page summary::-webkit-details-marker, .product-collection-tools summary::-webkit-details-marker { display: none; }
+.profit-page details > summary::before, .product-collection-tools details > summary::before {
+  content: '';
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border: solid var(--text-muted);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+}
+.profit-page details[open] > summary::before, .product-collection-tools details[open] > summary::before { transform: rotate(45deg); }
+.profit-page details > summary:hover, .product-collection-tools details > summary:hover { background: var(--surface-hover); }
+.profit-page details > summary:focus-visible, .product-collection-tools details > summary:focus-visible { outline: 2px solid var(--primary); }
+.profit-detail-area > details > summary { background: var(--surface); border: 1px solid var(--border); }
+.profit-detail-area > details[open] > summary { margin-bottom: 6px; }

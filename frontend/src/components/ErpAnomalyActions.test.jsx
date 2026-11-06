@@ -36,20 +36,20 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
-it('labels the waiting-cost shortcut with the current scope and count', async () => {
-  const show = vi.fn();
-  await act(async () => root.render(<CostAttention missing={7} store="all" onShowMissing={show} />));
-  await click('查看待补（7）');
-  await act(async () => root.render(<CostAttention missing={4} store="甲" onShowMissing={show} />));
-  await click('本店待补（4）');
-  expect(show).toHaveBeenCalledTimes(2);
-  await act(async () => root.render(<CostAttention missing={0} store="甲" onShowMissing={show} />));
+it('shows the missing count without a duplicate filter button', async () => {
+  await act(async () => root.render(<CostAttention missing={7} />));
+  expect(host.querySelector('[role="status"]').textContent).toContain('7 条店铺 SKU');
   expect(host.querySelector('button')).toBeNull();
+  await act(async () => root.render(<CostAttention missing={0} />));
+  expect(host.querySelector('[role="status"]')).toBeNull();
 });
 
 it('counts separate receipts once per warehouse and writes exactly the displayed month selection', async () => {
   state.pending.mockResolvedValue([price('A','W','SKU-1',0), price('A','w','SKU-2'), price('A','W','SKU-2'), price('B','W')]);
   await render();
+  expect(button('忽略全部店铺异常（2）')).toBeUndefined();
+  await click('核对价格异常');
+  expect(button('忽略全部店铺异常（2）').closest('[role="dialog"]')).not.toBeNull();
   await click('忽略全部店铺异常（2）');
   expect(state.save).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'A', warehouseSku: 'W' }, { inboxId: 'B', warehouseSku: 'W' }] });
   expect(host.textContent).toContain('含 0 元');
@@ -87,12 +87,14 @@ it('hides stale counts during a new month or receipt read, and offers a safe ret
   const old = [price('old','W')], next = [price('new','W'),price('new','X')];
   state.pending.mockResolvedValueOnce(old).mockRejectedValueOnce(new Error('收件读取失败')).mockResolvedValueOnce(next);
   await render({ inboxes: [] });
+  await click('核对价格异常');
   expect(button('忽略全部店铺异常（1）')).toBeDefined();
   await render({ inboxes: [{ id:'new' }], ledgerId:'N' });
   expect(host.querySelector('[role="alert"]').textContent).toContain('收件读取失败');
   expect(button('忽略全部店铺异常（1）')).toBeUndefined();
   expect(state.save).not.toHaveBeenCalled();
   await click('重试');
+  await click('核对价格异常');
   await click('忽略全部店铺异常（2）');
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId:'N', ignored:true, selectedItems:[{inboxId:'new',warehouseSku:'W'},{inboxId:'new',warehouseSku:'X'}] });
 });
@@ -101,6 +103,7 @@ it('retains write failures for retry and disables changes while saving or locked
   state.pending.mockResolvedValue([price('I','W')]);
   state.save.mockRejectedValueOnce(new Error('写入失败'));
   await render();
+  await click('核对价格异常');
   await click('忽略全部店铺异常（1）');
   expect(host.querySelector('[role="alert"]').textContent).toBe('写入失败');
   let finish; state.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));

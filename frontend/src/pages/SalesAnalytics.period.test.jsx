@@ -53,7 +53,7 @@ const monthBar = period => [...container.querySelectorAll('.sales-month-group')]
 
 it('defaults to twelve calendar slots and one total column, preserving missing months', async () => {
   expect(mocks.months).not.toHaveBeenCalled();
-  await click(container.querySelector('[title="点击切换每日 / 月度"]'));
+  await click(button('按月'));
   expect(mocks.months).toHaveBeenCalledWith({ workspaceId: 'W', store: 'all' });
   expect(container.querySelectorAll('.sales-month-group')).toHaveLength(12);
   expect(monthBar('2026-08').querySelectorAll('.sales-grouped-segment')).toHaveLength(1);
@@ -99,7 +99,7 @@ it('keeps the store across adjacent days and does not invent a zero for an absen
 });
 
 it('direct month selection keeps the store and has independent list context for each month', async () => {
-  await click(container.querySelector('[title="点击切换每日 / 月度"]')); await click(monthBar('2026-08')); await openStore();
+  await click(button('按月')); await click(monthBar('2026-08')); await openStore();
   await change(container.querySelector('input'), 'SKC-');
   await click(button('下一页'));
   const before = container.querySelector('tbody').textContent;
@@ -161,14 +161,14 @@ it.each([['10', '-2'], ['0', '0'], ['-1', '-2']])('does not plot signed/nonposit
 });
 
 it('opens absent months as unknown without sending synthetic ledger IDs to the repository', async () => {
-  await click(container.querySelector('[title="点击切换每日 / 月度"]')); await click(monthBar('2026-06'));
+  await click(button('按月')); await click(monthBar('2026-06'));
   expect(mocks.detail).not.toHaveBeenCalled();
   expect(container.textContent).toContain('期间数据待查');
   expect(container.querySelector('.sales-details-heading p').textContent).toContain('待查');
 });
 
 it('preserves all comparison store selections across modes and range changes', async () => {
-  await click(container.querySelector('[title="点击切换每日 / 月度"]')); await click(button('店铺对比'));
+  await click(button('按月')); await click(button('店铺对比'));
   expect(container.querySelectorAll('.sales-store-legend input:checked')).toHaveLength(2);
   await click(button('清空店铺'));
   expect(container.querySelectorAll('.sales-store-legend input:checked')).toHaveLength(0);
@@ -192,20 +192,20 @@ it('shows read errors and returns to the trend', async () => {
 });
 
 it('keeps an explicitly selected range end when a newer month arrives', async () => {
-  await click(container.querySelector('[title="点击切换每日 / 月度"]'));
+  await click(button('按月'));
   await change(byLabel('月份范围'), '6');
-  await click(container.querySelector('[title="点击切换每日 / 月度"]'));
+  await click(button('按日'));
   mocks.months.mockResolvedValue(['2026-08', '2026-09'].map(period => ({
     ...buildSalesMonth({ period, sourceRows: source(period) }, { today: '2026-10-18' }), ledgerId: period,
   })));
-  await click(container.querySelector('[title="点击切换每日 / 月度"]'));
+  await click(button('按月'));
   expect(container.querySelectorAll('.sales-month-group')).toHaveLength(6);
   expect(monthBar('2026-08')).toBeTruthy();
   expect(monthBar('2026-09')).toBeUndefined();
 });
 
 it('ignores late period results after rapid month changes', async () => {
-  await click(container.querySelector('[title="点击切换每日 / 月度"]')); await click(monthBar('2026-08'));
+  await click(button('按月')); await click(monthBar('2026-08'));
   let finish;
   mocks.detail.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   await click(byLabel('上一月'));
@@ -216,7 +216,7 @@ it('ignores late period results after rapid month changes', async () => {
 });
 
 it('applies the selected comparison stores to month details and never treats empty selection as all stores', async () => {
-  await click(container.querySelector('[title="点击切换每日 / 月度"]')); await click(button('店铺对比'));
+  await click(button('按月')); await click(button('店铺对比'));
   await click(button('清空店铺'));
   await click(monthBar('2026-08'));
   expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(0);

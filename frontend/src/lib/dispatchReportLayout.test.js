@@ -42,7 +42,12 @@ function verify(bytes, records) {
       expect(nativeCell ?? '').not.toMatch(/<(v|f|is)\b/);
     }
   }
-  expect([...xml(book, 'xl/styles.xml').match(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/)[0].matchAll(/<color\b[^>]*\/>/g)].map(match => match[0])).toEqual(Array(6).fill('<color rgb="FF000000"/>'));
+  const sheetPath = 'xl/worksheets/sheet' + (book.SheetNames.indexOf('代发表') + 1) + '.xml';
+  for (const [address, fontId] of [['D2', 0], ['E2', 5]]) {
+    const tag = xml(book, sheetPath).match(new RegExp('<c r="' + address + '"[^>]*>'))[0];
+    const style = Number(tag.match(/ s="(\d+)"/)[1]);
+    expect(book.Styles.CellXf[style].fontId).toBe(fontId);
+  }
   return sheet;
 }
 async function saved(bytes, templateVersion = build(rows).templateVersion) {

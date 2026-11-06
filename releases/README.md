@@ -1,3 +1,7 @@
+## 2.0.6 — 利润核对与导出
+
+基于 `7950869`，规范候选位于 `releases/candidates/2.0.6/`。[2.0.6 稳定版与校验文件](https://github.com/love70805/lworkstation/releases/tag/v2.0.6)
+
 ## 2.0.5 — 月度利润明细按行展开
 
 软件提交 `9089bd8`，规范候选位于 `releases/candidates/2.0.5/`。安装包、差分映射和稳定更新清单的校验值随版本保存。[2.0.5 发布资产与 SHA256.txt](https://github.com/love70805/lworkstation/releases/tag/v2.0.5)

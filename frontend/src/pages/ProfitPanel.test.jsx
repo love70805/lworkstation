@@ -100,16 +100,16 @@ it('renders initial asynchronous snapshot loading without dereferencing an empty
   expect(container.querySelector('.profit-summary-strip')).toBeNull();
 });
 
-it("opens the cost details from the missing-cost action", async () => {
+it("opens missing details from the adjacent reversible filter", async () => {
   const details = [...container.querySelectorAll("details")].find(el => el.querySelector("summary")?.textContent.startsWith("查看利润明细"));
   await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
   const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
-  await act(async () => findButton("查看待补（1）").click());
+  await act(async () => findButton("只看缺成本").click());
   await act(async () => new Promise(resolve => requestAnimationFrame(resolve)));
   expect(details.open).toBe(true);
   expect(container.querySelector('.profit-variant-row')).not.toBeNull();
-  expect(document.activeElement).toBe(container.querySelector('.profit-table-panel'));
-  expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  expect(findButton('只看缺成本').getAttribute('aria-pressed')).toBe('true');
+  expect(scroll).not.toHaveBeenCalled();
   scroll.mockRestore();
   await act(async () => container.querySelector('.profit-group-toggle').click());
   for (const open of [false, true]) {

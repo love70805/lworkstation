@@ -1,12 +1,12 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "candidateOnly": true,
-  "integrationBranch": "codex/profit-detail-rows-2-0-5",
+  "integrationBranch": "codex/profit-review-2-0-6",
   "requiredCommits": [
     {
-      "module": "profit-details-baseline",
-      "commit": "b5397f771b769dda063cf9b20a83c349e6904535"
+      "module": "profit-review-baseline",
+      "commit": "795086955afcae3087191fa40193b51ccf99e4fe"
     }
   ]
 }
