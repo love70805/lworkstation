@@ -1,12 +1,10 @@
 # Lworkstation 经营管理工作台
 
-面向组内运营的 Windows 桌面工作台，将月度台账、选品商品资料、ERP 成本核对和利润核算放在同一个本机工作区。
+面向组内运营的本机 Windows 桌面工作台。导入月度台账后，获取 ERP 成本、核对利润与异常，然后导出报告。商品资料可以按需补齐。
 
 **[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [2.0 使用指南](docs/USER_GUIDE_2.0.md) · [开发历史](docs/DEVELOPMENT_HISTORY.md) · [全部版本](https://github.com/love70805/lworkstation/releases)
 
-**2.0.2 本批更新**：商品档案一键后台获取并自动补齐；待补成本、异常核对与忽略操作集中显示，点击待补入口直接定位明细，采集进度使用单条阶段进度与向右脉冲。当前为本机 Windows 桌面版，无需云端数据库；实际公开版本以最新稳定 Release 为准。
-
-内置 ERP 助手 8.0.60，继续支持稳定通道自动更新。候选、合并与公开状态见[发布状态](docs/RELEASE_STATUS.md)；旧 Beta / RC 用户进入稳定版时需按对应版本说明安装。
+桌面版支持稳定通道内更新。从 Beta 或 RC 转入稳定版时，按对应版本说明安装。当前版本、发布通道及更新内容以[发布状态](docs/RELEASE_STATUS.md)和[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)为准。
 
 ## 主要功能
 
@@ -42,7 +40,7 @@ pnpm --dir desktop install
 pnpm --dir desktop dev
 ```
 
-`frontend/` 为 Electron 内置界面，开发时由 Vite 提供热更新；当前产品以 Windows 桌面安装版交付。工作站入口和模块边界见 [AGENTS.md](AGENTS.md)，开发目录、当前状态和历史材料的边界见 [开发工作区说明](docs/DEVELOPMENT_WORKSPACE.md)。
+`frontend/` 为 Electron 内置界面，开发时由 Vite 提供热更新；当前产品以 Windows 桌面安装版交付。长期业务口径与授权见[项目约束](AGENTS.md)。页面入口、模块边界、命令和验证方法见[开发指南](docs/DEVELOPMENT_WORKSPACE.md)。
 
 常用验证：
 
@@ -61,7 +59,7 @@ pnpm --dir desktop release:organize
 pnpm --dir desktop release:check
 ```
 
-按改动范围补充实际用户路径和桌面验证；构建成功不等于已经发布。发布要求及候选目录见 [开发规则](AGENTS.md)、[发布文件登记](releases/README.md) 和 [更新验收清单](desktop/UPDATE_RELEASE_CHECKLIST.md)。
+按改动影响选择用户路径与桌面验证，发布后核对通道和上传结果。[发布方法](docs/DEVELOPMENT_WORKSPACE.md#软件发布) · [候选登记](releases/README.md)
 
 ## 仓库导航
 

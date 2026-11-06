@@ -1,6 +1,6 @@
 # 旧工具兼容契约
 
-本文件把 ERP Assistant v8.0 和选品工作台 v0.0.1-beta.2 的关键行为转换为 Lworkstation 的验收契约。
+本页记录初次集成 ERP Assistant v8.0 和选品工作台 v0.0.1-beta.2 时的兼容约定，供旧输入与历史结果追溯。当前桌面业务口径和验收范围见[项目约束](../../../AGENTS.md)与[开发指南](../../../docs/DEVELOPMENT_WORKSPACE.md)。
 
 ## 1. ERP 成本抓取契约
 

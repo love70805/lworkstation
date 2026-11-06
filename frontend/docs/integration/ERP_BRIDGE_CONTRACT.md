@@ -1,5 +1,7 @@
 # ERP Assistant v8.0 桥接合同
 
+当前成本任务按已登记范围整项核算，资料按需获取；旧请求、批次和收件证据按其协议版本兼容。以下各版本的固定批量、轮询和人工接续要求属于相应版本。现行流程见[桌面工作流](../../../docs/integration/DESKTOP_WORKFLOW_2.0.0.md)、[档案与成本流程](../../../docs/integration/COST_ARCHIVE_WORKFLOW_2.0.2.md)和[任务看板](../../../docs/CODEX_TASK_BOARD.md)。
+
 ## 0.4.40 统一继续任务补充
 
 本机 `collection-task` 增加可选 `executionProtocol: 2`。成本任务以最多 5 个 SKC 分批；`request_resume` 持久保存继续意图并进入 `ready`，已登录的 ERP 采购管理页轮询后通过 `claim` 原子领取，工作台无需第二次点击。领取绑定 `resumeRequestId` 与 `runnerId`，批次更新和心跳校验执行者；45 秒执行租约失联或服务重启后转为暂停，用户显式继续。工作区内同一时间只领取一个任务。

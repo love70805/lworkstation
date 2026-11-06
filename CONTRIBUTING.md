@@ -15,7 +15,8 @@ feature discussions, and pull requests through GitHub.
 ## Development
 
 Lworkstation is delivered as a Windows Electron application. The browser build
-is retained for frontend development and testing only.
+is retained for frontend development and testing only. Select verification commands
+for the affected workflow using the [development guide](docs/DEVELOPMENT_WORKSPACE.md).
 
 ```powershell
 pnpm --dir frontend install
@@ -37,7 +38,8 @@ the contributor is authorized to use.
 - Describe manual verification and any remaining risk.
 - Preserve the project rules: CNY is the default currency, ERP cost is formal,
   and 1688 cost is reference-only.
-- Do not let the desktop shell decide or write formal cost or finalized profit.
+- The desktop shell transports evidence. Workstation repositories own formal
+  costs, editable monthly calculations and independently saved report snapshots.
 
 By submitting a contribution, you agree that it is licensed under the
 Apache License 2.0, as described in `LICENSE`.
