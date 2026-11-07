@@ -8,8 +8,10 @@ const MASTER_SHA256 = "07A556FA1A57EC9E147138CFA97443214FF63AB0E67CB4B3AD10EB4A5
 const ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const masterPath = path.resolve(__dirname, "../frontend/public/assets/brand/l7-app-icon-master.svg");
 const assetsDirectory = path.join(__dirname, "assets");
-const pngPath = path.join(assetsDirectory, "lworkstation.png");
-const icoPath = path.join(assetsDirectory, "lworkstation.ico");
+const beta = process.argv.includes("--beta");
+const iconName = beta ? "lworkstation-beta" : "lworkstation";
+const pngPath = path.join(assetsDirectory, iconName + ".png");
+const icoPath = path.join(assetsDirectory, iconName + ".ico");
 
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
 // Render build-time icons with the software compositor, independent of GPU drivers.
@@ -45,11 +47,15 @@ function createIco(images) {
 
 async function generate() {
   await app.whenReady();
-  const source = fs.readFileSync(masterPath, "utf8").replace(/\r\n/g, "\n");
-  const sourceBuffer = Buffer.from(source, "utf8");
+  const master = fs.readFileSync(masterPath, "utf8").replace(/\r\n/g, "\n");
+  const sourceBuffer = Buffer.from(master, "utf8");
   if (sha256(sourceBuffer) !== MASTER_SHA256) {
     throw new Error(`L7 master SHA-256 mismatch: ${sha256(sourceBuffer)}`);
   }
+  // Preserve the L7 silhouette; a high-contrast vector B stays legible on
+  // small shortcuts without relying on a system font at packaging time.
+  const badge = '<rect x="584" y="584" width="432" height="432" rx="106" fill="#13204a" stroke="#fff" stroke-width="16"/><path fill="#fff" fill-rule="evenodd" d="M699 665h109q85 0 85 64 0 38-30 56 41 16 41 62 0 77-96 77H699Zm59 48v54h41q35 0 35-28 0-26-35-26Zm0 99v62h47q40 0 40-31 0-31-42-31Z"/>';
+  const source = beta ? master.replace("</svg>", badge + "</svg>") : master;
 
   const renderer = new BrowserWindow({
     width: 1024,
@@ -102,12 +108,12 @@ async function generate() {
   const png = images.find(image => image.size === 1024).png;
   const icoImages = images.filter(image => ICON_SIZES.includes(image.size));
   const ico = createIco(icoImages);
-  fs.writeFileSync(pngPath, png);
+  if (!beta) fs.writeFileSync(pngPath, png);
   fs.writeFileSync(icoPath, ico);
 
   console.log(JSON.stringify({
     master: { path: masterPath, sha256: MASTER_SHA256 },
-    png: { path: pngPath, bytes: png.length, sha256: sha256(png) },
+    ...(!beta && {png: { path: pngPath, bytes: png.length, sha256: sha256(png) }}),
     ico: { path: icoPath, bytes: ico.length, sha256: sha256(ico), sizes: ICON_SIZES },
   }, null, 2));
 }

@@ -7,15 +7,16 @@ const { promisify } = require('node:util');
 
 // Stable NSIS identity, shared by all existing per-user and per-machine installs.
 const INSTALL_GUID = 'b871a797-4186-59e7-b82d-5dde992706b7';
+const betaInstallation = require('./beta-installation.json');
 const registryQuery = promisify(execFile);
 const sameDirectory = (left, right) => typeof left === 'string' && left.trim()
   && path.win32.resolve(left.trim()).toLowerCase() === path.win32.resolve(right).toLowerCase();
 
-async function readInstallLocation(hive) {
+async function readInstallLocation(hive, guid) {
   for (const view of ['64', '32']) {
     try {
       const { stdout } = await registryQuery(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe'),
-        ['query', `${hive}\\Software\\${INSTALL_GUID}`, '/v', 'InstallLocation', `/reg:${view}`],
+        ['query', `${hive}\\Software\\${guid}`, '/v', 'InstallLocation', `/reg:${view}`],
         { windowsHide: true, timeout: 5000, encoding: 'utf8' });
       const location = stdout.match(/InstallLocation\s+REG_SZ\s+(.+)/i)?.[1]?.trim();
       if (location) return location;
@@ -27,8 +28,9 @@ async function readInstallLocation(hive) {
   return null;
 }
 
-async function resolveInstallScope(directory, readLocation = readInstallLocation) {
-  const [machine, user] = await Promise.all([readLocation('HKLM'), readLocation('HKCU')]);
+async function resolveInstallScope(directory, readLocation = readInstallLocation, edition = 'stable') {
+  const guid = edition === 'beta' ? betaInstallation.guid : INSTALL_GUID;
+  const [machine, user] = await Promise.all([readLocation('HKLM', guid), readLocation('HKCU', guid)]);
   if (sameDirectory(machine, directory)) return 'machine';
   if (sameDirectory(user, directory)) return 'user';
   throw Object.assign(new Error('当前程序与 Windows 安装登记目录不一致，请手动运行安装包修复安装。'), { code: 'INSTALL_SCOPE' });
@@ -42,7 +44,7 @@ function installError(code) {
   return `安装器未能启动（${/^[A-Z0-9_-]{1,24}$/.test(String(code)) ? code : 'UNKNOWN'}），当前版本仍可使用，请重试。`;
 }
 
-function createUpdateInstaller({ executable, userDataPath, parentPid = process.pid, resolveScope = resolveInstallScope,
+function createUpdateInstaller({ executable, userDataPath, edition = 'stable', parentPid = process.pid, resolveScope = resolveInstallScope,
   spawnInstaller = spawn, createServer = net.createServer, timeoutMs = 120000, record: recordOverride } = {}) {
   let pending = null;
   const logPath = path.join(userDataPath, 'runtime', 'update-install.jsonl');
@@ -68,7 +70,7 @@ function createUpdateInstaller({ executable, userDataPath, parentPid = process.p
     });
     if (actual !== expected) throw Object.assign(new Error('安装包校验失败，尚未安装。请重新下载更新。'), { code: 'CHECKSUM' });
     const directory = path.dirname(executable);
-    const scope = await resolveScope(directory);
+    const scope = await resolveScope(directory, undefined, edition);
     record('launch', { version, scope });
     onWaiting(scope);
     const pipe = `\\\\.\\pipe\\Lworkstation.Update.${crypto.randomBytes(16).toString('hex')}`;

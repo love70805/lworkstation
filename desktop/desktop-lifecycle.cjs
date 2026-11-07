@@ -1,6 +1,6 @@
 const { loadCloseBehavior, saveCloseBehavior } = require('./desktop-preferences.cjs');
 
-function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, canRestore = () => true, onHide = () => {}, onError = () => {}, onChanged = () => {} }) {
+function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, productName = 'Lworkstation', canRestore = () => true, onHide = () => {}, onError = () => {}, onChanged = () => {} }) {
   let tray;
   let quitting = false;
   let notified = false;
@@ -13,7 +13,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, c
   const beginQuit = () => { quitting = true; };
   const quit = () => { beginQuit(); app.quit(); };
   function updateTray() {
-    tray?.setToolTip(closeBehavior === 'tray' ? 'Lworkstation · 关闭窗口后继续后台收件' : 'Lworkstation · 关闭窗口时退出应用');
+    tray?.setToolTip(productName + (closeBehavior === 'tray' ? ' · 关闭窗口后继续后台收件' : ' · 关闭窗口时退出应用'));
     tray?.setContextMenu(menu());
   }
   function setCloseBehavior(value) {
@@ -24,7 +24,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, c
   }
   function menu() {
     return Menu.buildFromTemplate([
-      { label: '打开 Lworkstation', click: restore },
+      { label: '打开 ' + productName, click: restore },
       { type: 'separator' },
       { label: '关闭窗口时', submenu: ['tray', 'quit'].map(value => ({
         label: value === 'tray' ? '隐藏到托盘（继续后台收件）' : '退出应用', type: 'radio', checked: closeBehavior === value,
@@ -34,7 +34,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, c
         },
       })) },
       { type: 'separator' },
-      { label: '退出 Lworkstation', click: quit },
+      { label: '退出 ' + productName, click: quit },
     ]);
   }
   try {
@@ -52,7 +52,7 @@ function createDesktopLifecycle({ app, window, Tray, Menu, icon, userDataPath, c
     onHide(); window.hide();
     if (!notified) {
       notified = true;
-      try { tray.displayBalloon({ title: 'Lworkstation 仍在后台运行', content: '点击托盘图标恢复窗口；右键菜单可退出或修改关闭行为。', noSound: true }); } catch {}
+      try { tray.displayBalloon({ title: productName + ' 仍在后台运行', content: '点击托盘图标恢复窗口；右键菜单可退出或修改关闭行为。', noSound: true }); } catch {}
     }
   });
   window.on('query-session-end', beginQuit);

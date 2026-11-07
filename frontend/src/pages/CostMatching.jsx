@@ -1,5 +1,4 @@
 import ErpAnomalyActions from '../components/ErpAnomalyActions';
-import CostAttention from '../components/CostAttention';
 import { revealErpCollectionProgress } from '../components/ErpBackgroundNotice';
 import { registerCostCatalogCompanion } from "../data/repositories/erpCatalogRepository";
 import { erpLedgerVersion } from '../domain/erpLedgerVersion';
@@ -1110,18 +1109,20 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     className="cost-detail-modal" title={viewFirst || targetRow.decision.eligibleForExactProfit ? "成本详情" : "补录成本"} formFirst viewFirst={viewFirst} onClose={closeCostDetails}>
     {targetDetails}
   </ManualCostDialog> : null;
-  const hasPendingAnomalies = pendingReviewEntries.some(item => item.inboxId && item.state === 'anomaly_pending');
   const anomalyActions = <ErpAnomalyActions ledgerId={snapshot.ledger.id} inboxes={workspaceInboxRecords} reviewRows={allReviewRows}
     locked={locked} onReview={item => {
     const row = allReviewRows.find(row => row.store === item.store && item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku));
     if (row) setManualTarget({ id: row.id, mode: 'details', inboxId: item.inboxId });
   }} />;
-  if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
-    <p className="profit-collection-scope">当前筛选范围 · {describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
-    <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
-      ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
-    <CostAttention missing={missingStoreSkus} hasAnomalies={hasPendingAnomalies}
-      collected={Boolean(workspaceInboxRecords.length)}>{anomalyActions}</CostAttention>
+  if (compact) return <section className="profit-cost-tools profit-erp-strip" aria-label="成本采集与异常处理">
+    <div className="profit-erp-toolbar">
+      <strong>ERP 成本</strong>
+      <p className="profit-collection-scope">{describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
+      {missingStoreSkus > 0 && <span className="profit-erp-pending">{missingStoreSkus} 条待补</span>}
+      <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
+        ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
+    </div>
+    {anomalyActions}
     {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
       <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? erpCollectionPresentation(collectionTask).title : '成本采集记录'}</summary>
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}

@@ -1,0 +1,8 @@
+{
+  "appId": "com.shopeers.workstation.beta",
+  "guid": "1bbc6a37-013e-4072-8f52-2685d10d9e1f",
+  "packageName": "lworkstation-beta",
+  "productName": "Lworkstation Beta",
+  "channel": "beta-sidecar",
+  "artifactPattern": "Lworkstation-Beta-Setup-${version}.${ext}"
+}

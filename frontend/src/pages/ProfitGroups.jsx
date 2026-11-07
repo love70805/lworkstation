@@ -4,6 +4,7 @@ import { ChevronRight } from 'lucide-react';
 import { DataTableRows } from '../components/DataTable';
 import TableScrollArea from '../components/TableScrollArea';
 import { Button } from '../components/UI';
+import BoardPagination from '../components/BoardPagination';
 import { displayMoney } from '../domain/profitReports';
 import { readProfitViewState, saveProfitViewState } from '../lib/profitViewState';
 import { revealListStart } from '../lib/pageListScroll';
@@ -56,10 +57,11 @@ function ProfitGroup({ group, columns, open, onToggle }) {
   </tbody>;
 }
 
-export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, expandRequest = 0 }) {
+export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, showFirstGroup = false, expandRequest = 0 }) {
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
   const [expandAll, setExpandAll] = useState(() => readProfitViewState(stateKey).expandAll ?? initiallyExpanded);
-  const [exceptions, setExceptions] = useState(() => readProfitViewState(stateKey).exceptions ?? []);
+  const [exceptions, setExceptions] = useState(() => readProfitViewState(stateKey).exceptions
+    ?? (!initiallyExpanded && showFirstGroup && groups[0] ? [groups[0].id] : []));
   const tableRef = useRef(null);
   const hasRows = groups.length > 0;
   const scroll = useRef(null);
@@ -115,7 +117,7 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
   const toggleGroup = id => setExceptions(previous => previous.includes(id) ? previous.filter(key => key !== id) : [...previous, id]);
   return <>
     <div className="profit-table-heading">
-      <div><h2>月度利润明细</h2><p>点分组查看 SKU 明细。金额单位为人民币（CNY）。</p></div>
+      <span className="profit-table-unit">人民币 CNY</span>
       <div className="profit-table-tools">
         <span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span>
         {groups.length > 1 && <Button variant="ghost" aria-controls={tableId} onClick={() => { setExpandAll(!expandAll); setExceptions([]); }}>
@@ -131,6 +133,8 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
         </table>
       </TableScrollArea> : <p className="no-results">没有符合筛选条件的商品。</p>}
     </div>
-    <nav className="profit-groups-pagination" aria-label="利润商品分页"><span>共 {groups.length} 个分组 · {current + 1} / {count} 页</span><Button disabled={current === 0} onClick={() => setPage(current - 1)}>上一页</Button><Button disabled={current + 1 === count} onClick={() => setPage(current + 1)}>下一页</Button></nav>
+    <div className="profit-groups-pagination"><span>共 {groups.length} 个分组 · {current + 1} / {count} 页</span>
+      <BoardPagination label="利润商品分页" page={current + 1} totalPages={count} onChange={number => setPage(number - 1)} />
+    </div>
   </>;
 }

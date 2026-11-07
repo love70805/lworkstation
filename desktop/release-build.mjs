@@ -4,7 +4,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { canonicalInstallerName } from "./release-artifacts.mjs";
+import { artifactNameFromPattern, canonicalInstallerName } from "./release-artifacts.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -20,12 +20,17 @@ const pkg = readJson("package.json");
 const plan = readJson("release-plan.json");
 const version = plan.version;
 const prerelease = isPrereleaseVersion(version);
-const artifactName = prerelease ? `Lworkstation-Setup-${version}.exe` : `Lworkstation Setup ${version}.exe`;
+const sidecar = plan.edition === "beta";
+if (sidecar && !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) throw new Error("Independent Beta requires a beta version.");
+const betaInstallation = require("./beta-installation.json");
+const artifactPattern = sidecar ? betaInstallation.artifactPattern : prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
+const artifactName = artifactNameFromPattern(artifactPattern, version);
 const outputRoot = path.join(root, "release");
 const candidateRoot = path.join(root, "release-test", version);
 const localRc = isRcVersion(version);
-const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
-const releaseConfig = localRc ? EXPECTED_RC_CONFIG : prerelease ? loadReleaseBetaConfig(root) : readJson("update-config.json");
+const channel = sidecar ? betaInstallation.channel : localRc ? "rc" : prerelease ? "beta" : "latest";
+const metadataFile = channel + ".yml";
+const releaseConfig = sidecar ? {...loadReleaseBetaConfig(root), channel} : localRc ? EXPECTED_RC_CONFIG : prerelease ? loadReleaseBetaConfig(root) : readJson("update-config.json");
 if (!prerelease && JSON.stringify(releaseConfig) !== JSON.stringify({...loadReleaseBetaConfig(root), channel:"latest"})) throw new Error("Stable candidate requires the public stable update configuration.");
 const pnpmCli = process.env.npm_execpath;
 const builderCli = path.join(root, "node_modules", "electron-builder", "out", "cli", "cli.js");
@@ -68,6 +73,12 @@ function verifyPackagedUpdateConfig() {
   if (JSON.stringify(packagedConfig) !== JSON.stringify(releaseConfig)) {
     throw new Error("Release package did not receive its controlled update configuration.");
   }
+  if (sidecar) {
+    const embedded = fs.readFileSync(path.join(path.dirname(configPath), "app-update.yml"), "utf8").split(/\r?\n/);
+    if (!embedded.includes(`channel: ${channel}`) || !embedded.includes(`updaterCacheDirName: ${betaInstallation.packageName}-updater`)) {
+      throw new Error("Independent Beta requires its own updater feed and download cache.");
+    }
+  }
 }
 
 function stageReleaseCandidate() {
@@ -77,7 +88,7 @@ function stageReleaseCandidate() {
   for (const file of [installer, blockmap, metadata]) {
     if (!fs.existsSync(file)) throw new Error(`Release build is missing artifact: ${file}`);
   }
-  if (["latest.yml", "beta.yml", "rc.yml"].some(name => name !== metadataFile && fs.existsSync(path.join(outputRoot, name)))) {
+  if (["latest.yml", "beta.yml", "rc.yml", "beta-sidecar.yml"].some(name => name !== metadataFile && fs.existsSync(path.join(outputRoot, name)))) {
     throw new Error(`Prerelease build produced metadata outside ${metadataFile}.`);
   }
   const metadataContents = fs.readFileSync(metadata, "utf8");
@@ -107,16 +118,18 @@ if (!fs.existsSync(builderCli)) throw new Error(`Unable to locate Electron Build
 
 resetDirectory(outputRoot, path.join(root, "release"));
 runPnpm(["--dir", "../frontend", "build"]);
-runPnpm(["brand:icons"]);
+runPnpm(["brand:icons", ...(sidecar ? ["--beta"] : [])]);
 run(process.execPath, [builderCli,
   "--win",
   "nsis",
   "--publish",
   "never",
-  "--config.electronDist=./node_modules/electron/dist",
-  ...(prerelease ? ["--config.afterPack=./release-after-pack.cjs", "--config.publish.releaseType=prerelease"] : ["--config.publish.releaseType=release"]),
-  `--config.publish.channel=${localRc ? "rc" : prerelease ? "beta" : "latest"}`,
-  `--config.win.artifactName=${prerelease ? "Lworkstation-Setup-${version}.${ext}" : "Lworkstation Setup ${version}.${ext}"}`,
+  ...(sidecar ? ["--config=parallel-beta-builder.cjs"] : [
+    "--config.electronDist=./node_modules/electron/dist",
+    ...(prerelease ? ["--config.afterPack=./release-after-pack.cjs", "--config.publish.releaseType=prerelease"] : ["--config.publish.releaseType=release"]),
+    `--config.publish.channel=${channel}`,
+    `--config.win.artifactName=${artifactPattern}`,
+  ]),
 ]);
 
 verifyPackagedUpdateConfig();

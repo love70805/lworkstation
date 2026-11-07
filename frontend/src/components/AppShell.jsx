@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Archive,
   Bell,
+  CalendarDays,
   Check,
   ChevronRight,
   Download,
@@ -47,7 +48,8 @@ const SIDEBAR_COLLAPSED_KEY = "shopeers-sidebar-collapsed";
 const SIDEBAR_COMPACT_QUERY = "(max-width: 1200px)";
 
 const baseNavigation = [
-  { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
+  { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace"] },
+  { id: "ledger", label: "月度账本", path: "/ledger", icon: CalendarDays, match: ["/ledger", "/import-preview"] },
   { id: "products", label: "商品资料", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
   { id: "diagnostics", label: "系统检查", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
@@ -129,7 +131,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const effectiveSidebarCollapsed = compactSidebar ? !compactSidebarExpanded : sidebarCollapsed;
 
   const backTarget = useMemo(() => {
-    if (baseNavigation.some((item) => item.path === pathname) || pathname === '/data-security') return null;
+    if (baseNavigation.some((item) => item.id !== "ledger" && item.path === pathname) || pathname === '/data-security') return null;
     if (pathname.startsWith("/products") || pathname.startsWith("/capture")) return "/products";
     if (pathname.startsWith("/import-preview") || pathname.startsWith('/ledger')) return `/workspace${navigationSearch}`;
     if (pathname.startsWith("/erp-assistant")) return profitWorkspaceHref(navigationSearch, 'cost');
@@ -146,7 +148,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigation = useMemo(() => baseNavigation.map((item) => (
     item.id === "products"
       ? { ...item, count: workspaceSummary?.pendingCaptureCount ?? 0 }
-      : ["workspace", "profit"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
+      : ["workspace", "ledger", "profit"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
   )), [workspaceSummary?.pendingCaptureCount, navigationSearch]);
 
   const notifications = useMemo(() => {
@@ -354,8 +356,7 @@ export default function AppShell({ children, pageClass = "" }) {
             title={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
           >
             <span className="brand-assets" aria-hidden="true">
-              <img className="brand-logo brand-logo-light" src="/assets/brand/lworkstation-wordmark-light.svg" alt="" aria-hidden="true" draggable="false" />
-              <img className="brand-logo brand-logo-dark" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
+              <img className="brand-logo" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
               <img className="brand-mark" src="/assets/brand/l7-app-icon-master.svg" alt="" aria-hidden="true" draggable="false" />
             </span>
             <span className="brand-toggle-hint" aria-hidden="true">
@@ -387,6 +388,7 @@ export default function AppShell({ children, pageClass = "" }) {
         <div className="topbar-leading">
           <IconButton icon={Menu} label="打开导航" className="mobile-menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)} />
           {backTarget ? <IconButton icon={ArrowLeft} label="返回上一级" className="global-back" onClick={goBack} /> : null}
+          {desktopRuntime?.edition === "beta" && <span className="edition-indicator" title={APP_VERSION_LABEL}>Beta 独立工作区</span>}
         </div>
         <div className="topbar-actions" ref={menuRef}>
           <div className="topbar-control environment-control">

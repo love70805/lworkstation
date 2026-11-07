@@ -37,6 +37,7 @@ if (typeof document !== "undefined") {
 
 contextBridge.exposeInMainWorld("shopeersDesktopRuntime", Object.freeze({
   desktop: true,
+  edition: process.argv.includes('--shopeers-edition=beta') ? 'beta' : 'stable',
   version,
   appearance: savedAppearance,
   onInboxChanged: callback => {

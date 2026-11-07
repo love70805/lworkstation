@@ -45,6 +45,30 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 
 async function settled() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); }); }
+it('shares the native multi-file picker and drag target with the original local import worker', async () => {
+  const zone = container.querySelector('.import-dropzone');
+  const input = zone.querySelector('input[type=file]');
+  const trigger = zone.querySelector('.batch-upload-trigger');
+  const choose = vi.spyOn(input, 'click');
+  trigger.focus();
+  expect(document.activeElement).toBe(trigger);
+  expect(trigger.tagName).toBe('BUTTON');
+  trigger.click();
+  expect(choose).toHaveBeenCalledTimes(1);
+  expect(input.multiple).toBe(true);
+  expect(input.accept).toBe('.csv,.tsv,.xlsx,.xls');
+  await act(async () => Simulate.dragOver(zone, {dataTransfer:{types:['Files']}}));
+  expect(zone.dataset.dragOver).toBe('true');
+  expect(trigger.textContent).toContain('松开以添加文件');
+  await act(async () => Simulate.dragLeave(zone, {relatedTarget:null}));
+  expect(zone.dataset.dragOver).toBe('false');
+  const files = [new File(['first'], '甲店.csv'), new File(['second'], '乙店.xlsx'), new File(['bad'], '错误.txt')];
+  await act(async () => Simulate.drop(zone, {dataTransfer:{files}}));
+  await vi.waitFor(() => expect(container.textContent).toContain('请选择 CSV、TSV、XLSX 或 XLS 文件'));
+  expect(mocks.parse.mock.calls.map(args => args[0].name)).toEqual(['甲店.csv', '乙店.xlsx']);
+  expect(container.querySelectorAll('.batch-file')).toHaveLength(3);
+  expect(mocks.save).not.toHaveBeenCalled();
+});
 it('shows standard calculated revenue and filename store separately from optional absent source columns', async () => {
   const headers = ['变动类型','结算类型','供方货号','SKC','平台SKU','商家SKU','属性集','数量','单价','金额','币种','业务单号','单据号','添加时间','商家ID','商家名称','销售商家ID','销售商家名称','备注','活动信息'];
   const suggestedMapping = suggestLedgerReportMapping(headers);
@@ -150,9 +174,7 @@ it('guides a completed import to this ledger cost step and keeps prestorage seco
   expect(nextStep.textContent).toContain('下一步：取得正式成本');
   expect(catalog.open).toBe(false);
   expect(nextStep.compareDocumentPosition(catalog) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  const steps = container.querySelectorAll('.import-flow-guide-steps > span');
-  expect(steps[0].textContent).toContain('已完成');
-  expect(steps[1].getAttribute('aria-current')).toBe('step');
+  expect(nextStep.querySelector('h3').textContent).toBe('本月成本核对');
   await click('下一步：取得正式成本');
   const target = container.querySelector('[data-location]').textContent;
   expect(target.split('?')[0]).toBe('/profit');
@@ -448,6 +470,11 @@ it('keeps zero suffix matches unselected and invalidates an earlier overwrite ap
 it('uses an applied fuzzy rule for newly added files including middle matches', async () => {
   mocks.parse.mockResolvedValue({headers:['SKU','SKC','数量','金额'],suggestedMapping:mapping,rowCount:2,previewRows:[{SKU:'000123'}],preset:'generic',
     facets:{supplierNumbers:['A-FFFV','FFFV-MID']}});
+  const preset = container.querySelector('.supplier-stage');
+  expect(preset.open).toBe(false);
+  expect(preset.querySelector('summary').textContent).toBe('预设货号筛选');
+  await act(async () => preset.querySelector('summary').click());
+  expect(preset.open).toBe(true);
   await act(async () => Simulate.change(container.querySelector('#batch-supplier-suffix'), { target:{value:'FFFV'} }));
   const choose = async files => {
     const input = container.querySelector('input[type=file]');

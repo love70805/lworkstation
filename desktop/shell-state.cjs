@@ -37,7 +37,7 @@
   }
 
   function getSurfacePresentation(state = {}) {
-    if (!state.activeTab || state.activeTab === 'workspace') return { title: 'Lworkstation', retryLabel: '重新加载工作站', ...state.startup };
+    if (!state.activeTab || state.activeTab === 'workspace') return { title: state.productName || 'Lworkstation', retryLabel: '重新加载工作站', ...state.startup };
     const tab = state.tabs?.[state.activeTab] || {};
     const status = tab.status === 'ready' ? 'ready' : tab.status === 'error' ? 'error' : 'loading';
     return { title: tab.title || state.activeTab, retryLabel: '重新加载页面', status,

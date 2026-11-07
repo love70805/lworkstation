@@ -1,6 +1,7 @@
+import BoardSelect from '../components/BoardSelect';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { CalendarDays, CheckCircle2, Plus, Warehouse } from "lucide-react";
+import { CalendarDays, Plus } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { CostMatchingContent } from "./CostMatching";
 import MonthlyReportManager from "./MonthlyReportManager";
@@ -161,12 +162,14 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const { skcCount, storeSkuCount } = useMemo(() => countProfitIdentities(filtered), [filtered]);
   const filteredSummary = useMemo(() => summarizeProfitRows(filtered, costBySku), [costBySku, filtered]);
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
+  const ledgerStoreSkus = useMemo(() => countProfitIdentities(calculated).storeSkuCount, [calculated]);
   useEffect(() => {
-    onReadiness?.({ ledgerId: snapshot?.ledger?.id, missingCount: calculation.loading || calculation.error ? null : ledgerSummary.missing });
-  }, [onReadiness, snapshot?.ledger?.id, calculation.loading, calculation.error, ledgerSummary.missing]);
+    onReadiness?.({ snapshot, totalCount: ledgerStoreSkus, missingCount: calculation.loading || calculation.error ? null : ledgerSummary.missing,
+      productProfitExact: calculation.loading || calculation.error ? null : ledgerSummary.exactTotals?.profit });
+  }, [onReadiness, snapshot, calculation.loading, calculation.error, ledgerStoreSkus, ledgerSummary.missing, ledgerSummary.exactTotals?.profit]);
   const nextStep = ledgerNextStep(snapshot?.ledger, { missingCount: ledgerSummary.missing, loading: calculation.loading });
   const { revenue, totalUnits, purchaseCosts, warehouseFees, matchedProfit, missing, missingErp } = filteredSummary;
-  const monthlySummary = snapshot?.ledger ? monthlyProfitSummary({ ledger: snapshot.ledger, reportState, productProfitExact: ledgerSummary.exactTotals?.profit, missingCostCount: calculation.loading || calculation.error ? null : ledgerSummary.missing }) : null;
+  const monthlySummary = !suppliedSnapshot && snapshot?.ledger ? monthlyProfitSummary({ ledger: snapshot.ledger, reportState, productProfitExact: ledgerSummary.exactTotals?.profit, missingCostCount: calculation.loading || calculation.error ? null : ledgerSummary.missing }) : null;
 
   const allMissingCostsHref = buildProfitHref({ ledgerId: snapshot?.ledger?.id, view: 'cost', storeFilter: 'all', missingOnly: true });
 
@@ -289,7 +292,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   }
   if (!snapshot?.ledger || !snapshot.rows?.length) {
     return (
-      <Panel><EmptyState icon={CalendarDays} title="还没有可核算的月度台账" description="先导入 CSV/XLSX 台账，再取得候选成本；人工确认后才会进入本月利润。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
+      <Panel><EmptyState icon={CalendarDays} title="还没有可核算的月度台账" description="导入销售台账后即可获取 ERP 成本。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
     );
   }
 
@@ -304,22 +307,14 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
         {nextStep.action ? <Button disabled={Boolean(calculation.loading || calculation.error)} onClick={() => navigate(nextStep.key === 'cost' ? allMissingCostsHref : buildProfitHref({ ledgerId: snapshot.ledger.id, view: 'detail' }))}>{nextStep.action}</Button> : null}
       </section> : null}
       {!suppliedSnapshot && missing ? <CostAttention missing={missing} /> : null}
-      <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">
-        <div className="profit-purpose-step"><span className="profit-purpose-index">1</span><div><strong>台账明细</strong><small>SKC · SKU · 属性 · 数量 · 金额</small></div></div>
-        <span className="profit-purpose-arrow">→</span>
-        <div className="profit-purpose-step"><span className="profit-purpose-index">2</span><div><strong>ERP 采购成本</strong><small>人工更正优先 · ERP 原始成本 · 1688 仅参考</small></div></div>
-        <span className="profit-purpose-arrow">→</span>
-        <div className="profit-purpose-step"><span className="profit-purpose-index">3</span><div><strong>月度利润表</strong><small>商品利润 + 代发金额 − 独立扣款</small></div></div>
-        <div className="profit-purpose-formula mono">商品利润 = 金额 − (数量 × 单件成本) − (数量 × {warehouseRate.toFixed(2)} 元)</div>
-      </Panel></details>
-
       {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={snapshot.ledger} onEdit={onEditSupplement} /> : null}
-      <p className="profit-subtotal-label">商品小计 · 当前筛选范围</p>
+      <section className="profit-review-sheet" aria-label="当前范围商品核对">
+      <header className="profit-review-heading"><h2>商品核对</h2><span>{storeFilter === 'all' ? '全部店铺' : storeFilter} · 当前筛选小计</span></header>
       <div className="profit-summary-strip profit-summary-products">
-        <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
-        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按单件平均成本 × 数量"}</small></div>
-        <button className="profit-summary-item profit-summary-action" onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
-        <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>商品利润</span><strong>{missing ? "待确认成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : "金额 − 采购 − 仓储"}</small></div>
+        <div className="profit-summary-item"><span>销售金额 · {totalUnits.toLocaleString("zh-CN")} 件</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong></div>
+        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong></div>
+        <button className="profit-summary-item profit-summary-action" title={`调整仓储费率：每件 ${warehouseRate.toFixed(2)} 元`} onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本 · 调整费率</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong></button>
+        <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>商品利润</span><strong>{missing ? `${missing} 条待核对` : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong></div>
       </div>
 
       <div id="profit-detail-area" className="profit-detail-area" ref={detailsPanel}>
@@ -327,11 +322,15 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section aria-label="月度利润明细" className="panel profit-table-panel">
         <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns}
           skcCount={skcCount} storeSkuCount={storeSkuCount}
-          initiallyExpanded={missingOnly} expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
+          initiallyExpanded={missingOnly} showFirstGroup={Boolean(suppliedSnapshot)} expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
       </section> : null}
       </details>
       </div>
+      </section>
 
+      <details className="profit-purpose-help"><summary>核算说明</summary>
+        <p className="profit-calc-note">商品利润 = 销售金额 − 采购成本 − 仓储成本。当前仓储费率为每件 {warehouseRate.toFixed(2)} 元。1688 报价仅供选品参考。</p>
+      </details>
       <Modal open={rateDialog} title="修改仓储费率" description="费率按每件售出商品计入当前月度账本，可随时调整。" onClose={() => setRateDialog(false)} footer={<><Button onClick={() => setRateDialog(false)}>取消</Button><Button variant="primary" disabled={!rateDraft || Number(rateDraft) < 0} onClick={applyRate}>应用费率</Button></>}><div className="form-field"><label className="required">每件仓储费率（CNY）</label><input className="text-input mono" type="number" inputMode="decimal" min="0" step="0.01" value={rateDraft} onChange={(event) => setRateDraft(event.target.value)} /></div></Modal>
       {manualTarget ? <ManualCostDialog ledger={snapshot.ledger} row={calculated.find(row => row.id === manualTarget.id) ?? manualTarget} viewFirst={manualTarget.mode === 'details'} onClose={() => setManualTarget(null)} /> : null}
 
@@ -366,13 +365,16 @@ export function ProfitViewsContent({ monthControl = null }) {
   if (snapshot?.error) return <Panel><p role="alert">账本读取失败：{snapshot.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取</Button></Panel>;
   if (!snapshot?.ledger) return <Panel><EmptyState icon={CalendarDays} title="开始本月利润核算" description="导入销售台账后，在这里采集成本、处理异常并导出利润表。" action={<Button variant="primary" onClick={() => navigate('/import-preview')}>导入月度台账</Button>} /></Panel>;
   if (store !== 'all' && !stores.includes(store)) return <Panel><p role="alert">当前账本没有此店铺。</p><Button onClick={() => changeScope({storeFilter:'all'})}>查看全部店铺</Button></Panel>;
+  const current = readiness?.snapshot === snapshot ? readiness : null;
+  const monthSummary = monthlyProfitSummary({ ledger: snapshot.ledger, reportState, productProfitExact: current?.productProfitExact, missingCostCount: current?.missingCount });
   return <>
-    <PageHeader title="利润核算" eyebrow={snapshot.ledger.period} description="随时调整台账与成本，重新核算并导出；历史报表保留原样。"
-      actions={<div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={event => changeScope({storeFilter:event.target.value})}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label><Button icon={CalendarDays} onClick={() => navigate('/ledger')}>月度账本</Button></div>} />
-    <section id="monthly-report-section" className="profit-report-section profit-report-top" tabIndex={-1} aria-label="本月报告">
+    <PageHeader title="利润核算"
+      actions={<div className="profit-workspace-controls">{monthControl}<BoardSelect label="店铺" ariaLabel="查看店铺" value={store} onChange={value => changeScope({storeFilter:value})} options={[{id:"all",label:"全部店铺"}, ...stores.map(name=>({id:name,label:name}))]} /><Button icon={CalendarDays} onClick={() => navigate('/ledger')}>月度账本</Button></div>} />
+    <section id="monthly-report-section" className="profit-report-section profit-report-top profit-month-band" tabIndex={-1} aria-label="本月报告">
+      <MonthlyProfitSummary compact summary={monthSummary} ledger={snapshot.ledger} />
       <MonthlyReportManager compact key={'report/'+snapshot.ledger.id} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId}
         onState={setReportState} editor={supplementEditor} onEdit={setSupplementEditor}
-        missingCostCount={readiness?.ledgerId === snapshot.ledger.id ? readiness.missingCount : null}
+        missingCostCount={current?.missingCount ?? null} totalCostCount={current?.totalCount}
         onOpenCosts={() => setDetailsRequest({ ledgerId: snapshot.ledger.id })} />
     </section>
     <CostMatchingContent compact suppliedSnapshot={snapshot} key={'cost/'+snapshot.ledger.id}

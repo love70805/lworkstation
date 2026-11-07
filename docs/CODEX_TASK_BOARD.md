@@ -1,10 +1,12 @@
 # Codex 当前任务看板
 
-2026-11-06 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
+2026-11-07 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
 
-## 2.0.7-beta.1 · 经营概览待核对入口
+## 2.0.7-beta.2 · 可并行安装的桌面 Beta
 
-本批从 2.0.6 主线 `385f9f5` 制作完整 Windows Beta。经营概览沿用现版侧栏、四张指标卡和核算流程，在「当前核算范围」增加待核对 SKU 入口，按所选月份和店铺进入缺成本明细。模拟账本中，某店的 2 条待核对 SKU 在补录 0.00001 元后降至 1 条，撤销更正后恢复为 2 条。候选和更新清单使用 Beta 通道，公开状态见 [Beta 发布页](https://github.com/love70805/lworkstation/releases/tag/v2.0.7-beta.1)。
+本批在主线 `86826cd` 上开发，交付前已合入 `b4e6bcd` 的主线文档更新。经营概览和利润页使用 BoardUI Select 切换月份和店铺，待核对 SKU 直达对应明细。台账导入可多选或拖入文件，商品库按页签切换，搜索支持 Esc 清空。利润页显示成本核对进度与可跳转页码。按钮、状态标签、经营指标和趋势切换共用按本机中英文数字排版适配的 BoardUI 组件。[组件目录](https://www.boardui.com/zh-hans/components)
+
+Windows 并行版使用独立名称、图标、安装标识、工作区和更新通道。第一次使用时，可在稳定版的「系统与备份 → 数据备份」导出完整 JSON，然后在 Beta 同一页面选择「导入备份」并确认恢复。Beta.1 曾作为本机同身份候选交付，公开交付采用 Beta.2 并行安装包。版本与文件见[并行 Beta 发布页](https://github.com/love70805/lworkstation/releases/tag/beta-sidecar-v2.0.7-beta.2)。
 
 ## 软件实现与项目约束的差异
 

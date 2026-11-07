@@ -34,7 +34,7 @@ function normalizeFeedConfig(value, { allowLoopback = false, allowPrerelease = f
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const channel = value.channel == null ? "latest" : value.channel;
-  if (channel !== "latest" && !(allowPrerelease && ["beta", "rc"].includes(channel))) return null;
+  if (channel !== "latest" && !(allowPrerelease && ["beta", "beta-sidecar", "rc"].includes(channel))) return null;
   if (value.provider === "generic") {
     const url = normalizeFeedUrl(value.url, { allowLoopback });
     return url ? { provider: "generic", url, channel } : null;
@@ -98,20 +98,21 @@ function normalizeSize(info) {
   return sizes.length ? Math.max(...sizes) : null;
 }
 
-function releaseUrlForVersion(version) {
+function releaseUrlForVersion(version, channel) {
   const safeVersion = String(version || "").trim();
   if (!/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(safeVersion)) return null;
-  return `${RELEASES_ORIGIN}${RELEASES_PATH_PREFIX}tag/v${encodeURIComponent(safeVersion)}`;
+  const tagPrefix = channel === "beta-sidecar" ? "beta-sidecar-v" : "v";
+  return `${RELEASES_ORIGIN}${RELEASES_PATH_PREFIX}tag/${tagPrefix}${encodeURIComponent(safeVersion)}`;
 }
 
-function sanitizeUpdateInfo(info = {}) {
+function sanitizeUpdateInfo(info = {}, channel) {
   const version = plainText(info.version, 64);
   return {
     version: version || null,
     size: normalizeSize(info),
     releaseDate: Number.isNaN(Date.parse(info.releaseDate || "")) ? null : new Date(info.releaseDate).toISOString(),
     notes: plainText(info.releaseNotes, 320),
-    releaseUrl: normalizeReleaseUrl(info.releaseUrl) || releaseUrlForVersion(version),
+    releaseUrl: channel === "beta-sidecar" ? releaseUrlForVersion(version, channel) : normalizeReleaseUrl(info.releaseUrl) || releaseUrlForVersion(version),
   };
 }
 
@@ -132,6 +133,7 @@ function createUpdateRuntime({
   updater,
   CancellationToken,
   currentVersion,
+  edition,
   enabled,
   feedConfig,
   feedUrl,
@@ -141,8 +143,8 @@ function createUpdateRuntime({
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
 }) {
-  const channel = versionChannel(currentVersion);
-  const currentIsPrerelease = ["beta", "rc"].includes(channel);
+  const channel = versionChannel(currentVersion, edition);
+  const currentIsPrerelease = ["beta", "beta-sidecar", "rc"].includes(channel);
   let safeFeedConfig = normalizeFeedConfig(feedConfig ?? feedUrl, {
     allowLoopback,
     allowPrerelease: currentIsPrerelease,
@@ -203,7 +205,7 @@ function createUpdateRuntime({
     if (!validTarget(info?.version)) { rejectTarget(); return; }
     acceptedVersion = info.version;
     downloadedVersion = null;
-    const release = sanitizeUpdateInfo(info);
+    const release = sanitizeUpdateInfo(info, channel);
     publish({
       status: "available",
       availableVersion: release.version,
@@ -227,7 +229,7 @@ function createUpdateRuntime({
     if (cancelRequested) return;
     if (state.status !== "downloading" || !validTarget(info?.version) || info.version !== acceptedVersion) { rejectTarget(); return; }
     downloadedVersion = info.version;
-    const release = sanitizeUpdateInfo(info);
+    const release = sanitizeUpdateInfo(info, channel);
     publish({
       status: "downloaded",
       availableVersion: release.version,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
+import { ArrowUpRight } from 'lucide-react';
 import { BoardChip } from './BoardChip';
 import { readPendingSkuCount } from '../data/repositories/ledgerOverviewRepository';
 import { buildProfitHref } from '../lib/profitFilter';
@@ -19,7 +20,7 @@ export default function PendingSkuStatus({ workspaceId, ledgerId, store }) {
     </> : result.count > 0 ? (
       <Link className="workspace-pending-link" aria-label={`查看当前范围待核对的 ${result.count} 条店铺 SKU`}
         to={buildProfitHref({ ledgerId, view: 'detail', storeFilter: store, missingOnly: true }) + '#profit-detail-area'}>
-        <BoardChip color="orange">{result.count} 条</BoardChip>
+        <BoardChip color="orange">{result.count} 条 <ArrowUpRight size={14} aria-hidden="true" /></BoardChip>
       </Link>
     ) : <BoardChip color="lime">0 条</BoardChip>}
   </div>;
