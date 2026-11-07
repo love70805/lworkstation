@@ -8,7 +8,7 @@ function isTrustedWorkspaceSender(event, contents, devUrl) {
     && isAllowedWorkspaceUrl(event.senderFrame?.url, devUrl));
 }
 
-function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecycle, dialog, devUrl, operations, backupDirectory, getInboxService }) {
+function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecycle, dialog, devUrl, operations, backupDirectory, manualBackupDirectory, productName, getInboxService }) {
   let activeEvent;
   const trusted = event => isTrustedWorkspaceSender(event, getContents(), devUrl);
   let safetyEvent;
@@ -35,6 +35,7 @@ function registerWorkspaceSystemIpc({ ipcMain, getContents, getWindow, getLifecy
     });
   }
   const save = createBackupSaver({
+    defaultDirectory: manualBackupDirectory, productName,
     showSaveDialog: options => dialog.showSaveDialog(getWindow(), options),
     isTrusted: () => trusted(activeEvent || {}), operations,
   });

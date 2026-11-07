@@ -16,6 +16,18 @@ try {
   assert.equal(await fs.readFile(target, 'utf8'), input.json);
   const canceled = createBackupSaver({ showSaveDialog: async () => ({ canceled: true }) });
   assert.deepEqual(await canceled(input), { status: 'canceled' });
+  const betaBackupDirectory = path.join(root, 'Lworkstation Beta 备份');
+  const betaSave = createBackupSaver({
+    defaultDirectory: betaBackupDirectory, productName: 'Lworkstation Beta',
+    showSaveDialog: async options => {
+      assert.equal(options.title, '保存 Lworkstation Beta 备份');
+      assert.equal(options.defaultPath, path.join(betaBackupDirectory, input.fileName));
+      return { canceled: true };
+    },
+  });
+  assert.deepEqual(await betaSave(input), { status: 'canceled' });
+  assert.deepEqual(await fs.readdir(betaBackupDirectory), []);
+  await fs.rmdir(betaBackupDirectory);
   const broken = createBackupSaver({ showSaveDialog: async () => ({ filePath: target }), operations: {
     ...fs, open: async () => { throw Error('ENOSPC: fixture disk full'); },
   } });

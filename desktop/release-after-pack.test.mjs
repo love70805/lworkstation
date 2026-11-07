@@ -29,6 +29,17 @@ const result = writeReleaseBetaConfig({
 }, { root: configRoot });
 assert.equal(result.target, target);
 assert.deepEqual(JSON.parse(fs.readFileSync(target, "utf8")), EXPECTED_BETA_CONFIG);
+const betaInstaller = require("./parallel-beta-builder.cjs");
+const stableInstaller = require("./package.json").build;
+for (const field of ["appId", "productName"]) assert.notEqual(betaInstaller[field], stableInstaller[field]);
+for (const field of ["guid", "shortcutName", "installerIcon", "uninstallerIcon"]) assert.notEqual(betaInstaller.nsis[field], stableInstaller.nsis[field]);
+assert.notEqual(betaInstaller.win.executableName, stableInstaller.win.executableName);
+assert.notEqual(betaInstaller.extraMetadata.name, require("./package.json").name);
+assert.ok(betaInstaller.files.includes(betaInstaller.win.icon));
+const sidecar = {appOutDir, packager: {config: betaInstaller, appInfo: {version: "2.0.7-beta.2", id: betaInstaller.appId}}};
+writeReleaseBetaConfig(sidecar, {root: configRoot});
+assert.deepEqual(JSON.parse(fs.readFileSync(target, "utf8")), {...EXPECTED_BETA_CONFIG, channel: "beta-sidecar"});
+assert.throws(() => writeReleaseBetaConfig({...sidecar, packager:{...sidecar.packager, appInfo: {version:"2.0.7-beta.2", id:stableInstaller.appId}}}, {root:configRoot}), /isolated appId/);
 assert.equal(isPrereleaseVersion("0.2.6-beta.6"), true);
 assert.equal(isPrereleaseVersion("0.2.6"), false);
 assert.equal(isRcVersion("0.3.0-rc.1"), true);

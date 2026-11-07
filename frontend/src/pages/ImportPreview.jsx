@@ -26,6 +26,40 @@ async function sha256File(file) {
 function sampleFile() {
   return new File(["供方货号,SKC,平台SKU,数量,金额\nSUP-001,SKC-001,000123,23,1245.50"], "示例店铺.csv", { type: "text/csv" });
 }
+
+// Adapted from BoardUI FileUpload (MIT, /licenses/boardui.txt). Both input
+// paths hand actual files to the import worker and its batch validation.
+function BoardFileUpload({ disabled, hasFiles, onFiles }) {
+  const inputRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
+  const drop = (event) => {
+    event.preventDefault();
+    setDragOver(false);
+    if (!disabled && event.dataTransfer.files?.length) onFiles(Array.from(event.dataTransfer.files));
+  };
+  return <div className="import-dropzone" data-drag-over={!disabled && dragOver}
+    onDragOver={event => {
+      event.preventDefault();
+      if (!disabled && Array.from(event.dataTransfer.types ?? []).includes('Files')) setDragOver(true);
+    }}
+    onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDragOver(false); }}
+    onDrop={drop}>
+    <input hidden ref={inputRef} type="file" multiple disabled={disabled} aria-label="选择月度销售台账文件"
+      accept={Array.from(ACCEPTED_EXTENSIONS, ext => '.' + ext).join(',')}
+      onChange={event => {
+        const files = Array.from(event.target.files);
+        event.target.value = '';
+        if (files.length) onFiles(files);
+      }} />
+    <button type="button" className="batch-upload-trigger" disabled={disabled}
+      aria-labelledby="batch-upload-title" aria-describedby="batch-upload-formats" onClick={() => inputRef.current?.click()}>
+      <Upload size={22} aria-hidden="true" />
+      <span><strong id="batch-upload-title">{dragOver && !disabled ? '松开以添加文件' : hasFiles ? '继续添加台账文件' : '选择或拖入台账文件'}</strong>
+        <span id="batch-upload-formats">可多选 CSV、TSV 或 Excel 文件，每个最大 50 MB。</span></span>
+    </button>
+    {!hasFiles && <Button variant="ghost" disabled={disabled} onClick={() => onFiles([sampleFile()])}>使用示例</Button>}
+  </div>;
+}
 const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const sourceMonthText = (months = [], period) => months.length === 1 && months[0].month === period
   ? `月份与账本一致 · ${months[0].count.toLocaleString('zh-CN')} 行`
@@ -141,7 +175,6 @@ export default function ImportPreview() {
   const { notify } = useToast();
   const importWorkspaceRef = useRef(null);
   const stageOwnerRef = useRef(crypto.randomUUID());
-  const inputRef = useRef(null);
   const previewRef = useRef(null);
   const clientRef = useRef(null);
   const operationRef = useRef(false);
@@ -514,16 +547,7 @@ export default function ImportPreview() {
     <ImportLeaveGuard pending={!result && files.length > 0} committing={committing} />
     <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate(returnHref)}><X size={20} />{result ? returnLabel : "取消导入"}</button><strong>月度台账批量导入</strong></header>
     <section className="wizard-content">
-      <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，自动识别明细、校验并显示概览，核对归属后一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
-      <details className="import-flow-guide" aria-label="月度核算流程" open={!files.length || Boolean(result)}>
-        <summary className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></summary>
-        <div className="import-flow-guide-steps">
-          <span className={result ? "completed" : "active"} aria-current={!result ? "step" : undefined}><b>1</b><strong>导入销售台账</strong><small>{result ? "已完成" : "当前步骤"}</small></span>
-          <span className={result ? "active" : undefined} aria-current={result ? "step" : undefined}><b>2</b><strong>取得正式成本</strong><small>{result ? "下一步 · ERP 自动采用" : "ERP 自动采用"}</small></span>
-          <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
-          <span><b>4</b><strong>确认利润</strong><small>核对后直接导出</small></span>
-        </div>
-      </details>
+      <div className="wizard-intro"><h1>导入店铺台账</h1><p>{result ? "查看本次写入的店铺与来源批次。" : "选择同一个月的店铺文件，核对月份和货号后一起导入。"}</p></div>
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
         {(files.length > 0 || requestedLedgerId && !contextBlocked) && <section className="batch-action-bar" aria-label="本次导入操作">
@@ -539,12 +563,11 @@ export default function ImportPreview() {
             {files.length ? <p id="batch-period-evidence" className={periodEvidence.conflictsExisting || periodEvidence.months.length > 1 || periodEvidence.missingCount || periodEvidence.invalidCount ? "batch-period-warning" : "batch-period-evidence"} role="status">
               {periodEvidence.awaitingEvidence ? "正在核对文件中的销售台账日期…" : <>{sourceMonthText(periodEvidence.months, period)}。{periodEvidence.missingCount ? `缺日期 ${periodEvidence.missingCount} 行。` : ""}{periodEvidence.invalidCount ? `无效日期 ${periodEvidence.invalidCount} 行。` : ""}{periodEvidence.errorCount ? `其他错误 ${periodEvidence.errorCount} 行。` : ""}{periodEvidence.conflictsExisting ? '来源月份与上方账本月份不一致，仍沿用账本月份。' : periodEvidence.months.length > 1 ? "请按月拆分文件后导入。" : !requestedLedgerId && !suggestedPeriod ? "文件日期不足，请核对后补充月份。" : ""}</>}
             </p> : null}
-            <div className="import-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); loadFiles(event.dataTransfer.files); }}>
-              <input ref={inputRef} type="file" multiple aria-label="选择月度销售台账文件" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => { loadFiles(event.target.files); event.target.value = ""; }} />
-              <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；自动识别实际明细页；多个候选时仅需为该文件选择。</p></div>
-              <Button onClick={() => inputRef.current?.click()}>添加文件</Button>{!files.length && <Button variant="ghost" onClick={() => loadFiles([sampleFile()])}>使用示例</Button>}
-            </div>
-            <ImportSupplierWorkbench key={groupWorkspaceId} files={files} workspaceId={groupWorkspaceId} period={period} aliasesText={batchSuffixText} mode={batchMode} initialRule={batchRuleRef.current} onAliasesChange={setBatchSuffixText} onModeChange={setBatchMode} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} disabled={busy || contextBlocked} />
+            <BoardFileUpload disabled={busy || contextBlocked} hasFiles={files.length > 0} onFiles={loadFiles} />
+            <details className="supplier-stage" open={files.length > 0}>
+              <summary>预设货号筛选</summary>
+              <ImportSupplierWorkbench key={groupWorkspaceId} files={files} workspaceId={groupWorkspaceId} period={period} aliasesText={batchSuffixText} mode={batchMode} initialRule={batchRuleRef.current} onAliasesChange={setBatchSuffixText} onModeChange={setBatchMode} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} disabled={busy || contextBlocked} />
+            </details>
           </fieldset>
           {busy && <div className="import-progress" role="status">{progress.value == null ? <span>{progress.label}</span> : <ProgressBar value={progress.value} label={progress.label} />}<Button onClick={cancel}>取消当前处理</Button></div>}
           <div className="batch-files">{files.map((item, index) => <section className="batch-file" key={item.itemId}>
@@ -582,12 +605,11 @@ export default function ImportPreview() {
             <OverlapPreview item={item} />
           </article>)}
           <p><strong>本次写入：</strong><Totals summary={preview.summary} /></p><p><strong>导入后全月：</strong><Totals summary={preview.finalSummary} /></p>
-          <p>核对文件、店铺及上方账本月份后，即可导入。修改配置后会自动重新校验。</p>
         </section>}
       </> : <section className="wizard-card batch-preview"><h2>整批处理完成 · {period}</h2>
         <section className="batch-next-step" aria-label="继续本月利润核算">
-          <h3>下一步：取得正式成本</h3>
-          <p>销售台账已导入。先取得 ERP 正式成本并核对缺失或异常，再核算与确认本月利润。</p>
+          <h3>本月成本核对</h3>
+          <p>取得 ERP 成本后，处理缺失或异常的 SKU。</p>
           <Button variant="primary" icon={ArrowRight} onClick={() => navigate(buildProfitHref({ ledgerId: result.ledgerId, view: 'cost' }))}>下一步：取得正式成本</Button>
         </section>
         {result.items.map((item) => <article key={item.itemId}><h3>{item.fileName} · {item.storeName}</h3><p>{item.status === "imported" ? `已导入：新增 ${item.addedGroupCount} 组，替换 ${item.replacedGroupCount} 组` : "已生效重复，跳过"}</p><p>来源批次：<code>{item.batchId}</code></p><Totals summary={item.summary} /></article>)}

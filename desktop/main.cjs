@@ -1,17 +1,9 @@
 const { app, BrowserWindow, dialog, Menu, Tray, WebContentsView, ipcMain, nativeTheme, net, protocol, session, shell } = require("electron");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const smokeUserDataPath = process.env.SHOPEERS_DESKTOP_SMOKE_USER_DATA
-  ? path.resolve(process.env.SHOPEERS_DESKTOP_SMOKE_USER_DATA)
-  : null;
-const smokeCachePath = process.env.SHOPEERS_DESKTOP_SMOKE_CACHE
-  ? path.resolve(process.env.SHOPEERS_DESKTOP_SMOKE_CACHE)
-  : null;
-if (smokeUserDataPath) app.setPath("userData", smokeUserDataPath);
-if (smokeCachePath) {
-  app.setPath("cache", smokeCachePath);
-  process.env.LOCALAPPDATA = smokeCachePath;
-}
+const { initializeDesktopEdition } = require('./desktop-edition.cjs');
+const desktopEdition = initializeDesktopEdition(app, require('./package.json'));
+const { smokeUserDataPath, productName, edition } = desktopEdition;
 const { acquireDesktopInstance } = require("./single-instance.cjs");
 const desktopInstance = acquireDesktopInstance(app);
 if (!desktopInstance.acquired) {
@@ -76,7 +68,7 @@ const {
 } = require("./desktop-preferences.cjs");
 
 const SHELL_TOP_HEIGHT = 80;
-const DESKTOP_ICON_PATH = path.join(__dirname, "assets", "lworkstation.ico");
+const DESKTOP_ICON_PATH = path.join(__dirname, "assets", desktopEdition.iconFile);
 const UPDATE_POPOVER_MIN_HEIGHT = 132;
 const UPDATE_POPOVER_MAX_HEIGHT = 340;
 const UPDATE_POPOVER_WIDTH = 296;
@@ -88,7 +80,7 @@ const visualDimension = (name, fallback, min, max) => VISUAL_SMOKE
 const views = new Map();
 const attachedViews = new Set();
 const tabState = {
-  workspace: { id: "workspace", title: "Lworkstation", status: "ready", url: DEV_URL || "" },
+  workspace: { id: "workspace", title: productName, status: "ready", url: DEV_URL || "" },
   erp: { id: "erp", title: "ERP", status: "idle", extension: { status: "deferred" }, url: "https://www.zhuolinkeji.cn/" },
 };
 let mainWindow;
@@ -160,11 +152,11 @@ let updateRuntime = null;
 let updateState = createInitialUpdateState({ currentVersion: app.getVersion(), enabled: app.isPackaged });
 let updateInstallInvocationCount = 0;
 let updateInstallPromise = null;
-let updateInstaller = createUpdateInstaller({ executable: process.execPath, userDataPath: app.getPath('userData') });
+let updateInstaller = createUpdateInstaller({ executable: process.execPath, userDataPath: app.getPath('userData'), edition });
 let inboxState = {
   status: "stopped",
   ownership: "none",
-  port: Number(process.env.SHOPEERS_ERP_INBOX_PORT || 8790),
+  port: desktopEdition.inboxPort,
   message: "ERP 收件服务尚未启动",
   flow: { status: "idle", tone: "muted", label: "等待 ERP 请求", message: "收件服务尚未启动。" },
 };
@@ -237,6 +229,8 @@ function publicState() {
     startup: startup.getState(),
     lifecycleNotice,
     version: app.getVersion(),
+    productName,
+    iconFile: desktopEdition.iconFile,
     erpZoom: { percent: erpZoomPercent, min: ERP_ZOOM_MIN, max: ERP_ZOOM_MAX, step: ERP_ZOOM_STEP },
   };
 }
@@ -363,7 +357,7 @@ function openUpdatePopover(anchor) {
     closable: true,
     skipTaskbar: true,
     show: false,
-    title: "Lworkstation 更新",
+    title: productName + " 更新",
     backgroundColor: shellAppearance === "dark" ? "#18212c" : "#ffffff",
     titleBarStyle: "hidden",
     webPreferences: {
@@ -767,7 +761,7 @@ function createWorkspaceView(url) {
   const view = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, "workspace-preload.cjs"),
-      additionalArguments: [`--shopeers-version=${app.getVersion()}`, `--shopeers-appearance=${shellAppearance}`],
+      additionalArguments: [`--shopeers-version=${app.getVersion()}`, `--shopeers-appearance=${shellAppearance}`, `--shopeers-edition=${edition}`],
       backgroundThrottling: false,
       nodeIntegration: false,
       contextIsolation: true,
@@ -1176,6 +1170,10 @@ async function writeSmokeReport() {
     packaged: app.isPackaged,
     applicationName: app.getName(),
     executableName: path.basename(process.execPath),
+    edition,
+    userDataPath: app.getPath('userData'),
+    sessionDataPath: app.getPath('sessionData'),
+    backupDirectory: desktopEdition.backupDirectory,
     packagedResources: {
       desktopIcon: fs.existsSync(DESKTOP_ICON_PATH),
       shell: fs.existsSync(path.join(__dirname, "shell.html")),
@@ -1219,7 +1217,7 @@ function readUpdateSettings({ allowLoopback = false } = {}) {
       feedConfig: {
         provider: "generic",
         url: process.env.SHOPEERS_DESKTOP_UPDATE_URL,
-        channel: ["beta", "rc"].includes(process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL) ? process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL : "latest",
+        channel: ["beta", "rc", "beta-sidecar"].includes(process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL) ? process.env.SHOPEERS_DESKTOP_UPDATE_CHANNEL : "latest",
       },
     };
   }
@@ -1240,6 +1238,7 @@ function configureAutoUpdater() {
   const allowLoopback = process.env.SHOPEERS_DESKTOP_UPDATE_SMOKE === "1";
   const settings = readUpdateSettings({ allowLoopback });
   updateRuntime = createUpdateRuntime({
+    edition,
     updater: autoUpdater,
     CancellationToken,
     currentVersion: app.getVersion(),
@@ -1333,7 +1332,7 @@ async function createWindow() {
     height: visualDimension("SHOPEERS_DESKTOP_VISUAL_HEIGHT", 960, 700, 1200),
     minWidth: 980,
     minHeight: 700,
-    title: "Lworkstation",
+    title: productName,
     icon: DESKTOP_ICON_PATH,
     backgroundColor: shellAppearance === "dark" ? "#0e1319" : "#eef2f6",
     show: false,
@@ -1355,7 +1354,7 @@ async function createWindow() {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     diagnostics.record('render-process-gone', { page: 'shell', reason: details.reason, exitCode: details.exitCode });
   });
-  desktopLifecycle = createDesktopLifecycle({ app, window: mainWindow, Tray, Menu, icon: DESKTOP_ICON_PATH,
+  desktopLifecycle = createDesktopLifecycle({ app, window: mainWindow, Tray, Menu, icon: DESKTOP_ICON_PATH, productName,
     userDataPath: app.getPath('userData'),
     canRestore: () => !hiddenSmoke,
     onHide: () => { closeUpdatePopover({ returnFocus: false }); },
@@ -1382,7 +1381,7 @@ async function createWindow() {
   inboxService = createInboxServiceController({
     executable: process.execPath,
     scriptPath: inboxScript,
-    spoolPath: process.env.SHOPEERS_ERP_INBOX_FILE || path.join(app.getPath("userData"), "runtime", "erp-inbox.json"),
+    spoolPath: desktopEdition.spoolPath,
     port: inboxState.port,
     capability: inboxCapability,
     runAsNode: true,
@@ -1416,7 +1415,8 @@ async function createWindow() {
 
 registerWorkspaceSystemIpc({ ipcMain, getContents: () => views.get('workspace')?.webContents,
   getWindow: () => mainWindow, getLifecycle: () => desktopLifecycle, dialog, devUrl: DEV_URL,
-  backupDirectory: smokeUserDataPath?path.join(smokeUserDataPath,'backups'):path.join(app.getPath('documents'),'Lworkstation 备份'),getInboxService:()=>inboxService });
+  backupDirectory: desktopEdition.backupDirectory, manualBackupDirectory: edition === 'beta' ? desktopEdition.backupDirectory : undefined,
+  productName, getInboxService: () => inboxService });
 ipcMain.handle("desktop:get-state", () => publicState());
 ipcMain.handle('desktop:startup-action', (event, action) => {
   if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false };
@@ -1605,7 +1605,6 @@ ipcMain.on("workspace:appearance", (event, appearance) => {
   publishState();
 });
 
-app.setAppUserModelId("com.shopeers.workstation");
 app.on('child-process-gone', (_event, details) => {
   diagnostics.record('child-process-gone', { page: details.type === 'GPU' ? 'gpu' : 'utility', reason: details.reason, exitCode: details.exitCode });
 });
@@ -1617,7 +1616,7 @@ app.whenReady().then(() => {
 app.whenReady().then(createWindow).catch((error) => {
   if (desktopLifecycle?.getState().quitting) { app.quit(); return; }
   console.error("桌面应用启动失败：", error);
-  if (!hiddenSmoke) dialog.showErrorBox("Lworkstation 无法启动", error?.message || String(error));
+  if (!hiddenSmoke) dialog.showErrorBox(productName + " 无法启动", error?.message || String(error));
   else if (smokeReportPath) {
     try { fs.writeFileSync(smokeReportPath, JSON.stringify({ ok: false, hiddenMode: true, startupError: error?.message || String(error) }), "utf8"); }
     catch (reportError) { console.error("隐藏验收失败报告无法保存：", reportError); }

@@ -1,3 +1,4 @@
+import { BoardButtonGroup, BoardButtonGroupItem } from '../components/BoardButtonGroup';
 import { buildSalesMonth, salesScale, salesGroupedScale, salesStoreKey, salesStoreColor, salesMonthRange, salesOverviewMonths, assignSalesStoreColors } from '../domain/salesChartModel';
 import { SalesMonthChart, SalesGroupedMonthChart, SalesHoverSummary } from './SalesMonthChart';
 import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react';
@@ -134,11 +135,11 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   return <Panel className="sales-analytics" style={assignSalesStoreColors([...storeNames, ...stores], colorAssignments.current)}>
     <div className="sales-analytics-heading"><div><h2>销售趋势</h2><p>台账 · {view === 'daily' ? `${data.period} · ` : ''}{store === 'all' ? '全部店铺' : store}</p></div><div className="sales-analysis-controls">
       {onStoreChange ? <label htmlFor={storeId}>店铺<select id={storeId} aria-label="每日销售店铺" value={store} disabled={changing} onChange={event => void changeStore(event.target.value)}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label> : null}
-      <div role="group" aria-label="趋势周期" className="sales-period-switch">
-        {[['daily', '按日'], ['monthly', '按月']].map(([period, label]) => <Button key={period} aria-pressed={view === period}
-          onClick={() => { if (view !== period) { setView(period); setSelection(null); setHovered(null); } }}>{label}</Button>)}
-      </div>
-      <div role="group" aria-label="趋势指标"><Button aria-pressed={metric === 'revenueExact'} onClick={() => setMetric('revenueExact')}>销售额</Button><Button aria-pressed={metric === 'quantityExact'} onClick={() => setMetric('quantityExact')}>销量</Button></div>
+      <BoardButtonGroup label="趋势周期">
+        {[['daily', '按日'], ['monthly', '按月']].map(([period, label]) => <BoardButtonGroupItem key={period} selected={view === period}
+          onClick={() => { if (view !== period) { setView(period); setSelection(null); setHovered(null); } }}>{label}</BoardButtonGroupItem>)}
+      </BoardButtonGroup>
+      <BoardButtonGroup label="趋势指标"><BoardButtonGroupItem selected={metric === 'revenueExact'} onClick={() => setMetric('revenueExact')}>销售额</BoardButtonGroupItem><BoardButtonGroupItem selected={metric === 'quantityExact'} onClick={() => setMetric('quantityExact')}>销量</BoardButtonGroupItem></BoardButtonGroup>
     </div></div>
     {changing ? <p role="status">正在切换店铺...</p> : null}{storeError ? <p role="alert">{storeError}</p> : null}
     {!selection && view === 'daily' ? <>
@@ -152,7 +153,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
       <p>{store === 'all' ? '全部店铺' : store}期间合计 · 销售原额 ¥{showSalesValue(periodTotals.missing === rangeMonths.length ? null : periodTotals.revenueExact)} · 销量 {showSalesValue(periodTotals.missing === rangeMonths.length ? null : periodTotals.quantityExact, 6)} 件{periodTotals.missing ? ' · ' + periodTotals.missing + ' 个月缺数据，合计仅含已知月份' : ''}</p>
       {monthMode === 'comparison' ? <p>所选店铺期间合计 · {storeNames.every(name => hiddenStores.includes(salesStoreKey(name))) ? '未选择店铺' : <>销售原额 ¥{showSalesValue(comparisonTotals.revenueExact)} · 销量 {showSalesValue(comparisonTotals.quantityExact, 6)} 件 · 仅含已有来源</>}</p> : null}
     </div> : null}
-    {!selection && (view === 'daily' || monthMode === 'comparison') ? <div className="sales-store-selection-actions"><Button onClick={() => setHiddenStores([])}>全选店铺</Button><Button onClick={() => setHiddenStores(storeNames.map(salesStoreKey))}>清空店铺</Button></div> : null}
+    {!selection && storeNames.length > 1 && (view === 'daily' || monthMode === 'comparison') ? <div className="sales-store-selection-actions"><Button onClick={() => setHiddenStores([])}>全选店铺</Button><Button onClick={() => setHiddenStores(storeNames.map(salesStoreKey))}>清空店铺</Button></div> : null}
     {!selection && (view === 'daily' || monthMode === 'comparison') ? <div className="sales-store-legend" aria-label="店铺颜色">{storeNames.map(name => {
       const checked = !hiddenStores.includes(salesStoreKey(name));
       const toggle = () => setHiddenStores(current => checked ? [...current, salesStoreKey(name)] : current.filter(key => key !== salesStoreKey(name)));

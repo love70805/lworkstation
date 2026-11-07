@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Search, Settings2, Tag, Trash2, WalletCards, Warehouse, X } from "lucide-react";
+import { AlertCircle, BarChart3, CheckCircle2, Copy, Download, ExternalLink, GitMerge, Image, Inbox, Pencil, Plus, Settings2, Tag, Trash2, WalletCards, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
 import DataTable from "../components/DataTable";
 import LibraryFilterBar, { LibraryFilterField } from "../components/LibraryFilterBar";
@@ -13,6 +13,8 @@ import SelectionReadState, { useSelectionRead } from "../components/SelectionRea
 import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
 import ProductCollectionTools from '../components/ProductCollectionTools';
+import BoardPillTabs from "../components/BoardPillTabs";
+import BoardSearchField from "../components/BoardSearchField";
 import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionPrestorageSnapshot, promoteSelectionPrestorageRecords, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
 import { exportWorkbook } from "../lib/spreadsheetExport";
 import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
@@ -46,7 +48,7 @@ const PRODUCT_FILTERS_KEY = "shopeers-product-library-filters-v1";
 const EMPTY_ROWS = [];
 const catalogRowId = row => row.id;
 const SKU_PREVIEW_COUNT = 5;
-const COMPACT_COLUMN_IDS = new Set(["selection", "image", "name", "suppliers", "cost", "salePrice", "referenceProfit", "store", "productStatus", "updatedAt"]);
+const COMPACT_COLUMN_IDS = new Set(["selection", "image", "name", "catalogWork", "cost", "salePrice", "referenceProfit", "productStatus"]);
 const matchesProductQuery = createSelectionSearchIndex((product) => [
   product.name, product.supplier, product.platformSkc, product.supplierNumbers ?? [],
   (product.supplierProfiles ?? []).map((supplier) => [supplier.supplierCode, supplier.supplierName]),
@@ -90,38 +92,40 @@ function ProductThumb({ product }) {
   return <span className={`product-thumb product-placeholder ${product.status === "inactive" ? "danger" : ""}`}>{product.status === "inactive" ? <AlertCircle size={20} /> : <Image size={20} />}</span>;
 }
 
+function catalogWork(product) {
+  const gaps = [];
+  if (!product.skuCount) gaps.push("平台 SKU");
+  if (product.incomingReferences.length) gaps.push("新增 SKU");
+  if (product.relatedDrafts.length) gaps.push("同 SKC 预存资料");
+  if (product.skuCount && product.dataReadiness?.hasGaps) {
+    if (product.dataReadiness.warehouseMapping?.status !== "complete") gaps.push("仓库映射");
+    if (product.dataReadiness.purchase?.status !== "complete") gaps.push("ERP 采购");
+    if (product.dataReadiness.referenceProfit?.status !== "complete") gaps.push("参考成本或售价");
+  }
+  return gaps;
+}
+
 function formatUpdatedAt(value) {
   if (!value) return "--";
   return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function SelectionDomainSearch({ value, onChange, label }) {
-  return (
-    <label className="selection-search-field"><span>{label}</span><span className="selection-domain-search">
-      <Search size={17} aria-hidden="true" />
-      <input
-        aria-label={label}
-        type="search"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder="搜索商品名、平台 SKC/SKU、仓库 SKU 或供应商"
-      />
-      {value ? <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onChange("")}><X size={16} /></button> : null}
-    </span></label>
-  );
+  return <BoardSearchField className="selection-search-field" value={value} onValueChange={onChange} label={label} placeholder="搜索商品名、SKC / SKU、仓库 SKU 或供应商" />;
 }
 
 export default function ProductLibrary() {
+  const lastTabThumb = useRef(null);
   const contextRead = useSelectionRead(getActiveMemberContext);
   const context = contextRead.data;
   const [params] = useSearchParams();
   const requestedView = params.get("view");
   const view = requestedView === "reference" ? "reference" : requestedView === "pending" ? "pending" : "official";
   if (!context) return <AppShell pageClass="product-library-page"><SelectionReadState read={contextRead} label="选品工作区" /></AppShell>;
-  return <ProductLibraryView key={`${context.workspaceId}:${view}`} workspaceId={context.workspaceId} view={view} />;
+  return <ProductLibraryView key={`${context.workspaceId}:${view}`} workspaceId={context.workspaceId} view={view} lastTabThumb={lastTabThumb} />;
 }
 
-function ProductLibraryView({ workspaceId, view }) {
+function ProductLibraryView({ workspaceId, view, lastTabThumb }) {
   const routeNavigate = useNavigate();
   const tableRef = useRef(null);
   const savedView = useMemo(() => readProductLibraryViewState(workspaceId, view), [workspaceId, view]);
@@ -209,7 +213,7 @@ function ProductLibraryView({ workspaceId, view }) {
   const salesStatusDefinitions = useMemo(() => normalizeSelectionStatusDefinitions(statusRead.data), [statusRead.data]);
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
   const pendingCount = pendingCaptures.length;
-  const missingProductCount = catalogProducts.filter((product) => product.dataReadiness?.hasGaps || product.skuCount === 0 || product.incomingReferences.length || product.relatedDrafts.length).length;
+  const missingProductCount = catalogProducts.filter(product => catalogWork(product).length > 0).length;
   const duplicateSkcGroups = useMemo(() => {
     const groups = new Map();
     catalogProducts.forEach((product) => {
@@ -273,7 +277,7 @@ function ProductLibraryView({ workspaceId, view }) {
       || (dataStatus === "profit_complete" && product.dataReadiness?.profit.status === "complete")
       || (dataStatus === "reference_profit_complete" && product.dataReadiness?.referenceProfit?.status === "complete")
       || (dataStatus === "mapping_complete" && product.dataReadiness?.warehouseMapping.status === "complete");
-    const matchesMissing = !missingOnly || product.skuCount === 0 || product.dataReadiness?.hasGaps || product.incomingReferences.length || product.relatedDrafts.length;
+    const matchesMissing = !missingOnly || catalogWork(product).length > 0;
     return matchesStatus && matchesData && matchesMissing && matchesProductSupplier(product, normalizedSupplierNumber);
   }).toSorted((a, b) => {
     if (productSort === "lowestCost") return (a.lowestReferenceCost ?? Number.POSITIVE_INFINITY) - (b.lowestReferenceCost ?? Number.POSITIVE_INFINITY);
@@ -404,6 +408,15 @@ function ProductLibraryView({ workspaceId, view }) {
           {row.original.skuExpanded ? "收起 SKU 明细" : `显示全部 ${row.original.skuReferences.length} 个 SKU`}
         </button> : null}
       </div>,
+    },
+    {
+      id: "catalogWork",
+      header: "待处理项",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const gaps = catalogWork(row.original);
+        return gaps.length ? <span className="catalog-work-items"><strong>待补 {gaps.length} 项</strong><small>{gaps.join("、")}</small></span> : <span className="catalog-work-done">已齐备</span>;
+      },
     },
     {
       id: "suppliers",
@@ -645,14 +658,15 @@ function ProductLibraryView({ workspaceId, view }) {
   ].filter(Boolean);
   const resetOfficialFilters = () => { setQuery(""); setSupplierNumber(""); setStore("all"); setStatus("all"); setRecordStatus("all"); setDataStatus("all"); setSalesLabel("all"); setMissingOnly(false); setDuplicatesOnly(false); };
   const resetReferenceFilters = () => { setQuery(""); setStore("all"); setSupplierNumber(""); setReferenceSource("all"); setNegativeOnly(false); setSalesLabel("all"); };
-  const visibleProductColumns = useMemo(() => columnView === "all" ? productColumns : productColumns.filter(column => COMPACT_COLUMN_IDS.has(column.id ?? column.accessorKey)), [columnView, productColumns]);
+  const visibleProductColumns = useMemo(() => columnView === "all" ? productColumns.filter(column => column.id !== "catalogWork") : productColumns.filter(column => COMPACT_COLUMN_IDS.has(column.id ?? column.accessorKey)), [columnView, productColumns]);
 
-  const pageTitle = view === "reference" ? "预存区" : view === "pending" ? "历史采集资料" : "选品工作台";
-  const pageDescription = view === "reference"
-    ? "只显示尚未进入选品库的资料。补齐后自动流转；已建档商品及新增 SKU 在选品商品库继续维护。"
-    : view === "pending"
-      ? "整理旧采集资料，补齐后确认入库。新商品请直接新建，或从预存区补齐。"
-      : "管理商品资料、售价与销售状态。供应商链接和参考成本随档案保留。";
+  const pageTitle = view === "reference" ? "预存区" : view === "pending" ? "历史采集资料" : "商品资料";
+  const pageDescription = view === "pending" ? "补齐历史采集资料后确认入库。" : undefined;
+  const viewTabs = [
+    { id:"official", label:"选品商品库", icon:CheckCircle2, count:catalogState.status === "ready" ? catalogProducts.length : "—" },
+    { id:"reference", label:"预存区", icon:BarChart3, count:referenceRead.status === "ready" && catalogState.status === "ready" ? pendingGroupCount : "—" },
+  ];
+  if (pendingCount > 0 || view === "pending") viewTabs.push({ id:"pending", label:"历史采集", icon:Inbox, count:captureRead.status === "ready" ? pendingCount : "—" });
 
   return (
     <AppShell pageClass={`product-library-page ${view === "pending" ? "pending-view" : ""}`}>
@@ -662,25 +676,26 @@ function ProductLibraryView({ workspaceId, view }) {
         actions={view === "reference" ? (
           <><Button icon={Download} loading={exporting} disabled={exporting || filteredReferences.length === 0} onClick={exportReferences}>导出参考</Button><Button icon={WalletCards} onClick={() => navigate("/ledger")}>月度账本</Button></>
         ) : view === "official" ? (
-          <><Button icon={Download} loading={exporting} disabled={exporting || filteredProducts.length === 0} onClick={exportProducts}>导出</Button><Button variant="primary" icon={Plus} onClick={() => navigate("/products/edit")}>新建商品</Button></>
+          <><Button variant="ghost" icon={WalletCards} onClick={() => navigate("/profit")}>核对月度利润</Button><Button icon={Download} loading={exporting} disabled={exporting || filteredProducts.length === 0} onClick={exportProducts}>导出</Button><Button variant="primary" icon={Plus} onClick={() => navigate("/products/edit")}>新建商品</Button></>
         ) : null}
       />
 
+      <div className="catalog-workbench">
+      <div className="catalog-view-bar">
+      <BoardPillTabs label="商品管理视图" items={viewTabs} value={view} onChange={changeView} panelId="catalog-view-content" lastThumb={lastTabThumb} />
       <ProductCollectionTools workspaceId={workspaceId} />
-      <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
-        <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
-        <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>预存区</span><small>{referenceRead.status === "ready" && catalogState.status === "ready" ? pendingGroupCount : "—"}</small></button>
-        {pendingCount > 0 || view === "pending" ? <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>历史采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button> : null}
       </div>
 
+      <div id="catalog-view-content" role="tabpanel" aria-labelledby={`catalog-view-content-${view}`}>
       {view === "reference" ? (
         <>
-          <Panel className="prestorage-flow"><strong>补齐预存资料，齐全后自动进入选品库</strong><p>资料可分次保存。每个 SKU 的属性、售价和参考成本，以及商品图片和供应商链接齐全后自动流转。</p><Button variant="ghost" loading={checkingPrestorage} disabled={referenceRead.status !== "ready" || checkingPrestorage || !pendingGroupCount} onClick={recheckPrestorage}>重新检查</Button></Panel>
-          <div className="reference-summary" aria-label="预存参考摘要">
+          <div className="catalog-reference-overview"><div className="reference-summary" aria-label="预存参考摘要">
             <span><small>当前待补商品</small><strong>{referenceRead.status === "ready" ? groupedReferences.length : "—"}</strong></span>
             <span><small>平台 SKU</small><strong>{referenceRead.status === "ready" ? filteredReferences.length : "—"}</strong></span>
             <span><small>资料已齐全</small><strong>{referenceRead.status === "ready" ? readyReferenceCount : "—"}</strong></span>
             <span><small>缺参考成本 SKU</small><strong>{referenceRead.status === "ready" ? missingReferenceCostCount : "—"}</strong></span>
+          </div><details className="catalog-transfer-help"><summary>转入选品库条件</summary><p>补齐图片、供应商链接，以及每个 SKU 的属性、售价和参考成本后自动转入。</p></details>
+            <Button variant="ghost" loading={checkingPrestorage} disabled={referenceRead.status !== "ready" || checkingPrestorage || !pendingGroupCount} onClick={recheckPrestorage}>重新检查</Button>
           </div>
           <LibraryFilterBar key="reference-filters"
             search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索预存资料" />}
@@ -712,7 +727,6 @@ function ProductLibraryView({ workspaceId, view }) {
         </>
       ) : view === "official" ? (
         <>
-          <div className="selection-workflow-note"><p>参考利润用于选品；历史盘点来自月度报告，尚无报告不代表商品资料缺失。</p><Button variant="ghost" icon={WalletCards} onClick={() => navigate("/profit")}>核对月度利润</Button></div>
           <LibraryFilterBar key="official-filters"
             search={<SelectionDomainSearch value={query} onChange={setQuery} label="搜索商品档案" />}
             common={<><LibraryFilterField label="店铺"><select className="select-input" aria-label="按店铺筛选" value={store} onChange={(event) => setStore(event.target.value)}>
@@ -720,7 +734,7 @@ function ProductLibraryView({ workspaceId, view }) {
               </select></LibraryFilterField><LibraryFilterField label="销售状态"><select className="select-input" aria-label="按商品状态筛选" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="all">全部状态</option>{status !== "all" && !salesStatusDefinitions.some(item => item.id === status) ? <option value={status}>当前选中状态（等待读取）</option> : null}{salesStatusDefinitions.map((statusItem) => <option value={statusItem.id} key={statusItem.id}>{statusItem.label}{statusItem.archivedAt ? "（已归档）" : ""}</option>)}
               </select></LibraryFilterField></>}
-            advancedCount={[supplierNumber.trim(), recordStatus !== "all", salesLabel !== "all", dataStatus !== "all", missingOnly, duplicatesOnly].filter(Boolean).length}
+            advancedCount={[supplierNumber.trim(), recordStatus !== "all", salesLabel !== "all", dataStatus !== "all", duplicatesOnly].filter(Boolean).length}
             advanced={<>
               <LibraryFilterField label="供方货号"><input className="text-input" aria-label="按供方货号筛选" placeholder="输入供方货号" value={supplierNumber} onChange={event => setSupplierNumber(event.target.value)} /></LibraryFilterField>
               <LibraryFilterField label="档案类型"><select className="select-input" aria-label="按档案类型筛选" value={recordStatus} onChange={event => setRecordStatus(event.target.value)}><option value="all">全部档案</option><option value="active">正式档案</option><option value="draft">草稿资料</option><option value="inactive">停用资料</option></select></LibraryFilterField>
@@ -728,10 +742,10 @@ function ProductLibraryView({ workspaceId, view }) {
               <LibraryFilterField label="参考与核算状态"><select className="select-input" aria-label="按经营数据筛选" value={dataStatus} onChange={(event) => setDataStatus(event.target.value)}>
                 <option value="all">全部参考与核算状态</option><option value="missing_purchase">ERP 采购未覆盖</option><option value="missing_reference_profit">参考利润待补</option><option value="missing_profit">历史盘点未覆盖</option><option value="missing_mapping">仓库 SKU 待映射</option><option value="erp_complete">ERP 采购已覆盖</option><option value="reference_profit_complete">参考利润可用</option><option value="profit_complete">历史盘点已覆盖</option><option value="mapping_complete">仓库 SKU 已映射</option>
               </select></LibraryFilterField>
-              <button aria-pressed={missingOnly} className={`filter-chip ${missingOnly ? "active" : ""}`} onClick={() => setMissingOnly(value => !value)}><AlertCircle size={17} />资料/参考待补（{catalogState.status === "ready" ? missingProductCount : "—"}）</button>
               {duplicateSkcGroups.length ? <button aria-pressed={duplicatesOnly} className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly(value => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
             </>}
             activeFilters={officialActiveFilters} onClear={resetOfficialFilters}
+            actions={<button type="button" aria-pressed={missingOnly} className="catalog-gaps-toggle" onClick={() => setMissingOnly(previous => !previous)}><AlertCircle size={15} />资料/参考待补 <strong>{catalogState.status === "ready" ? missingProductCount : "—"}</strong></button>}
             result={catalogState.status === "ready" ? `匹配 ${filteredProducts.length} / ${catalogProducts.length} 条` : "正在读取商品档案"}
             tools={<><div className="library-column-switch" role="group" aria-label="商品表格字段"><button aria-pressed={columnView === "compact"} onClick={() => setColumnView("compact")}>常用列</button><button aria-pressed={columnView === "all"} onClick={() => setColumnView("all")}>全部字段</button></div><label className="sort-control">排序<select value={productSort} onChange={event => setProductSort(event.target.value)}><option value="updated">最后更新</option><option value="coverage">成本覆盖情况</option><option value="lowestCost">最低 SKU 参考成本</option><option value="name">商品名称</option></select></label><Button variant="ghost" icon={Settings2} disabled={statusRead.status !== "ready"} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>{duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}</>}
           />
@@ -770,6 +784,8 @@ function ProductLibraryView({ workspaceId, view }) {
           </Panel>
         </>
       ) : <CaptureQueueView captureRead={captureRead} query={query} onQueryChange={setQuery} filter={queueFilter} onFilterChange={setQueueFilter} onOpenEditor={navigate} initialScrollY={savedView?.windowScrollY} />}
+      </div>
+      </div>
       <Modal
         open={bulkConfirmOpen}
         size="small"

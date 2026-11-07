@@ -99,10 +99,10 @@ describe('backup workflow save protection', () => {
   expect(container.querySelector('.system-operation-warning').textContent).toContain('无需重复恢复');
   expect(container.textContent).not.toContain('备份恢复失败');
  });
- it('prevents the two export controls from submitting the same save twice', async () => {
+ it('prevents rapid export clicks from submitting the same save twice', async () => {
   let finish;
   mocks.save.mockImplementation(() => new Promise(resolve => { finish=resolve; }));
-  await act(async () => { button('导出本机备份').click(); button('导出完整备份').click(); });
+  await act(async () => { button('导出本机备份').click(); button('导出本机备份').click(); });
   expect(mocks.create).toHaveBeenCalledOnce();expect(mocks.save).toHaveBeenCalledOnce();
   await act(async () => finish({ status: 'saved', fileName: 'once.json', sizeBytes: 20 }));
   expect(mocks.record).toHaveBeenCalledOnce();

@@ -9,16 +9,19 @@ import updatePolicy from "./update-policy.cjs";
 import releaseAfterPack from "./release-after-pack.cjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+const releasePlan = JSON.parse(fs.readFileSync(path.join(root, "release-plan.json"), "utf8"));
+const beta = releasePlan.edition === "beta";
+const executableName = beta ? "Lworkstation Beta.exe" : "Lworkstation.exe";
 const executable = process.env.SHOPEERS_DESKTOP_SMOKE_EXECUTABLE
   ? path.resolve(process.env.SHOPEERS_DESKTOP_SMOKE_EXECUTABLE)
-  : path.join(root, "release", "win-unpacked", "Lworkstation.exe");
+  : path.join(root, "release", "win-unpacked", executableName);
 const reportPath = path.join(os.tmpdir(), `shopeers-desktop-smoke-${process.pid}.json`);
 const inboxSpoolPath = path.join(os.tmpdir(), `shopeers-desktop-smoke-inbox-${process.pid}.json`);
 const userDataPath = path.join(os.tmpdir(), `shopeers-desktop-smoke-user-data-${process.pid}`);
 const cachePath = path.join(userDataPath, "cache");
 const inboxPort = 20790 + Math.floor(Math.random() * 800);
 const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
-const channel = updatePolicy.versionChannel(version);
+const channel = updatePolicy.versionChannel(version, releasePlan.edition);
 const localRc = releaseAfterPack.isRcVersion(version);
 const hiddenMode = process.env.SHOPEERS_DESKTOP_SMOKE_HIDDEN === "1";
 if (!channel) throw new Error(`Unsupported smoke update channel for ${version}`);
@@ -133,8 +136,12 @@ if (!validationError) {
     const runtime = report.extensionRuntime || {};
     if (!report.ok
       || !report.packaged
-      || report.applicationName !== "shopeers-desktop"
-      || report.executableName !== "Lworkstation.exe"
+      || report.applicationName !== (beta ? "Lworkstation Beta" : "shopeers-desktop")
+      || report.executableName !== executableName
+      || report.edition !== (beta ? "beta" : "stable")
+      || report.userDataPath !== userDataPath
+      || report.sessionDataPath !== userDataPath
+      || report.backupDirectory !== path.join(userDataPath, "backups")
       || !report.packagedResources?.desktopIcon
       || !report.packagedResources?.shell
       || !report.packagedResources?.workspacePreload
@@ -159,7 +166,7 @@ if (!validationError) {
       || report.erpZoom?.max !== 120
       || report.tabSwitches?.find((entry) => entry.activeTab === "erp")?.zoomFactor !== 0.8
       || report.tabSwitches?.some((entry) => entry.bounds?.height <= 0)
-      || runtime.port === 8790
+      || runtime.port !== inboxPort
       || runtime.root !== path.join(userDataPath, "Lworkstation-runtime-extensions")
       || runtime.erpPath !== path.join(runtime.root, "erp")
       || !runtime.erpPath

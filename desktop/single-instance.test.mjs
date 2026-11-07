@@ -33,16 +33,18 @@ let requested = false;
 const fakeApp = {
   requestSingleInstanceLock() { requested = true; return false; },
   exit(code) { exited = code; },
+  getPath(key) { return key; },
+  setAppUserModelId() {},
   setPath() {},
 };
 new Function("require", "process", main)((name) => {
   if (name === "electron") return { app: fakeApp };
-  if (["node:path", "node:crypto", "./single-instance.cjs"].includes(name)) return require(name);
+  if (["node:path", "node:crypto", "./desktop-edition.cjs", "./package.json", "./single-instance.cjs"].includes(name)) return require(name);
   assert.fail(`losing instance loaded ${name}`);
 }, { env: {} });
 assert.equal(requested, true);
 assert.equal(exited, 0);
-assert.ok(main.indexOf('app.setPath("userData"') < main.indexOf("acquireDesktopInstance(app)"));
+assert.match(main, /initializeDesktopEdition\(app, require\('\.\/package\.json'\)\)[\s\S]+acquireDesktopInstance\(app\)/);
 assert.ok(main.indexOf("acquireDesktopInstance(app)") < main.indexOf('require("electron-updater")'));
 assert.match(main, /desktopInstance\.windowReady\(hiddenSmoke \? null : mainWindow\)/);
 const pkg = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url), "utf8"));

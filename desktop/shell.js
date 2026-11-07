@@ -29,6 +29,14 @@ document.querySelector('#startup-quit').addEventListener('click', () => window.d
 
 function render(state) {
   if (!state) return;
+  const productName = state.productName || 'Lworkstation';
+  if (state.productName !== latestState?.productName) {
+    document.title = productName;
+    inboxAction.querySelector('strong').textContent = productName;
+    const startupIcon = document.querySelector('#startup img');
+    startupIcon.alt = productName;
+    startupIcon.src = './assets/' + state.iconFile;
+  }
   latestState = state;
   const boot = getSurfacePresentation(state);
   document.querySelector('#startup').hidden = boot.status === 'ready';
@@ -50,7 +58,7 @@ function render(state) {
   updateAction.dataset.status = updateStatus;
   updateAction.classList.toggle("has-update", hasUpdate);
   updateAction.setAttribute("aria-expanded", String(Boolean(state.updatePopoverOpen)));
-  updateAction.setAttribute("aria-label", update.message ? `Lworkstation ${version}，${update.message}` : `Lworkstation ${version} 更新`);
+  updateAction.setAttribute("aria-label", update.message ? `${productName} ${version}，${update.message}` : `${productName} ${version} 更新`);
   updateAction.title = updateAction.getAttribute("aria-label");
 
   tabs.forEach((tab) => {

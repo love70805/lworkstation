@@ -65,7 +65,13 @@ function writeReleaseBetaConfig(context, { root = __dirname, operations = fs } =
     throw new Error("Packaged update-config.json is missing from resources.");
   }
 
-  const config = isRcVersion(version) ? EXPECTED_RC_CONFIG : loadReleaseBetaConfig(root, operations);
+  const beta = require('./beta-installation.json');
+  const sidecar = context.packager.config?.extraMetadata?.lworkstationEdition === 'beta';
+  if (sidecar && (context.packager.appInfo.id !== beta.appId || !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version))) {
+    throw new Error("Independent Beta requires the isolated appId and beta version.");
+  }
+  const config = sidecar ? {...loadReleaseBetaConfig(root, operations), channel: beta.channel}
+    : isRcVersion(version) ? EXPECTED_RC_CONFIG : loadReleaseBetaConfig(root, operations);
   operations.writeFileSync(target, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return { version, target, config };
 }

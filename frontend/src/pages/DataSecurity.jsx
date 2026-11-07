@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   CloudDownload,
   CloudUpload,
-  DatabaseBackup,
   Download,
   FileCheck2,
   FileUp,
@@ -434,46 +433,27 @@ export default function DataSecurity() {
 
   return (
     <AppShell pageClass="security-page">
-      <SystemNavigation />
       <PageHeader
         title="数据备份"
-        description="备份本机业务数据、货号组和导入筛选配置，校验恢复文件并保留操作记录。"
-        actions={<Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出本机备份</Button>}
+        description={window.shopeersDesktopRuntime?.edition === 'beta' ? '可导入稳定版导出的 JSON。确认恢复后，数据写入当前 Beta 独立工作区。' : '导出完整 JSON，或选择已有备份进行恢复。'}
+        actions={<><Button icon={FileUp} loading={loadingRestoreFile} disabled={loadingRestoreFile || restoring} onClick={chooseRestoreFile}>导入备份</Button><Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出本机备份</Button></>}
       />
+      <SystemNavigation />
       {operationNotice ? <p className="system-operation-warning" role="status">{operationNotice}</p> : null}
       {check.status === 'error' ? <div className="system-check-error" role="alert">读取失败：{check.error}<Button onClick={refreshRecords} loading={check.refreshing} disabled={check.refreshing}>重试读取</Button></div> : null}
       <p className="system-check-note" role="status">{check.status === 'loading' ? '正在读取本机备份记录与存储占用…' : `最近检查：${formatDateTime(check.checkedAt)} · ${check.status === 'error' ? '未通过' : '仅检查本机记录可读取，不验证磁盘中的历史备份文件'}`}</p>
 
       <div className="security-layout">
         <div className="security-main">
-          <Panel className="safeguard-panel">
-            <div className="section-heading"><h2><ShieldCheck size={20} />恢复保护</h2></div>
-            <div className="setting-row">
-              <div>
-                <strong>恢复前保存当前回滚备份</strong>
-                <p>确认当前完整备份保存成功后才恢复；取消或保存失败将停止恢复。</p>
-              </div>
-              <button className={`toggle ${rollbackBeforeRestore ? "on" : ""}`} aria-label="恢复前下载回滚备份" aria-pressed={rollbackBeforeRestore} onClick={() => setRollbackPreference(!rollbackBeforeRestore)} />
-            </div>
-            <div className="setting-row">
-              <div>
-                <strong>恢复校验</strong>
-                <p>检查数据库版本、完整表清单、记录数、业务筛选配置与平台 SKU 唯一性；恢复期间暂停后台收件。</p>
-              </div>
-              <Badge tone="success"><CheckCircle2 size={14} />始终启用</Badge>
-            </div>
-          </Panel>
-
           <Panel className="snapshots-panel">
             <div className="panel-header">
               <div className="panel-title"><History size={20} /><h2>备份与恢复记录</h2></div>
               <div className="action-row">
                 <Button variant="ghost" icon={RefreshCw} loading={check.refreshing} disabled={check.refreshing} onClick={refreshRecords}>刷新</Button>
-                <Button icon={FileUp} loading={loadingRestoreFile} disabled={loadingRestoreFile || restoring} onClick={chooseRestoreFile}>导入备份</Button>
               </div>
             </div>
             <input ref={restoreInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择 Lworkstation JSON 备份文件" onChange={readRestoreFile} />
-            <div className="security-note">备份包含货号组、上次应用组、逐店例外和导入筛选，不包含登录信息或桌面收件历史。文件保存在你选择的位置；旧版导出记录不能证明文件仍在磁盘中。</div>
+            <div className="security-note">完整备份包含商品、账本、成本、利润、业务筛选和审计记录。桌面版还会保存本机收件和采集任务。</div>
             <div className="table-wrap">
               <table className="data-table snapshot-table">
                 <thead><tr><th>操作</th><th>本地时间</th><th>记录数</th><th>文件或来源</th></tr></thead>
@@ -527,20 +507,31 @@ export default function DataSecurity() {
         </div>
 
         <aside className="security-side">
-          <Panel className="manual-export">
-            <span className="export-icon"><DatabaseBackup size={29} /></span>
-            <h2>手动导出</h2>
-            <p>生成包含商品、采集、供应商、ERP 成本、账本、利润与审计记录的 JSON 备份。桌面版同时保存本机收件和采集任务。</p>
-            <Button icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出完整备份</Button>
-            <small className="mono">{lastBackup ? `最近备份：${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : check.status === 'ready' ? "尚未导出本机备份" : '备份状态未读取'}</small>
+          <Panel className="safeguard-panel">
+            <div className="section-heading"><h2><ShieldCheck size={20} />恢复保护</h2></div>
+            <div className="setting-row">
+              <div>
+                <strong>恢复前保存当前回滚备份</strong>
+                <p>确认当前完整备份保存成功后才恢复；取消或保存失败将停止恢复。</p>
+              </div>
+              <button className={`toggle ${rollbackBeforeRestore ? "on" : ""}`} aria-label="恢复前下载回滚备份" aria-pressed={rollbackBeforeRestore} onClick={() => setRollbackPreference(!rollbackBeforeRestore)} />
+            </div>
+            <div className="setting-row">
+              <div>
+                <strong>恢复校验</strong>
+                <p>检查数据库版本、完整表清单、记录数、业务筛选配置与平台 SKU 唯一性；恢复期间暂停后台收件。</p>
+              </div>
+              <Badge tone="success"><CheckCircle2 size={14} />始终启用</Badge>
+            </div>
           </Panel>
+
           <Panel className="storage-panel">
             <div className="panel-title"><HardDrive size={19} /><h2>本机存储</h2></div>
             <div className="storage-total"><span>已用 {storageEstimate ? formatBytes(usageBytes) : '--'}</span><span>{quotaBytes > 0 ? `配额 ${formatBytes(quotaBytes)}` : "配额未提供"}</span></div>
             <ProgressBar value={storagePercent} />
             <div className="storage-legend">
               <span><i className="active" />本机 IndexedDB <b className="mono">{security ? `${security.summary.recordCount.toLocaleString("zh-CN")} 条记录` : check.status === 'error' ? '读取失败' : "读取中"}</b></span>
-              <span><i />最近备份文件 <b className="mono">{lastBackup ? formatBytes(lastBackup.sizeBytes) : "--"}</b></span>
+              <span><i />最近导出 <b className="mono">{lastBackup ? `${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : "--"}</b></span>
             </div>
           </Panel>
         </aside>

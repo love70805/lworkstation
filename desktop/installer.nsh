@@ -36,6 +36,15 @@ FunctionEnd
 !endif
 
 !macro customInit
+  !ifdef LWORKSTATION_PARALLEL_BETA
+    Call verifyBetaInstallTarget
+    ${If} ${isUpdated}
+    ${AndIf} $hasPerMachineInstallation != "1"
+    ${AndIf} $hasPerUserInstallation != "1"
+      SetErrorLevel 87
+      Quit
+    ${EndIf}
+  !endif
   ${If} ${isUpdated}
     ${GetParameters} $R0
     ${GetOptions} $R0 "--lworkstation-pipe=" $updatePipe
@@ -112,6 +121,9 @@ FunctionEnd
 !macroend
 
 !macro customPageAfterChangeDir
+  !ifdef LWORKSTATION_PARALLEL_BETA
+    !define MUI_PAGE_CUSTOMFUNCTION_PRE verifyBetaInstallTarget
+  !else
   !undef MUI_PAGE_CUSTOMFUNCTION_PRE
   !define MUI_PAGE_CUSTOMFUNCTION_PRE preserveExistingInstallDirectory
   Function preserveExistingInstallDirectory
@@ -122,6 +134,7 @@ FunctionEnd
     ${EndIf}
     Call instFilesPre
   FunctionEnd
+  !endif
 !macroend
 
 ; Preserve the normal manual-install Finish page, but honor the updater's

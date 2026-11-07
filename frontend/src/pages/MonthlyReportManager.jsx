@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
+import BoardMeter from '../components/BoardMeter';
 import { readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement, previewProfitReport, saveProfitReport } from "../data/repositories/profitReportRepository";
 import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, suggestDeductionStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate, legacyUnassignedDispatchRows } from "../domain/monthlySupplements";
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
@@ -187,7 +188,7 @@ export function AdoptedDispatchNotice({ rows = [], locked = false }) {
   return inherited.length ? <Panel className="report-source-notice"><p role="status">当前采用包含 {inherited.length} 条由上一登记人顺延归属的 XLSX 记录，共 {exactSum(inherited,'quantityExact')} 件，源表没有明确登记人归属。历史采用值保持不变。</p><p>请核对源表后重新导入；替换已有来源即可应用新的归属规则。</p><details><summary>查看原采用中的未明确归属行</summary>{inherited.slice(0,100).map(row=><p key={supplementRowIdentity(row)}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.quantityExact} 件</p>)}</details></Panel> : null;
 }
 
-export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, onOpenCosts, onState, editor, onEdit, compact = false }) {
+export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, totalCostCount, onOpenCosts, onState, editor, onEdit, compact = false }) {
   const {notify}=useToast();
   const [retry,setRetry]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[orderDownload,setOrderDownload]=useState(null);
   const exportingRef=useRef(false);
@@ -218,11 +219,18 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     }catch(error){setError(error.message);}finally{exportingRef.current=false;setBusy(false);setExportStage('');}
   }
   return <Panel className="monthly-report-manager" id="monthly-reports" tabIndex={-1}>
-    {!compact ? <div className="report-heading"><h2>本月报告 · {data.ledger.period}</h2></div> : null}
-    <div className="report-primary-actions"><p role="status">{missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>补齐成本</Button>:null}<Button variant="primary" loading={busy} disabled={busy||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
+    <div className="report-primary-actions">
+      <div className="report-status-heading"><h2>本月报告</h2>
+        {compact && totalCostCount > 0 && missing != null && missing <= totalCostCount
+          ? <BoardMeter label="已核对成本" value={totalCostCount - missing} maxValue={totalCostCount} valueLabel={`${totalCostCount - missing} / ${totalCostCount} 条`} />
+          : <p role="status">{missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>}
+      </div>
+      {missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>补齐成本</Button>:null}
+      <Button variant="primary" loading={busy} disabled={busy||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button>
+    </div>
     {exportStage ? <div className="erp-collection-meter" role="status"><span>{exportStage}</span><progress aria-label="报告导出进度" /></div> : null}
     <details open={compact ? undefined : true}><summary>代发、扣款与导出记录</summary>
-    <p>按当前台账和成本直接导出，数据可随时更新。代发未录入时按 0 计；扣款未齐时导出未扣款报告。</p>
+    <p>代发未录入时按 0 计。扣款未齐时可导出未扣款报告。</p>
     <AdoptedDispatchNotice rows={data.adoptedRows} />
     <div className="report-sources-summary">
       <div><strong>代发</strong><p>{data.dispatch?'已登记 '+data.dispatch.adoptedQuantityExact+' 件 · ¥'+displayMoney(new Exact(data.dispatch.adoptedQuantityExact).times(data.ledger.warehouseRate??'0.7')):'未录入 · 本次按 0 计'}</p><Button disabled={busy} onClick={()=>onEdit('dispatch')}>{data.dispatch?'更新代发':'登记代发'}</Button></div>

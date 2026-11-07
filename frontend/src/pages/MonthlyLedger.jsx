@@ -130,14 +130,8 @@ export default function MonthlyLedger() {
     <AppShell pageClass="ledger-page">
       <PageHeader
         title="月度账本"
-        description="每个自然月保存独立的销售数据、成本来源和利润结果，人工可以随时补充或修正。"
         actions={<><Button icon={Download} loading={exporting} disabled={exporting || loadingResults || Boolean(result?.error) || items.length === 0} onClick={exportArchive}>导出归档</Button><Button variant={items.length > 0 ? "primary" : "secondary"} icon={Plus} onClick={() => navigate("/import-preview")}>新建或导入账本</Button></>}
       />
-
-      <div className="ledger-filter-bar">
-        <SearchInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索月份或账本状态..." />
-        <span className="ledger-filter-count">{!result ? '正在读取账本…' : result.error ? '读取失败' : `显示 ${filteredItems.length} / ${items.length} 个账本`}</span>
-      </div>
 
       {result && !result.error && items.length > 0 ? <div className="ledger-stat-grid">
         <Panel className="ledger-stat"><CalendarDays size={18} /><span>已建立月份</span><strong>{items.length}</strong></Panel>
@@ -145,6 +139,11 @@ export default function MonthlyLedger() {
         <Panel className="ledger-stat"><BarChart3 size={18} /><span>{currentYear} 年导入销量</span><strong>{yearQuantity.toLocaleString("zh-CN")}</strong></Panel>
         <Panel className="ledger-stat pending"><CalendarDays size={18} /><span>当前待处理</span><strong>{loadingResults ? '正在核对…' : pending ? formatLedgerPeriod(pending.period) : "无"}</strong><small>{loadingResults ? '正在检查成本与扣款' : pending ? pendingLabel : "成本与扣款均已齐全"}</small></Panel>
       </div> : null}
+
+      <div className="ledger-filter-bar">
+        <SearchInput value={query} onValueChange={setQuery} placeholder="搜索月份或账本状态..." />
+        <span className="ledger-filter-count">{!result ? '正在读取账本…' : result.error ? '读取失败' : `显示 ${filteredItems.length} / ${items.length} 个账本`}</span>
+      </div>
 
       {!result ? <Panel><p role="status">正在读取月度账本与报告结果…</p></Panel> : result.error ? <Panel><p role="alert">账本读取失败：{result.error}</p><Button onClick={() => setRefresh(value => value + 1)}>重试</Button></Panel> : items.length === 0 ? (
         <Panel><EmptyState icon={FileSpreadsheet} title="还没有月度账本" description="导入第一个月度销售台账后，系统会保存来源批次并进入成本核对。" action={<Button variant="primary" icon={Plus} onClick={() => navigate("/import-preview")}>导入月度台账</Button>} /></Panel>
@@ -158,7 +157,7 @@ export default function MonthlyLedger() {
             return (
               <Panel className="ledger-card" key={ledger.id}>
                 <div className="ledger-card-head">
-                  <span className="month-tile">{Number(ledger.period.slice(5))}月</span>
+                  <span className="month-tile" aria-hidden="true"><CalendarDays size={20} /></span>
                   <div><h2>{formatLedgerPeriod(ledger.period)}</h2><Badge tone={ledgerStateTones[ledger.status] ?? "neutral"}>{ledgerStateLabels[ledger.status] ?? ledger.status}</Badge></div>
                   <span className="ledger-card-head-actions"><button aria-label={`删除 ${formatLedgerPeriod(ledger.period)} 账本`} title="删除账本" onClick={() => setDeleteTarget(ledger)}><Trash2 size={18} /></button></span>
                 </div>

@@ -206,12 +206,12 @@ export default function Diagnostics() {
 
   return (
     <AppShell pageClass="diagnostics-page">
-      <SystemNavigation />
       <PageHeader
         title="系统检查"
         description={RUNTIME_COPY.diagnosticsDescription}
         actions={<Button icon={RefreshCw} loading={refreshing} disabled={refreshing} onClick={refresh}>刷新状态</Button>}
       />
+      <SystemNavigation />
       {check.status === 'error' ? <div className="system-check-error" role="alert">本机检查失败：{check.error}<Button onClick={refresh} loading={refreshing} disabled={refreshing}>重试检查</Button></div> : null}
       <p className="system-check-note">本机检查读取数据库记录与存储占用；可读取不代表业务数据均正确，也不代表 ERP 服务正常。各连接状态在下方独立检查。</p>
 
@@ -255,7 +255,6 @@ export default function Diagnostics() {
         </details>
       </Panel>
 
-      <div className="diagnostic-links"><span>系统与备份</span><span>数据模式：<code>本机 IndexedDB</code></span><span>云端协作：<code>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</code></span></div>
     </AppShell>
   );
 }

@@ -11,7 +11,7 @@ const { versionChannel, canUpdate } = require("./update-policy.cjs");
 const atom = (tags) => `<feed>${tags.map(tag => `<entry><title>${tag}</title><link href="https://github.com/love70805/lworkstation/releases/tag/v${tag}"/><content>fixture</content></entry>`).join("")}</feed>`;
 const yaml = (version) => `version: ${version}\nfiles:\n  - url: Lworkstation-${version}.exe\n    sha512: Zml4dHVyZQ==\n    size: 10\npath: Lworkstation-${version}.exe\nsha512: Zml4dHVyZQ==\n`;
 
-function fixture(current, { channel = versionChannel(current), tags = ["0.3.0", "0.2.7-beta.2"], latest = "0.3.0", metadata, missing = false, enabled = true } = {}) {
+function fixture(current, { edition, channel = versionChannel(current, edition), tags = ["0.3.0", "0.2.7-beta.2"], latest = "0.3.0", metadata, missing = false, enabled = true, wrongAsset = false } = {}) {
   const updater = new AppUpdater(null, { version: current, isPackaged: true, whenReady: async () => {} });
   updater.logger = { info() {}, warn() {}, error() {} };
   updater.getOrCreateStagingUserId = async () => "00000000-0000-4000-8000-000000000000";
@@ -19,12 +19,13 @@ function fixture(current, { channel = versionChannel(current), tags = ["0.3.0", 
   updater.httpExecutor = { request: async (options) => {
     const request = options.path;
     requests.push(request);
-    if (request.endsWith(".atom")) return atom(tags);
+    if (request.endsWith(".atom")) return atom(tags).replaceAll("/tag/vbeta-sidecar-v", "/tag/beta-sidecar-v");
     if (request.endsWith("/latest")) return JSON.stringify({ tag_name: `v${latest}` });
     if (missing) throw new Error("404 missing channel metadata");
-    const tag = /\/download\/v([^/]+)\//.exec(request)?.[1];
+    const tag = /\/download\/(?:beta-sidecar-)?v([^/]+)\//.exec(request)?.[1];
     assert.ok(tag, `unexpected request: ${request}`);
-    return yaml(metadata ?? tag);
+    const data = yaml(metadata ?? tag);
+    return channel === "beta-sidecar" && !wrongAsset ? data.replaceAll("Lworkstation-", "Lworkstation-Beta-Setup-") : data;
   } };
   let downloads = 0;
   updater.doDownloadUpdate = async ({ updateInfoAndProvider }) => {
@@ -33,12 +34,29 @@ function fixture(current, { channel = versionChannel(current), tags = ["0.3.0", 
     updater.emit("update-downloaded", updateInfoAndProvider.info);
     return ["fixture-only.exe"];
   };
-  const runtime = createUpdateRuntime({ updater, CancellationToken, currentVersion: current, enabled,
+  const runtime = createUpdateRuntime({ updater, CancellationToken, currentVersion: current, enabled, edition,
     feedConfig: { ...PRODUCTION_FEED_CONFIG, channel } });
   return { updater, runtime, requests, downloads: () => downloads };
 }
 
 // Exercise the installed upstream branch: beta currently selects a newer stable.
+{
+  const tags = ["beta-sidecar-v2.0.7-beta.3", "2.1.0-beta.9", "beta-sidecar-v2.0.7-beta.12", "2.1.0"];
+  const run = fixture("2.0.7-beta.2", {edition:"beta", tags});
+  const checked = await run.runtime.check();
+  assert.equal(checked.available, true, JSON.stringify({checked,requests:run.requests,state:run.runtime.snapshot()}));
+  assert.equal(run.runtime.snapshot().availableVersion, "2.0.7-beta.12");
+  assert.match(run.runtime.snapshot().release.releaseUrl, /beta-sidecar-v2\.0\.7-beta\.12$/);
+  assert.ok(run.requests.some(p => p.endsWith("/beta-sidecar-v2.0.7-beta.12/beta-sidecar.yml")));
+  assert.equal((await run.runtime.download()).downloaded, true);
+  for (const options of [{tags: ["2.1.0-beta.9"]}, {tags,wrongAsset:true}, {tags,channel:"beta"}, {tags,metadata:"2.1.0-beta.9"}]) {
+    const bad = fixture("2.0.7-beta.2", {edition:"beta", ...options});
+    assert.equal((await bad.runtime.check()).ok,false);
+    assert.equal(bad.runtime.canInstall(),false);
+  }
+  const legacy = fixture("2.0.7-beta.1", {tags: ["beta-sidecar-v2.0.7-beta.2"]});
+  assert.equal((await legacy.runtime.check()).ok,false);
+}
 {
   const f = fixture("0.2.6-beta.7");
   const upstream = new GitHubProvider({ ...PRODUCTION_FEED_CONFIG, channel: "beta" }, f.updater,

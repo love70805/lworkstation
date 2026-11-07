@@ -45,8 +45,10 @@ for (const requirement of plan.requiredCommits) {
 
 const prerelease = plan.version.includes("-");
 const localRc = releaseAfterPack.isRcVersion(plan.version);
-const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
-const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
+const beta = readJson("beta-installation.json");
+const sidecar = plan.edition === "beta";
+const metadataFile = sidecar ? beta.channel + ".yml" : localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
+const artifactPattern = sidecar ? beta.artifactPattern : prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
 const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
 const releaseRoot = (localRc || plan.candidateOnly) ? path.join(repositoryRoot, "releases", "candidates", plan.version) : prerelease
   ? path.join(repositoryRoot, "releases", "prerelease", plan.version)

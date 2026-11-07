@@ -14,6 +14,13 @@ const sha512 = crypto.createHash('sha512').update(fs.readFileSync(file)).digest(
 const updater = { downloadedUpdateHelper: { file, downloadedFileInfo: { sha512, isAdminRightsRequired: false }, versionInfo: { version: '1.0.0-rc.4' } } };
 const installed = 'C:\\Program Files\\Lworkstation';
 assert.equal(INSTALL_GUID, JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url))).build.nsis.guid);
+const beta = JSON.parse(fs.readFileSync(new URL('./beta-installation.json', import.meta.url)));
+const betaPath = installed + ' Beta';
+assert.notEqual(INSTALL_GUID, beta.guid);
+const locations = async (hive, guid) => hive === 'HKCU' ? (guid === beta.guid ? betaPath : installed) : null;
+assert.equal(await resolveInstallScope(betaPath, locations, 'beta'), 'user');
+await assert.rejects(resolveInstallScope(installed, locations, 'beta'), {code: 'INSTALL_SCOPE'});
+await assert.rejects(resolveInstallScope(betaPath, locations), {code: 'INSTALL_SCOPE'});
 assert.ok(sameDirectory('c:\\program files\\LWORKSTATION\\', installed));
 assert.equal(await resolveInstallScope(installed, async hive => hive === 'HKLM' ? installed : 'C:\\other'), 'machine');
 assert.equal(await resolveInstallScope(installed, async hive => hive === 'HKCU' ? installed : null), 'user');
