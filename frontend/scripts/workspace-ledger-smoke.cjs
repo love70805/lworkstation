@@ -55,17 +55,35 @@ app.whenReady().then(async()=>{
  return ids;
  })()`);
  await window.loadURL(origin+'/workspace?ledger='+encodeURIComponent(ids[0]));
+ await wait("document.querySelector('.sales-analytics')?.innerText.includes('2026-09 · 全部店铺')");
  await wait("document.querySelector('select[name=首页核算月份]')?.options.length>=6 && document.querySelector('select[name=首页店铺]')?.value==='all'");
  assert.deepEqual(await run("[...document.querySelector('select[name=首页核算月份]').options].map(option=>option.value).filter(Boolean)"),ids);
- const press=keyCode=>{
-   window.webContents.sendInputEvent({type:'keyDown',keyCode});
-   window.webContents.sendInputEvent({type:'keyUp',keyCode});
- };
- await run("document.querySelector('select[name=首页店铺]').closest('.board-select').querySelector('button').focus()");
- press('Enter');
- await wait("document.querySelector('[role=listbox] [role=option]')");
- await run("[...document.querySelectorAll('[role=listbox] [role=option]')].find(option=>option.textContent==='甲店').focus()");
- press('Enter');
+ // A hidden Electron window needs emulated foreground focus for trusted keyboard input.
+ const keyboard = window.webContents.debugger;
+ keyboard.attach();
+ try {
+   await keyboard.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+   async function press(key, keyCode) {
+     const event = { key, code: key, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
+     await keyboard.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...event });
+     await keyboard.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
+   }
+   await wait(`(() => {
+     const trigger = document.querySelector('select[name=首页店铺]')?.closest('.board-select')?.querySelector('.board-select-trigger');
+     trigger?.focus();
+     return trigger && document.activeElement === trigger;
+   })()`);
+   await press('ArrowDown', 40);
+   await wait("document.querySelector('[role=listbox] [role=option]')");
+   const stores = await run("[...document.querySelectorAll('[role=listbox] [role=option]')].map(option => option.textContent)");
+   const storeIndex = stores.indexOf('甲店');
+   assert.ok(storeIndex >= 0, '甲店应出现在店铺列表中');
+   await press('Home', 36);
+   for (let i = 0; i < storeIndex; i++) await press('ArrowDown', 40);
+   await press('Enter', 13);
+ } finally {
+   keyboard.detach();
+ }
  await wait("document.querySelector('select[name=首页店铺]')?.value==='甲店' && document.querySelector('.sales-analytics')?.innerText.includes('甲店')");
  await wait("document.querySelector('.sales-analytics')?.innerText.includes('缺少有效月内添加日期')");
  await overview('partial');
