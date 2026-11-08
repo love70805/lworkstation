@@ -1,4 +1,7 @@
 import "fake-indexeddb/auto";
+import { readProfitReportFreshness } from './repositories/profitReportRepository';
+import { readWorkspaceScopeSummary } from './repositories/ledgerOverviewRepository';
+
 import Dexie from "dexie";
 import { beforeEach,afterEach,expect,it,vi } from "vitest";
 import { db, CLIENT_DATABASE_NAME, CLIENT_DATABASE_V11_STORES } from "./db/clientDatabase";
@@ -456,4 +459,42 @@ it('saves a direct financial report without dispatch while keeping shop dispatch
  const book=XLSX.read(await prepareReportDownload(download.report,download),{type:'array'});
  expect(book.Sheets['代发表'].A1.v).toBe('店铺');expect(book.Sheets['代发表'].A2.v).toBe('甲');expect(book.Sheets['代发表'].A3.v).toBe('乙');
  expect(updated.totalsExact.dispatchQuantityExact).toBe('5');
+});
+
+it('keeps report source status current after export and revision, and detects material input changes without rewriting saved snapshots', async () => {
+ const first=await report();
+ expect((await readProfitReportFreshness(first.id)).status).toBe('current');
+ const second=await report();
+ expect(second.revision).toBe(first.revision+1);
+ expect(second.sourceStateFingerprint).toBe(first.sourceStateFingerprint);
+ expect((await readProfitReportFreshness(first.id)).status).toBe('current');
+ await db.ledgers.update('L',{warehouseRate:0.8});
+ expect((await readProfitReportFreshness(second.id)).status).toBe('changed');
+ await db.ledgers.update('L',{warehouseRate:0.7});
+ expect((await readProfitReportFreshness(second.id)).status).toBe('current');
+ await saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU1',unitCost:3,reason:'合成更正'});
+ expect((await readProfitReportFreshness(second.id)).status).toBe('changed');
+ const third=await report();
+ await adopt('deduction');
+ expect((await readProfitReportFreshness(third.id)).status).toBe('changed');
+ const fourth=await report('financial');
+ await adopt('dispatch');
+ expect((await readProfitReportFreshness(fourth.id)).status).toBe('changed');
+ expect(await readSavedProfitReport(first.id)).toEqual(first);
+ expect((await readProfitReportDownload(first.id)).report.fileSha256).toBe(first.fileSha256);
+});
+it('treats older report state as unknown and rejects foreign workspace reads', async () => {
+ const saved=await report();
+ await db.profitReports.update(saved.id,{sourceStateFingerprint:undefined});
+ expect((await readProfitReportFreshness(saved.id)).status).toBe('unknown');
+ await setActiveMemberContext({workspaceId:'OTHER',memberId:'finance',role:'finance'});
+ await expect(readProfitReportFreshness(saved.id)).rejects.toThrow();
+});
+it('summarizes only the selected home scope using the same precise product amounts, independently of monthly sources', async () => {
+ const before=await readWorkspaceScopeSummary('W','L','甲');
+ expect(before).toMatchObject({quantity:0.5,revenue:0,missing:0,profit:-0.34});
+ expect((await readWorkspaceScopeSummary('W','L','all')).quantity).toBe(1);
+ await adopt('dispatch');await adopt('deduction');
+ expect(await readWorkspaceScopeSummary('W','L','甲')).toEqual(before);
+ await expect(readWorkspaceScopeSummary('OTHER','L','甲')).rejects.toThrow();
 });

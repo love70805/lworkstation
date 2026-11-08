@@ -693,6 +693,7 @@ function ProductLibraryView({ workspaceId, view }) {
             actions={<Button id="continuous-catalog-start" variant="primary" icon={Plus} disabled={referenceRead.status !== "ready" || catalogState.status !== "ready" || !groupedReferences.length} onClick={startContinuousCatalog}>连续补齐</Button>}
             result={referenceRead.status === "ready" ? `匹配 ${groupedReferences.length} / ${pendingGroupCount} 个商品 · ${filteredReferences.length} 个 SKU` : "尚未取得预存资料"}
           />
+          <p className="product-draft-note">预存区包含已登记的商品草稿，已保存在本机。资料不全仍可核算，名称、属性和图片按需补齐。</p>
           <Panel className="product-table-panel">
             {referenceRead.status !== "ready" || catalogState.status !== "ready" ? <SelectionReadState read={referenceRead.status !== "ready" ? referenceRead : catalogState} label="预存区" /> : pendingGroupCount ? (
               <DataTable

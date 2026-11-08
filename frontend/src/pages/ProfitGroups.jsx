@@ -56,7 +56,7 @@ function ProfitGroup({ group, columns, open, onToggle }) {
   </tbody>;
 }
 
-export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, expandRequest = 0 }) {
+export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, expandRequest = 0, compactHeading = false }) {
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
   const [expandAll, setExpandAll] = useState(() => readProfitViewState(stateKey).expandAll ?? initiallyExpanded);
   const [exceptions, setExceptions] = useState(() => readProfitViewState(stateKey).exceptions ?? []);
@@ -114,8 +114,8 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
   }, [current]);
   const toggleGroup = id => setExceptions(previous => previous.includes(id) ? previous.filter(key => key !== id) : [...previous, id]);
   return <>
-    <div className="profit-table-heading">
-      <div><h2>月度利润明细</h2><p>点分组查看 SKU 明细。金额单位为人民币（CNY）。</p></div>
+    <div className={`profit-table-heading${compactHeading ? " compact" : ""}`}>
+      {!compactHeading ? <div><h2>月度利润明细</h2><p>点分组查看 SKU 明细。金额单位为人民币（CNY）。</p></div> : null}
       <div className="profit-table-tools">
         <span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span>
         {groups.length > 1 && <Button variant="ghost" aria-controls={tableId} onClick={() => { setExpandAll(!expandAll); setExceptions([]); }}>

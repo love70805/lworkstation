@@ -2,9 +2,9 @@
 
 面向组内运营的本机 Windows 桌面工作台。导入月度台账后，获取 ERP 成本、核对利润与异常，然后导出报告。商品资料可以按需补齐。
 
-**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [2.0 使用指南](docs/USER_GUIDE_2.0.md) · [开发历史](docs/DEVELOPMENT_HISTORY.md) · [全部版本](https://github.com/love70805/lworkstation/releases)
+**[下载最新稳定版](https://github.com/love70805/lworkstation/releases/latest)** · [2.0.6 详细使用说明（图文 PDF）](https://github.com/love70805/lworkstation/releases/download/v2.0.6/Lworkstation-2.0.6-User-Guide.pdf) · [2.0.6 简易利润核算指南（图文 PDF）](https://github.com/love70805/lworkstation/releases/download/v2.0.6/Lworkstation-2.0.6-Profit-Quickstart.pdf) · [开发历史](docs/DEVELOPMENT_HISTORY.md)
 
-桌面版支持稳定通道内更新。从 Beta 或 RC 转入稳定版时，按对应版本说明安装。当前版本、发布通道及更新内容以[发布状态](docs/RELEASE_STATUS.md)和[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)为准。
+稳定版支持应用内更新。仍在使用旧 Beta 或 RC 的组员，可先备份工作区，再从[稳定版发布页](https://github.com/love70805/lworkstation/releases/latest)下载 Windows 安装包，手动转入稳定通道。[网页版操作指南](docs/USER_GUIDE_2.0.md) · [发布状态](docs/RELEASE_STATUS.md)
 
 ## 主要功能
 

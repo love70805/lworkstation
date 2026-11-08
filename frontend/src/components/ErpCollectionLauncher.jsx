@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from './UI';
 import { erpCollectionPresentation } from '../domain/erpCollectionStatus';
 
-export default function ErpCollectionLauncher({ workspaceId, ledgerId, requestId, ready, task, onStarted, onRegistrationRetry, mode = 'cost', onStart }) {
+export default function ErpCollectionLauncher({ workspaceId, ledgerId, requestId, ready, task, onStarted, onRegistrationRetry, mode = 'cost', onStart, compact = false }) {
   const runtime = globalThis.window?.shopeersDesktopRuntime;
   const [state,setState] = useState(null), [busy,setBusy] = useState(false), [error,setError] = useState('');
   useEffect(() => {
@@ -37,6 +37,7 @@ export default function ErpCollectionLauncher({ workspaceId, ledgerId, requestId
       setState(result);onStarted?.();
     }catch(error){setError(error.message);}finally{setBusy(false);}
   }
+  if (compact && completed && !catalog && !error && !connecting && !retryConnection && !waitingLogin) return <p className="erp-completed-inline" role="status">ERP 成本已采集</p>;
   return <div className="erp-workspace-launcher">
     <Button variant="primary" loading={busy} disabled={busy||!ready||running||(!catalog && Boolean(completed))} onClick={start}>{waitingLogin?'核验登录并继续':retryConnection?'重新连接 ERP':connecting||taskView.state==='queued'?'正在连接 ERP':catalog ? running?'正在获取商品档案':catalogCompleted?'重新获取商品档案':task?.runMode==='catalog'?'继续获取商品档案':'一键获取商品档案':completed?'成本已采集':running?'正在采集成本':task?'继续成本核算':'开始成本核算'}</Button>
     {connecting&&!terminalTask?<span role="status">任务已发出，正在等待 ERP 确认接收。</span>:null}

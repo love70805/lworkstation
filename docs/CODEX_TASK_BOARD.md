@@ -1,6 +1,18 @@
 # Codex 当前任务看板
 
-2026-11-06 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
+2026-11-07 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
+
+## 2.0.7-beta.2 · 可并行安装的桌面 Beta
+
+本批在主线 `86826cd` 上开发，交付前已合入 `b4e6bcd` 的主线文档更新。经营概览和利润页使用 BoardUI Select 切换月份和店铺，待核对 SKU 直达对应明细。台账导入可多选或拖入文件，商品库按页签切换，搜索支持 Esc 清空。利润页显示成本核对进度与可跳转页码。按钮、状态标签、经营指标和趋势切换共用按本机中英文数字排版适配的 BoardUI 组件。[组件目录](https://www.boardui.com/zh-hans/components)
+
+Windows 并行版使用独立名称、图标、安装标识、工作区和更新通道。第一次使用时，可在稳定版的「系统与备份 → 数据备份」导出完整 JSON，然后在 Beta 同一页面选择「导入备份」并确认恢复。Beta.1 曾作为本机同身份候选交付，公开交付采用 Beta.2 并行安装包。版本与文件见[并行 Beta 发布页](https://github.com/love70805/lworkstation/releases/tag/beta-sidecar-v2.0.7-beta.2)。
+
+## 2.0.7-beta.3 界面优化
+
+2026-11-08：用户指定以 v2.0.6（385f9f5）为业务基线，实施五项界面优化及菜单键盘修复，允许按需引入 BoardUI 和 react-aria-components。保留 Beta 独立安装、数据目录与 beta-sidecar 更新通道。新报告增加可选来源状态指纹；历史报告不改写，真实工作区数据未操作。
+
+已实现范围：月份/店铺指标、导入选择和校验状态、商品草稿说明、利润页密度、最近报告与来源变化提示、菜单方向键和焦点恢复。合成浏览器流程已完成导入、成本更正、导出与来源变化验证；完整门禁与候选发布结果见[本批记录](integration/UI_BETA3_2026_11_08.md)。下表业务差异仍属后续任务。
 
 ## 软件实现与项目约束的差异
 
@@ -36,6 +48,8 @@
 项目约束及两种核算的共用输入口径已合入主线。对应的软件差异列在本页首表。[项目约束重构 PR](https://github.com/love70805/lworkstation/pull/329) · [核算口径 PR](https://github.com/love70805/lworkstation/pull/330)
 
 ## 对话与远端仓库整理
+
+2026-11-07 本批以 `v2.0.6` 为新的稳定基线。归档并校验其余 121 个公开 Release 的 485 个附件后整理了发布页，保留 Git 标签。[稳定版安装包与两份图文指南](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) · [发布沿革](DEVELOPMENT_HISTORY.md#当前交付与-github)
 
 本次保留了主线和跟进核算、建档规则的对话。已交付的讨论按版本整理，关联在用工作树的对话单独归类。聊天记录和私有核对材料保存在本机。
 

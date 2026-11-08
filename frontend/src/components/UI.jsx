@@ -2,6 +2,9 @@ import { createContext, forwardRef, useCallback, useContext, useEffect, useId, u
 import { AlertCircle, Check, Info, LoaderCircle, Search, X } from "lucide-react";
 import { createToastKey, createToastState, dismissToast, enqueueToast } from "../lib/uiState";
 
+import { BoardButton } from './BoardButton';
+import { BoardChip } from './BoardChip';
+
 const ToastContext = createContext(null);
 const openDialogs = [];
 let previousBodyOverflow = "";
@@ -88,10 +91,10 @@ export const IconButton = forwardRef(function IconButton({ label, icon: Icon, cl
 
 export function Badge({ children, tone = "neutral", dot = false, className = "" }) {
   return (
-    <span className={`badge badge-${tone} ${className}`}>
+    <BoardChip tone={tone} className={className}>
       {dot ? <span className="badge-dot" /> : null}
       {children}
-    </span>
+    </BoardChip>
   );
 }
 

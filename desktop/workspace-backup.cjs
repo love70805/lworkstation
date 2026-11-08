@@ -15,7 +15,7 @@ function validateBackupRequest(input) {
   return { fileName: input.fileName, json: input.json, sizeBytes };
 }
 
-function createBackupSaver({ showSaveDialog, operations = fs, isTrusted = () => true }) {
+function createBackupSaver({ showSaveDialog, operations = fs, isTrusted = () => true, defaultDirectory, productName = 'Lworkstation' }) {
   let saving = false;
   return async function saveBackup(input) {
     if (saving) return { status: 'failed', error: '已有备份正在保存，请完成后再试。' };
@@ -25,8 +25,10 @@ function createBackupSaver({ showSaveDialog, operations = fs, isTrusted = () => 
     let handle;
     try {
       const backup = validateBackupRequest(input);
+      if (defaultDirectory) await operations.mkdir(defaultDirectory, { recursive: true });
       const selected = await showSaveDialog({
-        title: '保存 Lworkstation 备份', defaultPath: backup.fileName,
+        title: '保存 ' + productName + ' 备份',
+        defaultPath: defaultDirectory ? path.join(defaultDirectory, backup.fileName) : backup.fileName,
         filters: [{ name: 'JSON 备份', extensions: ['json'] }],
         properties: ['showOverwriteConfirmation', 'createDirectory'],
       });

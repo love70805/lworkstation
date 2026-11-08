@@ -1116,17 +1116,19 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     const row = allReviewRows.find(row => row.store === item.store && item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku));
     if (row) setManualTarget({ id: row.id, mode: 'details', inboxId: item.inboxId });
   }} />;
-  if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
-    <p className="profit-collection-scope">当前筛选范围 · {describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
-    <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
+  if (compact) return <section className={`profit-cost-tools${missingStoreSkus || hasPendingAnomalies ? "" : " is-complete"}`} aria-label="成本采集与异常处理">
+    <div className="profit-cost-compact-heading"><p className="profit-collection-scope">当前筛选范围 · {describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
+    <ErpCollectionLauncher compact={compact} workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
       ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
-    <CostAttention missing={missingStoreSkus} hasAnomalies={hasPendingAnomalies}
-      collected={Boolean(workspaceInboxRecords.length)}>{anomalyActions}</CostAttention>
     {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
       <summary>{activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? erpCollectionPresentation(collectionTask).title : '成本采集记录'}</summary>
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}
         locked={locked} error={collectionError || collection.error} statusError={collection.error} />
     </details> : null}
+    </div>
+    <CostAttention missing={missingStoreSkus} hasAnomalies={hasPendingAnomalies}
+      collected={Boolean(workspaceInboxRecords.length)}>{anomalyActions}</CostAttention>
+
     {registrationState.status === 'failed' ? <p role="alert">{registrationState.message}<Button onClick={() => setRegistrationRetry(value => value + 1)}>重试连接</Button></p> : null}
     {scopeHasIdentityConflict ? <p role="alert">部分 SKU 的台账归属有冲突，请先检查导入映射。</p> : null}
     {reviewTarget && !targetRow ? <p role="status">正在读取此商品的成本证据…</p> : null}

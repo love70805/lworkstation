@@ -16,11 +16,14 @@ try {
       constructor() { super(); if (unavailable) throw new Error('unavailable'); tray = this; }
       setToolTip(value) { this.tooltip = value; } setContextMenu(value) { this.menu = value; } isDestroyed() { return this.dead; } destroy() { this.dead = true; } displayBalloon() {}
     }
-    const lifecycle = createDesktopLifecycle({ app, window, Tray, Menu: { buildFromTemplate: value => value }, userDataPath: path.join(root, String(unavailable)), canRestore: () => allowRestore });
+    const lifecycle = createDesktopLifecycle({ app, window, Tray, productName: 'Lworkstation Beta', Menu: { buildFromTemplate: value => value }, userDataPath: path.join(root, String(unavailable)), canRestore: () => allowRestore });
     let prevented = false;
     window.emit('close', { preventDefault: () => { prevented = true; } });
     assert.equal(prevented, !unavailable); assert.equal(visible, unavailable);
     if (tray) {
+      assert.match(tray.tooltip, /^Lworkstation Beta/);
+      assert.equal(tray.menu[0].label, '打开 Lworkstation Beta');
+      assert.equal(tray.menu.at(-1).label, '退出 Lworkstation Beta');
       tray.emit('click'); assert(visible);
       visible = false; allowRestore = false;
       tray.emit('click'); lifecycle.restore(); tray.menu[0].click(); assert.equal(visible, false, 'isolated hidden QA cannot restore through tray');

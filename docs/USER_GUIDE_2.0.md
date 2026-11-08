@@ -1,6 +1,6 @@
 # Lworkstation 2.0 使用指南（更新至 2.0.6）
 
-适用于 Windows 本机桌面版。配图 PDF 随 2.0.0 安装包提供，截图为实际客户端与示例数据。
+适用于 Windows 本机桌面版。首次使用可打开[2.0.6 详细使用说明（图文 PDF）](https://github.com/love70805/lworkstation/releases/download/v2.0.6/Lworkstation-2.0.6-User-Guide.pdf)。只想完成当月核算，可直接跟着[简易利润核算指南（图文 PDF）](https://github.com/love70805/lworkstation/releases/download/v2.0.6/Lworkstation-2.0.6-Profit-Quickstart.pdf)操作。
 
 ## 日常操作
 

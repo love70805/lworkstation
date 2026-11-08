@@ -12,8 +12,10 @@ const pkg = JSON.parse(fs.readFileSync(path.join(desktopRoot, "package.json"), "
 const plan = JSON.parse(fs.readFileSync(path.join(desktopRoot, "release-plan.json"), "utf8"));
 const prerelease = plan.version.includes("-");
 const localRc = releaseAfterPack.isRcVersion(plan.version);
-const metadataFile = localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
-const artifactPattern = prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
+const beta = JSON.parse(fs.readFileSync(path.join(desktopRoot, "beta-installation.json"), "utf8"));
+const sidecar = plan.edition === "beta";
+const metadataFile = sidecar ? beta.channel + ".yml" : localRc ? "rc.yml" : prerelease ? "beta.yml" : "latest.yml";
+const artifactPattern = sidecar ? beta.artifactPattern : prerelease ? "Lworkstation-Setup-${version}.${ext}" : pkg.build.win.artifactName;
 const artifactName = artifactNameFromPattern(artifactPattern, plan.version, "exe");
 const buildRoot = (prerelease || plan.candidateOnly) ? path.join(desktopRoot, "release-test", plan.version) : path.join(desktopRoot, "release");
 const releaseRoot = (localRc || plan.candidateOnly) ? path.join(releasesRoot, "candidates", plan.version) : prerelease ? path.join(releasesRoot, "prerelease", plan.version) : path.join(releasesRoot, "latest");

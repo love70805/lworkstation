@@ -40,7 +40,7 @@ it('keeps old months editable without a reopen dialog',async()=>{
 it('opens and closes SKU rows under a single group with fixed accounting columns', async () => {
   const headers = () => [...container.querySelectorAll('.profit-table thead th')].map(th => th.textContent);
   const initialHeaders = headers();
-  expect(initialHeaders).toEqual(['平台 SKU', '数量', '销售金额', '单件平均成本', '总采购成本', '仓储成本', '总利润', '成本状态']);
+  expect(initialHeaders).toEqual(['平台 SKU', '数量', '销售金额', '采用单件成本', '总采购成本', '仓储成本', '总利润', '成本状态']);
   expect(container.querySelector('.profit-variant-row')).toBeNull();
   expect(container.querySelector('.profit-table-heading button')).toBeNull();
   const group = container.querySelector('.profit-group-toggle');
