@@ -1,5 +1,4 @@
-import { useEffect, useId, useState } from 'react';
-import { ChevronDown, Download } from 'lucide-react';
+import { useState } from 'react';
 import { Panel } from './UI';
 import { useErpCollectionTasks } from '../hooks/useErpCollectionTasks';
 import { controlErpCollectionTask } from '../lib/erpInboxTransport';
@@ -15,8 +14,6 @@ export default function ProductCollectionTools({ workspaceId }) {
     .toSorted((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const task = tasks.find(item => item.taskId === selected) ?? tasks.find(item => erpCollectionPresentation(item).running) ?? tasks[0];
   const view = erpCollectionPresentation(task);
-  const id = useId();
-  const [expanded, setExpanded] = useState(false);
   const runtime = window.shopeersDesktopRuntime;
   async function control(action, refresh = false) {
     if (!task || busy) return;
@@ -36,15 +33,10 @@ export default function ProductCollectionTools({ workspaceId }) {
       return result;
     } catch (failure) { if (!['catalog', 'resume', 'retry_failed'].includes(action)) setError(failure.message); return { ok: false, error: failure.message }; } finally { setBusy(false); }
   }
-  const attention = Boolean(view.running || view.state === 'queued' || error || collection.error);
-  useEffect(() => { if (attention) setExpanded(true); }, [attention]);
-  return <>
-    <button type="button" className="catalog-erp-toggle" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded(previous => !previous)}>
-      <Download size={15} aria-hidden="true" />获取商品档案{attention ? <small>{error || collection.error ? '需检查' : view.title}</small> : null}<ChevronDown size={13} aria-hidden="true" />
-    </button>
-    <Panel id={id} hidden={!expanded} className="product-collection-tools">
+  return <Panel className="product-collection-tools">
     <div className="product-archive-entry">
-      <div><p>从 ERP 补齐名称、图片、属性和 1688 链接。已有人工资料优先。</p>
+      <div><h2>获取商品档案</h2><p>点击后后台获取 ERP 表格档案，自动匹配并补齐名称、图片、属性和 1688 链接。</p>
+        <p>可继续使用工作台；已有人工资料优先，采购单价不进入月度正式成本。</p>
       </div>
       <div className="product-archive-action"><ErpCollectionLauncher workspaceId={workspaceId} ledgerId={task?.ledgerId} requestId={task?.requestId}
         mode="catalog" task={task} ready={Boolean(task) && !busy && !collection.error}
@@ -56,5 +48,5 @@ export default function ProductCollectionTools({ workspaceId }) {
     </> : <p role="status">{collection.loading ? '正在读取可复用的商品范围…' : '暂无可复用的 SKU 对应关系。完成成本采集后即可一键获取。'}</p>}
     {!runtime?.startErpCollection ? <p role="status">后台获取在 Windows 桌面版中使用。</p> : null}
     {(error || collection.error) && task?.runMode !== 'catalog' ? <p role="alert">{error || collection.error}</p> : null}
-  </Panel></>;
+  </Panel>;
 }

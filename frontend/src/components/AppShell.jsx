@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   Archive,
   Bell,
-  CalendarDays,
   Check,
   ChevronRight,
   Download,
@@ -48,8 +47,7 @@ const SIDEBAR_COLLAPSED_KEY = "shopeers-sidebar-collapsed";
 const SIDEBAR_COMPACT_QUERY = "(max-width: 1200px)";
 
 const baseNavigation = [
-  { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace"] },
-  { id: "ledger", label: "月度账本", path: "/ledger", icon: CalendarDays, match: ["/ledger", "/import-preview"] },
+  { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
   { id: "products", label: "商品资料", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
   { id: "diagnostics", label: "系统检查", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
@@ -89,6 +87,8 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigate = useNavigate();
   const { notify } = useToast();
   const menuRef = useRef(null);
+  const menuTrigger = useRef(null);
+  const menuInitialFocus = useRef("first");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
   const [compactSidebar, setCompactSidebar] = useState(readCompactSidebar);
@@ -131,7 +131,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const effectiveSidebarCollapsed = compactSidebar ? !compactSidebarExpanded : sidebarCollapsed;
 
   const backTarget = useMemo(() => {
-    if (baseNavigation.some((item) => item.id !== "ledger" && item.path === pathname) || pathname === '/data-security') return null;
+    if (baseNavigation.some((item) => item.path === pathname) || pathname === '/data-security') return null;
     if (pathname.startsWith("/products") || pathname.startsWith("/capture")) return "/products";
     if (pathname.startsWith("/import-preview") || pathname.startsWith('/ledger')) return `/workspace${navigationSearch}`;
     if (pathname.startsWith("/erp-assistant")) return profitWorkspaceHref(navigationSearch, 'cost');
@@ -148,7 +148,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigation = useMemo(() => baseNavigation.map((item) => (
     item.id === "products"
       ? { ...item, count: workspaceSummary?.pendingCaptureCount ?? 0 }
-      : ["workspace", "ledger", "profit"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
+      : ["workspace", "profit"].includes(item.id) ? { ...item, path: `${item.path}${navigationSearch}` } : item
   )), [workspaceSummary?.pendingCaptureCount, navigationSearch]);
 
   const notifications = useMemo(() => {
@@ -232,6 +232,7 @@ export default function AppShell({ children, pageClass = "" }) {
       if (event.type === "keydown" && event.key !== "Escape") return;
       if (event.type === "mousedown" && menuRef.current?.contains(event.target)) return;
       setOpenMenu("");
+      if (event.type === "keydown" && menuRef.current?.querySelector('[role="menu"]')) { event.preventDefault(); menuTrigger.current?.focus(); }
     };
     document.addEventListener("mousedown", closeMenu);
     document.addEventListener("keydown", closeMenu);
@@ -241,7 +242,26 @@ export default function AppShell({ children, pageClass = "" }) {
     };
   }, []);
 
-  const toggleMenu = (menu) => setOpenMenu((current) => current === menu ? "" : menu);
+  useEffect(() => {
+    if (!openMenu) return;
+    const items = [...(menuRef.current?.querySelectorAll('[role="menu"] button') ?? [])];
+    items.forEach(item => { item.setAttribute('role', 'menuitem'); item.tabIndex = -1; });
+    const enabled = items.filter(item => !item.disabled);
+    (menuInitialFocus.current === 'last' ? enabled.at(-1) : enabled[0])?.focus();
+    menuInitialFocus.current = 'first';
+  }, [openMenu]);
+  const toggleMenu = (menu, trigger = document.activeElement) => { menuTrigger.current = trigger; setOpenMenu(current => current === menu ? "" : menu); };
+  const menuKeys = event => {
+    const popup = menuRef.current?.querySelector('[role="menu"]');
+    if (event.key === 'Tab') { setOpenMenu(''); return; }
+    if (!['ArrowDown','ArrowUp','Home','End'].includes(event.key)) return;
+    if (!popup) { const trigger = event.target.closest('[aria-haspopup="menu"]'); if (trigger) { event.preventDefault(); menuInitialFocus.current = event.key === "ArrowUp" ? "last" : "first"; trigger.click(); } return; }
+    event.preventDefault();
+    const items = [...popup.querySelectorAll('button:not(:disabled)')];
+    if (!items.length) return;
+    const index = items.indexOf(document.activeElement);
+    items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length].focus();
+  };
 
   const toggleSidebar = () => {
     if (compactSidebar) {
@@ -356,7 +376,8 @@ export default function AppShell({ children, pageClass = "" }) {
             title={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
           >
             <span className="brand-assets" aria-hidden="true">
-              <img className="brand-logo" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
+              <img className="brand-logo brand-logo-light" src="/assets/brand/lworkstation-wordmark-light.svg" alt="" aria-hidden="true" draggable="false" />
+              <img className="brand-logo brand-logo-dark" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
               <img className="brand-mark" src="/assets/brand/l7-app-icon-master.svg" alt="" aria-hidden="true" draggable="false" />
             </span>
             <span className="brand-toggle-hint" aria-hidden="true">
@@ -388,9 +409,9 @@ export default function AppShell({ children, pageClass = "" }) {
         <div className="topbar-leading">
           <IconButton icon={Menu} label="打开导航" className="mobile-menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)} />
           {backTarget ? <IconButton icon={ArrowLeft} label="返回上一级" className="global-back" onClick={goBack} /> : null}
-          {desktopRuntime?.edition === "beta" && <span className="edition-indicator" title={APP_VERSION_LABEL}>Beta 独立工作区</span>}
         </div>
-        <div className="topbar-actions" ref={menuRef}>
+        {desktopRuntime?.edition === "beta" && <span className="edition-indicator" title={APP_VERSION_LABEL}>Beta 独立工作区</span>}
+        <div className="topbar-actions" ref={menuRef} onKeyDown={menuKeys}>
           <div className="topbar-control environment-control">
             <button className="environment-chip" aria-haspopup="menu" aria-expanded={openMenu === "environment"} onClick={() => toggleMenu("environment")}><i /> {cloudEnvironment}</button>
             {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统检查<ChevronRight size={16} /></button></div> : null}
@@ -406,7 +427,7 @@ export default function AppShell({ children, pageClass = "" }) {
             />
           </div>
           <div className="topbar-control notification-control">
-            <IconButton icon={Bell} label={`通知${unreadCount ? `，${unreadCount} 条未读` : ""}`} className={`${unreadCount ? "has-notification" : ""} ${openMenu === "notifications" ? "active" : ""}`} aria-expanded={openMenu === "notifications"} onClick={() => toggleMenu("notifications")} />
+            <IconButton icon={Bell} label={`通知${unreadCount ? `，${unreadCount} 条未读` : ""}`} className={`${unreadCount ? "has-notification" : ""} ${openMenu === "notifications" ? "active" : ""}`} aria-haspopup="menu" aria-expanded={openMenu === "notifications"} onClick={() => toggleMenu("notifications")} />
             {openMenu === "notifications" ? <div className="topbar-popover notifications-popover" role="menu"><div className="popover-title">通知 <small>{unreadCount} 条未读</small></div>{notifications.length > 0 ? notifications.map((notification) => <button key={notification.id} onClick={() => openNotification(notification)}><span className={`notification-dot ${notification.tone}`} /><span><strong>{notification.title}</strong><small>{notification.detail}</small></span></button>) : <div className="popover-empty"><Check size={17} /><span>当前没有待处理通知</span></div>}{notifications.length > 0 ? <button className="popover-link" disabled={unreadCount === 0} onClick={() => { persistReadNotifications([...new Set([...readNotificationIds, ...notifications.map((item) => item.id)])]); setOpenMenu(""); }}>全部标记已读<Check size={16} /></button> : null}</div> : null}
           </div>
           <div className="topbar-control account-control">

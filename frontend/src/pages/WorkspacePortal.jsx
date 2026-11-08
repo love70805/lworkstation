@@ -18,7 +18,6 @@ import {
   Warehouse,
 } from "lucide-react";
 import AppShell from "../components/AppShell";
-import BoardStatCard from "../components/BoardStatCard";
 import { Button, Panel, PageHeader, useToast } from "../components/UI";
 import { db, getActiveMemberContext, getWorkspaceOperationalSummary } from "../data/database";
 import { describeAuditEvent } from "../domain/auditEvents";
@@ -27,7 +26,7 @@ import WorkspaceCostObservation from '../components/WorkspaceCostObservation';
 import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
 import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
 import SalesAnalytics from './SalesAnalytics';
-import { withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
+import { readWorkspaceScopeSummary, withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
 import { currentLedgerResult, ledgerNextStep } from "../domain/ledgerWorkflow";
 import { profitWorkspaceHref } from "../lib/workspaceNavigation";
 
@@ -36,6 +35,15 @@ const money = (value) => Number(value ?? 0).toLocaleString("zh-CN", {
   currency: "CNY",
   minimumFractionDigits: 2,
 });
+
+const ledgerStatusLabels = {
+  draft: "草稿",
+  cost_pending: "待核对成本",
+  approval_pending: "待确认成本",
+  ready: "待确认利润",
+  finalized: "可继续调整",
+  locked: "可继续调整",
+};
 
 const activityToneLabels = {
   success: "已完成",
@@ -91,6 +99,14 @@ export default function WorkspacePortal() {
       return { source: portalData, ledgers };
     } catch (error) { return { source: portalData, error: error.message }; }
   }, [portalData], null);
+  const selectedScope = ledgerScope.context;
+  const scopeKey = ledgerScope.ready && selectedScope?.selected ? JSON.stringify([selectedScope.workspaceId, selectedScope.selected.id, selectedScope.store]) : '';
+  const scopeSummary = useLiveQuery(async () => {
+    if (!scopeKey) return null;
+    try { return { key: scopeKey, data: await readWorkspaceScopeSummary(selectedScope.workspaceId, selectedScope.selected.id, selectedScope.store) }; }
+    catch (error) { return { key: scopeKey, error: error.message }; }
+  }, [scopeKey, refresh], null);
+  const scoped = scopeSummary?.key === scopeKey ? scopeSummary : null;
   const checkingHealth = Boolean(refresh && portalData?.refresh !== refresh);
   useEffect(() => {
     if (refresh && portalData?.refresh === refresh) setHealthChecked(!portalData.error);
@@ -104,7 +120,6 @@ export default function WorkspacePortal() {
   const latestLedger = summary?.latestLedger ?? null;
   const latestFinalizedLedger = summary?.latestReadyLedger ?? summary?.latestFinalizedLedger ?? null;
   const latestSales = latestLedger?.summary ?? {};
-  const latestProfit = latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger));
   const recentActivities = (portalData?.auditEvents ?? []).map((event) => ({
     ...describeAuditEvent(event),
     id: event.id,
@@ -113,12 +128,13 @@ export default function WorkspacePortal() {
 
   const workflowLedger = ledgerScope.context?.selected;
   const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
+  const workflowFrozen = false;
   const workflowQuery = ledgerScope.context?.query ?? '';
-  const workflowStep = !workflowLedger ? 0 : nextStep.key === 'cost' ? 1 : 2;
+  const workflowStep = !workflowLedger ? 0 : workflowFrozen ? 3 : nextStep.key === 'cost' ? 1 : 2;
   const workflowSteps = [
-    { title: "导入销售台账", path: "/import-preview?" + workflowQuery },
-    { title: "核对成本", path: workflowLedger ? profitWorkspaceHref(workflowQuery, "cost") : "/import-preview" },
-    { title: "导出本月报告", path: workflowLedger ? profitWorkspaceHref(workflowQuery, "detail") : "/import-preview" },
+    { title: workflowFrozen ? "查看销售台账" : "导入销售台账", detail: workflowLedger ? "沿用当前账本月份" : "先建立月度账本", path: workflowFrozen ? `/ledger?${workflowQuery}` : `/import-preview?${workflowQuery}` },
+    { title: workflowFrozen ? "查看成本" : "核对成本", detail: "ERP 默认，人工更正优先", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'cost') : "/import-preview" },
+    { title: workflowFrozen ? "查看本月报告" : "导出本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "代发可选填，直接导出", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
   ];
   const taskItems = useMemo(() => buildWorkspaceTaskItems(summary), [summary]);
   const workflowAction = workflowSteps[Math.min(workflowStep, workflowSteps.length - 1)];
@@ -133,6 +149,7 @@ export default function WorkspacePortal() {
     <AppShell pageClass="workspace-page">
       <PageHeader
         title="经营概览"
+        description="查看经营数据，按当前月份完成台账、成本核对与利润报告。"
         actions={<Button icon={healthChecked ? Check : RefreshCw} loading={checkingHealth} disabled={checkingHealth} onClick={runHealthCheck}>{healthChecked ? "总览已刷新" : "刷新总览"}</Button>}
       />
 
@@ -140,31 +157,32 @@ export default function WorkspacePortal() {
       {portalData?.error ? <div className="workspace-load-state" role="alert">总览读取失败：{portalData.error}<Button onClick={runHealthCheck}>重试</Button></div> : null}
       {profitData?.source === portalData && profitData?.error ? <div className="workspace-load-state" role="alert">利润摘要读取失败：{profitData.error}<Button onClick={runHealthCheck}>重试利润摘要</Button></div> : null}
 
-      <div className="ledger-desk">
-      <WorkspaceLedgerControls scope={ledgerScope} refresh={refresh} onError={message => notify(`切换账本失败：${message}`, 'error')}>
+      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
+      {workflowLedger ? <div className="workspace-scope-result" aria-label="当前范围经营指标">
+        <p>{workflowLedger.period} · {selectedScope.store === 'all' ? '全部店铺' : selectedScope.store}</p>
+        {scoped?.error ? <p role="alert">当前范围指标读取失败：{scoped.error}<Button onClick={runHealthCheck}>重试</Button></p> : <div className="workspace-scope-metrics" aria-busy={!scoped?.data}>
+          <div><span>销售额</span><strong>{scoped?.data ? money(scoped.data.revenue) : '正在读取…'}</strong></div>
+          <div><span>销量</span><strong>{scoped?.data ? scoped.data.quantity.toLocaleString('zh-CN') + ' 件' : '—'}</strong></div>
+          <div><span>商品利润</span><strong>{!scoped?.data ? '正在读取…' : scoped.data.missing ? '待补成本' : money(scoped.data.profit)}</strong><small>{scoped?.data?.missing ? scoped.data.missing + ' 条店铺 SKU 缺成本；' : ''}未含整月代发与独立扣款</small></div>
+        </div>}
+      </div> : null}
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
-          <div><h2 id="workspace-flow-title">{workflowLedger ? "本月核算进度" : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
-          <Button variant="primary" disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{`下一步：${workflowAction.title}`}</Button>
+          <div><h2 id="workspace-flow-title">{workflowLedger ? `${workflowLedger.period} 核算流程` : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
+          <Button variant="primary" disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{workflowFrozen ? workflowAction.title : `下一步：${workflowAction.title}`}</Button>
         </div>
         <div className="workspace-flow-steps">
           {workflowSteps.map((step, index) => (
             <button disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} className={`workspace-flow-step ${index === workflowStep ? "active" : ""} ${index < workflowStep ? "done" : ""}`} key={step.title} onClick={() => navigate(step.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })} aria-current={index === workflowStep ? "step" : undefined}>
               <span className="workspace-flow-index">{index < workflowStep ? <Check size={14} /> : index + 1}</span>
-              <span><strong>{step.title}</strong></span>
+              <span><strong>{step.title}</strong><small>{step.detail}</small></span>
               {index < workflowSteps.length - 1 ? <ChevronRight className="workspace-flow-arrow" size={16} /> : null}
             </button>
           ))}
         </div>
       </section>
       </WorkspaceLedgerControls>
-      {summary ? <div className="dashboard-metric-grid">
-        <BoardStatCard icon={ShoppingCart} label={latestLedger ? `${latestLedger.period} 销售额` : "最近月度销售额"} value={money(latestSales.revenue ?? 0)} caption={`总销量 ${Number(latestSales.quantity ?? 0).toLocaleString("zh-CN")} 件`} />
-        <BoardStatCard icon={CircleDollarSign} label="最近月度利润" value={latestProfit?.profit != null ? money(latestProfit.profit) : "--"} caption={latestProfit ? `${latestFinalizedLedger.period} · ${latestProfit.label}` : "尚无已核算账本"} />
-        <BoardStatCard icon={PackageCheck} label="正式商品" value={summary.productCount ?? 0} caption={`${summary.platformSkuCount ?? 0} 个平台 SKU`} />
-        <BoardStatCard icon={Hourglass} label="待核算账本" value={summary.openLedgerCount ?? 0} />
-      </div> : null}
-      </div>
+      {summary ? <div className="workspace-global-summary" aria-label="工作区总览"><span>整个工作区</span><button onClick={() => navigate("/products?view=reference")}>已登记商品 <strong>{summary.productCount ?? 0}</strong> · {summary.platformSkuCount ?? 0} 个平台 SKU（含草稿）</button><button onClick={() => navigate("/ledger")}>待核算账本 <strong>{summary.openLedgerCount ?? 0}</strong></button><span>草稿已保存，可先核算，资料按需补齐</span></div> : null}
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="每日销售趋势">
@@ -207,7 +225,15 @@ export default function WorkspacePortal() {
 
           <WorkspaceCostObservation refresh={refresh} navigate={navigate} />
 
-          <button className="workspace-reference-action" onClick={() => navigate("/products?view=reference")}><BarChart3 size={17} />查看选品参考<ArrowUpRight size={15} /></button>
+          <Panel className="quick-panel dashboard-widget">
+            <div className="panel-header">
+              <div className="panel-title"><BarChart3 size={19} /><h2>快捷操作</h2></div>
+            </div>
+            <div className="quick-actions">
+              <button onClick={() => navigate("/products?view=reference")}><BarChart3 size={21} /><span><strong>查看选品参考</strong><small>{summary?.platformSkuCount ?? 0} 个平台 SKU 可分析</small></span><ArrowUpRight size={17} /></button>
+              <button onClick={() => navigate("/ledger")}><CalendarDays size={21} /><span><strong>管理月度账本</strong><small>{summary?.openLedgerCount ?? 0} 个月份 · {summary?.readyLedgerCount ?? 0} 个成本已齐</small></span><ArrowUpRight size={17} /></button>
+            </div>
+          </Panel>
         </aside>
       </div>
     </AppShell>

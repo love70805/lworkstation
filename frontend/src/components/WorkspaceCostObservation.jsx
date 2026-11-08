@@ -24,7 +24,7 @@ function ObservationRows({ refresh, navigate }) {
 export default function WorkspaceCostObservation({ refresh, navigate }) {
   const [open, setOpen] = useState(false);
   return <details className="dashboard-widget reference-widget workspace-disclosure" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary><span><PackageSearch size={17} />商品成本观察</span></summary>
+    <summary><span><PackageSearch size={17} />商品成本观察</span><span className="widget-count">展开查看</span></summary>
     {open ? <ObservationRows refresh={refresh} navigate={navigate} /> : null}
   </details>;
 }

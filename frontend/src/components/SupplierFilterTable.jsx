@@ -43,7 +43,7 @@ export default function SupplierFilterTable({ rows = [], store = 'all', mode, on
   };
   return <section className={`supplier-filter-table${compact ? ' is-compact' : ''}`} aria-label="货号清单">
     <div className="supplier-table-toolbar"><h3>货号清单 <small>{scoped.length.toLocaleString('zh-CN')}</small></h3>
-      <SearchInput value={query} onValueChange={setQuery} label={recognitionMode === 'exact' ? '精准搜索完整货号' : '搜索货号、店铺或平台标识'} placeholder={recognitionMode === 'exact' ? '输入完整货号' : compact ? '搜索货号，如 KPXX' : '搜索货号、店铺、SKC / SKU'} />
+      <SearchInput value={query} onChange={event => setQuery(event.target.value)} label={recognitionMode === 'exact' ? '精准搜索完整货号' : '搜索货号、店铺或平台标识'} placeholder={recognitionMode === 'exact' ? '输入完整货号' : compact ? '搜索货号，如 KPXX' : '搜索货号、店铺、SKC / SKU'} />
       {mode === undefined && <label>识别方式 <select aria-label="货号清单识别方式" value={localMode} onChange={event => { setLocalMode(event.target.value); setMessage(''); }}><option value="fuzzy">模糊识别</option><option value="exact">精准识别</option></select></label>}
       <Button variant="ghost" icon={ListPlus} disabled={disabled} onClick={() => setPasteOpen(true)}>粘贴清单</Button>
       {onExport && <Button variant="ghost" icon={Download} disabled={disabled || !rows.some(row => row.selected)} onClick={onExport}>导出本批已选</Button>}

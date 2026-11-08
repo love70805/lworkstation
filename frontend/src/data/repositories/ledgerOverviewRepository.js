@@ -2,7 +2,6 @@ import { readAccountingSupplement } from './inventoryAccountingRepository';
 import { getLedgerSnapshot } from './profitRepository';
 import { readCachedReportProducts } from './derivedComputationService';
 import { Exact } from '../../domain/profitReports';
-import { countProfitIdentities } from '../../lib/profit';
 import { db } from '../db/clientDatabase';
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 
@@ -12,16 +11,6 @@ export async function readLedgerReportHeaders(ledger, revision = sourceRevision(
     compute: async () => (await db.profitReports.where('ledgerId').equals(ledger.id).toArray())
       .filter(report => report.workspaceId === ledger.workspaceId)
       .map(({ fileBase64, ...report }) => report),
-  });
-}
-
-export function readPendingSkuCount(workspaceId, ledgerId, store) {
-  return retrySourceRead(async () => {
-    const snapshot = await getLedgerSnapshot(ledgerId, { summaryOnly: true });
-    if (!snapshot || snapshot.ledger.workspaceId !== workspaceId) throw new Error('所选账本已不可用。');
-    const lines = await readCachedReportProducts({ snapshot });
-    const pending = lines.filter(line => line.unitCostExact == null && (store === 'all' || line.store === store));
-    return countProfitIdentities(pending).storeSkuCount;
   });
 }
 
@@ -47,5 +36,21 @@ export async function withCurrentLedgerResults(ledgers) {
     }
     assertSourceRevision(revision);
     return results;
+  });
+}
+
+// This is the same product calculation used by the profit page. Monthly
+// supplements are deliberately not allocated to a filtered store.
+export async function readWorkspaceScopeSummary(workspaceId, ledgerId, store = 'all') {
+  return retrySourceRead(async () => {
+    await observeSourceRevision(); const revision = sourceRevision();
+    const snapshot = await getLedgerSnapshot(ledgerId, { summaryOnly: true });
+    if (snapshot.ledger?.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
+    const lines = await readCachedReportProducts({ snapshot });
+    const selected = lines.filter(line => store === 'all' || line.store === store);
+    const sum = key => selected.reduce((total, line) => total.plus(line[key] ?? 0), new Exact(0));
+    const missing = new Set(selected.filter(line => line.unitCostExact == null).map(line => JSON.stringify([line.store,line.platformSku]))).size;
+    assertSourceRevision(revision);
+    return { revenue: sum('revenueExact').toDecimalPlaces(2, Exact.ROUND_DOWN).toNumber(), quantity: sum('quantityExact').toNumber(), profit: missing ? null : sum('profitExact').toDecimalPlaces(2, Exact.ROUND_DOWN).toNumber(), missing };
   });
 }

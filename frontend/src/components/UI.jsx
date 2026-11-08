@@ -1,9 +1,9 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import { AlertCircle, Check, Info, LoaderCircle, X } from "lucide-react";
-import BoardSearchField from "./BoardSearchField";
+import { AlertCircle, Check, Info, LoaderCircle, Search, X } from "lucide-react";
 import { createToastKey, createToastState, dismissToast, enqueueToast } from "../lib/uiState";
-import { BoardChip } from "./BoardChip";
-import { BoardButton } from "./BoardButton";
+
+import { BoardButton } from './BoardButton';
+import { BoardChip } from './BoardChip';
 
 const ToastContext = createContext(null);
 const openDialogs = [];
@@ -73,13 +73,19 @@ export function useToast() {
 }
 
 export function Button({ children, variant = "secondary", icon: Icon, className = "", loading = false, ...props }) {
-  return <BoardButton variant={variant} leadingIcon={loading ? LoaderCircle : Icon}
-    loading={loading} className={className} {...props}>{children}</BoardButton>;
+  return (
+    <button className={`button button-${variant} ${className}`} aria-busy={loading || undefined} {...props}>
+      {loading ? <LoaderCircle className="spin" size={17} /> : Icon ? <Icon size={17} /> : null}
+      <span>{children}</span>
+    </button>
+  );
 }
 
 export const IconButton = forwardRef(function IconButton({ label, icon: Icon, className = "", ...props }, ref) {
   return (
-    <BoardButton ref={ref} iconOnly leadingIcon={Icon} variant="ghost" className={`icon-button ${className}`} aria-label={label} title={label} {...props} />
+    <button ref={ref} className={`icon-button ${className}`} aria-label={label} title={label} {...props}>
+      <Icon size={19} />
+    </button>
   );
 });
 
@@ -109,8 +115,14 @@ export function PageHeader({ eyebrow, title, description, actions, className = "
   );
 }
 
-export function SearchInput({ placeholder = "搜索...", ...props }) {
-  return <BoardSearchField placeholder={placeholder} {...props} />;
+export function SearchInput({ value, onChange, placeholder = "搜索...", className = "", shortcut, label = placeholder }) {
+  return (
+    <label className={`search-input ${className}`}>
+      <Search size={18} />
+      <input aria-label={label} value={value} onChange={onChange} placeholder={placeholder} />
+      {shortcut ? <kbd>{shortcut}</kbd> : null}
+    </label>
+  );
 }
 
 export function ProgressBar({ value, tone = "primary", label }) {

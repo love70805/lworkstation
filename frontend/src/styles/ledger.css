@@ -11,7 +11,7 @@
 .ledger-filter-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .ledger-filter-bar .search-input { width: min(360px, 100%); }
 .ledger-filter-count { margin-left: auto; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.ledger-card-grid { display: grid; gap: 8px; }
+.ledger-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .ledger-card { display: flex; flex-direction: column; overflow: clip; }
 .ledger-card.locked { opacity: 0.72; }
 .ledger-card-head { display: grid; grid-template-columns: 48px minmax(0, 1fr) 24px; align-items: start; gap: 12px; min-height: 88px; padding: 18px; border-bottom: 1px solid var(--border); }
@@ -25,20 +25,6 @@
 .ledger-metrics > span strong { color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
 .ledger-card-footer { padding: 12px; border-top: 1px solid var(--border); background: var(--surface-soft); }
 .ledger-card-footer .button { width: 100%; }
-@media (min-width: 980px) {
-  .ledger-card { display: grid; grid-template-columns: minmax(170px, .9fr) minmax(270px, 2fr) minmax(100px, .5fr); align-items: center; }
-  .ledger-card-head { grid-template-columns: 32px minmax(0, 1fr) 26px; min-height: 0; align-items: center; padding: 16px 12px; gap: 8px; border: 0; }
-  .month-tile { width: 32px; height: 36px; background: var(--primary-soft); }
-  .ledger-metrics { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px 12px; }
-  .ledger-metrics > span { flex-direction: column; align-items: start; }
-  .ledger-metrics strong { overflow-wrap: anywhere; }
-  .ledger-metrics > small { grid-column: 1 / -1; color: var(--text-muted); }
-  .ledger-metrics > :last-child { grid-column: 1 / -1; }
-  .ledger-card-footer { display: grid; gap: 4px; padding: 8px; border: 0; background: transparent; }
-}
-@media (min-width: 680px) and (max-width: 979px) {
-  .ledger-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 @media (max-width: 760px) {
   .ledger-filter-bar { align-items: stretch; flex-direction: column; }
   .ledger-filter-bar .search-input { width: 100%; }

@@ -3,9 +3,6 @@
 .profit-report-top .monthly-report-manager { padding:14px 20px; }
 .profit-report-top .report-primary-actions { margin:0 0 8px; display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .profit-report-top .report-primary-actions > p { flex:1; margin:0; }
-.report-status-heading { flex:1 1 220px; }
-.monthly-report-manager .report-status-heading h2 { margin:0 0 3px; }
-.monthly-report-manager .report-status-heading p { margin:0; }
 .profit-report-top summary { cursor:pointer; padding:8px 0; }
 .profit-cost-tools { margin:0 0 16px; padding:14px 18px; background:var(--surface); border:1px solid var(--border); border-radius:10px; min-width:0; }
 .profit-cost-tools .erp-collection-progress { margin-top:12px; box-shadow:none; padding:14px; }
@@ -70,6 +67,7 @@
 .sales-day-table thead { position:sticky; top:0; background:var(--surface-bg); z-index:1; }
 .profit-purpose-help { margin:0 0 10px; font-size:12px; color:var(--text-muted); }
 .profit-purpose-help > summary { cursor:pointer; padding:6px 0; }
+.profit-purpose-help .profit-purpose-strip { margin-bottom:0; }
 .profit-workspace-controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px 16px; min-width:0; }
 .profit-workspace-controls label { display:flex; align-items:center; gap:8px; white-space:nowrap; font-size:13px; color: var(--text-muted); }
 .profit-workspace-controls select { min-height:36px; min-width:140px; max-width:100%; }
@@ -280,6 +278,14 @@
 .profit-next-step-items span.done b { background: var(--success-bg); color: var(--success); }
 .profit-next-step-items span.active { color: var(--primary); font-weight: 700; }
 .profit-next-step-items span.active b { background: var(--primary); color: var(--on-primary); }
+.profit-purpose-strip { display: flex; min-height: 72px; align-items: center; gap: 14px; margin-bottom: 14px; padding: 14px 18px; border-color: var(--border); background: var(--surface-soft); }
+.profit-purpose-step { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.profit-purpose-step > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.profit-purpose-step strong { font-size: 13px; }
+.profit-purpose-step small { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.profit-purpose-index { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border-radius: 50%; background: var(--action-soft); color: var(--primary); font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
+.profit-purpose-arrow { color: var(--text-subtle); font-size: 18px; }
+.profit-purpose-formula { margin-left: auto; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .profit-summary-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 14px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .profit-summary-item { position: relative; display: flex; min-height: 104px; flex-direction: column; justify-content: center; gap: 5px; padding: 16px 18px; border-right: 1px solid var(--border); text-align: left; }
 .profit-summary-item:last-child { border-right: 0; }
@@ -295,16 +301,8 @@
 .profit-summary-total.is-pending > strong { color: var(--warning); font-size: 20px; }
 .profit-summary-strip.profit-summary-products { grid-template-columns:repeat(4,minmax(0,1fr)); }
 .profit-summary-strip.profit-summary-monthly { grid-template-columns:repeat(3,minmax(0,1fr)); }
-.monthly-totals-heading, .profit-page h2.profit-subtotal-label { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; margin:0 0 10px; }
-.monthly-totals-heading h2, .profit-page h2.profit-subtotal-label { font-size:16px; font-weight:600; color:var(--text); }
-.monthly-totals-heading span, .profit-subtotal-label small { font-size:12px; font-weight:400; color:var(--text-muted); }
-.profit-calc-note { margin:8px 0 0; font-size:13px; color:var(--text-muted); }
-.profit-monthly-summary .profit-summary-total { justify-content:center; border-inline-start:3px solid var(--success); }
-.profit-monthly-summary .profit-summary-total.is-pending { border-inline-start-color:var(--warning); }
-.profit-monthly-summary .profit-summary-total strong { font-size:clamp(20px,2.25vw,30px); line-height:1.3; }
-@media (min-width: 1001px) {
-  .profit-page .profit-summary-monthly { grid-template-columns:minmax(0,1.35fr) repeat(2,minmax(0,1fr)); }
-}
+.profit-monthly-summary > p { display:flex; flex-wrap:wrap; gap:8px 16px; margin:0 0 8px; font-size:13px; color:var(--text-muted); }
+.profit-monthly-summary > p > span { color:var(--text-muted); font-size:12px; }
 .profit-monthly-summary .profit-summary-item { min-width:0; }
 .profit-monthly-summary .profit-summary-item > small { overflow-wrap:anywhere; color:var(--text-muted); font-size:12px; }
 .profit-monthly-summary .inline-link { align-self:flex-start; min-height:32px; }
@@ -359,6 +357,9 @@
 .profit-status-actions .inline-link { min-height: 24px; white-space: nowrap; }
 
 @media (max-width: 1180px) {
+  .profit-purpose-strip { align-items: flex-start; flex-wrap: wrap; }
+  .profit-purpose-step { flex: 1 1 220px; }
+  .profit-purpose-formula { width: 100%; margin-left: 0; white-space: normal; }
   .profit-summary-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .profit-summary-item:nth-child(3) { border-right: 0; }
   .profit-summary-item:nth-child(-n + 3) { border-bottom: 1px solid var(--border); }
@@ -373,6 +374,8 @@
 }
 
 @media (max-width: 760px) {
+  .profit-purpose-arrow { display: none; }
+  .profit-purpose-step { flex-basis: 100%; }
   .profit-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profit-summary-item { min-height: 90px; padding: 14px; }
   .profit-summary-item:nth-child(3) { border-right: 1px solid var(--border); }
@@ -556,69 +559,5 @@
 .profit-page details[open] > summary::before, .product-collection-tools details[open] > summary::before { transform: rotate(45deg); }
 .profit-page details > summary:hover, .product-collection-tools details > summary:hover { background: var(--surface-hover); }
 .profit-page details > summary:focus-visible, .product-collection-tools details > summary:focus-visible { outline: 2px solid var(--primary); }
-
-.profit-month-band { display:grid; grid-template-columns:minmax(240px,.85fr) minmax(360px,1.35fr); align-items:stretch; border:1px solid var(--border); border-radius:12px; background:var(--surface); margin:0 0 10px; }
-.profit-month-balance { min-width:0; align-self:stretch; padding:15px 21px; border-radius:11px 0 0 11px; background:#163868; color:#fff; }
-.profit-month-caption { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; font-weight:650; }
-.profit-month-caption small, .profit-month-balance p { color:#d5e4fa; font-size:12px; font-weight:400; }
-.profit-month-value { display:block; margin:6px 0; font-size:clamp(25px,2.4vw,35px); line-height:1.2; font-weight:700; font-variant-numeric:tabular-nums; }
-.profit-month-balance p { margin:0; }
-.profit-month-balance p span { margin:0 8px; }
-.profit-month-band .monthly-report-manager { align-self:center; min-width:0; margin:0; padding:10px 17px; border:0; border-radius:0; box-shadow:none; background:transparent; }
-.profit-month-band .report-primary-actions { min-height:0; margin:0; padding:2px 0 6px; gap:7px; }
-.profit-month-band .report-status-heading { flex:1 1 135px; }
-.profit-month-band .report-status-heading h2 { font-size:15px; }
-.board-meter { display:grid; gap:4px; max-width:240px; margin-top:5px; color:var(--primary); }
-.board-meter-heading { display:flex; align-items:baseline; justify-content:space-between; gap:8px; color:var(--text-muted); font-size:12px; font-variant-numeric:tabular-nums; }
-.board-meter-track { position:relative; height:5px; overflow:hidden; border-radius:99px; background:var(--border); }
-.board-meter-track > span { position:absolute; inset:0; border-radius:inherit; background:currentColor; }
-@media (prefers-reduced-motion:no-preference) { .board-meter-track > span { transition:translate 350ms ease-out; } }
-.profit-workspace-controls .board-select { min-width:124px; }
-.profit-month-band details > summary { min-height:30px; padding:4px 6px; font-size:12px; }
-.profit-erp-strip { margin:0 0 12px; padding:9px 15px; border-radius:8px; }
-.profit-erp-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; min-height:23px; }
-.profit-erp-toolbar > strong { font-size:13px; }
-.profit-erp-toolbar .profit-collection-scope { flex:1 1 180px; margin:0; font-size:12px; }
-.profit-erp-pending { color:var(--warning); font-weight:650; font-size:12px; }
-.profit-erp-strip .erp-workspace-launcher { margin:0; }
-.profit-erp-strip .erp-workspace-launcher:has([role]) { flex-wrap:wrap; }
-.profit-review-sheet { min-width:0; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
-.profit-review-heading { display:flex; align-items:baseline; flex-wrap:wrap; gap:7px 14px; padding:13px 16px 2px; }
-.profit-review-heading h2 { margin:0; font-size:17px; }
-.profit-review-heading > span,.profit-table-unit { color:var(--text-muted); font-size:12px; }
-.profit-review-sheet .profit-summary-products { padding:8px 0 11px; margin:0; border:0; border-bottom:1px solid var(--border); border-radius:0; background:none; box-shadow:none; }
-.profit-review-sheet .profit-summary-item { min-height:45px; padding:0 16px; gap:3px; background:transparent; }
-.profit-review-sheet .profit-summary-item strong { font-size:19px; line-height:24px; }
-.profit-review-sheet .profit-summary-action { color:var(--primary); }
-.profit-review-sheet .profit-summary-action:hover { background:var(--surface-hover); }
-.profit-review-sheet .profit-summary-total.is-pending strong { color:var(--warning); font-size:17px; }
-.profit-review-sheet .profit-scope-filters { margin:0; padding:10px 14px; gap:6px 12px; border:0; border-bottom:1px solid var(--border); border-radius:0; background:var(--surface-soft); }
-.profit-review-sheet .profit-scope-help { margin:0; font-size:11px; }
-.profit-review-sheet .profit-detail-area > details > summary { min-height:32px; padding:5px 14px; }
-.profit-review-sheet .profit-table-panel { margin:0; border:0; border-radius:0 0 12px 12px; box-shadow:none; }
-.profit-review-sheet .profit-table-heading { flex-direction:row; align-items:center; padding:4px 14px; min-height:32px; }
-.profit-review-sheet .profit-table-heading .button { min-height:27px; padding:2px 8px; }
-.profit-review-sheet .profit-groups-pagination { padding:5px 12px; }
-.board-pagination { display:flex; flex:1 1 320px; align-items:center; justify-content:space-between; gap:4px; max-width:470px; min-width:0; }
-.board-pagination ul { display:flex; align-items:center; list-style:none; gap:2px; margin:0; padding:0; }
-.board-pagination li > button { width:32px; height:32px; border:1px solid transparent; border-radius:6px; color:var(--text-muted); background:transparent; cursor:pointer; }
-.board-pagination li > button:hover { background:var(--surface-hover); }
-.board-pagination li > button[aria-current] { border-color:var(--border); background:var(--surface); color:var(--text); font-weight:650; box-shadow:0 1px 2px var(--border); }
-.board-pagination > .button { min-height:32px; padding:4px 8px; }
-.profit-review-sheet .profit-group-toggle { padding:8px 12px; }
-.profit-review-sheet .profit-table thead th { background:var(--surface-soft); }
-.profit-review-sheet + .profit-purpose-help { margin:8px 0 0; }
-@media(max-width:850px) {
-  .profit-month-band { grid-template-columns:minmax(210px,.75fr) minmax(240px,1fr); }
-  .profit-month-caption { flex-wrap:wrap; }
-}
-@media(max-width:650px) {
-  .profit-month-band { grid-template-columns:minmax(0,1fr); }
-  .profit-month-balance { border-radius:11px 11px 0 0; }
-  .profit-review-sheet .profit-summary-products { grid-template-columns:repeat(2,minmax(0,1fr)); row-gap:8px; padding:10px 0; }
-  .profit-review-sheet .profit-summary-products .profit-summary-item { border:0; border-inline-start:1px solid var(--border); }
-  .profit-review-sheet .profit-summary-products .profit-summary-item:nth-child(odd) { border-inline-start:0; }
-  .profit-review-sheet .profit-table-heading { flex-wrap:wrap; gap:4px 10px; }
-}
 .profit-detail-area > details > summary { background: var(--surface); border: 1px solid var(--border); }
 .profit-detail-area > details[open] > summary { margin-bottom: 6px; }

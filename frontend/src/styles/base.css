@@ -44,13 +44,13 @@
   --primary-bright: #2a6fdb;
   --primary-soft: #eaf2ff;
   --surface: #ffffff;
-  --surface-bg: #f2f5fa;
+  --surface-bg: #f6f7f9;
   --surface-soft: #f1f3f6;
   --surface-muted: #e9edf2;
   --surface-strong: #dde3ea;
   --surface-raised: #ffffff;
   --surface-hover: #f8faff;
-  --border: #dbe2ec;
+  --border: #e2e6ec;
   --border-strong: #c9d1dc;
   /* Controls keep a stronger outline than decorative hairlines so inputs stay
      identifiable without making every divider heavy. */
@@ -216,13 +216,8 @@ kbd {
   width: var(--sidebar-width);
   flex-direction: column;
   padding: 0 10px 14px;
-  --rail-ink: #ecf2ff;
-  --rail-muted: #bbc9df;
-  --rail-hover: #263e61;
-  --rail-rule: #344965;
-  border-right: 1px solid var(--rail-rule);
-  background: #172941;
-  color: var(--rail-ink);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
   /* Match the main canvas and topbar geometry immediately when collapsing.
      Animating only this fixed panel leaves it covering the newly exposed page. */
   transition: background-color 180ms ease, color 180ms ease;
@@ -264,7 +259,7 @@ kbd {
   transition: background var(--duration-fast) var(--ease-standard);
 }
 
-.brand-toggle:hover { background: var(--rail-hover); }
+.brand-toggle:hover { background: var(--surface-muted); }
 .brand-toggle:focus-visible { outline: 2px solid var(--primary-bright); outline-offset: 2px; }
 
 .brand-toggle-hint {
@@ -275,7 +270,7 @@ kbd {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  color: var(--rail-muted);
+  color: var(--text-soft);
   opacity: 0.7;
   transition: opacity var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
@@ -319,6 +314,7 @@ kbd {
   user-select: none;
 }
 
+.brand-logo-dark,
 .brand-mark {
   display: none;
 }
@@ -329,6 +325,8 @@ kbd {
   user-select: none;
 }
 
+html[data-appearance="dark"] .brand-logo-light { display: none; }
+html[data-appearance="dark"] .brand-logo-dark { display: block; }
 
 .sidebar-close,
 .mobile-menu {
@@ -353,7 +351,8 @@ kbd {
   display: block;
 }
 
-.sidebar-collapsed .brand-logo { display: none; }
+.sidebar-collapsed .brand-logo,
+html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: none; }
 
 .sidebar-collapsed .nav-item > span,
 .sidebar-collapsed .nav-count,
@@ -368,6 +367,10 @@ kbd {
   padding-left: 10px;
 }
 
+.sidebar-collapsed .nav-item.active::before {
+  left: -8px;
+}
+
 .sidebar-collapsed .workspace-switch {
   width: 48px;
   min-width: 48px;
@@ -378,19 +381,19 @@ kbd {
 .side-navigation {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 16px;
+  gap: 2px;
+  padding-top: 8px;
 }
 
 .nav-item {
   position: relative;
   display: flex;
-  min-height: 42px;
+  min-height: 38px;
   align-items: center;
   gap: 9px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  color: var(--rail-muted);
+  color: var(--text-muted);
   font-size: 13px;
   line-height: 20px;
   transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
@@ -414,18 +417,26 @@ kbd {
 }
 
 .nav-item:hover {
-  background: var(--rail-hover);
-  color: var(--rail-ink);
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .nav-item.active {
-  background: #275dcc;
-  color: #fff;
+  background: color-mix(in srgb, var(--primary-soft) 68%, var(--surface));
+  color: var(--primary);
   font-weight: 600;
 }
 
-.edition-indicator { padding: 3px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--primary-soft); color: var(--primary); font-size: 12px; font-weight: 600; white-space: nowrap; }
-@media (max-width: 520px) { .topbar .edition-indicator { display: none; } }
+.nav-item.active::before {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: -10px;
+  width: 3px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--primary-bright);
+  content: "";
+}
 
 .sidebar-bottom {
   display: flex;
@@ -433,7 +444,7 @@ kbd {
   gap: 2px;
   margin-top: auto;
   padding-top: 18px;
-  border-top: 1px solid var(--rail-rule);
+  border-top: 1px solid var(--border);
 }
 
 
@@ -676,9 +687,9 @@ textarea::placeholder {
 
 .page-heading h1 {
   color: var(--text);
-  font-size: 26px;
-  line-height: 34px;
-  font-weight: 700;
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -1433,7 +1444,9 @@ textarea::placeholder {
   }
 
   .sidebar-collapsed .brand-mark { display: none; }
-  .sidebar-collapsed .brand-logo { display: block; }
+  .sidebar-collapsed .brand-logo-light { display: block; }
+  html[data-appearance="dark"] .sidebar-collapsed .brand-logo-light { display: none; }
+  html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: block; }
 
   .sidebar-collapsed .nav-count { display: grid; }
 

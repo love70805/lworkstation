@@ -2,27 +2,16 @@ import { displayMoney } from '../domain/profitReports';
 
 const money = value => `¥${displayMoney(value)}`;
 
-export default function MonthlyProfitSummary({ summary, ledger, onEdit, compact = false }) {
+export default function MonthlyProfitSummary({ summary, ledger, onEdit }) {
   const ready = summary.status === 'ready';
   const frozen = ['finalized', 'locked'].includes(ledger.status);
-  if (compact) {
-    const value = !ready ? summary.status === 'error' ? '读取失败' : '正在读取…'
-      : summary.costsPending ? '待确认成本' : summary.profitExact === null ? '待登记代发' : money(summary.profitExact);
-    return <section aria-label="整月利润汇总" className="profit-summary-monthly profit-month-balance">
-      <div className="profit-month-caption"><span>{ready ? summary.label : '本月利润'}</span><small>{ledger.period} · 全部店铺</small></div>
-      <strong className="profit-month-value">{value}</strong>
-      {ready && <p>代发 {summary.dispatchAmountExact === null ? '待登记' : money(summary.dispatchAmountExact)}<span>·</span>扣款 {summary.deductionExact === null ? '尚未取得' : money(summary.deductionExact)}{summary.deductionExact !== null && summary.missingStores.length ? '（部分店铺未齐）' : ''}</p>}
-      {summary.status === 'error' && <p role="alert">{summary.error}</p>}
-      {ready && frozen && summary.deductionExact !== null && <p>{summary.formalSaved ? '已保存正式利润表' : '待保存正式利润表'}</p>}
-    </section>;
-  }
   return <section className="profit-monthly-summary" aria-label="整月利润汇总">
-    <header className="monthly-totals-heading"><h2>整月合计</h2><span>{ledger.period} · 全部店铺</span></header>
+    <p>整月合计 · 全部店铺<span>按整月台账计算</span></p>
     {summary.status === 'error' ? <p role="alert">整月汇总读取失败：{summary.error} 请在本月报告中重新读取。</p> : null}
     <div className="profit-summary-strip profit-summary-monthly" aria-live="polite">
-      <div className={`profit-summary-item profit-summary-total ${!ready || summary.profitExact === null || summary.deductionExact === null || summary.missingStores.length ? 'is-pending' : ''}`}><span>{ready ? summary.label : '本月利润'}</span><strong>{!ready ? summary.status === 'error' ? '读取失败' : '正在读取…' : summary.costsPending ? '待确认成本' : summary.profitExact === null ? '待登记代发' : money(summary.profitExact)}</strong><small>{ready && summary.deductionExact !== null ? summary.missingStores.length ? '已减当前扣款，部分店铺尚未取得' : '商品利润 + 代发 − 独立扣款' : '商品利润 + 代发，扣款尚未取得'}</small>{ready && summary.frozen && summary.deductionExact !== null ? <small>{summary.formalSaved?'已保存为正式利润表':'当前来源待保存为正式利润表'}</small> : null}</div>
       <div className="profit-summary-item"><span>代发金额</span><strong>{ready ? summary.dispatchAmountExact === null ? '待登记' : money(summary.dispatchAmountExact) : summary.status === 'error' ? '读取失败' : '正在读取…'}</strong><small>{ready && summary.dispatchQuantityExact !== null ? summary.dispatchRecorded === false ? '未录入，本次按 0 计 · 可直接导出' : `${summary.dispatchQuantityExact} 件 × 每件 ${summary.rateExact} 元${summary.frozen ? ' · 已随基础保存' : ''}` : '未录入也可导出，本次代发按 0 计'}</small>{onEdit && !frozen ? <button className="inline-link" disabled={!ready} onClick={() => onEdit('dispatch')}>{ready && summary.dispatchRecorded !== false && summary.dispatchQuantityExact !== null ? '更新代发' : '登记代发'}</button> : null}</div>
       <div className="profit-summary-item"><span>独立扣款</span><strong>{ready ? summary.deductionExact === null ? '尚未取得' : money(summary.deductionExact) : summary.status === 'error' ? '读取失败' : '正在读取…'}</strong><small>{ready && summary.deductionExact !== null ? summary.deductionSaved ? '已随报告保存' : summary.missingStores.length ? `待取得：${summary.missingStores.join('、')}` : '各店已齐 · 保留来源正负' : '取得前可先保存未扣款报告'}</small>{onEdit && ledger.status !== 'locked' && !summary.deductionSaved ? <button className="inline-link" disabled={!ready} onClick={() => onEdit('deduction')}>{ready && summary.deductionExact !== null ? '更新扣款' : '登记扣款'}</button> : null}</div>
+      <div className={`profit-summary-item profit-summary-total ${!ready || summary.profitExact === null || summary.deductionExact === null || summary.missingStores.length ? 'is-pending' : ''}`}><span>{ready ? summary.label : '本月利润'}</span><strong>{!ready ? summary.status === 'error' ? '读取失败' : '正在读取…' : summary.costsPending ? '待确认成本' : summary.profitExact === null ? '待登记代发' : money(summary.profitExact)}</strong><small>{ready && summary.deductionExact !== null ? summary.missingStores.length ? '已减当前扣款，部分店铺尚未取得' : '商品利润 + 代发 − 独立扣款' : '商品利润 + 代发，扣款尚未取得'}</small>{ready && summary.frozen && summary.deductionExact !== null ? <small>{summary.formalSaved?'已保存为正式利润表':'当前来源待保存为正式利润表'}</small> : null}</div>
     </div>
   </section>;
 }

@@ -111,6 +111,33 @@ export async function adoptMonthlySupplement(input,{expectedBatchId,inputSignatu
   });
 }
 
+// Independent of export revision, ledger status and report projections. Include
+// adopted deductions even for a pre-deduction report so newly received sources
+// tell the user to export again. Historical reports are never backfilled.
+async function reportSourceState(context) {
+  const { ledger, salesRows, erpCosts, approvals, dispatch, deduction } = context;
+  const rows = await db.monthlySupplementRows.where('ledgerId').equals(ledger.id)
+    .filter(row => [dispatch?.id, deduction?.id].filter(Boolean).includes(row.batchId)).toArray();
+  const ordered = values => values.map(value => canonicalJson(value)).sort();
+  return canonicalJson({ version: 1, formula: REPORT_FORMULA_VERSION, template: REPORT_TEMPLATE_VERSION,
+    workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: ledger.period,
+    accountingMode: ledger.accountingMode, warehouseRate: String(ledger.warehouseRate ?? '0.7'),
+    salesRows: ordered(salesRows), erpCosts: ordered(erpCosts), approvals: ordered(approvals),
+    dispatch: dispatch ?? null, deduction: deduction ?? null, supplementRows: ordered(rows) });
+}
+
+export async function readProfitReportFreshness(reportId) {
+  const snapshot = await db.transaction('r', tables(), async () => {
+    const report = await db.profitReports.get(reportId);
+    if (!report) throw new Error('报告不存在。');
+    const context = await sourceContext(report.ledgerId, false, true);
+    if (report.workspaceId !== context.ledger.workspaceId || accountingMode(report.accountingMode) !== context.ledger.accountingMode) throw new Error('报告不属于当前核算范围。');
+    return { report, source: report.sourceStateFingerprint ? await reportSourceState(context) : null };
+  });
+  const status = !snapshot.source ? 'unknown' : await sha256(snapshot.source) === snapshot.report.sourceStateFingerprint ? 'current' : 'changed';
+  return { reportId, status };
+}
+
 async function reportDraft(input,write=false,source=null){
   const context=source??await sourceContext(input.ledgerId,write,true);
   const {ledger,reports,dispatch,deduction}=context;
@@ -130,7 +157,8 @@ async function reportDraft(input,write=false,source=null){
   const revision=Math.max(0,...sameKind.map(report=>report.revision))+1;
   const fingerprint=canonicalJson({kind:input.kind,ledger,salesRows:context.salesRows,erpCosts:context.erpCosts,approvals:context.approvals,dispatch,dispatchRows,deduction:input.kind==='financial'?deduction:null,deductionRows,revision});
   const report={workspaceId:ledger.workspaceId,ledgerId:ledger.id,period:ledger.period,kind:input.kind,revision,operationWorkflow:2,accountingMode:ledger.accountingMode,baseReportId:null,supersedesReportId:sameKind.sort((a,b)=>b.revision-a.revision)[0]?.id??null,formulaVersion:REPORT_FORMULA_VERSION,templateVersion:REPORT_TEMPLATE_VERSION,warehouseRateExact:rate,adoptedBatchIds:[...(dispatch?[dispatch.id]:[]),...(input.kind==='financial'?[deduction.id]:[])],dispatchState:dispatch?'recorded':'not_recorded',registrantNames:dispatchRegistrantNames(dispatchRows),totalsExact,displayTotals:{profit:displayMoney(totalsExact.profitExact),preDeduction:displayMoney(totalsExact.preDeductionExact)},createdBy:context.member.memberId};
-  return {context,report,products,dispatchRows,deductionRows,fingerprint};
+  const sourceState = await reportSourceState(context);
+  return {context,report,products,dispatchRows,deductionRows,fingerprint,sourceState};
 }
 export async function previewProfitReport(input){
   return db.transaction('r',tables(),async()=>{const draft=await Dexie.waitFor(reportDraft(input,true));return {report:draft.report,fingerprint:draft.fingerprint};});
@@ -138,8 +166,9 @@ export async function previewProfitReport(input){
 async function buildSavedReport(draft,createdAt){
   const workbook=buildProfitReportWorkbook({report:draft.report,products:draft.products,dispatchRows:draft.dispatchRows,deductionRows:draft.deductionRows});
   const sourceFingerprint=await sha256(draft.fingerprint),fileSha256=await sha256(workbook.bytes);
+  const sourceStateFingerprint=await sha256(draft.sourceState);
   const id=makeId('PROFIT-REPORT');
-  const report={...draft.report,id,createdAt,sourceFingerprint,fileSha256,fileName:workbook.fileName,fileBase64:bytesToBase64(workbook.bytes)};
+  const report={...draft.report,id,createdAt,sourceFingerprint,sourceStateFingerprint,fileSha256,fileName:workbook.fileName,fileBase64:bytesToBase64(workbook.bytes)};
   const lines=([...draft.products,...draft.dispatchRows,...draft.deductionRows]).map((line,ordinal)=>{const {id:_id,reportId:_reportId,...data}=line;return {...data,id:`${id}:${ordinal}`,lineKind:line.lineKind??line.kind,ordinal,reportId:id,workspaceId:report.workspaceId,ledgerId:report.ledgerId};});
   report.lineCount=lines.length;
   report.payloadHash=await sha256(canonicalJson({report,lines}));

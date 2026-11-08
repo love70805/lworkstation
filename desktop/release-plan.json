@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.7-beta.2",
+  "version": "2.0.7-beta.3",
   "edition": "beta",
   "candidateOnly": true,
-  "integrationBranch": "codex/boardui-parallel-beta",
+  "integrationBranch": "codex/ui-beta3-from-2-0-6",
   "requiredCommits": [
     {
-      "module": "workspace-review-beta-baseline",
-      "commit": "86826cd318e57fdff6efb9c475aa32d0e504de68"
+      "module": "stable-2-0-6-baseline",
+      "commit": "385f9f54b55c9c74a593ecf121ddebc82e8f034a"
     }
   ]
 }
