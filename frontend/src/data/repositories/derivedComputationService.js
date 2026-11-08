@@ -31,6 +31,7 @@ export function runDerivedComputation(kind, input, { signal, onProgress } = {}) 
       if (finished) return;
       finished = true;
       signal?.removeEventListener('abort', onAbort);
+      worker.onmessage = null; worker.onerror = null;
       if (error) worker.terminate(); else retainWorker(worker);
       error ? reject(error) : resolve(value);
     };
@@ -43,7 +44,20 @@ export function runDerivedComputation(kind, input, { signal, onProgress } = {}) 
     worker.onerror = () => finish(new Error('后台计算失败，请重新读取。'));
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) return onAbort();
-    try { worker.postMessage({ kind, input, jobId }); } catch (error) { finish(error); }
+    const send = async () => {
+      const chunks = kind === 'report-source-fingerprint' ? Object.entries(input).filter(([, value]) => Array.isArray(value) && value.length > 1000) : [];
+      if (!chunks.length) { worker.postMessage({ kind, input, jobId }); return; }
+      const header = { ...input };
+      for (const [field] of chunks) header[field] = [];
+      worker.postMessage({ type: 'initialize', kind, input: header, jobId });
+      for (const [field, rows] of chunks) for (let offset = 0; offset < rows.length; offset += 500) {
+        if (finished) return;
+        worker.postMessage({ type: 'append', field, rows: rows.slice(offset, offset + 500), jobId });
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      if (!finished) worker.postMessage({ type: 'compute', jobId });
+    };
+    void send().catch(error => finish(error));
   });
 }
 

@@ -325,14 +325,14 @@ it('starts with no goods, preserves selected goods through search and remembers 
   await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
   await settled();
   expect(mocks.preview).not.toHaveBeenCalled();
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('0');
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('0');
   await click('选中筛选结果'); await click('匹配货号');
   await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
   await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0]).toMatchObject({ filterOptions:{supplierNumbers:['测试货号']}, sourceCoverage:{version:2,supplierNumbers:['测试货号'],scope:'full_month'}, importMode:'replace_store_month' });
   const search=container.querySelector('.supplier-filter-table .search-input input');
   await act(async()=>Simulate.change(search,{target:{value:'not-found'}}));
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('1');
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('1');
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   await click('导入');
   expect(JSON.parse(localStorage.getItem('lworkstation:import-suppliers:v2:W'))['甲店']).toEqual({selected:['测试货号'],keywords:[],matched:[]});
@@ -389,7 +389,7 @@ it('applies fuzzy selection across stores only on request, with a local store ov
   expect(container.querySelector('.supplier-apply-preview').textContent).toContain('本批已选6');
   expect([...container.querySelectorAll('.batch-impact-details')].every(details => !details.open)).toBe(true);
   expect(container.querySelector('.batch-action-bar').compareDocumentPosition(container.querySelector('.batch-files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  await act(async () => Simulate.change(container.querySelector('[aria-label="查看货号店铺"]'), { target: { value: '甲店' } }));
+  await act(async () => { const picker = container.querySelector('select[name="查看货号店铺"]'); picker.value = '甲店'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
   await click('选中筛选结果'); await click('匹配货号');
   expect(mocks.preview).toHaveBeenCalledTimes(count + 1);
 
@@ -441,7 +441,7 @@ it('keeps zero suffix matches unselected and invalidates an earlier overwrite ap
   expect(container.querySelector('.batch-preview')).toBeNull();
   expect(button('导入').disabled).toBe(true);
   expect(container.textContent).toContain('本店未选货号');
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('0');
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('0');
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
@@ -494,7 +494,8 @@ it('restores a group and its store exceptions without a new apply click, includi
   await act(async () => input.dispatchEvent(new Event('change',{bubbles:true})));
   await settled();
   expect(mocks.preview).not.toHaveBeenCalled();
-  expect(container.querySelector('.supplier-selected-list').open).toBe(false);
+  expect(container.querySelector('.supplier-selected-list')).toBeNull();
+  expect(button('核对本批已选').disabled).toBe(false);
   await click('匹配货号'); await settled();
   await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
   await vi.waitFor(async () => {
@@ -533,11 +534,11 @@ it('stages page and search selections without rereading files, then matches the 
   await settled();
   const parseCount=mocks.parse.mock.calls.length, inspectCount=mocks.inspectPeriod.mock.calls.length;
   await act(async()=>container.querySelector('[aria-label="选中本页货号"]').click());
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('20');
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('20');
   await act(async()=>Simulate.change(container.querySelector('.supplier-filter-table .search-input input'),{target:{value:'货号064'}}));
   await click('选中筛选结果'); await click('匹配货号'); await settled();
   await act(async()=>Simulate.change(container.querySelector('#ledger-period'),{target:{value:'2026-08'}}));
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('21');
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('21');
   expect(mocks.parse.mock.calls.length).toBeGreaterThan(parseCount); expect(mocks.inspectPeriod.mock.calls.length).toBeGreaterThan(inspectCount);
    await settled();
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual([...choices.slice(0,20),choices[64]]);
@@ -546,7 +547,7 @@ it('stages page and search selections without rereading files, then matches the 
   expect(container.querySelector('.batch-overwrite input').checked).toBe(false);
   await act(async()=>container.querySelector('.batch-overwrite input').click());
   expect(button('导入').disabled).toBe(false);
-  expect(container.querySelector('.supplier-stats > div:nth-child(3) strong').textContent).toBe('20');
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('20');
   expect(mocks.preview.mock.calls.at(-1)[0].items[0].filterOptions.supplierNumbers).toEqual(choices.slice(0,20));
   expect(mocks.save).not.toHaveBeenCalled();
 });

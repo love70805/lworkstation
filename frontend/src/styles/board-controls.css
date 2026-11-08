@@ -40,6 +40,8 @@
 }
 .board-select-menu { max-height: min(250px, var(--available-height)); overflow: auto; outline: none; }
 .board-select-option { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; padding: 5px 9px; border-radius: 8px; outline: none; font-size: 13px; cursor: pointer; }
+.board-select-option > span { min-width: 0; overflow-wrap: anywhere; }
+.board-select-option > svg { flex: none; }
 .board-select-option[data-focused], .board-select-option[data-hovered] { background: var(--surface-soft); }
 .board-select-option[data-selected] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
 @media (max-width: 760px) {

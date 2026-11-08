@@ -36,7 +36,9 @@ export function countProfitIdentities(rows = []) {
   return { skcCount: skcs.size, storeSkuCount: storeSkus.size };
 }
 
-export function groupProfitRowsBySkc(rows = []) {
+// An optional view-owned cache only reuses groups of the same immutable row
+// objects. Replacing a snapshot or changing group membership recomputes it.
+export function groupProfitRowsBySkc(rows = [], cache) {
   const groups = new Map();
 
   rows.forEach((row) => {
@@ -56,13 +58,16 @@ export function groupProfitRowsBySkc(rows = []) {
   });
 
   return [...groups.values()].map((group) => {
+    const cached = cache?.get(group.variants[0]);
+    if (cached?.key === group.groupKey && cached.rows.length === group.variants.length
+      && cached.rows.every((row, index) => row === group.variants[index])) return cached.result;
     const variants = group.variants.toSorted((left, right) => (
       String(left.attribute ?? "").localeCompare(String(right.attribute ?? ""), "zh-CN")
       || String(left.platformSku ?? "").localeCompare(String(right.platformSku ?? ""), "zh-CN")
     ));
     const allFinalizable = variants.every((row) => row.finalizable);
 
-    return {
+    const result = {
       ...group,
       variants,
       skuCount: countProfitIdentities(variants).storeSkuCount,
@@ -80,5 +85,7 @@ export function groupProfitRowsBySkc(rows = []) {
         profitExact: allFinalizable ? variants.reduce((sum,row)=>sum.plus(row.profitExact??row.profit),new GroupExact(0)).toFixed() : null,
       } : {}),
     };
+    cache?.set(group.variants[0], { key: group.groupKey, rows: group.variants, result });
+    return result;
   });
 }

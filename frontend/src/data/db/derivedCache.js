@@ -207,7 +207,7 @@ function persistEntry(entry, revision, revisionReader) {
   });
 }
 
-export async function cachedDerived({ scope, formula, revisionReader = sourceRevision, revision = revisionReader(), compute, persist = true, boundedMemory = false, onStatus = () => {} }) {
+export async function cachedDerived({ scope, formula, revisionReader = sourceRevision, revision = revisionReader(), compute, persist = true, boundedMemory = false, measure = derivedValueBytes, onStatus = () => {} }) {
   assertSourceRevision(revision, revisionReader);
   const key = JSON.stringify([formula, scope, revision]);
   if (memory.has(key)) { onStatus('ready'); return memory.get(key); }
@@ -223,7 +223,7 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
       onStatus('recalculating');
       value = await compute();
       assertSourceRevision(revision, revisionReader);
-      memorySize = derivedValueBytes(value);
+      memorySize = await measure(value);
       if (persist && durable) {
         try {
           if (memorySize <= MAX_ENTRY_BYTES) await persistEntry({ key, namespace: JSON.stringify([formula, scope]), value, bytes: memorySize, createdAt: Date.now() }, revision, revisionReader);
@@ -233,7 +233,8 @@ export async function cachedDerived({ scope, formula, revisionReader = sourceRev
     assertSourceRevision(revision, revisionReader);
     // Every revision reader shares the same heap budget. A small number of
     // rows can still contain hundreds of megabytes of purchase evidence.
-    memorySize ??= derivedValueBytes(value);
+    memorySize ??= await measure(value);
+    assertSourceRevision(revision, revisionReader);
     if (memorySize <= MAX_ENTRY_BYTES) {
       const namespace = JSON.stringify([formula, scope]);
       for (const [prior, existing] of memoryNamespaces) if (existing === namespace && prior !== key) removeMemory(prior);
@@ -272,6 +273,18 @@ export function derivedValueBytes(value, limit = MAX_ENTRY_BYTES) {
     else if (item instanceof Map) iterators.push((function* () { for (const [key, entry] of item) { bytes += 32; yield key; yield entry; } })());
     else if (item instanceof Set || Array.isArray(item)) iterators.push(item.values());
     else iterators.push((function* () { for (const key of Object.keys(item)) { bytes += 24 + key.length * 2; yield item[key]; } })());
+  }
+  return bytes;
+}
+
+export async function cooperativeDerivedValueBytes(value) {
+  if (!Array.isArray(value) || value.length <= 1000) return derivedValueBytes(value);
+  let bytes = 0;
+  for (let offset = 0; offset < value.length && bytes <= MAX_ENTRY_BYTES; offset += 500) {
+    // Per-chunk overhead is a conservative bound, never an understated budget.
+    bytes += derivedValueBytes(value.slice(offset, offset + 500), MAX_ENTRY_BYTES - bytes);
+    const pause = new Promise(resolve => setTimeout(resolve, 0));
+    await (Dexie.currentTransaction ? Dexie.waitFor(pause) : pause);
   }
   return bytes;
 }

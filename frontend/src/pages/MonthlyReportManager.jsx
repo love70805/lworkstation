@@ -1,5 +1,6 @@
 import MonthlyProfitSummary from './MonthlyProfitSummary';
 import { readProfitReportFreshness } from '../data/repositories/profitReportRepository';
+import { sourceRevision } from '../data/db/derivedCache';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
@@ -201,7 +202,7 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     try { return await readProfitReportFreshness(latest.id); }
     catch (error) { return { reportId: latest.id, status: 'error', error: error.message }; }
   }, [latest?.id, ledgerId, workspaceId, retry], null);
-  const currentFreshness = freshness?.reportId === latest?.id ? freshness : null;
+  const currentFreshness = freshness && latest && freshness.reportId === latest.id && (freshness.status === 'error' || freshness.sourceRevision === sourceRevision()) ? freshness : null;
   const reportTime = value => new Date(value).toLocaleString('zh-CN', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false });
   useEffect(()=>{onState?.(state);},[state,onState]);
   if(!state||state.ledgerId!==ledgerId)return <Panel>正在读取本月报告...</Panel>;
@@ -230,12 +231,7 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   return <Panel className="monthly-report-manager" id="monthly-reports" tabIndex={-1}>
     {!compact ? <div className="report-heading"><h2>本月报告 · {data.ledger.period}</h2></div> : null}
     <div className="report-primary-actions"><div className="report-export-scope"><strong>本月报告 · {data.ledger.period} · 全部店铺</strong><p role="status">{missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':monthlySummary?.status === 'ready' && monthlySummary.profitExact != null ? monthlySummary.label + ' ¥' + displayMoney(monthlySummary.profitExact) : nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{detailStore !== 'all' && missing > 0 && detailMissingCount != null && missing > detailMissingCount ? <small>其他店铺还有 {missing - detailMissingCount} 条 SKU 缺成本；明细筛选不缩小导出范围。</small> : null}</div>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>补齐成本</Button>:null}<Button variant="primary" loading={busy} disabled={busy||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
-    <div className="report-latest-state" role="status">
-      {latest ? <><span>最近导出：{latest.kind === 'financial' ? '利润表' : '未扣款报告'} · r{latest.revision} · <time dateTime={latest.createdAt}>{reportTime(latest.createdAt)}</time></span>
-        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{!currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
-        {currentFreshness?.status === 'error' ? <Button onClick={()=>setRetry(value=>value+1)}>重试核对</Button> : null}
-        <Button variant="ghost" disabled={busy} onClick={()=>download(latest.id)}>下载最近报告</Button></> : <span>尚未导出报告。导出后将在此保留类型、版本和来源状态。</span>}
-    </div>
+
     {exportStage ? <div className="erp-collection-meter" role="status"><span>{exportStage}</span><progress aria-label="报告导出进度" /></div> : null}
     <details open={compact ? undefined : true}><summary>代发、扣款与导出记录</summary>
     {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={data.ledger} onEdit={onEdit} /> : null}
@@ -248,6 +244,12 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
 
     {data.reports.length?<details><summary>历史导出（{data.reports.length}）</summary>{data.reports.map(report=><div className="report-history-row" key={report.id}><span>{report.kind==='financial'?'利润表':'未扣款报告'} · r{report.revision} · {reportTime(report.createdAt)} · ¥{report.displayTotals.profit}</span><Button disabled={busy} onClick={()=>download(report.id)}>下载此报告</Button><Button disabled={busy} onClick={()=>prepareOrderDownload(report.id)}>补齐代发单号</Button></div>)}</details>:null}
     </details>
+    {latest ? <div className="report-latest-state" role="status">
+      {latest ? <><span>最近导出：{latest.kind === 'financial' ? '利润表' : '未扣款报告'} · r{latest.revision} · <time dateTime={latest.createdAt}>{reportTime(latest.createdAt)}</time></span>
+        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{!currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
+        {currentFreshness?.status === 'error' ? <Button onClick={()=>setRetry(value=>value+1)}>重试核对</Button> : null}
+        <Button variant="ghost" disabled={busy} onClick={()=>download(latest.id)}>下载最近报告</Button></> : <span>尚未导出报告。导出后将在此保留类型、版本和来源状态。</span>}
+    </div> : null}
     {orderDownload?<DispatchOrderDownload key={orderDownload.report.id} saved={orderDownload} onClose={()=>setOrderDownload(null)} />:null}
     {editor?<SupplementEditor key={ledgerId+'/'+editor} state={data} kind={editor} onClose={()=>onEdit(null)} />:null}
     {error?<p role="alert">{error}</p>:null}

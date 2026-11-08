@@ -56,7 +56,7 @@ function ProfitGroup({ group, columns, open, onToggle }) {
   </tbody>;
 }
 
-export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, expandRequest = 0, compactHeading = false }) {
+export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount, stateKey, initiallyExpanded = false, expandRequest = 0, compactHeading = false, detailsOpen = true, onToggleDetails }) {
   const [page, setPage] = useState(() => readProfitViewState(stateKey).page);
   const [expandAll, setExpandAll] = useState(() => readProfitViewState(stateKey).expandAll ?? initiallyExpanded);
   const [exceptions, setExceptions] = useState(() => readProfitViewState(stateKey).exceptions ?? []);
@@ -97,7 +97,7 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
       window.removeEventListener('resize', schedule);
       cancelAnimationFrame(frame);
     };
-  }, [hasRows]);
+  }, [hasRows, detailsOpen]);
   useLayoutEffect(() => {
     if (!expandRequest || handledExpansion.current === expandRequest) return;
     handledExpansion.current = expandRequest;
@@ -117,20 +117,22 @@ export default function ProfitGroups({ groups, columns, skcCount, storeSkuCount,
     <div className={`profit-table-heading${compactHeading ? " compact" : ""}`}>
       {!compactHeading ? <div><h2>月度利润明细</h2><p>点分组查看 SKU 明细。金额单位为人民币（CNY）。</p></div> : null}
       <div className="profit-table-tools">
-        <span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span>
-        {groups.length > 1 && <Button variant="ghost" aria-controls={tableId} onClick={() => { setExpandAll(!expandAll); setExceptions([]); }}>
+        {onToggleDetails ? <button type="button" className="profit-detail-toggle" aria-expanded={detailsOpen} aria-controls={`${tableId}-list`} onClick={onToggleDetails}>
+          <ChevronRight size={16} aria-hidden="true" /><strong>利润明细与成本更正</strong><span>{skcCount} 个 SKC · {storeSkuCount} 条店铺 SKU</span>
+        </button> : <span className="profit-filter-count">当前 {skcCount} 个平台 SKC · {storeSkuCount} 条店铺 SKU</span>}
+        {detailsOpen && groups.length > 1 && <Button variant="ghost" aria-expanded={expandAll} aria-controls={tableId} onClick={() => { setExpandAll(!expandAll); setExceptions([]); }}>
           {expandAll ? '收起全部明细' : '展开全部明细'}
         </Button>}
       </div>
     </div>
-    <div className="profit-groups-list" ref={scroll}>
-      {groups.length ? <TableScrollArea label="商品成本明细">
+    <div className="profit-groups-list" id={`${tableId}-list`} ref={scroll} hidden={!detailsOpen}>
+      {detailsOpen && (groups.length ? <TableScrollArea label="商品成本明细">
         <table ref={tableRef} id={tableId} className="data-table profit-table" aria-label="商品成本明细">
           <thead><tr>{columns.map(column => <th key={column.id ?? column.accessorKey} scope="col" style={column.meta?.headerStyle}>{column.header}</th>)}</tr></thead>
           {pageGroups.map(group => <ProfitGroup key={group.id} group={group} columns={columns} open={expandAll !== exceptions.includes(group.id)} onToggle={toggleGroup} />)}
         </table>
-      </TableScrollArea> : <p className="no-results">没有符合筛选条件的商品。</p>}
+      </TableScrollArea> : <p className="no-results">没有符合筛选条件的商品。</p>)}
     </div>
-    <nav className="profit-groups-pagination" aria-label="利润商品分页"><span>共 {groups.length} 个分组 · {current + 1} / {count} 页</span><Button disabled={current === 0} onClick={() => setPage(current - 1)}>上一页</Button><Button disabled={current + 1 === count} onClick={() => setPage(current + 1)}>下一页</Button></nav>
+    {detailsOpen && <nav className="profit-groups-pagination" aria-label="利润商品分页"><span>共 {groups.length} 个分组 · {current + 1} / {count} 页</span><Button disabled={current === 0} onClick={() => setPage(current - 1)}>上一页</Button><Button disabled={current + 1 === count} onClick={() => setPage(current + 1)}>下一页</Button></nav>}
   </>;
 }

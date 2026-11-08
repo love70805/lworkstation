@@ -125,6 +125,28 @@ it('shares one raw snapshot and persists consumed sales summaries', async () => 
   expect((await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' })).monthTotalsExact.revenueExact).toBe('0.009');
 });
 
+it('rejects a persisted result if sources change while measuring its retained size', async () => {
+  const options = { scope: ['W', 'L'], formula: 'cooperative-measure@1', compute: async () => ['old'] };
+  await cachedDerived(options);
+  clearDerivedMemory();
+  await expect(cachedDerived({ ...options, measure: async value => {
+    await db.salesRows.toCollection().modify({ amountExact: '8' });
+    return derivedValueBytes(value);
+  } })).rejects.toBeInstanceOf(StaleDerivedResultError);
+});
+
+it('reads large interleaved ledgers cooperatively without leaking another ledger or changing source order', async () => {
+  await db.salesRows.clear();
+  const own = Array.from({ length: 1001 }, (_, index) => ({ id: index * 2 + 1, workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU-' + index, amountExact: '0.00001' }));
+  const foreign = own.map(row => ({ ...row, id: row.id + 1, workspaceId: 'OTHER', ledgerId: 'OTHER' }));
+  await db.salesRows.bulkAdd([...own, ...foreign]);
+  const rows = await readLedgerSalesRows('W', 'L', { strict: true, cooperative: true });
+  expect(rows).toEqual(own);
+  expect(await readLedgerSalesRows('W', 'L')).toBe(rows);
+  await db.salesRows.update(own[500].id, { amountExact: '3' });
+  expect((await readLedgerSalesRows('W', 'L', { strict: true, cooperative: true }))[500].amountExact).toBe('3');
+});
+
 it('does not reuse an old clock when storage remains readable but rejects revision writes', async () => {
   const first = await readLedgerSalesRows('W', 'L');
   const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage full'); });
