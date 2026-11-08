@@ -6,26 +6,37 @@ import { storeSkuKey } from "../domain/manualCostOverride";
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 
 const ExactSummary = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
-const exactKeys = { qty: "quantityExact", revenue: "revenueExact", profit: "profitExact", purchaseCost: "purchaseCostExact", warehouseCost: "warehouseCostExact", penalty: "penaltyExact" };
-const sum = (rows, key) => rows.reduce((total, row) => total.plus(row[exactKeys[key]] ?? row[key] ?? 0), new ExactSummary(0));
 const money = (value) => value.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber() || 0;
 
 // Only presentation/ledger exits truncate. Never accumulate these summaries.
 export function summarizeProfitRows(rows, costBySku = new Map()) {
-  const formal = rows.filter((row) => row.finalizable);
-  const revenue = sum(rows, "revenue");
-  const profit = sum(formal, "profit");
+  let revenue = new ExactSummary(0), quantity = new ExactSummary(0), purchaseCost = new ExactSummary(0);
+  let warehouseCost = new ExactSummary(0), penalty = new ExactSummary(0), profit = new ExactSummary(0);
+  const missing = new Set(), missingErp = new Set();
+  for (const row of rows) {
+    revenue = revenue.plus(row.revenueExact ?? row.revenue ?? 0);
+    quantity = quantity.plus(row.quantityExact ?? row.qty ?? 0);
+    warehouseCost = warehouseCost.plus(row.warehouseCostExact ?? row.warehouseCost ?? 0);
+    penalty = penalty.plus(row.penaltyExact ?? row.penalty ?? 0);
+    if (row.finalizable) {
+      purchaseCost = purchaseCost.plus(row.purchaseCostExact ?? row.purchaseCost ?? 0);
+      profit = profit.plus(row.profitExact ?? row.profit ?? 0);
+    } else {
+      missing.add(storeSkuKey(row.store, row.canonicalPlatformSku));
+      if (!costBySku.has(row.canonicalPlatformSku)) missingErp.add(row.canonicalPlatformSku);
+    }
+  }
   return {
-    exactTotals: { revenue: revenue.toFixed(), quantity: sum(rows, "qty").toFixed(), purchaseCost: sum(formal,"purchaseCost").toFixed(), warehouseCost: sum(rows,"warehouseCost").toFixed(), penalty: sum(rows,"penalty").toFixed(), profit: profit.toFixed() },
+    exactTotals: { revenue: revenue.toFixed(), quantity: quantity.toFixed(), purchaseCost: purchaseCost.toFixed(), warehouseCost: warehouseCost.toFixed(), penalty: penalty.toFixed(), profit: profit.toFixed() },
     revenue: money(revenue),
-    totalUnits: sum(rows, "qty").toNumber(),
-    purchaseCosts: money(sum(formal, "purchaseCost")),
-    warehouseFees: money(sum(rows, "warehouseCost")),
-    penalties: money(sum(rows, "penalty")),
+    totalUnits: quantity.toNumber(),
+    purchaseCosts: money(purchaseCost),
+    warehouseFees: money(warehouseCost),
+    penalties: money(penalty),
     matchedProfit: money(profit),
     profitRate: revenue.isZero() ? null : money(profit.div(revenue).times(100)),
-    missing: new Set(rows.filter((row) => !row.finalizable).map((row) => storeSkuKey(row.store, row.canonicalPlatformSku))).size,
-    missingErp: new Set(rows.filter((row) => !row.finalizable && !costBySku.has(row.canonicalPlatformSku)).map((row) => row.canonicalPlatformSku)).size,
+    missing: missing.size,
+    missingErp: missingErp.size,
   };
 }
 

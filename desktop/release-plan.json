@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.7-beta.3",
+  "version": "2.0.7-beta.4",
   "edition": "beta",
   "candidateOnly": true,
-  "integrationBranch": "codex/ui-beta3-from-2-0-6",
+  "integrationBranch": "codex/ui-beta4-performance",
   "requiredCommits": [
     {
-      "module": "stable-2-0-6-baseline",
-      "commit": "385f9f54b55c9c74a593ecf121ddebc82e8f034a"
+      "module": "beta3-from-stable-2-0-6",
+      "commit": "1c9922060a45bce39382564eb8bbae62580d9e64"
     }
   ]
 }

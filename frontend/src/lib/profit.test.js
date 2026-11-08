@@ -22,6 +22,19 @@ it("counts platform SKCs across stores and store/SKU pairs across attributes and
 });
 
 describe("legacy-compatible profit grouping", () => {
+  it('keeps filtered group totals exact when cached membership or source snapshots change', () => {
+    const cache = new WeakMap();
+    const first = { store: '甲', groupSkc: 'SKC', platformSku: 'A', qty: 1, revenue: 0.01, revenueExact: '0.0099999999999999999', profitExact: '0.0099999999999999999', finalizable: true };
+    const second = { ...first, platformSku: 'B', revenue: 5, revenueExact: '5', profitExact: '-2' };
+    const complete = groupProfitRowsBySkc([first, second], cache)[0];
+    expect(groupProfitRowsBySkc([first, second], cache)[0]).toBe(complete);
+    const partial = groupProfitRowsBySkc([first], cache)[0];
+    expect(partial.revenueExact).toBe('0.0099999999999999999');
+    expect(partial).toEqual(groupProfitRowsBySkc([first])[0]);
+    expect(groupProfitRowsBySkc([first, second], cache)[0]).toEqual(complete);
+    const changed = { ...second, finalizable: false, profitExact: null };
+    expect(groupProfitRowsBySkc([first, changed], cache)[0]).toMatchObject({ finalizable: false, profitExact: null, missingCount: 1 });
+  });
   it("groups by shop/SKC/supplier then platform SKU/attribute and applies ERP costs", () => {
     const rows = [
       { store: "US", platformSkc: "SKC-1", supplierNumber: "SUP-1", platformSku: "abc", attribute: "Black", quantity: 2, amount: 10.1, isDeduction: false, penalty: 0, sourceRow: 2, orderId: "O-1" },

@@ -1,3 +1,9 @@
+## 2.0.7-beta.4 — 界面与运行响应
+
+在已发布 Beta3 上继续优化来源检查、搜索分组、利润页密度和导入分页。规范候选 `releases/candidates/2.0.7-beta.4/`，安装包 116,484,263 字节，SHA256 `C44E26809AB2AC4B9A0AE09F79A65DF2724099CDDEDBD8E67643B1B84084D727`。独立安装、数据目录和 `beta-sidecar` 通道，稳定 Latest 保持 v2.0.6。
+
+完整本地门禁 40 项、前端 246 文件 / 1,955 项、桌面验证和隐藏实包冒烟通过；来源线程在实际打包协议中验证通过。公开状态以 [Beta4 Release](https://github.com/love70805/lworkstation/releases/tag/beta-sidecar-v2.0.7-beta.4) 为准。[验收与性能边界](../docs/integration/UI_BETA4_2026_11_09.md)。未安装或操作真实库。
+
 ## 2.0.6 — 利润核对与导出
 
 基于 `7950869`，规范候选位于 `releases/candidates/2.0.6/`。[2.0.6 稳定版与校验文件](https://github.com/love70805/lworkstation/releases/tag/v2.0.6)

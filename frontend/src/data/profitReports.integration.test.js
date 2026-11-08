@@ -461,6 +461,21 @@ it('saves a direct financial report without dispatch while keeping shop dispatch
  expect(updated.totalsExact.dispatchQuantityExact).toBe('5');
 });
 
+it('checks report freshness without scanning historical file payloads, reuses unchanged sources and invalidates same-count edits', async () => {
+ const saved = await report();
+ const scan = vi.spyOn(db.profitReports, 'where');
+ try {
+  const initial = await readProfitReportFreshness(saved.id);
+  expect(initial.status).toBe('current');
+  expect(await readProfitReportFreshness(saved.id)).toBe(initial);
+  expect(scan).not.toHaveBeenCalled();
+  const row = await db.salesRows.where('ledgerId').equals('L').first();
+  await db.salesRows.update(row.id, { amount: Number(row.amount) + 1 });
+  expect((await readProfitReportFreshness(saved.id)).status).toBe('changed');
+  expect(scan).not.toHaveBeenCalled();
+ } finally { scan.mockRestore(); }
+});
+
 it('keeps report source status current after export and revision, and detects material input changes without rewriting saved snapshots', async () => {
  const first=await report();
  expect((await readProfitReportFreshness(first.id)).status).toBe('current');

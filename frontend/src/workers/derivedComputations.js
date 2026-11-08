@@ -8,8 +8,10 @@ import { packSelectionSalesFacts } from '../domain/selectionSalesFactsCodec';
 import { calculateLedgerCostCoverage } from '../domain/costCoverage';
 import { reconcileErpCostRows } from '../domain/erpCosts';
 import { previewPendingErpCostAnomalies } from '../domain/erpAnomalyPreview';
+import { reportSourceFingerprint } from '../domain/reportSourceState';
 
 export function computeDerived(kind, input) {
+  if (kind === 'report-source-fingerprint') return reportSourceFingerprint(input);
   if (kind === 'cost-coverage') return calculateLedgerCostCoverage(input);
   if (kind === 'cost-reconciliation') return reconcileErpCostRows(input);
   if (kind === 'pending-erp-anomalies') return previewPendingErpCostAnomalies(input);

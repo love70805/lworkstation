@@ -1,5 +1,5 @@
 import BoardSelect from '../components/BoardSelect';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Plus, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
@@ -54,6 +54,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const initialFilter = initialFilterRef.current;
   const snapshot = useLatestSalesImport(requestedLedgerId, suppliedSnapshot);
   const [query, setQuery] = useState(initialFilter.query);
+  const deferredQuery = useDeferredValue(query);
   const [storeFilter, setStoreFilter] = useState(initialFilter.storeFilter);
   const [supplierSelection, setSupplierSelection] = useState(initialFilter.supplierSelection);
   const [supplierStoreSelection, setSupplierStoreSelection] = useState(initialFilter.supplierStoreSelection);
@@ -149,12 +150,15 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     return () => cancelAnimationFrame(frame);
   }, [filterState, detailsOpen, calculation.loading, revealSequence]);
   const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, supplierStoreSelection, missingOnly }), [calculated, storeFilter, supplierSelection, supplierStoreSelection, missingOnly]);
-  const filtered = useMemo(() => searchProfitRows(scopedRows, query), [scopedRows, query]);
-  const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered), [filtered]);
+  const filtered = useMemo(() => searchProfitRows(scopedRows, deferredQuery), [scopedRows, deferredQuery]);
+  const groupCache = useMemo(() => new WeakMap(), [calculated]);
+  const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered, groupCache), [filtered, groupCache]);
   const { skcCount, storeSkuCount } = useMemo(() => countProfitIdentities(filtered), [filtered]);
   const filteredSummary = useMemo(() => summarizeProfitRows(filtered, costBySku), [costBySku, filtered]);
   const ledgerSummary = useMemo(() => summarizeProfitRows(calculated, costBySku), [calculated, costBySku]);
-  const storeMissingCount = calculation.loading || calculation.error ? null : summarizeProfitRows(calculated.filter(row => storeFilter === 'all' || row.store === storeFilter)).missing;
+  const storeMissing = useMemo(() => new Set(calculated.filter(row => !row.finalizable && (storeFilter === 'all' || row.store === storeFilter))
+    .map(row => storeSkuKey(row.store, row.canonicalPlatformSku))).size, [calculated, storeFilter]);
+  const storeMissingCount = calculation.loading || calculation.error ? null : storeMissing;
   useEffect(() => {
     onReadiness?.({ ledgerId: snapshot?.ledger?.id, missingCount: calculation.loading || calculation.error ? null : ledgerSummary.missing, productProfitExact: ledgerSummary.exactTotals?.profit, store: storeFilter, storeMissingCount });
   }, [onReadiness, snapshot?.ledger?.id, calculation.loading, calculation.error, ledgerSummary.missing, ledgerSummary.exactTotals?.profit, storeMissingCount, storeFilter]);
@@ -293,6 +297,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
 
       {calculation.error ? <div role="alert" className="profit-refresh-status">读取失败：{calculation.error} 以下为上次结果，请刷新后再导出。<Button onClick={() => setRetryCalculation(value => value + 1)}>重新读取</Button></div> : null}
       {calculation.loading ? <p className="profit-refresh-status" role="status">正在更新计算，当前显示上次结果；更新完成后可导出。</p> : null}
+      {query !== deferredQuery ? <p className="profit-refresh-status" role="status">正在更新搜索结果…</p> : null}
       {!suppliedSnapshot ? <section className="profit-next-step" aria-label="本月下一步">
         <div><strong>本月下一步</strong><span>{nextStep.text}</span></div>
         {nextStep.action ? <Button disabled={Boolean(calculation.loading || calculation.error)} onClick={() => navigate(nextStep.key === 'cost' ? allMissingCostsHref : buildProfitHref({ ledgerId: snapshot.ledger.id, view: 'detail' }))}>{nextStep.action}</Button> : null}
@@ -311,12 +316,12 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
 
       <div className="profit-detail-area" ref={detailsPanel}>
       {scopeFilters}
-      <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section aria-label="月度利润明细" className="panel profit-table-panel">
+      <section aria-label="月度利润明细" className="panel profit-table-panel" aria-busy={query !== deferredQuery}>
         <ProfitGroups compactHeading key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns}
           skcCount={skcCount} storeSkuCount={storeSkuCount}
+          detailsOpen={detailsOpen} onToggleDetails={() => { setDetailsOpen(!detailsOpen); saveProfitViewState(detailsStateKey, { detailsOpen: !detailsOpen }); }}
           initiallyExpanded={missingOnly} expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
-      </section> : null}
-      </details>
+      </section>
       </div>
 
       <details className="profit-purpose-help"><summary>核算说明</summary><Panel className="profit-purpose-strip">

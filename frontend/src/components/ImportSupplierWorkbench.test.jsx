@@ -59,7 +59,9 @@ it('stages manual selection and the mode without reprocessing files until matchi
   await act(async () => container.querySelector('[aria-label="选择 甲店 B-KPX"]').click());
   expect(apply).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="选择 甲店 B-KPX"]').checked).toBe(true);
-  expect(container.querySelector('.supplier-selected-list').open).toBe(false);
+  expect(container.querySelector('.supplier-selected-list')).toBeNull();
+  await click('核对本批已选');
+  expect(container.querySelector('[data-view="selected"]').getAttribute('aria-pressed')).toBe('true');
   await click('匹配货号');
   expect(apply).toHaveBeenCalledTimes(1);
 
