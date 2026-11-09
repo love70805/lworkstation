@@ -1126,7 +1126,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
         locked={locked} error={collectionError || collection.error} statusError={collection.error} />
     </details> : null}
     </div>
-    <CostAttention compact missing={missingStoreSkus} hasAnomalies={hasPendingAnomalies}
+    <CostAttention missing={missingStoreSkus} hasAnomalies={hasPendingAnomalies}
       collected={Boolean(workspaceInboxRecords.length)}>{anomalyActions}</CostAttention>
 
     {registrationState.status === 'failed' ? <p role="alert">{registrationState.message}<Button onClick={() => setRegistrationRetry(value => value + 1)}>重试连接</Button></p> : null}
