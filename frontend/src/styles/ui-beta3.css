@@ -12,8 +12,6 @@
 .supplier-workbench-heading > .board-select { min-width: 160px; max-width: 280px; margin-right: 0; }
 .supplier-workbench-heading .board-select > label { font-size: 12px; }
 .supplier-scope-summary { grid-column: 1; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; color: var(--text-muted); font-size: 13px; }
-.supplier-rules > summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
-.supplier-rules:not([open]) { padding-block: 4px; }
 .supplier-apply-preview > .button { width: 100%; }
 .supplier-apply-preview .supplier-preview-total { border-top: 0; padding-top: 0; }
 .batch-source-details { margin-block: 8px; }
@@ -21,6 +19,7 @@
 .product-draft-note { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; }
 
 .profit-workspace-controls .board-select { min-width: 140px; }
+.profit-workspace-controls .board-select-trigger { line-height: 20px; }
 .profit-page .profit-workspace-controls .board-select > label { font-size: 12px; }
 .profit-page .page-header, .profit-page .page-heading { margin-bottom: 12px; }
 .profit-page .profit-report-top { margin-bottom: 8px; }
@@ -50,15 +49,11 @@
 .profit-task-record { margin: 0; font-size: 12px; }
 .profit-task-record[open] { width: 100%; }
 .profit-cost-compact-heading .profit-task-record[open] { flex-basis: 100%; }
-.profit-page .profit-cost-compact-heading summary, .profit-page .profit-report-top summary { min-height: 36px; padding: 8px 4px; }
+.profit-page .profit-cost-compact-heading summary, .profit-page .profit-report-top summary { min-height: 36px; padding: 4px; line-height: 20px; }
 .profit-cost-tools .cost-attention { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 4px 0; padding: 8px 12px; }
 .profit-cost-tools .cost-attention .profit-cost-alert { flex: 1; min-height: 36px; }
 .profit-cost-tools .cost-attention .profit-cost-alert strong { font-size: 13px; }
 .profit-cost-tools .cost-attention .erp-anomaly-actions { margin: 0; padding: 0; border: 0; }
-.cost-attention-help { font-size: 13px; }
-.cost-attention-help > summary { min-height: 36px; padding-block: 8px; cursor: pointer; }
-.cost-attention-help[open] { flex-basis: 100%; }
-.cost-attention-help p { margin: 0; color: var(--text-muted); }
 
 .profit-monthly-summary { margin-bottom: 8px; }
 .profit-monthly-summary > p { margin-bottom: 4px; }
@@ -77,6 +72,13 @@
 .profit-page .profit-scope-field { gap: 4px; }
 .profit-page .profit-scope-field > span { line-height: 17px; }
 .profit-page .profit-scope-search .search-input, .profit-page .profit-scope-filters .profit-filter-reset { min-height: 36px; }
+.profit-page .profit-scope-search .search-input { height: 36px; }
+.profit-page .profit-status-switch { min-height: 36px; padding: 0; gap: 0; overflow: hidden; }
+.profit-page .profit-status-switch .button { min-height: 34px; padding: 4px 12px; border: 0; border-radius: 0; line-height: 20px; }
+.profit-page .profit-status-switch .button + .button { border-left: 1px solid var(--border); }
+.profit-page .profit-status-switch .button[aria-pressed="true"] { background: var(--primary-soft); }
+.profit-page .profit-status-switch .button:focus-visible { outline-offset: -3px; }
+.profit-page .profit-scope-filters .profit-filter-reset { display: inline-flex; align-items: center; line-height: 20px; }
 .profit-page .profit-table-heading { padding: 8px 12px; gap: 8px; }
 .profit-page .profit-table-heading h2 { font-size: 14px; }
 .profit-page .profit-table-heading.compact { padding: 4px 12px; }
@@ -107,6 +109,7 @@
   .profit-page .profit-summary-item { padding: 8px 12px; }
 }
 @media (max-width: 760px) {
+  .profit-page .profit-workspace-controls > .button { min-height: 44px; }
   .report-latest-state .button, .profit-detail-toggle, .profit-page .profit-table-heading.compact .button { min-height: 44px; }
 }
 @media (max-width: 600px) {

@@ -60,13 +60,25 @@ it('stages manual selection and the mode without reprocessing files until matchi
   expect(apply).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="选择 甲店 B-KPX"]').checked).toBe(true);
   expect(container.querySelector('.supplier-selected-list')).toBeNull();
-  await click('核对本批已选');
+  await act(async () => container.querySelector('[data-view="selected"]').click());
   expect(container.querySelector('[data-view="selected"]').getAttribute('aria-pressed')).toBe('true');
   await click('匹配货号');
   expect(apply).toHaveBeenCalledTimes(1);
 
   expect(snapshot.files[0].filterOptions.supplierNumbers).toEqual(['A-FFFV', 'B-KPX', 'MANUAL']);
   expect(snapshot.dirty).toBe(false);
+});
+
+it('keeps matching visible and exposes just one matching and validation action', async () => {
+  expect(container.querySelector('.supplier-rules').tagName).toBe('DIV');
+  expect(button('应用选择并校验')).toBeUndefined();
+  expect(button('核对本批已选')).toBeUndefined();
+  expect(button('粘贴清单')).toBeUndefined();
+  expect(button('导出本批已选')).toBeUndefined();
+  await input('KPX');
+  await act(async () => Simulate.keyDown(container.querySelector('#batch-supplier-suffix'), { key: 'Enter', nativeEvent: { isComposing: false } }));
+  expect(apply).toHaveBeenCalledTimes(1);
+  expect(apply).toHaveBeenCalledWith({ F: ['B-KPX'] }, { aliases: ['KPX'], mode: 'fuzzy' });
 });
 
 it('drops a late member response after closing and opening another goods record', async () => {

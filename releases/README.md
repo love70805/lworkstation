@@ -1,3 +1,9 @@
+## 2.0.7-beta.5 — 恢复导入顺序与控件对齐
+
+按 v2.0.6 操作顺序恢复筛选在文件明细之前、一次匹配直接校验，去掉货号清单粘贴/导出和重复校验入口；修正利润页高度、底边和说明层级，恢复桌面页签样式。规范候选 `releases/candidates/2.0.7-beta.5/`，安装包 116,483,201 字节，SHA256 `80D78F5965B8D16E07176FD65B272FF5EA63542FE8E70326773280BEE76D66DF`。
+
+完整本地门禁 40 项、前端 246 文件 / 1,957 项、桌面验证、七文件十万行合成流程及隐藏实包冒烟通过。[验收记录](../docs/integration/UI_BETA5_2026_11_09.md) · [Beta5 Release](https://github.com/love70805/lworkstation/releases/tag/beta-sidecar-v2.0.7-beta.5)。沿用独立 Beta 身份，稳定 Latest 为 v2.0.6；未执行本机安装。
+
 ## 2.0.7-beta.4 — 界面与运行响应
 
 在已发布 Beta3 上继续优化来源检查、搜索分组、利润页密度和导入分页。规范候选 `releases/candidates/2.0.7-beta.4/`，安装包 116,484,263 字节，SHA256 `C44E26809AB2AC4B9A0AE09F79A65DF2724099CDDEDBD8E67643B1B84084D727`。独立安装、数据目录和 `beta-sidecar` 通道，稳定 Latest 保持 v2.0.6。

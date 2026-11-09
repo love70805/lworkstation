@@ -127,6 +127,22 @@ it('automatically validates and previews all files after explicit supplier choic
   expect(container.querySelector('.batch-filters')).toBeNull();
   expect(button('导入').disabled).toBe(true);
 });
+it('keeps supplier matching before seven file details and validates the whole batch with one match', async () => {
+  mocks.inspectPeriod.mockResolvedValue({ evidence: { distribution: [{ month: '2026-08', count: 1 }], suggestedPeriod: '2026-08', missingCount: 0, invalidCount: 0, errorCount: 0 } });
+  const original = mocks.preview.getMockImplementation();
+  mocks.preview.mockImplementation(async input => ({ ...await original(input), requiresOverwrite: false }));
+  await upload(false, Array.from({ length: 7 }, (_, index) => new File([String(index)], `合成${index}店.csv`)));
+  await settled();
+  const workbench = container.querySelector('.supplier-workbench'), fileList = container.querySelector('.batch-files');
+  expect(workbench.compareDocumentPosition(fileList) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(workbench.querySelector('.supplier-rules').tagName).toBe('DIV');
+  expect(mocks.preview).toHaveBeenCalledTimes(1);
+  expect(mocks.preview.mock.calls[0][0].items).toHaveLength(7);
+  expect(button('应用选择并校验')).toBeUndefined();
+  expect(button('导入').disabled).toBe(false);
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+
 it('imports a normal batch with one click and prevents double submits', async () => {
   const original = mocks.preview.getMockImplementation();
   mocks.preview.mockImplementation(async input => ({ ...await original(input), requiresOverwrite:false }));
@@ -495,7 +511,7 @@ it('restores a group and its store exceptions without a new apply click, includi
   await settled();
   expect(mocks.preview).not.toHaveBeenCalled();
   expect(container.querySelector('.supplier-selected-list')).toBeNull();
-  expect(button('核对本批已选').disabled).toBe(false);
+  expect(container.querySelector('.supplier-table-views [data-view="selected"] span').textContent).toBe('2');
   await click('匹配货号'); await settled();
   await act(async () => Simulate.change(container.querySelector('#ledger-period'), {target:{value:'2026-08'}}));
   await vi.waitFor(async () => {

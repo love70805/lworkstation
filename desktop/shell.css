@@ -3,7 +3,7 @@ html[data-appearance="light"] {
   color-scheme: light;
   font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
   --surface: #ffffff;
-  --surface-muted: #edf2f8;
+  --surface-muted: #e8ecf1;
   --border: #dce1e7;
   --border-strong: #c5cdd8;
   --text: #182230;
@@ -157,8 +157,9 @@ input:focus-visible {
   display: flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
 }
 .tab {
   height: 30px;
@@ -179,8 +180,8 @@ input:focus-visible {
 .tab:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 72%, transparent); }
 .tab.active {
   color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 11%, var(--surface));
-  box-shadow: inset 0 -2px var(--primary);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow) 42%, transparent), 0 0 0 1px var(--border);
 }
 .toolbar-divider { width: 1px; height: 22px; flex: none; background: var(--border-strong); }
 .browser-actions { height: 36px; display: flex; align-items: center; gap: 2px; }
