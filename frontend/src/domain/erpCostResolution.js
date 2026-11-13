@@ -1,10 +1,10 @@
 import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
-import { normalizePurchaseEvidenceRecord, validateCostPeriod } from "./erpPurchaseEvidence";
+import { effectivePurchaseAmount, normalizePurchaseEvidenceRecord, validateCostPeriod } from "./erpPurchaseEvidence";
 import { selectLatestPurchaseRecords } from "./erpPurchaseSelection";
 export { normalizePurchaseEvidenceRecord } from "./erpPurchaseEvidence";
 
-export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@6-reversible-anomaly-ignore";
+export const ERP_COST_RESOLUTION_VERSION = "shopeers-cost-resolution@7-purchase-total-reversible-anomaly-ignore";
 export const ERP_HISTORY_MIN_SAMPLES = 6;
 export const ERP_PREVIEW_RECORD_LIMIT = 3;
 
@@ -176,7 +176,7 @@ export function calculateWarehouseCostDecision({
   });
   const totalQuantity = resolvedRecords.reduce((sum, record) => sum.plus(record.quantity || 0), new Decimal(0));
   const totalPrice = resolvedRecords.reduce((sum, record) => (
-    sum.plus(new Decimal(record.quantity || 0).times(record.effectiveUnitPrice || 0))
+    sum.plus(effectivePurchaseAmount(record))
   ), new Decimal(0));
   const unresolvedAnomalyCount = anomalies.filter((anomaly) => anomaly.status === "pending").length;
   const hasInvalidPrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice)

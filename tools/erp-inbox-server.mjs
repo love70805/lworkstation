@@ -464,6 +464,8 @@ function sanitizePurchaseRecord(record, warehouseSku, index, excluded = false) {
   const quantity = optionalNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
   const unitPrice = optionalNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
   const totalPrice = optionalNumber(record?.totalPrice ?? record?.price);
+  if (record?.amountBasis != null && record.amountBasis !== 'purchase_total') throw Object.assign(new Error('采购金额口径无效。'), { status: 400, code: 'INVALID_ERP_EVIDENCE' });
+  const purchaseTotal = record?.amountBasis === 'purchase_total';
   return {
     recordId: String(record?.recordId ?? record?.id ?? `${evidenceRefFor(warehouseSku)}:${excluded ? "excluded" : "record"}:${index + 1}`).trim(),
     warehouseSku,
@@ -471,7 +473,8 @@ function sanitizePurchaseRecord(record, warehouseSku, index, excluded = false) {
     ...sanitizeCatalogFields(record),
     quantity,
     unitPrice,
-    totalPrice: totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    totalPrice: purchaseTotal ? totalPrice : totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    ...(purchaseTotal ? { amountBasis: 'purchase_total', purchaseUnitPrice: optionalNumber(record.purchaseUnitPrice), serviceUnitPrice: optionalNumber(record.serviceUnitPrice) } : {}),
     purchaseDate: String(record?.purchaseDate ?? record?.date ?? "").trim(),
     order1688: String(record?.order1688 ?? "").trim(),
     purchaseOrderNo: String(record?.purchaseOrderNo ?? "").trim(),

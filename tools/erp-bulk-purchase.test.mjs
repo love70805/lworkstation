@@ -11,7 +11,7 @@ const context = { window: { XLSX: xlsx }, URL, structuredClone, TextDecoder, Abo
 for (const name of ['result-policy.js', 'bulk-purchase.js']) vm.runInNewContext(await fs.readFile(new URL(`../integrations/erp-assistant-extension/src/${name}`, import.meta.url), 'utf8'), context);
 const policy = context.window.ShopeersErpResultPolicy;
 const module = context.window.ShopeersErpBulkPurchase;
-const headers = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '创建时间', '采购状态', '1688订单状态', '供应商名称', '采购链接1688'];
+const headers = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '采购总价', '服务单价', '创建时间', '采购状态', '1688订单状态', '供应商名称', '采购链接1688'];
 const canonical = value => String(value).toUpperCase();
 const digest = buffer => createHash('sha256').update(new Uint8Array(buffer)).digest('hex');
 const standard = rows => rows.map((row, index) => ({ order: `PO-${index + 1}`, warehouse: 'WH-A', skus: 'SKU-A', quantity: 2, price: 4,
@@ -20,6 +20,7 @@ const standard = rows => rows.map((row, index) => ({ order: `PO-${index + 1}`, w
 function workbook(rows, columns = headers) {
     const values = rows.map(row => {
         const named = { '采购单号': row.order, '仓库SKU': row.warehouse, '平台SKU': row.skus, '采购数量': row.quantity, '采购单价': row.price,
+            '采购总价': Object.hasOwn(row, 'total') ? row.total : row.quantity * (row.price + (row.service || 0)), '服务单价': Object.hasOwn(row, 'serviceCell') ? row.serviceCell : row.service || 0,
             '创建时间': row.date, '采购状态': row.status, '1688订单状态': row.orderStatus || '已付款', '供应商名称': '合成供应商', '采购链接1688': 'https://detail.1688.com/offer/9000000011.html' };
         return columns.map(column => named[column] ?? '');
     });
@@ -34,7 +35,7 @@ function aggregate(details) {
     const warehouses = [...new Set(details.map(row => row.itemId))].map(warehouseSku => ({ warehouseSku, evidenceComplete: true, sourceWarnings: [], excludedRecords: [],
         purchaseRecords: details.filter(row => row.itemId === warehouseSku).map(row => ({ recordId: row.detailId, warehouseSku,
             purchaseOrderNo: row._purchaseOrderNo, purchaseOrderId: row._purchaseOrderId, quantity: row.purchaseQuantity,
-            unitPrice: row.purchaseUnitPrice, purchaseDate: row.creationTime, statusFields: row._orderStatusFields, eligible: true, exclusionReasons: [] })) }));
+            ...policy.purchaseAmounts(row), purchaseDate: row.creationTime, statusFields: row._orderStatusFields, eligible: true, exclusionReasons: [] })) }));
     return { results: warehouses.map(row => ({ warehouseSku: row.warehouseSku })), warehouseEvidence: { warehouses, excludedDetails: [] }, skippedInvalid: 0 };
 }
 
@@ -56,7 +57,7 @@ function harness(rows, { mappings = [], exportError = null, countOffset = 0, col
         readDetails: async order => {
             stats.details++;
             return rows.filter(row => row.order === order.purchaseOrderNo).map(row => ({ itemId: row.warehouse, purchaseQuantity: row.quantity,
-                purchaseUnitPrice: row.price, creationTime: row.date, detailId: `native-detail-${row.order}` }));
+                purchaseUnitPrice: row.price, serviceUnitPrice: row.service || 0, creationTime: row.date, detailId: `native-detail-${row.order}` }));
         },
     });
     return { collector, stats, run, scope, bytes, exportQueries, mappingQueries, collect: () => collector.collect({ sku: 'SKC-A', storeId: '', queryRange: '0', page: 99, limit: 50 }, run, scope) };
@@ -82,6 +83,38 @@ test('short exact mappings use ledger parents with no mapping requests', async (
     assert.deepEqual(h.stats, { exports: 1, lists: 2, mappings: 0, details: 0 });
     assert.equal(h.exportQueries[0].page,undefined);
     assert.equal(h.exportQueries[0].limit,undefined);
+});
+
+test('purchase totals carry service charges through the batch preview', async () => {
+    const h = harness(standard([
+        { quantity: 12, price: 2.4, service: 0.6, total: 36 },
+        { quantity: 6, price: 4, service: 1, total: 30 },
+        { quantity: 9, price: 3, service: 1, total: 36 },
+    ]));
+    const state = await h.collect();
+    assert.equal(state.results[0].unitCost, '3.7777');
+    assert.equal(Number(state.results[0].totalPrice), 102);
+    assert.equal(Number(state.results[0].totalQty), 27);
+    const evidence = state.warehouseEvidence.warehouses[0].purchaseRecords[0];
+    assert.equal(evidence.amountBasis, 'purchase_total');
+    assert.equal(evidence.totalPrice, 36);
+    assert.equal(evidence.purchaseUnitPrice, 2.4);
+    assert.equal(evidence.unitPrice, 3);
+});
+
+test('recorded totals survive non-divisible per-item prices and cannot be synthesized from missing columns', async () => {
+    const h = harness(standard([{ quantity: 3, price: 0.2, total: 1 }, { quantity: 7, price: 0.2, total: 2 }]));
+    const state = await h.collect();
+    assert.equal(state.results[0].unitCost, '0.3000');
+    assert.equal(Number(state.results[0].totalPrice), 3);
+    const emptyService = await harness(standard([{ quantity: 12, price: 2.4, total: 36, serviceCell: '' }])).collect();
+    assert.equal(emptyService.results[0].unitCost, '3.0000', 'an empty ancillary service cell cannot replace or discard a recorded total');
+    const old = harness(standard([{}]), { columns: headers.filter(name => name !== '采购总价') });
+    await assert.rejects(old.collect(), error => error.reason === 'purchase_columns_missing');
+    for (const total of ['', null, 'bad']) {
+        const invalid = harness(standard([{ total }]));
+        await assert.rejects(invalid.collect(), error => error.reason === 'invalid_numeric_field');
+    }
 });
 
 test('one snapshot feeds multiple result batches without repeated exports', async () => {

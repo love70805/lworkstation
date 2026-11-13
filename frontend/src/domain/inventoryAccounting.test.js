@@ -5,6 +5,16 @@ import { reconcileErpCostRows } from './erpCosts';
 const record = (recordId, unitPrice, patch = {}) => ({ recordId, warehouseSku: 'WH', quantity: 2, unitPrice, purchaseDate: '2026-01-10', ...patch });
 const cost = purchaseRecords => ({ id: 1, platformSku: 'SKU', platformSkc: 'SKC', warehouseSku: 'WH', evidenceComplete: true, purchaseRecords, publishedAt: '2026-10-01' });
 
+it('compares the unit costs derived from recorded totals rather than base prices', () => {
+  const input = cost([
+    record('low-base', 2, { quantity: 10, totalPrice: 60, amountBasis: 'purchase_total' }),
+    record('low-total', 3, { quantity: 10, totalPrice: 40, amountBasis: 'purchase_total' }),
+  ]);
+  const before = structuredClone(input);
+  expect(historicalLowestCosts([input])[0]).toMatchObject({ unitCost: 4, selectedRecordIds: ['low-total'] });
+  expect(input).toEqual(before);
+});
+
 it('selects the all-time minimum including purchases after the ledger month without changing source evidence', () => {
   const input = cost([record('old', 4, { purchaseDate: '2024-01-10' }), record('recent', 8), record('later', 2, { purchaseDate: '2027-01-10', eligible: false, exclusionReasons: ['after_ledger_period'] })]);
   const before = structuredClone(input);

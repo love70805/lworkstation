@@ -408,7 +408,7 @@
     }
 
     function exactDecimal(value) {
-        const match = String(value).match(/^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
+        const match = String(value).trim().replace(/^\+/, '').replace(/^\./, '0.').match(/^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
         if (!match) return null;
         const scale = (match[2] || '').length - Number(match[3] || 0);
         if (Math.abs(scale) > 100) return null;
@@ -423,6 +423,37 @@
     function decimalString({ n, s }) {
         const value = n.toString().padStart(s + 1, '0');
         return s ? `${value.slice(0, -s)}.${value.slice(-s)}` : value;
+    }
+
+    function decimalRatioNumber(amount, quantity) {
+        if (!amount || !quantity?.n) return null;
+        const scale = Math.max(0, 20 + quantity.n.toString().length - amount.n.toString().length + amount.s - quantity.s);
+        return Number(decimalString({ n: amount.n * 10n ** BigInt(quantity.s + scale) / (quantity.n * 10n ** BigInt(amount.s)), s: scale }));
+    }
+
+    function purchaseAmounts(detail) {
+        const quantity = exactDecimal(text(detail?.purchaseQuantity));
+        const purchase = exactDecimal(text(detail?.purchaseUnitPrice));
+        const service = exactDecimal(text(detail?.serviceUnitPrice) || '0');
+        const paid = purchase && service ? addDecimal(purchase, service) : null;
+        // The export supplies the recorded line total. Native detail responses
+        // expose the base and service unit prices separately for that same line.
+        const total = Object.hasOwn(detail || {}, 'purchaseTotalPrice')
+            ? exactDecimal(text(detail.purchaseTotalPrice))
+            : quantity && paid ? { n: quantity.n * paid.n, s: quantity.s + paid.s } : null;
+        const totalPrice = total ? Number(decimalString(total)) : null;
+        const unitPrice = decimalRatioNumber(total, quantity);
+        return { amountBasis: 'purchase_total',
+            totalPrice: Number.isFinite(totalPrice) ? totalPrice : null,
+            unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
+            purchaseUnitPrice: purchase ? Number(decimalString(purchase)) : null,
+            serviceUnitPrice: service ? Number(decimalString(service)) : null };
+    }
+
+    function purchaseEvidenceAmount(record) {
+        if (record.amountBasis === 'purchase_total') return exactDecimal(text(record.totalPrice));
+        const q = exactDecimal(record.quantity), p = exactDecimal(record.unitPrice);
+        return q && p ? { n: q.n * p.n, s: q.s + p.s } : null;
     }
 
     function purchaseStatusFields(source) {
@@ -469,6 +500,8 @@
                 const date = purchaseDateInfo(record.purchaseDate);
                 return date && date.period <= result.ledgerPeriod;
             });
+            if (prior.some(record => record.amountBasis === 'purchase_total' && !purchaseEvidenceAmount(record))) return issue('total_missing', '采购总价缺失或无效', '重新获取 ERP 采购总价；缺失金额不会用采购单价补算。');
+            if (prior.some(record => record.amountBasis === 'purchase_total' && (!(Number(record.quantity) > 0) || !exactDecimal(record.quantity)))) return issue('quantity_invalid', '采购数量无效', '核对采购数量；数量不大于 0 的记录未参与计算。');
             if (prior.some(record => record.unitPrice == null || !text(record.unitPrice))) return issue('price_missing', '采购单价缺失或无效', '展开采购证据核对 ERP 单价；缺失值不会按 0 计算。');
             if (prior.some(record => !Number.isFinite(Number(record.unitPrice)) || Number(record.unitPrice) < 0 || !exactDecimal(record.unitPrice))) return issue('price_invalid', '采购单价无效', '展开采购证据核对 ERP 单价；无效记录未参与计算。');
             if (prior.some(record => !(Number(record.quantity) > 0) || !exactDecimal(record.quantity))) return issue('quantity_invalid', '采购数量无效', '核对采购数量；数量不大于 0 的记录未参与计算。');
@@ -487,7 +520,11 @@
         return (results || []).map(result => {
             const warehouse = warehouses.get(canonical(result.warehouseSku));
             const incomplete = warehouse?.evidenceComplete === false;
-            const history = period && !incomplete ? (warehouse?.purchaseRecords || []).filter(record => {
+            const history = period && !incomplete ? (warehouse?.purchaseRecords || []).map(record => {
+                if (record.amountBasis !== 'purchase_total') return record;
+                const total = purchaseEvidenceAmount(record);
+                return { ...record, unitPrice: decimalRatioNumber(total, exactDecimal(record.quantity)) };
+            }).filter(record => {
                 const date = purchaseDateInfo(record.purchaseDate);
                 const cancelled = cancelledPurchase(record.statusFields);
                 const exclusions = (record.exclusionReasons || []).filter(reason => !['on_or_after_ledger_period', 'after_ledger_period'].includes(reason));
@@ -496,23 +533,23 @@
                     && date && date.period <= period && Number(record.quantity) > 0
                     && Number.isFinite(Number(record.quantity)) && record.unitPrice != null
                     && Number.isFinite(Number(record.unitPrice)) && Number(record.unitPrice) >= 0
-                    && exactDecimal(record.quantity) && exactDecimal(record.unitPrice);
+                    && exactDecimal(record.quantity) && exactDecimal(record.unitPrice) && purchaseEvidenceAmount(record);
             }) : [];
             const selected = annotateHistoricalWarnings([...history].sort((a, b) => purchaseDateInfo(b.purchaseDate).timestamp - purchaseDateInfo(a.purchaseDate).timestamp
                 || text(b.purchaseOrderId).localeCompare(text(a.purchaseOrderId), 'zh-CN', { numeric: true })
                 || text(b.recordId).localeCompare(text(a.recordId), 'zh-CN', { numeric: true })).slice(0, 3), history);
             let qty = { n: 0n, s: 0 }, amount = { n: 0n, s: 0 };
             selected.forEach(record => {
-                const q = exactDecimal(record.quantity), p = exactDecimal(record.unitPrice);
+                const q = exactDecimal(record.quantity);
                 qty = addDecimal(qty, q);
-                amount = addDecimal(amount, { n: q.n * p.n, s: q.s + p.s });
+                amount = addDecimal(amount, purchaseEvidenceAmount(record));
             });
             const unitCost = qty.n ? decimalString({ n: amount.n * 10n ** BigInt(qty.s + 4) / (qty.n * 10n ** BigInt(amount.s)), s: 4 }) : null;
             const details = selected.map(record => ({
                 recordId: record.recordId, date: record.purchaseDate,
                 orderNumber: record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '',
                 sourceType: record.order1688 ? '1688' : '采购单', qty: record.quantity,
-                price: decimalString({ n: exactDecimal(record.quantity).n * exactDecimal(record.unitPrice).n, s: exactDecimal(record.quantity).s + exactDecimal(record.unitPrice).s }),
+                price: decimalString(purchaseEvidenceAmount(record)),
                 unitPrice: record.unitPrice, warningReasons: record.warningReasons || [],
                 supplierName: record.supplierName, supplier1688Url: record.supplier1688Url,
                 supplier1688Links: normalizeSupplier1688Links(record.supplier1688Links),
@@ -637,6 +674,7 @@ function diagnosticResponse(value) {
 }
 
     global.ShopeersErpResultPolicy = Object.freeze({
+        purchaseAmounts,
         diagnosticResponse,
         historicalWarehouseTargets,
         purchaseStatusFields,

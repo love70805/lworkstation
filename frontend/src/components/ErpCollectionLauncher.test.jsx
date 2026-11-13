@@ -22,6 +22,24 @@ it('starts the registered scope from one workstation action without any copy or 
   expect(runtime.startErpCollection).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'W', ledgerId: 'L', requestId: 'R', retryFailed: true });
   expect(props.onStarted).toHaveBeenCalledOnce(); expect(button('正在采集成本').disabled).toBe(true);
 });
+it.each(['completed','paused','partial'])('offers explicit recollection alongside the existing %s action', async status => {
+  props.task={requestId:'R',taskId:'T',status,batches:[status==='completed'?{deliveryId:'D'}:{status:'pending'}]};
+  props.onRecollect=vi.fn();props.recollectReady=true;await render();
+  expect(button('重新获取 ERP 成本').disabled).toBe(false);
+  if(status==='completed')expect(button('成本已采集').disabled).toBe(true);
+  if(status==='paused')expect(button('继续成本核算').disabled).toBe(false);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  expect(props.onRecollect).toHaveBeenCalledOnce();expect(runtime.startErpCollection).not.toHaveBeenCalled();
+});
+it('keeps recollection available with the compact completed status', async () => {
+  props.compact=true;props.task={requestId:'R',status:'completed',batches:[{deliveryId:'D'}]};
+  props.onRecollect=vi.fn();props.recollectReady=true;await render();
+  expect(host.querySelector('[role="status"]').textContent).toBe('ERP 成本已采集');
+  expect(button('成本已采集')).toBeUndefined();
+  await act(async()=>button('重新获取 ERP 成本').click());
+  expect(props.onRecollect).toHaveBeenCalledOnce();expect(runtime.startErpCollection).not.toHaveBeenCalled();
+  props.preparing=true;await render();expect(button('重新获取 ERP 成本').disabled).toBe(true);
+});
 it('offers the existing ERP login entry and tells the user that this scope will resume', async () => {
   runtime.getErpCollection.mockResolvedValue({ ok: true, requestId: 'R', status: 'waiting_login' }); await render();
   expect(host.textContent).toContain('登录后自动继续本次采集');

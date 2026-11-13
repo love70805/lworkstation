@@ -28,6 +28,21 @@ function harness(size = 12, creation = { executionProtocol: 2, costFlow: 'task' 
 
 const group = (skcs, sourceMode = 'bulk', fallbackReason) => ({ platformSkcs: skcs, sourceMode, ...(fallbackReason ? { fallbackReason } : {}) });
 
+test('delivery pause retains its bounded explanation and original unsent identity until continuation', () => {
+  const h = harness(2); h.resume(); const batch = h.start();
+  h.batchCall(batch, { state: 'collected', resultDeliveryId: 'RETAINED-OR-UNCONFIRMED' });
+  const identity = structuredClone(batch);
+  h.control({ action: 'pause', reason: { code: 'ERP_DELIVERY_FAILED', message: '回传未确认。'.repeat(150), credential: 'discard' } });
+  assert.equal(h.task.status, 'paused');
+  assert.equal(h.task.pauseReason.code, 'ERP_DELIVERY_FAILED');
+  assert.equal(h.task.pauseReason.message.length, 500);
+  assert.equal(h.task.pauseReason.credential, undefined);
+  assert.deepEqual(batch, identity);
+  h.resume();
+  assert.equal(h.task.pauseReason, undefined);
+  assert.deepEqual(batch, identity, 'continuation reconciles the exact old result before a new read');
+});
+
 test('whole-task mode creates one range and resumes without the legacy five-SKC split', () => {
   const h = harness(127);
   assert.equal(h.task.costFlow, 'task');

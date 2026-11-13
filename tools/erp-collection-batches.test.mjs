@@ -21,9 +21,17 @@ export async function scenario(size, mode = '', options = {}) {
   const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
   const records = [request], deliveries = [], catalogs = [], calls = [], errors = [], listTimes = new Map(), windows = [], claims = [];
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
+  const storageQuota = options.storageQuotaBytes ?? 10 * 1024 * 1024;
+  const storageBytes = values => Object.entries(values).reduce((sum, [key, value]) => sum + Buffer.byteLength(key) + Buffer.byteLength(JSON.stringify(value)), 0);
+  let peakStorageBytes = 0, storageRejected = false;
   let dispatch, window, inflight = 0, maxInflight = 0, maxInflightAfterLimit = 0, lists = 0, maxLists = 0, paused = false, lostAck = false, limited = false, remoteStopped = false, permissionCatalogBlocked = false, partitionInterrupted = false;
   const sender = { url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId:0 };
-  const chrome = { storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>Object.assign(storage,structuredClone(values))}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
+  const chrome = { storage:{local:{QUOTA_BYTES:storageQuota,getBytesInUse:async()=>storageBytes(storage),get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>{
+    if(options.storageResume && !storageRejected && values.shopeersErpPendingCostResultsV2?.length) { storageRejected=true;throw new Error('Resource::kQuotaBytes quota exceeded'); }
+    const bytes=storageBytes({...storage,...values});
+    if(bytes>storageQuota)throw new Error('Resource::kQuotaBytes quota exceeded');
+    peakStorageBytes=Math.max(peakStorageBytes,bytes);Object.assign(storage,structuredClone(values));
+  }}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
     const url = new URL(raw), payload = init.body ? JSON.parse(init.body) : {};
     // The longstanding scenarios exercise saved/older five-SKC tasks. New
@@ -124,6 +132,16 @@ export async function scenario(size, mode = '', options = {}) {
       assert.equal(calls.length,0,'paused tasks do not restart merely because ERP pages open');
       handleCollectionTaskRequest(records,{method:'POST',url:new URL(`http://localhost/erp/v1/collection-tasks/${task.taskId}/control`),payload:{workspaceId:'WS',action:'request_resume',scopeHash:task.scopeHash},instanceId:'test'});
     } else { await open(); window.document.getElementById('erpa-cost-trigger').click(); }
+    if(options.storageResume) {
+      await until(()=>records[1]?.status==='paused'&&!window.document.getElementById('erpa-recalculate').disabled);
+      assert.equal(deliveries.length,0);
+      assert.equal(records[1].pauseReason.code,'ERP_DELIVERY_FAILED');
+      assert.match(records[1].pauseReason.message,/暂存空间不足/);
+      assert.equal(records[1].batches[0].status,'collected','an unconfirmed original identity remains available for receipt reconciliation');
+      assert.equal((storage.shopeersErpPendingCostResultsV2||[]).length,0);
+      assert.match(window.document.getElementById('erpa-task-status').textContent,/成本回传未完成/);
+      window.document.getElementById('erpa-resume').click();
+    }
     if(options.lostPartition || options.pausePartition) {
       await until(()=>partitionInterrupted&&!window.document.getElementById('erpa-recalculate').disabled);
       assert.equal(deliveries.length,0,'no receipt from the retired or paused attempt');
@@ -200,9 +218,11 @@ export async function scenario(size, mode = '', options = {}) {
     }
     await until(()=>{
       if(options.fixture && records[1]?.batches.some(batch=>batch.status==='failed') && !window.document.getElementById('erpa-recalculate').disabled)throw Error(JSON.stringify(records[1].batches));
-      return deliveries.length===expectedDeliveries&&!window.document.getElementById('erpa-recalculate').disabled;
+      if(options.expectCapacitySplit && records[1]?.status==='paused')throw Error(JSON.stringify(records[1].pauseReason));
+      return (options.expectCapacitySplit ? records[1]?.summary.delivered===size : deliveries.length===expectedDeliveries)&&!window.document.getElementById('erpa-recalculate').disabled;
     });
     assert.equal(records[1].summary.delivered,size);
+    if(options.expectCapacitySplit)assert.ok(deliveries.length>1,'whole-task delivery splits before native storage fills');
     assert.equal(new Set(deliveries.map(item=>item.resultDeliveryId)).size,deliveries.length);
     assert.ok(deliveries[0].listCount<=(options.firstBatchListLimit??(mode==='throttle'?6:5)),'first five SKCs are durable before the remaining targets');
     assert.equal(maxLists,options.maxLists??(mode==='benchmark-serial'?1:mode==='benchmark-two-lanes'?2:4));assert.ok(maxInflight<=12);
@@ -235,7 +255,7 @@ export async function scenario(size, mode = '', options = {}) {
     }
     const listMs=[...listTimes.values()].reduce((sum,time)=>sum+time.end-time.start,0);
     console.log(JSON.stringify({size,mode,listMs:Math.round(listMs),elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,requests:calls.length,maxInflight,maxLists,batches:deliveries.length,...(options.bulk?{}:{duplicateRequests:calls.length-(mode==='shared-orders'?size*2+40:mode==='recalculate'?size*8:size*4)}),heapMb:Math.round(process.memoryUsage().heapUsed/1048576)}));
-    return options.returnMetrics ? {task:structuredClone(records[1]),body:window.document.body.textContent,listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries,catalogs} : listMs;
+    return options.returnMetrics ? {task:structuredClone(records[1]),body:window.document.body.textContent,listMs,elapsedMs:Date.now()-began,firstReceiptMs:deliveries[0]?.elapsedMs,maxInflight,maxInflightAfterLimit,calls,deliveries,catalogs,peakStorageBytes} : listMs;
   } finally {await Promise.all(windows.map(item=>item.happyDOM.close()));}
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -307,7 +307,7 @@ export async function verifyErpCatalogTransport({
     assert.equal(blue.purchaseCatalog.purchaseProportion1688, "2-1");
     assert.equal(blue.totalQuantity, 2, "2:1 procurement split must retain recorded warehouse quantity");
     assert.equal(blue.totalPrice, 10, "2:1 procurement split must retain recorded warehouse-unit price");
-    const cache = JSON.parse(window.localStorage.getItem("erpAssistantV8_latest_cost_result_v7"));
+    const cache = JSON.parse(window.localStorage.getItem(legacyScope ? "erpAssistantV8_latest_cost_result_v7" : "erpAssistantV8_latest_cost_result_v8_purchase_total"));
     assert.equal(cache.results.find((result) => result.warehouseSku === "WH-CATALOG").catalogMappings.length, includeConflict ? 2 : 1);
     const persisted = await readInboxRecords(spoolPath);
     assert.deepEqual(persisted.find((record) => record.kind === "batch" && record.workspaceId === workspaceId).envelope.batch.rows, batch.rows);

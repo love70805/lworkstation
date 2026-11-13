@@ -85,6 +85,49 @@ describe("ERP warehouse cost anomaly detection", () => {
 });
 
 describe("ERP Lworkstation-owned resolutions", () => {
+  it("uses recorded purchase totals including services before dividing the latest three quantities", () => {
+    const result = calculateWarehouseCostDecision({ warehouseSku: "WH-1", period: "2034-06", purchaseRecords: [
+      record("A", "2034-06-12", 2.4, 12, { amountBasis: "purchase_total", totalPrice: 36 }),
+      record("B", "2034-06-11", 4, 6, { amountBasis: "purchase_total", totalPrice: 30 }),
+      record("C", "2034-05-10", 3, 9, { amountBasis: "purchase_total", totalPrice: 36 }),
+      record("OLD", "2034-04-01", 2, 1, { amountBasis: "purchase_total", totalPrice: 2 }),
+      record("FUTURE", "2034-07-01", 8, 10, { amountBasis: "purchase_total", totalPrice: 90 }),
+      record("CANCELLED", "2034-06-20", 8, 10, { amountBasis: "purchase_total", totalPrice: 90, statusFields: { status: "11" } }),
+    ] });
+    expect(result).toMatchObject({ totalQuantity: 27, totalPrice: 102, formalUnitCost: 3.7777, selectedRecordIds: ["A", "B", "C"] });
+    expect(result.selectedRecords[0]).toMatchObject({ unitPrice: 3, totalPrice: 36, amountBasis: "purchase_total" });
+  });
+
+  it("sums original amounts without rounding repeating per-item prices first", () => {
+    const result = calculateWarehouseCostDecision({ warehouseSku: "WH-1", purchaseRecords: [
+      record("A", "2034-06-12", 0.2, 3, { amountBasis: "purchase_total", totalPrice: 1 }),
+      record("B", "2034-06-11", 0.2, 7, { amountBasis: "purchase_total", totalPrice: 2 }),
+    ] });
+    expect(result).toMatchObject({ totalQuantity: 10, totalPrice: 3, formalUnitCost: 0.3 });
+  });
+
+  it.each([["ignore_anomaly", 1, 4], ["confirm_true_price", 1, 4], ["correct_price", 2, 8]])("preserves total evidence while applying %s explicitly", (action, resolvedUnitPrice, totalPrice) => {
+    const purchaseRecords = [record("ONE", "2034-06-12", 0.5, 4, { amountBasis: "purchase_total", totalPrice: 4 })];
+    const before = structuredClone(purchaseRecords);
+    const result = calculateWarehouseCostDecision({ warehouseSku: "WH-1", purchaseRecords, resolutions: [{
+      recordId: "ONE", warehouseSku: "WH-1", action, originalUnitPrice: 1, resolvedUnitPrice,
+      resolvedBy: "synthetic-user", resolvedAt: "2034-06-13T00:00:00Z",
+    }] });
+    expect(result).toMatchObject({ formalUnitCost: resolvedUnitPrice, totalPrice });
+    expect(result.selectedRecords[0].totalPrice).toBe(4);
+    expect(purchaseRecords).toEqual(before);
+  });
+
+  it("does not fabricate a missing or invalid recorded purchase total from the base unit price", () => {
+    for (const totalPrice of [null, "", -1, "bad"]) {
+      const result = calculateWarehouseCostDecision({ warehouseSku: "WH-1", purchaseRecords: [
+        record("A", "2034-06-12", 4, 3, { amountBasis: "purchase_total", totalPrice }),
+      ] });
+      expect(result.formalUnitCost).toBeNull();
+      expect(result.selectedRecords).toHaveLength(0);
+    }
+  });
+
   it("allows a real one-yuan price to be confirmed without changing it", () => {
     const purchaseRecords = [
       record("ONE", "2026-07-03", 1, 2),

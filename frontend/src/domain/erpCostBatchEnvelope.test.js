@@ -30,6 +30,18 @@ function evidence(warehouseSku, unitPrice = 4) {
   };
 }
 
+it("retains the purchase total basis through JSON inbox validation without inventing missing amounts", () => {
+  const fixture = buildFixture();
+  const record = fixture.warehouseEvidence[0].purchaseRecords[0];
+  Object.assign(record, { amountBasis: "purchase_total", totalPrice: 15, purchaseUnitPrice: 6.2, serviceUnitPrice: 1.3 });
+  const restored = validateErpCostInboxEnvelope(JSON.parse(JSON.stringify(buildErpCostInboxEnvelope({ batch: fixture, deliveryId: "TOTAL" }))));
+  expect(restored.batch.warehouseEvidence[0].purchaseRecords[0]).toMatchObject({ amountBasis: "purchase_total", quantity: 2, totalPrice: 15, purchaseUnitPrice: 6.2, serviceUnitPrice: 1.3 });
+  record.totalPrice = null;
+  expect(validateErpCostBatchEnvelope(fixture).envelope.warehouseEvidence[0].purchaseRecords[0].totalPrice).toBeNull();
+  record.amountBasis = "unknown";
+  expect(() => validateErpCostBatchEnvelope(fixture)).toThrow("采购金额口径无效");
+});
+
 function buildFixture() {
   return buildErpCostBatchEnvelope({
     batchId: "ERP-BATCH-1",

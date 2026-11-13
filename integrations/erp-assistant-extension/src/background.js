@@ -14,6 +14,8 @@
   // Connection probes retain their short deadline so offline recovery stays prompt.
   const LOOPBACK_COMMIT_TIMEOUT_MS = 60000;
   const MAX_COST_PAYLOAD_BYTES = 25 * 1024 * 1024;
+  const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
+  const STORAGE_HEADROOM_BYTES = 256 * 1024;
   const ERP_PAGE_PATH = '/view/system/purchaseOrderModule/purchasingManagement.html';
   const activeDeliveries = new Set();
   const CHECKPOINT_KEY = 'shopeersErpCollectionCheckpointsV1';
@@ -92,9 +94,9 @@
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
     const currentVersion = chrome.runtime.getManifest().version;
-    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59'];
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.61'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -539,17 +541,44 @@
 
   async function writePending(records) {
     const clearedAt = Date.parse(workspaceReset?.clearedAt || '');
-    await chrome.storage.local.set({ [PENDING_RESULTS_KEY]: records.filter(record => !Number.isFinite(clearedAt) || Date.parse(record.createdAt || '') > clearedAt) });
+    try {
+      await chrome.storage.local.set({ [PENDING_RESULTS_KEY]: records.filter(record => !Number.isFinite(clearedAt) || Date.parse(record.createdAt || '') > clearedAt) });
+    } catch (error) {
+      if (/quota|kQuotaBytes/i.test(error?.message || '')) throw storageCapacityError();
+      throw error;
+    }
+  }
+
+  const jsonBytes = value => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  function storageCapacityError() {
+    return Object.assign(new Error('本机成本暂存空间不足，本批回传尚未确认。'), { code: 'ERP_COST_STORAGE_FULL', status: 507 });
+  }
+  async function costStorageCapacity(record, records = null) {
+    const retained = records ?? await readPending();
+    const quota = Number.isSafeInteger(chrome.storage.local.QUOTA_BYTES) && chrome.storage.local.QUOTA_BYTES > 0
+      ? chrome.storage.local.QUOTA_BYTES : DEFAULT_STORAGE_QUOTA_BYTES;
+    const used = typeof chrome.storage.local.getBytesInUse === 'function'
+      ? await chrome.storage.local.getBytesInUse(null) : jsonBytes(retained) + PENDING_RESULTS_KEY.length;
+    if (!Number.isSafeInteger(used) || used < 0) throw loopbackError('ERP_STORAGE_CHECK_FAILED', '本机暂存容量尚未确认，请继续原任务重试。', 503);
+    const existing = retained.find(item => item.resultDeliveryId === record.resultDeliveryId);
+    // Updating an exact queued payload replaces its existing bytes. Leave room
+    // for checkpoint/configuration writes and native JSON representation changes.
+    const storageBytes = jsonBytes(record) + 1;
+    const storageAvailableBytes = Math.max(0, quota - used + (existing ? jsonBytes(existing) + 1 : 0) - (existing ? 0 : STORAGE_HEADROOM_BYTES));
+    return { storageBytes, storageAvailableBytes, storageFits: storageBytes <= storageAvailableBytes };
   }
 
   let pendingWrites = Promise.resolve();
   function mutatePending(change) {
-    const operation = pendingWrites.catch(() => {}).then(async () => writePending(change(await readPending())));
+    const operation = pendingWrites.catch(() => {}).then(async () => writePending(await change(await readPending())));
     pendingWrites = operation;
     return operation;
   }
   function savePending(record) {
-    return mutatePending((records) => [...records.filter((item) => item.resultDeliveryId !== record.resultDeliveryId), record]);
+    return mutatePending(async records => {
+      if (record.requestKind !== 'catalog' && !(await costStorageCapacity(record, records)).storageFits) throw storageCapacityError();
+      return [...records.filter((item) => item.resultDeliveryId !== record.resultDeliveryId), record];
+    });
   }
 
   function removePending(resultDeliveryId) {
@@ -557,6 +586,7 @@
   }
 
   function retryable(error) {
+    if (error?.code === 'ERP_COST_STORAGE_FULL') return false;
     return !Number.isFinite(error?.status) || error.status === 408 || error.status === 429 || error.status >= 500;
   }
 
@@ -776,7 +806,7 @@
   async function measureCostResult(input, sender) {
     if (!senderAllowed(sender)) throw loopbackError('ERP_UNTRUSTED_SENDER', '只允许 ERP 采购管理页的隔离脚本核对成本载荷。', 403);
     const { record } = await prepareTaskCostResult(input ?? {}, { persist: false });
-    return { ok: true, bytes: costPayloadBytes(record) };
+    return { ok: true, bytes: costPayloadBytes(record), ...await costStorageCapacity(record) };
   }
 
   async function prepareCostResult(input) {

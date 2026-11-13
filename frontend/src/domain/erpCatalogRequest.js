@@ -99,9 +99,11 @@ export function normalizeErpCatalogPurchaseEvidence(value) {
     if (ref !== evidenceRef(warehouseSku)) throw new Error('ERP 资料采购证据与仓库 SKU 不一致。');
     const normalizeRecords = (records, excluded) => (Array.isArray(records) ? records : []).map((record, index) => {
       if (optional(record?.warehouseSku) && canonicalWarehouseSku(record.warehouseSku) !== canonical) throw new Error('ERP 资料采购记录与仓库证据不一致。');
+      if (record?.amountBasis != null && record.amountBasis !== 'purchase_total') throw new Error('采购金额口径无效。');
       return {
         recordId: required(record?.recordId ?? record?.id, `ERP 资料第 ${index + 1} 条采购记录 ID`), warehouseSku,
       productName: optional(record?.productName ?? record?.name), quantity: number(record?.quantity ?? record?.qty, '采购数量'), unitPrice: number(record?.unitPrice, '采购单价'), totalPrice: number(record?.totalPrice, '采购金额'),
+      ...(record?.amountBasis === 'purchase_total' ? { amountBasis: 'purchase_total', purchaseUnitPrice: number(record.purchaseUnitPrice, '原采购单价'), serviceUnitPrice: number(record.serviceUnitPrice, '服务单价') } : {}),
       purchaseDate: optional(record?.purchaseDate ?? record?.date), order1688: optional(record?.order1688), purchaseOrderNo: optional(record?.purchaseOrderNo), purchaseOrderId: optional(record?.purchaseOrderId),
       supplierName: optional(record?.supplierName), supplier1688Url: normalizeErpCatalogUrl(record?.supplier1688Url), ...normalizeErpCatalogFields(record, { includeMappings: false }),
       eligible: excluded ? false : record?.eligible !== false, selectedForPreview: false, exclusionReasons: unique(record?.exclusionReasons), warningReasons: unique(record?.warningReasons),

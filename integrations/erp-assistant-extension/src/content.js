@@ -32,14 +32,14 @@
     const RETRY_COUNT = 2;
     const CACHE_TTL = 10 * 60 * 1000;
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
-    const RESULT_CACHE_KEY = 'latest_cost_result_v7';
+    const RESULT_CACHE_KEY = 'latest_cost_result_v8_purchase_total';
     const PREFIX = '[ERP Assistant]';
     const WORKSPACE_RESET_KEY = 'erpAssistantV8_workspaceResetV1';
     let workspaceResetId = '';
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.60';
+    const EXTENSION_VERSION = '8.0.61';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1232,8 +1232,9 @@
         details.forEach((detail, detailIndex) => {
             const warehouseSku = String(detail && detail.itemId || '').trim();
             const date = parseDateInfo(detail && detail.creationTime);
-            const qty = Number.parseFloat(detail && detail.purchaseQuantity);
-            const unitPrice = Number.parseFloat(detail && detail.purchaseUnitPrice);
+            const qty = Number(detail?.purchaseQuantity);
+            const amounts = resultPolicy.purchaseAmounts(detail);
+            const unitPrice = amounts.unitPrice;
             const purchaseCatalog = resultPolicy.purchaseCatalogFromDetail(detail);
             const evidenceBase = {
                 recordId: String(detail.detailId || detail.purchaseOrderDetailId || detail.id || ((detail._purchaseOrderId || detail.purchaseOrderId || 'order') + ':' + detailIndex)).trim(),
@@ -1244,7 +1245,7 @@
                 ...(purchaseCatalog ? { purchaseCatalog } : {}),
                 quantity: Number.isFinite(qty) ? qty : null,
                 unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
-                totalPrice: Number.isFinite(qty) && Number.isFinite(unitPrice) ? qty * unitPrice : null,
+                ...amounts,
                 purchaseDate: date ? date.text : String(detail && detail.creationTime || '').trim(),
                 order1688: String(detail._orderNo1688 || '').trim(),
                 purchaseOrderNo: String(detail._purchaseOrderNo || '').trim(),
@@ -1276,7 +1277,7 @@
                 ...(purchaseCatalog ? { purchaseCatalog } : {}),
                 qty,
                 unitPrice,
-                totalPrice: qty * unitPrice,
+                ...amounts,
                 date: date.text,
                 dateValue: date.dateValue,
                 timestamp: date.timestamp,
@@ -1293,7 +1294,7 @@
         if (buckets.size === 0 && !allowEmpty) {
             throw new CostError(
                 '没有可用的采购明细',
-                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
+                '无日期、无 SKU、数量不大于 0 或采购总价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
             );
         }
 
@@ -1329,6 +1330,9 @@
                     quantity: record.qty,
                     unitPrice: record.unitPrice,
                     totalPrice: record.totalPrice,
+                    amountBasis: record.amountBasis,
+                    purchaseUnitPrice: record.purchaseUnitPrice,
+                    serviceUnitPrice: record.serviceUnitPrice,
                     purchaseDate: record.date,
                     order1688: record.order1688,
                     purchaseOrderNo: record.purchaseOrderNo,
@@ -1830,6 +1834,7 @@
             + (batches.some(batch => batch.catalogStatus) ? ' · 资料已检查 ' + batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).reduce((count, batch) => count + batch.platformSkcs.length, 0) + '/' + total + ' SKC' : '');
         if (task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') taskStage += ' · 已送达结果保留，服务恢复后继续原任务';
         if (task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED') taskStage = 'ERP 店铺权限校验未通过，采集已暂停 · 已送达结果保留，请检查 ERP 采购查询后继续原任务';
+        if (task.status === 'paused' && task.pauseReason?.code === 'ERP_DELIVERY_FAILED') taskStage = '成本回传未完成，采集已暂停 · ' + (task.pauseReason.message || '本机尚未确认收到本批成本。') + ' 继续原任务会先核对原回传结果；已送达结果保留。';
         renderPageContext();
         renderStatus();
     }
@@ -1937,9 +1942,10 @@
                             throw Object.assign(new CostError('成本回传体积尚未确认', measured?.message || '请继续原任务重试，结果尚未标记为已送达。'), { code: measured?.code });
                         }
                         const limit = (batch.platformSkcs.length > 1 ? 20 : 25) * 1024 * 1024;
-                        if (measured.bytes > limit) {
-                            throw Object.assign(new CostError(batch.platformSkcs.length > 1 ? '正在分段保存完整采购证据' : '当前 SKC 的完整采购证据超过传输上限',
-                                '完整证据保留，未截断或采用；请核对该商品范围。'), { code: batch.platformSkcs.length > 1 ? 'ERP_COST_PAYLOAD_LARGE' : 'ERP_COST_PAYLOAD_TOO_LARGE', readMetrics: state.meta });
+                        if (measured.bytes > limit || measured.storageFits === false) {
+                            throw Object.assign(new CostError(batch.platformSkcs.length > 1 ? '正在分段保存完整采购证据' : measured.storageFits === false ? '本机成本暂存空间不足' : '当前 SKC 的完整采购证据超过传输上限',
+                                measured.storageFits === false ? '本机成本暂存空间不足，本批回传尚未确认。' : '完整证据保留，未截断或采用；请核对该商品范围。'),
+                                { code: batch.platformSkcs.length > 1 ? 'ERP_COST_PAYLOAD_LARGE' : measured.storageFits === false ? 'ERP_COST_STORAGE_FULL' : 'ERP_COST_PAYLOAD_TOO_LARGE', readMetrics: state.meta });
                         }
                     }
                     state.meta = deliveryMeta;
@@ -1975,7 +1981,7 @@
                     setLoading('成本已采集，正在回传', '等待本机持久收件确认');
                     deliveryAttempted = true;
                     const response = await bridge.submit({ ...deliveryState, ...state, resultDeliveryId: run.resultDeliveryId, querySkcs: batch.platformSkcs, collectionTask: identity });
-                    if (response.status !== 'success' && !response.retained) throw new CostError('成本尚未送达', response.message || '请重试未完成项。');
+                    if (response.status !== 'success' && !response.retained) throw Object.assign(new CostError('成本尚未送达', response.message || '请重试未完成项。'), { code: response.code });
                     task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                     updateTaskStatus(task); renderResults(); renderStatus(); updateActionState();
                 } catch (error) {
@@ -1996,8 +2002,13 @@
                         // A lost ACK or status read cannot demote a durable receipt.
                         // Preserve the collected identity for receipt reconciliation.
                         run.pauseRequested = true;
-                        taskStage = '回执待核对 · 已采集结果保留，点击继续核对';
+                        run.pauseReason = { code: 'ERP_DELIVERY_FAILED', message: error.details || error.message || '本机尚未确认收到本批成本。' };
+                        taskStage = '回执待核对 · 点击继续原任务核对并接续';
                         break;
+                    }
+                    if (['ERP_COST_STORAGE_FULL', 'ERP_STORAGE_CHECK_FAILED'].includes(error.code)) {
+                        run.pauseRequested = true;
+                        run.pauseReason = { code: 'ERP_DELIVERY_FAILED', message: error.details || error.message };
                     }
                     const paused = rememberSourcePause(run, error) || error.code === 'ERP_COLLECTION_PAUSED' || run.pauseRequested;
                     const result = await taskOperation({ action: 'batch', ...identity, state: paused ? 'pending' : 'failed', error: paused ? null : error.details || error.message });
@@ -2329,7 +2340,7 @@
         const diagnostic = result.previewDiagnostic;
         const note = diagnostic?.needsReview ? '<p class="erpa-review-note"><strong>' + escapeHtml(diagnostic.label) + '</strong><br>' + escapeHtml(diagnostic.action) + '</p>' : '';
         const records = resultPolicy.previewEvidenceRecords(result, lastWarehouseEvidence);
-        const evidence = records.length ? '<details class="erpa-source-evidence"><summary>查看采购证据 · ' + records.length + ' 笔</summary><p>空白或无效单价不会补成 0。' + (records.length > 30 ? '这里显示前 30 笔，完整证据可在工作台查看。' : '') + '</p><div class="erpa-evidence-list">' + records.slice(0, 30).map(record => '<article><strong>' + escapeHtml(record.purchaseDate || '日期未提供') + '</strong><span>' + escapeHtml(record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '单号未提供') + '</span><p>数量 ' + escapeHtml(record.quantity ?? '未提供') + ' · 采购单价 ¥' + escapeHtml(record.unitPrice ?? '未提供') + '</p><small>' + (result.selectedRecordIds?.includes(record.recordId) ? '参与本次最近三笔计算' : '历史或排除记录，未参与本次计算') + '</small></article>').join('') + '</div><details class="erpa-raw-evidence"><summary>原始采购数据</summary><pre>' + escapeHtml(JSON.stringify(records.slice(0, 30), null, 2)) + '</pre></details></details>' : '<p class="erpa-muted">当前没有对应仓库 SKU 的采购记录。</p>';
+        const evidence = records.length ? '<details class="erpa-source-evidence"><summary>查看采购证据 · ' + records.length + ' 笔</summary><p>采购总价或数量缺失时不会补成 0。' + (records.length > 30 ? '这里显示前 30 笔，完整证据可在工作台查看。' : '') + '</p><div class="erpa-evidence-list">' + records.slice(0, 30).map(record => '<article><strong>' + escapeHtml(record.purchaseDate || '日期未提供') + '</strong><span>' + escapeHtml(record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '单号未提供') + '</span><p>数量 ' + escapeHtml(record.quantity ?? '未提供') + ' · 采购总价 ¥' + escapeHtml(record.totalPrice ?? '未提供') + ' · 核算单价 ¥' + escapeHtml(record.unitPrice ?? '未提供') + '</p><small>' + (result.selectedRecordIds?.includes(record.recordId) ? '参与本次最近三笔计算' : '历史或排除记录，未参与本次计算') + '</small></article>').join('') + '</div><details class="erpa-raw-evidence"><summary>原始采购数据</summary><pre>' + escapeHtml(JSON.stringify(records.slice(0, 30), null, 2)) + '</pre></details></details>' : '<p class="erpa-muted">当前没有对应仓库 SKU 的采购记录。</p>';
         if (result.previewStatus && result.previewStatus !== 'ready') return '<tr class="erpa-detail-row"><td colspan="9"><div class="erpa-detail-wrap">' + renderMappingList(result) + note + evidence + '</div></td></tr>';
         const rows = result.details.map((detail) => {
             const reasons = warningReasons(detail);
