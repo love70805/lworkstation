@@ -3,7 +3,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { db, DEFAULT_WORKSPACE_ID, createOrGetMonthlyLedger, setActiveMemberContext, saveErpCostRequest,
   receiveErpCostInboxEnvelope, saveManualCostOverride, revokeManualCostOverride, processErpCostInboxAdoption } from './database';
 import { saveRecoveredWarehouseCost } from './repositories/warehouseHistoryRecoveryRepository';
-import { saveProfitReport } from './repositories/profitReportRepository';
+import { createCurrentProfitReport, saveProfitReport } from './repositories/profitReportRepository';
 import { rejectErpCostInboxBatches, voidPublishedErpCostBatch, setErpCostAnomaliesIgnored } from './repositories/profitRepository';
 import { buildErpCostRequest } from '../domain/erpCosts';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
@@ -41,6 +41,7 @@ it('rechecks a stale completed UI snapshot and rejects manual save, revoke, conf
   await expect(processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [{ recordId: 'P', action: 'confirm_true_price' }] })).rejects.toMatchObject({ code: 'ERP_COST_REVIEW_NOT_READY' });
   await expect(saveRecoveredWarehouseCost({ ledgerId: ledger.id })).rejects.toMatchObject({ code: 'ERP_COST_REVIEW_NOT_READY' });
   await expect(saveProfitReport({ ledgerId: ledger.id })).rejects.toMatchObject({ code: 'ERP_COST_REVIEW_NOT_READY' });
+  await expect(createCurrentProfitReport({ ledgerId: ledger.id, kind: 'pre_deduction' })).rejects.toMatchObject({ code: 'ERP_COST_REVIEW_NOT_READY' });
   await expect(rejectErpCostInboxBatches({ ids: [receipt.id] })).rejects.toMatchObject({ code: 'ERP_COST_REVIEW_NOT_READY' });
   await expect(voidPublishedErpCostBatch({ inboxId: receipt.id, reason: '测试撤回' })).rejects.toMatchObject({ code: 'ERP_COST_REVIEW_NOT_READY' });
   expect(await db.auditEvents.toArray()).toEqual(audit);

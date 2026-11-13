@@ -1,4 +1,4 @@
-import { displayMoney, exactSum, REPORT_TEMPLATE_VERSION } from "../domain/profitReports";
+import { displayMoney, exactSum, REPORT_DOWNLOAD_FORMAT, REPORT_TEMPLATE_VERSION, sha256 } from "../domain/profitReports";
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 import { groupProfitExportProducts, mergeArchivedSkcSheet, mergeProfitSkcRows } from './profitSkcLayout';
 import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
@@ -105,7 +105,7 @@ function safeSheet(name,used){const base=String(name).replace(/[\[\]:*?/\\\x00-\
 
 function deductionSheet(report,rows) {
   const stores=[...report.totalsExact.stores].sort(byStore);
-  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额']),...[...rows].sort(byStore).map(row=>detailRow([identifier(row.businessId??'',1),identifier(row.platformSkc??'',1),identifier(row.supplierNumber??''),deductionNumber(row.signedAmountExact)]))],[headers(['店铺','明细合计']),...stores.map(store=>[text(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],5),widths:deductionWidths,rowHeight:reportRowHeight,alignment:[null,null,null,'right',null,null,'right']};
+  return {name:'扣款',rows:combine([headers(['补扣款单号','SKC','供方货号','扣款金额']),...[...rows].sort(byStore).map(row=>detailRow([identifier(row.businessId??'',1),identifier(row.platformSkc??'',1),identifier(row.supplierNumber??''),deductionNumber(row.signedAmountExact)]))],[headers(['店铺','明细合计']),...stores.map(store=>[identifier(store.store),deductionNumber(store.deductionExact)]),bandRow([text('合计'),deductionNumber(report.totalsExact.deductionExact)])],5),widths:deductionWidths,rowHeight:reportRowHeight,alignment:[null,null,null,'right',null,null,'right']};
 }
 // Saved downloads reuse their original styles while replacing this sheet only.
 export function buildProfitDeductionSheet(report,rows,registry) {
@@ -145,8 +145,27 @@ export function formatArchivedReportSkcs(files, sheets) {
 export const writeReportArchive = files => zip([...files]);
 
 export function bytesToBase64(bytes){let text="";for(let i=0;i<bytes.length;i+=16384)text+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(text);}
-export function base64ToBytes(value){return Uint8Array.from(atob(value),char=>char.charCodeAt(0));}
-export async function prepareReportDownload(report, { dispatchRows, deductionRows } = {}) {
+export function base64ToBytes(value){
+  const encoded=String(value).replace(/[\t\n\f\r ]/g,'');
+  if(!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)||encoded.length%4===1)throw new Error('报告文件编码无效。');
+  const padding=encoded.endsWith('==')?2:encoded.endsWith('=')?1:0;
+  const result=new Uint8Array(Math.floor(encoded.length*3/4)-padding);
+  let cursor=0;
+  // Uint8Array.from(string, callback) creates an intermediate element list.
+  // Decode bounded chunks directly into the final byte array instead.
+  for(let offset=0;offset<encoded.length;offset+=65536){
+    const text=atob(encoded.slice(offset,offset+65536));
+    for(let index=0;index<text.length;index++)result[cursor++]=text.charCodeAt(index);
+  }
+  return result;
+}
+export async function prepareReportDownload(report, { dispatchRows, deductionRows, useStoredFile=false } = {}) {
+  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&report.templateVersion===REPORT_TEMPLATE_VERSION
+    &&(useStoredFile||!dispatchRows&&!deductionRows)){
+    const bytes=base64ToBytes(report.fileBase64);
+    if(bytes[0]!==80||bytes[1]!==75||!report.fileSha256||await sha256(bytes)!==report.fileSha256)throw new Error('报告文件校验失败，请检查完整报告备份。');
+    return bytes;
+  }
   const { simplifySavedReport } = await import('./savedReportDownload');
   let bytes = await simplifySavedReport(report);
   if(report.kind==='financial'&&deductionRows){

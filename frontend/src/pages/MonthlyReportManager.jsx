@@ -1,11 +1,10 @@
 import { readProfitReportFreshness } from '../data/repositories/profitReportRepository';
 import { useCostEditingGuard } from '../hooks/useCostEditingGuard';
-import { assertLedgerCostEditingReady } from '../data/repositories/erpCostEditingGuard';
 import { sourceRevision } from '../data/db/derivedCache';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
-import { readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement, previewProfitReport, saveProfitReport } from "../data/repositories/profitReportRepository";
+import { readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement, createCurrentProfitReport } from "../data/repositories/profitReportRepository";
 import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, suggestDeductionStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate, legacyUnassignedDispatchRows } from "../domain/monthlySupplements";
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
 import { downloadReportFile } from "../lib/profitReportWorkbook";
@@ -200,10 +199,10 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,data:await readMonthlyReportState(ledgerId)};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry]);
   const latest = state?.ledgerId === ledgerId && state?.workspaceId === workspaceId ? state.data?.reports?.[0] : null;
   const freshness = useLiveQuery(async () => {
-    if (!latest) return null;
+    if (!latest || busy) return null;
     try { return await readProfitReportFreshness(latest.id); }
     catch (error) { return { reportId: latest.id, status: 'error', error: error.message }; }
-  }, [latest?.id, ledgerId, workspaceId, retry], null);
+  }, [latest?.id, ledgerId, workspaceId, retry, busy], null);
   const currentFreshness = freshness && latest && freshness.reportId === latest.id && (freshness.status === 'error' || freshness.sourceRevision === sourceRevision()) ? freshness : null;
   const reportTime = value => new Date(value).toLocaleString('zh-CN', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false });
   useEffect(()=>{onState?.(state);},[state,onState]);
@@ -213,7 +212,7 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   const missing=missingCostCount===undefined?data.ledger.costSummary?.missingCount:missingCostCount;
   const readiness=reportReadiness({...data,ledger:{...data.ledger,operationWorkflow:2},missingCount:missing});
   const nextKind=readiness.financialReady?'financial':'pre_deduction';
-  async function download(reportId){setBusy(true);setError('');try{const saved=await readProfitReportDownload(reportId);await downloadReportFile(saved.report,{dispatchRows:saved.dispatchRows,deductionRows:saved.deductionRows});}catch(error){setError(error.message);}finally{setBusy(false);}}
+  async function download(reportId){setBusy(true);setError('');try{const saved=await readProfitReportDownload(reportId);await downloadReportFile(saved.report,{dispatchRows:saved.dispatchRows,deductionRows:saved.deductionRows,useStoredFile:true});}catch(error){setError(error.message);}finally{setBusy(false);}}
   async function prepareOrderDownload(reportId){setBusy(true);setError('');try{setOrderDownload(await readProfitReportDownload(reportId));}catch(error){setError(error.message);}finally{setBusy(false);}}
   async function exportCurrent(){
     if(exportingRef.current || costGuard.blocked)return;
@@ -221,12 +220,8 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     setBusy(true);setError('');
     try{
       const input={ledgerId,kind:nextKind};
-      await assertLedgerCostEditingReady(ledgerId);
-      setExportStage('正在核对台账与成本…');
-      const preview=await previewProfitReport(input);
-      setExportStage('正在生成本次报告…');
-      const report=await saveProfitReport(input,{expectedFingerprint:preview.fingerprint});
-      setExportStage('正在生成 Excel 文件…');
+      const report=await createCurrentProfitReport(input,{onProgress:setExportStage});
+      setExportStage('正在准备 Excel 下载…');
       await downloadReportFile(report);
       notify('利润表已导出，数据仍可随时调整并重新核算。');
     }catch(error){setError(error.message);}finally{exportingRef.current=false;setBusy(false);setExportStage('');}
@@ -248,7 +243,7 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     </details>
     {latest ? <div className="report-latest-state" role="status">
       {latest ? <><span>最近导出：{latest.kind === 'financial' ? '利润表' : '未扣款报告'} · r{latest.revision} · <time dateTime={latest.createdAt}>{reportTime(latest.createdAt)}</time></span>
-        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{!currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
+        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{busy ? '文件处理完成后核对来源' : !currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
         {currentFreshness?.status === 'error' ? <Button onClick={()=>setRetry(value=>value+1)}>重试核对</Button> : null}
         <Button variant="ghost" disabled={busy} onClick={()=>download(latest.id)}>下载最近报告</Button></> : <span>尚未导出报告。导出后将在此保留类型、版本和来源状态。</span>}
     </div> : null}

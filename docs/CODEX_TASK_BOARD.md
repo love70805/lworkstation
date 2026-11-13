@@ -1,5 +1,9 @@
 # Codex 当前任务看板
 
+## 2026-11-13 · Beta 导出内存优化（实施中）
+
+用户已批准分块来源校验、复用导出计算、轻量状态/报告读取和减少 Excel 重复转换。已接入用户提供的 Beta.15 完整源码归档（标记 `84fd308`，本机导入 `e25ea76`），保留既有功能并继续实施。契约、验收与版本边界见[本批记录](integration/REPORT_EXPORT_MEMORY_2026_11.md)。不修改真实业务库或历史报告。
+
 2026-11-07 核对。当前公开版本见[最新稳定版](https://github.com/love70805/lworkstation/releases/latest)。软件维护从已置顶的项目主线对话接续，按当次确定的范围实施。[项目约束](../AGENTS.md) · [发布状态](RELEASE_STATUS.md) · [2.0 使用指南](USER_GUIDE_2.0.md)
 
 ## 2.0.7-beta.2 · 可并行安装的桌面 Beta

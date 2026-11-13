@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.7-beta.15",
+  "version": "2.0.7-beta.16",
   "edition": "beta",
   "candidateOnly": true,
-  "integrationBranch": "codex/beta13-erp-cost-delivery",
+  "integrationBranch": "codex/beta-export-memory",
   "requiredCommits": [
     {
-      "module": "beta14-cost-review",
-      "commit": "8b920a7"
+      "module": "user-beta15-source-snapshot",
+      "commit": "e25ea76"
     }
   ]
 }

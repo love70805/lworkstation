@@ -29,7 +29,14 @@ export async function assertLedgerCostEditingReady(ledgerId) {
 export async function assertCachedLedgerCostEditingReady(ledger) {
   if (!hasCostTaskTransport()) return;
   const state = readErpTaskState(ledger.workspaceId);
-  const inboxes = await db.erpCostInbox.where('ledgerId').equals(ledger.id).toArray();
+  const inboxes = [];
+  // The guard needs receipt identity and adoption state, never its purchase
+  // payload. Release each decoded envelope before retaining the next state.
+  await db.erpCostInbox.where('ledgerId').equals(ledger.id).each(inbox => inboxes.push({
+    workspaceId: inbox.workspaceId, ledgerId: inbox.ledgerId, requestId: inbox.requestId,
+    deliveryId: inbox.deliveryId, status: inbox.status,
+    adoptionPending: inbox.adoptionPending, adoptionFailure: inbox.adoptionFailure,
+  }));
   fail(erpCostEditingGuard({ workspaceId: ledger.workspaceId, ledgerId: ledger.id,
     tasks: state.tasks, loading: !state.ready, error: state.error, inboxes }));
 }
