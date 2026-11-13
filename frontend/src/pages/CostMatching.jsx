@@ -11,10 +11,12 @@ import { formatErpUnitCost, formatManualUnitCost, formatPurchaseAmountBasis } fr
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
 import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
+import { prepareCostRecollection, runCostRecollection } from '../lib/erpCostRecollection';
 import { createManualOverrideLookup, storeSkuKey } from "../domain/manualCostOverride";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { costEvaluationPeriod } from '../domain/inventoryAccounting';
 import ErpCollectionLauncher from '../components/ErpCollectionLauncher';
+import ErpCostRecollectionDialog from '../components/ErpCostRecollectionDialog';
 import ManualCostDialog from "./ManualCostDialog";
 import WarehouseHistoryDialog from './WarehouseHistoryDialog';
 import { readErpHistoryMappings } from '../data/repositories/profitRepository';
@@ -181,7 +183,16 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   const allInboxRecords = useLiveQuery(() => queryLedgerId ? listErpCostInbox({ ledgerId: queryLedgerId, statuses: ["pending", "loaded", "applied", "rejected", "voided"] }) : [], [queryLedgerId], []);
   const requestRecords = useLiveQuery(() => queryLedgerId ? listErpCostRequests(queryLedgerId) : [], [queryLedgerId], []);
   const collection = useErpCollectionTasks(snapshot?.ledger?.workspaceId, snapshot?.ledger?.id);
-  const collectionTask = collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
+  const [recollectionTarget, setRecollectionTarget] = useState(null);
+  const [recollectionIntent, setRecollectionIntent] = useState(null);
+  const [recollectionBusy, setRecollectionBusy] = useState(false);
+  const [recollectionError, setRecollectionError] = useState('');
+  const recollectionBusyRef = useRef(false), recollectionScopeRef = useRef(null), recollectionAliveRef = useRef(true);
+  useEffect(() => { recollectionAliveRef.current = true; return () => { recollectionAliveRef.current = false; }; }, []);
+  const selectedRecollection = recollectionTarget?.workspaceId === snapshot?.ledger?.workspaceId && recollectionTarget?.ledgerId === snapshot?.ledger?.id ? recollectionTarget : null;
+  const collectionTask = selectedRecollection
+    ? collection.tasks.find(task => task.requestId === selectedRecollection.id) ?? null
+    : collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
   const location = useLocation();
   useEffect(() => {
     if (location.hash !== '#erp-collection-progress' || !collectionTask) return;
@@ -246,7 +257,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   const unloadedInboxIdsRef = useRef(new Set());
   const inboxLoadRef = useRef(null);
   const ledgerIdentityRef = useLedgerIdentity(snapshot?.ledger?.id);
-  const effectiveRequestId = costRequestId ?? latestRequest?.id ?? null;
+  const effectiveRequestId = selectedRecollection?.id ?? costRequestId ?? latestRequest?.id ?? null;
   const requestForImport = requestRecords.find((request) => request.id === batchEnvelope?.requestId) ?? costRequest ?? latestRequest ?? null;
   const workspaceInboxRecords = useMemo(() => allInboxRecords.filter((record) => (
     !snapshot?.ledger?.workspaceId || record.workspaceId === snapshot.ledger.workspaceId
@@ -358,6 +369,12 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   }, [filteredSalesLines]);
   const erpQueryScope = useMemo(() => collectErpPlatformSkcs(filteredSalesLines), [filteredSalesLines]);
   const { platformSkcs, missingCount: missingPlatformSkcCount } = erpQueryScope;
+  const recollectionSkcs = new Set(platformSkcs.map(canonicalPlatformSkc));
+  const recollectionInput = { ledger: snapshot?.ledger, platformSkcs,
+    expectedSkus: expectedSkus.filter(item => String(item.platformSkc ?? '').trim() && recollectionSkcs.has(canonicalPlatformSkc(item.platformSkc))), ledgerVersion };
+  const recollectionScopeKey = JSON.stringify([erpRequestScopeKey(recollectionInput), filterSearchKey]);
+  const recollectReady = !locked && !scopeHasIdentityConflict && !collection.loading && !collection.error && platformSkcs.length > 0 && recollectionInput.expectedSkus.length > 0;
+  recollectionScopeRef.current = recollectReady ? recollectionScopeKey : null;
   const displayPlatformSkcs = platformSkcs;
   const displaySkuSet = useMemo(() => new Set(filteredSalesLines.map(row => row.canonicalPlatformSku)), [filteredSalesLines]);
   const registrationSkcs = collectionRequest?.platformSkcs ?? platformSkcs;
@@ -371,6 +388,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     return () => window.clearInterval(timer);
   }, [registrationScope, locked, scopeHasIdentityConflict]);
   useEffect(() => {
+    if (recollectionBusyRef.current || recollectionIntent?.request) return;
     if (collection.loading || collection.error) return;
     if (scopeCollection && (collectionScopeChanged || locked)) {
       void controlErpCollectionTask(scopeCollection.taskId, { workspaceId: scopeCollection.workspaceId, action: 'stop' })
@@ -408,9 +426,10 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
       void ensureAutoErpRequest({ ledger: snapshot.ledger, platformSkcs: registrationSkcs, expectedSkus: registrationExpected, ledgerVersion }, {
         latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest, prepareHistory: readErpHistoryMappings,
         activeRequest: collectionRequest,
-        isCurrent: () => !cancelled && currentRegistrationScopeRef.current === registrationScope,
+        isCurrent: () => !cancelled && !recollectionBusyRef.current && currentRegistrationScopeRef.current === registrationScope,
       }).then((request) => {
         if (!request || cancelled || currentRegistrationScopeRef.current !== registrationScope) return;
+        setRecollectionTarget(previous => previous ? request : null);
         if (!sourceText.trim() && !loadedInboxId) { setCostRequestId(request.id); setCostRequest(request); }
         setRegistrationState({ status: "registered", scope: registrationScope, message: "回传关联已登记，可在已选范围内分批查询" });
         void registerCostCatalogCompanion(request).catch(() => { /* Cost registration remains usable; explicit catalog supplement can retry. */ });
@@ -419,7 +438,36 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     const timer = registrationStartedRef.current ? window.setTimeout(registerScope, 300) : null;
     if (timer === null) registerScope();
     return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
-  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionRequest?.id, collectionScopeChanged]);
+  }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionRequest?.id, collectionScopeChanged, recollectionBusy, recollectionIntent?.request?.id]);
+  const openRecollection = () => {
+    if (!recollectReady || recollectionBusyRef.current) return;
+    setRecollectionError('');
+    setRecollectionIntent({ ...prepareCostRecollection(recollectionInput, { scopeKey: recollectionScopeKey, task: collectionTask, requestId: effectiveRequestId }),
+      filterLabel: describeProfitFilter(profitFilter) });
+  };
+  const confirmRecollection = async () => {
+    if (!recollectionIntent || recollectionBusyRef.current) return;
+    const intent = recollectionIntent;
+    recollectionBusyRef.current = true; setRecollectionBusy(true); setRecollectionError('');
+    try {
+      await runCostRecollection(intent, {
+        isCurrent: item => recollectionAliveRef.current && recollectionScopeRef.current === item.scopeKey,
+        stopTask: task => controlErpCollectionTask(task.taskId, { workspaceId: task.workspaceId, requestId: task.requestId, scopeHash: task.scopeHash, filters: task.filters, action: 'stop' }),
+        latest: getLatestErpCostRequest, save: saveErpCostRequest, register: registerErpBridgeRequest, prepareHistory: readErpHistoryMappings,
+        start: input => window.shopeersDesktopRuntime.startErpCollection(input),
+        onPrepared: request => {
+          setRecollectionTarget(request); setCostRequestId(request.id); setCostRequest(request);
+          const scope = erpRequestScopeKey(intent.input);
+          previousRegistrationRef.current = { ledger: intent.input.ledger, scope };
+          setRegistrationState({ status: 'registered', scope, message: '已准备新的采购总价采集请求。' });
+          void registerCostCatalogCompanion(request).catch(() => {});
+        },
+      });
+      if (recollectionAliveRef.current && recollectionScopeRef.current === intent.scopeKey) { setRecollectionIntent(null); setCollectionError(''); }
+      collection.refresh();
+    } catch (error) { if (recollectionAliveRef.current) setRecollectionError(error.message); }
+    finally { recollectionBusyRef.current = false; if (recollectionAliveRef.current) setRecollectionBusy(false); }
+  };
   const retryCollectionRegistration = async result => {
     if (!['ERP_SESSION_CHANGED', 'ERP_REQUEST_INVALID', 'ERP_TASK_STOPPED'].includes(result?.code)) {
       setRegistrationRetry(value => value + 1);
@@ -433,6 +481,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     });
     if (!request || currentRegistrationScopeRef.current !== scope) return null;
     setCostRequestId(request.id); setCostRequest(request);
+    setRecollectionTarget(previous => previous ? request : null);
     setRegistrationState({ status: 'registered', scope, message: '已重新准备当前范围，可继续采集。' });
     void registerCostCatalogCompanion(request).catch(() => {});
     collection.refresh();
@@ -1116,10 +1165,15 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     const row = allReviewRows.find(row => row.store === item.store && item.platformSku && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(item.platformSku));
     if (row) setManualTarget({ id: row.id, mode: 'details', inboxId: item.inboxId });
   }} />;
+  const canOfferRecollection = Boolean(collectionTask || selectedRecollection || persistedCostRows.length || workspaceInboxRecords.length);
+  const recollectionLauncherProps = { onRecollect: canOfferRecollection ? openRecollection : undefined, recollectReady, preparing: recollectionBusy };
+  const recollectionChanged = recollectionIntent && recollectionIntent.scopeKey !== recollectionScopeRef.current;
+  const recollectionDialog = <ErpCostRecollectionDialog intent={recollectionIntent} busy={recollectionBusy} changed={recollectionChanged} error={recollectionError}
+    onClose={() => { if (!recollectionBusyRef.current) setRecollectionIntent(null); }} onConfirm={confirmRecollection} />;
   if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
     <p className="profit-collection-scope">当前筛选范围 · {describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
     <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
-      ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
+      ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} {...recollectionLauncherProps} />
     <CostAttention missing={missingStoreSkus} hasAnomalies={hasPendingAnomalies}
       collected={Boolean(workspaceInboxRecords.length)}>{anomalyActions}</CostAttention>
     {collectionTask ? <details className="profit-task-record" open={activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId) ? true : undefined}>
@@ -1130,7 +1184,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     {registrationState.status === 'failed' ? <p role="alert">{registrationState.message}<Button onClick={() => setRegistrationRetry(value => value + 1)}>重试连接</Button></p> : null}
     {scopeHasIdentityConflict ? <p role="alert">部分 SKU 的台账归属有冲突，请先检查导入映射。</p> : null}
     {reviewTarget && !targetRow ? <p role="status">正在读取此商品的成本证据…</p> : null}
-    {costDialog}{resolutionDialog}{erpAssistantDialog}
+    {costDialog}{resolutionDialog}{erpAssistantDialog}{recollectionDialog}
   </section>;
 
   return (
@@ -1141,7 +1195,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
       {!desktop ? <div className="page-back-row cost-page-toolbar"><Button icon={PlugZap} onClick={() => setErpAssistantOpen(true)}>安装 ERP 助手</Button></div> : null}
       <div className="profit-section-toolbar"><div>{!validatedContext ? <h1>ERP 成本核对</h1> : null}<p>当前范围：{describeProfitFilter(profitFilter)} · 账本月份 {snapshot.ledger.period}</p></div><div className="page-actions"><Button icon={Inbox} variant="ghost" onClick={openInboxOverview} title="查看当前月份的全部 ERP 回传与待处理 SKU">回传总览 · {inboxReview.batches.length} 批</Button><Button variant="ghost" onClick={() => setManualInputOpen(true)}>{batchEnvelope ? "查看当前证据" : "手动导入"}</Button><input ref={fileInputRef} className="visually-hidden" type="file" aria-label="选择 ERP 成本结果文件" accept=".json,.tsv,.csv,.txt,.xlsx,.xls" onChange={(event) => loadFile(event.target.files[0])} /></div></div>
       {!validatedContext ? <ProfitScopeFilters searchCosts filter={profitFilter} stores={stores} suppliers={suppliers} workspaceId={snapshot?.ledger?.workspaceId} scopeRows={formalSalesLines} onChange={changeScope} /> : null}
-      <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId} ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} />
+      <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId} ready={registrationReady && !scopeHasIdentityConflict} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} {...recollectionLauncherProps} />
       <ErpCollectionProgress task={collectionTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy} locked={locked} error={collectionError || collection.error} statusError={collection.error} />
       {!locked && missingReviewRows.length ? <p className="cost-correction-help">采集时会为映射缺失项补查有可靠历史关联的仓库。可用核价显示在原“人工更正”中，核对后保存；旧历史证据文件可通过“手动导入”读取。</p> : null}
       {warehouseHistoryOpen ? <WarehouseHistoryDialog key={snapshot.ledger.id} ledger={snapshot.ledger} initialFile={warehouseHistoryFile} onClose={() => { setWarehouseHistoryOpen(false); setWarehouseHistoryFile(null); }} onSaved={result => notify(`已补齐 ${result.savedCount} 项成本，剩余待处理 ${result.pending.length} 项。`, 'success')} /> : null}
@@ -1194,6 +1248,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
       {manualInputDialog}
       {erpAssistantDialog}
       {resolutionDialog}
+      {recollectionDialog}
       <Modal open={Boolean(incomingCandidate)} onClose={keepIncomingDraft} title="已收到 ERP 成本结果" description="新批次已持久保存；载入将替换当前未发布草稿。" footer={<><Button onClick={keepIncomingDraft}>保留草稿</Button><Button variant="primary" onClick={() => { const candidate = incomingCandidate; setIncomingCandidate(null); void loadInboxRecord(candidate, { discardDraft: true }); }}>丢弃草稿并载入结果</Button></>}><p>{incomingCandidate?.inbox?.batchId}</p></Modal>
     </>
   );

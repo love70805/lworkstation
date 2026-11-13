@@ -11,7 +11,8 @@ import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 import { buildCostMatchingHref } from '../lib/profitFilter';
 
-const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn(), saveManual: vi.fn(), revokeManual: vi.fn() }));
+const mocks = vi.hoisted(() => ({ snapshot: null, inboxRecords: [], requests: [], notify: vi.fn(), register: vi.fn(), cancel: vi.fn(), controlTask: vi.fn(), latestRequest: vi.fn(), publish: vi.fn(), retry: vi.fn(), switchInbox: vi.fn(), readInbox: vi.fn(), saveManual: vi.fn(), revokeManual: vi.fn() }));
+vi.mock('../lib/erpInboxTransport', async importOriginal => ({ ...await importOriginal(), controlErpCollectionTask: mocks.controlTask }));
 vi.mock('../data/repositories/profitRepository', async importOriginal => ({ ...await importOriginal(), saveManualCostOverride: mocks.saveManual, revokeManualCostOverride: mocks.revokeManual }));
 vi.mock('../hooks/useErpCollectionTasks', () => ({ useErpCollectionTasks: () => ({ tasks: mocks.tasks ?? [], loading: false, error: '', refresh: () => {} }) }));
 vi.mock('../hooks/useLatestSalesImport', () => ({ useLatestSalesImport: () => mocks.snapshot }));
@@ -21,7 +22,7 @@ vi.mock('../lib/autoErpRequest', async importOriginal => ({ ...await importOrigi
 vi.mock('../data/repositories/erpCatalogRepository', () => ({ registerCostCatalogCompanion: vi.fn(async () => {}) }));
 vi.mock('../data/database', async importOriginal => {
   const original = await importOriginal();
-  return { ...original, savePublishedErpCostBatch: mocks.publish, processErpCostInboxAdoption: mocks.retry,
+  return { ...original, getLatestErpCostRequest: mocks.latestRequest, savePublishedErpCostBatch: mocks.publish, processErpCostInboxAdoption: mocks.retry,
     switchLoadedErpCostInbox: (...args) => mocks.switchInbox.getMockImplementation() ? mocks.switchInbox(...args) : original.switchLoadedErpCostInbox(...args),
     getErpCostInbox: (...args) => mocks.readInbox.getMockImplementation() ? mocks.readInbox(...args) : original.getErpCostInbox(...args),
   };
@@ -48,6 +49,8 @@ beforeEach(() => {
   mocks.inboxRecords = [];
   mocks.tasks = [];
   mocks.requests = [];
+  mocks.controlTask.mockReset().mockResolvedValue({ task: { status: 'stopped' } });
+  mocks.latestRequest.mockReset().mockResolvedValue(null);
   mocks.switchInbox.mockReset(); mocks.readInbox.mockReset();
   mocks.saveManual.mockReset().mockResolvedValue({});
   mocks.revokeManual.mockReset().mockResolvedValue({});
@@ -70,6 +73,61 @@ it('renews a rejected stopped task in the displayed scope and starts again on th
   expect(mocks.register.mock.calls.at(-1)[0]).toMatchObject({platformSkcs:['SKC-A'],expectedSkus:[{platformSku:'SKU-0',platformSkc:'SKC-A',store:'甲'}]});
   expect(window.shopeersDesktopRuntime.startErpCollection.mock.calls.map(([input])=>input.requestId)).toEqual(['REG-L','REG-NEW']);
   expect(container.textContent).not.toContain('登录已变化');
+});
+
+function completedCostTask() {
+  mocks.latestRequest.mockResolvedValue({id:'OLD'});
+  mocks.tasks=[{workspaceId:'W',ledgerId:'L',requestId:'OLD',taskId:'OLD-TASK',status:'cost_complete',catalogMode:'on_demand',ledgerPeriod:'2026-08',ledgerVersion:'[]',batches:[{deliveryId:'OLD-RECEIPT',catalogStatus:'pending'}]}];
+  mocks.requests=[{id:'OLD',workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-08',platformSkcs:['SKC-A','SKC-B'],expectedSkus:[{platformSku:'SKU-0',platformSkc:'SKC-A',store:'甲'},{platformSku:'SKU-1',platformSkc:'SKC-B',store:'甲'}]}];
+  mocks.register.mockImplementation(async input=>({id:'FRESH',workspaceId:input.ledger.workspaceId,ledgerId:input.ledger.id,ledgerPeriod:input.ledger.period,platformSkcs:input.platformSkcs,expectedSkus:input.expectedSkus}));
+}
+it('confirms the displayed filtered scope before replacing a completed task and never repins stale task state', async () => {
+  completedCostTask();await render(['SKC-A','SKC-B'],'ready',{initialEntry:'/?q=SKU-1'});
+  expect(button('成本已采集').disabled).toBe(true);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  const dialog=container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain('2026-08');expect(dialog.textContent).toContain('1 个 SKC / 1 个 SKU');expect(dialog.textContent).toContain('商品 SKC：SKC-B');
+  expect(mocks.controlTask).not.toHaveBeenCalled();expect(window.shopeersDesktopRuntime.startErpCollection).not.toHaveBeenCalled();
+  const confirm=button('确认重新获取');await act(async()=>{confirm.click();confirm.click();});
+  expect(mocks.controlTask).toHaveBeenCalledExactlyOnceWith('OLD-TASK',expect.objectContaining({workspaceId:'W',requestId:'OLD',action:'stop'}));
+  const registration=mocks.register.mock.calls.find(([,deps])=>deps.rejectedRequestId==='OLD');
+  expect(registration[0]).toMatchObject({platformSkcs:['SKC-B'],expectedSkus:[{platformSku:'SKU-1',platformSkc:'SKC-B',store:'甲'}]});
+  expect(window.shopeersDesktopRuntime.startErpCollection).toHaveBeenCalledExactlyOnceWith({workspaceId:'W',ledgerId:'L',requestId:'FRESH',mode:'cost',retryFailed:true});
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(button('成本已采集')).toBeUndefined();
+});
+it('keeps every SKU when parent SKCs differ only by canonical casing in the recollection scope', async () => {
+  completedCostTask();await render(['skc-a','SKC-A']);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('1 个 SKC / 2 个 SKU');
+  await act(async()=>button('确认重新获取').click());
+  const [scope]=mocks.register.mock.calls.find(([,deps])=>deps.rejectedRequestId==='OLD');
+  expect(scope.expectedSkus).toHaveLength(2);
+});
+it.each(['filter','import'])('rejects an open recollection confirmation when the %s scope changes', async change => {
+  completedCostTask();await render(['SKC-A','SKC-B']);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  if(change==='filter') await act(async()=>Simulate.change(container.querySelector('[aria-label="测试查询范围"]'),{target:{value:'SKU-1'}}));
+  else {
+    mocks.snapshot.batches=[{id:'FRESH-IMPORT',importedAt:'2026-08-20T00:00:00Z'}];
+    await act(async()=>root.render(<MemoryRouter><ScopeControls /><CostMatchingContent validatedContext={{workspaceId:'W',ledgerId:'L',store:'all'}} /></MemoryRouter>));
+  }
+  expect(button('确认重新获取').disabled).toBe(true);
+  const stopsBeforeClick=mocks.controlTask.mock.calls.length; // Import invalidation may independently stop its old scope.
+  await act(async()=>button('确认重新获取').click());
+  expect(mocks.controlTask).toHaveBeenCalledTimes(stopsBeforeClick);expect(window.shopeersDesktopRuntime.startErpCollection).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('已变化');
+});
+it('retries a failed recollection launch with the same new request and preserves the old receipt', async () => {
+  completedCostTask();await render(['SKC-A','SKC-B']);
+  window.shopeersDesktopRuntime.startErpCollection.mockResolvedValueOnce({ok:false,error:'连接尚未恢复'}).mockResolvedValue({ok:true,requestId:'FRESH',status:'waiting_ack'});
+  await act(async()=>button('重新获取 ERP 成本').click());
+  await act(async()=>button('确认重新获取').click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('连接尚未恢复');
+  await act(async()=>button('确认重新获取').click());
+  expect(mocks.controlTask).toHaveBeenCalledOnce();
+  expect(window.shopeersDesktopRuntime.startErpCollection.mock.calls.map(([input])=>input.requestId)).toEqual(['FRESH','FRESH']);
+  expect(mocks.tasks[0].batches[0].deliveryId).toBe('OLD-RECEIPT');
 });
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove();
