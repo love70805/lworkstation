@@ -6,6 +6,12 @@ const text = value => String(value ?? '').trim();
 const canonical = value => text(value).normalize('NFKC').toUpperCase();
 export const supplierEntryKey = (workspaceId, period, store, supplierNumber) => JSON.stringify([workspaceId ?? '', period ?? '', canonical(store), text(supplierNumber)]);
 export const supplierRuleKey = rule => JSON.stringify([rule?.id ?? '', supplierRecognitionMode(rule?.mode), normalizeImportKeywords(rule?.aliases)]);
+// An empty view means all stores. This scope never changes goods selection.
+export const supplierViewStores = store => Array.isArray(store) ? store : !store || store === 'all' ? [] : [store];
+const storeViewMatcher = store => {
+  const stores = new Set(supplierViewStores(store));
+  return row => !stores.size || stores.has(row.store);
+};
 
 // Built in the import Worker. Source counts include excluded/error rows; only
 // validated evidence contributes identifiers. No amount or cost leaves here.
@@ -100,14 +106,16 @@ export function supplierFilterPreview(candidates, { selected = {}, applied = {},
   };
   const stores = new Map();
   for (const row of rows) { const values = stores.get(row.store) ?? []; values.push(row); stores.set(row.store, values); }
-  return { rows, scope: summarize(store === 'all' ? rows : rows.filter(row => row.store === store)), batch: summarize(rows),
+  const scoped = rows.filter(storeViewMatcher(store));
+  return { rows, scope: summarize(scoped), batch: summarize(rows),
     stores: [...stores].map(([store, values]) => ({ store, ...summarize(values) })),
-    aliases: aliases.map(alias => ({ alias, count: rows.filter(row => (store === 'all' || row.store === store) && row.aliases.includes(alias)).length })) };
+    aliases: aliases.map(alias => ({ alias, count: scoped.filter(row => row.aliases.includes(alias)).length })) };
 }
 export function filterSupplierCandidates(rows, { query = '', store = 'all', view = 'all', mode = 'fuzzy' } = {}) {
   const search = canonical(query);
   const matcher = createSupplierMatcher([query], mode);
-  return rows.filter(row => (store === 'all' || row.store === store) && (!search || matcher.matches(row.supplierNumber) || (mode !== 'exact' && (row.searchText ?? canonical(`${row.supplierNumber} ${row.store ?? ''}`)).includes(search)))
+  const inStoreView = storeViewMatcher(store);
+  return rows.filter(row => inStoreView(row) && (!search || matcher.matches(row.supplierNumber) || (mode !== 'exact' && (row.searchText ?? canonical(`${row.supplierNumber} ${row.store ?? ''}`)).includes(search)))
     && (view === 'all' || view === 'selected' && row.selected || view === 'unselected' && !row.selected || view === 'matched' && row.matched || view === 'added' && row.change === 'added'));
 }
 export function changeSupplierSelection(selected, rows, checked) {
@@ -118,18 +126,10 @@ export function changeSupplierSelection(selected, rows, checked) {
   }
   return Object.fromEntries(Object.entries(sets).map(([id, values]) => [id, normalizeImportNumbers([...values])]));
 }
-export function supplierRuleSelection(files, rule, { previousRule, selected = {}, savedState, preserve = true } = {}) {
-  const same = supplierRuleKey(rule) === supplierRuleKey(previousRule);
+export function supplierRuleSelection(files, rule) {
   return Object.fromEntries(files.filter(file => file.status === 'parsed').map(file => {
-    const choices = file.facets?.supplierNumbers ?? [], matching = new Set(matchImportNumberRule(choices, rule));
-    if (preserve && same && Array.isArray(selected[file.itemId])) {
-      const previousMatches = new Set(matchImportNumberRule(choices, previousRule)), current = new Set(selected[file.itemId] ?? []);
-      for (const choice of choices) {
-        if (current.has(choice) && !previousMatches.has(choice)) matching.add(choice);
-        if (!current.has(choice) && previousMatches.has(choice)) matching.delete(choice);
-      }
-    } else if (preserve && rule.id && savedState?.groups?.some(group => supplierRuleKey(group) === supplierRuleKey(rule))) return [file.itemId, restoreSupplierGroupSelection(choices, rule, savedState, file.storeName)];
-    return [file.itemId, choices.filter(value => matching.has(value))];
+    const choices = file.facets?.supplierNumbers ?? [];
+    return [file.itemId, matchImportNumberRule(choices, rule)];
   }));
 }
 export function expandSupplierScopeGroupEntries(rows, rule, savedState, store = 'all') {

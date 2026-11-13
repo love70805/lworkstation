@@ -1,0 +1,34 @@
+/* Theme native single-choice pickers without replacing their form, focus or
+   keyboard behavior. Hidden accessibility selects keep their original styles. */
+@supports (appearance: base-select) {
+  select:not([multiple]):not([size]):not([tabindex="-1"]),
+  select:not([multiple]):not([size]):not([tabindex="-1"])::picker(select) { appearance: base-select; }
+  select:not([multiple]):not([size]):not([tabindex="-1"]) { align-items: center; }
+  select:not([multiple]):not([size]):not([tabindex="-1"])::picker(select) {
+    /* Keep the preferred downward placement; flip only when it overflows. */
+    position-try-order: normal;
+    margin-block: 4px; padding: 4px; max-height: min(320px, 55vh);
+    max-width: calc(100vw - 24px); overflow: auto;
+    color: var(--text); background: var(--surface);
+    border: 1px solid var(--control-border); border-radius: 8px;
+    box-shadow: 0 6px 20px rgb(20 34 50 / 16%);
+  }
+  select:not([multiple]):not([size]):not([tabindex="-1"])::picker-icon { color: var(--text-muted); margin-inline-start: 8px; }
+  select:not([multiple]):not([size]):not([tabindex="-1"]):open::picker-icon { rotate: 180deg; }
+  select:not([multiple]):not([size]):not([tabindex="-1"]) option {
+    min-height: 34px; padding: 6px 10px; gap: 8px; border-radius: 4px;
+    white-space: normal; overflow-wrap: anywhere; cursor: pointer;
+  }
+  select:not([multiple]):not([size]):not([tabindex="-1"]) option:checked { background: var(--primary-soft); color: var(--primary); }
+  select:not([multiple]):not([size]):not([tabindex="-1"]) option:is(:hover, :focus-visible) { background: var(--surface-hover); }
+  select:not([multiple]):not([size]):not([tabindex="-1"]) option:disabled { color: var(--text-muted); opacity: .55; cursor: default; }
+  select:not([multiple]):not([size]):not([tabindex="-1"]) option::checkmark { order: 1; margin-inline-start: auto; }
+  .mapping-select select { padding-inline-end: 12px; }
+  .mapping-select > svg { display: none; }
+  /* This control overlays the existing filter button. Keep its popup opaque. */
+  .queue-filter select { opacity: 1; color: transparent; background: transparent; border-color: transparent; }
+  .queue-filter select::picker-icon { visibility: hidden; }
+  @media (max-width: 760px) {
+    select:not([multiple]):not([size]):not([tabindex="-1"]) option { min-height: 44px; }
+  }
+}

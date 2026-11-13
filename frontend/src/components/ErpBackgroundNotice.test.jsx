@@ -29,6 +29,16 @@ it('shows the actual background stage and links to that task instead of the curr
   expect(html).not.toContain('继续补充资料');
 });
 
+it('retains the adoption acknowledgement in shared metadata and removes a finished cost runner', () => {
+  const workspaceId = 'FINISHED-COST-W';
+  publishErpCollectionActivity({ workspaceId, tasks: [{ ...task, workspaceId, executionProtocol: 2,
+    runMode: 'cost', catalogMode: 'on_demand', runnerId: 'RETAINED',
+    batches: [{ ...task.batches[0], adoptionReportedAt: '2026-11-09T00:00:00Z' }] }] });
+  const activity = readErpCollectionActivity(workspaceId);
+  expect(activity.tasks[0].batches[0].adoptionReportedAt).toBe('2026-11-09T00:00:00Z');
+  expect(renderToStaticMarkup(<MemoryRouter><ErpBackgroundNoticeContent {...activity} /></MemoryRouter>)).toBe('');
+});
+
 it('retains task context but stops claiming it is running when the status source is offline', () => {
   const html = renderToStaticMarkup(<MemoryRouter><ErpBackgroundNoticeContent tasks={[task]} error="本机服务连接失败" /></MemoryRouter>);
   expect(html).toContain('后台采集状态暂无法确认');

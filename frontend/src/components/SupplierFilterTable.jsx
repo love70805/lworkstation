@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import DataTable from './DataTable';
 import { Button, SearchInput } from './UI';
-import { filterSupplierCandidates } from '../domain/supplierFilterPreview';
+import { filterSupplierCandidates, supplierViewStores } from '../domain/supplierFilterPreview';
 
 function PageCheck({ rows, disabled, onSelect }) {
   const ref = useRef(null), selected = rows.filter(row => row.selected).length;
@@ -14,6 +14,7 @@ const identityCount = (row, kind) => row.mappingPending || !row[`${kind}Mapped`]
 export default function SupplierFilterTable({ rows = [], store = 'all', mode, onSelect, onInspect, disabled = false, compact = false, resetKey = '' }) {
   const id = useId(), [query, setQuery] = useState(''), [view, setView] = useState('all'), [pageSize, setPageSize] = useState(20);
   const [localMode, setLocalMode] = useState('fuzzy'), recognitionMode = mode ?? localMode;
+  const viewedStores = supplierViewStores(store), storeLabel = viewedStores.length ? viewedStores.join('、') : '全部店铺';
   const scoped = useMemo(() => filterSupplierCandidates(rows, { store }), [rows, store]);
   const filtered = useMemo(() => filterSupplierCandidates(rows, { query, store, view, mode: recognitionMode }), [rows, query, store, view, recognitionMode]);
   const counts = useMemo(() => ({ all: scoped.length, matched: scoped.filter(row => row.matched).length, selected: scoped.filter(row => row.selected).length, unselected: scoped.filter(row => !row.selected).length, added: scoped.filter(row => row.change === 'added').length }), [scoped]);
@@ -36,7 +37,7 @@ export default function SupplierFilterTable({ rows = [], store = 'all', mode, on
       {mode === undefined && <label>识别方式 <select aria-label="货号清单识别方式" value={localMode} onChange={event => setLocalMode(event.target.value)}><option value="fuzzy">模糊识别</option><option value="exact">精准识别</option></select></label>}
     </div>
     <div className="supplier-table-views" role="group" aria-label="货号查看视图">{[['all', '全部'], ['matched', '规则匹配'], ['selected', '已选'], ['unselected', '未选'], ...(!compact ? [['added', '本次新增选择']] : [])].map(([value, label]) => <button type="button" key={value} data-view={value} aria-pressed={view === value} onClick={() => setView(value)}>{label} <span>{counts[value]}</span></button>)}</div>
-    <div className="supplier-table-bulk"><span role="status">{store === 'all' ? '全部店铺' : store} · 筛选结果 {filtered.length} 个{!compact ? '（货号按店铺计数）' : ''}</span><div><Button variant="ghost" disabled={disabled || !filtered.length} onClick={() => onSelect(filtered, true)}>选中筛选结果</Button><Button variant="ghost" disabled={disabled || !filtered.length} onClick={() => onSelect(filtered, false)}>取消筛选结果</Button></div></div>
+    <div className="supplier-table-bulk"><span role="status">{storeLabel} · 筛选结果 {filtered.length} 个{!compact ? '（货号按店铺计数）' : ''}</span><div><Button variant="ghost" disabled={disabled || !filtered.length} onClick={() => onSelect(filtered, true)}>选中筛选结果</Button><Button variant="ghost" disabled={disabled || !filtered.length} onClick={() => onSelect(filtered, false)}>取消筛选结果</Button></div></div>
     <DataTable key={pageSize} data={filtered} columns={columns} getRowId={row => row.key} pageSize={pageSize} paginationResetKey={`${resetKey}/${store}/${query}/${view}/${recognitionMode}`} getRowProps={row => ({ className: `${row.selected ? 'is-selected' : ''} supplier-row-${row.change ?? 'unchanged'}` })} emptyState="没有匹配货号，请调整关键词或识别方式；已选项仍保留。" />
     <label className="supplier-page-size" htmlFor={`${id}-size`}>每页 <select id={`${id}-size`} value={pageSize} onChange={event => setPageSize(Number(event.target.value))}>{[20, 50, 100].map(size => <option key={size} value={size}>{size} 条</option>)}</select></label>
   </section>;

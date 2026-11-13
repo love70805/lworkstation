@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { readProfitReportFreshness } from './repositories/profitReportRepository';
+import { createCurrentProfitReport, readProfitReportFreshness } from './repositories/profitReportRepository';
 import { readWorkspaceScopeSummary } from './repositories/ledgerOverviewRepository';
 
 import Dexie from "dexie";
@@ -31,6 +31,47 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('creates the current report directly, preserves compact preview tokens and verifies its saved snapshot',async()=>{
+ const input={ledgerId:'L',kind:'pre_deduction'},preview=await previewProfitReport(input),stages=[];
+ expect(preview.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+ const saved=await createCurrentProfitReport(input,{onProgress:stage=>stages.push(stage)});
+ expect(saved.sourceFingerprint).toBe(preview.fingerprint);
+ expect(stages).toEqual(['正在核对台账与成本…','正在生成本次报告…','正在核对并保存报告…']);
+ expect((await readProfitReportDownload(saved.id)).report).toEqual(saved);
+ expect(await db.profitReports.count()).toBe(1);
+});
+it('rejects equal-count source edits during direct generation without a partial report',async()=>{
+ const row=await db.salesRows.toCollection().first();let edit;
+ const creation=createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'},{onProgress:stage=>{
+   if(stage==='正在生成本次报告…')edit=db.salesRows.update(row.id,{amountExact:'123.0001',amount:123.0001});
+ }});
+ await expect(creation).rejects.toThrow('来源已变化');await edit;
+ expect(await db.salesRows.count()).toBe(2);
+ expect(await db.profitReports.count()).toBe(0);expect(await db.profitReportLines.count()).toBe(0);
+});
+it('rolls back a direct report and audit when its line write fails',async()=>{
+ vi.spyOn(db.profitReportLines,'bulkAdd').mockRejectedValue(new Error('synthetic line write failure'));
+ await expect(createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'})).rejects.toThrow('synthetic line write failure');
+ expect(await db.profitReports.count()).toBe(0);expect(await db.profitReportLines.count()).toBe(0);
+ expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(0);
+});
+it.each(['permission','workspace','accounting','warehouse'])('rejects a %s change before the direct report write',async change=>{
+ let edit;
+ await expect(createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'},{onProgress:stage=>{
+   if(stage!=='正在生成本次报告…')return;
+   if(change==='permission')edit=setActiveMemberContext({workspaceId:'W',memberId:'viewer',role:'viewer'});
+   if(change==='workspace')edit=setActiveMemberContext({workspaceId:'OTHER',memberId:'finance',role:'finance'});
+   if(change==='accounting')edit=db.settings.put({key:'inventory-accounting:W',value:'historical_lowest'});
+   if(change==='warehouse')edit=db.ledgers.update('L',{warehouseRate:0.8});
+ }})).rejects.toThrow();
+ await edit;expect(await db.profitReports.count()).toBe(0);expect(await db.profitReportLines.count()).toBe(0);
+});
+it('retains transaction consistency after hashing a source larger than the cooperative chunk budget',async()=>{
+ const row=await db.salesRows.toCollection().first();
+ await db.salesRows.update(row.id,{rawValue:'完整合成来源😀'.repeat(50000)});
+ const saved=await createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'});
+ expect((await readProfitReportDownload(saved.id)).report.fileSha256).toBe(saved.fileSha256);
+});
 it('keeps the filtered source sequence after IndexedDB string IDs cross index 9 and freezes the selected order',async()=>{
  const rows=Array.from({length:15},(_,i)=>({kind:'dispatch',sourceFormat:'xlsx',fileHash:'SOURCE-ORDER',sourceSheet:i<8?'原表二 ':'原表一',sourceRow:i<8?13+i:i-5,ownerMarker:'合成登记人',store:'甲',platformSkc:`SKC-${i}`,businessId:`ORDER-${i}`,quantityExact:String(i+1),order1688:'9000000000000000001'}));
  const batch=await adopt('dispatch',{mode:'files',rows});

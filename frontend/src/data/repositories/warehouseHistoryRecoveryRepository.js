@@ -1,3 +1,4 @@
+import { assertLedgerCostEditingReady } from './erpCostEditingGuard';
 import { db } from '../db/clientDatabase';
 import { getActiveMemberContext } from './selectionRepository';
 import { getLatestLedgerCosts, readErpHistoryMappings, saveManualCostOverride } from './profitRepository';
@@ -84,7 +85,8 @@ export function previewRecoveredWarehouseCost(input) {
   return db.transaction('r', tables(), async () => readCandidate(input));
 }
 
-export function saveRecoveredWarehouseCost({ expectedUnitCost, reason, ...input }) {
+export async function saveRecoveredWarehouseCost({ expectedUnitCost, reason, ...input }) {
+  await assertLedgerCostEditingReady(input.ledgerId);
   return db.transaction('rw', tables(), async () => {
     const candidate = await readCandidate(input);
     if (!candidate || Number(expectedUnitCost) !== candidate.unitCost) throw new Error('历史核价来源或当前成本已变化，请重新核对。');

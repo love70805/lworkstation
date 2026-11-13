@@ -1,17 +1,15 @@
 // @vitest-environment happy-dom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import DataSecurity from './DataSecurity';
+import DataSecurity, { WorkspaceBackupTools } from './DataSecurity';
 import { ToastProvider } from '../components/UI';
 
 const mocks = vi.hoisted(() => ({
   snapshot: { status: 'ready', data: { security: { summary: { recordCount: 3 }, securityEvents: [] }, storage: { usage: 12, quota: 100 } }, checkedAt: '2026-09-22T00:00:00Z', refreshing: false, refresh: vi.fn() },
   create: vi.fn(), record: vi.fn(), restore: vi.fn(), applied: vi.fn(), cloudRestore: vi.fn(), save: vi.fn(),clear:vi.fn(),
 }));
-vi.mock('../components/AppShell', () => ({ default: ({ children }) => <div>{children}</div> }));
-vi.mock('../hooks/useSystemSnapshot', () => ({ useSystemSnapshot: () => mocks.snapshot }));
 vi.mock('../data/database', () => ({
   db: { tables: [] }, DEFAULT_WORKSPACE_ID: 'fixture', getDataSecuritySnapshot: vi.fn(),
   createWorkspaceBackupPayload: mocks.create, recordWorkspaceBackupExport: mocks.record,
@@ -40,7 +38,7 @@ beforeEach(async () => {
   mocks.snapshot.refresh.mockResolvedValue({ status: 'ready' });
   window.shopeersDesktopRuntime = { desktop: true, saveBackup: mocks.save };
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
-  await act(async () => root.render(<MemoryRouter initialEntries={['/data-security']}><ToastProvider><DataSecurity /></ToastProvider></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={['/data-security']}><ToastProvider><WorkspaceBackupTools check={mocks.snapshot} /></ToastProvider></MemoryRouter>));
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); delete window.shopeersDesktopRuntime; delete globalThis.IS_REACT_ACT_ENVIRONMENT; });
 
@@ -68,14 +66,14 @@ describe('backup workflow save protection', () => {
     expect(container.querySelector('[role=dialog]')).toBeNull();
   });
 
-  it('does not register canceled ordinary exports and runs a real refresh callback', async () => {
+  it('does not register canceled exports and exposes a single backup action', async () => {
     mocks.save.mockResolvedValue({ status: 'canceled' });
     await act(async () => button('导出本机备份').click());
     expect(mocks.record).not.toHaveBeenCalled();
-    await act(async () => button('刷新').click());
-    expect(mocks.snapshot.refresh).toHaveBeenCalledOnce();
+    expect(mocks.snapshot.refresh).not.toHaveBeenCalled();
+    expect([...container.querySelectorAll('button')].filter(node=>node.textContent==='导出本机备份')).toHaveLength(1);
     expect(container.querySelector('.system-advanced').open).toBe(false);
-    expect(container.querySelector('.system-navigation a[href="/diagnostics"]')).not.toBeNull();
+    expect(container.querySelector('.system-navigation')).toBeNull();
   });
 });
 
@@ -99,10 +97,10 @@ describe('backup workflow save protection', () => {
   expect(container.querySelector('.system-operation-warning').textContent).toContain('无需重复恢复');
   expect(container.textContent).not.toContain('备份恢复失败');
  });
- it('prevents the two export controls from submitting the same save twice', async () => {
+ it('prevents rapid repeated exports from submitting the same save twice', async () => {
   let finish;
   mocks.save.mockImplementation(() => new Promise(resolve => { finish=resolve; }));
-  await act(async () => { button('导出本机备份').click(); button('导出完整备份').click(); });
+  await act(async () => { button('导出本机备份').click(); button('导出本机备份').click(); });
   expect(mocks.create).toHaveBeenCalledOnce();expect(mocks.save).toHaveBeenCalledOnce();
   await act(async () => finish({ status: 'saved', fileName: 'once.json', sizeBytes: 20 }));
   expect(mocks.record).toHaveBeenCalledOnce();
@@ -158,4 +156,21 @@ it('keeps the dialog open and accurately reports partial deletion for retry',asy
   expect(mocks.save).not.toHaveBeenCalled();
   await act(async()=>button('永久清空').click());
   expect(container.querySelector('[role=dialog]')).toBeNull();
+});
+
+function LegacyLocation() { const location=useLocation(); return <output>{location.pathname+location.search+location.hash}</output>; }
+it('redirects legacy backup links to the merged page and preserves the query',async()=>{
+ await act(async()=>root.render(<MemoryRouter key="legacy-backup" initialEntries={['/data-security?source=fixture']}><Routes><Route path="/data-security" element={<DataSecurity/>}/><Route path="/diagnostics" element={<LegacyLocation/>}/></Routes></MemoryRouter>));
+ expect(container.querySelector('output').textContent).toBe('/diagnostics?source=fixture#backup');
+});
+it('keeps the rollback preference keyboard-accessible and persists changes',async()=>{
+ const input=container.querySelector('.backup-rollback-switch input');
+ expect(input.checked).toBe(true);
+ await act(async()=>input.click());
+ expect(localStorage.getItem('shopeers-rollback-before-restore')).toBe('false');
+ await chooseRestore();
+ mocks.save.mockResolvedValue({status:'canceled'});
+ await act(async()=>button('恢复备份').click());
+ expect(mocks.applied).toHaveBeenCalledOnce();
+ expect(mocks.save).not.toHaveBeenCalled();
 });

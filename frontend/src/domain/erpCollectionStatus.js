@@ -16,6 +16,7 @@ export function erpCostCollectionTiming(task) {
 
 export function isActiveErpCollection(task) {
   if (!task || ['stopped', 'completed', 'invalidated'].includes(task.status)) return false;
+  if (task.catalogMode === 'on_demand' && task.runMode !== 'catalog' && erpCostCollectionTiming(task).completed) return false;
   if (task.status === 'cost_complete' && task.catalogMode === 'on_demand' && !task.runnerId) return false;
   return task.status !== 'cost_complete' || hasPendingErpCatalog(task);
 }
@@ -26,11 +27,13 @@ export function erpCollectionPresentation(task) {
   const batches = task?.batches ?? [];
   const catalogPending = hasPendingErpCatalog(task);
   const costDelivered = batches.length > 0 && batches.every(batch => batch.deliveryId);
+  // A retained executor lease is not another cost read after durable delivery.
+  const costOnlyDelivered = costDelivered && task?.catalogMode === 'on_demand' && task.runMode !== 'catalog';
   const adoptionUnconfirmed = costDelivered && task?.executionProtocol === 2 && batches.some(batch => !batch.adoptionReportedAt);
   const inactive = !task || task.recoveryRequired || ['ready', 'paused', 'interrupted', 'expired', 'stopped', 'completed', 'invalidated'].includes(task.status);
   const catalogExecution = task?.catalogMode !== 'on_demand' || task?.runMode === 'catalog' && task?.runnerId;
   const catalogRunning = !inactive && catalogExecution && batches.some(batch => batch.catalogStatus === 'running');
-  const costRunning = !inactive && batches.some(batch => batch.status === 'running');
+  const costRunning = !inactive && batches.some(batch => batch.status === 'running' && !batch.deliveryId);
   const delivering = !inactive && batches.some(batch => batch.status === 'collected' && !batch.deliveryId);
   const preparingCatalog = !inactive && (task.runMode === 'catalog' && task.runnerId
     || task.catalogMode === 'after_costs' && task.runnerId && task.phase === 'catalog_ready'
@@ -43,8 +46,8 @@ export function erpCollectionPresentation(task) {
   const catalogOnly = costDelivered && !costIssues && catalogPending;
   const neverStarted = batches.every(batch => batch.status === 'pending' && !batch.deliveryId && !batch.catalogStatus);
   const pendingCost = batches.some(batch => ['pending', 'running', 'collected'].includes(batch.status));
-  const queued = task?.executionProtocol === 2 && task.status === 'ready';
-  const claimed = task?.executionProtocol === 2 && Boolean(task.runnerId) && !inactive;
+  const queued = task?.executionProtocol === 2 && task.status === 'ready' && !costOnlyDelivered;
+  const claimed = task?.executionProtocol === 2 && Boolean(task.runnerId) && !inactive && !costOnlyDelivered;
   const canResume = !running && !terminal && !queued && !claimed && (task.recoveryRequired
     || ['ready', 'paused', 'interrupted', 'expired'].includes(task.status)
     || ['partial', 'failed'].includes(task.status) && (pendingCost || catalogPending && task.catalogMode !== 'on_demand')

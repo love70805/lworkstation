@@ -407,8 +407,11 @@
 @media (pointer: coarse) {
   .cost-match-row-actions .button, .cost-match-table .cost-group-toggle, .cost-match-collapsed-row .button { min-height: 44px; }
 }
-.cost-detail-modal { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin-left: auto; }
-.cost-detail-modal .modal-body { display: grid; gap: 18px; }
+.cost-detail-modal { width: min(720px, calc(100vw - 32px)); height: min(848px, calc(100vh - 32px)); max-height: calc(100vh - 32px); margin-left: auto; }
+.cost-detail-modal .modal-body { display: grid; align-content: start; gap: 18px; }
+.cost-confirm-purchases { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.cost-confirm-purchases > div { flex: 1 1 300px; }
+.cost-confirm-purchases p { margin: 6px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 .cost-detail-current { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-bg); }
 .cost-detail-current small { color: var(--text-muted); line-height: 1.6; }
 .cost-purchase-summary { white-space: pre-line; overflow-wrap: anywhere; }

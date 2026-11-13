@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { Navigate, useLocation } from "react-router-dom";
+import { Switch } from "react-aria-components";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -8,22 +10,13 @@ import {
   Download,
   FileCheck2,
   FileUp,
-  HardDrive,
-  History,
-  RefreshCw,
-  RotateCcw,
-  ShieldCheck,
 } from "lucide-react";
-import AppShell from "../components/AppShell";
-import SystemNavigation from "../components/SystemNavigation";
-import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
-import { Badge, Button, Modal, PageHeader, Panel, ProgressBar, useToast } from "../components/UI";
+import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
 import {
   clearLocalWorkspaceData,
   createWorkspaceBackupPayload,
   createWorkspaceCloudSeedPayload,
   DEFAULT_WORKSPACE_ID,
-  getDataSecuritySnapshot,
   recordCloudSeedImportReceipt,
   recordWorkspaceBackupExport,
   restoreWorkspaceBackupPayload,
@@ -39,11 +32,6 @@ import { backupSaveMessage, downloadWorkspaceBackup, requireSavedWorkspaceBackup
 import { withWorkspaceReset } from '../lib/workspaceBackgroundTasks';
 
 const ROLLBACK_BEFORE_RESTORE_KEY = "shopeers-rollback-before-restore";
-
-async function readSecurityState() {
-  const [security, storage] = await Promise.all([getDataSecuritySnapshot(), navigator.storage?.estimate?.() ?? null]);
-  return { security, storage };
-}
 
 function formatBytes(value) {
   const bytes = Number(value ?? 0);
@@ -126,6 +114,11 @@ function describeSecurityEvent(event) {
 }
 
 export default function DataSecurity() {
+  const { search } = useLocation();
+  return <Navigate replace to={{ pathname: "/diagnostics", search, hash: "#backup" }} />;
+}
+
+export function WorkspaceBackupTools({ check }) {
   const { notify } = useToast();
   const restoreInputRef = useRef(null);
   const exportPendingRef = useRef(false);
@@ -134,9 +127,7 @@ export default function DataSecurity() {
   const [clearProgress,setClearProgress]=useState('');
   const [clearError,setClearError]=useState('');
   const cloudSeedInputRef = useRef(null);
-  const check = useSystemSnapshot(readSecurityState);
   const security = check.data?.security;
-  const storageEstimate = check.data?.storage;
   const [rollbackBeforeRestore, setRollbackBeforeRestore] = useState(() => localStorage.getItem(ROLLBACK_BEFORE_RESTORE_KEY) !== "false");
   const [restoreCandidate, setRestoreCandidate] = useState(null);
   const [loadingRestoreFile, setLoadingRestoreFile] = useState(false);
@@ -160,21 +151,11 @@ export default function DataSecurity() {
   const [dangerText, setDangerText] = useState("");
   const [clearing, setClearing] = useState(false);
 
-  const usageBytes = Number(storageEstimate?.usage ?? 0);
-  const quotaBytes = Number(storageEstimate?.quota ?? 0);
-  const storagePercent = quotaBytes > 0 ? Math.min(100, Math.round((usageBytes / quotaBytes) * 100)) : 0;
   const events = security?.securityEvents ?? security?.backupEvents ?? [];
-  const lastBackup = security?.lastBackup ?? null;
   const lastCloudSeed = security?.lastCloudSeed ?? null;
   const lastCloudImport = security?.lastCloudImport ?? null;
 
   const refreshStorageEstimate = check.refresh;
-  const refreshRecords = async () => {
-    const result = await check.refresh();
-    if (!result) return;
-    notify(result.status === 'ready' ? '已重新读取备份记录与存储占用。' : `刷新失败：${result.error}`, result.status === 'ready' ? 'success' : 'error');
-  };
-
   const setRollbackPreference = (nextValue) => {
     setRollbackBeforeRestore(nextValue);
     localStorage.setItem(ROLLBACK_BEFORE_RESTORE_KEY, String(nextValue));
@@ -433,47 +414,27 @@ export default function DataSecurity() {
   };
 
   return (
-    <AppShell pageClass="security-page">
-      <SystemNavigation />
-      <PageHeader
-        title="数据备份"
-        description="备份本机业务数据、货号组和导入筛选配置，校验恢复文件并保留操作记录。"
-        actions={<Button variant="primary" icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出本机备份</Button>}
-      />
+    <section id="backup" className="workspace-backup-tools" aria-labelledby="backup-title">
       {operationNotice ? <p className="system-operation-warning" role="status">{operationNotice}</p> : null}
-      {check.status === 'error' ? <div className="system-check-error" role="alert">读取失败：{check.error}<Button onClick={refreshRecords} loading={check.refreshing} disabled={check.refreshing}>重试读取</Button></div> : null}
-      <p className="system-check-note" role="status">{check.status === 'loading' ? '正在读取本机备份记录与存储占用…' : `最近检查：${formatDateTime(check.checkedAt)} · ${check.status === 'error' ? '未通过' : '仅检查本机记录可读取，不验证磁盘中的历史备份文件'}`}</p>
-
-      <div className="security-layout">
-        <div className="security-main">
-          <Panel className="safeguard-panel">
-            <div className="section-heading"><h2><ShieldCheck size={20} />恢复保护</h2></div>
-            <div className="setting-row">
-              <div>
-                <strong>恢复前保存当前回滚备份</strong>
-                <p>确认当前完整备份保存成功后才恢复；取消或保存失败将停止恢复。</p>
-              </div>
-              <button className={`toggle ${rollbackBeforeRestore ? "on" : ""}`} aria-label="恢复前下载回滚备份" aria-pressed={rollbackBeforeRestore} onClick={() => setRollbackPreference(!rollbackBeforeRestore)} />
-            </div>
-            <div className="setting-row">
-              <div>
-                <strong>恢复校验</strong>
-                <p>检查数据库版本、完整表清单、记录数、业务筛选配置与平台 SKU 唯一性；恢复期间暂停后台收件。</p>
-              </div>
-              <Badge tone="success"><CheckCircle2 size={14} />始终启用</Badge>
-            </div>
-          </Panel>
-
-          <Panel className="snapshots-panel">
-            <div className="panel-header">
-              <div className="panel-title"><History size={20} /><h2>备份与恢复记录</h2></div>
-              <div className="action-row">
-                <Button variant="ghost" icon={RefreshCw} loading={check.refreshing} disabled={check.refreshing} onClick={refreshRecords}>刷新</Button>
-                <Button icon={FileUp} loading={loadingRestoreFile} disabled={loadingRestoreFile || restoring} onClick={chooseRestoreFile}>导入备份</Button>
-              </div>
-            </div>
-            <input ref={restoreInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择 Lworkstation JSON 备份文件" onChange={readRestoreFile} />
-            <div className="security-note">备份包含货号组、上次应用组、逐店例外和导入筛选，不包含登录信息或桌面收件历史。文件保存在你选择的位置；旧版导出记录不能证明文件仍在磁盘中。</div>
+      <Panel className="backup-panel">
+        <div className="panel-header">
+          <div className="panel-title"><DatabaseBackup size={20} /><h2 id="backup-title">数据备份</h2></div>
+          <div className="action-row">
+            <Button icon={FileUp} loading={loadingRestoreFile} disabled={loadingRestoreFile || restoring || exporting || clearing} onClick={chooseRestoreFile}>导入备份</Button>
+            <Button variant="primary" icon={Download} loading={exporting} disabled={exporting || restoring || clearing} onClick={() => exportBackup()}>导出本机备份</Button>
+          </div>
+        </div>
+        <input ref={restoreInputRef} className="visually-hidden" type="file" accept="application/json,.json" aria-label="选择 Lworkstation JSON 备份文件" onChange={readRestoreFile} />
+        <div className="backup-settings">
+          <p>完整备份包含业务数据、货号组和导入筛选；桌面版同时保存本机收件与采集任务，不包含账号登录信息。</p>
+          <Switch aria-label="恢复前保存回滚备份" className="backup-rollback-switch" isSelected={rollbackBeforeRestore} onChange={setRollbackPreference} isDisabled={restoring || exporting || clearing}>
+            <span className="switch-indicator" aria-hidden="true"><span /></span>
+            <span className="switch-copy"><strong>恢复前保存回滚备份</strong><small>{rollbackBeforeRestore ? "保存成功后才恢复；取消保存会停止恢复。" : "已关闭；恢复包含桌面任务的完整备份时，仍会保存回滚备份。"}</small></span>
+          </Switch>
+          <p className="backup-validation"><CheckCircle2 size={16} />恢复前自动校验文件和 SKU 唯一性，恢复期间暂停后台收件。</p>
+        </div>
+        <details className="backup-history">
+          <summary>备份与恢复记录{security ? `（${events.length} 条）` : ''}</summary>
             <div className="table-wrap">
               <table className="data-table snapshot-table">
                 <thead><tr><th>操作</th><th>本地时间</th><th>记录数</th><th>文件或来源</th></tr></thead>
@@ -487,7 +448,9 @@ export default function DataSecurity() {
               {security && events.length === 0 ? <div className="security-empty">还没有备份或恢复记录。先保存一次本机备份，再放到公司云盘或受控共享目录中。</div> : null}
               {!security ? <div className="security-empty">{check.status === 'error' ? '记录读取失败，请重试。' : '正在读取备份与恢复记录…'}</div> : null}
             </div>
-          </Panel>
+          <p className="backup-file-note">文件保存在你选择的位置；导出记录不代表文件仍在磁盘中。</p>
+        </details>
+      </Panel>
 
           <details className="system-advanced"><summary>高级：云端迁移与恢复</summary>
           <Panel className="cloud-migration-panel">
@@ -524,28 +487,7 @@ export default function DataSecurity() {
             <small className="mono cloud-last-import">{lastCloudSeed ? `最近种子包：${formatDateTime(lastCloudSeed.generatedAt)} · ${formatBytes(lastCloudSeed.sizeBytes)}` : '尚未保存云端种子包'}</small>
           </Panel>
           </details>
-        </div>
-
-        <aside className="security-side">
-          <Panel className="manual-export">
-            <span className="export-icon"><DatabaseBackup size={29} /></span>
-            <h2>手动导出</h2>
-            <p>生成包含商品、采集、供应商、ERP 成本、账本、利润与审计记录的 JSON 备份。桌面版同时保存本机收件和采集任务。</p>
-            <Button icon={Download} loading={exporting} disabled={exporting} onClick={() => exportBackup()}>导出完整备份</Button>
-            <small className="mono">{lastBackup ? `最近备份：${formatDateTime(lastBackup.generatedAt)} · ${formatBytes(lastBackup.sizeBytes)}` : check.status === 'ready' ? "尚未导出本机备份" : '备份状态未读取'}</small>
-          </Panel>
-          <Panel className="storage-panel">
-            <div className="panel-title"><HardDrive size={19} /><h2>本机存储</h2></div>
-            <div className="storage-total"><span>已用 {storageEstimate ? formatBytes(usageBytes) : '--'}</span><span>{quotaBytes > 0 ? `配额 ${formatBytes(quotaBytes)}` : "配额未提供"}</span></div>
-            <ProgressBar value={storagePercent} />
-            <div className="storage-legend">
-              <span><i className="active" />本机 IndexedDB <b className="mono">{security ? `${security.summary.recordCount.toLocaleString("zh-CN")} 条记录` : check.status === 'error' ? '读取失败' : "读取中"}</b></span>
-              <span><i />最近备份文件 <b className="mono">{lastBackup ? formatBytes(lastBackup.sizeBytes) : "--"}</b></span>
-            </div>
-          </Panel>
-        </aside>
-      </div>
-
+      <details className="system-advanced system-danger"><summary>清空本机工作区</summary>
       <Panel className="danger-zone">
         <div className="danger-title"><AlertTriangle size={23} /><h2>危险操作</h2></div>
         <p>永久删除本机业务数据及采集任务，不会自动备份，无法撤销。</p>
@@ -554,6 +496,7 @@ export default function DataSecurity() {
           <Button variant="danger" onClick={() => setDangerOpen(true)}>清空数据</Button>
         </div>
       </Panel>
+      </details>
 
       <Modal
         open={cloudRecoveryOpen}
@@ -618,6 +561,6 @@ export default function DataSecurity() {
         {clearProgress?<p role="status">{clearProgress}</p>:null}
         {clearError?<p className="system-check-error" role="alert">{clearError}</p>:null}
       </Modal>
-    </AppShell>
+    </section>
   );
 }

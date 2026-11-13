@@ -59,13 +59,31 @@ it('enforces financial permission for ignore and revoke',async()=>{
  await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id})).rejects.toThrow('财务写权限');
  await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false})).rejects.toThrow('财务写权限');
 });
-it('previews exactly the writable receipt and warehouse pairs across history, stores and shared SKU mappings', async () => {
+
+it.each([8, 0, 0.0000001])('preserves manual %s after ignoring all anomalies and uses ERP only after revocation', async unitCost => {
+ const { ledger, envelope } = await seed({ prices: [1, 1] });
+ await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: '乙', platformSku: 'B', platformSkc: 'SKC-B', quantity: 1, amount: 20 });
+ await receiveErpCostInboxEnvelope({ envelope });
+ const manual = await saveManualCostOverride({ ledgerId: ledger.id, store: '甲', platformSku: 'B', unitCost, reason: '已核实实际单价' });
+ await setErpCostAnomaliesIgnored({ ledgerId: ledger.id });
+ expect(await db.costApprovals.get(manual.id)).toEqual(manual);
+ const snapshot = await getLedgerSnapshot(ledger.id);
+ const rows = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
+ expect(rows.find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost, costSource: 'manual_override' });
+ expect(rows.find(row => row.platformSku === 'B' && row.store === '乙')).toMatchObject({ unitCost: 1, costSource: 'erp' });
+ await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: manual.id });
+ const after = await getLedgerSnapshot(ledger.id);
+ expect(calculateFormalLedgerRows({ ledger: after.ledger, salesRows: after.rows, erpCosts: after.costs, approvals: after.approvals })
+   .find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost: 1, costSource: 'erp' });
+ expect((await db.erpCostInbox.toArray())[0].envelope).toEqual(envelope);
+});
+it('reviews current receipt scope across history, stores and shared SKU mappings', async () => {
   const older = await seed({ id: 'older', prices: [1, 0] });
   const newer = await seed({ id: 'newer', prices: [5, 8], requestAt: '2026-09-03T00:00:00Z' });
   await receiveErpCostInboxEnvelope({ envelope: newer.envelope });
   const oldReceipt = await receiveErpCostInboxEnvelope({ envelope: older.envelope });
   expect(oldReceipt.adoption.summary.supersededCount).toBe(2);
-  const { ledger, request } = await seed({ id: 'shared' });
+  const { ledger, request } = await seed({ id: 'shared', requestAt: '2026-09-04T00:00:00Z' });
   await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: '乙', platformSku: 'A', platformSkc: 'SKC-A', quantity: 1, amount: 20 });
   const batch = buildErpCostBatchEnvelope({ batchId: 'SHARED', workspaceId: ledger.workspaceId, ledgerId: ledger.id, requestId: request.id,
     platformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus, results: [{ warehouseSku: 'WH-A', mappings: request.expectedSkus, previewUnitCost: 1 }],
@@ -78,9 +96,9 @@ it('previews exactly the writable receipt and warehouse pairs across history, st
   const before = await read();
   expect([...new Set(before.filter(row => row.inboxId === shared.id).map(row => row.platformSku))].sort()).toEqual(['A', 'B']);
   expect(groups(before)).toEqual(groups([
-    { inboxId: oldReceipt.id, warehouseSku: 'WH-A' }, { inboxId: oldReceipt.id, warehouseSku: 'WH-B' }, { inboxId: shared.id, warehouseSku: 'WH-A' },
+    { inboxId: shared.id, warehouseSku: 'WH-A' },
   ]));
-  const selected = [{ inboxId: oldReceipt.id, warehouseSku: 'WH-A' }];
+  const selected = [{ inboxId: shared.id, warehouseSku: 'WH-A' }];
   await setErpCostAnomaliesIgnored({ ledgerId: ledger.id, selectedItems: selected });
   const remaining = groups(await read());
   expect(remaining).toEqual(groups(before).filter(item => item.inboxId !== selected[0].inboxId || item.warehouseSku !== 'WH-A'));
@@ -162,7 +180,8 @@ it('applies multi-receipt selections atomically and rolls the whole selection ba
  expect(await db.erpCostRows.count()).toBe(0);
  await db.erpCostInbox.update(b.id,{envelope:second.envelope});
  await setErpCostAnomaliesIgnored({ledgerId:first.ledger.id,selectedItems});
- expect((await listIgnoredErpCostAnomalies(first.ledger.id)).map(row=>[row.inboxId,row.warehouseSku]).sort()).toEqual(selectedItems.map(row=>[row.inboxId,row.warehouseSku]).sort());
+ expect((await listIgnoredErpCostAnomalies(first.ledger.id)).map(row=>[row.inboxId,row.warehouseSku])).toEqual([[b.id,'WH-B']]);
+ expect((await db.erpCostInbox.get(a.id)).costResolutions).toMatchObject([{warehouseSku:'WH-A',action:'ignore_anomaly'}]);
  await setErpCostAnomaliesIgnored({ledgerId:first.ledger.id,ignored:false,selectedItems});
  expect(await listIgnoredErpCostAnomalies(first.ledger.id)).toEqual([]);
 });
@@ -576,4 +595,150 @@ it.each([true, false])('recovers already-confirmed prices from an older draft (l
   expect(values.size).toBe(0);
   expect((await db.erpCostInbox.get(receipt.id))).toMatchObject({ status: 'applied', costResolutions: [expect.objectContaining({ recordId: 'R-B' })] });
   expect((await getLatestLedgerCosts(ledger.id)).find(row => row.platformSku === 'B').unitCost).toBe(1);
+});
+
+
+it('reuses only identical monthly purchase ignores and keeps current counts stable across delivery retries and reopening', async () => {
+  const old = await seed({ id: 'reuse-old', prices: [1, 0] });
+  const a = await receiveErpCostInboxEnvelope({ envelope: old.envelope });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id });
+  const current = await seed({ id: 'reuse-new', prices: [1, 0], requestAt: '2026-09-02T00:00:00Z' });
+  const b = await receiveErpCostInboxEnvelope({ envelope: current.envelope });
+  expect(b.adoption.summary.adoptedCount).toBe(2);
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toEqual([]);
+  expect((await listIgnoredErpCostAnomalies(old.ledger.id)).map(row => [row.inboxId, row.warehouseSku])).toEqual([[b.id, 'WH-A'], [b.id, 'WH-B']]);
+  expect((await db.erpCostInbox.get(b.id)).costResolutions).toEqual((await db.erpCostInbox.get(a.id)).costResolutions);
+  expect((await getLatestLedgerCosts(old.ledger.id)).map(row => [row.platformSku, row.unitCost, row.sourceEnvelopeBatchId])).toEqual([['A', 1, current.batch.batchId], ['B', 0, current.batch.batchId]]);
+  const audit = await db.auditEvents.toArray();
+  expect(audit.filter(row => row.action === 'anomaly_ignores_reused')).toMatchObject([{ after: { resolutionCount: 2 } }]);
+  await receiveErpCostInboxEnvelope({ envelope: current.envelope });
+  db.close(); await db.open();
+  await recoverErpCostInboxAdoptions({ workspaceId: old.ledger.workspaceId, ledgerId: old.ledger.id });
+  expect(await db.erpCostInbox.count()).toBe(2);
+  expect(await db.auditEvents.count()).toBe(audit.length);
+  expect(await listIgnoredErpCostAnomalies(old.ledger.id)).toHaveLength(2);
+  expect((await db.erpCostInbox.get(a.id)).envelope).toEqual(old.envelope);
+  expect((await db.erpCostInbox.get(b.id)).envelope).toEqual(current.envelope);
+});
+
+it('keeps Beta ignore reuse and restore scoped to the complete purchase-total and service-fee evidence', async () => {
+  const record = { recordId: 'R-B', purchaseDate: '2026-08-01', quantity: 2, unitPrice: 1,
+    amountBasis: 'purchase_total', totalPrice: 2, purchaseUnitPrice: 0.8, serviceUnitPrice: 0.2 };
+  const old = await seed({ id: 'total-old', prices: [5, 1], recordsB: [record] });
+  const a = await receiveErpCostInboxEnvelope({ envelope: old.envelope });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id });
+  const same = await seed({ id: 'total-same', prices: [5, 1], recordsB: [record], requestAt: '2026-09-02T00:00:00Z' });
+  const b = await receiveErpCostInboxEnvelope({ envelope: same.envelope });
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toEqual([]);
+  expect(await listIgnoredErpCostAnomalies(old.ledger.id)).toHaveLength(1);
+  expect((await db.erpCostInbox.get(b.id)).costResolutions).toHaveLength(1);
+  const changed = await seed({ id: 'total-changed', prices: [5, 1],
+    recordsB: [{ ...record, purchaseUnitPrice: 0.7, serviceUnitPrice: 0.3 }], requestAt: '2026-09-03T00:00:00Z' });
+  const c = await receiveErpCostInboxEnvelope({ envelope: changed.envelope });
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toMatchObject([{ inboxId: c.id, warehouseSku: 'WH-B' }]);
+  expect((await db.erpCostInbox.get(c.id)).costResolutions ?? []).toEqual([]);
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id, ignored: false, selectedItems: [{ inboxId: c.id, warehouseSku: 'WH-B' }] });
+  for (const receipt of [a, b]) expect((await db.erpCostInbox.get(receipt.id)).costResolutions).toHaveLength(1);
+  db.close(); await db.open();
+  await recoverErpCostInboxAdoptions({ workspaceId: old.ledger.workspaceId, ledgerId: old.ledger.id });
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toMatchObject([{ inboxId: c.id, warehouseSku: 'WH-B' }]);
+  expect((await db.erpCostInbox.get(a.id)).envelope).toEqual(old.envelope);
+});
+
+it('restores reminders across identical copies without resurrecting ignores or changing manual costs and frozen reports', async () => {
+  const old = await seed({ id: 'revoke-old', prices: [1, 0] });
+  const a = await receiveErpCostInboxEnvelope({ envelope: old.envelope });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id });
+  const current = await seed({ id: 'revoke-new', prices: [1, 0], requestAt: '2026-09-02T00:00:00Z' });
+  const b = await receiveErpCostInboxEnvelope({ envelope: current.envelope });
+  const manual = await saveManualCostOverride({ ledgerId: old.ledger.id, store: '甲', platformSku: 'B', unitCost: 0.002, reason: '已核对' });
+  const input = { ledgerId: old.ledger.id, kind: 'pre_deduction' };
+  const report = await saveProfitReport(input, { expectedFingerprint: (await previewProfitReport(input)).fingerprint });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id, ignored: false, selectedItems: [{ inboxId: b.id, warehouseSku: 'WH-B' }] });
+  for (const receipt of [a, b]) expect((await db.erpCostInbox.get(receipt.id)).costResolutions.map(row => row.warehouseSku)).toEqual(['WH-A']);
+  for (const receipt of [a, b]) await processErpCostInboxAdoption({ inboxId: receipt.id });
+  const next = await seed({ id: 'revoke-third', prices: [1, 0], requestAt: '2026-09-03T00:00:00Z' });
+  const c = await receiveErpCostInboxEnvelope({ envelope: next.envelope });
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toMatchObject([{ inboxId: c.id, warehouseSku: 'WH-B', originalUnitPrice: 0 }]);
+  expect((await getLatestLedgerCosts(old.ledger.id)).map(row => row.platformSku)).toEqual(['A']);
+  expect(await db.costApprovals.get(manual.id)).toEqual(manual);
+  const snapshot = await getLedgerSnapshot(old.ledger.id);
+  expect(calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals }).find(row => row.platformSku === 'B')).toMatchObject({ costSource: 'manual_override', unitCost: 0.002 });
+  expect((await readProfitReportDownload(report.id)).report.fileBase64).toBe(report.fileBase64);
+  expect((await db.erpCostInbox.get(a.id)).envelope).toEqual(old.envelope);
+});
+
+it.each([
+  ['record identity', { recordId: 'R-B-CHANGED' }], ['quantity', { quantity: 3 }],
+  ['original price', { unitPrice: 0 }], ['date', { purchaseDate: '2026-08-02' }],
+  ['order status', { statusFields: { orderStatus: '已完成' } }], ['order number', { purchaseOrderNo: 'NEW-ORDER' }],
+])('requires review when %s changes even if the warehouse and aggregate price match', async (_label, change) => {
+  const old = await seed({ id: 'changed-old', prices: [5, 1] });
+  await receiveErpCostInboxEnvelope({ envelope: old.envelope });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id });
+  const next = await seed({ id: 'changed-new', prices: [5, change.unitPrice ?? 1], requestAt: '2026-09-02T00:00:00Z',
+    recordsB: [{ recordId: 'R-B', purchaseDate: '2026-08-01', quantity: 2, unitPrice: 1, ...change }] });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope: next.envelope });
+  expect((await listPendingErpCostAnomalies(old.ledger.id)).map(row => row.inboxId)).toEqual([receipt.id]);
+  expect(await listIgnoredErpCostAnomalies(old.ledger.id)).toEqual([]);
+  expect((await db.erpCostInbox.get(receipt.id)).costResolutions ?? []).toEqual([]);
+});
+
+it.each(['workspace', 'period', 'import', 'rejected', 'incomplete'])('does not inherit an ignore from %s-invalid history', async invalid => {
+  const old = await seed({ id: 'scope-old', prices: [5, 1] });
+  const a = await receiveErpCostInboxEnvelope({ envelope: old.envelope });
+  await setErpCostAnomaliesIgnored({ ledgerId: old.ledger.id });
+  if (invalid === 'workspace') await db.erpCostInbox.update(a.id, { workspaceId: 'FOREIGN' });
+  if (invalid === 'period') await db.erpCostRequests.update(old.request.id, { ledgerPeriod: '2026-07' });
+  if (invalid === 'import') await db.erpCostRequests.update(old.request.id, { ledgerVersion: 'obsolete-import' });
+  if (invalid === 'rejected') await db.erpCostInbox.update(a.id, { status: 'rejected' });
+  if (invalid === 'incomplete') {
+    const envelope = structuredClone(old.envelope); envelope.batch.warehouseEvidence[1].evidenceComplete = false;
+    await db.erpCostInbox.update(a.id, { envelope });
+  }
+  const next = await seed({ id: 'scope-new', prices: [5, 1], requestAt: '2026-09-02T00:00:00Z' });
+  const b = await receiveErpCostInboxEnvelope({ envelope: next.envelope });
+  expect((await db.erpCostInbox.get(b.id)).costResolutions ?? []).toEqual([]);
+  expect((await listPendingErpCostAnomalies(old.ledger.id)).map(row => row.inboxId)).toEqual([b.id]);
+});
+
+it('keeps unaffected SKUs in view after a partial recollection and treats concurrent ignores idempotently', async () => {
+  const old = await seed({ id: 'partial-old', prices: [1, 0] });
+  const a = await receiveErpCostInboxEnvelope({ envelope: old.envelope });
+  const expectedSkus = [{ platformSku: 'A', platformSkc: 'SKC-A' }];
+  const request = buildErpCostRequest({ id: 'REQ-PARTIAL', workspaceId: old.ledger.workspaceId, ledgerId: old.ledger.id, ledgerPeriod: old.ledger.period,
+    platformSkcs: ['SKC-A'], expectedSkus, requestedAt: '2026-09-02T00:00:00Z', requestedBy: 'finance' });
+  await saveErpCostRequest(request);
+  const batch = buildErpCostBatchEnvelope({ batchId: 'B-PARTIAL', workspaceId: old.ledger.workspaceId, ledgerId: old.ledger.id, requestId: request.id,
+    platformSkcs: request.platformSkcs, expectedSkus, results: [{ warehouseSku: 'WH-A', mappings: expectedSkus, previewUnitCost: 5 }],
+    warehouseEvidence: [{ warehouseSku: 'WH-A', evidenceComplete: true, purchaseRecords: [{ recordId: 'R-A', purchaseDate: '2026-08-01', quantity: 2, unitPrice: 5 }] }] });
+  await receiveErpCostInboxEnvelope({ envelope: buildErpCostInboxEnvelope({ batch, deliveryId: 'D-PARTIAL' }) });
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toMatchObject([{ inboxId: a.id, warehouseSku: 'WH-B', platformSku: 'B' }]);
+  const action = { ledgerId: old.ledger.id, selectedItems: [{ inboxId: a.id, warehouseSku: 'WH-B' }] };
+  const writes = await Promise.all([setErpCostAnomaliesIgnored(action), setErpCostAnomaliesIgnored(action)]);
+  expect(writes.map(row => row.changedCount).sort()).toEqual([0, 1]);
+  expect((await db.auditEvents.toArray()).filter(row => row.action === 'anomalies_ignored')).toHaveLength(1);
+  expect(await listPendingErpCostAnomalies(old.ledger.id)).toEqual([]);
+  expect((await getLatestLedgerCosts(old.ledger.id)).map(row => [row.platformSku, row.unitCost])).toEqual([['A', 5], ['B', 0]]);
+});
+
+it('rolls back every identical-copy revoke if an audit write fails midway', async () => {
+  const first = await seed({ id: 'rollback-old', prices: [5, 1] });
+  const a = await receiveErpCostInboxEnvelope({ envelope: first.envelope });
+  await setErpCostAnomaliesIgnored({ ledgerId: first.ledger.id });
+  const second = await seed({ id: 'rollback-new', prices: [5, 1], requestAt: '2026-09-02T00:00:00Z' });
+  const b = await receiveErpCostInboxEnvelope({ envelope: second.envelope });
+  const before = await db.erpCostInbox.toArray(), costs = await db.erpCostRows.toArray(), audits = await db.auditEvents.count();
+  let count = 0;
+  const fail = (_key, row) => { if (row.action === 'anomaly_ignore_revoked' && ++count === 2) throw new Error('simulated write failure'); };
+  db.auditEvents.hook('creating').subscribe(fail);
+  try {
+    await expect(setErpCostAnomaliesIgnored({ ledgerId: first.ledger.id, ignored: false, selectedItems: [{ inboxId: b.id, warehouseSku: 'WH-B' }] })).rejects.toThrow('simulated write failure');
+  } finally { db.auditEvents.hook('creating').unsubscribe(fail); }
+  expect(count).toBe(2);
+  expect(await db.erpCostInbox.toArray()).toEqual(before);
+  expect(await db.erpCostRows.toArray()).toEqual(costs);
+  expect(await db.auditEvents.count()).toBe(audits);
+  expect((await listIgnoredErpCostAnomalies(first.ledger.id)).map(row => row.inboxId)).toEqual([b.id]);
 });

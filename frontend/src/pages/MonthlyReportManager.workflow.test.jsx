@@ -9,7 +9,7 @@ import { ToastProvider } from '../components/UI';
 
 const mock=vi.hoisted(()=>({state:null,preview:vi.fn(),save:vi.fn(),read:vi.fn(),download:vi.fn()}));
 vi.mock('dexie-react-hooks',()=>({useLiveQuery:()=>mock.state}));
-vi.mock('../data/repositories/profitReportRepository',()=>({readMonthlyReportState:vi.fn(),readProfitReportDownload:mock.read,previewMonthlySupplement:vi.fn(),adoptMonthlySupplement:vi.fn(),previewProfitReport:mock.preview,saveProfitReport:mock.save}));
+vi.mock('../data/repositories/profitReportRepository',()=>({readMonthlyReportState:vi.fn(),readProfitReportDownload:mock.read,previewMonthlySupplement:vi.fn(),adoptMonthlySupplement:vi.fn(),previewProfitReport:mock.preview,saveProfitReport:mock.save,createCurrentProfitReport:mock.save}));
 vi.mock('../lib/profitReportWorkbook',()=>({downloadReportFile:mock.download}));
 const ledger={id:'L',workspaceId:'W',period:'2026-09',status:'cost_pending',warehouseRate:'0.7'};
 const scope={workspaceId:'W',ledgerId:'L',period:'2026-09'};
@@ -30,22 +30,22 @@ async function mount(patch={},controls={}){
 afterEach(async()=>{if(root)await act(async()=>root.unmount());container?.remove();root=null;});
 it('directly exports the checked current report in one click without a finalization dialog',async()=>{
  await mount();expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('导出利润表').click());
- expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'});expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},{expectedFingerprint:'checked'});expect(mock.download).toHaveBeenCalledWith(formal);
+ expect(mock.preview).not.toHaveBeenCalled();expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},expect.objectContaining({onProgress:expect.any(Function)}));expect(mock.download).toHaveBeenCalledWith(formal);
  expect(document.querySelector('[role=dialog]')).toBeNull();expect(container.textContent).not.toMatch(/定稿|重开/);
 });
 it('exports without optional dispatch or pending deductions and keeps both source entries available',async()=>{
  await mount({deduction:null,dispatch:null});expect(button('导出未扣款报告').disabled).toBe(false);expect(button('登记代发')).toBeDefined();expect(button('登记扣款')).toBeDefined();
- await act(async()=>button('导出未扣款报告').click());expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'pre_deduction'});
+ await act(async()=>button('导出未扣款报告').click());expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'pre_deduction'},expect.any(Object));
 });
 it('uses current data for legacy finalized ledgers and permits source updates directly',async()=>{
  const onEdit=vi.fn();await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[base]},{onEdit});
  expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('更新代发').click());expect(onEdit).toHaveBeenCalledWith('dispatch');
- await act(async()=>button('导出利润表').click());expect(mock.preview).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'});
+ await act(async()=>button('导出利润表').click());expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},expect.any(Object));
 });
 it('keeps historical downloads separate from the direct current export and allows regenerating after data edits',async()=>{
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
  expect(button('导出利润表')).toBeDefined();expect(container.textContent).toContain('历史导出（2）');expect(button('更新扣款')).toBeDefined();
- await act(async()=>button('下载此报告').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined});
+ await act(async()=>button('下载此报告').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined,useStoredFile:true});
 });
 it('does not close a source editor when a prior report exists',async()=>{
  const onEdit=vi.fn();await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});
@@ -62,7 +62,7 @@ it('reports a stale snapshot without downloading a file or claiming success',asy
  expect(container.querySelector('[role=alert]').textContent).toContain('预览已过期');expect(mock.download).not.toHaveBeenCalled();
 });
 it('guards double clicks while a report is being prepared',async()=>{
- await mount();let finish;mock.preview.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
- await act(async()=>{button('导出利润表').click();button('导出利润表').click();});expect(mock.preview).toHaveBeenCalledTimes(1);expect(mock.save).not.toHaveBeenCalled();
- await act(async()=>finish({report:formal,fingerprint:'checked'}));expect(mock.save).toHaveBeenCalledTimes(1);expect(mock.download).toHaveBeenCalledTimes(1);
+ await mount();let finish;mock.save.mockImplementationOnce((_input,{onProgress})=>{onProgress('正在核对台账与成本…');return new Promise(resolve=>{finish=resolve;});});
+ await act(async()=>{button('导出利润表').click();button('导出利润表').click();});expect(mock.save).toHaveBeenCalledTimes(1);expect(mock.preview).not.toHaveBeenCalled();expect(container.textContent).toContain('正在核对台账与成本…');
+ await act(async()=>finish(formal));expect(mock.save).toHaveBeenCalledTimes(1);expect(mock.download).toHaveBeenCalledTimes(1);
 });

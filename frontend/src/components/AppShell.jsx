@@ -50,7 +50,7 @@ const baseNavigation = [
   { id: "workspace", label: "工作区首页", path: "/workspace", icon: LayoutGrid, match: ["/workspace", "/ledger", "/import-preview"] },
   { id: "products", label: "商品资料", path: "/products", icon: Archive, match: ["/products", "/capture"] },
   { id: "profit", label: "利润核算", path: "/profit", icon: CircleDollarSign, match: ["/profit", "/cost-matching", "/erp-assistant"] },
-  { id: "diagnostics", label: "系统检查", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
+  { id: "diagnostics", label: "系统与备份", path: "/diagnostics", icon: ShieldCheck, match: ["/diagnostics", "/data-security"] },
 ];
 
 function isActive(pathname, item) {
@@ -67,7 +67,8 @@ function readStoredNotificationIds() {
 }
 
 function readStoredSidebarCollapsed() {
-  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+  const stored = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+  return stored === "true" ? true : stored === "false" ? false : null;
 }
 
 function readCompactSidebar() {
@@ -87,12 +88,12 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigate = useNavigate();
   const { notify } = useToast();
   const menuRef = useRef(null);
+  const brandToggleRef = useRef(null);
   const menuTrigger = useRef(null);
   const menuInitialFocus = useRef("first");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
   const [compactSidebar, setCompactSidebar] = useState(readCompactSidebar);
-  const [compactSidebarExpanded, setCompactSidebarExpanded] = useState(false);
   const [openMenu, setOpenMenu] = useState("");
   const [openDialog, setOpenDialog] = useState("");
   const [readNotificationIds, setReadNotificationIds] = useState(readStoredNotificationIds);
@@ -128,7 +129,7 @@ export default function AppShell({ children, pageClass = "" }) {
   const cloudEnvironment = runtimeConfig.syncProvider === "supabase"
     ? (cloudAuth.user ? "环境：云端" : "环境：待登录")
     : "环境：本机";
-  const effectiveSidebarCollapsed = compactSidebar ? !compactSidebarExpanded : sidebarCollapsed;
+  const effectiveSidebarCollapsed = sidebarCollapsed ?? compactSidebar;
 
   const backTarget = useMemo(() => {
     if (baseNavigation.some((item) => item.path === pathname) || pathname === '/data-security') return null;
@@ -190,7 +191,6 @@ export default function AppShell({ children, pageClass = "" }) {
   useEffect(() => {
     setMobileOpen(false);
     setOpenMenu("");
-    setCompactSidebarExpanded(false);
   }, [pathname]);
 
   useEffect(() => {
@@ -198,7 +198,6 @@ export default function AppShell({ children, pageClass = "" }) {
     const media = window.matchMedia(SIDEBAR_COMPACT_QUERY);
     const syncCompactSidebar = () => {
       setCompactSidebar(media.matches);
-      if (media.matches) setCompactSidebarExpanded(false);
     };
     syncCompactSidebar();
     media.addEventListener("change", syncCompactSidebar);
@@ -224,7 +223,7 @@ export default function AppShell({ children, pageClass = "" }) {
   }, [openDialog, desktopRuntime]);
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+    if (sidebarCollapsed !== null) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
   useEffect(() => {
@@ -264,11 +263,7 @@ export default function AppShell({ children, pageClass = "" }) {
   };
 
   const toggleSidebar = () => {
-    if (compactSidebar) {
-      setCompactSidebarExpanded((current) => !current);
-      return;
-    }
-    setSidebarCollapsed((current) => !current);
+    setSidebarCollapsed((current) => !(current ?? compactSidebar));
   };
 
   // The brand row is the single collapse/expand affordance on desktop; on the
@@ -365,15 +360,17 @@ export default function AppShell({ children, pageClass = "" }) {
   return (
     <div className={`app-shell ${effectiveSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <a className="skip-link" href="#main-content">跳到主内容</a>
-      <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
+      <aside id="app-navigation" className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
           <button
+            ref={brandToggleRef}
             type="button"
             className={`brand-toggle ${effectiveSidebarCollapsed ? "brand-toggle-collapsed" : "brand-toggle-expanded"}`}
             onClick={onBrandToggle}
-            aria-label={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
-            aria-expanded={!effectiveSidebarCollapsed}
-            title={effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
+            aria-label={mobileOpen ? "关闭导航" : effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
+            aria-expanded={mobileOpen || !effectiveSidebarCollapsed}
+            aria-controls="app-navigation"
+            title={mobileOpen ? "关闭导航" : effectiveSidebarCollapsed ? "展开导航" : "折叠导航"}
           >
             <span className="brand-assets" aria-hidden="true">
               <img className="brand-logo brand-logo-light" src="/assets/brand/lworkstation-wordmark-light.svg" alt="" aria-hidden="true" draggable="false" />
@@ -381,7 +378,7 @@ export default function AppShell({ children, pageClass = "" }) {
               <img className="brand-mark" src="/assets/brand/l7-app-icon-master.svg" alt="" aria-hidden="true" draggable="false" />
             </span>
             <span className="brand-toggle-hint" aria-hidden="true">
-              {effectiveSidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+              {effectiveSidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={18} />}
             </span>
           </button>
           <IconButton icon={X} label="关闭导航" className="sidebar-close" onClick={() => setMobileOpen(false)} />
@@ -407,14 +404,15 @@ export default function AppShell({ children, pageClass = "" }) {
 
       <header className="topbar">
         <div className="topbar-leading">
-          <IconButton icon={Menu} label="打开导航" className="mobile-menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)} />
+          <IconButton icon={Menu} label="打开导航" className="mobile-menu" aria-expanded={mobileOpen} aria-controls="app-navigation" onClick={() => setMobileOpen(true)} />
+          {effectiveSidebarCollapsed ? <IconButton icon={PanelLeftOpen} label="展开导航" className="sidebar-expand" aria-expanded={false} aria-controls="app-navigation" onClick={() => { toggleSidebar(); brandToggleRef.current?.focus(); }} /> : null}
           {backTarget ? <IconButton icon={ArrowLeft} label="返回上一级" className="global-back" onClick={goBack} /> : null}
         </div>
         {desktopRuntime?.edition === "beta" && <span className="edition-indicator" title={APP_VERSION_LABEL}>Beta 独立工作区</span>}
         <div className="topbar-actions" ref={menuRef} onKeyDown={menuKeys}>
           <div className="topbar-control environment-control">
             <button className="environment-chip" aria-haspopup="menu" aria-expanded={openMenu === "environment"} onClick={() => toggleMenu("environment")}><i /> {cloudEnvironment}</button>
-            {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统检查<ChevronRight size={16} /></button></div> : null}
+            {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统与备份<ChevronRight size={16} /></button></div> : null}
           </div>
           {workspaceSummary?.pendingCaptureCount > 0 ? <Button icon={Inbox} onClick={() => navigate("/products?view=pending")}>历史资料（{workspaceSummary.pendingCaptureCount}）</Button> : null}
           <span className="topbar-separator" />
@@ -473,7 +471,7 @@ export default function AppShell({ children, pageClass = "" }) {
           <div><span><strong>应用版本</strong><small>{PRODUCT_NAME} 经营管理中心</small></span><b>{APP_VERSION_LABEL}</b></div>
           <div><span><strong>运行环境</strong><small>本机 IndexedDB 工作区，仅检查可读取性</small></span><b>{connectionLabel}</b></div>
           <div><span><strong>业务数据</strong><small>正式商品 / 平台 SKU / 待确认采集</small></span><b>{workspaceSummary ? `${workspaceSummary.productCount} / ${workspaceSummary.platformSkuCount} / ${workspaceSummary.pendingCaptureCount}` : "读取中"}</b></div>
-          <button type="button" onClick={() => { setOpenDialog(''); navigate('/diagnostics'); }}><ShieldCheck size={18} /><span><strong>打开系统检查</strong><small>左侧“系统检查”可检查连接、导出摘要及管理备份</small></span><ChevronRight size={16} /></button>
+          <button type="button" onClick={() => { setOpenDialog(''); navigate('/diagnostics'); }}><ShieldCheck size={18} /><span><strong>打开系统与备份</strong><small>左侧“系统与备份”可检查连接、导出摘要及管理备份</small></span><ChevronRight size={16} /></button>
         </div>
       </Modal>
 

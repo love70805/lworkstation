@@ -5,12 +5,26 @@ import { Exact } from '../../domain/profitReports';
 import { db } from '../db/clientDatabase';
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 
+export function profitReportHeader(report) {
+  if (!report) return report;
+  const { fileBase64, ...header } = report;
+  return header;
+}
+
+export async function readLedgerReportHeaderRows(ledger) {
+  const headers = [];
+  // IndexedDB cannot project individual fields. Decode one record at a time
+  // and release its file here, before retaining the next report header.
+  await db.profitReports.where('ledgerId').equals(ledger.id).each(report => {
+    if (report.workspaceId === ledger.workspaceId) headers.push(profitReportHeader(report));
+  });
+  return headers;
+}
+
 export async function readLedgerReportHeaders(ledger, revision = sourceRevision()) {
   return cachedDerived({
     scope: [ledger.workspaceId, ledger.id], formula: 'report-headers@1', revision,
-    compute: async () => (await db.profitReports.where('ledgerId').equals(ledger.id).toArray())
-      .filter(report => report.workspaceId === ledger.workspaceId)
-      .map(({ fileBase64, ...report }) => report),
+    compute: () => readLedgerReportHeaderRows(ledger),
   });
 }
 

@@ -1,10 +1,10 @@
-import MonthlyProfitSummary from './MonthlyProfitSummary';
 import { readProfitReportFreshness } from '../data/repositories/profitReportRepository';
+import { useCostEditingGuard } from '../hooks/useCostEditingGuard';
 import { sourceRevision } from '../data/db/derivedCache';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
-import { readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement, previewProfitReport, saveProfitReport } from "../data/repositories/profitReportRepository";
+import { readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement, createCurrentProfitReport } from "../data/repositories/profitReportRepository";
 import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, suggestDeductionStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate, legacyUnassignedDispatchRows } from "../domain/monthlySupplements";
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
 import { downloadReportFile } from "../lib/profitReportWorkbook";
@@ -190,7 +190,8 @@ export function AdoptedDispatchNotice({ rows = [], locked = false }) {
   return inherited.length ? <Panel className="report-source-notice"><p role="status">当前采用包含 {inherited.length} 条由上一登记人顺延归属的 XLSX 记录，共 {exactSum(inherited,'quantityExact')} 件，源表没有明确登记人归属。历史采用值保持不变。</p><p>请核对源表后重新导入；替换已有来源即可应用新的归属规则。</p><details><summary>查看原采用中的未明确归属行</summary>{inherited.slice(0,100).map(row=><p key={supplementRowIdentity(row)}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.quantityExact} 件</p>)}</details></Panel> : null;
 }
 
-export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, onOpenCosts, onState, editor, onEdit, compact = false, detailStore = "all", detailMissingCount = null, monthlySummary = null }) {
+export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, onOpenCosts, onState, editor, onEdit, compact = false }) {
+  const costGuard = useCostEditingGuard(workspaceId, ledgerId);
   const {notify}=useToast();
   const [retry,setRetry]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[orderDownload,setOrderDownload]=useState(null);
   const exportingRef=useRef(false);
@@ -198,10 +199,10 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,data:await readMonthlyReportState(ledgerId)};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry]);
   const latest = state?.ledgerId === ledgerId && state?.workspaceId === workspaceId ? state.data?.reports?.[0] : null;
   const freshness = useLiveQuery(async () => {
-    if (!latest) return null;
+    if (!latest || busy) return null;
     try { return await readProfitReportFreshness(latest.id); }
     catch (error) { return { reportId: latest.id, status: 'error', error: error.message }; }
-  }, [latest?.id, ledgerId, workspaceId, retry], null);
+  }, [latest?.id, ledgerId, workspaceId, retry, busy], null);
   const currentFreshness = freshness && latest && freshness.reportId === latest.id && (freshness.status === 'error' || freshness.sourceRevision === sourceRevision()) ? freshness : null;
   const reportTime = value => new Date(value).toLocaleString('zh-CN', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false });
   useEffect(()=>{onState?.(state);},[state,onState]);
@@ -211,30 +212,26 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   const missing=missingCostCount===undefined?data.ledger.costSummary?.missingCount:missingCostCount;
   const readiness=reportReadiness({...data,ledger:{...data.ledger,operationWorkflow:2},missingCount:missing});
   const nextKind=readiness.financialReady?'financial':'pre_deduction';
-  async function download(reportId){setBusy(true);setError('');try{const saved=await readProfitReportDownload(reportId);await downloadReportFile(saved.report,{dispatchRows:saved.dispatchRows,deductionRows:saved.deductionRows});}catch(error){setError(error.message);}finally{setBusy(false);}}
+  async function download(reportId){setBusy(true);setError('');try{const saved=await readProfitReportDownload(reportId);await downloadReportFile(saved.report,{dispatchRows:saved.dispatchRows,deductionRows:saved.deductionRows,useStoredFile:true});}catch(error){setError(error.message);}finally{setBusy(false);}}
   async function prepareOrderDownload(reportId){setBusy(true);setError('');try{setOrderDownload(await readProfitReportDownload(reportId));}catch(error){setError(error.message);}finally{setBusy(false);}}
   async function exportCurrent(){
-    if(exportingRef.current)return;
+    if(exportingRef.current || costGuard.blocked)return;
     exportingRef.current=true;
     setBusy(true);setError('');
     try{
       const input={ledgerId,kind:nextKind};
-      setExportStage('正在核对台账与成本…');
-      const preview=await previewProfitReport(input);
-      setExportStage('正在生成本次报告…');
-      const report=await saveProfitReport(input,{expectedFingerprint:preview.fingerprint});
-      setExportStage('正在生成 Excel 文件…');
+      const report=await createCurrentProfitReport(input,{onProgress:setExportStage});
+      setExportStage('正在准备 Excel 下载…');
       await downloadReportFile(report);
       notify('利润表已导出，数据仍可随时调整并重新核算。');
     }catch(error){setError(error.message);}finally{exportingRef.current=false;setBusy(false);setExportStage('');}
   }
   return <Panel className="monthly-report-manager" id="monthly-reports" tabIndex={-1}>
     {!compact ? <div className="report-heading"><h2>本月报告 · {data.ledger.period}</h2></div> : null}
-    <div className="report-primary-actions"><div className="report-export-scope"><strong>本月报告 · {data.ledger.period} · 全部店铺</strong><p role="status">{missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':monthlySummary?.status === 'ready' && monthlySummary.profitExact != null ? monthlySummary.label + ' ¥' + displayMoney(monthlySummary.profitExact) : nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{detailStore !== 'all' && missing > 0 && detailMissingCount != null && missing > detailMissingCount ? <small>其他店铺还有 {missing - detailMissingCount} 条 SKU 缺成本；明细筛选不缩小导出范围。</small> : null}</div>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>补齐成本</Button>:null}<Button variant="primary" loading={busy} disabled={busy||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
+    <div className="report-primary-actions"><p role="status">{costGuard.blocked?'成本核算尚未结束，当前结果仍会变化':missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>{costGuard.blocked?'查看临时结果':'补齐成本'}</Button>:null}<Button variant="primary" loading={busy} disabled={busy||costGuard.blocked||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
 
     {exportStage ? <div className="erp-collection-meter" role="status"><span>{exportStage}</span><progress aria-label="报告导出进度" /></div> : null}
     <details open={compact ? undefined : true}><summary>代发、扣款与导出记录</summary>
-    {monthlySummary ? <MonthlyProfitSummary summary={monthlySummary} ledger={data.ledger} onEdit={onEdit} /> : null}
     <p>按当前台账和成本直接导出，数据可随时更新。代发未录入时按 0 计；扣款未齐时导出未扣款报告。</p>
     <AdoptedDispatchNotice rows={data.adoptedRows} />
     <div className="report-sources-summary">
@@ -246,7 +243,7 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     </details>
     {latest ? <div className="report-latest-state" role="status">
       {latest ? <><span>最近导出：{latest.kind === 'financial' ? '利润表' : '未扣款报告'} · r{latest.revision} · <time dateTime={latest.createdAt}>{reportTime(latest.createdAt)}</time></span>
-        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{!currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
+        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{busy ? '文件处理完成后核对来源' : !currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
         {currentFreshness?.status === 'error' ? <Button onClick={()=>setRetry(value=>value+1)}>重试核对</Button> : null}
         <Button variant="ghost" disabled={busy} onClick={()=>download(latest.id)}>下载最近报告</Button></> : <span>尚未导出报告。导出后将在此保留类型、版本和来源状态。</span>}
     </div> : null}

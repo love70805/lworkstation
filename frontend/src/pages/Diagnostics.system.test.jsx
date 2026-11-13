@@ -24,7 +24,10 @@ it('keeps failed checks visible without presenting missing data as healthy or em
   expect(container.querySelector('.system-local-cards').textContent).toContain('检查失败');
   expect(container.querySelector('.system-local-cards').textContent).not.toContain('尚未导出');
   expect(container.querySelector('.system-local-cards').textContent).not.toContain('0 B');
-  expect(container.querySelector('.system-navigation a[href="/data-security"]')).not.toBeNull();
+  expect(container.querySelector('.system-navigation')).toBeNull();
+  expect(container.querySelector('#backup')).not.toBeNull();
+  expect(container.querySelector('h1').textContent).toBe('系统与备份');
+  expect([...container.querySelectorAll('button')].filter(node=>node.textContent==='导出本机备份')).toHaveLength(1);
   const retry = [...container.querySelectorAll('button')].find(item => item.textContent === '重试检查');
   await act(async () => retry.click());
   expect(mocks.check.refresh).toHaveBeenCalledOnce();

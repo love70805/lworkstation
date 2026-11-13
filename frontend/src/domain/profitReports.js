@@ -7,6 +7,9 @@ import { costEvaluationPeriod } from './inventoryAccounting';
 
 export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
 export const REPORT_TEMPLATE_VERSION = "profit-zebra@14-profit-colors";
+// Only newly generated, complete files carry this marker. Existing snapshots
+// retain the archived-layout conversion path without migration.
+export const REPORT_DOWNLOAD_FORMAT = 'profit-final-file@1';
 export const REPORT_TABLES = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
 export const Exact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 export function exact(value, { nonnegative = false } = {}) {

@@ -11,6 +11,10 @@
 .cost-attention { margin:14px 0; border-radius:8px; }
 .cost-attention:empty { display:none; }
 .cost-attention.needs-attention { padding:14px; border:1px solid var(--warning-border); background:var(--warning-bg); }
+.cost-attention.is-collecting { padding:14px; border:1px solid var(--border); background:var(--info-bg); }
+.cost-attention.is-collecting .profit-cost-alert { color:var(--info); }
+.cost-attention.is-collecting .profit-cost-alert small { color:var(--text); }
+.cost-attention.is-collecting .erp-anomaly-actions { border-color:var(--border); }
 .cost-attention .profit-cost-alert { padding:0; margin:0; border:0; background:none; }
 .cost-attention .profit-cost-alert > svg { flex-shrink:0; }
 .cost-attention .profit-cost-alert strong { font-size:15px; }
@@ -65,9 +69,6 @@
 .sales-chart-note, .sales-list-scope { color:var(--text-muted); font-size:12px; }
 .sales-day-table { overflow-x:auto; }
 .sales-day-table thead { position:sticky; top:0; background:var(--surface-bg); z-index:1; }
-.profit-purpose-help { margin:0 0 10px; font-size:12px; color:var(--text-muted); }
-.profit-purpose-help > summary { cursor:pointer; padding:6px 0; }
-.profit-purpose-help .profit-purpose-strip { margin-bottom:0; }
 .profit-workspace-controls { display:flex; align-items:flex-end; flex-wrap:wrap; gap:10px 16px; min-width:0; }
 .profit-workspace-controls label { display:flex; align-items:center; gap:8px; white-space:nowrap; font-size:13px; color: var(--text-muted); }
 .profit-workspace-controls select { min-height:36px; min-width:140px; max-width:100%; }
@@ -278,14 +279,6 @@
 .profit-next-step-items span.done b { background: var(--success-bg); color: var(--success); }
 .profit-next-step-items span.active { color: var(--primary); font-weight: 700; }
 .profit-next-step-items span.active b { background: var(--primary); color: var(--on-primary); }
-.profit-purpose-strip { display: flex; min-height: 72px; align-items: center; gap: 14px; margin-bottom: 14px; padding: 14px 18px; border-color: var(--border); background: var(--surface-soft); }
-.profit-purpose-step { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.profit-purpose-step > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.profit-purpose-step strong { font-size: 13px; }
-.profit-purpose-step small { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
-.profit-purpose-index { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border-radius: 50%; background: var(--action-soft); color: var(--primary); font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
-.profit-purpose-arrow { color: var(--text-subtle); font-size: 18px; }
-.profit-purpose-formula { margin-left: auto; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
 .profit-summary-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 14px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .profit-summary-item { position: relative; display: flex; min-height: 104px; flex-direction: column; justify-content: center; gap: 5px; padding: 16px 18px; border-right: 1px solid var(--border); text-align: left; }
 .profit-summary-item:last-child { border-right: 0; }
@@ -357,9 +350,6 @@
 .profit-status-actions .inline-link { min-height: 24px; white-space: nowrap; }
 
 @media (max-width: 1180px) {
-  .profit-purpose-strip { align-items: flex-start; flex-wrap: wrap; }
-  .profit-purpose-step { flex: 1 1 220px; }
-  .profit-purpose-formula { width: 100%; margin-left: 0; white-space: normal; }
   .profit-summary-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .profit-summary-item:nth-child(3) { border-right: 0; }
   .profit-summary-item:nth-child(-n + 3) { border-bottom: 1px solid var(--border); }
@@ -374,8 +364,6 @@
 }
 
 @media (max-width: 760px) {
-  .profit-purpose-arrow { display: none; }
-  .profit-purpose-step { flex-basis: 100%; }
   .profit-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profit-summary-item { min-height: 90px; padding: 14px; }
   .profit-summary-item:nth-child(3) { border-right: 1px solid var(--border); }
@@ -533,31 +521,66 @@
   border-color: var(--border);
   background: var(--surface);
 }
-.profit-page details > summary, .product-collection-tools details > summary {
+:is(.profit-page, .product-collection-tools, .system-page) details > summary {
+  --disclosure-box-size: 24px;
+  --disclosure-glyph-size: 16px;
+  --disclosure-inset: 10px;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 9px;
   min-height: 36px;
-  padding: 6px 10px;
-  border-radius: 6px;
+  padding: 6px var(--disclosure-inset);
+  border-radius: 8px;
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   list-style: none;
+  transition: background-color 140ms ease;
 }
-.profit-page summary::-webkit-details-marker, .product-collection-tools summary::-webkit-details-marker { display: none; }
-.profit-page details > summary::before, .product-collection-tools details > summary::before {
+:is(.profit-page, .product-collection-tools, .system-page) summary::-webkit-details-marker { display: none; }
+:is(.profit-page, .product-collection-tools, .system-page) details > summary::before {
   content: '';
-  flex: 0 0 7px;
-  width: 7px;
-  height: 7px;
-  border: solid var(--text-muted);
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(-45deg);
+  box-sizing: border-box;
+  flex: 0 0 var(--disclosure-box-size);
+  width: var(--disclosure-box-size);
+  height: var(--disclosure-box-size);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
-.profit-page details[open] > summary::before, .product-collection-tools details[open] > summary::before { transform: rotate(45deg); }
-.profit-page details > summary:hover, .product-collection-tools details > summary:hover { background: var(--surface-hover); }
-.profit-page details > summary:focus-visible, .product-collection-tools details > summary:focus-visible { outline: 2px solid var(--primary); }
+:is(.profit-page, .product-collection-tools, .system-page) details > summary::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: calc(var(--disclosure-inset) + (var(--disclosure-box-size) - var(--disclosure-glyph-size)) / 2);
+  top: 50%;
+  width: var(--disclosure-glyph-size);
+  height: var(--disclosure-glyph-size);
+  /* Center the complete vector box, not the asymmetric edges of a rotated border. */
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m9 18 6-6-6-6' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  color: var(--text-muted);
+  background: currentColor;
+  transform: translateY(-50%) rotate(0deg);
+  transition: transform 140ms ease, color 140ms ease;
+  pointer-events: none;
+}
+:is(.profit-page, .product-collection-tools, .system-page) details[open] > summary::before {
+  background: var(--primary-soft);
+  border-color: var(--primary-soft);
+}
+:is(.profit-page, .product-collection-tools, .system-page) details[open] > summary::after {
+  color: var(--primary);
+  transform: translateY(-50%) rotate(90deg);
+}
+:is(.profit-page, .product-collection-tools, .system-page) details > summary:hover { background: var(--surface-hover); }
+:is(.profit-page, .product-collection-tools, .system-page) details > summary:active { background: var(--primary-soft); }
+:is(.profit-page, .product-collection-tools, .system-page) details > summary:focus-visible { outline: 2px solid var(--primary); }
 .profit-detail-area > details > summary { background: var(--surface); border: 1px solid var(--border); }
 .profit-detail-area > details[open] > summary { margin-bottom: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .profit-page details > summary, .profit-page details > summary::before, .profit-page details > summary::after,
+  .product-collection-tools details > summary, .product-collection-tools details > summary::before, .product-collection-tools details > summary::after,
+  .system-page details > summary, .system-page details > summary::before, .system-page details > summary::after { transition: none; }
+}

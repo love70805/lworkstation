@@ -13,6 +13,7 @@
 .board-button.button-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 88%, #000); }
 .board-button.button-ghost { box-shadow: none; }
 .board-button:disabled { box-shadow: none; }
+.board-button:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
 .board-button-icon { padding: 0; }
 .board-button-group { display: inline-flex; align-items: stretch; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 1px 2px rgb(15 23 42 / .08); }
 .board-button-group button { min-height: 32px; padding: 4px 11px; border: 0; border-inline-end: 1px solid var(--border); background: transparent; color: var(--text-muted); font-size: 13px; }
@@ -21,7 +22,7 @@
 .board-button-group button:hover { background: var(--surface-soft); }
 .board-button-group button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .board-select { display: grid; min-width: 0; gap: 4px; }
-.board-select > label { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.board-select > .board-select-label { color: var(--text-muted); font-size: 12px; font-weight: 500; }
 .board-select-trigger {
   display: flex; width: 100%; min-width: 0; min-height: 36px; align-items: center; justify-content: space-between;
   gap: 6px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 10px;
@@ -33,6 +34,7 @@
 .board-select-trigger[aria-expanded="true"] svg { transform: rotate(180deg); }
 .board-select-trigger[data-hovered] { border-color: var(--control-border); }
 .board-select-trigger[data-focus-visible] { outline: 2px solid var(--primary); outline-offset: 2px; }
+.board-select-trigger { transition: border-color 140ms ease-out, background-color 140ms ease-out; }
 .board-select-popover {
   min-width: var(--trigger-width); max-width: min(360px, 92vw); z-index: 100;
   padding: 6px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-raised);
@@ -46,4 +48,8 @@
 .board-select-option[data-selected] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
 @media (max-width: 760px) {
   .board-select-trigger, .board-select-option { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-button, .board-select-trigger, .board-select-trigger svg { transition: none; }
+  .board-button:active:not(:disabled) { transform: none; }
 }

@@ -4,6 +4,10 @@
 
 2026-11-07 以 [2.0.6](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) 作为稳定基线，安装包和两份中文版图文指南在同一发布页。较早条目记载当时情况，旧安装包已归档，旧版源码可按[版本标签](https://github.com/love70805/lworkstation/tags)定位。
 
+## 2.0.7-beta.16 导出内存优化
+
+已完成独立 Beta 候选验收，保留 Beta.15 的布局、采集保护和异常解锁。完整验证、性能边界及安装包见[本批记录](integration/REPORT_EXPORT_MEMORY_2026_11.md)和[候选登记](../releases/README.md)。集成与公开上传状态以 [PR #343](https://github.com/love70805/lworkstation/pull/343) 和 [Beta.16 Release](https://github.com/love70805/lworkstation/releases/tag/beta-sidecar-v2.0.7-beta.16) 服务记录为准；稳定版继续使用 2.0.7 通道。
+
 ## 2.0.7 成本回传与采购总价
 
 修复大批成本回传超出暂存容量后再次暂停的问题，保留具体失败说明。常规 ERP 成本按有效采购总价合计除以数量合计，包含采购服务费；桌面新增“重新获取 ERP 成本”，确认月份及当前范围后获取新证据，人工更正与历史报告保持。
