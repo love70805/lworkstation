@@ -30,7 +30,7 @@ const detailValues = [
 ];
 const details = detailValues.map(([id,itemId,creationTime,quantity,purchaseUnitPrice],index)=>({purchaseOrderId:'ORDER-'+id,purchaseOrderNo:'ORDER-'+id,purchaseOrderDetailId:'DETAIL-'+index,itemId,creationTime,purchaseQuantity:String(quantity),purchaseUnitPrice,tradeName:'脱敏商品',supplierName:'脱敏供应商'}));
 const mappings = ['ORANGE','WHITE','HOOK'].map(key=>({associatedProductId:'WH-'+key,barcodeSkuid:'SKU-'+key,barcodeSkcid:'SKC-TARGET'}));
-async function replay(period, queryRange, { status = '4', paged = false, incomplete = false, emptyScope = false, detailOnlyNumbers = false, badDetail = false } = {}) {
+async function replay(period, queryRange, { status = '4', paged = false, incomplete = false, emptyScope = false, detailOnlyNumbers = false, badDetail = false, serviceUnitPrice = 0 } = {}) {
  const window = new Window({url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html'});
  const messages=[],requests=[];
  window.chrome={runtime:{lastError:null,sendMessage(message,callback){messages.push(structuredClone(message));callback(collectionReply(message,{ledgerPeriod:period, expectedSkus: mappings.map(m => ({ platformSku: m.barcodeSkuid, platformSkc: m.barcodeSkcid }))}) || (message.type==='shopeers.erp.catalogContext'?{ok:false,message:'isolated observation'}:{ok:true,status:'success',resultDeliveryId:message.payload?.resultDeliveryId}));}}};
@@ -48,7 +48,7 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
     if(detailOnlyNumbers)for(const order of orders){order.purchaseOrderNo='';order.purchaseOrderNo1688='';}
     data = paged ? orders.slice((page - 1) * 7, page * 7) : page === 1 ? orders : [];
   }
-  else if(endpoint==='purchase-order-details')data=details.filter(d=>d.purchaseOrderId===url.searchParams.get('purchaseOrderId')).map(d=>detailOnlyNumbers?{...d,purchaseOrderNo:'DETAIL-'+d.purchaseOrderId,purchaseOrderNo1688:'00012345678901234567890'+d.purchaseOrderId}:d);
+  else if(endpoint==='purchase-order-details')data=details.filter(d=>d.purchaseOrderId===url.searchParams.get('purchaseOrderId')).map(d=>({...d,serviceUnitPrice,...(detailOnlyNumbers?{purchaseOrderNo:'DETAIL-'+d.purchaseOrderId,purchaseOrderNo1688:'00012345678901234567890'+d.purchaseOrderId}:{})}));
   else if(endpoint==='product-info-sku')data=mappings.filter(m=>m.associatedProductId===url.searchParams.get('productId'));
   else if(endpoint==='product-page')data=mappings.map(m=>({itemId:m.associatedProductId,tradeName:'脱敏商品'}));
   else throw new Error('Unexpected endpoint '+endpoint);
@@ -65,6 +65,13 @@ async function replay(period, queryRange, { status = '4', paged = false, incompl
 }
 const currentAugust=await replay('2026-08','0');
 const currentSeptember=await replay('2026-09','0');
+const serviceAugust=await replay('2026-08','0',{serviceUnitPrice:2});
+assert.equal(serviceAugust.rows.find(r=>r.warehouseSku==='WH-WHITE').unitCost,'12.4000');
+const serviceRecord=serviceAugust.warehouseEvidence.warehouses.find(w=>w.warehouseSku==='WH-WHITE').purchaseRecords.find(r=>r.purchaseUnitPrice===10.2);
+assert.equal(serviceRecord.amountBasis,'purchase_total');
+assert.equal(serviceRecord.quantity,6);
+assert.equal(serviceRecord.totalPrice,73.2);
+assert.equal(serviceRecord.unitPrice,12.2);
 
 assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-WHITE').unitCost,'10.4000');
 assert.equal(currentAugust.rows.find(r=>r.warehouseSku==='WH-ORANGE').unitCost,'8.4000');

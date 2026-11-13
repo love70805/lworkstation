@@ -517,7 +517,7 @@ try {
         warehouseSku: "WH-A",
         purchaseRecords: [
           { recordId: "R-1", unitPrice: 1, quantity: 2, eligible: true, selectedForPreview: true, confirmed: true, imageUrl: "https://images.example/detail-a.jpg", attribute: "采购属性甲", supplierName: "旧采购供应商", supplier1688Links: [{ type: "store", url: "https://old.1688.com/", supplierName: "旧采购供应商" }], purchaseCatalog: { picturesLinking: "https://images.example.invalid/detail.jpg", purchaseSpecificationAndModel1688: "同行采购规格", purchaseProportion1688: "2-1", lineNumber: 0, purchaseOrderDetailId: "DETAIL-1" } },
-          { recordId: "R-2", unitPrice: 1.99, quantity: 5, eligible: true, selectedForPreview: false },
+          { recordId: "R-2", unitPrice: 1.99, quantity: 5, amountBasis: "purchase_total", totalPrice: 9.95, purchaseUnitPrice: 1.49, serviceUnitPrice: 0.5, eligible: true, selectedForPreview: false },
         ],
       }],
       excludedOrders: [{ purchaseOrderId: "PO-CANCELLED", warehouseSku: "WH-A", exclusionReasons: ["cancelled_or_closed"] }],
@@ -576,6 +576,11 @@ try {
   assert.equal(firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords.length, 2);
   assert.equal(firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords[0].confirmed, undefined);
   const catalogRecord = firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords[0];
+  const purchaseTotalRecord = firstPending.records[0].envelope.batch.warehouseEvidence[0].purchaseRecords[1];
+  assert.equal(purchaseTotalRecord.amountBasis, 'purchase_total');
+  assert.equal(purchaseTotalRecord.totalPrice, 9.95);
+  assert.equal(purchaseTotalRecord.purchaseUnitPrice, 1.49);
+  assert.equal(purchaseTotalRecord.serviceUnitPrice, 0.5);
   assert.equal(catalogRecord.imageUrl, "https://images.example/detail-a.jpg");
   assert.equal(catalogRecord.attribute, "采购属性甲");
   assert.equal(catalogRecord.supplier1688Links[0].supplierName, "旧采购供应商");

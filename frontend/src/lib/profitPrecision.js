@@ -63,8 +63,14 @@ export function formatProfitAmount(value) {
 export const formatErpUnitCost = (value) => `¥${new Decimal(value).toDecimalPlaces(4, Decimal.ROUND_DOWN).toFixed(4)}`;
 export const formatManualUnitCost = (value) => `¥${new Decimal(value).toFixed()}`;
 
+export function formatPurchaseAmountBasis(record) {
+  if (record.amountBasis !== "purchase_total" || record.totalPrice == null) return `${record.quantity} 件 × ${formatErpUnitCost(record.effectiveUnitPrice ?? record.unitPrice)}`;
+  const corrected = record.resolution?.action === "correct_price";
+  return `${corrected ? "原" : ""}采购总价 ${formatManualUnitCost(record.totalPrice)} ÷ ${record.quantity} 件${corrected ? `；更正后单价 ${formatManualUnitCost(record.effectiveUnitPrice)}` : ""}`;
+}
+
 export function formatCostPurchaseEvidence(row) {
-  return (row.costPurchaseRecords ?? []).map(record => `${record.purchaseDate} | ${record.order1688 ? "1688" : "采购单"} ${record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || "未提供单号"} | ${record.quantity}件 × ${record.effectiveUnitPrice ?? record.unitPrice}`).join("\n");
+  return (row.costPurchaseRecords ?? []).map(record => `${record.purchaseDate} | ${record.order1688 ? "1688" : "采购单"} ${record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || "未提供单号"} | ${record.amountBasis === "purchase_total" ? formatPurchaseAmountBasis(record) : `${record.quantity}件 × ${record.effectiveUnitPrice ?? record.unitPrice}`}`).join("\n");
 }
 
 export function buildProfitExportRows(rows, ledger, summary) {

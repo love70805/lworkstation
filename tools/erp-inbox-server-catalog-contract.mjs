@@ -270,6 +270,7 @@ function normalizeErpCatalogPurchaseEvidence(value) {
     if (ref !== evidenceRef(warehouseSku)) throw new Error("ERP \u8D44\u6599\u91C7\u8D2D\u8BC1\u636E\u4E0E\u4ED3\u5E93 SKU \u4E0D\u4E00\u81F4\u3002");
     const normalizeRecords = (records, excluded) => (Array.isArray(records) ? records : []).map((record, index) => {
       if (optional(record?.warehouseSku) && canonicalWarehouseSku(record.warehouseSku) !== canonical) throw new Error("ERP \u8D44\u6599\u91C7\u8D2D\u8BB0\u5F55\u4E0E\u4ED3\u5E93\u8BC1\u636E\u4E0D\u4E00\u81F4\u3002");
+      if (record?.amountBasis != null && record.amountBasis !== "purchase_total") throw new Error("\u91C7\u8D2D\u91D1\u989D\u53E3\u5F84\u65E0\u6548\u3002");
       return {
         recordId: required(record?.recordId ?? record?.id, `ERP \u8D44\u6599\u7B2C ${index + 1} \u6761\u91C7\u8D2D\u8BB0\u5F55 ID`),
         warehouseSku,
@@ -277,6 +278,7 @@ function normalizeErpCatalogPurchaseEvidence(value) {
         quantity: number(record?.quantity ?? record?.qty, "\u91C7\u8D2D\u6570\u91CF"),
         unitPrice: number(record?.unitPrice, "\u91C7\u8D2D\u5355\u4EF7"),
         totalPrice: number(record?.totalPrice, "\u91C7\u8D2D\u91D1\u989D"),
+        ...record?.amountBasis === "purchase_total" ? { amountBasis: "purchase_total", purchaseUnitPrice: number(record.purchaseUnitPrice, "\u539F\u91C7\u8D2D\u5355\u4EF7"), serviceUnitPrice: number(record.serviceUnitPrice, "\u670D\u52A1\u5355\u4EF7") } : {},
         purchaseDate: optional(record?.purchaseDate ?? record?.date),
         order1688: optional(record?.order1688),
         purchaseOrderNo: optional(record?.purchaseOrderNo),

@@ -7,7 +7,7 @@ import { runDerivedComputation } from '../data/repositories/derivedComputationSe
 import { erpCollectionPresentation, isActiveErpCollection } from '../domain/erpCollectionStatus';
 import { useErpCollectionTasks } from '../hooks/useErpCollectionTasks';
 import ErpCollectionProgress from '../components/ErpCollectionProgress';
-import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
+import { formatErpUnitCost, formatManualUnitCost, formatPurchaseAmountBasis } from "../lib/profitPrecision";
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
 import { cancelAutoErpRequest, ensureAutoErpRequest, erpRequestScopeKey } from "../lib/autoErpRequest";
@@ -144,7 +144,7 @@ function SelectedPurchaseEvidence({ match, expanded }) {
         <strong>{record.purchaseDate}</strong>
         <span>{record.order1688 ? "1688" : "采购单"} · {record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || "未提供单号"}</span>
         {record.order1688 && record.purchaseOrderNo ? <small>采购单 · {record.purchaseOrderNo}</small> : null}
-        <small>{record.quantity} 件 × {formatErpUnitCost(record.effectiveUnitPrice ?? record.unitPrice)}</small>
+        <small>{formatPurchaseAmountBasis(record)}</small>
       </div>)}
     </div>
   </details>;

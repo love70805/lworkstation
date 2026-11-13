@@ -32,7 +32,7 @@
     const RETRY_COUNT = 2;
     const CACHE_TTL = 10 * 60 * 1000;
     const RESULT_CACHE_TTL = 30 * 60 * 1000;
-    const RESULT_CACHE_KEY = 'latest_cost_result_v7';
+    const RESULT_CACHE_KEY = 'latest_cost_result_v8_purchase_total';
     const PREFIX = '[ERP Assistant]';
     const WORKSPACE_RESET_KEY = 'erpAssistantV8_workspaceResetV1';
     let workspaceResetId = '';
@@ -1232,8 +1232,9 @@
         details.forEach((detail, detailIndex) => {
             const warehouseSku = String(detail && detail.itemId || '').trim();
             const date = parseDateInfo(detail && detail.creationTime);
-            const qty = Number.parseFloat(detail && detail.purchaseQuantity);
-            const unitPrice = Number.parseFloat(detail && detail.purchaseUnitPrice);
+            const qty = Number(detail?.purchaseQuantity);
+            const amounts = resultPolicy.purchaseAmounts(detail);
+            const unitPrice = amounts.unitPrice;
             const purchaseCatalog = resultPolicy.purchaseCatalogFromDetail(detail);
             const evidenceBase = {
                 recordId: String(detail.detailId || detail.purchaseOrderDetailId || detail.id || ((detail._purchaseOrderId || detail.purchaseOrderId || 'order') + ':' + detailIndex)).trim(),
@@ -1244,7 +1245,7 @@
                 ...(purchaseCatalog ? { purchaseCatalog } : {}),
                 quantity: Number.isFinite(qty) ? qty : null,
                 unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
-                totalPrice: Number.isFinite(qty) && Number.isFinite(unitPrice) ? qty * unitPrice : null,
+                ...amounts,
                 purchaseDate: date ? date.text : String(detail && detail.creationTime || '').trim(),
                 order1688: String(detail._orderNo1688 || '').trim(),
                 purchaseOrderNo: String(detail._purchaseOrderNo || '').trim(),
@@ -1276,7 +1277,7 @@
                 ...(purchaseCatalog ? { purchaseCatalog } : {}),
                 qty,
                 unitPrice,
-                totalPrice: qty * unitPrice,
+                ...amounts,
                 date: date.text,
                 dateValue: date.dateValue,
                 timestamp: date.timestamp,
@@ -1293,7 +1294,7 @@
         if (buckets.size === 0 && !allowEmpty) {
             throw new CostError(
                 '没有可用的采购明细',
-                '无日期、无 SKU、数量不大于 0 或单价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
+                '无日期、无 SKU、数量不大于 0 或采购总价无效的记录不参与预览；账本月末截止范围待工作台筛选。'
             );
         }
 
@@ -1329,6 +1330,9 @@
                     quantity: record.qty,
                     unitPrice: record.unitPrice,
                     totalPrice: record.totalPrice,
+                    amountBasis: record.amountBasis,
+                    purchaseUnitPrice: record.purchaseUnitPrice,
+                    serviceUnitPrice: record.serviceUnitPrice,
                     purchaseDate: record.date,
                     order1688: record.order1688,
                     purchaseOrderNo: record.purchaseOrderNo,
@@ -2336,7 +2340,7 @@
         const diagnostic = result.previewDiagnostic;
         const note = diagnostic?.needsReview ? '<p class="erpa-review-note"><strong>' + escapeHtml(diagnostic.label) + '</strong><br>' + escapeHtml(diagnostic.action) + '</p>' : '';
         const records = resultPolicy.previewEvidenceRecords(result, lastWarehouseEvidence);
-        const evidence = records.length ? '<details class="erpa-source-evidence"><summary>查看采购证据 · ' + records.length + ' 笔</summary><p>空白或无效单价不会补成 0。' + (records.length > 30 ? '这里显示前 30 笔，完整证据可在工作台查看。' : '') + '</p><div class="erpa-evidence-list">' + records.slice(0, 30).map(record => '<article><strong>' + escapeHtml(record.purchaseDate || '日期未提供') + '</strong><span>' + escapeHtml(record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '单号未提供') + '</span><p>数量 ' + escapeHtml(record.quantity ?? '未提供') + ' · 采购单价 ¥' + escapeHtml(record.unitPrice ?? '未提供') + '</p><small>' + (result.selectedRecordIds?.includes(record.recordId) ? '参与本次最近三笔计算' : '历史或排除记录，未参与本次计算') + '</small></article>').join('') + '</div><details class="erpa-raw-evidence"><summary>原始采购数据</summary><pre>' + escapeHtml(JSON.stringify(records.slice(0, 30), null, 2)) + '</pre></details></details>' : '<p class="erpa-muted">当前没有对应仓库 SKU 的采购记录。</p>';
+        const evidence = records.length ? '<details class="erpa-source-evidence"><summary>查看采购证据 · ' + records.length + ' 笔</summary><p>采购总价或数量缺失时不会补成 0。' + (records.length > 30 ? '这里显示前 30 笔，完整证据可在工作台查看。' : '') + '</p><div class="erpa-evidence-list">' + records.slice(0, 30).map(record => '<article><strong>' + escapeHtml(record.purchaseDate || '日期未提供') + '</strong><span>' + escapeHtml(record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '单号未提供') + '</span><p>数量 ' + escapeHtml(record.quantity ?? '未提供') + ' · 采购总价 ¥' + escapeHtml(record.totalPrice ?? '未提供') + ' · 核算单价 ¥' + escapeHtml(record.unitPrice ?? '未提供') + '</p><small>' + (result.selectedRecordIds?.includes(record.recordId) ? '参与本次最近三笔计算' : '历史或排除记录，未参与本次计算') + '</small></article>').join('') + '</div><details class="erpa-raw-evidence"><summary>原始采购数据</summary><pre>' + escapeHtml(JSON.stringify(records.slice(0, 30), null, 2)) + '</pre></details></details>' : '<p class="erpa-muted">当前没有对应仓库 SKU 的采购记录。</p>';
         if (result.previewStatus && result.previewStatus !== 'ready') return '<tr class="erpa-detail-row"><td colspan="9"><div class="erpa-detail-wrap">' + renderMappingList(result) + note + evidence + '</div></td></tr>';
         const rows = result.details.map((detail) => {
             const reasons = warningReasons(detail);
