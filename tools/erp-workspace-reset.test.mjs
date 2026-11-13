@@ -11,7 +11,7 @@ const src=process.env.ERP_RESET_TEST_SRC || path.join(root,'integrations/erp-ass
 const manifest=await fs.readFile(path.join(src,'../manifest.json'),'utf8');
 const backgroundSource=await fs.readFile(path.join(src,'background.js'),'utf8');
 const checkpointKey='shopeersErpCollectionCheckpointsV1', pendingKey='shopeersErpPendingCostResultsV2';
-const resultKey='erpAssistantV8_latest_cost_result_v7';
+const resultKey='erpAssistantV8_latest_cost_result_v8_purchase_total';
 const resetKey='erpAssistantV8_workspaceResetV1';
 const sender={url:'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html',frameId:0};
 sender.tab={url:sender.url};

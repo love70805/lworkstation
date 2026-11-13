@@ -5,12 +5,13 @@ import vm from 'node:vm';
 
 const background = await readFile(new URL('../integrations/erp-assistant-extension/src/background.js', import.meta.url), 'utf8');
 const bridgeSource = await readFile(new URL('../integrations/erp-assistant-extension/src/shopeers-bridge.js', import.meta.url), 'utf8');
+const extensionVersion = JSON.parse(await readFile(new URL('../integrations/erp-assistant-extension/manifest.json', import.meta.url), 'utf8')).version;
 const PENDING = 'shopeersErpPendingCostResultsV2';
 const CHECKPOINTS = 'shopeersErpCollectionCheckpointsV1';
 const sender = { url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId: 0 };
 const utf8Bytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8');
 
-function fixture(count = 1) {
+function fixture(count = 1, storageSeed = {}) {
   const mappings = Array.from({ length: count }, (_, index) => ({ platformSku: `SYNTHETIC-SKU-${index}`, platformSkc: `SYNTHETIC-SKC-${index}`, warehouseSku: 'SHARED-WAREHOUSE', productName: '合成中文商品🧪' }));
   const request = { kind: 'request', requestId: 'REQ', ledgerId: 'LEDGER', ledgerPeriod: '2026-10', workspaceId: 'WS', status: 'registered',
     registeredAt: '2026-11-04T00:00:00Z', platformSkcs: mappings.map(item => item.platformSkc), expectedSkus: structuredClone(mappings) };
@@ -22,13 +23,19 @@ function fixture(count = 1) {
     warehouseEvidence: { warehouses: [{ warehouseSku: 'SHARED-WAREHOUSE', evidenceComplete: true,
       purchaseRecords: [{ recordId: 'P-1', quantity: 2, unitPrice: 5, purchaseDate: '2026-10-01 12:00:00' }] }] } };
   const storage = { shopeersErpInboxBaseUrl: 'http://127.0.0.1:5397', shopeersErpInboxCapability: 'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId: 'WS',
-    [PENDING]: [], [CHECKPOINTS]: [{ schemaVersion: 1, extensionVersion: '8.0.57', updatedAt: Date.now(), requestId: 'UNRELATED', binding: 'unchanged' }] };
+    [PENDING]: [], [CHECKPOINTS]: [{ schemaVersion: 1, extensionVersion: '8.0.57', updatedAt: Date.now(), requestId: 'UNRELATED', binding: 'unchanged' }], ...storageSeed };
   const calls = [], writes = [];
   let dispatch, afterTaskRead;
+  const storedBytes = values => Object.entries(values).reduce((sum, [key, value]) => sum + Buffer.byteLength(key) + utf8Bytes(value), 0);
   const chrome = { storage: { local: {
+    QUOTA_BYTES: 10 * 1024 * 1024,
+    getBytesInUse: async () => storedBytes(storage),
     get: async keys => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map(key => [key, structuredClone(storage[key])])),
-    set: async values => { writes.push(structuredClone(values)); Object.assign(storage, structuredClone(values)); },
-  } }, runtime: { getManifest: () => ({ version: '8.0.59' }), onMessage: { addListener: listener => { dispatch = listener; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} },
+    set: async values => {
+      if (storedBytes({ ...storage, ...values }) > 10 * 1024 * 1024) throw new Error('Resource::kQuotaBytes quota exceeded');
+      writes.push(structuredClone(values)); Object.assign(storage, structuredClone(values));
+    },
+  } }, runtime: { getManifest: () => ({ version: extensionVersion }), onMessage: { addListener: listener => { dispatch = listener; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} },
     sendMessage: (message, callback) => dispatch(message, sender, callback),
   }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout, console,
@@ -67,9 +74,38 @@ function fixture(count = 1) {
 }
 
 {
+  const sample = fixture();
+  sample.input.warehouseEvidence.syntheticEvidence = 'x'.repeat(11 * 1024 * 1024);
+  const initial = structuredClone(sample.storage);
+  const measured = await sample.bridge.measureCost(sample.input);
+  assert.equal(measured.ok, true);
+  assert.ok(measured.bytes < 20 * 1024 * 1024, 'HTTP preflight alone used to accept a batch that native storage rejects');
+  assert.equal(measured.storageFits, false);
+  assert.ok(measured.storageBytes > measured.storageAvailableBytes);
+  assert.equal(sample.writes.length, 0);
+  const submitted = await sample.bridge.submit(sample.input);
+  assert.equal(submitted.code, 'ERP_COST_STORAGE_FULL');
+  assert.equal(submitted.status, 'failed');
+  assert.deepEqual(sample.storage, initial, 'capacity failure cannot replace previously retained evidence');
+  assert.ok(sample.calls.every(call => call.method === 'GET'));
+}
+
+{
+  const retained = { resultDeliveryId: 'UNRELATED-RETAINED', syntheticEvidence: 'x'.repeat(9 * 1024 * 1024) };
+  const sample = fixture(1, { [PENDING]: [retained] });
+  sample.input.warehouseEvidence.syntheticEvidence = 'x'.repeat(1024 * 1024);
+  const measured = await sample.bridge.measureCost(sample.input);
+  assert.equal(measured.storageFits, false, 'preflight accounts for all already retained results');
+  assert.ok(measured.storageAvailableBytes < 1024 * 1024);
+  assert.equal((await sample.bridge.submit(sample.input)).code, 'ERP_COST_STORAGE_FULL');
+  assert.deepEqual(sample.storage[PENDING], [retained]);
+}
+
+{
   const sample = fixture(5);
   const measured = await sample.bridge.measureCost(sample.input);
   assert.equal(measured.ok, true);
+  assert.equal(measured.storageFits, true);
   assert.equal(sample.writes.length, 0);
   const submitted = await sample.bridge.submit(sample.input);
   assert.equal(submitted.status, 'success');
@@ -78,6 +114,17 @@ function fixture(count = 1) {
   assert.ok(measured.bytes > delivered.body.length, 'UTF-8 bytes are not JavaScript UTF-16 character count');
   assert.equal(JSON.parse(delivered.body).rows.length, 5);
   assert.equal(sample.storage[PENDING].length, 0, 'successful delivery retires its exact retained payload');
+}
+
+{
+  const sample = fixture();
+  const original = await sample.bridge.submit(sample.input);
+  assert.equal(original.status, 'success');
+  const retained = { ...original, syntheticRetainedEvidence: 'x'.repeat(Math.floor(9.8 * 1024 * 1024)) };
+  sample.storage[PENDING] = [retained];
+  const retried = await sample.bridge.retry(retained.resultDeliveryId);
+  assert.equal(retried.status, 'success', 'a near-quota original payload can be retried without allocating a second copy');
+  assert.equal(sample.storage[PENDING].length, 0);
 }
 
 for (const [name, mutate, code] of [
@@ -108,11 +155,12 @@ for (const [name, mutate, code] of [
 
 {
   const sample = fixture();
-  sample.storage[CHECKPOINTS] = ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.28'].map(extensionVersion => ({
-    schemaVersion: 1, extensionVersion, updatedAt: Date.now(), requestId: `SYNTHETIC-${extensionVersion}`, binding: `unchanged-${extensionVersion}`,
+  const checkpointUpdatedAt = Date.now();
+  sample.storage[CHECKPOINTS] = ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.61', '8.0.28'].map(extensionVersion => ({
+    schemaVersion: 1, extensionVersion, updatedAt: checkpointUpdatedAt, requestId: `SYNTHETIC-${extensionVersion}`, binding: `unchanged-${extensionVersion}`,
   }));
   const preserved = await sample.api.cleanCheckpoints();
-  assert.deepEqual(Array.from(preserved, value => value.extensionVersion), ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59']);
+  assert.deepEqual(Array.from(preserved, value => value.extensionVersion), ['8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.61']);
   assert.ok(preserved.every(value => value.binding === `unchanged-${value.extensionVersion}`), 'upgrade keeps the exact original binding for later identity checks');
   sample.storage[CHECKPOINTS] = [{ ...preserved[2], requestId: 'REQ', workspaceId: 'WS', state: 'pending', binding: 'wrong-original-scope' }];
   const restored = await sample.message('collectionCheckpoint', { action: 'restore', requestId: 'REQ' });

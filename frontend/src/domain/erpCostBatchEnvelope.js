@@ -16,6 +16,7 @@ import {
 } from "./identifiers";
 import { normalizeErpCatalogFields, normalizeErpCatalogCoverage } from "./erpCatalogFields";
 import { normalizeErpHistoryMappings } from '../../../integrations/contracts/erp-history-mappings.mjs';
+import { PURCHASE_TOTAL_BASIS } from "./erpPurchaseEvidence";
 
 export const ERP_COST_BATCH_FORMAT = "shopeers-erp-cost-batch";
 export const ERP_COST_BATCH_VERSION = 2;
@@ -115,13 +116,18 @@ function normalizePurchaseRecord(record, index, warehouseSku, excluded = false) 
   const quantity = optionalFiniteNumber(record.quantity ?? record.qty ?? record.purchaseQuantity, "采购数量", { minimum: 0 });
   const unitPrice = optionalFiniteNumber(record.unitPrice ?? record.purchaseUnitPrice, "采购单价", { minimum: 0 });
   const totalPrice = optionalFiniteNumber(record.totalPrice ?? record.price, "采购金额", { minimum: 0 });
+  if (record.amountBasis != null && record.amountBasis !== PURCHASE_TOTAL_BASIS) throw new Error("采购金额口径无效。");
+  const purchaseTotal = record.amountBasis === PURCHASE_TOTAL_BASIS;
   return {
     recordId: optionalText(record.recordId ?? record.id) ?? `${evidenceRefFor(warehouseSku)}:${excluded ? "excluded" : "record"}:${index + 1}`,
     warehouseSku,
     productName: optionalText(record.productName ?? record.name),
     quantity,
     unitPrice,
-    totalPrice: totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    totalPrice: purchaseTotal ? totalPrice : totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    ...(purchaseTotal ? { amountBasis: PURCHASE_TOTAL_BASIS,
+      purchaseUnitPrice: optionalFiniteNumber(record.purchaseUnitPrice, "原采购单价", { minimum: 0 }),
+      serviceUnitPrice: optionalFiniteNumber(record.serviceUnitPrice, "服务单价", { minimum: 0 }) } : {}),
     purchaseDate: optionalText(record.purchaseDate ?? record.date),
     order1688: optionalText(record.order1688),
     purchaseOrderNo: optionalText(record.purchaseOrderNo),

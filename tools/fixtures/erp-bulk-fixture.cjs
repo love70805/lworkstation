@@ -9,11 +9,11 @@ const businessOrder = (scope, index) => `PUR-${scope}-${String(index).padStart(4
 const rows = targets.flatMap((_, scope) => Array.from({ length: ORDERS }, (_, index) => ({ scope, index,
     purchaseOrderId: `PO-SKC-${scope}-${index}`, purchaseOrderNo: businessOrder(scope, index), creationTime: date(index), purchaseStatus: '7' })));
 const longMapping = Array.from({ length: 200 }, (_, index) => `FOREIGN-${index}`).join(',').slice(0, 1024);
-const headers = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '创建时间', '采购状态', '1688订单状态', '商品名称', '供应商名称'];
+const headers = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '采购总价', '创建时间', '采购状态', '1688订单状态', '商品名称', '供应商名称'];
 function exportBytes(broken = false) {
     const book = xlsx.utils.book_new();
     const values = [broken ? ['未知列'] : headers, ...(!broken ? rows.map(row => [row.purchaseOrderNo, `WH-${row.scope}`, row.scope === 0 ? longMapping : `SKU-${row.scope}`,
-        2, 4 + row.index % 3, row.creationTime, '已上架', '已付款', '合成采购商品', '合成供应商']) : [])];
+        2, 4 + row.index % 3, 2 * (4 + row.index % 3), row.creationTime, '已上架', '已付款', '合成采购商品', '合成供应商']) : [])];
     xlsx.utils.book_append_sheet(book, xlsx.utils.aoa_to_sheet(values), 'Sheet1');
     return xlsx.write(book, { bookType: 'xlsx', type: 'array', compression: true });
 }

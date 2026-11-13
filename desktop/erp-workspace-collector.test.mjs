@@ -10,7 +10,7 @@ function harness(options={}){
   const input={workspaceId:'W',ledgerId:'L',requestId:'REQ'};
   let context={workspaceId:'W'},task=null,login=false,created=0,closed=0,reloads=0,requestStatus='registered',clock=0;
   let nextRead=null,nextCreation=null,nextProbe=null,nextReconnectError=null,claimOnReconnect=false;
-  const calls=[],views=[];
+  const calls=[],views=[],retainedTasks=new Map();
   const collector=createWorkspaceErpCollector({getContext:()=>context,now:()=>clock,ackTimeoutMs:100,checkSession:async()=>!login,...options,interval:()=>1,clear:()=>{},createView:async url=>{
     created++;assert.equal(new URL(url).searchParams.get('lworkstationRequest'),input.requestId);
     assert.equal(new URL(url).searchParams.get('lworkstationResume'),task.resumeRequestId,'the page is bound to the exact execution intent');
@@ -43,12 +43,13 @@ function harness(options={}){
         resumeRequestId:call.body.action==='request_resume'?'RESUME-'+calls.filter(item=>item.body?.action==='request_resume').length:task.resumeRequestId,
         ...(call.body.action==='request_resume'?{runnerId:undefined,runnerLeaseExpiresAt:undefined,executionTarget:call.body.executionTarget??task.executionTarget}:{})};return {task};
     }
-    if(nextRead){const gate=nextRead;nextRead=null;const snapshot=structuredClone(task);gate.entered.resolve();await gate.release.promise;return {task:snapshot};}
-    return {task};
+    const observed=task??retainedTasks.get(call.route.split('/').at(-1));
+    if(nextRead){const gate=nextRead;nextRead=null;const snapshot=structuredClone(observed);gate.entered.resolve();await gate.release.promise;return {task:snapshot};}
+    return {task:observed};
   }});
   const gate=()=>({entered:deferred(),release:deferred()});
   return {collector,input,calls,views,login(value){login=value;},context(value){context=value;},running(){task={...task,status:'running',runnerId:'RUNNER'};},
-    update(value){task={...task,...value};},register(id){input.requestId=id;requestStatus='registered';task=null;},advance(ms){clock+=ms;},
+    update(value){task={...task,...value};},register(id,{retainPreviousTask=false}={}){if(retainPreviousTask&&task)retainedTasks.set(task.taskId,structuredClone(task));input.requestId=id;requestStatus='registered';task=null;},advance(ms){clock+=ms;},
     holdRead(){return nextRead=gate();},holdCreation(){return nextCreation=gate();},holdProbe(){return nextProbe=gate();},
     claimBeforeReconnect(){claimOnReconnect=true;},failReconnect(error){nextReconnectError=error;},get task(){return task;},
     get created(){return created;},get closed(){return closed;},get reloads(){return reloads;}};
@@ -61,6 +62,27 @@ test('starts one immutable desktop task with no foreground form or clipboard ope
   assert.equal(create.body.catalogMode,'on_demand');
   assert.equal(create.body.costFlow,'task');
   assert.equal(h.collector.snapshot().status,'waiting_ack');h.collector.dispose();
+});
+
+test('recollection releases a confirmed stopped old view without waiting for the next poll',async()=>{
+  const h=harness();await h.collector.start(h.input);h.running();await h.collector.poll();
+  h.update({status:'stopped'});h.register('REQ-NEW',{retainPreviousTask:true});
+  const [a,b]=await Promise.all([h.collector.start(h.input),h.collector.start(h.input)]);
+  assert.equal(a.requestId,'REQ-NEW');assert.equal(b.requestId,'REQ-NEW');
+  assert.equal(h.closed,1);assert.equal(h.created,2);assert.equal(h.views[0].destroyed,true);h.collector.dispose();
+});
+test('a different request never closes a genuinely running task or accepts foreign task metadata',async()=>{
+  for(const patch of [{status:'running',runnerId:'ACTIVE'},{status:'stopped',workspaceId:'OTHER'}]){
+    const h=harness();await h.collector.start(h.input);h.update(patch);h.register('REQ-NEW',{retainPreviousTask:true});
+    await assert.rejects(h.collector.start(h.input),/采集正在执行/);
+    assert.equal(h.closed,0);assert.equal(h.created,1);h.collector.dispose();
+  }
+});
+test('a workspace change during the old-view read cannot launch or release another workspace view',async()=>{
+  const h=harness();await h.collector.start(h.input);h.update({status:'stopped'});h.register('REQ-NEW',{retainPreviousTask:true});
+  const gate=h.holdRead(),pending=h.collector.start(h.input);await gate.entered.promise;
+  h.context({workspaceId:'OTHER'});gate.release.resolve();
+  await assert.rejects(pending,/工作区或采集状态已改变/);assert.equal(h.closed,0);assert.equal(h.created,1);h.collector.dispose();
 });
 test('waits for first login and resumes only that fixed task after login',async()=>{
   const h=harness();h.login(true);await h.collector.start(h.input);assert.equal(h.collector.snapshot().status,'waiting_login');

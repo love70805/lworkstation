@@ -159,7 +159,18 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, che
       if (['starting','running','waiting_ack','reconnecting','ready'].includes(state.status) && !state.error) return snapshot();
       if (current?.task?.runnerId && !['paused','stopped','invalidated'].includes(current.task.status)) return snapshot();
     }
-    if ((current?.view || current?.opening) && current.requestId !== input.requestId) throw new Error('已有成本采集正在执行，请先暂停或停止。');
+    if ((current?.view || current?.opening) && current.requestId !== input.requestId) {
+      const previous = current, previousRevision = generation;
+      if (previous.workspaceId !== input.workspaceId) throw new Error('已有其他工作区的成本采集正在执行，请先停止。');
+      // A confirmed recollection stops its old task before launching a fresh
+      // request. The hidden view may outlive that stop until the next poll.
+      const { task } = await readTask(previous);
+      if (!owns(previous, previousRevision) || getContext()?.workspaceId !== input.workspaceId) throw new Error('工作区或采集状态已改变，请重试。');
+      if (task?.taskId !== previous.task.taskId || task.workspaceId !== input.workspaceId || task.ledgerId !== previous.ledgerId || task.requestId !== previous.requestId
+        || !['stopped', 'invalidated', 'completed'].includes(task.status)) throw new Error('已有成本采集正在执行，请先停止。');
+      previous.task = task;
+      generation++; closeView(previous);
+    }
     if (current?.sessionInvalidated && current.requestId === input.requestId) throw Object.assign(new Error('ERP 登录已变化，请重新准备本月采集。'), { code: 'ERP_SESSION_CHANGED' });
     const revision = ++generation;
     const registered = await requestInbox({ route: '/erp/v1/requests', query: { workspaceId: input.workspaceId, includeHistory: true } });
@@ -188,8 +199,8 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, che
     }
   }
   function start(input) {
-    if (starting) return starting.requestId === input?.requestId ? starting.promise : Promise.reject(new Error('正在准备另一项采集，请稍后重试。'));
-    const promise = launch(input).finally(() => { starting = null; }); starting = { requestId: input?.requestId, promise }; return promise;
+    if (starting) return ['requestId','workspaceId','ledgerId'].every(key => starting[key] === input?.[key]) ? starting.promise : Promise.reject(new Error('正在准备另一项采集，请稍后重试。'));
+    const promise = launch(input).finally(() => { starting = null; }); starting = { requestId: input?.requestId, workspaceId: input?.workspaceId, ledgerId: input?.ledgerId, promise }; return promise;
   }
   async function stop(status = 'stopped') {
     const owner = current; generation++; closeView(owner);

@@ -76,8 +76,8 @@ app.whenReady().then(async () => {
         const xlsx = require('../frontend/node_modules/xlsx');
         const book = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(book, xlsx.utils.aoa_to_sheet([
-          ['采购单号','仓库SKU','平台SKU','采购数量','采购单价','创建时间','采购状态','1688订单状态','商品名称'],
-          ['PUR-NATIVE-BULK','WH-A','SKU-A',2,4,'2026-08-20 12:00:00','已上架','已付款','原生批量商品'],
+          ['采购单号','仓库SKU','平台SKU','采购数量','采购单价','采购总价','创建时间','采购状态','1688订单状态','商品名称'],
+          ['PUR-NATIVE-BULK','WH-A','SKU-A',2,3,8,'2026-08-20 12:00:00','已上架','已付款','原生批量商品'],
         ]), 'Sheet1');
         return new Response(xlsx.write(book, { type: 'buffer', bookType: 'xlsx', compression: true }), { headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' } });
       }
@@ -133,7 +133,7 @@ app.whenReady().then(async () => {
     await call('requests', { request: { id: 'NATIVE-AUTO-R', workspaceId, ledgerId: 'NATIVE-AUTO-L', ledgerPeriod: '2026-09', platformSkcs: [{ platformSkc: 'SKC-A' }] }, expectedSkus: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A' }] });
     await evaluate(`document.body.insertAdjacentHTML('beforeend','<input id="keep-foreground" value="前台原查询"><select id="keep-page"><option>20</option><option selected>100</option></select>')`);
     const foregroundUrl = view.webContents.getURL();
-    const foregroundCache = await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v7'))?.results`);
+    const foregroundCache = await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v8_purchase_total'))?.results`);
     automaticLoginRequired = true;
     collector = createWorkspaceErpCollector({
       getContext: () => ({ workspaceId }),
@@ -164,7 +164,7 @@ app.whenReady().then(async () => {
     assert.equal(view.webContents.getURL(), foregroundUrl);
     assert.equal(await evaluate(`document.querySelector('#keep-foreground').value`), '前台原查询');
     assert.equal(await evaluate(`document.querySelector('#keep-page').value`), '100');
-    assert.deepEqual(await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v7'))?.results`), foregroundCache);
+    assert.deepEqual(await evaluate(`JSON.parse(localStorage.getItem('erpAssistantV8_latest_cost_result_v8_purchase_total'))?.results`), foregroundCache);
     await collector.sessionChanged();
     assert.equal(collector.snapshot().status, 'session_changed');
     await assert.rejects(collector.start({ workspaceId, ledgerId: 'NATIVE-AUTO-L', requestId: 'NATIVE-AUTO-R' }), { code: 'ERP_SESSION_CHANGED' });
@@ -250,6 +250,10 @@ app.whenReady().then(async () => {
     const bulkReceipt = await waitFor(async () => (await call(`cost-batches?workspaceId=${workspaceId}`)).records?.find(item=>item.requestId==='NATIVE-BULK'), 'automatic native bulk export receipt');
     assert.equal(bulkReceipt.envelope.batch.rows[0].unitCost,4);
     assert.equal(bulkReceipt.envelope.batch.sourceMeta.collectionMethod,'bulk_export');
+    const bulkPurchase = bulkReceipt.envelope.batch.warehouseEvidence[0].purchaseRecords[0];
+    assert.equal(bulkPurchase.amountBasis,'purchase_total');
+    assert.equal(bulkPurchase.totalPrice,8);
+    assert.equal(bulkPurchase.purchaseUnitPrice,3);
     assert.match(bulkReceipt.envelope.batch.sourceMeta.bulkSourceSha256,/^[a-f0-9]{64}$/);
     assert.equal(bulkReceipt.envelope.batch.sourceMeta.catalogPublication.mode,'on_demand');
     const bulkTask = (await call(`collection-tasks?workspaceId=${workspaceId}`)).tasks.find(task=>task.requestId==='NATIVE-BULK');

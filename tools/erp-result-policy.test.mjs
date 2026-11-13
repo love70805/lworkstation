@@ -15,6 +15,18 @@ const policy = sandbox.window.ShopeersErpResultPolicy;
 
 assert.ok(policy, "result policy should expose its browser API");
 
+const nativeAmount = policy.purchaseAmounts({ purchaseQuantity: '12', purchaseUnitPrice: '2.4', serviceUnitPrice: '.6' });
+assert.equal(nativeAmount.totalPrice, 36);
+assert.equal(nativeAmount.unitPrice, 3);
+assert.equal(nativeAmount.amountBasis, 'purchase_total');
+assert.equal(policy.purchaseAmounts({ purchaseQuantity: 12, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6, purchaseTotalPrice: 42 }).unitPrice, 3.5, 'an explicit line total is authoritative');
+for (const purchaseTotalPrice of [null, '', -1, 'invalid']) {
+  const amount = policy.purchaseAmounts({ purchaseQuantity: 12, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6, purchaseTotalPrice });
+  assert.equal(amount.totalPrice, null);
+  assert.equal(amount.unitPrice, null, 'an explicit invalid total cannot fall back to base or service prices');
+}
+assert.equal(policy.purchaseAmounts({ purchaseQuantity: 12, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6, purchaseTotalPrice: 0 }).unitPrice, 0, 'real zero and missing totals remain distinct');
+
 const diagnosticRecords = [
   { warehouseSku: 'MISSING', unitPrice: null },
   { warehouseSku: 'INVALID', unitPrice: -2 },
@@ -360,7 +372,7 @@ async function verifyLedgerScopedEvidenceDelivery() {
         continue;
       }
       assert.equal(fetchedOrders.length, mixedMonths ? 2 : 1);
-      const payload = deliveries[0]?.payload || JSON.parse(window.localStorage.getItem('erpAssistantV8_latest_cost_result_v7'));
+      const payload = deliveries[0]?.payload || JSON.parse(window.localStorage.getItem('erpAssistantV8_latest_cost_result_v8_purchase_total'));
       assert.equal(payload.warehouseEvidence.warehouses.length, 1);
       const records = payload.warehouseEvidence.warehouses[0].purchaseRecords;
       assert.deepEqual(

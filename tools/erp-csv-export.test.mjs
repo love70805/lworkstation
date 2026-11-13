@@ -10,7 +10,7 @@ const extensionVersion = JSON.parse(await readFile(path.join(workspaceRoot, "int
 const frontendRequire = createRequire(path.join(workspaceRoot, "frontend", "package.json"));
 const { Window } = await import(pathToFileURL(frontendRequire.resolve("happy-dom")).href);
 const Papa = frontendRequire("papaparse");
-const cacheKey = "erpAssistantV8_latest_cost_result_v7";
+const cacheKey = "erpAssistantV8_latest_cost_result_v8_purchase_total";
 const legacyCacheKey = "erpAssistantV8_latest_cost_result_v5";
 const erpUrl = "https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html";
 

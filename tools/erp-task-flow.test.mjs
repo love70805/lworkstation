@@ -61,8 +61,8 @@ try {
 // repeat metadata, so the source state alone cannot predict the body size.
 const sharedBook = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(sharedBook, XLSX.utils.aoa_to_sheet([
-  ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '创建时间', '采购状态', '1688订单状态', '商品名称'],
-  ...[1, 2, 3].map(index => [`SHARED-${index}`, 'SHARED-WH', 'X'.repeat(1024), 2, 5, `2026-08-0${index} 12:00:00`, '已上架', '已付款', '合成共仓商品']),
+  ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '采购总价', '创建时间', '采购状态', '1688订单状态', '商品名称'],
+  ...[1, 2, 3].map(index => [`SHARED-${index}`, 'SHARED-WH', 'X'.repeat(1024), 2, 3, 10, `2026-08-0${index} 12:00:00`, '已上架', '已付款', '合成共仓商品']),
 ]), 'Sheet1');
 const sharedBytes = XLSX.write(sharedBook, { type: 'array', bookType: 'xlsx', compression: true });
 const sharedFixture = url => {

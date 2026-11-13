@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
 import { parseSalesAddedDate } from "./salesAnalytics";
 import { purchaseDateFacts } from "./erpPurchaseSelection";
@@ -6,6 +7,17 @@ import { normalizeErpCatalogFields } from "./erpCatalogFields";
 const text = value => String(value ?? "").trim() || null;
 const finiteNumber = value => value != null && String(value).trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : null;
 const CANCELLED_PURCHASE_STATUS = /(?:^|[\s:：])(?:11|cancel(?:led)?|void(?:ed)?|已取消|取消|已作废|作废|已关闭|关闭)(?:$|[\s:：])/i;
+
+export const PURCHASE_TOTAL_BASIS = "purchase_total";
+
+export function effectivePurchaseAmount(record) {
+  // Legacy totals were synthesized from the base unit price. Only new source
+  // evidence carries the recorded purchase-total basis. Corrections stay explicit.
+  if (record.amountBasis === PURCHASE_TOTAL_BASIS && record.resolution?.action !== "correct_price") {
+    return new Decimal(record.totalPrice);
+  }
+  return new Decimal(record.quantity).times(record.effectiveUnitPrice ?? record.unitPrice);
+}
 
 export function validateCostPeriod(period) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period ?? "")) throw new Error("请先选择有效的账本月份，再核对 ERP 成本。");
@@ -21,8 +33,12 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const warehouseSkuText = text(record?.warehouseSku ?? fallbackWarehouseSku);
   const warehouseSku = warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null;
   const quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
-  const unitPrice = finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
+  const purchaseTotal = record?.amountBasis === PURCHASE_TOTAL_BASIS;
+  const rawUnitPrice = finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
   const totalPriceValue = finiteNumber(record?.totalPrice ?? record?.price);
+  const unitPrice = purchaseTotal
+    ? quantity > 0 && totalPriceValue != null && totalPriceValue >= 0 ? new Decimal(totalPriceValue).div(quantity).toNumber() : null
+    : rawUnitPrice;
   const exclusionReasons = [...new Set((Array.isArray(record?.exclusionReasons) ? record.exclusionReasons : []).map(text).filter(Boolean))];
   const purchaseDate = text(record?.purchaseDate ?? record?.date);
   const { period: purchasePeriod, timestamp } = purchaseDateFacts(record);
@@ -54,7 +70,9 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   return {
     recordId, warehouseSku, canonicalWarehouseSku: warehouseSku ? canonicalWarehouseSku(warehouseSku) : null,
     purchaseDate, timestamp, quantity, unitPrice,
-    totalPrice: totalPriceValue ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    totalPrice: purchaseTotal ? totalPriceValue : totalPriceValue ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    ...(purchaseTotal ? { amountBasis: PURCHASE_TOTAL_BASIS,
+      purchaseUnitPrice: finiteNumber(record.purchaseUnitPrice), serviceUnitPrice: finiteNumber(record.serviceUnitPrice) } : {}),
     order1688: text(record?.order1688), purchaseOrderNo: text(record?.purchaseOrderNo), purchaseOrderId: text(record?.purchaseOrderId),
     supplierName: text(record?.supplierName), supplier1688Url: text(record?.supplier1688Url), statusFields,
     ...(typeof record?.productName === "string" && record.productName.trim() ? { productName: record.productName.trim() } : {}),
@@ -73,7 +91,8 @@ export function adoptedCostEvidence(cost) {
     const record = records.find(item => item.recordId === id);
     if (!record) return undefined;
     const resolved = decision?.selectedRecords?.find(item => item.recordId === id);
-    return { ...record, effectiveUnitPrice: resolved?.effectiveUnitPrice ?? record.unitPrice };
+    return { ...record, effectiveUnitPrice: resolved?.effectiveUnitPrice ?? record.unitPrice,
+      ...(resolved?.resolution ? { resolution: resolved.resolution } : {}) };
   }) : decision?.selectedRecords ?? [];
   return { evidence, decision, records, selected };
 }

@@ -3,7 +3,7 @@
     const EXPORT_PATH = '/purchase/purchase/v1/export-purchase-order';
     const MAX_BYTES = 32 * 1024 * 1024;
     const MAX_ROWS = 100000;
-    const REQUIRED = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '创建时间', '采购状态', '1688订单状态'];
+    const REQUIRED = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '采购总价', '创建时间', '采购状态', '1688订单状态'];
     const text = value => String(value ?? '').normalize('NFKC').trim();
     const key = value => text(value).toUpperCase();
     const pairKey = (order, warehouse) => JSON.stringify([key(order), key(warehouse)]);
@@ -84,6 +84,8 @@
             records.push({ itemId: warehouseSku, detailId: `bulk:${digest}:${sheetName}:${index + 1}`,
                 _purchaseOrderNo: order, _purchaseOrderId: order, _orderNo1688: text(get('1688订单号')),
                 purchaseQuantity: decimal(get('采购数量')), purchaseUnitPrice: decimal(get('采购单价')),
+                purchaseTotalPrice: decimal(get('采购总价')),
+                ...(columns['服务单价'] != null ? { serviceUnitPrice: decimal(text(get('服务单价')) || '0') } : {}),
                 creationTime: dateText(get('创建时间'), xlsx), platformSkuList: text(get('平台SKU')), platformSkuListLength: String(get('平台SKU') ?? '').length,
                 tradeName: text(get('商品名称')), imageUrl: text(get('图片链接')), _supplierName: supplierName,
                 _supplier1688Url: url, _supplier1688Links: url ? [{ type: 'product', supplierName, url }] : [],
@@ -202,7 +204,8 @@
                 const order = byOrder.get(key(row._purchaseOrderNo));
                 if (!order?.purchaseOrderId) throw fallback('purchase_identity_missing');
                 const matches = (await readDetails(order, run)).filter(detail => key(detail.itemId) === warehouse);
-                if (matches.length !== 1 || Number(matches[0].purchaseQuantity) !== row.purchaseQuantity || Number(matches[0].purchaseUnitPrice) !== row.purchaseUnitPrice) throw fallback('purchase_snapshot_changed');
+                if (matches.length !== 1 || Number(matches[0].purchaseQuantity) !== row.purchaseQuantity || Number(matches[0].purchaseUnitPrice) !== row.purchaseUnitPrice
+                    || policy.purchaseAmounts(matches[0]).totalPrice !== row.purchaseTotalPrice) throw fallback('purchase_snapshot_changed');
                 const detail = matches[0];
                 const date = policy.purchaseDateInfo(detail.creationTime);
                 if (!date) throw fallback('invalid_purchase_date');

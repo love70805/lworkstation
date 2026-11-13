@@ -16,6 +16,8 @@ import {
   rejectErpCostInboxBatches,
   selectProfitAuditActor,
   saveErpCostRequest,
+  saveManualCostOverride,
+  revokeManualCostOverride,
   savePublishedErpCostBatch,
   setActiveMemberContext,
   voidPublishedErpCostBatch,
@@ -32,6 +34,55 @@ import { buildSyncPostgresPlan } from "../domain/syncPostgresPlan";
 import { describeEvidenceIssues } from "../lib/costMatching";
 
 const period = "2026-08";
+
+it("keeps purchase totals through source validation, publication, reopening and profit calculation", async () => {
+  const { ledger, request } = await context();
+  const purchaseRecords = [{ ...record("TOTAL", 2.4, 12), amountBasis: "purchase_total", totalPrice: 36, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6 }];
+  const source = sourceEnvelope({ ledger, request, purchaseRecords });
+  const before = structuredClone(source);
+  await savePublishedErpCostBatch({ ledgerId: ledger.id, requestId: request.id, reconciliation: reconcile({ purchaseRecords }), sourceEnvelope: source });
+  db.close(); await db.open();
+  const saved = (await getLatestLedgerCosts(ledger.id))[0];
+  expect(saved).toMatchObject({ unitCost: 3, totalQuantity: 12, totalPrice: 36 });
+  expect(saved.costDecision.selectedRecords[0]).toMatchObject({ unitPrice: 3, totalPrice: 36, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6, amountBasis: "purchase_total" });
+  const decision = resolveFormalCostDecision({ period, platformSku: "SKU-AUDIT", erpCost: saved });
+  expect(calculateExactProfitLine({ quantity: 5, revenue: 50, warehouseRate: 0, costDecision: decision })).toMatchObject({ purchaseCost: 15, profit: 35 });
+  expect(source).toEqual(before);
+});
+
+it("adopts a fresh total-based request while preserving legacy evidence, manual cost and exported reports", async () => {
+  const { ledger, request } = await context();
+  const store = "合成重采店铺";
+  await setActiveMemberContext({ workspaceId: ledger.workspaceId, memberId: "recollect-test", role: "finance" });
+  await db.salesRows.add({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, store, platformSku: "SKU-AUDIT", platformSkc: "SKC-AUDIT", quantity: 5, amount: 50 });
+  const oldSource = sourceEnvelope({ ledger, request, purchaseRecords: [record("OLD", 2.4, 12)] });
+  const oldReceipt = await receiveErpCostInboxEnvelope({ envelope: buildErpCostInboxEnvelope({ batch: oldSource, deliveryId: "LEGACY-DELIVERY" }), receivedVia: "test" });
+  expect(oldReceipt.status).toBe("applied");
+  const oldRows = await db.erpCostRows.toArray();
+  expect((await getLatestLedgerCosts(ledger.id))[0].unitCost).toBe(2.4);
+  await adoptZeroDispatch(ledger.id);
+  await finalizeMonthlyLedger({ ledgerId: ledger.id });
+  const reports = await db.profitReports.toArray(), reportLines = await db.profitReportLines.toArray();
+  const manual = await saveManualCostOverride({ ledgerId: ledger.id, store, platformSku: "SKU-AUDIT", unitCost: 0, reason: "合成零值更正" });
+  const savedManual = await db.costApprovals.get(manual.id);
+  const freshRequest = { ...request, id: "FRESH-TOTAL-REQUEST", supersedesRequestId: request.id, requestedAt: "2026-08-13T08:00:00Z" };
+  await saveErpCostRequest(freshRequest);
+  const freshSource = sourceEnvelope({ ledger, request: freshRequest, purchaseRecords: [{ ...record("NEW", 2.4, 12), amountBasis: "purchase_total", totalPrice: 36, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6 }] });
+  freshSource.generatedAt = "2026-08-13T08:15:00Z";
+  const receipt = await receiveErpCostInboxEnvelope({ envelope: buildErpCostInboxEnvelope({ batch: freshSource, deliveryId: "TOTAL-DELIVERY" }), receivedVia: "test" });
+  expect(receipt.status, receipt.adoptionError).toBe("applied");
+  db.close(); await db.open();
+  const cost = (await getLatestLedgerCosts(ledger.id))[0];
+  expect(cost.unitCost).toBe(3);
+  expect(await db.erpCostRows.get(oldRows[0].id)).toEqual(oldRows[0]);
+  expect(await db.costApprovals.get(manual.id)).toEqual(savedManual);
+  const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store, period, platformSku: "SKU-AUDIT", erpCost: cost };
+  expect(resolveFormalCostDecision({ ...scope, manualOverride: savedManual })).toMatchObject({ unitCost: 0, source: "manual_override" });
+  await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: manual.id });
+  expect(resolveFormalCostDecision({ ...scope, manualOverride: await db.costApprovals.get(manual.id) })).toMatchObject({ unitCost: 3, source: "erp" });
+  expect(await db.profitReports.toArray()).toEqual(reports);
+  expect(await db.profitReportLines.toArray()).toEqual(reportLines);
+});
 
 it.each([['SKC-CHANGED'],['SKC-AUDIT','SKC-CONFLICT']])('rejects new publication against changed live ledger parents: %s',async (...parents)=>{
   const {ledger,request}=await context(),purchaseRecords=[record('IDENTITY',5,1)];
