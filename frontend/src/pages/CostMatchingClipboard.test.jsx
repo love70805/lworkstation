@@ -129,6 +129,20 @@ it('retries a failed recollection launch with the same new request and preserves
   expect(window.shopeersDesktopRuntime.startErpCollection.mock.calls.map(([input])=>input.requestId)).toEqual(['FRESH','FRESH']);
   expect(mocks.tasks[0].batches[0].deliveryId).toBe('OLD-RECEIPT');
 });
+it('blocks another recollection until the newly started task snapshot supplies a stoppable identity', async () => {
+  completedCostTask();await render(['SKC-A','SKC-B']);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  await act(async()=>button('确认重新获取').click());
+  expect(button('重新获取 ERP 成本').disabled).toBe(true);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(window.shopeersDesktopRuntime.startErpCollection).toHaveBeenCalledOnce();
+  expect(mocks.controlTask).toHaveBeenCalledOnce();
+  mocks.tasks.unshift({...mocks.tasks[0],taskId:'FRESH-TASK',requestId:'FRESH',status:'running',runnerId:'FRESH-RUNNER',batches:[{status:'running'}]});
+  mocks.requests.unshift({...mocks.requests[0],id:'FRESH'});
+  await act(async()=>root.render(<MemoryRouter><ScopeControls /><CostMatchingContent validatedContext={{workspaceId:'W',ledgerId:'L',store:'all'}} /></MemoryRouter>));
+  expect(button('重新获取 ERP 成本').disabled).toBe(false);
+});
 afterEach(async () => {
   await act(async () => root.unmount()); container.remove();
   delete window.shopeersDesktopRuntime; vi.restoreAllMocks(); vi.unstubAllGlobals(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;

@@ -193,6 +193,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
   const collectionTask = selectedRecollection
     ? collection.tasks.find(task => task.requestId === selectedRecollection.id) ?? null
     : collection.tasks.find(isActiveErpCollection) ?? collection.tasks[0] ?? null;
+  const recollectionAwaitingTask = Boolean(selectedRecollection && !collectionTask);
   const location = useLocation();
   useEffect(() => {
     if (location.hash !== '#erp-collection-progress' || !collectionTask) return;
@@ -440,7 +441,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer); };
   }, [registrationScope, registrationRetry, locked, scopeHasIdentityConflict, collection.loading, collection.error, scopeCollection?.taskId, collectionRequest?.id, collectionScopeChanged, recollectionBusy, recollectionIntent?.request?.id]);
   const openRecollection = () => {
-    if (!recollectReady || recollectionBusyRef.current) return;
+    if (!recollectReady || recollectionAwaitingTask || recollectionBusyRef.current) return;
     setRecollectionError('');
     setRecollectionIntent({ ...prepareCostRecollection(recollectionInput, { scopeKey: recollectionScopeKey, task: collectionTask, requestId: effectiveRequestId }),
       filterLabel: describeProfitFilter(profitFilter) });
@@ -1166,7 +1167,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     if (row) setManualTarget({ id: row.id, mode: 'details', inboxId: item.inboxId });
   }} />;
   const canOfferRecollection = Boolean(collectionTask || selectedRecollection || persistedCostRows.length || workspaceInboxRecords.length);
-  const recollectionLauncherProps = { onRecollect: canOfferRecollection ? openRecollection : undefined, recollectReady, preparing: recollectionBusy };
+  const recollectionLauncherProps = { onRecollect: canOfferRecollection ? openRecollection : undefined, recollectReady: recollectReady && !recollectionAwaitingTask, preparing: recollectionBusy };
   const recollectionChanged = recollectionIntent && recollectionIntent.scopeKey !== recollectionScopeRef.current;
   const recollectionDialog = <ErpCostRecollectionDialog intent={recollectionIntent} busy={recollectionBusy} changed={recollectionChanged} error={recollectionError}
     onClose={() => { if (!recollectionBusyRef.current) setRecollectionIntent(null); }} onConfirm={confirmRecollection} />;
