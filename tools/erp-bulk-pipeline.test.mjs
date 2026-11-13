@@ -19,6 +19,16 @@ function verify(deliveries) {
 }
 const bulk = await scenario(10, 'bulk-pipeline', { fixture, bulk: true, maxLists: 1, returnMetrics: true, firstBatchListLimit: 2 });
 verify(bulk.deliveries);
+const capacity = await scenario(10, 'bulk-storage-capacity', { fixture, bulk: true, taskFlow: true,
+    storageQuotaBytes: 384 * 1024, expectCapacitySplit: true, maxLists: 1, returnMetrics: true, firstBatchListLimit: 2 });
+verify(capacity.deliveries);
+assert.ok(capacity.peakStorageBytes <= 384 * 1024);
+assert.equal(capacity.calls.filter(row => row.endpoint === 'export-purchase-order').length, 1, 'capacity partitions reuse the original complete export');
+assert.equal(new Set(capacity.deliveries.flatMap(row => row.querySkcs)).size, 10, 'capacity partitions keep the entire original scope');
+const resumedStorage = await scenario(10, 'bulk-storage-resume', { fixture, bulk: true, taskFlow: true,
+    storageResume: true, maxLists: 1, returnMetrics: true, firstBatchListLimit: 4 });
+verify(resumedStorage.deliveries);
+assert.equal(resumedStorage.task.pauseReason, undefined, 'successful explicit continuation clears the old failure explanation');
 assert.equal(bulk.calls.filter(row => row.endpoint === 'export-purchase-order').length, 1);
 assert.equal(bulk.calls.filter(row => row.endpoint === 'product-info-sku').length, 1);
 assert.equal(bulk.calls.filter(row => row.endpoint === 'product-page').length, 0);

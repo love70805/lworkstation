@@ -68,6 +68,17 @@ it('shows durable ERP service pause separately from initial waiting and user pau
   expect(erpCollectionPresentation({ ...task, status: 'running', batches: [{ status: 'running' }] }).state).toBe('cost_running');
 });
 
+it('explains a delivery pause and keeps the original continuation available', () => {
+  const view = erpCollectionPresentation({ executionProtocol: 2, status: 'paused',
+    pauseReason: { code: 'ERP_DELIVERY_FAILED', message: '本机成本暂存空间不足。' },
+    batches: [{ status: 'collected', resultDeliveryId: 'UNCONFIRMED' }, { status: 'pending' }] });
+  expect(view).toMatchObject({ state: 'paused', running: false, canResume: true, tone: 'warning' });
+  expect(view.title).toContain('成本回传未完成');
+  expect(view.description).toContain('本机成本暂存空间不足');
+  expect(view.description).toContain('继续原任务');
+  expect(view.description).not.toContain('登录');
+});
+
 it('explains permission pauses before the first batch and during optional catalog without claiming logout', () => {
   const task = { status: 'paused', pauseReason: { code: 'ERP_PERMISSION_REQUIRED' }, batches: [{ status: 'pending' }] };
   for (const batches of [task.batches, [{ ...delivered, catalogStatus: 'running' }]]) {

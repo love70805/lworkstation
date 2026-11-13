@@ -313,10 +313,11 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
       }
       renew(task, request, records, now);
     } else if (action === 'pause' || action === 'stop') {
-      if (payload.reason != null && (action !== 'pause' || !['ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED'].includes(payload.reason?.code))) fail('ERP_TASK_PAUSE_REASON_INVALID', '暂停原因格式无效。', 400);
+      if (payload.reason != null && (action !== 'pause' || !['ERP_SERVICE_UNAVAILABLE', 'ERP_PERMISSION_REQUIRED', 'ERP_DELIVERY_FAILED'].includes(payload.reason?.code))) fail('ERP_TASK_PAUSE_REASON_INVALID', '暂停原因格式无效。', 400);
       task.status = action === 'pause' ? 'paused' : 'stopped'; task.updatedAt = timestamp(now);
       if (payload.reason) task.pauseReason = { code: payload.reason.code, message: String(payload.reason.message || (payload.reason.code === 'ERP_PERMISSION_REQUIRED'
-        ? 'ERP 店铺权限校验未通过，请检查采购查询后继续原任务。' : 'ERP 服务暂不可用，请在服务恢复后继续原任务。')).slice(0, 500), at: timestamp(now) };
+        ? 'ERP 店铺权限校验未通过，请检查采购查询后继续原任务。' : payload.reason.code === 'ERP_DELIVERY_FAILED'
+          ? '成本回传尚未确认，请继续原任务核对原结果。' : 'ERP 服务暂不可用，请在服务恢复后继续原任务。')).slice(0, 500), at: timestamp(now) };
       else delete task.pauseReason;
     } else fail('ERP_TASK_ACTION_INVALID', '未知任务操作。', 400);
     return { status: 200, body: { task: refresh(task) } };

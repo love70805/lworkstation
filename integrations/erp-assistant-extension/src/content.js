@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.60';
+    const EXTENSION_VERSION = '8.0.61';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -1830,6 +1830,7 @@
             + (batches.some(batch => batch.catalogStatus) ? ' · 资料已检查 ' + batches.filter(batch => ['completed', 'failed'].includes(batch.catalogStatus)).reduce((count, batch) => count + batch.platformSkcs.length, 0) + '/' + total + ' SKC' : '');
         if (task.pauseReason?.code === 'ERP_SERVICE_UNAVAILABLE') taskStage += ' · 已送达结果保留，服务恢复后继续原任务';
         if (task.status === 'paused' && task.pauseReason?.code === 'ERP_PERMISSION_REQUIRED') taskStage = 'ERP 店铺权限校验未通过，采集已暂停 · 已送达结果保留，请检查 ERP 采购查询后继续原任务';
+        if (task.status === 'paused' && task.pauseReason?.code === 'ERP_DELIVERY_FAILED') taskStage = '成本回传未完成，采集已暂停 · ' + (task.pauseReason.message || '本机尚未确认收到本批成本。') + ' 继续原任务会先核对原回传结果；已送达结果保留。';
         renderPageContext();
         renderStatus();
     }
@@ -1937,9 +1938,10 @@
                             throw Object.assign(new CostError('成本回传体积尚未确认', measured?.message || '请继续原任务重试，结果尚未标记为已送达。'), { code: measured?.code });
                         }
                         const limit = (batch.platformSkcs.length > 1 ? 20 : 25) * 1024 * 1024;
-                        if (measured.bytes > limit) {
-                            throw Object.assign(new CostError(batch.platformSkcs.length > 1 ? '正在分段保存完整采购证据' : '当前 SKC 的完整采购证据超过传输上限',
-                                '完整证据保留，未截断或采用；请核对该商品范围。'), { code: batch.platformSkcs.length > 1 ? 'ERP_COST_PAYLOAD_LARGE' : 'ERP_COST_PAYLOAD_TOO_LARGE', readMetrics: state.meta });
+                        if (measured.bytes > limit || measured.storageFits === false) {
+                            throw Object.assign(new CostError(batch.platformSkcs.length > 1 ? '正在分段保存完整采购证据' : measured.storageFits === false ? '本机成本暂存空间不足' : '当前 SKC 的完整采购证据超过传输上限',
+                                measured.storageFits === false ? '本机成本暂存空间不足，本批回传尚未确认。' : '完整证据保留，未截断或采用；请核对该商品范围。'),
+                                { code: batch.platformSkcs.length > 1 ? 'ERP_COST_PAYLOAD_LARGE' : measured.storageFits === false ? 'ERP_COST_STORAGE_FULL' : 'ERP_COST_PAYLOAD_TOO_LARGE', readMetrics: state.meta });
                         }
                     }
                     state.meta = deliveryMeta;
@@ -1975,7 +1977,7 @@
                     setLoading('成本已采集，正在回传', '等待本机持久收件确认');
                     deliveryAttempted = true;
                     const response = await bridge.submit({ ...deliveryState, ...state, resultDeliveryId: run.resultDeliveryId, querySkcs: batch.platformSkcs, collectionTask: identity });
-                    if (response.status !== 'success' && !response.retained) throw new CostError('成本尚未送达', response.message || '请重试未完成项。');
+                    if (response.status !== 'success' && !response.retained) throw Object.assign(new CostError('成本尚未送达', response.message || '请重试未完成项。'), { code: response.code });
                     task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                     updateTaskStatus(task); renderResults(); renderStatus(); updateActionState();
                 } catch (error) {
@@ -1996,8 +1998,13 @@
                         // A lost ACK or status read cannot demote a durable receipt.
                         // Preserve the collected identity for receipt reconciliation.
                         run.pauseRequested = true;
-                        taskStage = '回执待核对 · 已采集结果保留，点击继续核对';
+                        run.pauseReason = { code: 'ERP_DELIVERY_FAILED', message: error.details || error.message || '本机尚未确认收到本批成本。' };
+                        taskStage = '回执待核对 · 点击继续原任务核对并接续';
                         break;
+                    }
+                    if (['ERP_COST_STORAGE_FULL', 'ERP_STORAGE_CHECK_FAILED'].includes(error.code)) {
+                        run.pauseRequested = true;
+                        run.pauseReason = { code: 'ERP_DELIVERY_FAILED', message: error.details || error.message };
                     }
                     const paused = rememberSourcePause(run, error) || error.code === 'ERP_COLLECTION_PAUSED' || run.pauseRequested;
                     const result = await taskOperation({ action: 'batch', ...identity, state: paused ? 'pending' : 'failed', error: paused ? null : error.details || error.message });
