@@ -5,7 +5,7 @@ import { version as appVersion } from '../../../package.json';
 import Dexie from 'dexie';
 
 const salesRevision = tableRevisionReader('salesRows');
-const inputTables = ['costApprovals', 'erpCostRows', 'erpCostBatches', 'importBatches'];
+const inputTables = ['costApprovals', 'erpCostRows', 'erpCostBatches', 'importBatches', 'erpCostInbox', 'erpCostRequests'];
 const inputReaders = inputTables.map(tableRevisionReader);
 const inputRevision = () => {
   const revisions = inputReaders.map(read => read());
@@ -78,8 +78,13 @@ async function readLedgerInputs(ledgerId, readScope) {
       const rows = [], keys = await db.table(table).where('ledgerId').equals(ledgerId).primaryKeys();
       for (let offset = 0; offset < keys.length; offset += 16) {
         const chunk = await db.table(table).bulkGet(keys.slice(offset, offset + 16));
-        for (const row of chunk) if (row) rows.push({ id: row.id, platformSku: row.platformSku, sku: row.sku,
-          batchId: row.batchId, sourceEnvelopeBatchId: row.sourceEnvelopeBatchId, fingerprint: await digestValue(row) });
+        for (const row of chunk) {
+          // Only explicit ignores in other receipts can authorize reuse. Keep
+          // their complete evidence fingerprint, never a price/count shortcut.
+          if (!row || table === 'erpCostInbox' && !row.costResolutions?.some(item => item.action === 'ignore_anomaly')) continue;
+          rows.push({ id: row.id, platformSku: row.platformSku, sku: row.sku,
+            batchId: row.batchId, sourceEnvelopeBatchId: row.sourceEnvelopeBatchId, fingerprint: await digestValue(row) });
+        }
       }
       inputs[table] = rows;
     }
@@ -87,7 +92,7 @@ async function readLedgerInputs(ledgerId, readScope) {
   };
   const revision = inputRevision();
   if (revision && readScope?.inputs?.ledgerId === ledgerId && readScope.inputs.revision === revision) return readScope.inputs.value;
-  const value = await (revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-fingerprints@2',
+  const value = await (revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-fingerprints@3',
     revision, revisionReader: inputRevision, persist: false, boundedMemory: true, compute }) : compute());
   // Only tiny, content-complete fingerprints remain in this optional cache.
   // The raw evidence is released after each chunk. Financial/context changes
@@ -128,6 +133,7 @@ export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, get
       const signatureInput = { appVersion, member, inbox, request,
         ledger: { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period, status: ledger.status },
         imports: inputs.importBatches,
+        ignoredEvidence: inputs.erpCostInbox, requests: inputs.erpCostRequests,
         sales,
         approvals: inputs.costApprovals.filter(row => wanted.has(skuOf(row))),
         costs, batches: inputs.erpCostBatches.filter(row => batchIds.has(row.id)) };

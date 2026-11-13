@@ -1835,12 +1835,16 @@ export async function getSelectionReferenceSnapshot(options = {}) {
     readTrustedErpCostInboxCatalogRecords(context, sourceSnapshot, { excludedBatchIds: publishedSourceBatchIds, requests: erpRequests }),
   ]);
   const pendingCatalogRecords = receivedCatalogRecords.filter(record => !publishedSourceBatchIds.has(record.batchId));
+  const catalogScopes = new Map(), catalogScopeKeys = new Map();
   const catalogScope = batch => {
+    if (catalogScopes.has(batch.id)) return catalogScopes.get(batch.id);
     const requested = new Set((requestById.get(batch.requestId)?.platformSkcs ?? []).map(item => item?.platformSkc ?? item).filter(Boolean).map(canonicalPlatformSkc));
-    return (batch.sourceContract?.query?.platformSkcs ?? []).map(item => item?.platformSkc ?? item).filter(value => value && requested.has(canonicalPlatformSkc(value)));
+    const scope = (batch.sourceContract?.query?.platformSkcs ?? []).map(item => item?.platformSkc ?? item).filter(value => value && requested.has(canonicalPlatformSkc(value)));
+    catalogScopes.set(batch.id, scope); catalogScopeKeys.set(batch.id, new Set(scope.map(canonicalPlatformSkc)));
+    return scope;
   };
   const catalogRowMatches = (row, batch) => Boolean(batch && row.workspaceId === batch.workspaceId && row.ledgerId === batch.ledgerId && row.batchId === batch.id
-    && row.platformSkc && catalogScope(batch).some(skc => canonicalPlatformSkc(skc) === canonicalPlatformSkc(row.platformSkc))
+    && row.platformSkc && (catalogScope(batch), catalogScopeKeys.get(batch.id).has(canonicalPlatformSkc(row.platformSkc)))
     && (!row.sourceEnvelopeBatchId || row.sourceEnvelopeBatchId === batch.sourceContract.batchId));
   const batchById = new Map(importBatches.filter(batch => batch.workspaceId === context.workspaceId && batch.status === "completed" && ledgerById.has(batch.ledgerId)).map(batch => [batch.id, batch]));
   const ledgerIdentityRows = options.selectionSalesFacts?.ledgerIdentityRows ?? salesRows.filter(row => {

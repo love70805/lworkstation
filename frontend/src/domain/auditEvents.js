@@ -8,6 +8,7 @@ function money(value) {
 
 export function describeAuditEvent(event) {
   const descriptions = {
+    anomaly_ignores_reused: { tone: "info", title: "沿用已忽略的价格异常", detail: `${event.after?.resolutionCount ?? 0} 条相同采购证据沿用本月原处理结果` },
     created: { tone: "info", title: "已创建月度账本", detail: event.after?.period ?? event.objectId },
     imported: { tone: "success", title: "销售台账导入完成", detail: `${event.after?.fileName ?? "导入文件"} · ${event.after?.validRowCount ?? 0} 条有效记录` },
     published: { tone: "success", title: "ERP 成本批次已发布", detail: `${event.after?.matchedCount ?? 0} 个平台 SKU 已匹配` },

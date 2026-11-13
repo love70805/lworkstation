@@ -2,8 +2,7 @@ import ImportLeaveGuard from '../components/ImportLeaveGuard';
 import ImportSupplierWorkbench from '../components/ImportSupplierWorkbench';
 import ImportMovementPicker from '../components/ImportMovementPicker';
 import { supplierRuleKey } from '../domain/supplierFilterPreview';
-import { readImportPreference, restoreImportPreference, saveImportNumbers } from '../lib/importSupplierPreferences';
-import { readSupplierGroups, matchImportNumberRule, restoreSupplierGroupSelection, rememberSupplierGroupSelection } from '../lib/importSupplierGroups';
+import { matchImportNumberRule, rememberSupplierGroupSelection } from '../lib/importSupplierGroups';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
@@ -17,6 +16,7 @@ import { createImportWorkerClient } from "../lib/importWorkerClient";
 import { LEDGER_REPORT_MOVEMENT_TYPES, salesFields, suggestMappings, validateSalesMapping } from "../lib/salesImport";
 import { createSalesSourceCoverage } from "../domain/selectionSalesLabels";
 
+const emptySupplierDraft = { text: '', rule: { aliases: [], mode: 'fuzzy' } };
 const ACCEPTED_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"]);
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 async function sha256File(file) {
@@ -150,6 +150,7 @@ export default function ImportPreview() {
   const abortRef = useRef(null);
   const attemptedRef = useRef("");
   const validateRef = useRef(null);
+  const progressTaskRef = useRef(null);
   const activeJobsRef = useRef(new Set());
   const pendingJobsRef = useRef(new Map());
   const inspectionSequenceRef = useRef(new Map());
@@ -163,12 +164,16 @@ export default function ImportPreview() {
   const [payload, setPayload] = useState(null);
   const [overwriteSignature, setOverwriteSignature] = useState(null);
   const [result, setResult] = useState(null);
-  const [batchSuffixText, setBatchSuffixText] = useState('');
-  const [batchMode, setBatchMode] = useState('fuzzy');
+  const [supplierDraft, setSupplierDraft] = useState(emptySupplierDraft);
   const [groupWorkspaceId, setGroupWorkspaceId] = useState(null);
   const [supplierDirty, setSupplierDirty] = useState(false);
   const [supplierMatched, setSupplierMatched] = useState(false);
-  const [supplierViewStore, setSupplierViewStore] = useState('all');
+  const [supplierViewStore, setSupplierViewStore] = useState([]);
+  const availableStoresKey = JSON.stringify([...new Set(files.map(item => item.storeName))]);
+  useEffect(() => {
+    const available = new Set(JSON.parse(availableStoresKey));
+    setSupplierViewStore(current => current.every(store => available.has(store)) ? current : current.filter(store => available.has(store)));
+  }, [availableStoresKey]);
   const batchRuleRef = useRef({ aliases: [], mode: 'fuzzy' });
   const contextReady = !requestedLedgerId || ledgerContext?.id === requestedLedgerId;
   const contextBlocked = !contextReady || Boolean(ledgerContext?.error);
@@ -204,7 +209,10 @@ export default function ImportPreview() {
   };
 
   const makeClient = () => createImportWorkerClient((value, jobId, details) => {
-    setFiles(current => current.map(item => item.itemId === jobId ? { ...item, progress: value, progressLabel: details?.total ? `${details.stage} ${details.completed.toLocaleString("zh-CN")} / ${details.total.toLocaleString("zh-CN")} 行` : details?.stage ?? "正在读取" } : item));
+    const label = details?.total ? `${details.stage} ${details.completed.toLocaleString("zh-CN")} / ${details.total.toLocaleString("zh-CN")} 行` : details?.stage ?? "正在读取";
+    setFiles(current => current.map(item => item.itemId === jobId ? { ...item, progress: value, progressLabel: label } : item));
+    const task = progressTaskRef.current;
+    if (operationRef.current && task?.jobId === jobId && task.generation === generationRef.current) setProgress({ value, label: `${task.label} · ${label}` });
   }, { stageOwner: stageOwnerRef.current });
   useEffect(() => {
     void clearImportStages(null, { expiredOnly: true }).catch(() => {});
@@ -215,6 +223,7 @@ export default function ImportPreview() {
   const cancel = () => {
     if (abortRef.current) { setProgress({ value: null, label: "正在取消，等待整批回滚…" }); abortRef.current.abort(); return; }
     generationRef.current += 1;
+    progressTaskRef.current = null;
     clientRef.current?.terminate();
     const cancelledOwner = stageOwnerRef.current;
     stageOwnerRef.current = crypto.randomUUID();
@@ -224,7 +233,7 @@ export default function ImportPreview() {
     inspectionSequenceRef.current.clear();
     activeJobsRef.current.clear();
     importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'fuzzy' };
-    setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('fuzzy'); setSupplierViewStore('all');
+    setGroupWorkspaceId(null); setSupplierDraft(emptySupplierDraft); setSupplierViewStore([]);
     setFiles([]); setPreview(null); setPayload(null); setOverwriteSignature(null); setSupplierDirty(false); setBusy(false); operationRef.current = false;
     setError("解析已取消，尚未写入任何数据。可重新选择文件。");
   };
@@ -296,14 +305,11 @@ export default function ImportPreview() {
         const choices = refreshed.facets?.supplierNumbers ?? next.facets?.supplierNumbers ?? [];
         await assertImportContext();
         if (inspectionSequenceRef.current.get(itemId) !== sequence) return;
-        const preference = patch.storeName !== undefined ? readImportPreference(importWorkspaceRef.current, next.storeName) : next.supplierPreference;
-        const saved = patch.storeName !== undefined ? next.usesBatchSuffix
-          ? next.supplierGroupRule?.id ? restoreSupplierGroupSelection(choices, next.supplierGroupRule, readSupplierGroups(importWorkspaceRef.current), next.storeName) : matchImportNumberRule(choices, batchRuleRef.current)
-          : preference.selected : next.filterOptions?.supplierNumbers ?? [];
+        const selected = next.filterOptions?.supplierNumbers ?? [];
         const movementChoices = refreshed.facets?.movementTypes ?? next.facets?.movementTypes ?? [];
         const movementTypes = next.mapping.movementType && Array.isArray(next.filterOptions.movementTypes)
           ? next.filterOptions.movementTypes.filter(type => movementChoices.includes(type)) : undefined;
-        next = { ...next, supplierPreference: preference, supplierKeywords: patch.storeName !== undefined ? preference.keywords : next.supplierKeywords, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, movementTypes, supplierNumbers: saved.filter(value => choices.includes(value)) }, missingNumbers: saved.filter(value => !choices.includes(value)) };
+        next = { ...next, facets: refreshed.facets ?? next.facets, filterOptions: { ...next.filterOptions, movementTypes, supplierNumbers: selected.filter(value => choices.includes(value)) } };
         setFiles(entries => entries.map(item => item.itemId === itemId ? next : item));
       } catch (error) { setError(error.message); return; }
     }
@@ -313,6 +319,7 @@ export default function ImportPreview() {
     if (operationRef.current || !selection.length || result || contextBlocked) return;
     const generation = generationRef.current;
     operationRef.current = true; setBusy(true); setSupplierMatched(false); invalidate();
+    setProgress({ value: null, label: "正在准备读取文件…" });
     const additions = Array.from(selection).map((file) => ({ file, sourceScope: "full_month", importMode: "replace_store_month", fileName: file.name, itemId: crypto.randomUUID(), storeName: file.name.replace(/\.[^.]+$/, "").trim(), status: "queued", progress: 0 }));
     if (retryItem) additions[0] = { ...retryItem, status: "queued", error: null, selectedSheet };
     setFiles((current) => retryItem ? current.map(item => item.itemId === retryItem.itemId ? additions[0] : item) : [...current, ...additions]);
@@ -320,23 +327,18 @@ export default function ImportPreview() {
       await assertImportContext();
       importWorkspaceRef.current = (await getActiveMemberContext()).workspaceId;
       setGroupWorkspaceId(importWorkspaceRef.current);
-      const groupState = readSupplierGroups(importWorkspaceRef.current);
-      if (!batchRuleRef.current.aliases.length && !batchSuffixText.trim()) {
-        const previous = groupState.groups.find(group => group.id === groupState.lastAppliedId);
-        if (previous) {
-          batchRuleRef.current = previous;
-          setBatchSuffixText(previous.aliases.join('、')); setBatchMode(previous.mode);
-        }
-      }
       for (let index = 0; index < additions.length; index += 1) {
         if (generation !== generationRef.current) return;
         const item = additions[index];
-        setProgress({ value: index / additions.length * 100, label: `解析 ${index + 1}/${additions.length}：${item.fileName}` });
+        const label = `文件 ${index + 1}/${additions.length}：${item.fileName}`;
+        progressTaskRef.current = { jobId: item.itemId, label, generation };
+        setProgress({ value: null, label: `${label} · 正在核对文件` });
         try {
           if (!ACCEPTED_EXTENSIONS.has(item.fileName.split(".").pop()?.toLowerCase())) throw new Error("请选择 CSV、TSV、XLSX 或 XLS 文件。");
           if (item.file.size > MAX_FILE_SIZE) throw new Error("单文件不能超过 50 MB。");
           const fileHash = await sha256File(item.file);
           if (generation !== generationRef.current) return;
+          setProgress({ value: 0, label: `${label} · 正在解析` });
           const parsed = await clientRef.current.parse(item.file, item.itemId, selectedSheet);
           if (generation !== generationRef.current) return;
           if (parsed.type === "sheet-selection-required") {
@@ -344,14 +346,13 @@ export default function ImportPreview() {
             continue;
           }
           activeJobsRef.current.add(item.itemId);
-          const supplierPreference = readImportPreference(importWorkspaceRef.current, item.storeName);
           const choices = parsed.facets?.supplierNumbers ?? [];
-          const restored = restoreImportPreference(supplierPreference, choices);
-          const rule = batchRuleRef.current;
-          const filterOptions = { supplierNumbers: rule.aliases.length ? rule.id ? restoreSupplierGroupSelection(choices, rule, groupState, item.storeName) : matchImportNumberRule(choices, rule) : restored.selected, ...(parsed.preset === "ledger_report" ? {
+          const rule = supplierDraft.rule;
+          const filterOptions = { supplierNumbers: matchImportNumberRule(choices, rule), ...(parsed.preset === "ledger_report" ? {
             movementTypes: LEDGER_REPORT_MOVEMENT_TYPES.filter((type) => parsed.facets.movementTypes.includes(type)),
             deriveAmountFromUnitPrice: true,
           } : {}) };
+          setProgress({ value: null, label: `${label} · 正在核对台账日期` });
           const inspected = await clientRef.current.inspectPeriod(item.itemId, parsed.suggestedMapping, {
             ...filterOptions, defaultStore: item.storeName, enforceSingleStore: true, workspaceId: importWorkspaceRef.current,
           }, { revision: generation });
@@ -360,7 +361,7 @@ export default function ImportPreview() {
           if (generation !== generationRef.current) return;
           setFiles((current) => current.map((entry) => entry.itemId !== item.itemId ? entry : {
             ...entry, ...parsed, fileHash, mapping: parsed.suggestedMapping, status: "parsed", progress: 100,
-            filterOptions, usesBatchSuffix: Boolean(rule.aliases.length), supplierMatchRule: rule, supplierGroupRule: rule.id ? { ...rule, aliases: [...rule.aliases] } : null, supplierPreview: inspected.supplierPreview, supplierPreference, supplierKeywords: supplierPreference.keywords, missingNumbers: restored.missing, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
+            filterOptions, supplierGroupRule: rule.id ? rule : null, supplierPreview: inspected.supplierPreview, periodEvidence: inspected.evidence, rowSource: inspected.rowSource,
             validation: inspected.evidence.validationSummary ? { summary: inspected.evidence.validationSummary } : null,
           }));
           // Each completed file is on disk; release its workbook heap before
@@ -372,7 +373,7 @@ export default function ImportPreview() {
           await clientRef.current.release(item.itemId).catch(() => {});
         }
       }
-    } catch (error) { if (generation === generationRef.current) setError(error.message); } finally { if (generation === generationRef.current) { setProgress({ value: 100, label: "文件解析完成" }); setBusy(false); operationRef.current = false; } }
+    } catch (error) { if (generation === generationRef.current) setError(error.message); } finally { if (generation === generationRef.current) { progressTaskRef.current = null; setBusy(false); operationRef.current = false; } }
   };
   const remove = async (item) => {
     if (operationRef.current) return;
@@ -383,7 +384,7 @@ export default function ImportPreview() {
     invalidate(); setFiles((current) => current.filter((entry) => entry.itemId !== item.itemId));
     if (files.length === 1) {
       generationRef.current += 1; importWorkspaceRef.current = null; batchRuleRef.current = { aliases: [], mode: 'fuzzy' };
-      setGroupWorkspaceId(null); setBatchSuffixText(''); setBatchMode('fuzzy'); setSupplierViewStore('all'); setSupplierDirty(false);
+      setGroupWorkspaceId(null); setSupplierDraft(emptySupplierDraft); setSupplierViewStore([]); setSupplierDirty(false);
     }
     await clientRef.current.release(item.itemId).catch(() => {});
   };
@@ -396,7 +397,8 @@ export default function ImportPreview() {
     if (supplierMatched && supplierRuleKey(rule) === supplierRuleKey(batchRuleRef.current)
       && files.filter(item => item.status === 'parsed').every(item => JSON.stringify(selection[item.itemId] ?? []) === JSON.stringify(item.filterOptions?.supplierNumbers ?? []))) { setSupplierDirty(false); return true; }
     const generation = generationRef.current;
-    operationRef.current = true; setBusy(true); invalidate();
+    operationRef.current = true; setBusy(true); setSupplierMatched(false); invalidate();
+    setProgress({ value: null, label: "正在确认货号并校验…" });
     try {
       await assertImportContext();
       attemptedRef.current = "";
@@ -405,16 +407,20 @@ export default function ImportPreview() {
         if (generation !== generationRef.current) return false;
         const allowed = new Set(item.facets?.supplierNumbers ?? []);
         const numbers = (selection[item.itemId] ?? []).filter(value => allowed.has(value));
-        const patch = { usesBatchSuffix: Boolean(rule?.aliases?.length), supplierMatchRule: rule, supplierGroupRule: rule?.id ? rule : null,
+        const patch = { supplierGroupRule: rule?.id ? rule : null,
           filterOptions: { ...item.filterOptions, supplierNumbers: numbers } };
         if (JSON.stringify(numbers) === JSON.stringify(item.filterOptions?.supplierNumbers ?? [])) {
           setFiles(current => current.map(entry => entry.itemId === item.itemId ? { ...entry, ...patch } : entry));
-        } else await update(item.itemId, patch);
+        } else {
+          progressTaskRef.current = { jobId: item.itemId, label: `确认货号：${item.fileName}`, generation };
+          setProgress({ value: null, label: `正在校验所选货号：${item.fileName}` });
+          await update(item.itemId, patch);
+        }
       }
       if (generation === generationRef.current) { setSupplierMatched(true); setSupplierDirty(false); return true; }
       return false;
     } catch (failure) { if (generation === generationRef.current) setError(failure.message); return false; }
-    finally { if (generation === generationRef.current) { setBusy(false); operationRef.current = false; } }
+    finally { if (generation === generationRef.current) { progressTaskRef.current = null; setBusy(false); operationRef.current = false; } }
   };
   const readSupplierMembers = useCallback(async (row, page) => {
     await assertImportContext();
@@ -427,13 +433,16 @@ export default function ImportPreview() {
     if (operationRef.current || !ready || result) return;
     const generation = generationRef.current;
     operationRef.current = true; setBusy(true); invalidate();
+    setProgress({ value: null, label: "正在准备整批校验…" });
     try {
       await assertImportContext();
       const items = [];
       let hasErrors = false;
       for (let index = 0; index < filesToImport.length; index += 1) {
         const item = filesToImport[index];
-        setProgress({ value: index / filesToImport.length * 100, label: `校验 ${index + 1}/${filesToImport.length}：${item.fileName}` });
+        const label = `校验 ${index + 1}/${filesToImport.length}：${item.fileName}`;
+        progressTaskRef.current = { jobId: item.itemId, label, generation };
+        setProgress({ value: null, label });
         if (generation !== generationRef.current) return;
         let validation;
         if (item.rowSource) validation = { rowSource: item.rowSource, summary: item.periodEvidence.validationSummary };
@@ -461,16 +470,18 @@ export default function ImportPreview() {
       if (hasErrors) throw new Error("部分文件有错误行或没有有效数据。请修正或明确移除问题文件后重新校验，整批尚未写入。");
       const input = { period, items };
       abortRef.current = new AbortController();
+      progressTaskRef.current = null;
       setProgress({ value: null, label: "正在核对重复文件与替换范围…" });
       const nextPreview = await previewSalesImports({ ...input, signal: abortRef.current.signal });
       if (generation !== generationRef.current) return;
       setPreview(nextPreview); setPayload(input);
     } catch (validationError) { if (generation === generationRef.current) setError(validationError.message); }
-    finally { if (generation === generationRef.current) { abortRef.current = null; setBusy(false); operationRef.current = false; setProgress({ value: 100, label: "整批校验完成" }); } }
+    finally { if (generation === generationRef.current) { progressTaskRef.current = null; abortRef.current = null; setBusy(false); operationRef.current = false; } }
   };
   const confirmImport = async () => {
     if (operationRef.current || supplierDirty || result || !preview || !payload || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)) return;
     operationRef.current = true; setBusy(true); setCommitting(true);
+    setProgress({ value: null, label: "正在核对并原子写入，完成前可取消" });
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -479,8 +490,11 @@ export default function ImportPreview() {
       setProgress({ value: null, label: "正在核对并原子写入，完成前可取消" });
       setResult(await saveSalesImports({ ...payload, preview, overwriteSignature, signal: controller.signal,
         onProgress: ({ completed, total }) => setProgress({ value: completed / total * 100, label: `写入 ${completed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")} 行` }) }));
-      try { saveImportNumbers(importWorkspaceRef.current, files); rememberSupplierGroupSelection(importWorkspaceRef.current, files); }
-      catch { notify("数据已导入，但货号偏好未能保存；下次请重新选择。", "warning"); }
+      // The profit filter also uses the store scope of a successfully imported group.
+      if (files.some(item => item.supplierGroupRule?.id)) {
+        try { rememberSupplierGroupSelection(importWorkspaceRef.current, files); }
+        catch { notify("数据已导入，常用组在利润页的店铺范围保存失败。", "warning"); }
+      }
       notify("整批处理完成，来源批次已保留。");
       // The result contains summaries only. Release raw workbook jobs and the
       // normalized payload immediately after the atomic transaction commits.
@@ -498,11 +512,10 @@ export default function ImportPreview() {
   const configurationKey = JSON.stringify([period, files.map(item => [item.itemId, item.status, item.storeName, item.mapping, item.filterOptions, item.sourceScope, item.importMode, item.periodEvidence]), contextBlocked]);
   const storesWithoutNumbers = files.filter(item => item.status === 'parsed' && !item.filterOptions?.supplierNumbers?.length).map(item => item.storeName || item.fileName);
   const storesWithoutMovements = filesToImport.filter(item => Array.isArray(item.filterOptions?.movementTypes) && !item.filterOptions.movementTypes.length).map(item => item.storeName || item.fileName);
-  const [selectionCount, setSelectionCount] = useState(0);
   const importPreparation = periodEvidence.awaitingEvidence ? '正在按本次选择重新校验…'
     : storesWithoutMovements.length ? `${storesWithoutMovements.join('、')}未选变动类型，请勾选后再导入`
-    : supplierDirty || !supplierMatched ? selectionCount ? '已选待匹配；点击“匹配货号”后直接校验' : '请选择货号；勾选后点击“匹配货号”'
-    : !filesToImport.length ? '尚未选择货号，请先搜索或勾选要导入的货号'
+    : !supplierDirty && !filesToImport.length ? '请选择常用组、输入关键词或手动勾选货号'
+    : supplierDirty || !supplierMatched ? '确认所选货号后即可校验'
     : periodEvidence.months.length > 1 ? '来源包含多个月份，请按月处理后导入' : !period ? '文件日期不足，请补充月份'
     : error || (storesWithoutNumbers.length ? `${storesWithoutNumbers.join('、')}未选货号，本次自动跳过；已选店铺可直接导入` : '已匹配货号，核对预览后可直接导入');
   validateRef.current = validate;
@@ -516,15 +529,15 @@ export default function ImportPreview() {
     <header className="wizard-topbar"><button disabled={busy} onClick={() => navigate(returnHref)}><X size={20} />{result ? returnLabel : "取消导入"}</button><strong>月度台账批量导入</strong></header>
     <section className="wizard-content">
       <div className="wizard-intro"><span className="batch-eyebrow">第一步 · 销售数据</span><h1>导入店铺台账</h1><p>选择同一个月的店铺文件，自动识别明细、校验并显示概览，核对归属后一次导入。导入后仍可以补充、更换或重新导入，不会锁死本月数据。</p></div>
-      <details className="import-flow-guide" aria-label="月度核算流程" open={!files.length || Boolean(result)}>
-        <summary className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></summary>
+      <section className="import-flow-guide" aria-label="月度核算流程">
+        <div className="import-flow-guide-heading"><strong>月度核算流程</strong><span>正常 ERP 成本回传后自动采用；异常和最终报告仍需核对。</span></div>
         <div className="import-flow-guide-steps">
           <span className={result ? "completed" : "active"} aria-current={!result ? "step" : undefined}><b>1</b><strong>导入销售台账</strong><small>{result ? "已完成" : "当前步骤"}</small></span>
           <span className={result ? "active" : undefined} aria-current={result ? "step" : undefined}><b>2</b><strong>取得正式成本</strong><small>{result ? "下一步 · ERP 自动采用" : "ERP 自动采用"}</small></span>
           <span><b>3</b><strong>核对与更正</strong><small>人工更正优先</small></span>
           <span><b>4</b><strong>确认利润</strong><small>核对后直接导出</small></span>
         </div>
-      </details>
+      </section>
       {contextBlocked ? <section className="wizard-card">{ledgerContext?.error ? <><p role="alert">{ledgerContext.error}</p><Button onClick={() => navigate('/ledger')}>选择账本</Button><Button onClick={() => setContextRetry(value => value + 1)}>重试</Button></> : <p role="status">正在读取目标账本月份…</p>}</section> : null}
       {!result ? <>
         {(files.length > 0 || requestedLedgerId && !contextBlocked) && <section className="batch-action-bar" aria-label="本次导入操作">
@@ -534,6 +547,7 @@ export default function ImportPreview() {
           <div className="batch-action-summary"><strong>{files.length} 个文件{requestedLedgerId ? ' · 沿用当前账本' : suggestedPeriod ? ' · 按台账日期识别' : ''}</strong><span id="batch-import-status" role="status">{busy ? progress.label || '正在校验…' : preview ? `新增 ${preview.items.reduce((n, item) => n + item.addedGroupCount, 0)} 组 · 替换 ${preview.items.reduce((n, item) => n + item.replacedGroupCount, 0)} 组 · 移除 ${preview.items.reduce((n, item) => n + (item.removedGroupCount ?? 0), 0)} 组${preview.requiresOverwrite && overwriteSignature !== preview.targetSignature ? ' · 请确认替换范围后导入' : ''}` : importPreparation}</span></div>
           {preview?.requiresOverwrite && <label className="batch-overwrite"><input disabled={busy} type="checkbox" checked={overwriteSignature === preview.targetSignature} onChange={event => setOverwriteSignature(event.target.checked ? preview.targetSignature : null)} />确认本次全部替换范围（含分页内容）与移除旧分组；可展开下方 SKC 明细核对。</label>}
           <Button variant="primary" aria-describedby="batch-import-status" disabled={busy || supplierDirty || !preview || (preview.requiresOverwrite && overwriteSignature !== preview.targetSignature)} loading={busy} onClick={confirmImport}>导入</Button>
+          {busy && <div className="import-progress"><ProgressBar value={progress.value} label={progress.label || '正在处理导入…'} />{Number.isFinite(progress.value) && <span className="import-progress-value" aria-hidden="true">{Math.round(progress.value)}%</span>}<Button onClick={cancel}>取消当前处理</Button></div>}
         </section>}
         <section className="wizard-card">
           <fieldset disabled={busy || contextBlocked} className="batch-fieldset batch-source-fieldset">
@@ -545,10 +559,8 @@ export default function ImportPreview() {
               <Upload size={26} /><div><strong>选择或拖入多个店铺文件</strong><p>CSV / TSV / XLSX / XLS，每文件最大 50 MB；自动识别实际明细页；多个候选时仅需为该文件选择。</p></div>
               <Button onClick={() => inputRef.current?.click()}>添加文件</Button>{!files.length && <Button variant="ghost" onClick={() => loadFiles([sampleFile()])}>使用示例</Button>}
             </div>
-
+            <ImportSupplierWorkbench key={groupWorkspaceId} files={files} workspaceId={groupWorkspaceId} period={period} draft={supplierDraft} onDraftChange={setSupplierDraft} initialRule={batchRuleRef.current} confirmed={supplierMatched} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} disabled={busy || contextBlocked} />
           </fieldset>
-          {busy && <div className="import-progress" role="status">{progress.value == null ? <span>{progress.label}</span> : <ProgressBar value={progress.value} label={progress.label} />}<Button onClick={cancel}>取消当前处理</Button></div>}
-          <fieldset disabled={busy || contextBlocked} className="batch-fieldset"><ImportSupplierWorkbench key={groupWorkspaceId} files={files} workspaceId={groupWorkspaceId} period={period} aliasesText={batchSuffixText} mode={batchMode} initialRule={batchRuleRef.current} onAliasesChange={setBatchSuffixText} onModeChange={setBatchMode} onApply={applySupplierDraft} onDirtyChange={setSupplierDirty} onMembers={readSupplierMembers} viewStore={supplierViewStore} onViewStore={setSupplierViewStore} validated={Boolean(preview && supplierMatched && !supplierDirty)} onSelectionCount={setSelectionCount} disabled={busy || contextBlocked} /></fieldset>
           <div className="batch-files">{files.map((item, index) => <section className="batch-file" key={item.itemId}>
             <div className="batch-file-heading"><span className="batch-file-icon"><FileSpreadsheet size={21} /></span><div><strong>{item.fileName}</strong><span className="batch-file-status">文件 {index + 1}{item.rowCount != null ? ` · ${item.rowCount.toLocaleString("zh-CN")} 行` : ""} · {item.status === "error" ? "解析失败" : item.status === "queued" ? (item.progressLabel || "等待解析") : item.status === "sheet_required" ? "请选择明细页" : item.status === "parsed" && !supplierMatched ? "已解析，待选择货号" : item.validation ? item.validation.summary.errorCount ? "需要处理" : !item.validation.summary.validRowCount ? "本次无有效行" : "已校验" : "自动校验中"}</span></div><div className="batch-store form-field"><label htmlFor={`store-${item.itemId}`}>所属店铺</label><input id={`store-${item.itemId}`} aria-describedby={`store-note-${item.itemId}`} aria-invalid={!item.storeName.trim()} className="text-input" disabled={busy} value={item.storeName} onChange={(event) => update(item.itemId, { storeName: event.target.value })} /><small id={`store-note-${item.itemId}`}>{item.storeName.trim() ? "文件名仅作建议，请核对店铺归属。" : "请填写所属店铺后再校验。"}</small></div><Button disabled={busy} variant="ghost" aria-label={`移除 ${item.fileName}`} onClick={() => remove(item)}>移除</Button></div>
             {item.status === "error" ? <p role="alert" className="import-error">解析失败：{item.error}</p> : item.status === "queued" ? <p role="status">{item.progressLabel || "等待或正在读取工作簿…"}</p> : item.status === "sheet_required" ? <div className="form-field"><label htmlFor={`sheet-${item.itemId}`}>发现多个明细页，请选择本次来源</label><select id={`sheet-${item.itemId}`} className="text-input" defaultValue="" onChange={event => loadFiles([item.file], item, event.target.value)}><option value="" disabled>选择明细页</option>{item.sheetCandidates.map(name => <option key={name}>{name}</option>)}</select></div> : <fieldset disabled={busy} className="batch-fieldset">
@@ -557,15 +569,13 @@ export default function ImportPreview() {
               {item.periodEvidence?.distribution?.length > 1 && <p className="import-error" role="alert">此文件包含多个月份，请按月处理后再导入。</p>}
               {item.periodInspectionError && <p className="import-error" role="alert">{item.periodInspectionError}</p>}
 
-              <div className="batch-store-suppliers"><span>本店已应用 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个货号</span><Button variant="ghost" onClick={() => { setSupplierViewStore(item.storeName); document.querySelector('.supplier-workbench')?.scrollIntoView({ block: 'start' }); }}>查看本店货号</Button></div>
+              <div className="batch-store-suppliers"><span>本店已应用 {item.filterOptions?.supplierNumbers?.length ?? 0} / {item.facets?.supplierNumbers?.length ?? 0} 个货号</span><Button variant="ghost" onClick={() => { setSupplierViewStore([item.storeName]); document.querySelector('.supplier-workbench')?.scrollIntoView({ block: 'start' }); }}>查看本店货号</Button></div>
               {!item.filterOptions?.supplierNumbers?.length && <p role="status">本店未选货号，本次自动跳过；已有台账数据保留。</p>}
-              <details className="batch-source-details"><summary>来源范围与销售变动类型</summary>
               <ImportMovementPicker store={item.storeName} choices={item.facets?.movementTypes ?? []} counts={item.facets?.movementTypeCounts}
                 selected={item.filterOptions?.movementTypes ?? item.facets?.movementTypes ?? []}
                 defaults={item.preset === "ledger_report" ? LEDGER_REPORT_MOVEMENT_TYPES.filter(type => item.facets?.movementTypes?.includes(type)) : item.facets?.movementTypes ?? []}
                 onChange={movementTypes => update(item.itemId, { filterOptions: { ...item.filterOptions, movementTypes } })} />
               <p className="batch-period-evidence" role="status">{sourceScope(item) === "full_month" ? '所选货号完整月台账' : '本月部分来源'} · {item.storeName}。{sourceScope(item) === "full_month" ? "仅证明所选货号的完整月份，销量标签统计月末最后七天；缺日期的商品仍显示数据不足。" : "本文件仍可核算，但不足以证明未出现商品为零销量。"}</p>
-              </details>
               <details className="batch-advanced"><summary>高级选项 · {Object.values(item.mapping).filter(Boolean).length} 列已映射{item.filterOptions?.deriveAmountFromUnitPrice ? " · 销售额自动计算" : ""}{item.filterOptions?.movementTypes ? ` · ${item.filterOptions.movementTypes.length} 类销售变动` : ""}</summary>
               <div className="form-field"><label htmlFor={`source-scope-${item.itemId}`}>来源范围</label><select id={`source-scope-${item.itemId}`} className="text-input" value={sourceScope(item)} onChange={event => update(item.itemId, { sourceScope: event.target.value, importMode: event.target.value === "partial" ? "append" : "replace_store_month" })}><option value="full_month" disabled={sourceIsFiltered(item)}>完整历史月台账</option><option value="partial">部分日期来源</option></select>{sourceIsFiltered(item) && <small>已缩小销售变动类型筛选，按部分来源保存；恢复全范围后可选择完整月。</small>}</div>
               <div className="form-field"><label htmlFor={`import-mode-${item.itemId}`}>导入方式</label><select id={`import-mode-${item.itemId}`} className="text-input" value={sourceScope(item) === "partial" ? "append" : item.importMode ?? "append"} onChange={event => update(item.itemId, { importMode: event.target.value })}><option value="append">追加并替换重叠分组</option><option value="replace_store_month" disabled={sourceScope(item) !== "full_month"}>完整替换本店本月</option></select><small>完整月默认替换本店本月为此次选择；部分日期仅追加或替换重叠分组。请核对下方移除范围。</small></div>
@@ -578,7 +588,7 @@ export default function ImportPreview() {
               {item.validation && <div className="batch-validation"><p>有效 {item.validation.summary.validRowCount} 行 · 业务规则排除 {item.validation.summary.ignoredCount} 行 · 错误 {item.validation.summary.errorCount} 行</p>{item.validation.summary.errors.map((issue) => <p className="import-error" key={issue.sourceRow}>第 {issue.sourceRow} 行：{issue.messages.join("；")}</p>)}{!!item.validation.summary.platformSkcMissingCount && <p>有 {item.validation.summary.platformSkcMissingCount} 行缺少平台 SKC，无法生成对应 ERP 查询。</p>}</div>}
             </fieldset>}
           </section>)}</div>
-          <div className="wizard-card-footer"><span>{files.length ? `${files.length} 个文件 · ${preview && !supplierDirty ? "已校验" : "匹配货号后直接校验"}` : "添加文件后选择货号"}</span>{(error || preview) && ready && <Button disabled={busy || supplierDirty} onClick={() => { invalidate(); void validate(); }}>重新校验</Button>}</div>
+          <div className="wizard-card-footer"><span>{files.length ? `${files.length} 个文件 · 已自动解析与校验` : "添加文件后自动校验"}</span>{(error || preview) && ready && <Button disabled={busy || supplierDirty} onClick={() => { invalidate(); void validate(); }}>重新校验</Button>}</div>
         </section>
         {error && <div className="import-error" role="alert"><AlertCircle size={18} />{error}</div>}
         {preview && !supplierDirty && supplierMatched && <section ref={previewRef} tabIndex={-1} aria-label={`整批预览 ${period}`} className="wizard-card batch-preview"><h2>整批预览</h2>

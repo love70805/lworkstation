@@ -89,3 +89,44 @@ it('toggles the sidebar immediately on every click and never changes accounting 
  expect(host.textContent).not.toMatch(/最低|开发者|切换核算/);
  await localDb.settings.delete('inventory-accounting:W');
 });
+
+it('keeps a manual sidebar choice across compact-width navigation, resizing and remounting',async()=>{
+ const listeners=new Set();
+ const media={matches:true,addEventListener:(_event,listener)=>listeners.add(listener),removeEventListener:(_event,listener)=>listeners.delete(listener)};
+ const original=window.matchMedia.bind(window);
+ const spy=vi.spyOn(window,'matchMedia').mockImplementation(query=>query==='(max-width: 1200px)'?media:original(query));
+ const mount=key=>act(async()=>root.render(<MemoryRouter key={key} initialEntries={['/workspace']}><ToastProvider><AppShell><p>导航验收</p></AppShell></ToastProvider></MemoryRouter>));
+ try {
+  await mount('compact-default');
+  expect(button('展开导航')).toBeTruthy();
+  expect(localStorage.getItem('shopeers-sidebar-collapsed')).toBeNull();
+  await act(async()=>button('展开导航').click());
+  expect(localStorage.getItem('shopeers-sidebar-collapsed')).toBe('false');
+  await act(async()=>host.querySelector('a[href="/products"]').click());
+  expect(button('折叠导航')?.getAttribute('aria-expanded')).toBe('true');
+  await mount('remember-expanded');
+  expect(button('折叠导航')).toBeTruthy();
+  await act(async()=>{media.matches=false;listeners.forEach(listener=>listener());});
+  await act(async()=>button('折叠导航').click());
+  await act(async()=>{media.matches=true;listeners.forEach(listener=>listener());});
+  await mount('remember-collapsed');
+  expect(button('展开导航')?.getAttribute('aria-expanded')).toBe('false');
+  expect(localStorage.getItem('shopeers-sidebar-collapsed')).toBe('true');
+ } finally { spy.mockRestore(); }
+});
+
+it('uses window width only until the user chooses a sidebar state',async()=>{
+ const listeners=new Set();
+ const media={matches:false,addEventListener:(_event,listener)=>listeners.add(listener),removeEventListener:(_event,listener)=>listeners.delete(listener)};
+ const original=window.matchMedia.bind(window);
+ const spy=vi.spyOn(window,'matchMedia').mockImplementation(query=>query==='(max-width: 1200px)'?media:original(query));
+ try {
+  await act(async()=>root.render(<MemoryRouter key="auto-sidebar"><ToastProvider><AppShell><p>自动导航</p></AppShell></ToastProvider></MemoryRouter>));
+  expect(button('折叠导航')).toBeTruthy();
+  await act(async()=>{media.matches=true;listeners.forEach(listener=>listener());});
+  expect(button('展开导航')).toBeTruthy();
+  await act(async()=>{media.matches=false;listeners.forEach(listener=>listener());});
+  expect(button('折叠导航')).toBeTruthy();
+  expect(localStorage.getItem('shopeers-sidebar-collapsed')).toBeNull();
+ } finally { spy.mockRestore(); }
+});

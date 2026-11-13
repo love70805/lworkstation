@@ -129,3 +129,25 @@ it('invalidates table read caches on abort and still enforces role and finalizat
   await setActiveMemberContext({ workspaceId: 'OTHER', memberId: 'finance', role: 'finance' });
   await expect(recover()).rejects.toThrow('当前工作区');
 });
+
+
+it('invalidates a pending receipt memo when another receipt gains a reusable ignore without changing published cost rows', async () => {
+  const previous = await db.erpCostInbox.get(receipts[0].id), originalRequest = await db.erpCostRequests.get(previous.requestId);
+  const request = { ...originalRequest, id: 'REQ-A-NEXT', requestedAt: '2026-10-02T00:00:00Z' };
+  await saveErpCostRequest(request);
+  const expectedSkus = request.expectedSkus;
+  const batch = buildErpCostBatchEnvelope({ batchId: 'BATCH-A-NEXT', workspaceId, ledgerId, requestId: request.id,
+    platformSkcs: request.platformSkcs, expectedSkus, generatedAt: request.requestedAt,
+    results: expectedSkus.map((row, i) => ({ warehouseSku: `WH-${row.platformSku}`, mappings: [row], previewUnitCost: i ? 1 : 5 })),
+    warehouseEvidence: previous.envelope.batch.warehouseEvidence });
+  const current = await receiveErpCostInboxEnvelope({ envelope: buildErpCostInboxEnvelope({ batch, deliveryId: 'DELIVERY-A-NEXT' }) });
+  await recover(); await recover();
+  // Simulate a valid stored legacy decision, with no published-cost mutation.
+  const costs = await db.erpCostRows.toArray();
+  await db.erpCostInbox.update(previous.id, { status: 'applied', costResolutions: [{ warehouseSku: 'WH-A-ANOMALY', recordId: 'RECORD-A-ANOMALY',
+    action: 'ignore_anomaly', originalUnitPrice: 1, resolvedUnitPrice: 1, resolvedAt: '2026-10-03T00:00:00Z', resolvedBy: 'finance', reason: '已忽略' }] });
+  expect(await db.erpCostRows.toArray()).toEqual(costs);
+  await recover();
+  expect((await db.erpCostInbox.get(current.id)).costResolutions).toMatchObject([{ warehouseSku: 'WH-A-ANOMALY', action: 'ignore_anomaly' }]);
+  expect((await db.erpCostRows.where('platformSku').equals('A-ANOMALY').toArray()).map(row => row.sourceEnvelopeBatchId)).toEqual(['BATCH-A-NEXT']);
+});

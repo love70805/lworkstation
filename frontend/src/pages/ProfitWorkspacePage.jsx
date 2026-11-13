@@ -9,7 +9,6 @@ import { workspaceLedgerQuery } from "../lib/workspaceNavigation";
 import { ProfitViewsContent } from "./ProfitPanel";
 import { readProfitView } from "../lib/profitFilter";
 import { readLedgerSalesRows } from "../data/repositories/ledgerReadCache";
-import BoardSelect from '../components/BoardSelect';
 
 const PAGE_DESCRIPTION = "导入月度台账后，系统自动采用合格 ERP 成本；核对异常或补齐缺失成本后即可导出。";
 
@@ -54,7 +53,7 @@ export default function ProfitWorkspacePage() {
   }
   return (
     <AppShell pageClass="workspace-page profit-page">
-      {selected ? <div className="workspace-profit-content"><ProfitViewsContent key={`${context.workspaceId}/${selected.id}`} monthControl={<BoardSelect label="核算月份" value={selected.id} disabled={switching} onChange={id => { void selectLedger(id); }} options={context.ledgers.map(ledger => ({ id: ledger.id, label: ledger.period }))} />} /></div> : <>
+      {selected ? <div className="workspace-profit-content"><ProfitViewsContent key={`${context.workspaceId}/${selected.id}`} monthControl={<label className="workspace-month-picker"><span>核算月份</span><select className="select-input" aria-label="核算月份" value={selected.id} disabled={switching} onChange={event => { void selectLedger(event.target.value); }}>{context.ledgers.map(ledger => <option key={ledger.id} value={ledger.id}>{ledger.period}</option>)}</select></label>} /></div> : <>
         <PageHeader title="利润核算" description={PAGE_DESCRIPTION} />
         {context?.error ? <Panel className="page-state" role="alert"><p>账本读取失败：{context.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取账本</Button></Panel>
           : ready && ledgerId && !selected ? <Panel className="page-state" role="alert"><p>账本不属于当前工作区或已不存在。</p><Link to="/ledger" className="button button-secondary">重新选择账本</Link></Panel>

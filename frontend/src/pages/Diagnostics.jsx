@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { Activity, CloudOff, CloudUpload, Copy, Database, Download, HardDrive, RefreshCw, ShieldCheck } from "lucide-react";
 import AppShell from "../components/AppShell";
-import SystemNavigation from "../components/SystemNavigation";
+import { WorkspaceBackupTools } from "./DataSecurity";
 import { useSystemSnapshot } from "../hooks/useSystemSnapshot";
 import ErpAssistantSetup from "../components/ErpAssistantSetup";
 import { Badge, Button, Panel, PageHeader, useToast } from "../components/UI";
@@ -72,7 +72,6 @@ function triggerDownload(fileName, content) {
 }
 
 export default function Diagnostics() {
-  const navigate = useNavigate();
   const location = useLocation();
   const { notify } = useToast();
   const check = useSystemSnapshot(readDiagnosticsState);
@@ -87,14 +86,13 @@ export default function Diagnostics() {
   const lastCheckedAt = check.checkedAt;
 
   useEffect(() => {
-    if (location.hash !== "#extensions") return;
-    const frame = window.requestAnimationFrame(() => document.getElementById("extensions")?.scrollIntoView({ block: "start" }));
+    if (!["#extensions", "#backup"].includes(location.hash)) return;
+    const frame = window.requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" }));
     return () => window.cancelAnimationFrame(frame);
   }, [location.hash]);
 
   const usageBytes = Number(storageEstimate?.usage ?? 0);
   const quotaBytes = Number(storageEstimate?.quota ?? 0);
-  const storagePercent = quotaBytes > 0 ? Math.round((usageBytes / quotaBytes) * 100) : null;
   const summary = diagnostics?.summary;
   const lastBackup = diagnostics?.lastBackup;
   const runtimeSummary = getRuntimeConfigSummary();
@@ -205,11 +203,10 @@ export default function Diagnostics() {
   };
 
   return (
-    <AppShell pageClass="diagnostics-page">
-      <SystemNavigation />
+    <AppShell pageClass="diagnostics-page system-page">
       <PageHeader
-        title="系统检查"
-        description={RUNTIME_COPY.diagnosticsDescription}
+        title="系统与备份"
+        description="查看本机状态，保存和恢复工作区备份。"
         actions={<Button icon={RefreshCw} loading={refreshing} disabled={refreshing} onClick={refresh}>刷新状态</Button>}
       />
       {check.status === 'error' ? <div className="system-check-error" role="alert">本机检查失败：{check.error}<Button onClick={refresh} loading={refreshing} disabled={refreshing}>重试检查</Button></div> : null}
@@ -218,10 +215,12 @@ export default function Diagnostics() {
       <div className="diagnostic-meta"><span>应用 <strong className="mono">{APP_VERSION}</strong></span><span>环境 <strong className="mono">{RUNTIME_COPY.environment}</strong></span><span>云端协作 <strong className="mono">{runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "未配置"}</strong></span><span>上次检查 <strong className="mono">{lastCheckedAt ? formatDateTime(lastCheckedAt) : "未运行"}</strong></span></div>
 
       <div className="diagnostic-card-grid system-local-cards">
-        <Panel className="diagnostic-card"><Database size={22} /><div><h2>本机数据库</h2><Badge tone={check.status === 'error' ? 'danger' : summary ? "success" : "neutral"}>{check.status === 'error' ? '检查失败' : summary ? "可读取" : "读取中"}</Badge></div><strong className="mono">{summary ? `${summary.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{DESKTOP_RUNTIME ? "桌面工作站中的全部业务记录" : "当前浏览器中的全部业务记录"}</p><footer><span>模式：IndexedDB</span><span>{check.status === 'error' ? '请重试检查' : summary ? "已读取" : "等待数据"}</span></footer></Panel>
-        <Panel className="diagnostic-card"><HardDrive size={22} /><div><h2>{DESKTOP_RUNTIME ? "桌面存储" : "浏览器存储"}</h2><Badge tone={quotaBytes > 0 ? "success" : "neutral"}>{check.status !== 'ready' ? check.status === 'error' ? '未读取' : '读取中' : quotaBytes > 0 ? "已估算" : "未提供配额"}</Badge></div><strong className="mono">{check.status !== 'ready' || !storageEstimate ? '--' : storagePercent == null ? formatBytes(usageBytes) : `${storagePercent}%`}</strong><p>{check.status !== 'ready' ? '等待本机检查完成' : quotaBytes > 0 ? `${formatBytes(usageBytes)} / ${formatBytes(quotaBytes)}` : '当前环境未提供存储估算'}</p><footer><span>来源：Storage API</span><span>本机</span></footer></Panel>
-        <Panel className="diagnostic-card"><ShieldCheck size={22} /><div><h2>备份状态</h2><Badge tone={check.status !== 'ready' ? 'neutral' : lastBackup ? "success" : "warning"}>{check.status !== 'ready' ? check.status === 'error' ? '未读取' : '读取中' : lastBackup ? "有导出记录" : "尚未导出"}</Badge></div><strong className="mono">{lastBackup ? `${lastBackup.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{lastBackup ? `最近导出：${formatDateTime(lastBackup.generatedAt)}，文件是否仍在磁盘需另行确认` : check.status === 'ready' ? "请先保存本机完整备份" : '等待本机检查完成'}</p><footer><span>{lastBackup ? formatBytes(lastBackup.sizeBytes) : '--'}</span><button onClick={() => navigate("/data-security")}>打开数据备份</button></footer></Panel>
+        <Panel className="diagnostic-card"><Database size={22} /><div><h2>本机数据库</h2><Badge tone={check.status === 'error' ? 'danger' : summary ? "success" : "neutral"}>{check.status === 'error' ? '检查失败' : summary ? "可读取" : "读取中"}</Badge></div><strong className="mono">{summary ? `${summary.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{DESKTOP_RUNTIME ? "桌面工作站中的全部业务记录" : "当前浏览器中的全部业务记录"}</p></Panel>
+        <Panel className="diagnostic-card"><HardDrive size={22} /><div><h2>{DESKTOP_RUNTIME ? "桌面存储" : "浏览器存储"}</h2><Badge tone={quotaBytes > 0 ? "success" : "neutral"}>{check.status !== 'ready' ? check.status === 'error' ? '未读取' : '读取中' : quotaBytes > 0 ? "已估算" : "未提供配额"}</Badge></div><strong className="mono">{check.status !== 'ready' || !storageEstimate ? '--' : formatBytes(usageBytes)}</strong><p>{check.status !== 'ready' ? '等待本机检查完成' : quotaBytes > 0 ? `${formatBytes(usageBytes)} / ${formatBytes(quotaBytes)}` : '当前环境未提供存储估算'}</p></Panel>
+        <Panel className="diagnostic-card"><ShieldCheck size={22} /><div><h2>备份状态</h2><Badge tone={check.status !== 'ready' ? 'neutral' : lastBackup ? "success" : "warning"}>{check.status !== 'ready' ? check.status === 'error' ? '未读取' : '读取中' : lastBackup ? "有导出记录" : "尚未导出"}</Badge></div><strong className="mono">{lastBackup ? `${lastBackup.recordCount.toLocaleString("zh-CN")} 条` : "--"}</strong><p>{lastBackup ? `最近导出：${formatDateTime(lastBackup.generatedAt)}，文件是否仍在磁盘需另行确认` : check.status === 'ready' ? "请先保存本机完整备份" : '等待本机检查完成'}</p></Panel>
       </div>
+
+      <WorkspaceBackupTools check={check} />
 
       <section className="diagnostic-extension-section" id="extensions" aria-labelledby="diagnostic-extension-title">
         <div className="diagnostic-section-heading">

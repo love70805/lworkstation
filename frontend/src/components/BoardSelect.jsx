@@ -6,7 +6,7 @@ import { Check, ChevronDown } from 'lucide-react';
 export default function BoardSelect({ label, ariaLabel, value, onChange, options, disabled, className = '' }) {
   return <Select className={`board-select ${className}`.trim()} aria-label={ariaLabel || label}
     name={ariaLabel || label} selectedKey={value} onSelectionChange={key => { if (key != null) onChange(String(key)); }} isDisabled={disabled}>
-    <Label>{label}</Label>
+    <Label className="board-select-label">{label}</Label>
     <Button className="board-select-trigger">
       <SelectValue /><ChevronDown size={16} aria-hidden="true" />
     </Button>

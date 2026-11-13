@@ -37,7 +37,7 @@ it.each([true, false])('month picker keeps per-store selection when the selected
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<MemoryRouter initialEntries={['/profit?' + query]}><ToastProvider><ProfitWorkspacePage /></ToastProvider></MemoryRouter>));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
-  const picker = host.querySelector('select[name="核算月份"]');
+  const picker = host.querySelector('select[aria-label="核算月份"]');
   expect(picker).not.toBeNull();
   await act(async () => { picker.value = 'L2'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
@@ -68,9 +68,9 @@ it.each([
   await act(async () => root.render(<MemoryRouter initialEntries={['/profit?' + query]}><ToastProvider><ProfitWorkspacePage /></ToastProvider></MemoryRouter>));
   for (let attempt = 0; attempt < 50; attempt++) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
-    if (host.querySelector('select[name="核算月份"]')) break;
+    if (host.querySelector('select[aria-label="核算月份"]')) break;
   }
-  expect(host.querySelector('select[name="核算月份"]')).not.toBeNull();
+  expect(host.querySelector('select[aria-label="核算月份"]')).not.toBeNull();
   const output = host.querySelector('output'), params = new URLSearchParams(output.getAttribute('data-search'));
   expect(params.get('ledger')).toBe('L1');
   expect(params.get('supplier_scope')).toBe(withScope ? 'unavailable' : null);

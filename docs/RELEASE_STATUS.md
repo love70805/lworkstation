@@ -1,14 +1,6 @@
 # Lworkstation 发布状态
 
-更新时间：2026-11-13（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
-
-2026-11-07 以 [2.0.6](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) 作为稳定基线，安装包和两份中文版图文指南在同一发布页。较早条目记载当时情况，旧安装包已归档，旧版源码可按[版本标签](https://github.com/love70805/lworkstation/tags)定位。
-
-## 2.0.7 成本回传与采购总价
-
-修复大批成本回传超出暂存容量后再次暂停的问题，保留具体失败说明。常规 ERP 成本按有效采购总价合计除以数量合计，包含采购服务费；桌面新增“重新获取 ERP 成本”，确认月份及当前范围后获取新证据，人工更正与历史报告保持。
-
-本版沿 v2.0.6 稳定源码构建，内置助手 8.0.61；修复同步主线，主线的独立 Beta 界面不进入本稳定包。更新后，旧成本需点击“重新获取 ERP 成本”才能取得新的完整总价。验证与边界见[本批记录](integration/ERP_DELIVERY_CAPACITY_2.0.7.md)，安装包与校验值见[候选登记](../releases/README.md)。实际公开状态、标签和上传结果以同批 [v2.0.7 Release](https://github.com/love70805/lworkstation/releases/tag/v2.0.7) 为准；未代安装或改写真实业务数据。
+2026-11-07（北京时间）以 [2.0.6](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) 作为新的稳定基线，安装包和两份中文版图文指南在同一发布页。本页较早条目记载当时的发布情况。旧安装包已归档，查旧版源码可按[版本标签](https://github.com/love70805/lworkstation/tags)定位，版本沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
 
 ## 2.0.6 利润核对与导出
 

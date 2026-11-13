@@ -11,6 +11,21 @@ function file(id, store, source, selected = []) {
   return { itemId: id, status: 'parsed', storeName: store, supplierPreview: sealSupplierFilterIndex(index), facets: collectSalesImportFacets(source, mapping), filterOptions: { supplierNumbers: selected } };
 }
 describe('read-only supplier filter preview', () => {
+  it('unions multiple store views, clears back to all and retains goods in hidden stores', () => {
+    const files = [file('A','甲',[raw('A-KPX','父','1')]), file('B','乙',[raw('B-KPX','父','2')]), file('C','丙',[raw('C-KPX','父','3')])];
+    const selected = { A: ['A-KPX'], B: ['B-KPX'], C: ['C-KPX'] };
+    const candidates = supplierFilterCandidates(files);
+    const preview = supplierFilterPreview(candidates, { selected, applied: selected, store: ['甲', '丙'], rule: { aliases: ['KPX'] } });
+    expect(preview.scope).toMatchObject({ total: 2, selected: 2, skcCount: 1, skuCount: 2, sourceRowCount: 2 });
+    expect(preview.batch).toMatchObject({ total: 3, selected: 3, added: 0, removed: 0 });
+    expect(preview.aliases[0].count).toBe(2);
+    const visible = filterSupplierCandidates(preview.rows, { store: ['甲', '丙'] });
+    expect(visible.map(row => row.store)).toEqual(['甲', '丙']);
+    expect(changeSupplierSelection(selected, visible, false)).toEqual({ A: [], B: ['B-KPX'], C: [] });
+    expect(filterSupplierCandidates(preview.rows, { store: [] })).toHaveLength(3);
+    expect(supplierFilterPreview(candidates, { selected, store: [] }).scope.selected).toBe(3);
+    expect(selected).toEqual({ A: ['A-KPX'], B: ['B-KPX'], C: ['C-KPX'] });
+  });
   it('counts full goods codes per store, real source rows and global identifier unions without touching source', () => {
     const first = [raw('0001-KPX', 'ＳＫＣ-1', '００１'), raw('0001-KPX', 'SKC-1', '001'), raw('0002-KPX', 'SKC-1', '002'), raw('0002-KPX', 'ignored', 'ignored', '2026-09-01', { 类型: '盘亏' }), raw('0002-KPX', 'error', 'bad', '2026-09-01', { 数量: '错误' })];
     const files = [file('A', '甲', first), file('B', '乙', [raw('0001-KPX', 'SKC-1', '001')])], snapshot = JSON.stringify(files);
@@ -60,16 +75,13 @@ describe('read-only supplier filter preview', () => {
     expect(changeSupplierSelection(selection, [], false)).toEqual(selection);
     expect(supplierSelectionCsv(preview.rows).split('\r\n')).toHaveLength(3);
   });
-  it('preserves current same-rule exceptions, applies only target-group compatible exceptions, and keeps zero matches empty', () => {
+  it('matches the chosen rule independently for every file', () => {
     const choices = ['A-KPX','B-KPX','A-OTHER'], files = [{itemId:'A',status:'parsed',storeName:'甲',facets:{supplierNumbers:choices}}];
     const group = { id:'G',aliases:['KPX'],mode:'fuzzy' }, other = { id:'O',aliases:['OTHER'],mode:'fuzzy' };
-    const state = {groups:[group,other],overrides:{'甲':{groupId:'G',exclude:['B-KPX'],include:['A-OTHER']}}};
-    expect(supplierRuleSelection(files,group,{previousRule:group,selected:{A:['A-KPX','A-OTHER']},savedState:state})).toEqual({A:['A-KPX','A-OTHER']});
-    expect(supplierRuleSelection(files,other,{previousRule:group,selected:{A:['A-KPX','A-OTHER']},savedState:state})).toEqual({A:['A-OTHER']});
-    expect(supplierRuleSelection(files,{aliases:['NOT-FOUND'],mode:'fuzzy'},{previousRule:group,selected:{A:choices},savedState:state})).toEqual({A:[]});
-    expect(supplierRuleSelection(files,{...group,aliases:['OTHER']},{savedState:state})).toEqual({A:['A-OTHER']});
-    expect(supplierRuleSelection(files,group,{savedState:state,preserve:false})).toEqual({A:['A-KPX','B-KPX']});
-    expect(supplierRuleSelection([...files,{...files[0],itemId:'NEW',storeName:'乙'}],group,{previousRule:group,selected:{A:['A-KPX']},savedState:state})).toEqual({A:['A-KPX'],NEW:['A-KPX','B-KPX']});
+    expect(supplierRuleSelection(files, { aliases: ['NOT-FOUND'] })).toEqual({ A: [] });
+    expect(supplierRuleSelection(files, other)).toEqual({ A: ['A-OTHER'] });
+    expect(supplierRuleSelection([...files, { ...files[0], itemId: 'NEW', storeName: '乙' }], group))
+      .toEqual({ A: ['A-KPX', 'B-KPX'], NEW: ['A-KPX', 'B-KPX'] });
   });
   it('expands profit groups only against current ledger/store and keeps null and empty at the caller boundary', () => {
     const rule = {id:'G',aliases:['KPX'],mode:'fuzzy'}, state = {groups:[rule],overrides:{'甲':{groupId:'G',exclude:['A-KPX'],include:['MANUAL']}}};

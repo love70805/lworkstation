@@ -26,7 +26,7 @@ function mappingIssues(batch, outcomes) {
   const failures = source?.sourceMeta?.mappingFailures ?? source?.warehouseEvidence?.mappingFailures;
   return (Array.isArray(failures) ? failures : []).filter(item => item?.platformSku || item?.platformSkc || item?.warehouseSku);
 }
-export default function ErpCollectionProgress({ task, inboxes = [], onControl, busy = false, locked = false, error = '', statusError = '', showCatalog = false, catalogOnly = false }) {
+export default function ErpCollectionProgress({ task, inboxes = [], onControl, busy = false, locked = false, error = '', statusError = '', showCatalog = false, catalogOnly = false, costScopeEmpty = false }) {
   if (!task) return error ? <p className="cost-registration-status" role="status">采集任务状态暂不可用：{error}</p> : null;
   const batches = task.batches ?? [];
   const expectedSkus = task.expectedSkus ?? task.requestSnapshot?.expectedSkus ?? [];
@@ -55,8 +55,10 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
     tone: 'warning', title: '采集状态暂无法确认', description: '连接检查失败；已收到结果保留。连接恢复后自动刷新状态，请先查看下方错误原因。' }
     : !presentation.running && (localFailure || localPending) ? { ...presentation, tone: localFailure ? 'warning' : 'info' } : presentation;
   if (!showCatalog && timing.completed && !statusError) {
-    const waiting = localPending || outcomes.length < delivered.length;
-    view = { ...view, running: waiting, catalogOnly: false, canResume: false, canStop: false,
+    const waiting = outcomes.some(inbox => inbox.adoptionPending && !inbox.adoptionFailure && !['rejected', 'voided'].includes(inbox.status))
+      || delivered.some(batch => !outcomes.some(inbox => inbox.deliveryId === batch.deliveryId));
+    view = { ...view, state: waiting ? 'cost_adoption' : localFailure ? 'attention' : 'completed',
+      running: waiting, catalogOnly: false, canResume: false, canStop: false,
       tone: localFailure ? 'warning' : waiting ? 'info' : 'success',
       title: localFailure ? '本机核算待重试' : waiting ? '成本已送达，正在核验并更新利润' : '成本已更新',
       description: localFailure ? localFailure.message : waiting ? '原始采购数据已收到，正在保存可用成本。' : '请查看上方待补成本与价格异常，核对后再决定如何处理。' };
@@ -77,8 +79,8 @@ export default function ErpCollectionProgress({ task, inboxes = [], onControl, b
       <div className="page-actions">
         {!awaitingLocal && (view.running || view.state === 'queued' || task.status === 'ready' && ['waiting_login','sync_error'].includes(view.state)) ? <Button disabled={busy || Boolean(statusError) || task.status === 'pausing'} onClick={() => onControl('pause')}>暂停采集</Button> : null}
         {view.canStop && (!view.catalogOnly || view.running) ? <Button disabled={busy || Boolean(statusError)} onClick={() => onControl('stop')}>停止采集</Button> : null}
-        {view.canResume && !catalogOnly && (showCatalog || !view.catalogOnly) ? <Button disabled={busy || locked} onClick={() => onControl(view.catalogOnly ? 'catalog' : 'resume')}>{view.catalogOnly ? '继续获取商品档案' : '继续原任务'}</Button> : null}
-        {!catalogOnly && failures.length ? <Button disabled={busy || locked || !view.canRetry} onClick={() => onControl('retry_failed')}>重试未完成项</Button> : null}
+        {view.canResume && !catalogOnly && (showCatalog || !view.catalogOnly) ? <Button disabled={busy || locked || costScopeEmpty && !view.catalogOnly} onClick={() => onControl(view.catalogOnly ? 'catalog' : 'resume')}>{view.catalogOnly ? '继续获取商品档案' : '继续原任务'}</Button> : null}
+        {!catalogOnly && failures.length ? <Button disabled={busy || locked || costScopeEmpty || !view.canRetry} onClick={() => onControl('retry_failed')}>重试未完成项</Button> : null}
       </div>
     </div>
     <div className={`erp-collection-activity erp-activity-${view.tone}`} role="status" aria-live="polite">

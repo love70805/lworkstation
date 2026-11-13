@@ -26,6 +26,7 @@ export function publishErpCollectionActivity({ workspaceId, tasks, error = '' })
     catalogMode: task.catalogMode, runMode: task.runMode, runnerId: task.runnerId,
     batches: (task.batches ?? []).map(batch => ({
       status: batch.status, catalogStatus: batch.catalogStatus, deliveryId: batch.deliveryId,
+      adoptionReportedAt: batch.adoptionReportedAt,
       platformSkcs: batch.platformSkcs ?? [],
     })),
   }));

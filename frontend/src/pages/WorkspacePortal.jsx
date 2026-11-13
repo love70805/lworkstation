@@ -26,7 +26,7 @@ import WorkspaceCostObservation from '../components/WorkspaceCostObservation';
 import { useWorkspaceLedgerScope } from '../lib/useWorkspaceLedgerScope';
 import WorkspaceLedgerControls from '../components/WorkspaceLedgerControls';
 import SalesAnalytics from './SalesAnalytics';
-import { readWorkspaceScopeSummary, withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
+import { withCurrentLedgerResults } from "../data/repositories/ledgerOverviewRepository";
 import { currentLedgerResult, ledgerNextStep } from "../domain/ledgerWorkflow";
 import { profitWorkspaceHref } from "../lib/workspaceNavigation";
 
@@ -99,14 +99,6 @@ export default function WorkspacePortal() {
       return { source: portalData, ledgers };
     } catch (error) { return { source: portalData, error: error.message }; }
   }, [portalData], null);
-  const selectedScope = ledgerScope.context;
-  const scopeKey = ledgerScope.ready && selectedScope?.selected ? JSON.stringify([selectedScope.workspaceId, selectedScope.selected.id, selectedScope.store]) : '';
-  const scopeSummary = useLiveQuery(async () => {
-    if (!scopeKey) return null;
-    try { return { key: scopeKey, data: await readWorkspaceScopeSummary(selectedScope.workspaceId, selectedScope.selected.id, selectedScope.store) }; }
-    catch (error) { return { key: scopeKey, error: error.message }; }
-  }, [scopeKey, refresh], null);
-  const scoped = scopeSummary?.key === scopeKey ? scopeSummary : null;
   const checkingHealth = Boolean(refresh && portalData?.refresh !== refresh);
   useEffect(() => {
     if (refresh && portalData?.refresh === refresh) setHealthChecked(!portalData.error);
@@ -157,15 +149,14 @@ export default function WorkspacePortal() {
       {portalData?.error ? <div className="workspace-load-state" role="alert">总览读取失败：{portalData.error}<Button onClick={runHealthCheck}>重试</Button></div> : null}
       {profitData?.source === portalData && profitData?.error ? <div className="workspace-load-state" role="alert">利润摘要读取失败：{profitData.error}<Button onClick={runHealthCheck}>重试利润摘要</Button></div> : null}
 
-      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
-      {workflowLedger ? <div className="workspace-scope-result" aria-label="当前范围经营指标">
-        <p>{workflowLedger.period} · {selectedScope.store === 'all' ? '全部店铺' : selectedScope.store}</p>
-        {scoped?.error ? <p role="alert">当前范围指标读取失败：{scoped.error}<Button onClick={runHealthCheck}>重试</Button></p> : <div className="workspace-scope-metrics" aria-busy={!scoped?.data}>
-          <div><span>销售额</span><strong>{scoped?.data ? money(scoped.data.revenue) : '正在读取…'}</strong></div>
-          <div><span>销量</span><strong>{scoped?.data ? scoped.data.quantity.toLocaleString('zh-CN') + ' 件' : '—'}</strong></div>
-          <div><span>商品利润</span><strong>{!scoped?.data ? '正在读取…' : scoped.data.missing ? '待补成本' : money(scoped.data.profit)}</strong><small>{scoped?.data?.missing ? scoped.data.missing + ' 条店铺 SKU 缺成本；' : ''}未含整月代发与独立扣款</small></div>
-        </div>}
+      {summary ? <div className="dashboard-metric-grid">
+        <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>已登记商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU（含草稿）</em></span></Panel>
+        <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待核算账本</small><strong>{summary?.openLedgerCount ?? 0}</strong><em>进入当前月份继续处理</em></span></Panel>
+        <Panel className="dashboard-metric-card"><span className="overview-icon info"><ShoppingCart size={19} /></span><span><small>{latestLedger ? `${latestLedger.period} 销售额` : "最近月度销售额"}</small><strong>{money(latestSales.revenue ?? 0)}</strong><em>总销量 {Number(latestSales.quantity ?? 0).toLocaleString("zh-CN")} 件</em></span></Panel>
+        <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近月度利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已核算账本"}</em></span></Panel>
       </div> : null}
+
+      <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
           <div><h2 id="workspace-flow-title">{workflowLedger ? `${workflowLedger.period} 核算流程` : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
@@ -182,7 +173,6 @@ export default function WorkspacePortal() {
         </div>
       </section>
       </WorkspaceLedgerControls>
-      {summary ? <div className="workspace-global-summary" aria-label="工作区总览"><span>整个工作区</span><button onClick={() => navigate("/products?view=reference")}>已登记商品 <strong>{summary.productCount ?? 0}</strong> · {summary.platformSkuCount ?? 0} 个平台 SKU（含草稿）</button><button onClick={() => navigate("/ledger")}>待核算账本 <strong>{summary.openLedgerCount ?? 0}</strong></button><span>草稿已保存，可先核算，资料按需补齐</span></div> : null}
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="每日销售趋势">

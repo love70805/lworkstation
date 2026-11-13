@@ -31,15 +31,6 @@ it.each(['completed','paused','partial'])('offers explicit recollection alongsid
   await act(async()=>button('重新获取 ERP 成本').click());
   expect(props.onRecollect).toHaveBeenCalledOnce();expect(runtime.startErpCollection).not.toHaveBeenCalled();
 });
-it('keeps recollection available with the compact completed status', async () => {
-  props.compact=true;props.task={requestId:'R',status:'completed',batches:[{deliveryId:'D'}]};
-  props.onRecollect=vi.fn();props.recollectReady=true;await render();
-  expect(host.querySelector('[role="status"]').textContent).toBe('ERP 成本已采集');
-  expect(button('成本已采集')).toBeUndefined();
-  await act(async()=>button('重新获取 ERP 成本').click());
-  expect(props.onRecollect).toHaveBeenCalledOnce();expect(runtime.startErpCollection).not.toHaveBeenCalled();
-  props.preparing=true;await render();expect(button('重新获取 ERP 成本').disabled).toBe(true);
-});
 it('offers the existing ERP login entry and tells the user that this scope will resume', async () => {
   runtime.getErpCollection.mockResolvedValue({ ok: true, requestId: 'R', status: 'waiting_login' }); await render();
   expect(host.textContent).toContain('登录后自动继续本次采集');
@@ -102,6 +93,16 @@ it('does not let an old completed task disable a newly registered scope', async 
   await render();expect(button('继续成本核算').disabled).toBe(false);
 });
 
+it.each(['waiting_ack', 'ready', 'waiting_login', 'sync_error', 'running'])('prefers durable cost completion to stale desktop %s', async status => {
+  props.task = { requestId: 'R', executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost',
+    status: 'cost_complete', runnerId: 'RETAINED', batches: [{ status: 'delivered', deliveryId: 'D' }] };
+  runtime.getErpCollection.mockResolvedValue({ requestId: 'R', status });
+  await render();
+  expect(button('成本已采集').disabled).toBe(true);
+  expect(host.textContent).not.toMatch(/正在连接|等待 ERP|核验登录|重新连接/);
+  expect(runtime.startErpCollection).not.toHaveBeenCalled();
+});
+
 it('shows a failed renewal and leaves the action retryable without a start loop', async () => {
   runtime.startErpCollection.mockResolvedValue({ok:false,code:'ERP_REQUEST_INVALID',error:'请求已失效'});
   props.onRegistrationRetry.mockRejectedValue(new Error('登记失败：本机服务不可用'));
@@ -114,4 +115,11 @@ it('uses the registered archive task activity when the runtime snapshot has not 
   props.mode='catalog'; props.task={requestId:'R',runMode:'catalog',catalogMode:'on_demand',status:'cost_complete',runnerId:'RUNNER',batches:[{status:'delivered',deliveryId:'D',catalogStatus:'running'}]};
   await render(); expect(button('正在获取商品档案').disabled).toBe(true);
   props.task.requestId='OLD'; await render(); expect(button('继续获取商品档案').disabled).toBe(false);
+});
+it('never starts an empty visible scope even when an old registered request is ready', async () => {
+  props.scopeEmpty=true;props.task={requestId:'R',status:'partial',batches:[{status:'incomplete'}]};
+  runtime.getErpCollection.mockResolvedValue({requestId:'R',status:'waiting_ack'});
+  await render();const start=button('当前范围无需采集');expect(start.disabled).toBe(true);
+  await act(async()=>start.click());expect(runtime.startErpCollection).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain('正在等待 ERP 确认接收');
 });

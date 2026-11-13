@@ -108,6 +108,15 @@ it('finishes cost work without treating optional or stale material activity as r
   expect(erpCollectionPresentation({ ...task, status: 'partial', batches: [{ ...delivered, status: 'incomplete' }] })).toMatchObject({ canResume: false, canRetry: true });
 });
 
+it('does not present a delivered cost runner as queued while its lease is being released', () => {
+  const task = { executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost', status: 'cost_complete',
+    runnerId: 'RETAINED', batches: [{ ...delivered, adoptionReportedAt: '2026-11-09T00:00:00Z' }] };
+  expect(erpCollectionPresentation(task)).toMatchObject({ state: 'cost_completed', running: false, tone: 'success', canStop: false });
+  expect(isActiveErpCollection(task)).toBe(false);
+  expect(erpCollectionPresentation({ ...task, batches: [{ ...delivered, status: 'incomplete' }] })).toMatchObject({ state: 'attention', running: false, canRetry: true });
+  expect(erpCollectionPresentation({ ...task, runMode: 'catalog', status: 'ready' })).toMatchObject({ state: 'queued', canResume: false });
+});
+
 it('shows local calculation before automatic catalog and keeps pause available', () => {
   const task = { executionProtocol: 2, catalogMode: 'after_costs', runMode: 'cost', runnerId: 'R', status: 'cost_complete', phase: 'cost_adoption', batches: [delivered] };
   expect(erpCollectionPresentation(task)).toMatchObject({ state: 'cost_adoption', running: true, canResume: false, canStop: true });

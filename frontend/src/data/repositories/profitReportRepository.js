@@ -1,6 +1,7 @@
 import { operatingLedger, accountingMode, accountingApprovals } from '../../domain/inventoryAccounting';
 import { accountingCosts, readAccountingMode, readAccountingSupplement, projectAccountingLedger } from './inventoryAccountingRepository';
 import Dexie from 'dexie';
+import { assertLedgerCostEditingReady } from './erpCostEditingGuard';
 import { db } from "../db/clientDatabase";
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
@@ -192,6 +193,7 @@ async function buildSavedReport(draft,createdAt){
   return {report,lines};
 }
 export async function saveProfitReport(input,{expectedFingerprint}={}){
+  await assertLedgerCostEditingReady(input.ledgerId);
   const draft=await db.transaction('r',tables(),async()=>{ return await Dexie.waitFor(reportDraft(input,true)); });
   if(!expectedFingerprint||draft.fingerprint!==expectedFingerprint)throw new Error("报告预览已过期，请重新核对。");
   // Build the file and hashes before writing; commit its source lines and

@@ -23,8 +23,6 @@ function snapshotForStatus() {
 vi.mock("../hooks/useLatestSalesImport", () => ({ useLatestSalesImport: () => snapshotForStatus() }));
 let container, root;
 const findButton = (text) => [...container.querySelectorAll("button")].find((button) => button.textContent === text);
-const detailsToggle = () => container.querySelector('.profit-detail-toggle');
-const setDetailsOpen = async open => act(async () => { if ((detailsToggle().getAttribute('aria-expanded') === 'true') !== open) detailsToggle().click(); });
 beforeEach(async () => {
   clearProfitViewState();
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,7 +42,7 @@ it('opens and closes SKU rows under a single group with fixed accounting columns
   const initialHeaders = headers();
   expect(initialHeaders).toEqual(['平台 SKU', '数量', '销售金额', '采用单件成本', '总采购成本', '仓储成本', '总利润', '成本状态']);
   expect(container.querySelector('.profit-variant-row')).toBeNull();
-  expect(findButton('展开全部明细')).toBeUndefined();
+  expect(container.querySelector('.profit-table-heading button')).toBeNull();
   const group = container.querySelector('.profit-group-toggle');
   await act(async () => group.click());
   const row = container.querySelector('.profit-variant-row');
@@ -58,7 +56,9 @@ it('opens and closes SKU rows under a single group with fixed accounting columns
 
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 it("opens the warehouse dialog outside collapsed details, cancels, and applies through the visible action", async () => {
-  expect(container.querySelector("details").open).toBe(false);
+  const details = container.querySelector('.profit-detail-area > details');
+  await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
+  expect(details.open).toBe(false);
   await act(async () => container.querySelector(".profit-summary-action").click());
   let dialog = container.querySelector('[role="dialog"]');
   expect(dialog).not.toBeNull();
@@ -75,10 +75,11 @@ it("opens the warehouse dialog outside collapsed details, cancels, and applies t
   expect(mocks.updateRate).toHaveBeenCalledTimes(1);
   expect(mocks.updateRate).toHaveBeenCalledWith("L", 1.2);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
-  expect(container.querySelector("details").open).toBe(false);
+  expect(details.open).toBe(false);
 });
 it('preserves an in-progress manual draft when a new ERP snapshot triggers recalculation', async()=>{
-  await setDetailsOpen(true);
+  const details=[...container.querySelectorAll('details')].find(el=>el.querySelector('summary')?.textContent.startsWith('查看利润明细'));
+  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
   await act(async()=>container.querySelector('.profit-group-toggle').click());
   await act(async()=>findButton('补录成本').click());
   const input=container.querySelector('#manual-cost-value');
@@ -102,18 +103,19 @@ it('renders initial asynchronous snapshot loading without dereferencing an empty
 });
 
 it("opens missing details from the adjacent reversible filter", async () => {
-  await setDetailsOpen(false);
+  const details = [...container.querySelectorAll("details")].find(el => el.querySelector("summary")?.textContent.startsWith("查看利润明细"));
+  await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
   const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
   await act(async () => findButton("只看缺成本").click());
   await act(async () => new Promise(resolve => requestAnimationFrame(resolve)));
-  expect(detailsToggle().getAttribute('aria-expanded')).toBe('true');
+  expect(details.open).toBe(true);
   expect(container.querySelector('.profit-variant-row')).not.toBeNull();
   expect(findButton('只看缺成本').getAttribute('aria-pressed')).toBe('true');
   expect(scroll).not.toHaveBeenCalled();
   scroll.mockRestore();
   await act(async () => container.querySelector('.profit-group-toggle').click());
   for (const open of [false, true]) {
-    await setDetailsOpen(open);
+    await act(async () => { details.open = open; details.dispatchEvent(new Event('toggle')); });
   }
   expect(container.querySelector('.profit-group-toggle').getAttribute('aria-expanded')).toBe('false');
   expect(container.querySelector('.profit-variant-row')).toBeNull();
@@ -128,7 +130,8 @@ it('retains same-number store exclusions in current profit display and saved fil
   const href=buildProfitHref({ledgerId:'L',workspaceId:'W',supplierSelection:['A-KPX'],supplierStoreSelection});
   root=createRoot(container);
   await act(async()=>root.render(<MemoryRouter initialEntries={[href]}><ToastProvider><ProfitWorkspaceContent /></ToastProvider></MemoryRouter>));
-  await setDetailsOpen(true);
+  const details=[...container.querySelectorAll('details')].find(element=>element.querySelector('summary')?.textContent.startsWith('查看利润明细'));
+  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
   await act(async()=>{for(const toggle of container.querySelectorAll('.profit-group-toggle[aria-expanded="false"]')) toggle.click();});
   expect(container.textContent).toContain('SKU-1');
   expect(container.textContent).not.toContain('SKU-0');
@@ -136,14 +139,15 @@ it('retains same-number store exclusions in current profit display and saved fil
   expect(findButton('导出旧账本')).toBeUndefined();
 });
 it('keeps the details and search field open while filters change', async () => {
- await setDetailsOpen(true);
+ const details = [...container.querySelectorAll('details')].find(el => el.querySelector('summary')?.textContent.startsWith('查看利润明细'));
+ await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
  const search = container.querySelector('.profit-scope-filters .search-input input');
  expect(search).not.toBeNull();
  search.focus();
  await act(async () => Simulate.change(search, { target: { value: 'S' } }));
- expect(detailsToggle().getAttribute('aria-expanded')).toBe('true');
+ expect(details.open).toBe(true);
  expect(document.activeElement).toBe(search);
  await act(async () => Simulate.change(search, { target: { value: 'SKU' } }));
- expect(detailsToggle().getAttribute('aria-expanded')).toBe('true');
+ expect(details.open).toBe(true);
  expect(search.value).toBe('SKU');
 });

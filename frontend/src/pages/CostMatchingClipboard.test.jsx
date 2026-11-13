@@ -318,7 +318,7 @@ function exceptionReceipt(ledgerId, number, platformSku, records) {
     adoption: { version: 'erp-auto-adoption@1', state: 'partial', summary: { adoptedCount: 0, remainingCount: 1, anomalyCount: 1 }, items: [{ platformSku, canonicalPlatformSku: platformSku, state: 'anomaly_pending' }] },
   } };
 }
-it('keeps editable cost and expandable evidence in one dialog without procurement confirmation buttons', async () => {
+it('keeps manual editing and purchase confirmation alongside evidence in one dialog', async () => {
   const ledgerId = 'SINGLE-PRICE-DIALOG', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
   mocks.requests = [request]; mocks.inboxRecords = [{ ...inbox, status: 'loaded' }];
   mocks.switchInbox.mockResolvedValue({});
@@ -326,13 +326,49 @@ it('keeps editable cost and expandable evidence in one dialog without procuremen
   await act(async () => button('查看证据').click());
   expect(container.querySelectorAll('[aria-modal="true"]')).toHaveLength(1);
   await act(async () => Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: '9.3' } }));
-  await act(async () => container.querySelector('.cost-correction-evidence summary').click());
+  expect(container.querySelector('.cost-correction-evidence')).toBeNull();
   expect(container.querySelector('#manual-cost-value').value).toBe('9.3');
   expect(container.querySelector('.cost-detail-evidence').textContent).toContain('¥1.00');
-  expect(button('确认真实价格')).toBeUndefined();
+  expect(button('确认采购价正确')).toBeDefined();
   expect(button('确认本 SKU 全部真实采购价')).toBeUndefined();
   expect(mocks.retry).not.toHaveBeenCalled();
   expect(mocks.saveManual).not.toHaveBeenCalled();
+});
+
+it('confirms the existing purchase prices in the same dialog without transcribing a manual cost', async () => {
+  const ledgerId = 'INLINE-PRICE-CONFIRM';
+  const records = [1.2, 1.6, 1.1].map((unitPrice, i) => ({ recordId: `RECENT-${i}`, purchaseDate: `2026-08-${20 + i}`, quantity: i + 1, unitPrice }));
+  const history = Array.from({ length: 6 }, (_, i) => ({ recordId: `OLD-${i}`, purchaseDate: `2026-08-0${i + 1}`, quantity: 1, unitPrice: 10 }));
+  const { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [...history, ...records]);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  await render(['SKC-1'], 'cost_pending', { ledgerId });
+  await act(async () => button('查看证据').click());
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.querySelector('.cost-evidence-details').open).toBe(true);
+  expect(dialog.textContent).toContain('3 笔待核对采购');
+  mocks.retry.mockRejectedValueOnce(new Error('保存暂不可用'));
+  await act(async () => button('确认采购价正确').click());
+  expect(dialog.querySelector('[role="alert"]').textContent).toBe('保存暂不可用');
+  mocks.retry.mockResolvedValueOnce({ adoption: { state: 'applied', items: [{ canonicalPlatformSku: 'SKU-0', state: 'adopted' }] } });
+  await act(async () => button('确认采购价正确').click());
+  const write = mocks.retry.mock.lastCall[0];
+  expect(write.inboxId).toBe(inbox.id);
+  expect(write.resolutions.map(item => [item.recordId, item.originalUnitPrice, item.resolvedUnitPrice]).sort()).toEqual(records.map(item => [item.recordId, item.unitPrice, item.unitPrice]).sort());
+  expect(write.resolutions.every(item => item.action === 'confirm_true_price')).toBe(true);
+  expect(mocks.saveManual).not.toHaveBeenCalled();
+  expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+  expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(dialog.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('keeps zero-price evidence on the explicit manual path', async () => {
+  const ledgerId = 'ZERO-PRICE-CONFIRM', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ZERO', purchaseDate: '2026-08-10', quantity: 2, unitPrice: 0 }]);
+  mocks.requests = [request]; mocks.inboxRecords = [inbox];
+  await render(['SKC-1'], 'cost_pending', { ledgerId });
+  await act(async () => button('查看证据').click());
+  expect(button('确认采购价正确')).toBeUndefined();
+  expect(container.querySelector('#manual-cost-value')).not.toBeNull();
+  expect(mocks.retry).not.toHaveBeenCalled();
 });
 
 it('reads original procurement from an unloaded receipt without creating a cost draft or silently adopting it', async () => {
@@ -437,7 +473,7 @@ it('shows adopted ERP and never offers adoption without a new evidence batch', a
 it('refreshes an open cost dialog when the formal ERP cost is adopted', async () => {
   await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH' });
   await act(async () => button('详情').click());
-  expect(container.querySelector('.cost-detail-current')?.textContent).toContain('缺少有效成本');
+  expect(container.querySelector('.cost-detail-current')?.textContent).toContain('没有成本');
   await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH', costs: [formalCost] });
   expect(container.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.0000/件');
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('正式成本已生效');
@@ -478,9 +514,9 @@ it('corrects only missing store SKUs directly without loading a receipt, accepti
   expect(dialog().textContent).toContain('乙 · SKU-1');
   expect(dialog().textContent).not.toContain('第 1 / 2 项');
   expect(container.querySelector('#manual-cost-value').value).toBe('');
-  expect(container.querySelector('.cost-correction-evidence').open).toBe(false);
+  expect(container.querySelector('.cost-correction-evidence')).toBeNull();
   const form = [...container.querySelector('.modal-body').children];
-  expect(form.indexOf(container.querySelector('#manual-cost-value').parentElement)).toBeLessThan(form.indexOf(container.querySelector('.cost-correction-evidence')));
+  expect(form.indexOf(container.querySelector('#manual-cost-value').parentElement)).toBeLessThan(form.indexOf(container.querySelector('.cost-detail-evidence')));
   const fill = async amount => act(async () => {
     Simulate.change(container.querySelector('#manual-cost-value'), { target: { value: amount } });
   });

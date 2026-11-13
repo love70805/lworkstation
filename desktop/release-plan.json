@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.7-beta.5",
+  "version": "2.0.7-beta.15",
   "edition": "beta",
   "candidateOnly": true,
-  "integrationBranch": "codex/ui-beta5-workflow-corrections",
+  "integrationBranch": "codex/beta13-erp-cost-delivery",
   "requiredCommits": [
     {
-      "module": "beta4-ui-corrections-from-stable-2-0-6",
-      "commit": "e1249cbbdbc4a03652de4cded2746d47250891c5"
+      "module": "beta14-cost-review",
+      "commit": "8b920a7"
     }
   ]
 }

@@ -126,9 +126,10 @@ export function SearchInput({ value, onChange, placeholder = "搜索...", classN
 }
 
 export function ProgressBar({ value, tone = "primary", label }) {
+  const percentage = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : undefined;
   return (
     <div className="progress-wrap">
-      <div className="progress-track"><span className={`progress-fill progress-${tone}`} style={{ width: `${value}%` }} /></div>
+      <div className="progress-track" role="progressbar" aria-label={label || '处理进度'} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><span className={`progress-fill progress-${tone}${percentage === undefined ? ' progress-indeterminate' : ''}`} style={percentage === undefined ? undefined : { width: `${percentage}%` }} /></div>
       {label ? <span className="progress-label">{label}</span> : null}
     </div>
   );

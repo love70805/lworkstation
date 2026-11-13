@@ -10,7 +10,8 @@ it('ends cost timing at the last receipt and locates each unresolved platform ma
   const inboxes = [{ deliveryId: 'D', envelope: { batch: { sourceMeta: { mappingFailures: [{ platformSku: 'SKU-A', platformSkc: 'SKC-A', message: '目标平台 SKU/SKC 映射未确认' }] } } } }];
   const html = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={inboxes} />);
   expect(html).toContain('成本采集历时 43 分钟'); expect(html).not.toContain('151 分钟');
-  expect(html).toContain('成本读取与送达已结束'); expect(html).toContain('当前阶段：成本证据核对');
+  expect(html).toContain('成本读取与送达已结束'); expect(html).toContain('成本证据待补齐');
+  expect(html).not.toContain('当前阶段：成本证据核对');
   expect(html).toContain('平台 SKU：SKU-A'); expect(html).toContain('SKC：SKC-A'); expect(html).toContain('目标平台 SKU/SKC 映射未确认');
 });
 
@@ -121,6 +122,21 @@ it('keeps delivered costs distinct from unconfirmed or failed local accounting',
   expect(failed).toContain('本机核算未完成：本机写入暂不可用');
   expect(failed).toContain('erp-activity-warning');
   expect(failed).not.toContain('erp-activity-success');
+});
+
+it('finishes every cost indicator when local adoption is done but the old executor lease remains', () => {
+  const task = { executionProtocol: 2, catalogMode: 'on_demand', runMode: 'cost', status: 'cost_complete',
+    workspaceId: 'W', runnerId: 'OLD-RUNNER', phase: 'cost_adoption',
+    progress: { label: '正在等待 ERP 返回数据' },
+    batches: [{ batchId: 'B', platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' }] };
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'W', deliveryId: 'D',
+    adoption: { items: [{ platformSku: 'S', state: 'adopted' }, { platformSku: 'EXCEPTION', state: 'anomaly_pending' }] } }]} />);
+  expect(html).toContain('成本已更新');
+  expect(html).toContain('已送达 1 / 1 个 SKC');
+  for (const stale of ['正在等待 ERP', '等待进度确认', '暂停采集', '停止采集', 'collection-progress-pulse', '当前阶段：成本证据核对']) expect(html).not.toContain(stale);
+  const pending = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[]} />);
+  expect(pending).toContain('正在核验并更新利润');
+  expect(pending).not.toContain('正在等待 ERP');
 });
 
 it('does not use another workspace receipt as this task accounting progress', () => {
