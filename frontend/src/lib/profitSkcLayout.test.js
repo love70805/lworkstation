@@ -22,7 +22,8 @@ it.each(['pre_deduction', 'financial'])('groups and merges SKC in summary/store 
   const before = structuredClone(products), built = buildProfitReportWorkbook({ report: report(products, kind), products });
   const book = read(built.bytes), first = book.Sheets['甲店'], second = book.Sheets['乙店'];
   expect(merges(first)).toEqual(['A2:A4']); expect(merges(second)).toEqual(['A2:A3']);
-  expect(merges(book.Sheets['汇总表'])).toEqual(['A2:J2', 'A3:A5', 'A8:J8', 'A9:A10']);
+  const secondGroup = kind === 'financial' ? ['A10:J10','A11:A12'] : ['A8:J8','A9:A10'];
+  expect(merges(book.Sheets['汇总表'])).toEqual(['A2:J2', 'A3:A5', ...secondGroup]);
   expect(detail(first).map(row => row[1])).toEqual(['A1', 'A2', 'A3', 'B1']);
   expect(first.A2).toMatchObject({ t: 's', v: 'SKC-A' }); expect(first.A3?.v).toBeUndefined();
   expect(first.F2).toMatchObject({ t: 's', v: '000123456789012345678901' });
