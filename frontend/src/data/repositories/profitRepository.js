@@ -1,7 +1,10 @@
 import Dexie from "dexie";
-import { assertLedgerCostEditingReady, assertCachedLedgerCostEditingReady } from './erpCostEditingGuard';
+import { erpInboxSummary, indexedErpInboxSummary } from '../../domain/erpInboxSummary';
+import { profitCostFields, profitCostWithinPeriod, packProfitSearch, unpackProfitSearch } from '../../domain/profitPageProjection';
+import { committedCostSource, readCostSaleIdentities } from './costActionSources';
+import { assertLedgerCostEditingReady, assertCachedLedgerCostEditingReady, readReceiptStates } from './erpCostEditingGuard';
 import { erpLedgerVersion } from '../../domain/erpLedgerVersion';
-import { calculateLedgerCostCoverage, ledgerStatusFromCoverage } from "../../domain/costCoverage";
+import { calculateLedgerCostCoverage, ledgerStatusFromCoverage, projectCoverageCost } from "../../domain/costCoverage";
 import { resolveFormalCostDecision } from "../../domain/costPolicy";
 import { buildLedgerSkuIdentityIndex, ledgerCostIdentityIssue, resolveLedgerCostDecision, describeLedgerCostIdentityIssue, LEDGER_COST_IDENTITY_VERSION } from '../../domain/ledgerCostIdentity';
 import {
@@ -28,10 +31,16 @@ import { purchaseOrderSummary } from "../../domain/erpPurchaseSelection";
 import { buildErpVoidTransitionId } from "../../domain/syncLifecycleGroup";
 import { runtimeConfig } from "../../config/runtimeConfig";
 import { db } from "../db/clientDatabase";
-import { readLedgerSalesRows, ledgerSnapshotRevision, observeLedgerSnapshotRevision } from './ledgerReadCache';
+import { readLedgerSalesRows, ledgerSnapshotRevision, observeLedgerSnapshotRevision, forEachLedgerChunk } from './ledgerReadCache';
+import { readProfitPageSales } from './profitPageSalesRepository';
+import { readActionCostFacts, readActionCostRows, readActionHeaderIndex, readCostIds, readIndexedProfitCosts, completeProfitResolutionIndex } from './profitCostIndex';
+import { hasOpenCostReview } from '../../lib/costReviewActivity';
 import { runDerivedComputation } from './derivedComputationService';
-import { readErpRecoveryProbe, cachedErpRecoveryResult, rememberErpRecoveryResult, loadErpRecoveryMemo, persistErpRecoveryMemo } from './erpRecoveryReadCache';
-import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
+import {
+  readErpRecoveryProbe, cachedErpRecoveryResult, rememberErpRecoveryResult, loadErpRecoveryMemo, persistErpRecoveryMemo,
+  recoveryIgnoreIds, readRecoveryAdoptionInputs, adoptionCostHeader, adoptionBatchHeader,
+} from './erpRecoveryReadCache';
+import { sourceRevision, selectionFactsRevision, cachedDerived, assertSourceRevision, retrySourceRead, observeSourceRevision, observeTableRevision, tableRevisionReader, inboxRowVersion } from '../db/derivedCache';
 import {
   ACTIVE_MEMBER_CONTEXT_KEY,
   DEFAULT_MEMBER_ID,
@@ -41,7 +50,7 @@ import {
 } from "../db/constants";
 import { makeId } from "../db/utils";
 import { ensureDefaultWorkspace, getActiveMemberContext, ensureLedgerCatalogDrafts } from "./selectionRepository";
-import { manualSnapshot, selectManualOverride, createManualOverrideLookup, storeIdentity, validManualOverride } from "../../domain/manualCostOverride";
+import { manualSnapshot, selectManualOverride, createManualOverrideLookup, manualCostConflicts, storeIdentity, storeSkuKey, validManualOverride } from "../../domain/manualCostOverride";
 import { calculateFormalLedgerRows, comparableProfitLines } from "../../domain/ledgerProfit";
 import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
 import { normalizeErpHistoryMappings } from '../../../../integrations/contracts/erp-history-mappings.mjs';
@@ -49,10 +58,10 @@ import { summarizeProfitRows } from "../../lib/profitPrecision";
 import { reconcileErpCostRows } from "../../domain/erpCosts";
 import { erpAdoptionReadiness } from "../../domain/erpAdoptionReadiness";
 import { ERP_ADOPTION_VERSION, erpSourceOrder, compareErpSourceOrder, erpBatchAdoptionBoundary, legacyExpectedSkusForRequest, summarizeErpAdoption } from "../../domain/erpAutomaticAdoption";
-import { readAdoptionEvidence, ignorableErpPriceAnomaly } from "../../domain/erpAnomalyPreview";
-import { operatingLedger, costEvaluationPeriod, accountingMode, accountingApprovals, LOWEST_ACCOUNTING } from '../../domain/inventoryAccounting';
-import { readAccountingMode, accountingCosts, projectAccountingLedger, accountingRateKey, readHistoricalLowestCosts } from './inventoryAccountingRepository';
-import { inventoryCalculationRevision, inventoryLowestRevision, observeInventoryRevision, publishedCostRevision, observePublishedCostRevision } from '../db/inventoryRevisions';
+import { readAdoptionEvidence, ignorableErpPriceAnomaly, newestAnomalyReceipts, uncoveredAnomalySkus, createAnomalyReview, reviewErpAnomalyReceipt } from "../../domain/erpAnomalyPreview";
+import { operatingLedger, costEvaluationPeriod, accountingApprovals, LOWEST_ACCOUNTING } from '../../domain/inventoryAccounting';
+import { readAccountingMode, accountingCosts, projectAccountingLedger, accountingRateKey, readHistoricalLowestCosts, readLowestPurchaseReview } from './inventoryAccountingRepository';
+import { inventoryCalculationRevision, inventoryEvidenceRevision, inventoryLowestRevision, observeInventoryRevision, publishedCostRevision, observePublishedCostRevision } from '../db/inventoryRevisions';
 
 const TECHNICAL_AUDIT_ACTORS = new Set(["erp-assistant-v8", "system-migration"]);
 
@@ -84,7 +93,16 @@ async function readLedgerCostCoverage(ledgerId, current = {}) {
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
   ]);
   const ledger = current.ledger ?? await db.ledgers.get(ledgerId);
-  return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals: accountingApprovals(approvals), workspaceId: ledger?.workspaceId, ledgerId, period: ledger?.period });
+  return calculateLedgerCostCoverage({ salesRows, erpCosts, approvals: accountingApprovals(approvals), workspaceId: ledger?.workspaceId, ledgerId, period: ledger?.period }, current.checkPeriod);
+}
+
+const readActionCosts = committedCostSource(['erpCostRows','erpCostBatches','erpCostRequests'], async ledger =>
+  (await scanProfitPageCosts(ledger, true, true)).costs);
+async function manualCostInputs(ledger, mode) {
+  const rows = await readCostSaleIdentities(ledger, false);
+  const weightedCosts = await readActionCosts(ledger);
+  const erpCosts = mode === LOWEST_ACCOUNTING ? await accountingCosts(ledger, [], mode, rows) : weightedCosts;
+  return { rows, erpCosts, weightedCosts, approvals: await db.costApprovals.where('ledgerId').equals(ledger.id).toArray() };
 }
 
 export async function saveManualCostOverride({ ledgerId, store, platformSku, unitCost, reason, historyEvidence = null, expectedAccountingMode }) {
@@ -108,28 +126,24 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
     await assertCachedLedgerCostEditingReady(ledger);
     const mode = await readAccountingMode(ledger.workspaceId);
     if (expectedAccountingMode != null && expectedAccountingMode !== mode) throw new Error('核算上下文已变化，请重新打开成本明细。');
-    const allApprovals = batchContext?.approvals ?? await db.costApprovals.where("ledgerId").equals(ledgerId).toArray();
-    const approvals = allApprovals.filter(item => accountingMode(item.accountingMode) === mode);
-    const target = revoke ? accountingApprovals(allApprovals, mode).find((item) => item.id === approvalId && item.workspaceId === ledger.workspaceId && manualSnapshot(item)?.kind === "manual_override" && item.status === "approved") : null;
+    const { rows, erpCosts, weightedCosts, approvals } = batchContext ?? await manualCostInputs(ledger, mode);
+    const visible = accountingApprovals(approvals, mode);
+    const target = revoke ? visible.find((item) => item.id === approvalId && item.workspaceId === ledger.workspaceId && manualSnapshot(item)?.kind === "manual_override" && item.status === "approved") : null;
     if (revoke && !target) throw new Error("找不到当前账本有效的人工更正。");
     const scopedStore = storeIdentity(revoke ? manualSnapshot(target).store : store);
     const sku = normalizePlatformSku(revoke ? target.platformSku : platformSku);
-    const rows = batchContext?.rows ?? await db.salesRows.where("ledgerId").equals(ledgerId).toArray();
     if (!scopedStore || !rows.some((row) => storeIdentity(row.store) === scopedStore && canonicalPlatformSku(row.platformSku ?? row.sku) === canonicalPlatformSku(sku))) throw new Error("店铺和 SKU 不属于当前账本。");
     const now = new Date().toISOString();
     const scope = { workspaceId: ledger.workspaceId, ledgerId, store: scopedStore, platformSku: sku };
-    const previous = selectManualOverride(accountingApprovals(allApprovals, mode), scope);
-    const erpCosts = batchContext?.erpCosts ?? await accountingCosts(ledger, await getLatestLedgerCosts(ledgerId), mode, rows);
+    const previous = selectManualOverride(visible, scope);
+    if (revoke && previous?.id !== approvalId) throw new Error("人工成本已变化，请重新打开成本明细。");
     const erpCost = erpCosts.find((row) => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(sku));
-    const oldDecision = resolveLedgerCostDecision({ ...scope, identity: buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(sku)), period: mode === LOWEST_ACCOUNTING ? null : ledger.period, manualOverride: previous, erpCost });
+    const checkPeriod = mode === LOWEST_ACCOUNTING ? undefined : profitCostWithinPeriod;
+    const oldDecision = resolveLedgerCostDecision({ ...scope, accountingMode: mode, identity: buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(sku)), period: mode === LOWEST_ACCOUNTING ? null : ledger.period, manualOverride: previous, erpCost }, checkPeriod);
     const auditActor = await resolveProfitAuditActor();
-    if (revoke && mode === LOWEST_ACCOUNTING && accountingMode(target.accountingMode) !== mode) {
-      const shadow = { ...target, id: makeId('OVERRIDE'), accountingMode: mode, sourceApprovalId: target.id, status: 'revoked', revokedAt: now, revokedBy: auditActor, revokeReason: '撤销当前核算中的人工更正' };
-      await db.costApprovals.add(shadow);
-      await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: 'cost_approval', objectId: shadow.id, action: 'manual_override_revoked', actorId: auditActor, createdAt: now, after: { snapshot: shadow } });
-      return null;
-    }
-    const revokedRecords = approvals.filter((item) => item.status === "approved" && manualSnapshot(item)?.kind === "manual_override" && storeIdentity(manualSnapshot(item).store) === scopedStore && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(sku));
+    const revokedRecords = approvals.filter(item => item.workspaceId === ledger.workspaceId && item.ledgerId === ledgerId && item.status === "approved"
+      && manualSnapshot(item)?.kind === "manual_override" && storeIdentity(manualSnapshot(item).store) === scopedStore
+      && String(item.platformSku ?? '').trim() && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(sku));
     for (const item of revokedRecords) {
       const revoked = { ...item, status: "revoked", revokedAt: now, revokedBy: auditActor, revokeReason: revoke ? "撤销人工更正" : "由新人工更正替代" };
       await db.costApprovals.put(revoked);
@@ -138,14 +152,14 @@ async function mutateManualCostOverride({ ledgerId, store, platformSku, unitCost
     let saved = null;
     if (!revoke) {
       const referenceId = makeId("MANUAL-COST");
-      saved = { id: makeId("OVERRIDE"), ...(mode === LOWEST_ACCOUNTING ? { accountingMode: mode } : {}), workspaceId: ledger.workspaceId, ledgerId, platformSku: sku, canonicalPlatformSku: canonicalPlatformSku(sku), referenceCostId: referenceId, approvedAmount: amount, currency: "CNY", reason: String(reason).trim(), approvedBy: auditActor, approvedAt: now, status: "approved",
+      saved = { id: makeId("OVERRIDE"), workspaceId: ledger.workspaceId, ledgerId, platformSku: sku, canonicalPlatformSku: canonicalPlatformSku(sku), referenceCostId: referenceId, approvedAmount: amount, currency: "CNY", reason: String(reason).trim(), approvedBy: auditActor, approvedAt: now, status: "approved",
         referenceCost: { id: referenceId, kind: "manual_override", store: scopedStore, unitCost: amount, currency: "CNY", previousUnitCost: oldDecision.unitCost, previousSource: oldDecision.source,
           ...(historyEvidence ? { historyEvidence: structuredClone(historyEvidence) } : {}) } };
       await db.costApprovals.add(saved);
     }
-    const coverage = batchContext ? null : await readLedgerCostCoverage(ledgerId, { ledger, salesRows: rows, erpCosts });
-    const savedLedger = batchContext || mode === LOWEST_ACCOUNTING ? ledger : { ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, now) };
-    if (!batchContext && mode !== LOWEST_ACCOUNTING) await db.ledgers.put(savedLedger);
+    const coverage = batchContext ? null : await readLedgerCostCoverage(ledgerId, { ledger, salesRows: rows, erpCosts: weightedCosts, checkPeriod: profitCostWithinPeriod });
+    const savedLedger = coverage ? { ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, now) } : ledger;
+    if (coverage) await db.ledgers.put(savedLedger);
     if (saved) await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: "cost_approval", objectId: saved.id, action: "manual_override_saved", actorId: auditActor, createdAt: now, before: { unitCost: oldDecision.unitCost, source: oldDecision.source, store: scopedStore }, after: { snapshot: { ...saved, ledger: savedLedger } } });
     else {
       const event = (await db.auditEvents.where("objectId").equals(target.id).toArray()).filter((item) => item.action === "manual_override_revoked").at(-1);
@@ -162,15 +176,11 @@ export async function saveManualCostOverrideGroup({ ledgerId, targets, unitCost,
   return db.transaction('rw', db.settings, db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const ledger = operatingLedger(await db.ledgers.get(ledgerId));
     const mode = await readAccountingMode(ledger.workspaceId);
-    const rows = await db.salesRows.where('ledgerId').equals(ledgerId).toArray();
-    const erpCosts = await accountingCosts(ledger, await getLatestLedgerCosts(ledgerId), mode, rows);
-    const context = { rows, erpCosts, approvals: await db.costApprovals.where('ledgerId').equals(ledgerId).toArray() };
+    const context = await manualCostInputs(ledger, mode);
     const saved = [];
     for (const row of targets) saved.push(await mutateManualCostOverride({ ledgerId, ...row, unitCost, reason, expectedAccountingMode }, context));
-    if (mode !== LOWEST_ACCOUNTING) {
-      const coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows: rows, erpCosts });
-      await db.ledgers.put({ ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, new Date().toISOString()) });
-    }
+    const coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows: context.rows, erpCosts: context.weightedCosts, checkPeriod: profitCostWithinPeriod });
+    await db.ledgers.put({ ...ledger, ...buildLedgerCoveragePatch(ledger, coverage, new Date().toISOString()) });
     return saved;
   });
 }
@@ -188,12 +198,16 @@ async function warehouseHistoryPlan({ ledgerId, history, expectedAccountingMode 
   ]);
   const costs = await accountingCosts(ledger, originalCosts, mode, rows);
   const identities = buildLedgerSkuIdentityIndex(rows);
+  const visibleApprovals = accountingApprovals(approvals, mode);
+  const manualFor = createManualOverrideLookup(visibleApprovals);
+  const conflicts = manualCostConflicts(visibleApprovals, ledger);
   const costBySku = new Map(costs.map(row => [canonicalPlatformSku(row.platformSku), row]));
   const uniqueRows = new Map(rows.map(row => [JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)]), row]));
   const targets = new Map();
   for (const row of uniqueRows.values()) {
     const scope = { workspaceId: member.workspaceId, ledgerId, store: row.store, platformSku: row.platformSku };
-    const decision = resolveLedgerCostDecision({ ...scope, period: costEvaluationPeriod(ledger), identity: identities.get(canonicalPlatformSku(row.platformSku)), manualOverride: selectManualOverride(accountingApprovals(approvals, mode), scope), erpCost: costBySku.get(canonicalPlatformSku(row.platformSku)) });
+    if (conflicts.has(storeSkuKey(row.store, row.platformSku))) continue;
+    const decision = resolveLedgerCostDecision({ ...scope, accountingMode: mode, period: costEvaluationPeriod(ledger), identity: identities.get(canonicalPlatformSku(row.platformSku)), manualOverride: manualFor(scope), erpCost: costBySku.get(canonicalPlatformSku(row.platformSku)) });
     if (decision.eligibleForExactProfit) continue;
     targets.set(JSON.stringify([row.store, canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)]), { store: row.store, platformSku: row.platformSku, platformSkc: row.platformSkc });
   }
@@ -208,24 +222,32 @@ export async function readErpHistoryMappings({ ledgerId, expectedSkus = [] }) {
   if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务权限。');
   const skus = [...new Set(expectedSkus.map(row => canonicalPlatformSku(row.platformSku)).filter(Boolean))];
   if (!skus.length) return [];
-  const [batches, rows, approvals] = await Promise.all([
-    db.erpCostBatches.where('workspaceId').equals(member.workspaceId).toArray(),
-    db.erpCostRows.where('canonicalPlatformSku').anyOf(skus).toArray(),
+  const [batchIds, publishedIds, approvals] = await Promise.all([
+    db.erpCostBatches.where('workspaceId').equals(member.workspaceId).primaryKeys(),
+    db.erpCostBatches.where('status').equals('published').primaryKeys(),
     db.costApprovals.where('workspaceId').equals(member.workspaceId).toArray(),
   ]);
-  const published = new Map(batches.filter(batch => batch.status === 'published').map(batch => [batch.id, batch]));
+  const published = new Set(publishedIds), owned = new Set(batchIds);
   const pairs = new Set(expectedSkus.map(row => JSON.stringify([canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)])));
-  const hints = rows.filter(row => row.workspaceId === member.workspaceId && published.has(row.batchId)
+  const hints = [];
+  await db.erpCostRows.where('canonicalPlatformSku').anyOf(skus).each(row => {
+    if (!(row.workspaceId === member.workspaceId && owned.has(row.batchId) && published.has(row.batchId)
     && row.evidenceComplete === true && !row.mappingFallback && row.warehouseSku
-    && pairs.has(JSON.stringify([canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)])))
-    .map(row => ({
+    && pairs.has(JSON.stringify([canonicalPlatformSku(row.platformSku), canonicalPlatformSkc(row.platformSkc)])))) return;
+    hints.push({
       platformSku: row.platformSku, platformSkc: row.platformSkc, warehouseSku: row.warehouseSku,
       sourceRecordId: String(row.id), sourceBatchId: row.batchId,
-      observedAt: row.publishedAt ?? published.get(row.batchId).publishedAt,
+      observedAt: row.publishedAt,
       ...(row.store ? { store: row.store } : {}),
       ...(row.unitConversion ? { unitConversion: row.unitConversion } : {}),
-    })).filter(row => Number.isFinite(Date.parse(row.observedAt)));
-  for (const approval of approvals) {
+    });
+  });
+  const batchDates = new Map();
+  for (const hint of hints) if (hint.observedAt == null) {
+    if (!batchDates.has(hint.sourceBatchId)) batchDates.set(hint.sourceBatchId, (await db.erpCostBatches.get(hint.sourceBatchId))?.publishedAt);
+    hint.observedAt = batchDates.get(hint.sourceBatchId);
+  }
+  for (const approval of accountingApprovals(approvals)) {
     const snapshot = manualSnapshot(approval), history = snapshot?.historyEvidence, mapping = history?.historicalMapping;
     if (!mapping?.platformSku || !mapping.platformSkc || !mapping.warehouseSku
       || !validManualOverride(approval, { workspaceId: member.workspaceId, ledgerId: approval.ledgerId, store: snapshot.store, platformSku: mapping.platformSku })
@@ -237,7 +259,7 @@ export async function readErpHistoryMappings({ ledgerId, expectedSkus = [] }) {
       store: snapshot.store, sourceRecordId: `approval:${approval.id}`, sourceBatchId: history.sourceBatchId ?? '',
       observedAt: approval.approvedAt, ...(mapping.unitConversion ? { unitConversion: mapping.unitConversion } : {}) });
   }
-  return normalizeErpHistoryMappings(hints, expectedSkus);
+  return normalizeErpHistoryMappings(hints.filter(row => Number.isFinite(Date.parse(row.observedAt))), expectedSkus);
 }
 
 export async function previewWarehouseHistoryCosts(input) { return warehouseHistoryPlan(input); }
@@ -606,7 +628,9 @@ function erpAdoptionScopeIssue(inbox, ledger, request, ledgerVersion) {
 
 const activeAnomalyReceipt = inbox => ['pending', 'loaded', 'applied'].includes(inbox.status);
 
-async function reusableErpAnomalyIgnores({ inbox, batch, ledger, ledgerVersion, salesRows, resolutions }) {
+async function reusableErpAnomalyIgnores({ inbox, batch, ledger, ledgerVersion, salesRows, resolutions, readScope }) {
+  const ignoreIds = recoveryIgnoreIds(readScope, ledger.id);
+  if (ignoreIds && !ignoreIds.some(id => id !== inbox.id)) return { resolutions: [], sources: [] };
   const wanted = indexErpAnomalyEvidence(batch, ledger.period);
   for (const [warehouse, evidence] of wanted) {
     const pending = evidence.decision.anomalies.filter(item => {
@@ -617,9 +641,10 @@ async function reusableErpAnomalyIgnores({ inbox, batch, ledger, ledgerVersion, 
     else wanted.delete(warehouse);
   }
   if (!wanted.size) return { resolutions: [], sources: [] };
-  const records = await db.erpCostInbox.where('ledgerId').equals(ledger.id)
-    .filter(row => row.id !== inbox.id && row.workspaceId === ledger.workspaceId && activeAnomalyReceipt(row)
-      && row.costResolutions?.some(item => item.action === 'ignore_anomaly')).toArray();
+  const eligible = row => row && row.id !== inbox.id && row.ledgerId === ledger.id && row.workspaceId === ledger.workspaceId
+    && activeAnomalyReceipt(row) && row.costResolutions?.some(item => item.action === 'ignore_anomaly');
+  const records = ignoreIds ? (await db.erpCostInbox.bulkGet(ignoreIds)).filter(eligible)
+    : await db.erpCostInbox.where('ledgerId').equals(ledger.id).filter(eligible).toArray();
   const inherited = [], sources = [];
   for (const source of records) {
     const request = await db.erpCostRequests.get(source.requestId);
@@ -647,9 +672,148 @@ async function reusableErpAnomalyIgnores({ inbox, batch, ledger, ledgerVersion, 
   return { resolutions: inherited, sources };
 }
 
-async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAction = null }) {
+function comparePublishedRows(a, b) {
+  return String(a.publishedAt ?? '').localeCompare(String(b.publishedAt ?? '')) || Number(a.id ?? 0) - Number(b.id ?? 0);
+}
+
+function setCoverageHead(heads, row, published, period, verifiedCost) {
+  const sku = row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku);
+  const previous = heads.get(sku);
+  const identity = { id: row.id, publishedAt: row.publishedAt };
+  const first = previous && comparePublishedRows(previous.first, identity) < 0 ? previous.first : identity;
+  if (previous && comparePublishedRows(previous, identity) > 0) { previous.first = first; return; }
+  // Voiding the newest owned batch still suppresses older prices. Only the
+  // winner needs a period check, performed against its original purchase data.
+  const cost = published ? verifiedCost ?? projectCoverageCost(row, period) : null;
+  heads.set(sku, { ...identity, first, cost });
+}
+
+async function previousAdoptionCosts(heads, candidates) {
+  const skus = new Set(candidates.map(row => canonicalPlatformSku(row.platformSku)));
+  const selected = [...heads.values()].filter(head => head.cost && skus.has(canonicalPlatformSku(head.cost.platformSku)));
+  selected.sort((a,b) => comparePublishedRows(a.first, b.first));
+  const rows = await db.erpCostRows.bulkGet(selected.map(head => head.id));
+  const batches = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.evidenceRef && row.evidenceComplete === true) continue;
+    if (!batches.has(row.batchId)) batches.set(row.batchId, await db.erpCostBatches.get(row.batchId));
+    rows[i] = projectPublishedCostEvidence(row, batches.get(row.batchId));
+  }
+  return rows;
+}
+
+async function readSingleReceiptCosts(ledger, batchById, scope) {
+  const table = db.erpCostRows;
+  const ranks = new Map(), selected = new Set();
+  // The write transaction owns this index. Use the indexed identity and actual
+  // publication order to find every relevant prior cost and every coverage winner.
+  const ids = await table.where('ledgerId').equals(ledger.id).primaryKeys();
+  if (!ids.every(Number.isSafeInteger)) return null;
+  const headers = await readActionHeaderIndex(ledger, ids);
+  if (!headers) return null;
+  for (const [id, { workspaceId, batchId, platformSku, canonicalSku, publishedAt, sourceBatch }] of headers) {
+    if (typeof platformSku !== 'string' || !platformSku.trim() || !canonicalSku) return null;
+    if (scope.sourceBatch === sourceBatch || scope.skus.has(canonicalPlatformSku(platformSku))) selected.add(id);
+    const batch = batchById.get(batchId);
+    if (!batch || workspaceId && workspaceId !== ledger.workspaceId || batch.workspaceId && batch.workspaceId !== ledger.workspaceId) continue;
+    const row = {id, publishedAt};
+    const rank = ranks.get(canonicalSku);
+    if (!rank) ranks.set(canonicalSku, { first: row, latest: row, published: batch.status === 'published' });
+    else {
+      if (comparePublishedRows(row, rank.first) < 0) rank.first = row;
+      if (comparePublishedRows(row, rank.latest) > 0) { rank.latest = row; rank.published = batch.status === 'published'; }
+    }
+  }
+  const resolved = await table.where('[ledgerId+resolutions.length]').between([ledger.id,0], [ledger.id,Dexie.maxKey], false, true).primaryKeys();
+  const needed = new Set(resolved.filter(id => selected.has(id)));
+  for (const {latest, published} of ranks.values()) if (published) needed.add(latest.id);
+  const facts = await readActionCostFacts(ledger, [...needed].sort((a,b) => a-b));
+  if (facts.size !== needed.size) return null;
+  const coverageHeads = new Map();
+  for (const [sku, {latest, first, published}] of ranks) {
+    coverageHeads.set(sku, { ...latest, first, cost: published ? facts.get(latest.id).coverage : null });
+  }
+  const costHeaders = [...selected].sort((a,b) => a-b).map(id => {
+    if (facts.has(id)) return facts.get(id).header;
+    // A superseded cost without decisions needs just its indexed identity and
+    // source order for this ignore. Its purchase details never enter coverage.
+    const {workspaceId,batchId,platformSku,warehouseSku,sourceOrder,sourceBatch} = headers.get(id);
+    return {id,workspaceId,batchId,platformSku,warehouseSku,sourceOrder,sourceEnvelopeBatchId:sourceBatch};
+  });
+  return { coverageHeads, costHeaders };
+}
+
+async function readAdoptionBatchHeaders(ledgerId, { indexed = false, appliedBatchId } = {}) {
+  const table = db.erpCostBatches, headers = new Map();
+  const owner = table.where('ledgerId').equals(ledgerId);
+  if (!indexed) {
+    await owner.each(row => { headers.set(row.id, adoptionBatchHeader(row)); });
+    return headers;
+  }
+  const [ids] = await Promise.all([owner.primaryKeys(), table.where('[ledgerId+workspaceId+status+publishedAt+sourceOrder]')
+    .between([ledgerId, Dexie.minKey], [ledgerId, Dexie.maxKey]).eachKey(([,workspaceId,status,publishedAt,sourceOrder], cursor) => {
+      headers.set(cursor.primaryKey, {workspaceId, status, publishedAt, sourceOrder});
+    })]);
+  // The active receipt also needs its full adoption state. Sparse legacy
+  // batches are read from the original table to retain their metadata.
+  const missing = ids.filter(id => !headers.has(id) || id === appliedBatchId);
+  for (const id of missing) {
+    const batch = await table.get(id);
+    if (batch) headers.set(id, adoptionBatchHeader(batch));
+  }
+  return headers;
+}
+
+async function readAdoptionLedgerInputs(ledger, needsImportDates, readScope, prepareCoverage, actionSales, singleReceiptScope) {
+  const ledgerId = ledger.id;
+  const key = JSON.stringify([ledgerId, needsImportDates, sourceRevision()]);
+  if (readScope?.adoptionInputs?.key === key) return readScope.adoptionInputs.value;
+  if (readScope && !needsImportDates) {
+    const checked = await readRecoveryAdoptionInputs(readScope, ledgerId);
+    if (checked) {
+      readScope.adoptionInputs = { key, value: checked };
+      return checked;
+    }
+  }
+  const salesByIdentity = new Map(), costHeaders = [];
+  const coverageHeads = prepareCoverage ? new Map() : null;
+  const [approvals, batchById] = await Promise.all([
+    db.costApprovals.where('ledgerId').equals(ledgerId).toArray(),
+    readAdoptionBatchHeaders(ledgerId, { indexed: Boolean(singleReceiptScope), appliedBatchId: singleReceiptScope?.appliedBatchId }),
+    actionSales ? null : forEachLedgerChunk(db.salesRows, ledgerId, 1000, row => {
+      const { workspaceId, store, platformSku, sku, platformSkc } = row;
+      const identity = { workspaceId, ledgerId, store, platformSku, sku, platformSkc };
+      if (needsImportDates) identity.importedAt = row.importedAt;
+      salesByIdentity.set(JSON.stringify(identity), identity);
+    }),
+  ]);
+  if (singleReceiptScope && actionSales && prepareCoverage) {
+    const scoped = await readSingleReceiptCosts(ledger, batchById, singleReceiptScope);
+    if (scoped) return { salesRows: actionSales, approvals, batchById, ...scoped };
+  }
+  function collect(row, header, verifiedCost) {
+    costHeaders.push(header);
+    const batch = batchById.get(row.batchId);
+    if (coverageHeads && batch && (!row.workspaceId || row.workspaceId === ledger.workspaceId) && (!batch.workspaceId || batch.workspaceId === ledger.workspaceId)) {
+      setCoverageHead(coverageHeads, row, batch.status === 'published', ledger.period, verifiedCost);
+    }
+  }
+  if (actionSales && prepareCoverage) {
+    await readActionCostRows(ledger, ({header, canonicalPlatformSku, publishedAt, coverage}) =>
+      collect({...header,canonicalPlatformSku,publishedAt}, header, coverage));
+  } else {
+    await forEachLedgerChunk(db.erpCostRows, ledgerId, 16, row => collect(row, adoptionCostHeader(row)), { newestFirst: true });
+  }
+  costHeaders.reverse(); // Retain the original primary-key order for legacy resolutions.
+  const value = { salesRows: actionSales ?? [...salesByIdentity.values()], approvals, batchById, costHeaders, coverageHeads };
+  if (readScope && key === JSON.stringify([ledgerId, needsImportDates, sourceRevision()])) readScope.adoptionInputs = { key, value };
+  return value;
+}
+
+async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAction = null, inspectOnly = false, readScope = null, actionInputs = null }) {
   const member = await getActiveMemberContext();
-  return db.transaction('rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
+  return db.transaction(inspectOnly ? 'r' : 'rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const inbox = await db.erpCostInbox.get(inboxId);
     if (!inbox || inbox.workspaceId !== member.workspaceId) throw new Error('ERP 收件不属于当前工作区。');
     // Recheck the current identity inside the transaction, including the same
@@ -667,6 +831,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
       const changed = Boolean(inbox.adoptionPending || inbox.adoptionFailure)
         || JSON.stringify(inbox.costResolutions ?? []) !== JSON.stringify(costResolutions)
         || JSON.stringify(inbox.adoption && { ...inbox.adoption, processedAt: undefined }) !== JSON.stringify(adoption);
+      if (changed && inspectOnly) return { needsWrite: true };
       if (changed) {
         const saved = { ...inbox, ...(batchId ? { appliedBatchId: batchId } : {}), ...(costResolutions.length || inbox.costResolutions ? { costResolutions } : {}), status: state === 'applied' ? 'applied' : inbox.status, adoptionPending: false, adoptionFailure: null, adoption: { ...adoption, processedAt: now }, updatedAt: now };
         await db.erpCostInbox.put(saved);
@@ -677,34 +842,33 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
     const ledgerVersion = ledger ? erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray()) : null;
     const scopeIssue = erpAdoptionScopeIssue(inbox, ledger, request, ledgerVersion);
     if (scopeIssue) return persistResult([], 'blocked', scopeIssue);
-    const [salesRows, approvals, batches] = await Promise.all([
-      db.salesRows.where('ledgerId').equals(ledger.id).toArray(), db.costApprovals.where('ledgerId').equals(ledger.id).toArray(),
-      db.erpCostBatches.where('ledgerId').equals(ledger.id).toArray(),
-    ]);
+    let inputs = actionInputs?.current;
+    if (!inputs) {
+      const actionSales = ignoreAction ? await readCostSaleIdentities(ledger, !request.expectedSkus?.length || actionInputs?.legacy) : null;
+      const wanted = actionInputs?.singleReceipt && uncoveredAnomalySkus(inbox, request, new Set());
+      inputs = await readAdoptionLedgerInputs(ledger, !request.expectedSkus?.length, inspectOnly ? readScope : null,
+        ignoreAction ? ignoreAction.action === 'ignore' : !inspectOnly && !inbox.appliedBatchId, actionSales,
+        wanted?.length ? { skus: new Set(wanted), sourceBatch: inbox.batchId, appliedBatchId: inbox.appliedBatchId } : null);
+      if (actionInputs) actionInputs.current = inputs;
+    }
+    const { salesRows, approvals, batchById, costHeaders, coverageHeads } = inputs;
     const ownedSales = salesRows.filter(row => row.workspaceId === ledger.workspaceId);
     const identities = buildLedgerSkuIdentityIndex(ownedSales);
     const { validated, batch, expected, reason } = readAdoptionEvidence(inbox, ledger, request, ownedSales);
     if (reason) return persistResult([], 'blocked', reason);
     const boundary = erpBatchAdoptionBoundary(batch);
     const expectedSkuKeys = new Set(expected.map(row => canonicalPlatformSku(row.platformSku)));
-    // Retain COMPLETE records, including evidenceComplete, costDecision,
-    // purchaseRecords and resolutions. The two consumers below inspect only:
-    // (1) every row from this source envelope (including auxiliary SKUs), and
-    // (2) newer rows for this batch's validated expected SKUs. Other source
-    // histories cannot contribute to either check. All batches, the raw inbox
-    // envelope and the authoritative publication/validation paths stay intact.
-    const allRows = await db.erpCostRows.where('ledgerId').equals(ledger.id).filter(row => {
+    const allRows = costHeaders.filter(row => {
       if (row.sourceEnvelopeBatchId === batch.batchId || !row.platformSku) return true;
       try { return expectedSkuKeys.has(canonicalPlatformSku(row.platformSku)); }
-      catch { return true; } // Leave malformed legacy rows to the original guards.
-    }).toArray();
+      catch { return true; } // Preserve the existing handling of malformed historical rows.
+    });
     const order = erpSourceOrder(request, batch);
-    const batchById = new Map(batches.map(row => [row.id, row]));
     let existingRows = allRows.filter(row => row.sourceEnvelopeBatchId === batch.batchId && batchById.get(row.batchId)?.status === 'published');
     if (inbox.appliedBatchId && batchById.get(inbox.appliedBatchId)?.status !== 'published') throw new Error('已采用成本批次关联失效，请核对历史记录。');
     let mergedResolutions = [...existingRows.flatMap(row => row.resolutions ?? []), ...costResolutions, ...resolutions].reduce(upsertCostResolution, []);
     const reused = !ignoreAction && !boundary.globalReasons.length
-      ? await reusableErpAnomalyIgnores({ inbox, batch, ledger, ledgerVersion, salesRows: ownedSales, resolutions: mergedResolutions })
+      ? await reusableErpAnomalyIgnores({ inbox, batch, ledger, ledgerVersion, salesRows: ownedSales, resolutions: mergedResolutions, readScope: inspectOnly ? readScope : null })
       : { resolutions: [], sources: [] };
     if (reused.resolutions.length) mergedResolutions = [...reused.resolutions, ...mergedResolutions].reduce(upsertCostResolution, []);
     if (ignoreAction) {
@@ -750,6 +914,7 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
     }
     costResolutions = verifiedResolutions;
     if (reused.resolutions.length) {
+      if (inspectOnly) return { needsWrite: true };
       await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: 'erp_cost_inbox', objectId: inbox.id,
         action: 'anomaly_ignores_reused', actorId: member.memberId, createdAt: now,
         after: { ledgerId: ledger.id, batchId: inbox.batchId, sources: reused.sources, resolutionCount: reused.resolutions.length } });
@@ -784,81 +949,197 @@ async function processErpCostInboxAdoptionOnce({ inboxId, resolutions, ignoreAct
     }
     let appliedBatchId = inbox.appliedBatchId;
     if (candidates.length) {
-      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts: (await getLatestLedgerCosts(ledger.id)).filter(cost => candidates.some(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(cost.platformSku))) } },
-        { transaction: Dexie.currentTransaction, ledgerId: ledger.id, workspaceId: ledger.workspaceId, salesRows });
+      if (inspectOnly) return { needsWrite: true };
+      const candidateSkus = new Set(candidates.map(row => canonicalPlatformSku(row.platformSku)));
+      const previousCosts = coverageHeads ? await previousAdoptionCosts(coverageHeads, candidates)
+        : (await getLatestLedgerCosts(ledger.id)).filter(cost => candidateSkus.has(canonicalPlatformSku(cost.platformSku)));
+      const saved = await publishVerifiedErpCostBatch({ ledgerId: ledger.id, workspaceId: ledger.workspaceId, requestId: request.id, sourceEnvelope: batch, inboxId: inbox.id, sourceName: 'ERP 自动回传', reconciliation: { ...reconciliation, matches: candidates }, adoptionContext: { batchId: appliedBatchId, sourceOrder: order, method: resolutions.length ? 'exception_retry' : 'automatic', previousCosts } },
+        { transaction: Dexie.currentTransaction, ledgerId: ledger.id, workspaceId: ledger.workspaceId, salesRows, coverageHeads, actionInputs });
       appliedBatchId = saved.batchId;
-      const persisted = await db.erpCostRows.where('batchId').equals(appliedBatchId).toArray();
-      for (const item of items) if (['adopted', 'manual_effective'].includes(item.state)) item.costRowId = persisted.find(row => canonicalPlatformSku(row.platformSku) === item.canonicalPlatformSku)?.id;
+      for (const item of items) if (['adopted', 'manual_effective'].includes(item.state)) item.costRowId = saved.rowIds.get(item.canonicalPlatformSku);
     }
     const summary = summarizeErpAdoption(items);
     const state = summary.remainingCount === 0 && items.length ? 'applied' : summary.adoptedCount ? 'partial' : summary.protectedCount ? 'protected' : boundary.globalReasons.length ? 'blocked' : 'pending';
     const result = await persistResult(items, state, boundary.globalReasons.join(',') || null, appliedBatchId);
+    if (result.needsWrite) return result;
     // Pending exceptions are checked again while the app is idle. Rewriting an
     // identical adoption invalidates every finance-derived live reader and
     // repeatedly clones/recomputes the complete reference evidence. Keep the
     // batch metadata aligned, including legacy missing metadata, only on change.
     if (appliedBatchId && JSON.stringify(batchById.get(appliedBatchId)?.adoption) !== JSON.stringify(result.adoption)) {
+      if (inspectOnly) return { needsWrite: true };
       await db.erpCostBatches.update(appliedBatchId, { adoption: result.adoption });
     }
-    if (ignoreAction) {
-      const coverage = await readLedgerCostCoverage(ledger.id, { ledger, salesRows });
+    if (ignoreAction && (!candidates.length || !coverageHeads)) {
+      const coverage = coverageHeads ? calculateLedgerCostCoverage({ salesRows, approvals, workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: ledger.period,
+        erpCosts: [...coverageHeads.values()].flatMap(head => head.cost ? [head.cost] : []) }, cost => cost.withinPeriod) : await readLedgerCostCoverage(ledger.id, { ledger, salesRows });
       await db.ledgers.update(ledger.id, buildLedgerCoveragePatch(ledger, coverage, now));
     }
     return result;
   });
 }
 
-// One snapshot drives all review tabs; historical receipts do not multiply
-// current work. The worker selects the latest valid request scope per SKU.
-export async function listErpCostAnomalyReview(ledgerId, suppliedInboxes) {
-  if (suppliedInboxes?.length === 0) return { pending: [], ignored: [] };
-  const input = await db.transaction('r', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, async () => {
-    const member = await getActiveMemberContext();
-    const ledger = await db.ledgers.get(ledgerId);
-    if (!ledger || ledger.workspaceId !== member.workspaceId) return null;
-    const inboxes = suppliedInboxes ?? await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray();
-    const active = inboxes.filter(inbox => inbox.ledgerId === ledgerId && inbox.workspaceId === member.workspaceId && activeAnomalyReceipt(inbox));
-    if (!active.length) return null;
-    const requests = await db.erpCostRequests.bulkGet([...new Set(active.map(inbox => inbox.requestId))]);
-    const byId = new Map(requests.filter(Boolean).map(request => [request.id, request]));
-    const ledgerVersion = requests.some(request => request?.ledgerVersion != null)
-      ? erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledgerId).toArray()) : null;
-    const candidates = active.filter(inbox => {
-      const request = byId.get(inbox.requestId);
-      if (erpAdoptionScopeIssue(inbox, ledger, request, ledgerVersion)) return false;
-      return true;
-    });
-    if (!candidates.length) return null;
-    const sales = [];
-    if (candidates.some(inbox => !byId.get(inbox.requestId).expectedSkus?.length)) {
-      await db.salesRows.where('ledgerId').equals(ledgerId).each(({ workspaceId, platformSku, platformSkc, importedAt }) => {
-        if (workspaceId === member.workspaceId) sales.push({ workspaceId, platformSku, platformSkc, importedAt });
-      });
-    }
-    const sourceIds = new Set(candidates.map(inbox => inbox.batchId));
-    const publishedIds = new Set(), batchIds = [];
-    await db.erpCostBatches.where('ledgerId').equals(ledgerId).each(batch => {
-      if (batch.status !== 'published') return;
-      publishedIds.add(batch.id);
-      if (!batch.sourceContract?.batchId || sourceIds.has(batch.sourceContract.batchId)) batchIds.push(batch.id);
-    });
-    const sourceResolutions = new Map();
-    if (batchIds.length) {
-      const rows = await db.erpCostRows.where('batchId').anyOf(batchIds)
-        .filter(row => row.ledgerId === ledgerId && sourceIds.has(row.sourceEnvelopeBatchId) && row.resolutions?.length).sortBy('id');
+const anomalySourceTables = ['settings', 'ledgers', 'importBatches', 'salesRows', 'erpCostRequests', 'erpCostInbox', 'erpCostBatches', 'erpCostRows', 'costApprovals'];
+let activeProfitReads = 0;
+async function withProfitRead(read) {
+  activeProfitReads++;
+  try { return await read(); }
+  finally { activeProfitReads--; }
+}
+const anomalySourceReaders = anomalySourceTables.map(tableRevisionReader);
+function anomalyReviewRevision() {
+  const revisions = anomalySourceReaders.map(read => read());
+  return revisions.every(Boolean) ? JSON.stringify(revisions) : sourceRevision();
+}
+
+const reviewedReceipts = new Map();
+async function readAnomalyReview(ledger, suppliedInboxes, { signal, onProgress, warehouseSku } = {}) {
+  signal?.throwIfAborted();
+  const headers = suppliedInboxes ?? await listErpCostInbox({ ledgerId: ledger.id, statuses: ['pending', 'loaded', 'applied', 'rejected', 'voided'], displayOnly: true });
+  const active = headers.filter(inbox => inbox.ledgerId === ledger.id && inbox.workspaceId === ledger.workspaceId && activeAnomalyReceipt(inbox));
+  const review = createAnomalyReview();
+  if (!active.length) return review.result();
+  const requests = await db.erpCostRequests.bulkGet([...new Set(active.map(inbox => inbox.requestId))]);
+  const byId = new Map(requests.filter(Boolean).map(request => [request.id, request]));
+  const ledgerVersion = requests.some(request => request?.ledgerVersion != null)
+    ? erpLedgerVersion(await db.importBatches.where('ledgerId').equals(ledger.id).toArray()) : null;
+  const candidates = active.filter(inbox => !erpAdoptionScopeIssue(inbox, ledger, byId.get(inbox.requestId), ledgerVersion));
+  if (!candidates.length) return review.result();
+
+  // A warehouse can serve several platform SKUs across receipts. Include all
+  // of them, then let newer validated queries supersede each SKU as usual.
+  // Older request formats can lack these mappings and use the full review.
+  let targetSkus = null;
+  if (warehouseSku && candidates.every(header => byId.get(header.requestId).expectedSkus?.length)) {
+    const warehouse = canonicalWarehouseSku(warehouseSku);
+    targetSkus = new Set();
+    function includeRows(rows) {
       for (const row of rows) {
-        if (!sourceResolutions.has(row.sourceEnvelopeBatchId)) sourceResolutions.set(row.sourceEnvelopeBatchId, []);
-        sourceResolutions.get(row.sourceEnvelopeBatchId).push(...row.resolutions);
+        if (row.warehouseSku && canonicalWarehouseSku(row.warehouseSku) === warehouse && row.platformSku) targetSkus.add(canonicalPlatformSku(row.platformSku));
       }
     }
-    const receipts = candidates.map(inbox => {
-      if (inbox.appliedBatchId && !publishedIds.has(inbox.appliedBatchId)) throw new Error('已采用成本批次关联失效，请核对历史记录。');
-      return { inbox: { id: inbox.id, requestId: inbox.requestId, batchId: inbox.batchId, envelope: inbox.envelope },
-        request: byId.get(inbox.requestId), resolutions: [...(sourceResolutions.get(inbox.batchId) ?? []), ...(inbox.costResolutions ?? [])] };
+    for (const requestId of new Set(candidates.map(header => header.requestId))) includeRows(byId.get(requestId).expectedSkus);
+    for (const header of candidates) includeRows(header.envelope?.batch?.rows ?? []);
+    if (!targetSkus.size) targetSkus = null;
+  }
+  const sales = [];
+  if (candidates.some(inbox => !byId.get(inbox.requestId).expectedSkus?.length)) {
+    await forEachLedgerChunk(db.salesRows, ledger.id, 1000, ({ workspaceId, platformSku, platformSkc, importedAt }) => {
+      if (workspaceId === ledger.workspaceId) sales.push({ workspaceId, platformSku, platformSkc, importedAt });
     });
-    return { ledger: { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period }, receipts, sales };
-  });
-  return input ? runDerivedComputation('erp-anomaly-review', input) : { pending: [], ignored: [] };
+  }
+  const cached = recentResolutionIndex;
+  let index = !Dexie.currentTransaction && cached?.workspaceId === ledger.workspaceId && cached.ledgerId === ledger.id && cached.revision === publishedCostRevision()
+    ? cached.value : (await scanProfitPageCosts(ledger, false)).resolutionIndex;
+  const published = new Set(index.publishedIds), sources = new Set(candidates.map(inbox => inbox.batchId));
+  async function readResolutions() {
+    if (index.unchecked?.length) {
+      const partial = index, revision = publishedCostRevision();
+      index = signal ? await completeProfitResolutionIndex(ledger, partial, signal)
+        : await cachedDerived({scope:[ledger.workspaceId,ledger.id], formula:'profit-page-resolutions@1', revisionReader:publishedCostRevision, revision,
+          compute:() => completeProfitResolutionIndex(ledger, partial)});
+      signal?.throwIfAborted();
+      assertSourceRevision(revision, publishedCostRevision);
+      recentResolutionIndex = {workspaceId:ledger.workspaceId, ledgerId:ledger.id, revision, value:index};
+    }
+    const result = new Map(), batches = new Map();
+    for (const row of index.resolutions) {
+      if (!sources.has(row.sourceEnvelopeBatchId)) continue;
+      if (!batches.has(row.batchId)) batches.set(row.batchId, (await db.erpCostBatches.get(row.batchId))?.sourceContract?.batchId);
+      const owner = batches.get(row.batchId);
+      if (owner && !sources.has(owner)) continue;
+      if (!result.has(row.sourceEnvelopeBatchId)) result.set(row.sourceEnvelopeBatchId, []);
+      result.get(row.sourceEnvelopeBatchId).push(...row.resolutions);
+    }
+    return result;
+  }
+  const context = { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period };
+  const ordered = newestAnomalyReceipts(candidates.map(inbox => ({ inbox, request: byId.get(inbox.requestId) })));
+  let resolutions;
+  async function check({header, request, wanted, alreadyCovered}, decisions) {
+    signal?.throwIfAborted();
+    const version = header.displayOnly && !Dexie.currentTransaction && inboxRowVersion(header.id);
+    const requestVersion = tableRevisionReader('erpCostRequests')();
+    const salesVersion = request.expectedSkus?.length ? true : tableRevisionReader('salesRows')();
+    const key = version && requestVersion && salesVersion && JSON.stringify([version, requestVersion, salesVersion, context,
+      header.batchId, request.id, wanted, alreadyCovered, decisions?.get(header.batchId) ?? []]);
+    const cached = reviewedReceipts.get(header.id);
+    if (key && cached?.key === key) return cached.checked;
+    const original = header.displayOnly ? await db.erpCostInbox.get(header.id) : header;
+    if (!original || original.batchId !== header.batchId || original.requestId !== request.id || original.ledgerId !== ledger.id
+      || original.workspaceId !== ledger.workspaceId || !activeAnomalyReceipt(original)) return null;
+    const input = { ledger: context, request, inbox: { id: original.id, requestId: original.requestId, batchId: original.batchId, envelope: original.envelope },
+      resolutions: [...(decisions?.get(original.batchId) ?? []), ...(original.costResolutions ?? [])],
+      sales: request.expectedSkus?.length ? [] : sales, wanted, alreadyCovered };
+    const checked = Dexie.currentTransaction ? reviewErpAnomalyReceipt(input) : await runDerivedComputation('erp-anomaly-receipt', input, {signal});
+    if (key && checked && inboxRowVersion(header.id) === version && !signal?.aborted) {
+      reviewedReceipts.set(header.id, { key, checked });
+      if (reviewedReceipts.size > 100) reviewedReceipts.delete(reviewedReceipts.keys().next().value);
+    }
+    return checked;
+  }
+  const pieces = [];
+  let delivered = 0;
+  async function appendReady() {
+    if (!resolutions) return;
+    let changed = false;
+    while (delivered < pieces.length) {
+      const {part,checked,usedHistory} = pieces[delivered++];
+      const final = !usedHistory && resolutions.has(part.header.batchId) ? await check(part,resolutions) : checked;
+      review.append(final);
+      changed ||= Boolean(final?.items.length);
+    }
+    if (changed && onProgress) {
+      signal?.throwIfAborted();
+      const view = review.result();
+      onProgress({pending: [...view.pending], ignored: view.ignored});
+    }
+  }
+  async function checkReceipts() {
+    const covered = new Set();
+    for (const { inbox: header, request } of ordered) {
+      signal?.throwIfAborted();
+      if (header.appliedBatchId && !published.has(header.appliedBatchId)) throw new Error('已采用成本批次关联失效，请核对历史记录。');
+      let wanted = uncoveredAnomalySkus(header, request, covered);
+      if (targetSkus && wanted) wanted = wanted.filter(sku => targetSkus.has(sku));
+      if (wanted?.length === 0) continue;
+      const part = {header,request,wanted,alreadyCovered:wanted ? [] : [...covered]}, decisions = resolutions;
+      const checked = await check(part,decisions);
+      if (!checked) continue;
+      // Coverage comes solely from the validated query, independently of price
+      // decisions. Keep only its small result, never an entire set of envelopes.
+      for (const sku of checked.skus) covered.add(sku);
+      pieces.push({part,checked,usedHistory:Boolean(decisions)});
+      await appendReady();
+    }
+  }
+  if (index.unchecked?.length && !Dexie.currentTransaction) {
+    await Promise.all([readResolutions().then(value=>{resolutions=value;}),checkReceipts()]);
+  } else { resolutions = await readResolutions(); await checkReceipts(); }
+  await appendReady();
+  const result = review.result();
+  if (warehouseSku) result.noPriorIgnores = !active.some(row => row.costResolutions?.some(item => item.action === 'ignore_anomaly'))
+    && !index.resolutions.some(row => row.resolutions.some(item => item.action === 'ignore_anomaly'));
+  return result;
+}
+
+export async function listErpCostAnomalyReview(ledgerId, suppliedInboxes, options = {}) {
+  if (suppliedInboxes?.length === 0) return { pending: [], ignored: [] };
+  const supplied = suppliedInboxes?.some(inbox => inbox.displayOnly) ? undefined : suppliedInboxes;
+  return withProfitRead(() => retrySourceRead(async () => {
+    if (!Dexie.currentTransaction) await Promise.all(anomalySourceTables.flatMap(table => [db.table(table).count(), observeTableRevision(table)]));
+    const revision = anomalyReviewRevision();
+    const member = await getActiveMemberContext(), ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || ledger.workspaceId !== member.workspaceId) return { pending: [], ignored: [] };
+    if (Dexie.currentTransaction) return readAnomalyReview(ledger, supplied, options);
+    if (supplied || options.signal || options.onProgress || options.warehouseSku) {
+      const result = await readAnomalyReview(ledger, supplied, options);
+      assertSourceRevision(revision, anomalyReviewRevision);
+      return options.warehouseSku ? { ...result, revision } : result;
+    }
+    return cachedDerived({ scope: [member.workspaceId, ledger.id, member.memberId, member.role], formula: 'erp-anomaly-review@1',
+      revisionReader: anomalyReviewRevision, revision, compute: () => readAnomalyReview(ledger) });
+  }));
 }
 
 export async function listPendingErpCostAnomalies(ledgerId, suppliedInboxes) {
@@ -871,24 +1152,27 @@ export async function listIgnoredErpCostAnomalies(ledgerId) {
 
 // One user action covers the month. Each affected receipt is revalidated in
 // the same transaction, so a failure cannot leave a half-revoked cost state.
-export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inboxId = null, warehouseSku = null, selectedItems } = {}) {
+export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inboxId = null, warehouseSku = null, selectedItems, expectedReviewRevision } = {}) {
   await assertLedgerCostEditingReady(ledgerId);
   return db.transaction('rw', db.settings, db.ledgers, db.importBatches, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const member = await getActiveMemberContext();
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger || ledger.workspaceId !== member.workspaceId || !['admin', 'finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
     await assertCachedLedgerCostEditingReady(ledger);
+    if (expectedReviewRevision && anomalyReviewRevision() !== expectedReviewRevision) throw new Error('采购记录已变化，请查看最新价格后再处理。');
     // Current ledgers remain editable, including legacy finalized/locked data.
     // Saved report files are separate immutable snapshots, never rewritten here.
-    const ownedReceipts = (await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray())
-      .filter(row => row.workspaceId === member.workspaceId && activeAnomalyReceipt(row));
+    if (selectedItems !== undefined && (!Array.isArray(selectedItems) || inboxId || warehouseSku)) throw new Error('异常选择范围无效，请重新选择。');
+    const ids = ignored && (selectedItems !== undefined ? [...new Set(selectedItems.map(item => item?.inboxId))] : inboxId ? [inboxId] : null);
+    if (ids && ids.some(id => !id)) throw new Error('异常选择范围无效，请重新选择。');
+    const ownedReceipts = (ids ? await db.erpCostInbox.bulkGet(ids) : await db.erpCostInbox.where('ledgerId').equals(ledgerId).toArray())
+      .filter(row => row && row.ledgerId === ledgerId && row.workspaceId === member.workspaceId && activeAnomalyReceipt(row));
     let receipts = ownedReceipts.filter(row => !inboxId || row.id === inboxId);
     // An explicit empty selection means no action, never the whole month.
     // Validate every selected receipt before changing any costs; one selection
     // may span several receipts and several warehouse products in one receipt.
     let selection = null;
     if (selectedItems !== undefined) {
-      if (!Array.isArray(selectedItems) || inboxId || warehouseSku) throw new Error('异常选择范围无效，请重新选择。');
       selection = new Map();
       const receiptById = new Map(receipts.map(row => [row.id, row]));
       for (const item of selectedItems) {
@@ -902,6 +1186,11 @@ export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inb
         const candidates = [...(receipt.envelope?.batch?.rows ?? []), ...(receipt.costResolutions ?? [])];
         const known = new Set(candidates.filter(row => row.warehouseSku).map(row => canonicalWarehouseSku(row.warehouseSku)));
         for (const sku of warehouses) if (!known.has(sku)) throw new Error('所选商品不属于当前回传，请刷新后重选。');
+        const checked = selectedItems.filter(item => item.inboxId === id && item.evidenceKey);
+        if (checked.length) {
+          const evidence = indexErpAnomalyEvidence(receipt.envelope?.batch, ledger.period, warehouses);
+          if (checked.some(item => evidence.get(canonicalWarehouseSku(item.warehouseSku))?.key !== item.evidenceKey)) throw new Error('采购证据已变化，请核对最新采购价。');
+        }
       }
     }
     if (!ignored) {
@@ -929,10 +1218,12 @@ export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inb
       }
       receipts = ownedReceipts;
     }
+    const targets = receipts.filter(row => !selection || selection.has(row.id));
+    const requests = await db.erpCostRequests.bulkGet([...new Set(targets.map(row => row.requestId))]);
+    const actionInputs = ignored ? { current: null, singleReceipt: targets.length === 1, legacy: requests.some(request => !request?.expectedSkus?.length) } : null;
     const results = [];
-    for (const row of receipts) {
-      if (selection && !selection.has(row.id)) continue;
-      results.push(await processErpCostInboxAdoptionOnce({ inboxId: row.id, resolutions: [], ignoreAction: {
+    for (const row of targets) {
+      results.push(await processErpCostInboxAdoptionOnce({ inboxId: row.id, resolutions: [], actionInputs, ignoreAction: {
         action: ignored ? 'ignore' : 'revoke', warehouseSku, ...(selection ? { warehouseSkus: [...selection.get(row.id)] } : {}),
       } }));
     }
@@ -942,7 +1233,7 @@ export async function setErpCostAnomaliesIgnored({ ledgerId, ignored = true, inb
 
 let lastStableErpRecovery = null;
 
-export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = null } = {}) {
+export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = null, background = false, shouldStop, deferReviewed } = {}) {
   const member = await getActiveMemberContext();
   if (!workspaceId || workspaceId !== member.workspaceId) throw new Error('恢复 ERP 收件必须限定当前工作区。');
   const revision = selectionFactsRevision();
@@ -963,15 +1254,39 @@ export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = nul
   const inboxIds = pendingIds.filter(id => owned.has(id) && (!scoped || scoped.has(id))).sort();
   const results = [];
   let yieldedAt = performance.now();
-  const readScope = {};
+  const readScope = { shouldStop, deferReviewed: background ? () => activeProfitReads > 0 || hasOpenCostReview() || deferReviewed?.() : null };
+  const reviewed = new Map();
+  if (inboxIds.length && readScope.deferReviewed?.()) {
+    const revision = inboxRevision();
+    const states = await listErpCostAdoptionStates({workspaceId}).catch(() => []);
+    if (revision && revision === inboxRevision()) for (const row of states) {
+      if (row.adoption?.processedAt && !row.adoptionPending && !row.adoptionFailure) reviewed.set(row.id, inboxRowVersion(row.id));
+    }
+  }
+  let deferred = false;
   for (const inboxId of inboxIds) {
+    if (shouldStop?.()) return results;
+    if (reviewed.get(inboxId) && readScope.deferReviewed() && reviewed.get(inboxId) === inboxRowVersion(inboxId)) {
+      deferred = true;
+      continue;
+    }
     let probe;
     try {
       try { probe = await readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext: getActiveMemberContext, readScope }); }
       catch { /* Optional read cache failures retain the authoritative path. */ }
+      if (shouldStop?.()) return results;
+      if (probe?.deferred) { deferred = true; continue; }
       if (probe?.ignored) continue;
       const cached = probe && cachedErpRecoveryResult(probe);
-      const result = cached ?? await processErpCostInboxAdoption({ inboxId });
+      // Rechecking a processed, partial receipt usually changes nothing. Readers can
+      // proceed during that check. Any mutation revalidates inside the write transaction.
+      let checked = cached;
+      if (!checked && probe?.result && !probe.hasPreviousCheck) {
+        try { checked = await processErpCostInboxAdoptionOnce({ inboxId, resolutions: [], inspectOnly: true, readScope }); }
+        catch { /* The write path preserves diagnostic and retry handling. */ }
+      }
+      if (shouldStop?.()) return results;
+      const result = checked && !checked.needsWrite ? checked : await processErpCostInboxAdoption({ inboxId });
       if (!cached && probe) rememberErpRecoveryResult(probe, result);
       results.push(result);
     } catch (error) { results.push({ id: inboxId, status: probe?.metadata?.status ?? 'pending', error: error.message }); }
@@ -981,7 +1296,7 @@ export async function recoverErpCostInboxAdoptions({ workspaceId, ledgerId = nul
       yieldedAt = performance.now();
     }
   }
-  if (selectionFactsRevision() === revision && !results.some(result => result.error)) {
+  if (!deferred && selectionFactsRevision() === revision && !results.some(result => result.error)) {
     lastStableErpRecovery = { key, results: structuredClone(results) };
     await persistErpRecoveryMemo(member);
   }
@@ -994,24 +1309,15 @@ export async function listErpCostAdoptionStates({ workspaceId = null } = {}) {
   return retrySourceRead(async () => {
     // Every consumer must observe source changes, even when another consumer
     // populated the metadata cache. A cache hit alone has no inbox dependency.
-    const observable = await observeSourceRevision();
-    const revision = selectionFactsRevision();
+    await Promise.all([db.erpCostInbox.count(), observeTableRevision('erpCostInbox')]);
+    const reader = inboxRevision() ? inboxRevision : sourceRevision;
+    const revision = reader();
     const member = await getActiveMemberContext();
     if (workspaceId && workspaceId !== member.workspaceId) throw new Error('ERP 采用状态必须限定当前工作区。');
-    assertSourceRevision(revision, selectionFactsRevision);
-    const compute = async () => {
-      const states = [];
-      await db.erpCostInbox.where('workspaceId').equals(member.workspaceId).each(inbox => states.push({
-        id: inbox.id, deliveryId: inbox.deliveryId, workspaceId: inbox.workspaceId, ledgerId: inbox.ledgerId, requestId: inbox.requestId, status: inbox.status,
-        adoptionPending: inbox.adoptionPending, adoptionFailure: inbox.adoptionFailure,
-        adoption: inbox.adoption ? { state: inbox.adoption.state, processedAt: inbox.adoption.processedAt, summary: inbox.adoption.summary } : null,
-      }));
-      return states;
-    };
-    // If disposable-cache storage is unavailable, read and observe real rows.
-    if (!observable) return compute();
-    return cachedDerived({ scope: [member.workspaceId, member.memberId, member.role], formula: 'erp-cost-adoption-states@2-ledger',
-      revision, revisionReader: selectionFactsRevision, persist: false, compute });
+    assertSourceRevision(revision, reader);
+    const compute = () => readReceiptStates('workspaceId', member.workspaceId);
+    return cachedDerived({ scope: [member.workspaceId, member.memberId, member.role], formula: 'erp-cost-adoption-states@3-inbox',
+      revision, revisionReader: reader, compute });
   });
 }
 
@@ -1160,20 +1466,9 @@ async function publishVerifiedErpCostBatch({
     };
   });
   const manualDeliveryId = `ERP-MANUAL-${verifiedSourceEnvelope.batchId}`;
-  const manualInboxEnvelope = buildErpCostInboxEnvelope({
-    batch: verifiedSourceEnvelope,
-    deliveryId: manualDeliveryId,
-    sentAt: publishedAt,
-    transport: "manual-v2-import",
-  }, {
-    expectedWorkspaceId: workspaceId,
-    expectedLedgerId: ledgerId,
-    expectedRequestId: effectiveRequestId,
-    expectedPlatformSkcs: recordedRequest.platformSkcs,
-    expectedSkus: verifiedExpectedSkus,
-  });
   let appliedInboxId = null;
   let adoptionSummary = null;
+  let rowIds;
   await db.transaction("rw", db.ledgers, db.salesRows, db.erpCostRequests, db.erpCostInbox, db.erpCostBatches, db.erpCostRows, db.costApprovals, db.auditEvents, async () => {
     const ledger = operatingLedger(await db.ledgers.get(ledgerId));
     if (!ledger) throw new Error("找不到对应的月度账本。");
@@ -1206,12 +1501,12 @@ async function publishVerifiedErpCostBatch({
       throw new Error("找不到与当前账本和工作区匹配的 ERP 成本请求，不能发布正式成本。");
     }
     const normalizedInboxId = String(inboxId ?? "").trim() || null;
-    const sourceInboxRecords = await db.erpCostInbox.where("batchId").equals(verifiedSourceEnvelope.batchId).toArray();
+    const sourceInboxRecords = await db.erpCostInbox.where("batchId").equals(verifiedSourceEnvelope.batchId).primaryKeys();
     if (sourceInboxRecords.length > 1) {
       throw new Error("ERP 源批次关联了多个收件记录，不能发布正式成本。");
     }
-    const sourceInbox = sourceInboxRecords[0] ?? null;
-    if (sourceInbox && !normalizedInboxId) {
+    const sourceInboxId = sourceInboxRecords[0] ?? null;
+    if (sourceInboxId && !normalizedInboxId) {
       throw new Error("该 ERP 源批次已有收件记录，必须从当前已载入的收件批次发布。");
     }
     let linkedInbox = normalizedInboxId ? await db.erpCostInbox.get(normalizedInboxId) : null;
@@ -1221,10 +1516,10 @@ async function publishVerifiedErpCostBatch({
       || linkedInbox.workspaceId !== workspaceId
       || linkedInbox.requestId !== effectiveRequestId
       || linkedInbox.batchId !== verifiedSourceEnvelope.batchId
-      || (sourceInbox && sourceInbox.id !== linkedInbox.id))) {
+      || (sourceInboxId && sourceInboxId !== linkedInbox.id))) {
       throw new Error("当前 ERP 收件批次状态或请求范围已变化，请重新载入后再发布。");
     }
-    const manualInbox = !sourceInbox && !linkedInbox;
+    const manualInbox = !sourceInboxId && !linkedInbox;
     if (manualInbox) {
       linkedInbox = {
         id: `INBOX-${manualDeliveryId}`,
@@ -1237,7 +1532,10 @@ async function publishVerifiedErpCostBatch({
         receivedVia: "manual-v2-import",
         sentAt: publishedAt,
         receivedAt: publishedAt,
-        envelope: manualInboxEnvelope,
+        envelope: buildErpCostInboxEnvelope({ batch: verifiedSourceEnvelope, deliveryId: manualDeliveryId, sentAt: publishedAt, transport: "manual-v2-import" }, {
+          expectedWorkspaceId: workspaceId, expectedLedgerId: ledgerId, expectedRequestId: effectiveRequestId,
+          expectedPlatformSkcs: recordedRequest.platformSkcs, expectedSkus: verifiedExpectedSkus,
+        }),
       };
     }
 
@@ -1333,11 +1631,20 @@ async function publishVerifiedErpCostBatch({
       sourceBaselineSha256: verifiedSourceEnvelope.baseline?.releaseSha256 ?? null,
       publishedAt,
     }));
-    if (verifiedRows.length > 0) {
-      await db.erpCostRows.bulkAdd(storedRows);
+    const keys = await db.erpCostRows.bulkAdd(storedRows, { allKeys: true });
+    const added = storedRows.map((row, i) => ({ ...row, id: keys[i] }));
+    const sharedInputs = sharedSales && transactionReads.actionInputs?.current;
+    if (sharedInputs) {
+      sharedInputs.batchById.set(batchId, adoptionBatchHeader(savedBatch));
+      for (const row of added) sharedInputs.costHeaders.push(adoptionCostHeader(row));
     }
-
-    const coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows });
+    const heads = sharedSales && transactionReads.coverageHeads;
+    let coverage;
+    if (heads) {
+      for (const row of added) setCoverageHead(heads, row, true, costPeriod);
+      coverage = calculateLedgerCostCoverage({ salesRows, approvals: accountingApprovals(approvals), workspaceId, ledgerId, period: costPeriod,
+        erpCosts: [...heads.values()].flatMap(head => head.cost ? [head.cost] : []) }, row => row.withinPeriod);
+    } else coverage = await readLedgerCostCoverage(ledgerId, { ledger, salesRows });
     const savedLedger = {
       ...ledger,
       ...buildLedgerCoveragePatch(
@@ -1348,9 +1655,14 @@ async function publishVerifiedErpCostBatch({
       ),
     };
     await db.ledgers.put(savedLedger);
-    const persistedRows = verifiedRows.length > 0
-      ? await db.erpCostRows.where("batchId").equals(batchId).toArray()
-      : [];
+    const persistedRows = adoptionContext?.batchId ? await db.erpCostRows.where("batchId").equals(batchId).toArray() : added;
+    if (sharedSales) {
+      rowIds = new Map();
+      for (const row of persistedRows) {
+        const sku = canonicalPlatformSku(row.platformSku);
+        if (!rowIds.has(sku)) rowIds.set(sku, row.id);
+      }
+    }
     let appliedInbox = null;
     if (linkedInbox) {
       appliedInbox = {
@@ -1405,7 +1717,7 @@ async function publishVerifiedErpCostBatch({
     }
   });
 
-  return { batchId, inboxId: appliedInboxId, ...adoptionSummary, matchedCount: verifiedRows.length };
+  return { batchId, inboxId: appliedInboxId, ...adoptionSummary, matchedCount: verifiedRows.length, ...(rowIds ? { rowIds } : {}) };
 }
 
 export async function saveApproved1688Fallback({
@@ -1708,12 +2020,76 @@ export async function getErpCostInbox(id) {
   return key ? db.erpCostInbox.get(key) : null;
 }
 
-export async function listErpCostInbox({ ledgerId = null, statuses = ["pending", "loaded"] } = {}) {
+const inboxRevision = tableRevisionReader('erpCostInbox');
+const decodedInboxSummaries = new WeakMap();
+const packedInboxRows = new Map();
+async function packDisplayInboxes(query, parents) {
+  const ids = await query.primaryKeys(), packed = [];
+  for (let i = 0; i < ids.length; i += 4) {
+    const group = ids.slice(i, i + 4).map(id => {
+      const version = inboxRowVersion(id), saved = packedInboxRows.get(id);
+      if (version && saved?.version === version) {
+        const parent = parents.get(saved.ledgerId);
+        if (parent?.workspaceId === saved.workspaceId && parent.period === saved.period) return {id,version,part:saved.part};
+      }
+      return {id,version};
+    });
+    const missing = group.filter(entry => !entry.part);
+    const originals = missing.length ? await db.erpCostInbox.bulkGet(missing.map(entry => entry.id)) : [];
+    const byId = new Map(originals.filter(Boolean).map(row => [row.id,row]));
+    const pieces = await Promise.all(group.map(async ({id, version, part: cached}) => {
+      if (cached) return cached;
+      const row = byId.get(id);
+      if (!row) return null;
+      const parent = parents.get(row.ledgerId), period = parent?.workspaceId === row.workspaceId ? parent.period : null;
+      const header = await indexedErpInboxSummary(row, period);
+      let part = header;
+      if (globalThis.CompressionStream && globalThis.DecompressionStream && globalThis.Blob?.prototype.stream) {
+        const stream = new Blob([JSON.stringify(header)]).stream().pipeThrough(new CompressionStream('gzip'));
+        part = await new Response(stream).arrayBuffer();
+      }
+      if (version && version === inboxRowVersion(id) && part instanceof ArrayBuffer && part.byteLength <= 1024 * 1024) {
+        packedInboxRows.set(id, { version, ledgerId: row.ledgerId, workspaceId: row.workspaceId, period, part });
+        if (packedInboxRows.size > 128) packedInboxRows.delete(packedInboxRows.keys().next().value);
+      }
+      return part;
+    }));
+    packed.push(...pieces.filter(Boolean));
+  }
+  return packed;
+}
+async function unpackDisplayInboxes(parts) {
+  const prior = decodedInboxSummaries.get(parts)?.deref();
+  if (prior) return prior;
+  const rows = [];
+  for (const part of parts) {
+    rows.push(part instanceof ArrayBuffer ? await new Response(new Blob([part]).stream().pipeThrough(new DecompressionStream('gzip'))).json() : part);
+  }
+  if (typeof WeakRef !== 'undefined') decodedInboxSummaries.set(parts, new WeakRef(rows));
+  return rows;
+}
+export async function listErpCostInbox({ ledgerId = null, statuses = ["pending", "loaded"], displayOnly = false } = {}) {
   const allowed = new Set(["pending", "loaded", "applied", "rejected", "voided"]);
   const statusSet = new Set((Array.isArray(statuses) ? statuses : []).filter((status) => allowed.has(status)));
-  const rows = ledgerId
-    ? await db.erpCostInbox.where("ledgerId").equals(ledgerId).toArray()
-    : await db.erpCostInbox.toArray();
+  const query = ledgerId ? db.erpCostInbox.where("ledgerId").equals(ledgerId) : db.erpCostInbox.toCollection();
+  let rows;
+  if (displayOnly) {
+    const read = async () => {
+      const summaries = [];
+      await query.each(row => { if (!statusSet.size || statusSet.has(row.status)) summaries.push(erpInboxSummary(row)); });
+      return summaries;
+    };
+    rows = Dexie.currentTransaction ? await read() : await retrySourceRead(async () => {
+      await Promise.all([db.erpCostInbox.count(), observeTableRevision('erpCostInbox')]);
+      const reader = inboxRevision() ? inboxRevision : sourceRevision, revision = reader();
+      const ledgers = ledgerId ? [await db.ledgers.get(ledgerId)].filter(Boolean) : await db.ledgers.toArray();
+      const parents = new Map(ledgers.map(ledger => [ledger.id, ledger]));
+      const packed = await cachedDerived({ scope: [ledgerId, ledgers.map(row => [row.workspaceId, row.id, row.period])], formula: 'erp-inbox-display@4', revisionReader: reader, revision, compute: () => packDisplayInboxes(query, parents) });
+      const summaries = await unpackDisplayInboxes(packed);
+      assertSourceRevision(revision, reader);
+      return summaries;
+    });
+  } else rows = await query.toArray();
   return rows
     .filter((row) => statusSet.size === 0 || statusSet.has(row.status))
     .toSorted((left, right) => String(left.sentAt ?? left.receivedAt ?? "").localeCompare(String(right.sentAt ?? right.receivedAt ?? "")));
@@ -1839,16 +2215,10 @@ export async function updateLedgerWarehouseRate(ledgerId, warehouseRate, updated
     if (ledger.workspaceId !== member.workspaceId || !['admin','finance'].includes(member.role)) throw new Error('当前成员无此账本的财务写权限。');
     const mode = await readAccountingMode(ledger.workspaceId);
     if (expectedAccountingMode != null && mode !== expectedAccountingMode) throw new Error('核算上下文已变化，请重新打开仓储费率。');
-    if (mode === LOWEST_ACCOUNTING) {
-      const current = await projectAccountingLedger(ledger, mode);
-      await db.settings.put({ key: accountingRateKey(ledger), value: rate, updatedAt });
-      await db.auditEvents.add({ workspaceId: ledger.workspaceId, objectType: 'local_profit_report', objectId: ledgerId,
-        action: 'warehouse_rate_updated', actorId: auditActor, createdAt: updatedAt, localOnly: true, syncState: 'local_only',
-        before: { warehouseRate: current.warehouseRate }, after: { warehouseRate: rate, accountingMode: mode } });
-      return;
-    }
+    const current = await projectAccountingLedger(ledger, mode);
     const savedLedger = { ...ledger, warehouseRate: rate, updatedAt };
     await db.ledgers.put(savedLedger);
+    await db.settings.delete(accountingRateKey(ledger));
     await db.auditEvents.add({
       workspaceId: ledger.workspaceId,
       objectType: "monthly_ledger",
@@ -1856,7 +2226,7 @@ export async function updateLedgerWarehouseRate(ledgerId, warehouseRate, updated
       action: "warehouse_rate_updated",
       actorId: auditActor,
       createdAt: updatedAt,
-      before: { warehouseRate: ledger.warehouseRate },
+      before: { warehouseRate: current.warehouseRate },
       after: {
         warehouseRate: rate,
         snapshot: savedLedger,
@@ -1886,24 +2256,142 @@ async function readOwnedLedgerCosts(ledger) {
     revision: publishedCostRevision(), persist: false, compute: () => readLatestLedgerCosts(ledgerId, ledger.workspaceId) });
 }
 
-async function readLatestLedgerCosts(ledgerId, workspaceId) {
-  const [rows, batches] = await Promise.all([
-    db.erpCostRows.where("ledgerId").equals(ledgerId).toArray(),
-    db.erpCostBatches.where("ledgerId").equals(ledgerId).toArray(),
+const profitPageCostOrigins = new WeakMap();
+let recentResolutionIndex;
+async function scanProfitPageCosts(ledger, includeCosts, indexedInTransaction = false) {
+  const batches = db.erpCostBatches;
+  const [ledgerIds, ownedIds, scopedIds, publishedIds] = await Promise.all([
+    batches.where('ledgerId').equals(ledger.id).primaryKeys(),
+    batches.where('workspaceId').equals(ledger.workspaceId).primaryKeys(),
+    batches.where('workspaceId').above('').primaryKeys(),
+    batches.where('status').equals('published').primaryKeys(),
   ]);
-  const batchById = new Map(batches.filter(batch => !batch.workspaceId || batch.workspaceId === workspaceId).map((batch) => [batch.id, batch]));
-  const latest = new Map();
-  // A foreign or orphan row is not a successor of this workspace's cost.
-  // Owned voided batches still suppress their prior values as before.
-  rows.filter(row => (!row.workspaceId || row.workspaceId === workspaceId) && batchById.has(row.batchId)).toSorted((a, b) => {
-    const dateOrder = String(a.publishedAt ?? "").localeCompare(String(b.publishedAt ?? ""));
-    return dateOrder || Number(a.id ?? 0) - Number(b.id ?? 0);
-  }).forEach((row) => {
-    latest.set(row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku), row);
+  const owned = new Set(ownedIds), scoped = new Set(scopedIds), published = new Set(publishedIds);
+  const allowed = new Set(ledgerIds.filter(id => owned.has(id) || !scoped.has(id)));
+  if (!includeCosts) {
+    const publishedIds = [...allowed].filter(id => published.has(id));
+    return { costs: [], resolutionIndex: await completeProfitResolutionIndex(ledger, {publishedIds, resolutions: []}) };
+  }
+  if (includeCosts && (!Dexie.currentTransaction || indexedInTransaction)) {
+    const indexed = await readIndexedProfitCosts(ledger, allowed, published);
+    if (indexed) return indexed;
+  }
+  const latest = new Map(), resolutions = [];
+  await forEachLedgerChunk(db.erpCostRows, ledger.id, 16, row => {
+    if ((row.workspaceId && row.workspaceId !== ledger.workspaceId) || !allowed.has(row.batchId)) return;
+    if (row.resolutions?.length && published.has(row.batchId)) {
+      resolutions.push({ id: row.id, batchId: row.batchId, sourceEnvelopeBatchId: row.sourceEnvelopeBatchId, resolutions: row.resolutions });
+    }
+    const sku = row.canonicalPlatformSku ?? canonicalPlatformSku(row.platformSku);
+    const previous = latest.get(sku);
+    if (previous) previous.firstId = row.id;
+    if (previous && comparePublishedRows(previous, row) > 0) return;
+    // The page's period check uses purchase records and explicit evidence failures.
+    // Legacy evidence references are reconstructed only when the purchase detail is opened.
+    latest.set(sku, { firstId: row.id, id: row.id, publishedAt: row.publishedAt,
+      cost: published.has(row.batchId) ? profitCostFields(row, ledger.period) : null });
+  }, { newestFirst: true });
+  return { costs: [...latest.values()].sort((a,b) => a.firstId-b.firstId).flatMap(entry => entry.cost ? [entry.cost] : []),
+    resolutionIndex: { publishedIds: [...allowed].filter(id => published.has(id)), resolutions: resolutions.reverse() } };
+}
+
+async function readProfitPageCosts(ledger) {
+  if (Dexie.currentTransaction) return (await scanProfitPageCosts(ledger, true)).costs;
+  await observePublishedCostRevision();
+  const revision = publishedCostRevision();
+  const packed = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period], formula: 'profit-page-costs@4-index',
+    revisionReader: publishedCostRevision, revision, compute: async () => {
+      const capture = readActionCosts.capture(ledger);
+      const result = await scanProfitPageCosts(ledger, true);
+      if (capture) capture(result.costs.map(({purchaseSearchText, ...cost}) => structuredClone(cost)));
+      try { return await packProfitSearch(result); } catch { return result; }
+    } });
+  let projection;
+  try { projection = await unpackProfitSearch(packed); }
+  catch { projection = await scanProfitPageCosts(ledger, true); }
+  assertSourceRevision(revision, publishedCostRevision);
+  const { costs, resolutionIndex } = projection;
+  if (recentResolutionIndex?.revision !== revision || recentResolutionIndex.ledgerId !== ledger.id
+    || recentResolutionIndex.workspaceId !== ledger.workspaceId || recentResolutionIndex.value.unchecked?.length) {
+    recentResolutionIndex = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, revision, value: resolutionIndex };
+  }
+  for (const cost of costs) profitPageCostOrigins.set(cost, { workspaceId: ledger.workspaceId, ledgerId: ledger.id, id: cost.id, batchId: cost.batchId, sku: canonicalPlatformSku(cost.platformSku), revision });
+  return costs;
+}
+
+export async function getProfitPageCostEvidence({ workspaceId, ledgerId, platformSku, id, batchId, mode, selection }) {
+  return retrySourceRead(async () => {
+    const member = await getActiveMemberContext(), ledger = await db.ledgers.get(ledgerId);
+    if (!ledger || member.workspaceId !== workspaceId || ledger.workspaceId !== workspaceId) return null;
+    if (await readAccountingMode(workspaceId) !== mode) return null;
+    const sku = canonicalPlatformSku(platformSku);
+    if (mode === LOWEST_ACCOUNTING) {
+      await observeInventoryRevision(true);
+      const revision = inventoryEvidenceRevision();
+      const minimum = (await readHistoricalLowestCosts(workspaceId)).find(row => row.id === id && canonicalPlatformSku(row.platformSku) === sku);
+      if (!minimum) return null;
+      const purchaseReview = await readLowestPurchaseReview(workspaceId, minimum, ledger.period);
+      assertSourceRevision(revision, inventoryEvidenceRevision);
+      return { ...minimum, purchaseReview };
+    }
+    await observePublishedCostRevision();
+    const revision = publishedCostRevision();
+    const origin = selection && profitPageCostOrigins.get(selection);
+    if (origin) {
+      if (origin.revision !== revision || origin.workspaceId !== workspaceId || origin.ledgerId !== ledgerId || origin.sku !== sku || origin.id !== id || origin.batchId !== batchId) return null;
+    } else {
+      const current = (await readProfitPageCosts(ledger)).find(row => canonicalPlatformSku(row.platformSku) === sku);
+      if (!current || current.id !== id || current.batchId !== batchId) return null;
+    }
+    const row = await db.erpCostRows.get(id);
+    if (!row || canonicalPlatformSku(row.platformSku) !== sku || row.ledgerId !== ledgerId || row.batchId !== batchId || (row.workspaceId && row.workspaceId !== workspaceId)) return null;
+    const proven = row.evidenceRef && row.evidenceComplete === true ? row : projectPublishedCostEvidence(row, await db.erpCostBatches.get(batchId));
+    assertSourceRevision(revision, publishedCostRevision);
+    return proven;
   });
-  return [...latest.values()]
-    .filter((row) => batchById.get(row.batchId)?.status === "published")
-    .map((row) => projectPublishedCostEvidence(row, batchById.get(row.batchId)));
+}
+
+async function readLatestLedgerCosts(ledgerId, workspaceId) {
+  return db.transaction('r', db.erpCostRows, db.erpCostBatches, async () => {
+    const [ids, batches] = await Promise.all([
+      db.erpCostRows.where('ledgerId').equals(ledgerId).primaryKeys(),
+      readAdoptionBatchHeaders(ledgerId, { indexed: true }),
+    ]);
+    // Both report checks need the current transaction's own keys, including a
+    // same-count change to a row's SKU, publication date or ownership.
+    let headers = await readActionHeaderIndex({ id: ledgerId }, ids, { fresh: true });
+    if (!headers) {
+      headers = new Map();
+      await readCostIds(ids, row => {
+        headers.set(row.id, { workspaceId: row.workspaceId, batchId: row.batchId, platformSku: row.platformSku,
+          canonicalSku: row.canonicalPlatformSku, publishedAt: row.publishedAt });
+      });
+    }
+    const ordered = [];
+    for (const id of ids) {
+      const header = headers.get(id);
+      const batch = batches.get(header.batchId);
+      if (!batch || (batch.workspaceId && batch.workspaceId !== workspaceId) || (header.workspaceId && header.workspaceId !== workspaceId)) continue;
+      ordered.push({ id, publishedAt: header.publishedAt, sku: header.canonicalSku ?? canonicalPlatformSku(header.platformSku), published: batch.status === 'published' });
+    }
+    const latest = new Map();
+    // Insertion order is part of the report fingerprint. A voided latest
+    // publication suppresses an older value for the same SKU.
+    for (const row of ordered.sort(comparePublishedRows)) latest.set(row.sku, row);
+    const winners = [...latest.values()].filter(row => row.published);
+    const rows = new Map(), legacyByBatch = new Map();
+    await readCostIds(winners.map(row => row.id).sort(Dexie.cmp), row => {
+      rows.set(row.id, row);
+      if (row.evidenceRef && row.evidenceComplete === true) return;
+      if (!legacyByBatch.has(row.batchId)) legacyByBatch.set(row.batchId, []);
+      legacyByBatch.get(row.batchId).push(row);
+    });
+    for (const [batchId, legacy] of legacyByBatch) {
+      const batch = await db.erpCostBatches.get(batchId);
+      for (const row of legacy) rows.set(row.id, projectPublishedCostEvidence(row, batch));
+    }
+    return winners.map(row => rows.get(row.id));
+  });
 }
 
 function samePurchaseEvidence(left, right) {
@@ -2124,10 +2612,11 @@ export async function voidPublishedErpCostBatch({
 }
 
 export async function getLedgerSnapshot(ledgerId, options = {}) {
-  return retrySourceRead(() => readLedgerSnapshot(ledgerId, options));
+  const read = () => retrySourceRead(() => readLedgerSnapshot(ledgerId, options));
+  return options.profitPage ? withProfitRead(read) : read();
 }
 
-async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
+async function readLedgerSnapshot(ledgerId, { summaryOnly = false, profitPage = false } = {}) {
   await observeLedgerSnapshotRevision();
   const dataVersion = ledgerSnapshotRevision();
   const original = await db.ledgers.get(ledgerId);
@@ -2136,18 +2625,20 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
   const member = await getActiveMemberContext();
   if (ledger.workspaceId !== member.workspaceId) return null;
   const accountingMode = await readAccountingMode(ledger.workspaceId);
-  const [rows, batches, originalCosts, approvals, profitLines] = await Promise.all([
-    readLedgerSalesRows(member.workspaceId, ledgerId),
+  const [sales, batches, originalCosts, approvals, profitLines] = await Promise.all([
+    profitPage ? readProfitPageSales(ledger) : readLedgerSalesRows(member.workspaceId, ledgerId),
     summaryOnly ? [] : db.importBatches.where("ledgerId").equals(ledgerId).toArray(),
-    accountingMode === LOWEST_ACCOUNTING ? [] : readOwnedLedgerCosts(ledger),
+    accountingMode === LOWEST_ACCOUNTING ? [] : profitPage ? readProfitPageCosts(ledger) : readOwnedLedgerCosts(ledger),
     db.costApprovals.where("ledgerId").equals(ledgerId).toArray(),
-    summaryOnly ? [] : db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
+    summaryOnly || profitPage ? [] : db.profitLines.where("ledgerId").equals(ledgerId).toArray(),
   ]);
+  const rows = profitPage ? sales.rows : sales;
   Object.assign(ledger, await projectAccountingLedger(ledger, accountingMode));
   await observeInventoryRevision(false, accountingMode);
   const calculationReader = accountingMode === LOWEST_ACCOUNTING ? inventoryLowestRevision : inventoryCalculationRevision;
   const calculationRevision = calculationReader();
-  const costs = await accountingCosts(ledger, originalCosts, accountingMode, rows);
+  const accountingRows = await accountingCosts(ledger, originalCosts, accountingMode, rows);
+  const costs = profitPage && accountingMode === LOWEST_ACCOUNTING ? accountingRows.map(row => profitCostFields(row, null)) : accountingRows;
   // Compute alternate accounting only when selected. Loading this month must
   // not wait for a second, workspace-wide history projection.
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
@@ -2155,8 +2646,8 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
   // checks existed. Project current readiness without mutating business data or
   // touching any frozen report/snapshot during an upgrade or ordinary read.
   const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period, accountingMode],
-    formula: 'inventory-cost-coverage@3-anomaly-ignore', revisionReader: calculationReader, revision: calculationRevision, persist: false,
-    compute: () => runDerivedComputation('cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
+    formula: profitPage ? 'profit-page-coverage@2-shared-manual' : 'inventory-cost-coverage@4-shared-manual', revisionReader: calculationReader, revision: calculationRevision, persist: profitPage,
+    compute: () => runDerivedComputation(profitPage ? 'profit-page-coverage' : 'cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
       workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: costEvaluationPeriod(ledger), accountingMode }) });
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
   const snapshotLedger = {
@@ -2164,14 +2655,14 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false } = {}) {
     ...buildLedgerCoveragePatch(ledger, coverage, ledger.updatedAt),
   };
   assertSourceRevision(calculationRevision, calculationReader);
-  return { ledger: snapshotLedger, rows, batches, costs, approvals: accountingApprovals(approvals, accountingMode), profitLines, dataVersion: calculationRevision, revisionKind: accountingMode === LOWEST_ACCOUNTING ? 'inventory-lowest' : 'inventory' };
+  return { ledger: snapshotLedger, rows, batches, costs, approvals: accountingApprovals(approvals, accountingMode), profitLines, ...(profitPage ? { profitPage: true, pageSales: sales } : {}), dataVersion: calculationRevision, revisionKind: accountingMode === LOWEST_ACCOUNTING ? 'inventory-lowest' : 'inventory' };
 }
 
-export async function getLatestLedgerSnapshot() {
+export async function getLatestLedgerSnapshot(options) {
   const member = await getActiveMemberContext();
   if (!member.workspaceId) return null;
   const ledger = (await db.ledgers.where("workspaceId").equals(member.workspaceId).sortBy("updatedAt")).at(-1);
-  return ledger ? getLedgerSnapshot(ledger.id) : null;
+  return ledger ? getLedgerSnapshot(ledger.id, options) : null;
 }
 
 export async function listLedgerSummaries() {
@@ -2188,9 +2679,16 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
     const mode = await readAccountingMode(member.workspaceId);
     const projected = await Promise.all(ledgers.map(async original => {
       const ledger = operatingLedger(original);
-      if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id, { summaryOnly: true }))?.ledger ?? ledger;
+      if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id, { summaryOnly: true, profitPage: true }))?.ledger ?? ledger;
       if (ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
-      const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@1-identity',
+      if (ledger.costSummary?.identityPolicyVersion === 'ledger-cost-identity@1') {
+        // A weighted summary from the previous version is still valid if there
+        // were no separate manual records to bring over from lowest mode.
+        const legacy = await db.costApprovals.where('ledgerId').equals(ledger.id).filter(row =>
+          row.workspaceId === ledger.workspaceId && row.accountingMode === LOWEST_ACCOUNTING && manualSnapshot(row)?.kind === 'manual_override').first();
+        if (!legacy) return ledger;
+      }
+      const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@2-shared-manual',
         revision, revisionReader: selectionFactsRevision, persist: false, compute: async () => {
           const saleIdentities = new Map(), latest = new Map(), batchStates = new Map();
           let needsOwnershipProof = false, invalidSales = false, foreignSales = false, foreignBatch = false, foreignCost = false;
@@ -2235,10 +2733,10 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
           const erpCosts = currentCosts.filter(row => row.periodVerified);
           const approvals = [];
           await db.costApprovals.where('ledgerId').equals(ledger.id).each(row => {
-            if (row.accountingMode === LOWEST_ACCOUNTING) return;
             if (row.workspaceId && row.workspaceId !== ledger.workspaceId) return;
             const snapshot = manualSnapshot(row);
             approvals.push({ id: row.id, workspaceId: row.workspaceId, ledgerId: row.ledgerId, platformSku: row.platformSku,
+              accountingMode: row.accountingMode, sourceApprovalId: row.sourceApprovalId,
               status: row.status, approvedAmount: row.approvedAmount, unitCost: row.unitCost, currency: row.currency,
               approvedBy: row.approvedBy, approvedAt: row.approvedAt, reason: row.reason,
               referenceCost: snapshot && { kind: snapshot.kind, store: snapshot.store } });

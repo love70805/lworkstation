@@ -1,5 +1,6 @@
 const pending = new Set();
 let resetting = false;
+export const isWorkspaceResetting = () => resetting;
 let recoveryError = '';
 const recoveryListeners = new Set();
 const resumeListeners = new Set();

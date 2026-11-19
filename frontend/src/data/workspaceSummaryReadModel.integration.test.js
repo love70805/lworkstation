@@ -2,6 +2,7 @@
 import 'fake-indexeddb/auto';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {db,getWorkspaceOperationalSummary,setActiveMemberContext} from './database';
+import { LEDGER_COST_IDENTITY_VERSION } from '../domain/ledgerCostIdentity';
 
 beforeEach(async()=>{
   localStorage.clear();await db.delete();await db.open();
@@ -12,6 +13,22 @@ beforeEach(async()=>{
   await db.captures.put({id:'C',workspaceId:'projection',status:'pending',validation:{blocking:[{raw:'large'.repeat(5000)}]}});
 });
 afterEach(async()=>{vi.restoreAllMocks();db.close();await db.delete();localStorage.clear();});
+
+it('reads navigation counts without scanning historical costs, and supplies the full count on demand', async () => {
+  await db.ledgers.put({ id: 'L', workspaceId: 'projection', period: '2026-10', status: 'cost_pending',
+    costSummary: { identityPolicyVersion: LEDGER_COST_IDENTITY_VERSION } });
+  await db.erpCostRows.add({ ledgerId: 'L', workspaceId: 'projection', platformSku: 'SKU' });
+  const reads = vi.fn(row => row);
+  db.erpCostRows.hook('reading').subscribe(reads);
+  try {
+    const shell = await getWorkspaceOperationalSummary({ includeRecordCount: false });
+    expect(shell).toMatchObject({ recordCount: null, productCount: 1, platformSkuCount: 1, pendingCaptureCount: 1 });
+    expect(reads).not.toHaveBeenCalled();
+    const full = await getWorkspaceOperationalSummary();
+    expect(full.recordCount).toBeGreaterThan(0);
+    expect({ ...full, recordCount: null }).toEqual(shell);
+  } finally { db.erpCostRows.hook('reading').unsubscribe(reads); }
+});
 
 it('reuses compact catalog projections across audit-only writes and invalidates equal-count edits',async()=>{
   const read=vi.spyOn(Object.getPrototypeOf(db.products),'each');

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateWarehouseCostDecision,
   detectPurchaseCostAnomalies,
+  mayHavePurchaseAnomalies,
   normalizePurchaseEvidenceRecord,
   selectFormalPurchaseRecords,
 } from "./erpCostResolution";
@@ -22,6 +23,20 @@ function record(id, date, unitPrice, quantity = 1, extra = {}) {
 function normalized(records) {
   return records.map((item, index) => normalizePurchaseEvidenceRecord(item, index, "WH-1"));
 }
+
+it('retains every possible anomaly after exclusions, period cutoffs and purchase-total pricing', () => {
+  const sets = [[5,5,5,5,5,5], [10,11,10,11,10,12], [3,3,3,3,6,6], [4,4,4,4,3,30], [0,5], [1],
+    [12,11,12,5,5,5,5,5,5], [0.4,0.41,0.7,3,0.4,0.5], [15,15,15,15,15,29.9999]];
+  let ruledOut = 0;
+  for (const prices of sets) for (const masked of [true, false]) for (const cutoff of ['2026-08', '2026-09']) {
+    const rows = prices.map((price, i) => record(String(i), i % 3 ? '2026-08-10' : '2026-09-12', 99, 2,
+      { amountBasis: 'purchase_total', totalPrice: 2 * price, eligible: !(masked && i % 4 === 0) }));
+    const decision = calculateWarehouseCostDecision({ warehouseSku: 'WH-1', purchaseRecords: rows, period: cutoff });
+    if (!mayHavePurchaseAnomalies(rows)) { ruledOut++; expect(decision.anomalies).toEqual([]); }
+    if (decision.anomalies.length) expect(mayHavePurchaseAnomalies(rows)).toBe(true);
+  }
+  expect(ruledOut).toBeGreaterThan(0);
+});
 
 describe("ERP warehouse cost anomaly detection", () => {
   it("uses all effective history for median/MAD and flags a recent sustained shift", () => {

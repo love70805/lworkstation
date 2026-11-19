@@ -15,6 +15,14 @@ function formalErpCost(item) {
     && Number(item?.unresolvedAnomalyCount ?? 0) === 0;
 }
 
+// The coverage check consumes only these scalar fields after verifying the
+// month against the original purchase records in the caller's transaction.
+export function projectCoverageCost(row, period, verifiedWithinPeriod) {
+  const { platformSku, sku, platformSkc, unitCost, resolutionStatus, unresolvedAnomalyCount, publishedAt } = row;
+  return { platformSku, sku, platformSkc, unitCost, resolutionStatus, unresolvedAnomalyCount, publishedAt,
+    withinPeriod: formalErpCost(row) && (verifiedWithinPeriod ?? isErpCostWithinPeriod(row, period)) };
+}
+
 function collectSkus(items, predicate = () => true) {
   return new Set((items ?? [])
     .filter(predicate)
@@ -22,13 +30,13 @@ function collectSkus(items, predicate = () => true) {
     .filter(Boolean));
 }
 
-export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId, period = null, accountingMode = 'weighted' }) {
+export function calculateLedgerCostCoverage({ salesRows = [], erpCosts = [], approvals = [], workspaceId, ledgerId, period = null, accountingMode = 'weighted' }, checkPeriod = isErpCostWithinPeriod) {
   approvals = accountingApprovals(approvals, accountingMode);
   const manualFor = createManualOverrideLookup(approvals);
   const identities = buildLedgerSkuIdentityIndex(salesRows);
   const expectedRows = new Map(salesRows.map((row) => [storeSkuKey(row.store, row.platformSku ?? row.sku), row]));
   const expectedSkus = new Set(expectedRows.keys());
-  const erpSkus = collectSkus(erpCosts, item => formalErpCost(item) && isErpCostWithinPeriod(item, period)
+  const erpSkus = collectSkus(erpCosts, item => formalErpCost(item) && checkPeriod(item, period)
     && !ledgerCostIdentityIssue(identities.get(canonicalPlatformSku(item.platformSku ?? item.sku)), item));
   const approvedSkus = collectSkus(approvals, (item) => (
     manualSnapshot(item)?.kind !== "manual_override" && item.status === "approved" && validAmount(item.approvedAmount ?? item.unitCost)

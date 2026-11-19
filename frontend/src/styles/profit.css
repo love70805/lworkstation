@@ -1,4 +1,8 @@
 /* Profit panel */
+.profit-opening { padding:14px 20px; }
+.profit-opening p { margin:0; color:var(--text-muted); }
+.profit-opening p + p { margin-top:6px; }
+.profit-opening strong { color:var(--text); }
 .profit-report-top { margin:0 0 14px; }
 .profit-report-top .monthly-report-manager { padding:14px 20px; }
 .profit-report-top .report-primary-actions { margin:0 0 8px; display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
@@ -128,6 +132,9 @@
 .report-import .report-mode, .report-import .report-upload { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:12px 0; }
 .report-import .report-selection { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px; background:var(--surface-soft); border:1px solid var(--border); border-radius:8px; }
 .report-import .report-selection p { flex-basis:100%; margin:0; }
+.dispatch-month-options { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; flex-basis:100%; min-width:0; margin:0; padding:0; border:0; }
+.dispatch-month-options legend { padding:0; margin-bottom:6px; font-weight:600; }
+.report-import .dispatch-month-options input[type=checkbox] { width:auto; }
 .report-supplier-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .report-supplier-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr)); gap:8px; width:100%; min-width:0; }
 .report-import .report-supplier-option { flex-wrap:nowrap; min-height:40px; min-width:0; padding:8px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface); cursor:pointer; }

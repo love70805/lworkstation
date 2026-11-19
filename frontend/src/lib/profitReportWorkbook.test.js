@@ -28,7 +28,7 @@ it.each(['pre_deduction','financial'])('writes readable %s workbook with textual
  const styles=packageXml.match(/<cellXfs[^>]*>(.*?)<\/cellXfs>/s)[1];
  expect(styles.split('/>')[0]).toContain('fillId="0"');
  expect(styles.split('/>')[0]).toContain('fontId="0"');
- expect(book.Sheets['合成甲店'].B5.s.fgColor.rgb).toBe('EAF1F1');
+ expect(book.Sheets['合成甲店'].B5.s.fgColor.rgb).toBe('EBEEF5');
  expect(book.Sheets['汇总表'].K6).toBeUndefined();
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(book.Sheets['合成甲店'].B2).toMatchObject({t:'s',v:products[0].platformSku});
@@ -38,6 +38,34 @@ it.each(['pre_deduction','financial'])('writes readable %s workbook with textual
  if(kind==='financial'){expect(rows.at(-2)[0]).toBe('扣款');expect(rows.at(-1)[0]).toBe('扣后利润');expect(book.Sheets['扣款'].D3.v).toBe(-0.002);}else expect(rows.flat()).not.toContain('扣款');
  if(process.env.REPORT_QA_DIR){mkdirSync(process.env.REPORT_QA_DIR,{recursive:true});writeFileSync(join(process.env.REPORT_QA_DIR,result.fileName),result.bytes);}
 });
+it('puts each store’s signed deduction and net profit under its summary block and reconciles the monthly total', () => {
+ const items = [8, -5, 20].map((amount, index) => ({
+   ...products[index], store: '示例店' + index, profitExact: String(amount),
+ }));
+ const deductions = [12, -2.25, 0].map((amount, index) => ({
+   ...deductionRows[0], store: items[index].store, signedAmountExact: String(amount),
+ }));
+ const totals = reportTotals(items, '10', '0.7', deductions);
+ const {bytes} = buildProfitReportWorkbook({report:{period:'2026-10',kind:'financial',totalsExact:totals},products:items,deductionRows:deductions});
+ const book = XLSX.read(bytes,{type:'array',cellStyles:true,bookFiles:true});
+ const groupRows = XLSX.utils.sheet_to_json(book.Sheets['汇总表'], {header:1});
+ const amounts = totals.stores.map(store => {
+   const start = groupRows.findIndex(row => row[0] === store.store + ' 小计');
+   expect(start).toBeGreaterThan(0);
+   const deduction = groupRows[start + 1], net = groupRows[start + 2];
+   expect([deduction[0],deduction[9],net[0],net[9]]).toEqual(['扣款',Number(store.deductionExact),'扣后利润',Number(store.financialProfitExact)]);
+   const tab = XLSX.utils.sheet_to_json(book.Sheets[store.store],{header:1});
+   expect(tab.at(-2)[9]).toBe(deduction[9]);
+   expect(tab.at(-1)[9]).toBe(net[9]);
+   return net[9];
+ });
+ expect(amounts).toEqual([-4,-2.75,20]);
+ expect(amounts.reduce((sum, n) => sum+n, 0) + Number(totals.dispatchAmountExact)).toBe(Number(totals.profitExact));
+ const xml = new TextDecoder().decode(bytes);
+ expect(xml).toContain('rgb="FF85571C"');
+ expect(xml).toContain('rgb="FF9B4B50"');
+});
+
 it('handles colliding, reserved and long store names without losing any store',()=>{
  const rows=['汇总表','a/b','a:b','A:B','很长'.repeat(20)].map((store,i)=>({...products[0],store,platformSku:`S${i}`}));
  const workbook=buildProfitReportWorkbook({report:{kind:'pre_deduction',period:'2026-08',revision:1,totalsExact:reportTotals(rows,'0','0')},products:rows});
@@ -63,7 +91,7 @@ it.each(['pre_deduction','financial'])("exports one text order per SKU without a
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(new TextDecoder().decode(result.bytes)).not.toContain('name="核算采购"');
  expect(result.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
- expect(result.templateVersion).toBe("profit-zebra@14-profit-colors");
+ expect(result.templateVersion).toBe("profit-zebra@16-store-deductions");
  const summaryRows=XLSX.utils.sheet_to_json(book.Sheets["汇总表"],{header:1});
  rows.forEach((row,index)=>{
   const summary=summaryRows.find(cells=>cells[1]===row.platformSku);

@@ -2,13 +2,14 @@ import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { db } from './db/clientDatabase';
 import { clearDerivedMemory, tableRevisionReader, derivedCacheDb, invalidateDerivedCache } from './db/derivedCache';
-import { clearErpRecoveryMemory } from './repositories/erpRecoveryReadCache';
+import { clearErpRecoveryMemory, readErpRecoveryProbe } from './repositories/erpRecoveryReadCache';
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { saveErpCostRequest, receiveErpCostInboxEnvelope, recoverErpCostInboxAdoptions, saveManualCostOverride } from './repositories/profitRepository';
 import { buildErpCostRequest } from '../domain/erpCosts';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { buildErpCostInboxEnvelope } from '../domain/erpInboxContract';
 import * as contract from '../domain/erpInboxContract';
+import { beginCostReview } from '../lib/costReviewActivity';
 
 const workspaceId = 'W-RECOVERY', ledgerId = 'L-RECOVERY';
 const recover = () => recoverErpCostInboxAdoptions({ workspaceId });
@@ -36,6 +37,37 @@ beforeEach(async () => {
   await recover(); await recover();
 });
 afterEach(async () => { vi.restoreAllMocks(); clearDerivedMemory(); clearErpRecoveryMemory(); await db.delete(); await derivedCacheDb.delete(); vi.unstubAllGlobals(); });
+
+it('stops a historical background pass at a maintenance boundary and checks it on the next normal run', async () => {
+  await db.salesRows.where('platformSku').equals('A-ANOMALY').modify({ platformSkc: 'OTHER-PARENT' });
+  const read = vi.spyOn(db.erpCostInbox, 'get');
+  const stopped = await recoverErpCostInboxAdoptions({workspaceId, background:true, shouldStop:()=>true});
+  expect(stopped).toEqual([]);
+  expect(read).not.toHaveBeenCalled();
+  expect((await recover()).find(row=>row.id===receipts[0].id).adoption.items.find(row=>row.platformSku==='A-ANOMALY').state).toBe('evidence_incomplete');
+});
+
+it('yields a previously reviewed receipt while a profit read runs and still checks an unprocessed receipt', async () => {
+  const inboxId = receipts[0].id;
+  const probe = defer => readErpRecoveryProbe({ inboxId, workspaceId, ledgerId,
+    getContext: async () => ({ workspaceId, memberId: 'finance', role: 'finance' }), readScope: { deferReviewed: () => defer } });
+  expect(await probe(true)).toEqual({ deferred: true });
+  expect((await probe(false)).result.adoption.summary.anomalyCount).toBe(1);
+  await db.erpCostInbox.update(inboxId, { adoption: null });
+  expect((await probe(true)).deferred).toBeUndefined();
+});
+
+it('defers reviewed receipts during cost entry while still finishing a newly pending local adoption', async () => {
+  const pending = receipts[1].id;
+  await db.erpCostInbox.update(pending,{adoptionPending:true});
+  const close = beginCostReview();
+  try {
+    const processed = await recoverErpCostInboxAdoptions({workspaceId,background:true});
+    expect(processed.map(row=>row.id)).toEqual([pending]);
+    expect((await db.erpCostInbox.get(pending)).adoptionPending).toBe(false);
+  } finally { close(); }
+  expect((await recover()).map(row=>row.id).sort()).toEqual(receipts.map(row=>row.id).sort());
+});
 
 it('reuses bounded signatures after restart but reads adoption state from current receipts', async () => {
   const validate = vi.spyOn(contract, 'validateErpCostInboxEnvelope');
@@ -75,8 +107,12 @@ it('reads complete oversized evidence once per input version and retains only sm
     await db.settings.put({ key: 'unrelated-notification', value: true });
     await recover();
     expect(seen).toEqual([]);
-    // A new source revision starts a fresh sweep and never reuses stale rows.
+    // Approval edits retain unchanged cost fingerprints. Cost edits invalidate them.
     await db.costApprovals.put({ id: 'UNRELATED-APPROVAL', workspaceId, ledgerId, platformSku: 'UNRELATED', approvedAmount: 0 });
+    await recover();
+    expect(seen).toEqual([]);
+    await db.erpCostRows.where('platformSku').equals('UNRELATED').modify({ diagnosticPadding: 'updated' });
+    seen.length = 0;
     await recover();
     expect(seen.filter(sku => sku === 'UNRELATED')).toHaveLength(1);
   } finally { db.erpCostRows.hook('reading').unsubscribe(reading); }

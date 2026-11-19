@@ -1,10 +1,29 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { db, getProductEditorSnapshot, listProductCatalogRecords, saveProductCatalogRecord, setActiveMemberContext } from "./database";
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 
 beforeEach(async () => { await db.delete(); await db.open(); await setActiveMemberContext({ workspaceId: "workspace-default" }); });
 afterEach(async () => { db.close(); await db.delete(); });
+
+it('shows an empty official catalog without reading purchase or profit history for drafts', async () => {
+  await db.products.add({ id:'D', workspaceId:'workspace-default', status:'draft', name:'预存商品' });
+  const costRead = vi.spyOn(db.erpCostRows, 'toArray'), profitRead = vi.spyOn(db.profitLines, 'toArray');
+  try {
+    expect(await listProductCatalogRecords({includeDrafts:false})).toEqual([]);
+    expect(costRead).not.toHaveBeenCalled();
+    expect(profitRead).not.toHaveBeenCalled();
+    expect((await listProductCatalogRecords()).map(product => product.id)).toEqual(['D']);
+  } finally { costRead.mockRestore(); profitRead.mockRestore(); }
+});
+
+it('applies product visibility before sending stored details to the editor', async () => {
+  const onStoredProduct = vi.fn();
+  await db.products.add({ id: 'P', workspaceId: 'workspace-default', name: '私人商品', ownerId: 'other', visibility: 'private' });
+  await setActiveMemberContext({ memberId: 'reader', role: 'member' });
+  expect(await getProductEditorSnapshot({ productId: 'P', onStoredProduct })).toBeNull();
+  expect(onStoredProduct).toHaveBeenCalledExactlyOnceWith(null);
+});
 
 it("shows reference profit independently of finalization and keeps all financial records unchanged", async () => {
   const source = { ...erpProductCatalogFixture(), attribute: "B-粉色", catalogMappings: [] };

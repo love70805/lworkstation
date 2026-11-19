@@ -8,6 +8,38 @@ import { once } from 'node:events';
 import { handleCollectionTaskRequest, collectionScopeHash, recoverCollectionTasks, recordCollectionDelivery } from './erp-collection-tasks.mjs';
 
 {
+  const task = { kind:'collection-task', taskId:'done', workspaceId:'W', status:'partial', expectedSkus:[{platformSkc:'A'}],
+    batches:[{platformSkcs:['A'],status:'incomplete',deliveryId:'D'}] };
+  const report = (now, data) => handleCollectionTaskRequest([task], {method:'POST', now,
+    url:new URL('http://localhost/erp/v1/collection-tasks/done/adoption'), payload:{workspaceId:'W',deliveryId:'D',...data}}).body;
+  const legacy = {state:'pending',processedAt:'2026-11-19T10:43:05.727Z',expectedCount:1,missingCount:1};
+  report(1000,legacy);
+  assert.equal(task.batches[0].adoption.missingCount,1);
+  assert.equal(report(2000,legacy).idempotent,true);
+  assert.equal(task.updatedAt,new Date(1000).toISOString());
+  report(3000,{state:'pending'});
+  assert.equal(task.batches[0].adoptionReportedAt,undefined);
+  assert.equal(report(4000,{state:'pending'}).idempotent,true);
+  assert.equal(task.updatedAt,new Date(3000).toISOString());
+  assert.equal(report(5000,{...legacy,state:'review_required'}).task.batches[0].adoption.missingCount,1);
+}
+
+{
+  const request = { kind: 'request', status: 'registered', requestId: 'RETRY', workspaceId: 'W', ledgerId: 'L', platformSkcs: ['A', 'B'], expectedSkus: [] };
+  const records = [request];
+  const call = (suffix, payload) => handleCollectionTaskRequest(records, { method: 'POST', url: new URL(`http://localhost/erp/v1/collection-tasks${suffix}`),
+    payload: { workspaceId: 'W', ...payload }, instanceId: 'NEW' }).body;
+  const { task } = call('', { requestId: request.requestId, executionProtocol: 2, catalogMode: 'on_demand' });
+  Object.assign(task, { instanceId: 'OLD', status: 'partial', runMode: 'cost', runnerId: 'OLD-RUNNER',
+    batches: [{ batchId: 'OK', platformSkcs: ['A'], status: 'delivered', deliveryId: 'KEPT' }, { batchId: 'GAP', platformSkcs: ['B'], status: 'failed' }] });
+  assert.equal(recoverCollectionTasks(records, 'NEW'), true);
+  assert.equal(task.status, 'partial'); assert.equal(task.runnerId, undefined);
+  call(`/${task.taskId}/control`, { action: 'request_resume', mode: 'cost', retryFailed: true });
+  assert.equal(task.status, 'ready');
+  assert.equal(task.batches[0].deliveryId, 'KEPT'); assert.equal(task.batches[1].status, 'pending');
+}
+
+{
   const records = [{ kind: 'request', status: 'registered', requestId: 'R-desktop', workspaceId: 'W', ledgerId: 'L', platformSkcs: ['A'], expectedSkus: [] }];
   const call = (suffix, payload) => handleCollectionTaskRequest(records, { method: 'POST', url: new URL(`http://localhost/erp/v1/collection-tasks${suffix}`), payload: { workspaceId: 'W', ...payload }, instanceId: 'I' }).body;
   const { task } = call('', { requestId: 'R-desktop', executionProtocol: 2, executionTarget: 'desktop', filters: { sku: 'A' } });

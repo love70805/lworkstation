@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { erpCollectionPresentation, isActiveErpCollection, erpCostCollectionTiming } from './erpCollectionStatus';
+import { currentLedgerCollectionTask, erpCollectionPresentation, isActiveErpCollection, erpCostCollectionTiming } from './erpCollectionStatus';
 
 it('does not extend finished costs for later adoption reports or optional catalog reads', () => {
   const task = { createdAt: '2026-10-18T00:00:00Z', updatedAt: '2026-10-18T05:00:00Z', runMode: 'catalog', runnerId: 'material-runner',
@@ -15,6 +15,14 @@ it('leaves historical finished costs without timestamps unknown', () => {
 });
 
 const delivered = { platformSkcs: ['A'], status: 'delivered', deliveryId: 'D' };
+
+it('keeps the latest finished round visible ahead of an old resumable task and respects a live collection', () => {
+  const current = { status: 'partial', catalogMode: 'on_demand', batches: [delivered, { status: 'failed' }] };
+  const old = { status: 'paused', batches: [{ status: 'pending' }] };
+  expect(currentLedgerCollectionTask([current, old])).toBe(current);
+  const live = { ...old, status: 'running', runnerId: 'runner', batches: [{ status: 'running' }] };
+  expect(currentLedgerCollectionTask([current, live])).toBe(live);
+});
 
 it('shows actual background material reads without offering resume, including partial cost tasks', () => {
   for (const status of ['cost_complete', 'partial']) {

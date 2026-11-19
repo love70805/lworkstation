@@ -1,6 +1,10 @@
 # Lworkstation 发布状态
 
-更新时间：2026-11-13（北京时间）。本页区分软件候选、代码合并与实际公开发布；完整沿革见[开发历史](DEVELOPMENT_HISTORY.md)。
+本页列出正式版和独立 Beta 的发布记录。[开发历史](DEVELOPMENT_HISTORY.md)
+
+## 2.1.0 稳定版
+
+常规与最低成本核算共用同月账本的人工价、仓储费率、代发和扣款。两种详情使用同一份采购证据视图。导入代发表默认选中核算月，导出按当下来源生成 Excel。已改善档案首次编辑、异常处理、采集状态核对及大账本导出的读取路径。[使用指南](USER_GUIDE_2.0.md) · [2.1.0 正式发布](https://github.com/love70805/lworkstation/releases/tag/v2.1.0)
 
 2026-11-07 以 [2.0.6](https://github.com/love70805/lworkstation/releases/tag/v2.0.6) 作为稳定基线，安装包和两份中文版图文指南在同一发布页。较早条目记载当时情况，旧安装包已归档，旧版源码可按[版本标签](https://github.com/love70805/lworkstation/tags)定位。
 

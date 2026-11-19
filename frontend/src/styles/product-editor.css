@@ -165,7 +165,7 @@
 
 /* The catalog editor follows the same full-width rhythm as the library. */
 .editor-grid { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.editor-grid > .panel { width: 100%; min-width: 0; }
+.editor-grid > .panel, .editor-dependent-fields > .panel { width: 100%; min-width: 0; }
 .editor-titlebar { margin-bottom: 18px; }
 .editor-titlebar .page-actions { flex: 0 0 auto; width: auto; max-width: 100%; flex-wrap: wrap; }
 .editor-titlebar .button { min-height: 36px; padding: 6px 12px; }
@@ -184,6 +184,7 @@
 .editor-secondary-details > .form-field, .editor-secondary-details > .mapping-two-col { margin-top: 12px; }
 .editor-secondary-details .form-field label { color: var(--text); }
 .editor-inline-note { margin: 12px 18px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.editor-dependent-fields { display: contents; }
 .catalog-variants-panel { min-height: 0; }
 .catalog-variants-panel > .field-error { margin: 0 18px 12px; }
 .catalog-variants-table { min-width: 900px; }

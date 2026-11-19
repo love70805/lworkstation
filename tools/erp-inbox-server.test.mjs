@@ -1011,6 +1011,19 @@ try {
   assert.equal(directMetaWarningBatch.sourceMeta.evidenceComplete, false);
   assert.deepEqual(directMetaWarningBatch.sourceMeta.sourceWarnings, ["top-level-collection-warning"]);
 
+  const workbookLimit = { kind: "sheetRows", actual: 100002, limit: 100001 };
+  response = await post("/erp/v1/cost-batches", directInboxFixture({
+    deliveryId: "WORKBOOK-LIMIT-DELIVERY", batchId: "WORKBOOK-LIMIT-BATCH", workspaceId: "workbook-limit-test",
+    ledgerId: "workbook-limit-ledger", requestId: "workbook-limit-request", platformSkc: "SKC-LIMIT",
+    sourceMeta: { collectionMethod: "legacy", bulkFallbackReason: "workbook_too_large", workbookLimit: { ...workbookLimit, extra: "discard" } },
+    rows: [{ platformSku: "SKU-LIMIT", platformSkc: "SKC-LIMIT", warehouseSku: "WH-LIMIT", unitCost: 5 }],
+  }));
+  assert.equal(response.status, 202);
+  response = await fetch(`${base}/erp/v1/cost-batches?workspaceId=workbook-limit-test&ledgerId=workbook-limit-ledger`);
+  const fallbackMeta = (await response.json()).records[0].envelope.batch.sourceMeta;
+  assert.equal(fallbackMeta.bulkFallbackReason, "workbook_too_large");
+  assert.deepEqual(fallbackMeta.workbookLimit, workbookLimit);
+
   for (const failureField of ["detailFailures", "mappingFailures"]) {
     const suffix = failureField === "detailFailures" ? "DETAIL" : "MAPPING";
     response = await post("/erp/v1/cost-batches", directInboxFixture({

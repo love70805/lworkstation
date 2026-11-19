@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.0.7-beta.16",
-  "edition": "beta",
+  "version": "2.1.0",
+  "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/beta-export-memory",
+  "integrationBranch": "codex/release-2.1.0",
   "requiredCommits": [
     {
-      "module": "user-beta15-source-snapshot",
-      "commit": "e25ea76"
+      "module": "release-2.1-main-baseline",
+      "commit": "83f7ef7083f4de37782fb2a59ac26049e40a41d8"
     }
   ]
 }

@@ -11,7 +11,7 @@ const CHECKPOINTS = 'shopeersErpCollectionCheckpointsV1';
 const sender = { url: 'https://www.zhuolinkeji.cn/view/system/purchaseOrderModule/purchasingManagement.html', frameId: 0 };
 const utf8Bytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8');
 
-function fixture(count = 1, storageSeed = {}) {
+function fixture(count = 1, storageSeed = {}, permissions = ['storage']) {
   const mappings = Array.from({ length: count }, (_, index) => ({ platformSku: `SYNTHETIC-SKU-${index}`, platformSkc: `SYNTHETIC-SKC-${index}`, warehouseSku: 'SHARED-WAREHOUSE', productName: '合成中文商品🧪' }));
   const request = { kind: 'request', requestId: 'REQ', ledgerId: 'LEDGER', ledgerPeriod: '2026-10', workspaceId: 'WS', status: 'registered',
     registeredAt: '2026-11-04T00:00:00Z', platformSkcs: mappings.map(item => item.platformSkc), expectedSkus: structuredClone(mappings) };
@@ -32,10 +32,10 @@ function fixture(count = 1, storageSeed = {}) {
     getBytesInUse: async () => storedBytes(storage),
     get: async keys => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map(key => [key, structuredClone(storage[key])])),
     set: async values => {
-      if (storedBytes({ ...storage, ...values }) > 10 * 1024 * 1024) throw new Error('Resource::kQuotaBytes quota exceeded');
+      if (!permissions.includes('unlimitedStorage') && storedBytes({ ...storage, ...values }) > 10 * 1024 * 1024) throw new Error('Resource::kQuotaBytes quota exceeded');
       writes.push(structuredClone(values)); Object.assign(storage, structuredClone(values));
     },
-  } }, runtime: { getManifest: () => ({ version: extensionVersion }), onMessage: { addListener: listener => { dispatch = listener; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} },
+  } }, runtime: { getManifest: () => ({ version: extensionVersion, permissions }), onMessage: { addListener: listener => { dispatch = listener; } }, onInstalled: { addListener() {} }, onStartup: { addListener() {} },
     sendMessage: (message, callback) => dispatch(message, sender, callback),
   }, alarms: { create() {}, onAlarm: { addListener() {} } } };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__: true, chrome, URL, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout, console,
@@ -99,6 +99,15 @@ function fixture(count = 1, storageSeed = {}) {
   assert.ok(measured.storageAvailableBytes < 1024 * 1024);
   assert.equal((await sample.bridge.submit(sample.input)).code, 'ERP_COST_STORAGE_FULL');
   assert.deepEqual(sample.storage[PENDING], [retained]);
+}
+
+{
+  const retained = { resultDeliveryId: 'OTHER', syntheticEvidence: 'x'.repeat(22 * 1024 * 1024) };
+  const sample = fixture(1, { [PENDING]: [retained] }, ['storage', 'unlimitedStorage']);
+  sample.input.warehouseEvidence.syntheticEvidence = 'x'.repeat(11 * 1024 * 1024);
+  assert.equal((await sample.bridge.measureCost(sample.input)).storageFits, false);
+  assert.equal((await sample.bridge.submit(sample.input)).code, 'ERP_COST_STORAGE_FULL');
+  assert.deepEqual(sample.storage[PENDING], [retained], 'the desktop budget still protects existing pending deliveries');
 }
 
 {

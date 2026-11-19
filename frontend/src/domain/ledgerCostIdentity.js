@@ -2,7 +2,7 @@ import { canonicalPlatformSku, canonicalPlatformSkc } from './identifiers';
 import { resolveFormalCostDecision } from './costPolicy';
 
 const text = value => String(value ?? '').normalize('NFKC').trim();
-export const LEDGER_COST_IDENTITY_VERSION = 'ledger-cost-identity@1';
+export const LEDGER_COST_IDENTITY_VERSION = 'ledger-cost-identity@2-shared-manual';
 
 // Build from the complete ledger, before any store/search/missing-cost filter.
 // A manual amount can replace a price, but cannot resolve an ambiguous parent.
@@ -43,14 +43,18 @@ export function describeLedgerCostIdentityIssue(issue) {
   return `${sku} 已采用的 ERP 成本缺少平台 SKC，无法核实成本归属，请重新采集或按店铺人工更正。`;
 }
 
-export function resolveLedgerCostDecision({ identity, ...scope }) {
-  const decision = resolveFormalCostDecision(scope);
+export function resolveLedgerCostDecision({ identity, ...scope }, checkPeriod) {
+  const decision = resolveFormalCostDecision(scope, checkPeriod);
   // Some valid historical adoptions predate persisted SKC evidence. Preserve
   // their existing eligibility; never invent a parent. New ERP envelopes are
   // checked strictly on adoption, and every known mismatch/conflict is blocked.
   const issue = ledgerCostIdentityIssue(identity,
     decision.source === 'manual_override' ? null : scope.erpCost);
   if (!issue) return decision;
+  if (decision.source === 'erp' && scope.manualOverride && issue.code !== 'ledger_sku_skc_conflict') {
+    const fallback = resolveFormalCostDecision({ ...scope, erpCost: null }, checkPeriod);
+    if (fallback.source === 'manual_override') return fallback;
+  }
   return { ...decision, status: 'missing', calculationMode: null, eligibleForExactProfit: false,
     source: null, unitCost: null, sourceRecordId: null, approvalId: null,
     reasons: [...decision.reasons, issue.code], identityIssue: issue };

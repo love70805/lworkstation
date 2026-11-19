@@ -30,12 +30,15 @@ export function createLedgerCatalogDraftBuilder() {
       const candidates = [], issues = [];
       for (const entry of identities.values()) {
         const reason = entry.skcs.size === 0 ? 'missing_skc' : entry.skcs.size > 1 ? 'skc_conflict'
-          : entry.stores.size !== 1 ? 'store_conflict' : new Set([...entry.attributes].map(catalogAttributeKey)).size > 1 ? 'attribute_conflict' : null;
+          : entry.stores.size !== 1 ? 'store_conflict' : null;
         if (reason) { issues.push({ platformSku: entry.platformSku, reason }); continue; }
+        const attributes = [...entry.attributes];
+        const conflictingAttribute = new Set(attributes.map(catalogAttributeKey)).size > 1;
+        if (conflictingAttribute) issues.push({ platformSku: entry.platformSku, reason: 'attribute_conflict' });
         candidates.push({
           platformSku: entry.platformSku, canonicalPlatformSku: entry.canonicalPlatformSku,
           platformSkc: [...entry.skcs.values()][0], canonicalPlatformSkc: [...entry.skcs.keys()][0],
-          store: [...entry.stores.values()][0], attribute: [...entry.attributes][0] ?? '',
+          store: [...entry.stores.values()][0], attribute: conflictingAttribute ? '' : attributes[0] ?? '',
           supplierNumbers: [...entry.supplierNumbers], batchIds: [...entry.batchIds],
         });
       }

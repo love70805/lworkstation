@@ -2,11 +2,11 @@ import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 import { dispatchOrderHeaders } from './dispatchOrderNumber';
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@9-dispatch-store";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@10-dispatch-period";
 export const DEDUCTION_STORE_RULE = 'deduction-store@1-sh-number';
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
-  date: ["日期", "登记日期"],
+  date: ["日期", "登记日期", "代发日期", "月份", "年月"],
   store: ["店铺", "店铺名称", "店铺号", "店铺编号"],
   platformSkc: ["SKC", "skc", "平台SKC"],
   supplierNumber: ["供方货号", "货号"],
@@ -51,7 +51,7 @@ export function supplementRowLabel(row) {
   const position=row.recordRow?`表格第 ${row.recordRow} 行${csv?`（CSV 物理第 ${row.sourceRow} 行）`:''}`:`${csv?'CSV 物理':'工作表'}第 ${row.sourceRow} 行`;
   return `${position}${row.businessId?` · 单号 ${row.businessId}`:''}`;
 }
-export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", supplierNumbers, ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store, stores = [], includeAll = false } = {}) {
+export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, ownerMarker = "", supplierNumbers, ownerField = kind==='deduction'?'supplierNumber':'owner', matchMode = 'exact', store, stores = [], includeAll = false, periodScope } = {}) {
   const cells = source.cells ?? [];
   const headerIndex=source.sourceRows?source.sourceRows.indexOf(Number(headerRow)):Number(headerRow)-1;
   if(headerIndex<0||headerIndex>=cells.length)throw new Error("表头行不在来源记录中。");
@@ -71,7 +71,9 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
     const values = cells[index];
     if (!values.some(value => normalized(value))) {group=null;continue;}
     const sourceRow = source.sourceRows?.[index] ?? index + 1;
-    const position={sourceRow,recordRow:source.recordRows?.[index]??index+1,sourceFormat:source.sourceFormat??(source.sheetName==='CSV'?'csv':'xlsx'),businessId:normalized(values[Number(fields.businessId)]),sourceSheet:source.sheetName};
+    const sourcePeriod = periodScope?.rows[index];
+    if (periodScope && !periodScope.selected.has(sourcePeriod)) { group=null; continue; }
+    const position={sourceRow,recordRow:source.recordRows?.[index]??index+1,sourceFormat:source.sourceFormat??(source.sheetName==='CSV'?'csv':'xlsx'),businessId:normalized(values[Number(fields.businessId)]),sourceSheet:source.sheetName,...(sourcePeriod ? {sourcePeriod} : {})};
     const missingQuantity=kind==='dispatch'&&!normalized(values[Number(fields.quantity)]);
     const mergedFrom={};
     const get = field => {
@@ -134,7 +136,7 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
     const remarks=values.flatMap((value,col)=>!mapped.has(col)&&normalized(value)?[{column:col+1,header:normalized(headers[col]),value:normalized(value)}]:[]);
     rows.push({ ...position, ...Object.fromEntries(identifiers.map(field => [field, normalized(get(field))])), platformSkc, order1688, kind, ownerMarker:owner, inheritedFrom, inheritedIdentifiers, mergedFrom, remarks, amountHeader:kind==='deduction'?normalized(headers[Number(fields.amount)]):null, originalStore: sourceStore || source.sheetName, store: targetStore, fileHash: source.fileHash, sourceSheet: source.sheetName, sourceName: source.fileName, selected: true, ...(kind === "dispatch" ? { quantityExact: exact(amount,{nonnegative:true}), ...(position.sourceFormat === "xlsx" && typeof get("quantity") === "string" ? { quantityFromText: true } : {}) } : { signedAmountExact: exact(amount),storeMapping:{rule:DEDUCTION_STORE_RULE,input:sourceStore||source.sheetName,target:targetStore,source:sourceStore?'source_column':'sheet_mapping'} }) });
   }
-  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:selectedSet?'':marker,ownerField,matchMode:selectedSet?'exact':matchMode,includeAll,store:fallbackStore,...(kind==='deduction'?{storeRule:DEDUCTION_STORE_RULE}:{}),...(selectedNumbers===null?{}:{supplierNumbers:selectedNumbers})}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
+  return { rows, errors, ignored, source: { fileHash:source.fileHash, fileName:source.fileName, sheetName:source.sheetName, sourceFormat:source.sourceFormat, headerRow, mapping:fields, selection:{ownerMarker:selectedSet?'':marker,ownerField,matchMode:selectedSet?'exact':matchMode,includeAll,store:fallbackStore,...(periodScope?{periods:[...periodScope.selected].sort()}:{}),...(kind==='deduction'?{storeRule:DEDUCTION_STORE_RULE}:{}),...(selectedNumbers===null?{}:{supplierNumbers:selectedNumbers})}, ignored, parserVersion:SUPPLEMENT_PARSER_VERSION } };
 }
 
 export function normalizeSupplementCandidate(input, { ledger, stores }) {

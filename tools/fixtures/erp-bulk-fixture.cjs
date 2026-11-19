@@ -10,9 +10,9 @@ const rows = targets.flatMap((_, scope) => Array.from({ length: ORDERS }, (_, in
     purchaseOrderId: `PO-SKC-${scope}-${index}`, purchaseOrderNo: businessOrder(scope, index), creationTime: date(index), purchaseStatus: '7' })));
 const longMapping = Array.from({ length: 200 }, (_, index) => `FOREIGN-${index}`).join(',').slice(0, 1024);
 const headers = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '采购总价', '创建时间', '采购状态', '1688订单状态', '商品名称', '供应商名称'];
-function exportBytes(broken = false) {
+function exportBytes(broken = false, selected = rows) {
     const book = xlsx.utils.book_new();
-    const values = [broken ? ['未知列'] : headers, ...(!broken ? rows.map(row => [row.purchaseOrderNo, `WH-${row.scope}`, row.scope === 0 ? longMapping : `SKU-${row.scope}`,
+    const values = [broken ? ['未知列'] : headers, ...(!broken ? selected.map(row => [row.purchaseOrderNo, `WH-${row.scope}`, row.scope === 0 ? longMapping : `SKU-${row.scope}`,
         2, 4 + row.index % 3, 2 * (4 + row.index % 3), row.creationTime, '已上架', '已付款', '合成采购商品', '合成供应商']) : [])];
     xlsx.utils.book_append_sheet(book, xlsx.utils.aoa_to_sheet(values), 'Sheet1');
     return xlsx.write(book, { bookType: 'xlsx', type: 'array', compression: true });
@@ -21,7 +21,12 @@ const binary = exportBytes(), brokenBinary = exportBytes(true);
 function fixture(url) {
     const endpoint = url.pathname.split('/').at(-1);
     const target = url.searchParams.get('sku') || url.searchParams.get('purchaseOrderId') || url.searchParams.get('productId') || url.searchParams.get('skuGroup') || '';
-    if (endpoint === 'export-purchase-order') return { binary: process.env.ERP_BULK_BROKEN === '1' ? brokenBinary : binary };
+    if (endpoint === 'export-purchase-order') {
+        if (process.env.ERP_BULK_BROKEN === '1') return { binary: brokenBinary };
+        const skcs = new Set(target.split(/[,\s]+/));
+        const selected = rows.filter(row => skcs.has(`SKC-${row.scope}`));
+        return { binary: selected.length === rows.length ? binary : exportBytes(false, selected) };
+    }
     const scope = Number(target.split('-').at(-1));
     let data, count;
     if (endpoint === 'product-page') data = [{ itemId: `WH-${scope}`, tradeName: '合成采购商品' }];

@@ -2,6 +2,7 @@ import { db } from "../db/clientDatabase";
 import { getActiveMemberContext } from "./selectionRepository";
 import { cachedDerived, sourceRevision, tableRevisionReader, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import { readLedgerSalesRows } from './ledgerReadCache';
+import { readPageSaleChunks } from './ledgerPageSalesRepository';
 import { runDerivedComputation } from './derivedComputationService';
 import { canonicalStore } from "../../domain/batchSalesImport";
 
@@ -29,11 +30,25 @@ async function readScopedSalesOnce({ workspaceId, ledgerId, store = "all", allow
 }
 
 export async function readLedgerSalesAnalytics(scope) {
-  // Keep this live-query result as the selected scope's read-only source. Date
-  // clicks can reuse it without cloning the full ledger from IndexedDB again.
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-  const store = scope.store ?? 'all';
-  return readScopedSales(scope, async (rows, period) => ({ ...await cachedSales({ scope: [scope.workspaceId, scope.ledgerId, store === 'all' ? null : canonicalStore(store), period, today], formula: 'daily-sales@4-grouped', compute: () => runDerivedComputation('sales', { rows, period, store, today }) }), sourceRows: rows }));
+  const { workspaceId, ledgerId, store = 'all' } = scope;
+  return retrySourceRead(async () => {
+    const revision = sourceRevision();
+    const current = await getActiveMemberContext();
+    const ledger = await db.ledgers.get(ledgerId);
+    if (!workspaceId || current.workspaceId !== workspaceId || ledger?.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
+    assertSourceRevision(revision);
+    await observeSourceRevision();
+    const result = await cachedSales({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), ledger.period, today], formula: 'daily-sales@5-chart',
+      compute: async () => {
+        const pageChunks = await readPageSaleChunks(workspaceId, ledgerId, {parent:ledger});
+        const hasStore = store === 'all' || pageChunks.some(chunk => [...chunk.stores.keys()].some(name => canonicalStore(name) === canonicalStore(store)));
+        return { hasStore, data: await runDerivedComputation('sales', { pageChunks, workspaceId, period: ledger.period, store, today }) };
+      } });
+    assertSourceRevision(revision);
+    if (!result.hasStore && !scope.allowMissingStore) throw new Error('店铺不属于当前账本。');
+    return result.data;
+  });
 }
 
 export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store = "all", date }) {
@@ -68,9 +83,9 @@ export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
         scope: [workspaceId, ledger.id, store === 'all' ? null : canonicalStore(store), ledger.period, today],
         formula: 'monthly-chart@1',
         compute: async () => {
-          const rows = await db.salesRows.where('ledgerId').equals(ledger.id).filter(row => row.workspaceId === workspaceId && (store === 'all' || canonicalStore(row.store) === canonicalStore(store))).toArray();
+          const pageChunks = await readPageSaleChunks(workspaceId, ledger.id);
           assertSourceRevision(revision);
-          const data = await runDerivedComputation('sales', { rows, period: ledger.period, store, today });
+          const data = await runDerivedComputation('sales', { pageChunks, workspaceId, requireExplicitOwner: true, period: ledger.period, store, today });
           return data.chartMonth;
         },
       });

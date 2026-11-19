@@ -4,6 +4,7 @@ import { buildErpCostBatchEnvelope } from "../domain/erpCostBatchEnvelope";
 import { buildErpCostInboxEnvelope } from "../domain/erpInboxContract";
 import { ERP_ADOPTION_VERSION, summarizeErpAdoption } from "../domain/erpAutomaticAdoption";
 import { buildErpInboxReview, readErpInboxReviewEvidence } from "./erpInboxReview";
+import { erpInboxSummary } from '../domain/erpInboxSummary';
 
 const ledger = { id: "LEDGER", workspaceId: "WORKSPACE", period: "2026-09", status: "cost_pending" };
 const record = (id, price, date = "2026-09-01", quantity = 10) => ({ recordId: id, unitPrice: price, purchaseDate: date, quantity, eligible: true, exclusionReasons: [] });
@@ -50,6 +51,26 @@ function lowHistory() {
 }
 
 describe("ERP inbox review display projection", () => {
+  it('keeps summary counts, scope, inline reasons and history without retaining purchase bodies', () => {
+    const receipts = [receipt(1, [{ sku: 'A', price: 1 }, { sku: 'ZERO', price: 0 }]),
+      receipt(2, [{ sku: 'A', price: 1 }, { sku: 'MIXED', records: [record('m1', 1), record('m2', 5)] }]),
+      receipt(3, [{ sku: 'OLD', price: 1 }], { status: 'voided' }),
+      receipt(4, [{ sku: 'EMPTY', state: 'missing', records: [] }])];
+    const rows = ['A', 'ZERO', 'MIXED', 'OLD', 'EMPTY'].map(sku => row(sku));
+    const before = structuredClone(receipts);
+    const options = { includeEvidence: false, includeRowReasons: true };
+    const full = review(receipts, rows, options);
+    const summaries = receipts.map(item => ({ ...item, inbox: erpInboxSummary(item.inbox) }));
+    const projected = review(summaries, rows, options);
+    expect(projected.exceptions).toEqual(full.exceptions);
+    expect(projected.batches.map(({ inbox, ...batch }) => batch)).toEqual(full.batches.map(({ inbox, ...batch }) => batch));
+    for (const item of summaries) {
+      expect(JSON.stringify(item.inbox)).not.toContain('purchaseRecords');
+      expect(readErpInboxReviewEvidence({ ...item, ledger, platformSku: 'A' }).match).toBeNull();
+    }
+    expect(receipts).toEqual(before);
+    expect(readErpInboxReviewEvidence({ ...receipts[0], ledger, platformSku: 'A' }).match?.status).toBe('anomaly_pending');
+  });
   it('summarizes statuses without reading procurement bodies, then validates only the opened receipt', () => {
     const first = receipt(1, [{ sku: 'A', price: 1 }]), other = receipt(2, [{ sku: 'B', price: 1 }]);
     let firstReads = 0, otherReads = 0;

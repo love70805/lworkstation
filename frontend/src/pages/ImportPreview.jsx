@@ -8,6 +8,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowRight, FileSpreadsheet, Upload, X } from "lucide-react";
 import { Button, ProgressBar, useToast } from "../components/UI";
 import { getActiveMemberContext, listLedgerSummaries, previewSalesImports, saveSalesImports } from "../data/database";
+import { warmImportedProfitSales } from '../data/repositories/profitPageSalesRepository';
 import { importReturnHref } from "../lib/importNavigation";
 import { buildProfitHref } from "../lib/profitFilter";
 import { summarizeImportPeriod } from "../lib/importPeriod";
@@ -488,8 +489,10 @@ export default function ImportPreview() {
       await assertImportContext();
       if (controller.signal.aborted) throw new Error("导入已取消，尚未写入数据。");
       setProgress({ value: null, label: "正在核对并原子写入，完成前可取消" });
-      setResult(await saveSalesImports({ ...payload, preview, overwriteSignature, signal: controller.signal,
-        onProgress: ({ completed, total }) => setProgress({ value: completed / total * 100, label: `写入 ${completed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")} 行` }) }));
+      const saved = await saveSalesImports({ ...payload, preview, overwriteSignature, signal: controller.signal,
+        onProgress: ({ completed, total }) => setProgress({ value: completed / total * 100, label: `写入 ${completed.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")} 行` }) });
+      setResult(saved);
+      warmImportedProfitSales(saved.ledgerId, importWorkspaceRef.current);
       // The profit filter also uses the store scope of a successfully imported group.
       if (files.some(item => item.supplierGroupRule?.id)) {
         try { rememberSupplierGroupSelection(importWorkspaceRef.current, files); }

@@ -42,10 +42,11 @@ it('uses current data for legacy finalized ledgers and permits source updates di
  expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('更新代发').click());expect(onEdit).toHaveBeenCalledWith('dispatch');
  await act(async()=>button('导出利润表').click());expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},expect.any(Object));
 });
-it('keeps historical downloads separate from the direct current export and allows regenerating after data edits',async()=>{
+it('shows the current export and sources even when the ledger contains archived reports',async()=>{
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
- expect(button('导出利润表')).toBeDefined();expect(container.textContent).toContain('历史导出（2）');expect(button('更新扣款')).toBeDefined();
- await act(async()=>button('下载此报告').click());expect(mock.read).toHaveBeenCalledWith('F');expect(mock.download).toHaveBeenCalledWith(formal,{dispatchRows:[{ownerMarker:'张三'}],deductionRows:undefined,useStoredFile:true});
+ expect(button('导出利润表')).toBeDefined();expect(button('更新扣款')).toBeDefined();
+ expect(container.textContent).not.toMatch(/历史导出|下载此报告|下载最近报告|补齐代发单号/);
+ expect(mock.read).not.toHaveBeenCalled();
 });
 it('does not close a source editor when a prior report exists',async()=>{
  const onEdit=vi.fn();await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});

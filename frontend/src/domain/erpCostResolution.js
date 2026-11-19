@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
-import { effectivePurchaseAmount, normalizePurchaseEvidenceRecord, validateCostPeriod } from "./erpPurchaseEvidence";
+import { effectivePurchaseAmount, normalizePurchaseEvidenceRecord, purchaseEvidenceUnitPrice, validateCostPeriod } from "./erpPurchaseEvidence";
 import { selectLatestPurchaseRecords } from "./erpPurchaseSelection";
 export { normalizePurchaseEvidenceRecord } from "./erpPurchaseEvidence";
 
@@ -78,6 +78,22 @@ export function selectFormalPurchaseRecords(records, maxRecords = ERP_PREVIEW_RE
   return selectLatestPurchaseRecords(records, maxRecords);
 }
 
+const priceTolerance = (medianPrice, mad) => Math.max(medianPrice * 0.3, 0.5, 3 * mad);
+const extremePrices = (low, high) => high - low >= 1 && high >= low * 2;
+
+// Every eligible subset has its median in [low, high]. If neither end
+// can trip a rule, exclusions or a ledger cutoff cannot create an anomaly.
+export function mayHavePurchaseAnomalies(records) {
+  let low = Infinity, high = -Infinity, count = 0;
+  for (const record of records) {
+    const price = purchaseEvidenceUnitPrice(record);
+    if (price === 0 || price === 1) return true;
+    if (price == null || price <= 0 || !Number.isFinite(price)) continue;
+    low = Math.min(low, price); high = Math.max(high, price); count++;
+  }
+  return count >= ERP_HISTORY_MIN_SAMPLES && (high - low > priceTolerance(low, 0) || extremePrices(low, high));
+}
+
 export function detectPurchaseCostAnomalies(records, selectedRecords) {
   const positivePrices = (records ?? [])
     .filter((record) => record.eligible !== false && record.exclusionReasons.length === 0 && Number(record.unitPrice) > 0)
@@ -88,7 +104,7 @@ export function detectPurchaseCostAnomalies(records, selectedRecords) {
     : median(positivePrices.map((price) => Math.abs(price - baselineMedian)));
   const baselineEnabled = positivePrices.length >= ERP_HISTORY_MIN_SAMPLES && baselineMedian > 0;
   const tolerance = baselineEnabled
-    ? Math.max(baselineMedian * 0.3, 0.5, 3 * baselineMad)
+    ? priceTolerance(baselineMedian, baselineMad)
     : null;
   const states = (selectedRecords ?? []).map((record) => {
     const reasons = [];
@@ -98,9 +114,7 @@ export function detectPurchaseCostAnomalies(records, selectedRecords) {
     if (baselineEnabled && Math.abs(record.unitPrice - baselineMedian) > tolerance) {
       deviationSide = record.unitPrice > baselineMedian ? "high" : "low";
     }
-    if (baselineEnabled
-      && Math.abs(record.unitPrice - baselineMedian) >= 1
-      && (record.unitPrice >= baselineMedian * 2 || record.unitPrice <= baselineMedian * 0.5)) {
+    if (baselineEnabled && extremePrices(Math.min(record.unitPrice, baselineMedian), Math.max(record.unitPrice, baselineMedian))) {
       reasons.push("extreme_price_deviation");
     }
     return { record, reasons, deviationSide };

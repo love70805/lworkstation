@@ -1,9 +1,9 @@
-import { operatingLedger, accountingMode, accountingApprovals } from '../../domain/inventoryAccounting';
+import { operatingLedger, accountingMode, accountingApprovals, LOWEST_ACCOUNTING } from '../../domain/inventoryAccounting';
 import { accountingCosts, readAccountingMode, readAccountingSupplement, projectAccountingLedger } from './inventoryAccountingRepository';
 import Dexie from 'dexie';
 import { assertCachedLedgerCostEditingReady, assertLedgerCostEditingReady } from './erpCostEditingGuard';
 import { db } from "../db/clientDatabase";
-import { readLedgerSalesRows } from './ledgerReadCache';
+import { readLedgerSalesRows, readLedgerStoreNames } from './ledgerReadCache';
 import { cachedDerived, sourceRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import { makeId } from "../db/utils";
 import { getActiveMemberContext } from "./selectionRepository";
@@ -17,7 +17,8 @@ import { buildProfitReportWorkbook, bytesToBase64 } from "../../lib/profitReport
 import { profitReportHeader, readLedgerReportHeaderRows, readLedgerReportHeaders } from './ledgerOverviewRepository';
 import { dispatchRegistrantNames } from '../../domain/profitReportPresentation';
 import { reportSourceFingerprint } from '../../domain/reportSourceState';
-import { hashCanonicalJson, hashCanonicalJsonSync } from '../../domain/canonicalHash';
+import { hashCanonicalJson } from '../../domain/canonicalHash';
+import { reportSourceDigests, REPORT_SOURCE_DIGEST_VERSION } from '../../domain/reportSourceDigests';
 import { runDerivedComputation } from './derivedComputationService';
 
 const tables = () => [db.settings,db.ledgers,db.salesRows,db.erpCostRequests,db.erpCostInbox,db.erpCostBatches,db.erpCostRows,db.costApprovals,db.profitLines,db.auditEvents,db.monthlySupplementBatches,db.monthlySupplementRows,db.profitReports,db.profitReportLines];
@@ -27,20 +28,21 @@ async function scope(ledgerId,write=false) {
   return {ledger,member};
 }
 const adopted=readAccountingSupplement;
-async function sourceContext(ledgerId,write=false,forReport=false,{freshnessOnly=false}={}){
+async function sourceContext(ledgerId,write=false,forReport=false,{freshnessOnly=false,includeReports=forReport}={}){
   const {ledger,member}=await scope(ledgerId,write);
   const mode=await readAccountingMode(ledger.workspaceId);
   Object.assign(ledger, await projectAccountingLedger(ledger, mode));
-  const [salesRows,erpCosts,approvals,dispatch,deduction,reports]=await Promise.all([freshnessOnly?readLedgerSalesRows(ledger.workspaceId,ledgerId,{strict:true,cooperative:true,observe:false}):db.salesRows.where('ledgerId').equals(ledgerId).toArray(),getLatestLedgerCosts(ledgerId),db.costApprovals.where('ledgerId').equals(ledgerId).toArray(),adopted(ledgerId,'dispatch',mode),adopted(ledgerId,'deduction',mode),freshnessOnly?[]:readLedgerReportHeaderRows(ledger)]);
+  const weightedCosts = forReport && mode !== LOWEST_ACCOUNTING ? getLatestLedgerCosts(ledgerId) : [];
+  const [salesRows,erpCosts,approvals,dispatch,deduction,reports]=await Promise.all([freshnessOnly?readLedgerSalesRows(ledger.workspaceId,ledgerId,{strict:true,cooperative:true,observe:false}):db.salesRows.where('ledgerId').equals(ledgerId).toArray(),weightedCosts,db.costApprovals.where('ledgerId').equals(ledgerId).toArray(),adopted(ledger,'dispatch'),adopted(ledger,'deduction'),freshnessOnly||!includeReports?[]:readLedgerReportHeaderRows(ledger)]);
   if(salesRows.some(row=>row.workspaceId!==ledger.workspaceId))throw new Error("台账存在跨工作区来源记录，请恢复完整备份后再核算。");
   return {ledger:{...ledger,accountingMode:mode},member,salesRows,erpCosts:forReport?await accountingCosts(ledger,erpCosts,mode,salesRows):erpCosts,approvals:accountingApprovals(approvals,mode),dispatch,deduction,reports:reports.filter(report=>accountingMode(report.accountingMode)===mode)};
 }
 const localAudit = (context,action,objectId,after,before=null) => db.auditEvents.add({workspaceId:context.ledger.workspaceId,objectType:'local_profit_report',objectId,action,actorId:context.member.memberId,createdAt:new Date().toISOString(),localOnly:true,syncState:'local_only',before,after});
 
-export async function readMonthlyReportState(ledgerId){
-  return retrySourceRead(() => readMonthlyReportStateOnce(ledgerId));
+export async function readMonthlyReportState(ledgerId,{includeReports=true}={}){
+  return retrySourceRead(() => readMonthlyReportStateOnce(ledgerId,includeReports));
 }
-async function readMonthlyReportStateOnce(ledgerId){
+async function readMonthlyReportStateOnce(ledgerId,includeReports){
     await observeSourceRevision();
     const revision = sourceRevision();
     const {ledger}=await scope(ledgerId);
@@ -48,13 +50,11 @@ async function readMonthlyReportStateOnce(ledgerId){
     Object.assign(ledger, await projectAccountingLedger(ledger, ledger.accountingMode));
     // The source editor needs stores and adopted batches, not ERP cost rows or
     // a complete calculation context. Keep those reads for actual previews.
-    const [salesRows,dispatch,deduction,reports]=await Promise.all([readLedgerSalesRows(ledger.workspaceId,ledgerId,{strict:true}),adopted(ledgerId,'dispatch',ledger.accountingMode),adopted(ledgerId,'deduction',ledger.accountingMode),readLedgerReportHeaders(ledger,revision)]);
-    if(salesRows.some(row=>row.workspaceId!==ledger.workspaceId))throw new Error("台账存在跨工作区来源记录，请恢复完整备份后再核算。");
-    const context={ledger,salesRows,dispatch,deduction,reports};
+    const [stores,dispatch,deduction,reports]=await Promise.all([readLedgerStoreNames(ledger.workspaceId,ledgerId),adopted(ledger,'dispatch'),adopted(ledger,'deduction'),includeReports?readLedgerReportHeaders(ledger,revision):[]]);
     const batches=await db.monthlySupplementBatches.where('ledgerId').equals(ledgerId).toArray();
-    const adoptedRows=orderSupplementPresentation(await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[context.dispatch?.id,context.deduction?.id].includes(row.batchId)).toArray());
+    const adoptedRows=orderSupplementPresentation(await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[dispatch?.id,deduction?.id].includes(row.batchId)).toArray());
     assertSourceRevision(revision);
-    return {ledger:context.ledger,stores:[...new Set(context.salesRows.map(row=>row.store))],dispatch:context.dispatch,deduction:context.deduction,batches,adoptedRows,reports:context.reports.filter(report=>accountingMode(report.accountingMode)===ledger.accountingMode).toSorted((a,b)=>b.createdAt.localeCompare(a.createdAt))};
+    return {ledger,stores,dispatch,deduction,batches,adoptedRows,reports:reports.filter(report=>accountingMode(report.accountingMode)===ledger.accountingMode).toSorted((a,b)=>b.createdAt.localeCompare(a.createdAt))};
 }
 export async function readSavedProfitReport(reportId){
   return db.transaction('r',tables(),async()=>{const report=await db.profitReports.get(reportId);if(!report)throw new Error("报告不存在。");await scope(report.ledgerId);return report;});
@@ -101,13 +101,13 @@ export async function adoptMonthlySupplement(input,{expectedBatchId,inputSignatu
     if(candidate.conflicts.length&&!candidate.reviewedCrossFileConflicts)throw new Error('跨文件相似业务记录尚未核对，请检查来源后重新预览。');
     if(signature!==inputSignature)throw new Error("采用预览已变化，请重新预览。");
     const previous=context[input.kind];
-    if(previous?.inputSignature===signature&&accountingMode(previous.accountingMode)===context.ledger.accountingMode)return previous;
+    if(previous?.inputSignature===signature)return previous;
     if((previous?.id??null)!==expectedBatchId)throw new Error("该月份已有新的采用版本，请刷新后核对完整候选集合。");
-    const prior=await db.monthlySupplementBatches.where('ledgerId').equals(input.ledgerId).filter(row=>row.kind===input.kind&&accountingMode(row.accountingMode)===context.ledger.accountingMode).toArray();
+    const prior=await db.monthlySupplementBatches.where('ledgerId').equals(input.ledgerId).filter(row=>row.workspaceId===context.ledger.workspaceId&&row.period===context.ledger.period&&row.kind===input.kind).toArray();
     const id=makeId('SUPPLEMENT'),createdAt=new Date().toISOString();
     const {rows,...header}=candidate;
-    const batch={...header,id,...(context.ledger.accountingMode==='historical_lowest'?{accountingMode:context.ledger.accountingMode}:{}),workspaceId:context.ledger.workspaceId,ledgerId:context.ledger.id,rowCount:rows.length,revision:Math.max(0,...prior.map(row=>row.revision))+1,status:'adopted',inputSignature:signature,replacesBatchId:previous?.id??null,createdAt,createdBy:context.member.memberId};
-    if(previous&&accountingMode(previous.accountingMode)===context.ledger.accountingMode)await db.monthlySupplementBatches.update(previous.id,{status:'superseded'});
+    const batch={...header,id,workspaceId:context.ledger.workspaceId,ledgerId:context.ledger.id,rowCount:rows.length,revision:Math.max(0,...prior.map(row=>row.revision))+1,status:'adopted',inputSignature:signature,replacesBatchId:previous?.id??null,createdAt,createdBy:context.member.memberId};
+    for (const row of prior) if (row.status === 'adopted') await db.monthlySupplementBatches.update(row.id,{status:'superseded'});
     await db.monthlySupplementBatches.add(batch);
     if(rows.length)await db.monthlySupplementRows.bulkAdd(rows.map((row,index)=>({...row,id:`${id}:${index}`,batchId:id,workspaceId:context.ledger.workspaceId,ledgerId:context.ledger.id})));
     await localAudit(context,'supplement_adopted',id,{kind:input.kind,revision:batch.revision,rowCount:rows.length,replacesBatchId:batch.replacesBatchId});
@@ -142,7 +142,7 @@ export async function readProfitReportFreshness(reportId) {
           // Old reports need no full source read; leave their bytes untouched.
           if (!report.sourceStateFingerprint) return null;
           const context = await sourceContext(report.ledgerId, false, true, { freshnessOnly: true });
-          return { expected: report.sourceStateFingerprint, input: await reportSourceInput(context) };
+          return { expected: report.sourceStateFingerprint, input: { ...await reportSourceInput(context), formula: report.formulaVersion, template: report.templateVersion, fingerprintVersion: report.sourceFingerprintVersion } };
         });
         if (!snapshot) return { reportId, status: 'unknown', sourceRevision: revision };
         const fingerprint = await runDerivedComputation('report-source-fingerprint', snapshot.input);
@@ -153,8 +153,8 @@ export async function readProfitReportFreshness(reportId) {
   });
 }
 
-async function reportSources(input,write=false,source=null,{synchronousHash=false}={}){
-  const context=source??await sourceContext(input.ledgerId,write,true);
+async function reportSources(input,write,{includeFreshness=false,includeReports=true}={}){
+  const context=await sourceContext(input.ledgerId,write,true,{includeReports});
   const {ledger,reports,dispatch,deduction}=context;
   if(!['pre_deduction','financial'].includes(input.kind))throw new Error('报告类型无效。');
   if(input.expectedLegacyLines?.some(line=>!line.finalizable))throw new Error('仍有平台 SKU 缺少正式成本。');
@@ -163,15 +163,20 @@ async function reportSources(input,write=false,source=null,{synchronousHash=fals
   const deductionRows=input.kind==='financial'&&deduction?await db.monthlySupplementRows.where('batchId').equals(deduction.id).toArray():[];
   const sameKind=reports.filter(report=>report.kind===input.kind);
   const revision=Math.max(0,...sameKind.map(report=>report.revision))+1;
-  // Re-enter the active native IDB task before subsequent source reads. Keeping
-  // the outer draft alive alone is insufficient after a cooperative timer.
-  const fingerprintInput={kind:input.kind,ledger,salesRows:context.salesRows,erpCosts:context.erpCosts,approvals:context.approvals,dispatch,dispatchRows,deduction:input.kind==='financial'?deduction:null,deductionRows,revision};
-  const fingerprint=synchronousHash?hashCanonicalJsonSync(fingerprintInput):await Dexie.waitFor(hashCanonicalJson(fingerprintInput));
-  return {context,dispatchRows,deductionRows,sameKind,revision,fingerprint};
+  // Keep the native transaction open across WebCrypto. Both reads check the
+  // actual records. Only the draft reuses its row hashes for the freshness view.
+  const { digests, fingerprint } = await Dexie.waitFor(async () => {
+    const digests = await reportSourceDigests(context, includeFreshness);
+    const fingerprint = await hashCanonicalJson({ version: REPORT_SOURCE_DIGEST_VERSION, kind:input.kind, ledger,
+      salesRows:digests.salesRows.ordered, erpCosts:digests.erpCosts.ordered, approvals:context.approvals,
+      dispatch, dispatchRows, deduction:input.kind==='financial'?deduction:null, deductionRows, revision });
+    return { digests, fingerprint };
+  }, Infinity);
+  return {context,dispatchRows,deductionRows,sameKind,revision,fingerprint,digests};
 }
 
-async function reportDraft(input,write=false){
-  const {context,dispatchRows,deductionRows,sameKind,revision,fingerprint}=await reportSources(input,write);
+async function reportDraft(input,write=false,{archive=true}={}){
+  const {context,dispatchRows,deductionRows,sameKind,revision,fingerprint,digests}=await reportSources(input,write,{includeFreshness:archive,includeReports:archive});
   const {ledger,dispatch,deduction}=context;
   const products=buildReportProducts(context);
   if(input.kind==='financial'){
@@ -179,9 +184,12 @@ async function reportDraft(input,write=false){
     if([...new Set(products.map(row=>row.store))].some(store=>!deduction.coveredStores.includes(store)))throw new Error('部分店铺扣款尚未取得，可先导出未扣款报告。');
   }
   const rate=exact(ledger.warehouseRate??'0.7',{nonnegative:true});
-  const totalsExact=reportTotals(products,dispatch?.adoptedQuantityExact??'0',rate,deductionRows);
+  const totalsExact=reportTotals(products,dispatch ? dispatch.adoptedQuantityExact : null,rate,deductionRows);
   const report={workspaceId:ledger.workspaceId,ledgerId:ledger.id,period:ledger.period,kind:input.kind,revision,operationWorkflow:2,accountingMode:ledger.accountingMode,baseReportId:null,supersedesReportId:sameKind.sort((a,b)=>b.revision-a.revision)[0]?.id??null,formulaVersion:REPORT_FORMULA_VERSION,templateVersion:REPORT_TEMPLATE_VERSION,warehouseRateExact:rate,adoptedBatchIds:[...(dispatch?[dispatch.id]:[]),...(input.kind==='financial'?[deduction.id]:[])],dispatchState:dispatch?'recorded':'not_recorded',registrantNames:dispatchRegistrantNames(dispatchRows),totalsExact,displayTotals:{profit:displayMoney(totalsExact.profitExact),preDeduction:displayMoney(totalsExact.preDeductionExact)},createdBy:context.member.memberId};
-  const sourceStateFingerprint = await Dexie.waitFor(reportSourceFingerprint(await reportSourceInput(context)));
+  if (!archive) return {report,products,dispatchRows,deductionRows,fingerprint};
+  report.sourceFingerprintVersion = REPORT_SOURCE_DIGEST_VERSION;
+  const sourceState = await reportSourceInput(context);
+  const sourceStateFingerprint = await Dexie.waitFor(() => reportSourceFingerprint({ ...sourceState, fingerprintVersion: REPORT_SOURCE_DIGEST_VERSION }, digests));
   // Retain the export lines and small scope only. Raw sales and full purchase
   // evidence must become collectible before constructing the workbook.
   return {context:{ledger,member:context.member},report,products,dispatchRows,deductionRows,fingerprint,sourceStateFingerprint};
@@ -207,14 +215,22 @@ export async function saveProfitReport(input,{expectedFingerprint}={}){
   return savePreparedReport(input,draft);
 }
 
-// The direct export button does not show a separate preview. Prepare once and
-// keep the same authoritative, in-transaction content check used by previewed
-// saves. No cached clock or row count authorizes a financial write.
+// Live exports release the workbook to the caller only after its sources
+// are verified again. The workbook and its source rows stay in memory.
 export async function createCurrentProfitReport(input,{onProgress}={}){
   onProgress?.('正在核对台账与成本…');
   await assertLedgerCostEditingReady(input.ledgerId);
-  const draft=await db.transaction('r',tables(),async()=>await reportDraft(input,true));
-  return savePreparedReport(input,draft,onProgress);
+  const {report,products,dispatchRows,deductionRows,fingerprint}=await db.transaction('r',tables(),async()=>await reportDraft(input,true,{archive:false}));
+  onProgress?.('正在生成本次报告…');
+  const workbook=buildProfitReportWorkbook({report,products,dispatchRows,deductionRows});
+  onProgress?.('正在核对导出来源…');
+  await assertLedgerCostEditingReady(input.ledgerId);
+  await db.transaction('r',tables(),async()=>{
+    const current=await reportSources(input,true,{includeReports:false});
+    if(current.fingerprint!==fingerprint)throw new Error('导出期间账本或采用来源已变化，请刷新后重试。');
+    await assertCachedLedgerCostEditingReady(current.context.ledger);
+  });
+  return {...report,bytes:workbook.bytes,fileName:workbook.fileName};
 }
 
 async function savePreparedReport(input,draft,onProgress){
@@ -227,7 +243,7 @@ async function savePreparedReport(input,draft,onProgress){
   onProgress?.('正在核对并保存报告…');
   await assertLedgerCostEditingReady(input.ledgerId);
   return db.transaction('rw',tables(),async()=>{
-    let current=await reportSources(input,true,null,{synchronousHash:true});
+    let current=await reportSources(input,true);
     if(current.fingerprint!==draft.fingerprint)throw new Error("保存期间账本或采用来源已变化，请刷新后重试。");
     await assertCachedLedgerCostEditingReady(current.context.ledger);
     const currentContext={ledger:current.context.ledger,member:current.context.member};

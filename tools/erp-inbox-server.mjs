@@ -5,7 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery, collectionCatalogSeed, collectionCostsSettled } from './erp-collection-tasks.mjs';
+import { handleCollectionTaskRequest, recoverCollectionTasks, validateCollectionDelivery, recordCollectionDelivery, collectionCatalogSeed, collectionCostsSettled, normalizeWorkbookLimit } from './erp-collection-tasks.mjs';
 import {createInboxStorage, cloneInboxMetadata} from './erp-inbox-storage.mjs';
 import {DESKTOP_INBOX_BACKUP_FORMAT,INBOX_RUNTIME_KINDS,INBOX_CLEAR_MAINTENANCE_ACTION,validateDesktopInboxBackup} from '../integrations/contracts/desktop-inbox-backup.mjs';
 import { normalizeErpHistoryMappings } from '../integrations/contracts/erp-history-mappings.mjs';
@@ -627,6 +627,10 @@ function sanitizeSourceMeta(meta, warehouseEvidence, {
     result.bulkSourceSha256 = meta.bulkSourceSha256;
   }
   if (/^[a-z_]{1,80}$/.test(meta?.bulkFallbackReason ?? '')) result.bulkFallbackReason = meta.bulkFallbackReason;
+  if (result.bulkFallbackReason === 'workbook_too_large') {
+    const measurement = normalizeWorkbookLimit(meta.workbookLimit);
+    if (measurement) result.workbookLimit = measurement;
+  }
   for (const field of ["detailFailures", "mappingFailures", "scopeDirectoryFailures", "exclusionStats", "failureStats"]) {
     if (Array.isArray(meta?.[field])) result[field] = meta[field].map((item) => {
       if (typeof item === "string") return item.slice(0, 500);
@@ -1093,11 +1097,11 @@ const server = http.createServer(async (req, res) => {
     const taskHeartbeat = req.method==='POST' && /^\/erp\/v1\/collection-tasks\/[^/]+\/control$/.test(route) && payload?.action==='heartbeat';
     // Only successful durable business responses wake the workspace. Context
     // publications and lease renewals must not create a feedback polling loop.
-    const notifyWorkspace = req.method === 'POST' && !taskHeartbeat && (
+    let notifyWorkspace = req.method === 'POST' && !taskHeartbeat && (
       /^\/erp\/v1\/collection-tasks(?:\/|$)/.test(route)
       || ['/erp/v1/cost-results', '/erp/v1/cost-batches', '/erp/v1/catalog-results', '/erp/v1/catalog-batches', '/erp/v1/workspace-reset'].includes(route));
     if (notifyWorkspace) res.once('finish', () => {
-      if (res.statusCode >= 200 && res.statusCode < 300 && process.connected) {
+      if (notifyWorkspace && res.statusCode >= 200 && res.statusCode < 300 && process.connected) {
         try { process.send({ type: 'workspace-inbox-changed', version: 1 }, () => {}); } catch { /* Recovery polling survives IPC disconnects. */ }
       }
     });
@@ -1130,6 +1134,8 @@ const server = http.createServer(async (req, res) => {
       if(taskHeartbeat) {
         const task=taskResponse.body.task;
         await persistTaskHeartbeat(task, resetRevision);
+      } else if (taskResponse.body.idempotent && route.endsWith('/adoption')) {
+        notifyWorkspace = false;
       } else if (req.method === 'POST') await writeSpool(records);
       return json(res, taskResponse.status, { ...taskResponse.body, workspaceReset: workspaceResetState(records) });
     }
@@ -1166,6 +1172,9 @@ const server = http.createServer(async (req, res) => {
           .filter((item) => !workspaceId || item.workspaceId === workspaceId)
           .filter((item) => !Number.isFinite(registeredBefore) || Date.parse(String(item.registeredAt ?? "")) <= registeredBefore);
         const visibleRequests = includeHistory ? requestRecords : requestRecords.filter((item) => item.status === "registered");
+        if (url.searchParams.get('view') === 'summary') {
+          return json(res, 200, { records: visibleRequests.map(({status, registeredAt, requestedAt}) => ({status, registeredAt, requestedAt})) });
+        }
         const catalogReceipts = new Map();
         for (const receipt of records) {
           if (receipt.kind !== 'catalog-batch' || receipt.workspaceId !== workspaceId || !['pending', 'acknowledged'].includes(receipt.status)) continue;

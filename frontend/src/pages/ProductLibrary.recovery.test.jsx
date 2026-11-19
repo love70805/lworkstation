@@ -17,7 +17,9 @@ vi.mock("../data/database", async (importOriginal) => {
     if (key === 'reference') faults.referenceReads++;
     if (key === "catalog" && faults.wait) await faults.wait;
     if (faults[key]) throw Error(`合成 ${key} 读取失败`);
-    return fn(...args);
+    const result = await fn(...args);
+    if (key === 'catalog' && faults.details) await faults.details;
+    return result;
   };
   return { ...actual, listProductCatalogRecords: read("catalog", actual.listProductCatalogRecords), getSelectionReferenceSnapshot: read("reference", actual.getSelectionReferenceSnapshot), getSelectionPrestorageSnapshot: read("reference", actual.getSelectionPrestorageSnapshot), listPendingCaptureRecords: read("capture", actual.listPendingCaptureRecords), getActiveMemberContext: read("context", actual.getActiveMemberContext) };
 });
@@ -46,7 +48,7 @@ const retry = async () => act(async () => button("重试读取").click());
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  Object.assign(faults, { catalog: false, reference: false, capture: false, context: false, wait: null, referenceReads: 0 });
+  Object.assign(faults, { catalog: false, reference: false, capture: false, context: false, wait: null, details: null, referenceReads: 0 });
   localStorage.clear(); await db.delete(); await db.open();
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -56,6 +58,32 @@ afterEach(async () => {
 });
 
 describe("selection read recovery", () => {
+  it("opens saved identities before reference prices are ready and waits for complete data when filtered", async () => {
+    await saveProductCatalogRecord({draft});
+    let finish;
+    faults.details = new Promise(resolve => { finish = resolve; });
+    await mount();
+    await waitFor(() => container.querySelector('.catalog-opening-table tbody tr[tabindex="0"]')?.textContent.includes(draft.name));
+    expect(container.querySelector('.catalog-opening-table').textContent).not.toMatch(/缺成本|参考利润/);
+    expect(button('导出').disabled).toBe(true);
+    await change('搜索商品档案', 'RECOVERY-SKU');
+    expect(container.querySelector('.catalog-opening-table')).toBeNull();
+    await act(async () => finish());
+    await waitFor(() => container.querySelector('.product-table tbody')?.textContent.includes(draft.name));
+    expect(button('导出').disabled).toBe(false);
+  });
+  it("reuses the loaded reference subscription when switching product tabs", async () => {
+    await saveProductCatalogRecord({draft});
+    await mount();
+    await waitFor(() => [...container.querySelectorAll('[role=tab] small')].every(label => /^\d+$/.test(label.textContent)) && field("搜索商品档案"));
+    const reads = faults.referenceReads;
+    await act(async () => container.querySelectorAll('[role=tab]')[1].click());
+    await waitFor(() => field("搜索预存资料") && container.textContent.includes("暂无待补齐的预存资料"));
+    await act(async () => container.querySelector('[role=tab]').click());
+    await waitFor(() => container.querySelector(".product-table")?.textContent.includes(draft.name));
+    expect(faults.referenceReads).toBe(reads);
+  });
+
   it("keeps catalog filters during loading, failed read and successful retry", async () => {
     await saveProductCatalogRecord({ draft });
     let release; faults.wait = new Promise(resolve => { release = resolve; }); faults.catalog = true;

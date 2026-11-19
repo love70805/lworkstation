@@ -13,11 +13,37 @@ it('waits for the last delivery and local adoption, then permits unresolved anom
   expect(guard([done], [receipt, second]).blocked).toBe(true);
   expect(guard([done], [receipt, { ...second, adoptionPending: false }]).blocked).toBe(false);
 });
+it('unlocks a finished round with failed reads after its actual receipts settle', () => {
+  const partial = { ...task, status: 'partial', batches: [
+    { status: 'delivered', deliveryId: 'D1' }, { status: 'incomplete', deliveryId: 'D2' }, { status: 'failed' },
+  ] };
+  const second = { ...receipt, deliveryId: 'D2' };
+  expect(guard([partial]).blocked).toBe(true);
+  expect(guard([partial], [receipt, { ...second, adoptionPending: true }]).blocked).toBe(true);
+  expect(guard([partial], [receipt, { ...second, adoptionFailure: { message: 'write failed' } }]).blocked).toBe(true);
+  expect(guard([partial], [receipt, second])).toMatchObject({ blocked: false, title: '本轮成本采集已结束' });
+  for (const status of ['partial', 'failed']) {
+    expect(guard([{ ...task, status, batches: [{ status: 'failed' }] }], []).blocked).toBe(false);
+  }
+  for (const status of ['pending', 'running', 'collected']) {
+    expect(guard([{ ...partial, batches: [...partial.batches, { status, resultDeliveryId: 'staged' }] }]).blocked).toBe(true);
+  }
+  expect(guard([{ ...partial, status: 'ready' }], [receipt, second]).blocked).toBe(true);
+});
 it('does not treat adoption failure or unknown task status as finished', () => {
   const done = { ...task, batches: [{ deliveryId: 'D1' }] };
   expect(guard([done], [{ ...receipt, adoptionFailure: { message: 'write failed' } }]).blocked).toBe(true);
   expect(guard([], [], { error: 'offline' }).blocked).toBe(true);
   expect(guard([], [], { loading: true }).blocked).toBe(true);
+});
+it('preserves the last verified terminal outcome through a connection failure while protecting writes', () => {
+  const done = {...task,status:'partial',batches:[{status:'incomplete',deliveryId:'D1'}]};
+  expect(guard([done],[receipt],{error:'offline'})).toMatchObject({blocked:true,title:'本轮成本采集已结束',lastConfirmedFinished:true});
+  const unfinished = {...task,ledgerPeriod:'2026-10',batches:[{status:'running',platformSkcs:['P']}]};
+  const offline = guard([unfinished],[receipt],{error:'offline'});
+  expect(offline).toMatchObject({blocked:true,title:'采集状态暂无法确认',lastConfirmedFinished:false});
+  expect(offline.message).toContain('上次确认时，2026-10 采集任务尚未完成，还有 1 个 SKC 未送达');
+  expect(guard([done],[{...receipt,adoptionPending:true}],{error:'offline'}).lastConfirmedFinished).toBe(false);
 });
 it('permits explicit stop only after received results have settled', () => {
   const stopped = { ...task, status: 'stopped' };

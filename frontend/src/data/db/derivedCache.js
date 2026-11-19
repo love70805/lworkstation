@@ -22,6 +22,41 @@ const MAX_DISK = 24;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_DISK_BYTES = 64 * 1024 * 1024;
 const tableReaders = new Map();
+const tablesChangedInTransaction = new WeakMap();
+const inboxTokens = new Map();
+let inboxGeneration = 0, inboxSequence = 0, observedInboxClock;
+function syncInboxClock() {
+  const clock = tableRevisionReader('erpCostInbox')();
+  if (!clock || observedInboxClock !== clock) {
+    inboxTokens.clear(); inboxGeneration++; observedInboxClock = clock;
+  }
+  return clock;
+}
+// Volatile read-only hints. A different window, reset, range delete or missing
+// clock discards all row hints. Normal local edits invalidate only their keys.
+export function inboxRowVersion(id) {
+  return syncInboxClock() ? inboxGeneration + '/' + (inboxTokens.get(id) ?? 0) : null;
+}
+let observedCostClock, existingCostGeneration = 0;
+// Native add cannot replace an existing primary key. A put, delete, abort of
+// such an edit, external change or unavailable clock invalidates all hints.
+export function existingCostRowVersion() {
+  const value = tableRevisionReader('erpCostRows')();
+  if (!value || value !== observedCostClock) {
+    existingCostGeneration++;
+    observedCostClock = value;
+  }
+  return value ? existingCostGeneration : null;
+}
+function markInboxKeys(keys) {
+  if (!keys || keys.some(key => typeof key !== 'string') || keys.length + inboxTokens.size > 1024) {
+    inboxTokens.clear(); inboxGeneration++;
+  } else for (const id of keys) inboxTokens.set(id, ++inboxSequence);
+}
+export function transactionChangedTable(transaction, names) {
+  const changed = tablesChangedInTransaction.get(transaction?.idbtrans);
+  return names.some(name => changed?.has(name));
+}
 const memoryNamespaces = new Map();
 
 // These clocks serve disposable read caches only. A table edit, including an
@@ -129,18 +164,52 @@ export async function retrySourceRead(read) {
 export function installDerivedInvalidation(database) {
   const observed = new WeakSet();
   const factsObserved = new WeakSet();
-  const tablesObserved = new WeakMap();
+  const tablesObserved = tablesChangedInTransaction;
+  const inboxChanges = new WeakMap();
+  const costReplacements = new WeakSet();
   database.use({ stack: 'dbcore', name: 'derived-cache-revision', create(down) {
     return { ...down, table(name) {
       const table = down.table(name);
       return { ...table, mutate(request) {
+        if (name === 'erpCostRows') {
+          existingCostRowVersion();
+          if (request.type !== 'add') {
+            existingCostGeneration++;
+            costReplacements.add(request.trans);
+          }
+        }
+        if (name === 'erpCostInbox') {
+          syncInboxClock();
+          const keys = request.type === 'deleteRange' ? null : request.keys ?? request.values?.map(row => row.id);
+          markInboxKeys(keys);
+          let changes = inboxChanges.get(request.trans);
+          if (!changes) { changes = { keys: new Set() }; inboxChanges.set(request.trans, changes); }
+          if (!keys || keys.length > 1024) changes.keys = null;
+          else if (changes.keys) for (const key of keys) changes.keys.add(key);
+        }
         let changedTables = tablesObserved.get(request.trans);
         if (!changedTables) { changedTables = new Set(); tablesObserved.set(request.trans, changedTables); }
         if (!changedTables.has(name)) {
           changedTables.add(name);
           invalidateTableRevision(name);
-          request.trans.addEventListener('complete', () => invalidateTableRevision(name, true));
-          request.trans.addEventListener('abort', () => invalidateTableRevision(name, true));
+          if (name === 'erpCostInbox') observedInboxClock = tableRevisionReader(name)();
+          if (name === 'erpCostRows') observedCostClock = tableRevisionReader(name)();
+          const finish = () => {
+            if (name === 'erpCostInbox') syncInboxClock();
+            if (name === 'erpCostRows') existingCostRowVersion();
+            invalidateTableRevision(name, true);
+            if (name === 'erpCostRows') {
+              observedCostClock = tableRevisionReader(name)();
+              if (costReplacements.has(request.trans)) existingCostGeneration++;
+            }
+            if (name === 'erpCostInbox') {
+              observedInboxClock = tableRevisionReader(name)();
+              const keys = inboxChanges.get(request.trans)?.keys;
+              markInboxKeys(keys ? [...keys] : null);
+            }
+          };
+          request.trans.addEventListener('complete', finish);
+          request.trans.addEventListener('abort', finish);
         }
         // Separate transaction tracking matters when a transaction writes a
         // catalog row first and a financial/context table later.

@@ -1,4 +1,6 @@
 import { projectProductArchiveRows } from '../../domain/productArchive';
+import { selectionSaleFields } from '../../domain/ledgerPageSales';
+import { readPageSaleChunks } from './ledgerPageSalesRepository';
 import {
   assertUniquePlatformSkus,
   canonicalPlatformSkc,
@@ -645,7 +647,7 @@ function storedProductEditorDraft({ product, skuRows, storedOffers, statusDefini
     });
 }
 
-async function readProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "" } = {}) {
+async function readProductEditorSnapshot({ captureId = null, productId = null, platformSkc = "", platformSku = "", productName = "", onStoredProduct } = {}) {
   const memberContext = await getActiveMemberContext();
   const statusDefinitions = await getSelectionStatusDefinitions();
   if (captureId) {
@@ -666,12 +668,16 @@ async function readProductEditorSnapshot({ captureId = null, productId = null, p
 
   if (productId) {
     const product = await db.products.get(productId);
-    if (!product || !selectionRecordVisible(product, memberContext)) return null;
+    if (!product || !selectionRecordVisible(product, memberContext)) {
+      onStoredProduct?.(null);
+      return null;
+    }
     const [skuRows, storedOffers] = await Promise.all([
       db.platformSkus.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
       db.supplierOffers.where("productId").equals(productId).filter(row => (row.workspaceId ?? product.workspaceId) === memberContext.workspaceId).toArray(),
     ]);
     const draft = storedProductEditorDraft({ product, skuRows, storedOffers, statusDefinitions });
+    onStoredProduct?.({ context: memberContext, mode: "product", product, capture: null, draft });
     const projection = await productEditorErpPrefill({ draft, productId });
     return { context: memberContext, mode: "product", product, capture: null, ...projection, validation: validateProductDraft(projection.draft) };
   }
@@ -729,15 +735,18 @@ async function productEditorErpPrefill({ draft, productId }) {
   return projection;
 }
 
-export async function listProductCatalogRecords() {
-  const [products, platformSkus, supplierOffers, catalogManualCosts, erpCosts, profitLines, context] = await Promise.all([
-    db.products.toArray(),
-    db.platformSkus.toArray(),
-    db.supplierOffers.toArray(),
-    db.catalogManualCosts.toArray(),
-    db.erpCostRows.toArray(),
-    db.profitLines.toArray(),
-    getActiveMemberContext(),
+export async function listProductCatalogRecords({ includeDrafts = true, onProducts } = {}) {
+  const [storedProducts, context] = await Promise.all([db.products.toArray(), getActiveMemberContext()]);
+  const products = storedProducts.filter(product => (includeDrafts || product.status !== 'draft') && selectionRecordVisible(product, context));
+  onProducts?.(products);
+  if (!products.length) return [];
+  const ids = products.map(product => product.id);
+  const [platformSkus, supplierOffers, catalogManualCosts, statusDefinitions, snapshot] = await Promise.all([
+    db.platformSkus.where('productId').anyOf(ids).toArray(),
+    db.supplierOffers.where('productId').anyOf(ids).toArray(),
+    db.catalogManualCosts.where('workspaceId').equals(context.workspaceId).toArray(),
+    getSelectionStatusDefinitions(),
+    getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction }),
   ]);
   const skusByProduct = new Map();
   platformSkus.filter(sku => (sku.workspaceId ?? DEFAULT_WORKSPACE_ID) === context.workspaceId).forEach((sku) => {
@@ -749,22 +758,10 @@ export async function listProductCatalogRecords() {
     if (!offersByProduct.has(offer.productId)) offersByProduct.set(offer.productId, []);
     offersByProduct.get(offer.productId).push(offer);
   });
-  const latestErpCostBySku = new Map();
-  const statusDefinitions = await getSelectionStatusDefinitions();
-  const projectedReferences = buildSelectionReferenceRows(await getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction }));
+  if (snapshot.workspaceId !== context.workspaceId) throw new Error('工作区已变化，请重新读取商品档案。');
+  const projectedReferences = buildSelectionReferenceRows(snapshot);
   const projectedReferenceBySku = new Map(projectedReferences.map(row => [row.canonicalPlatformSku, row]));
   const automaticTagBySkc = new Map(projectedReferences.filter(row => row.platformSkc && row.automaticSalesTag).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag]));
-  erpCosts
-    .filter((cost) => !cost.workspaceId || cost.workspaceId === context.workspaceId)
-    .forEach((cost) => {
-      const key = cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku);
-      const amount = Number(cost.unitCost);
-      if (!key || !Number.isFinite(amount) || amount <= 0) return;
-      const current = latestErpCostBySku.get(key);
-      const currentTime = Date.parse(current?.publishedAt ?? current?.calculatedAt ?? current?.updatedAt ?? "") || 0;
-      const nextTime = Date.parse(cost.publishedAt ?? cost.calculatedAt ?? cost.updatedAt ?? "") || 0;
-      if (!current || nextTime >= currentTime) latestErpCostBySku.set(key, cost);
-    });
   const latestManualCostBySku = new Map();
   catalogManualCosts
     .filter((cost) => cost.workspaceId === context.workspaceId && cost.status === "active")
@@ -777,43 +774,23 @@ export async function listProductCatalogRecords() {
       const nextTime = Date.parse(cost.confirmedAt ?? cost.updatedAt ?? "") || 0;
       if (!current || nextTime >= currentTime) latestManualCostBySku.set(key, cost);
     });
-  const latestFinalizedCostBySku = new Map();
-  profitLines
-    .filter((line) => !line.workspaceId || line.workspaceId === context.workspaceId)
-    .forEach((line) => {
-      const key = line.canonicalPlatformSku ?? canonicalPlatformSku(line.platformSku ?? line.sku);
-      const amount = Number(line.formalUnitCost ?? line.unitCost);
-      if (!key || !Number.isFinite(amount) || amount <= 0) return;
-      const current = latestFinalizedCostBySku.get(key);
-      const currentTime = Date.parse(current?.finalizedAt ?? current?.calculatedAt ?? "") || 0;
-      const nextTime = Date.parse(line.finalizedAt ?? line.calculatedAt ?? "") || 0;
-      if (!current || nextTime >= currentTime) latestFinalizedCostBySku.set(key, line);
-    });
-
   return products
-    .filter((product) => selectionRecordVisible(product, context))
     .map((product) => {
       const skus = skusByProduct.get(product.id) ?? [];
       const offers = offersByProduct.get(product.id) ?? [];
       const supplierProfiles = catalogDisplaySupplierProfiles(product, offers);
       const pendingVariantCount = catalogPendingVariants(product.attributes?.pendingVariants).length;
-      const supplierCostBySku = new Map();
+      const suppliersBySku = new Map();
       offers.forEach((offer) => {
         const key = offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku);
-        const amount = Number(offer.landedUnitCost ?? offer.referenceUnitCost);
-        if (!key || !Number.isFinite(amount) || amount <= 0) return;
-        const current = supplierCostBySku.get(key);
-        if (current == null || amount < current) supplierCostBySku.set(key, amount);
+        if (!suppliersBySku.has(key)) suppliersBySku.set(key, new Set());
+        suppliersBySku.get(key).add(`${offer.supplierCode ?? ""}\u001f${offer.supplierName ?? ""}\u001f${offer.sourceUrl ?? ""}`);
       });
       const skuReferences = skus.map((sku) => {
         const key = sku.canonicalPlatformSku ?? canonicalPlatformSku(sku.platformSku);
-        const erpCost = latestErpCostBySku.get(key);
         const projectedReference = projectedReferenceBySku.get(key);
         const salePrice = projectedReference ? projectedReference.catalogSalePrice : productSalePrice(sku.salePrice ?? sku.price);
-        const supplierOffers = offers.filter((offer) => (offer.canonicalPlatformSku ?? canonicalPlatformSku(offer.platformSku)) === key);
         const manualCost = latestManualCostBySku.get(key);
-        const finalizedCost = latestFinalizedCostBySku.get(key);
-        const supplierCost = supplierCostBySku.get(key);
         const unitCost = projectedReference?.referenceUnitCost ?? null;
         const source = projectedReference?.referenceKind === "erp_history" ? "erp"
           : projectedReference?.referenceKind === "erp_catalog_reference" ? "erp_reference" : projectedReference?.referenceKind ?? null;
@@ -838,7 +815,7 @@ export async function listProductCatalogRecords() {
           referencePeriod: projectedReference?.referencePeriod ?? null,
           referenceEvidence: projectedReference?.referenceEvidence ?? null,
           manualCostId: manualCost?.id ?? null,
-          supplierCount: new Set(supplierOffers.map((offer) => `${offer.supplierCode ?? ""}\u001f${offer.supplierName ?? ""}\u001f${offer.sourceUrl ?? ""}`)).size,
+          supplierCount: suppliersBySku.get(key)?.size ?? 0,
           referenceUnitProfit: referenceProfit?.profit ?? null,
           referenceProfitRate: referenceProfit?.profitRate ?? null,
         };
@@ -850,7 +827,7 @@ export async function listProductCatalogRecords() {
       const finalizedCoveredSkuCount = skuReferences.filter((item) => item.source === "finalized_profit_history").length;
       const supplierCoveredSkuCount = skuReferences.filter((item) => item.source === "supplier_landed").length;
       const referenceCoveredSkuCount = skuReferences.filter((item) => item.source != null).length;
-      const profitHistorySkuCount = skuReferences.filter((item) => latestFinalizedCostBySku.has(item.canonicalPlatformSku)).length;
+      const profitHistorySkuCount = skuReferences.filter(item => projectedReferenceBySku.get(item.canonicalPlatformSku)?.hasPositiveProfitCost).length;
       const warehouseMappedSkuCount = skuReferences.filter((item) => item.canonicalWarehouseSku).length;
       const dataReadiness = buildProductDataReadiness({
         skuCount: skus.length,
@@ -1640,12 +1617,16 @@ export async function saveProductCatalogRecord({
 }
 
 // Global automation does not need finance/history when there is no candidate.
-export async function getSelectionPrestorageAutomationSnapshot() {
+export async function getSelectionPrestorageAutomationSnapshot({ signal } = {}) {
   const context = await getActiveMemberContext();
-  const products = await db.products.toArray();
-  const productIds = products.filter(product => selectionRecordVisible(product, context) && canAutoPromotePrestorage(product)).map(product => product.id);
+  const productIds = [];
+  await db.products.each(product => {
+    signal?.throwIfAborted();
+    if (selectionRecordVisible(product, context) && canAutoPromotePrestorage(product)) productIds.push(product.id);
+  });
   if (!productIds.length) return { workspaceId: context.workspaceId, products: [] };
-  const snapshot = await getSelectionPrestorageSnapshot({ productIds });
+  signal?.throwIfAborted();
+  const snapshot = await getSelectionPrestorageSnapshot({ productIds, signal });
   const candidates = [];
   for (const product of snapshot.products) candidates.push({ id: product.id, autoPromote: product.autoPromote,
     readiness: { ready: product.readiness.ready },
@@ -1658,9 +1639,9 @@ export async function getSelectionPrestorageAutomationSnapshot() {
 
 // A single source projection supplies both the staging UI and the automation.
 // Group once so a large import does not rebuild the reference index per product.
-export async function getSelectionPrestorageSnapshot({ store = "all", productIds = null } = {}) {
+export async function getSelectionPrestorageSnapshot({ store = "all", productIds = null, signal } = {}) {
   const [snapshot, context, statusDefinitions, storedProducts, storedSkus, storedOffers] = await Promise.all([
-    getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction, store }), getActiveMemberContext(), getSelectionStatusDefinitions(),
+    getSelectionReferenceSnapshot({ compact: !Dexie.currentTransaction, store, signal }), getActiveMemberContext(), getSelectionStatusDefinitions(),
     db.products.toArray(), db.platformSkus.toArray(), db.supplierOffers.toArray(),
   ]);
   const visibleProducts = storedProducts.filter(product => selectionRecordVisible(product, context));
@@ -1799,21 +1780,33 @@ export async function saveCatalogManualCost({
 // The compact path is an explicitly derived UI contract. Source records remain
 // intact in the business database and the legacy snapshot remains available.
 export async function getSelectionReferenceSnapshot(options = {}) {
-  if (options.compact && !Dexie.currentTransaction) return retrySourceRead(() => readCompactSelectionSnapshot(options));
+  options.signal?.throwIfAborted();
+  if (options.compact && !Dexie.currentTransaction) {
+    const read = () => retrySourceRead(() => readCompactSelectionSnapshot(options));
+    try { return await read(); }
+    catch (error) {
+      // A foreground reader may have joined an in-flight catalog job just as
+      // its background owner navigated away. Let the remaining reader finish.
+      if (error.name !== 'AbortError' || options.signal?.aborted) throw error;
+      return read();
+    }
+  }
   const context = await getActiveMemberContext();
+  const batchRead = options.projectedCatalogCosts ? Promise.resolve(options.projectedCatalogCosts.batches) : readSelectionBatches(options.signal);
   const [platformSkus, products, supplierOffers, catalogManualCosts, erpCosts, profitLines, salesRows, ledgers, importBatches, erpBatches, erpRequests] = await Promise.all([
     db.platformSkus.toArray(),
     db.products.toArray(),
     db.supplierOffers.toArray(),
     db.catalogManualCosts.toArray(),
-    options.projectCostEvidence ? readSelectionCostProjection() : db.erpCostRows.toArray(),
+    options.projectedCatalogCosts?.costs ?? (options.projectCostEvidence ? batchRead.then(batches => readSelectionCostProjection(batches, options.signal)) : db.erpCostRows.toArray()),
     db.profitLines.toArray(),
-    options.selectionSalesFacts ? [] : options.projectSales ? readSelectionSalesProjection(context.workspaceId) : db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(),
+    options.selectionSalesFacts ? [] : options.projectSales ? readSelectionSalesProjection(context.workspaceId, null, options.signal) : db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(),
     db.ledgers.toArray(),
     db.importBatches.toArray(),
-    db.erpCostBatches.toArray(),
+    batchRead,
     db.erpCostRequests.toArray(),
   ]);
+  options.signal?.throwIfAborted();
   if (options.selectionSalesFacts && options.selectionSalesFacts.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
   const sourceSnapshot = { platformSkus, products, salesRows: options.selectionSalesFacts?.ledgerIdentityRows ?? salesRows, ledgers, importBatches };
   const visibleProducts = products.filter((product) => selectionRecordVisible(product, context));
@@ -1834,6 +1827,7 @@ export async function getSelectionReferenceSnapshot(options = {}) {
     readTrustedErpCatalogRecords(context, sourceSnapshot),
     readTrustedErpCostInboxCatalogRecords(context, sourceSnapshot, { excludedBatchIds: publishedSourceBatchIds, requests: erpRequests }),
   ]);
+  options.signal?.throwIfAborted();
   const pendingCatalogRecords = receivedCatalogRecords.filter(record => !publishedSourceBatchIds.has(record.batchId));
   const catalogScopes = new Map(), catalogScopeKeys = new Map();
   const catalogScope = batch => {
@@ -1908,32 +1902,57 @@ export async function getSelectionReferenceSnapshot(options = {}) {
 }
 
 
-const SELECTION_SALES_FIELDS = ["id", "workspaceId", "ledgerId", "batchId", "platformSku", "sku", "platformSkc", "attribute", "store", "supplierNumber", "sourceSheet", "sourceRow", "sourceAddedDate", "sourceAddedAt", "rawAddedAt", "sourceTimePrecision", "movementType", "isDeduction", "quantityExact", "quantity", "qty", "amountExact", "amount", "unitPriceRaw", "unitPrice"];
-async function readSelectionCostProjection() {
+async function readSelectionBatches(signal) {
+  const rows = [];
+  await db.erpCostBatches.each(batch => {
+    signal?.throwIfAborted();
+    const source = batch.sourceContract;
+    rows.push({ id:batch.id, workspaceId:batch.workspaceId, ledgerId:batch.ledgerId, requestId:batch.requestId,
+      status:batch.status, publishedAt:batch.publishedAt, sourceContract: source && {
+        requestId:source.requestId, batchId:source.batchId, query:source.query, sourceMeta:{catalogPublication:source.sourceMeta?.catalogPublication},
+        ...(source.sourceMeta?.catalogPublication?.mode === 'on_demand' ? {} : {
+          catalogRows:source.catalogRows, catalogCoverage:source.catalogCoverage, warehouseEvidence:source.warehouseEvidence,
+        }),
+      } });
+  });
+  return rows;
+}
+
+async function readSelectionCostProjection(batches, signal) {
   const keys = await db.erpCostRows.toCollection().primaryKeys(), rows = [];
+  const costOnly = new Set(batches.filter(batch => batch.sourceContract?.sourceMeta?.catalogPublication?.mode === 'on_demand').map(batch => batch.id));
   // Drop repeated raw/financial evidence after each bounded read, before the
   // next chunk or Worker clone. Original rows are never modified.
   for (let offset = 0; offset < keys.length; offset += 32) {
-    const chunk = await db.erpCostRows.bulkGet(keys.slice(offset, offset + 32));
-    for (const row of chunk) if (row) rows.push(projectSelectionErpCost(row));
+    signal?.throwIfAborted();
+    const ids = keys.slice(offset, offset + 32), first = ids[0], last = ids.at(-1);
+    const chunk = Number.isSafeInteger(first) && Number.isSafeInteger(last) && last - first === ids.length - 1
+      ? await db.erpCostRows.where(':id').between(first, last, true, true).toArray()
+      : await db.erpCostRows.bulkGet(ids);
+    for (const row of chunk) if (row) rows.push(projectSelectionErpCost(row, { costOnly: costOnly.has(row.batchId) }));
   }
   return rows;
 }
-async function readSelectionSalesProjection(workspaceId, ledgerId = null) {
+async function readSelectionSalesProjection(workspaceId, ledgerId = null, signal) {
   const keys = await db.salesRows.where(ledgerId ? "ledgerId" : "workspaceId").equals(ledgerId ?? workspaceId).primaryKeys();
   const rows = [];
   for (let offset = 0; offset < keys.length; offset += 4000) {
+    signal?.throwIfAborted();
     const chunk = await db.salesRows.bulkGet(keys.slice(offset, offset + 4000));
     for (const row of chunk) if (row && row.workspaceId === workspaceId) {
       const projected = {};
-      for (const field of SELECTION_SALES_FIELDS) if (row[field] !== undefined) projected[field] = row[field];
+      for (const field of selectionSaleFields) if (row[field] !== undefined) projected[field] = row[field];
       rows.push(projected);
     }
   }
   return rows;
 }
 
-async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [], store = "all" } = {}) {
+// A list can already be displaying a result too large for the bounded cache.
+// Its rows keep that snapshot available to the editor only while in use.
+const selectionSnapshotsByRows = new WeakMap();
+let lastSelectionRead;
+async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [], store = "all", signal } = {}) {
   const observable = await observeSourceRevision();
   const revision = selectionReferenceRevision();
   const context = await getActiveMemberContext();
@@ -1941,33 +1960,50 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
   const compute = async () => {
     const factsRevision = salesFactsRevision();
     const [ledgers, importBatches] = await Promise.all([db.ledgers.where("workspaceId").equals(context.workspaceId).toArray(), db.importBatches.where("workspaceId").equals(context.workspaceId).toArray()]);
-    const parts = [];
-    for (const ledger of ledgers) {
+    async function readLedgerFacts(ledger) {
       const computeFacts = async () => {
-        const salesRows = await readSelectionSalesProjection(context.workspaceId, ledger.id);
+        signal?.throwIfAborted();
+        const pageChunks = await readPageSaleChunks(context.workspaceId, ledger.id, {parent: ledger, cache: observable});
         if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
         // Facts consume identity/period, sales and import coverage only. Formal
         // cost/status changes still invalidate the final reference projection.
         const factsLedger = { id: ledger.id, workspaceId: ledger.workspaceId, period: ledger.period };
-        const facts = await runDerivedComputation("selection-facts", { salesRows, ledgers: [factsLedger], importBatches: importBatches.filter(batch => batch.ledgerId === ledger.id), workspaceId: context.workspaceId });
+        const facts = await runDerivedComputation("selection-facts", { pageChunks, requireExplicitOwner: true, ledgers: [factsLedger], importBatches: importBatches.filter(batch => batch.ledgerId === ledger.id), workspaceId: context.workspaceId }, { signal });
         if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
         return facts;
       };
-      parts.push(observable && factsRevision ? await cachedDerived({ scope: [context.workspaceId, ledger.id, ledger.period], formula: "selection-ledger-facts@5-sales-inputs", revision: factsRevision, revisionReader: salesFactsRevision, boundedMemory: true, compute: computeFacts }) : await computeFacts());
+      return observable && factsRevision ? cachedDerived({ scope: [context.workspaceId, ledger.id, ledger.period], formula: "selection-ledger-facts@5-sales-inputs", revision: factsRevision, revisionReader: salesFactsRevision, boundedMemory: true, compute: computeFacts }) : computeFacts();
     }
+    // Cost rows are projected in bounded chunks while the sales worker builds
+    // monthly facts. Keep sales reads sequential across ledgers.
+    async function readAllFacts() {
+      const parts = [];
+      for (const ledger of ledgers) parts.push(await readLedgerFacts(ledger));
+      return parts;
+    }
+    const [parts, projectedCatalogCosts] = await Promise.all([readAllFacts(), readSelectionBatches(signal).then(async batches =>
+      ({ batches, costs: await readSelectionCostProjection(batches, signal) }))]);
     if (factsRevision) assertSourceRevision(factsRevision, salesFactsRevision);
     const selectionSalesFacts = { workspaceId: context.workspaceId, packedParts: parts, ledgerIdentityRows: parts.flatMap(unpackSelectionFactIdentities).sort((a, b) => Number(a.sourceOrder) - Number(b.sourceOrder)) };
     assertSourceRevision(revision, selectionReferenceRevision);
-    const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts, projectCostEvidence: true });
+    signal?.throwIfAborted();
+    const snapshot = await getSelectionReferenceSnapshot({ selectionSalesFacts, projectedCatalogCosts, signal });
     assertSourceRevision(revision, selectionReferenceRevision);
     if (snapshot.workspaceId !== context.workspaceId) throw new Error("工作区已变化，请重新读取商品资料。");
-    const rows = await runDerivedComputation("selection", { ...snapshot, store });
+    const rows = await runDerivedComputation("selection", { ...snapshot, store }, { signal });
     return { workspaceId: context.workspaceId, dataVersion: revision, catalogCoverage: snapshot.catalogCoverage, computedReferenceRows: rows };
   };
-  const result = observable ? await cachedDerived({
-    scope: [context.workspaceId, context.memberId, context.role, store], formula: "selection-reference@6-product-archive", revision, revisionReader:selectionReferenceRevision, compute,
-  }) : await compute();
+  const scope = [context.workspaceId, context.memberId, context.role, context.canSeeAllSelection, store];
+  const key = observable && revision && JSON.stringify([scope, revision]);
+  const displayed = key && lastSelectionRead?.key === key ? lastSelectionRead.snapshot.deref() : null;
+  const result = displayed || (observable ? await cachedDerived({
+    scope, formula: "selection-reference@7-profit-coverage", revision, revisionReader:selectionReferenceRevision, compute,
+  }) : await compute());
   assertSourceRevision(revision, selectionReferenceRevision);
+  if (key && !displayed && typeof WeakRef !== 'undefined') {
+    selectionSnapshotsByRows.set(result.computedReferenceRows, result);
+    lastSelectionRead = { key, snapshot: new WeakRef(result) };
+  }
   const skus = new Set(platformSkus.filter(Boolean).map(canonicalPlatformSku));
   const skcs = new Set(platformSkc ? [canonicalPlatformSkc(platformSkc)] : []);
   for (const row of result.computedReferenceRows) if (skus.has(row.canonicalPlatformSku) && row.platformSkc) skcs.add(canonicalPlatformSkc(row.platformSkc));

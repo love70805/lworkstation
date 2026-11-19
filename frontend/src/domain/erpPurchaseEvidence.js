@@ -29,16 +29,18 @@ export function purchaseRecordPeriod(record) {
   return date.dateStatus === "valid" ? date.sourceAddedDate.slice(0, 7) : null;
 }
 
+export function purchaseEvidenceUnitPrice(record, quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity), total = finiteNumber(record?.totalPrice ?? record?.price)) {
+  if (record?.amountBasis === PURCHASE_TOTAL_BASIS) return quantity > 0 && total != null && total >= 0 ? new Decimal(total).div(quantity).toNumber() : null;
+  return finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
+}
+
 export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWarehouseSku = null, { period = null, currentYearMonth = null } = {}) {
   const warehouseSkuText = text(record?.warehouseSku ?? fallbackWarehouseSku);
   const warehouseSku = warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null;
   const quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
   const purchaseTotal = record?.amountBasis === PURCHASE_TOTAL_BASIS;
-  const rawUnitPrice = finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
   const totalPriceValue = finiteNumber(record?.totalPrice ?? record?.price);
-  const unitPrice = purchaseTotal
-    ? quantity > 0 && totalPriceValue != null && totalPriceValue >= 0 ? new Decimal(totalPriceValue).div(quantity).toNumber() : null
-    : rawUnitPrice;
+  const unitPrice = purchaseEvidenceUnitPrice(record, quantity, totalPriceValue);
   const exclusionReasons = [...new Set((Array.isArray(record?.exclusionReasons) ? record.exclusionReasons : []).map(text).filter(Boolean))];
   const purchaseDate = text(record?.purchaseDate ?? record?.date);
   const { period: purchasePeriod, timestamp } = purchaseDateFacts(record);

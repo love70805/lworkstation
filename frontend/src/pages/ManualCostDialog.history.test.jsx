@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({ preview: vi.fn(), historySave: vi.fn(), manual
 vi.mock('../hooks/useCostEditingGuard', () => ({ useCostEditingGuard: () => mocks.guard }));
 vi.mock('../data/repositories/profitRepository', () => ({ saveManualCostOverride: mocks.manualSave, revokeManualCostOverride: mocks.revoke }));
 vi.mock('../data/repositories/warehouseHistoryRecoveryRepository', () => ({ previewRecoveredWarehouseCost: mocks.preview, saveRecoveredWarehouseCost: mocks.historySave }));
+vi.mock('../data/repositories/sharedManualCostRepository', () => ({ previewSharedManualCost: async () => null }));
 const ledger = { id: 'L', period: '2026-09' }, row = { store: '甲店', platformSku: 'SKU-A', unitCost: null, decision: { eligibleForExactProfit: false } };
 const candidate = { unitCost: 0.35, warehouseSku: 'WH-A', inboxId: 'INBOX', reason: '确认历史采购，不恢复当前映射',
   historyEvidence: { warehouseEvidence: { decision: { selectedRecords: [{ recordId: 'R', purchaseDate: '2026-09-20', quantity: 2, unitPrice: 0.35 }] } } } };
@@ -30,6 +31,31 @@ async function edit(selector, value) {
   });
 }
 const saveButton = () => [...document.querySelectorAll('button')].find(button => button.textContent === '保存更正');
+it('shows the adopted ERP price and edits the shared manual price when ERP wins in lowest mode', async () => {
+  await render({ ledger: { ...ledger, accountingMode: 'historical_lowest' }, viewFirst: true, row: { ...row,
+    unitCost: 2, costSource: 'erp', decision: { eligibleForExactProfit: true, source: 'erp' }, manualOverride: { id: 'M', approvedAmount: 3 } } });
+  const dialog = document.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain('已保存人工价 ¥3/件');
+  expect(dialog.querySelector('.cost-detail-current strong').textContent).toContain('ERP 已采用');
+  await act(async () => [...dialog.querySelectorAll('button')].find(b => b.textContent === '人工更正').click());
+  expect(dialog.querySelector('#manual-cost-value').value).toBe('3');
+  await act(async () => [...dialog.querySelectorAll('button')].find(b => b.textContent === '撤销当前更正').click());
+  expect(mocks.revoke).toHaveBeenCalledWith({ ledgerId:'L', approvalId:'M' });
+});
+it('retains an explicitly typed shared amount when the pricing mode changes while editing', async () => {
+  const onClose = vi.fn(), current = { ...ledger, workspaceId:'W', accountingMode:'weighted' };
+  await render({ ledger:current, row, onClose });
+  await edit('#manual-cost-value','0.003');
+  await act(async () => root.render(<ManualCostDialog ledger={{ ...current, accountingMode:'historical_lowest' }} row={row} onClose={onClose} />));
+  await act(async () => saveButton().click());
+  expect(mocks.manualSave).toHaveBeenCalledWith({ ledgerId:'L', store:'甲店', platformSku:'SKU-A', unitCost:'0.003', reason:'人工输入单件成本并确认更正' });
+});
+it('leaves the shared amount empty when a legacy backup has incompatible active prices', async () => {
+  await render({ row: { ...row, unitCost: 5, costSource: 'erp', decision: { eligibleForExactProfit: true, source:'erp' }, manualCostConflict: [8,3] } });
+  expect(document.querySelector('[role="dialog"]').textContent).toContain('¥8、¥3');
+  expect(document.querySelector('#manual-cost-value').value).toBe('');
+  expect(saveButton().disabled).toBe(true);
+});
 it('opens adopted ERP costs for inspection and only accepts Enter after an explicit edit', async () => {
   const onClose = vi.fn();
   const props = { ledger, onClose, formFirst: true, viewFirst: true, hasEffectiveErpCost: true, children: <p>采购单 DEMO-56</p> };
@@ -59,8 +85,23 @@ it('opens adopted ERP costs for inspection and only accepts Enter after an expli
   });
   expect(onClose).toHaveBeenCalledOnce();
 });
-it('shows the automatically collected suggestion in the existing correction dialog and waits for Save', async () => {
+const requestHistory = () => act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === '查询历史采购与同仓商品').click());
+it('cancels a requested history lookup on leaving and does not apply a late suggestion', async () => {
+  let resolve;
+  mocks.preview.mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+  await render(); await requestHistory();
+  const signal=mocks.preview.mock.lastCall[0].signal;
+  expect(signal.aborted).toBe(false);
+  await act(async()=>root.render(null));
+  expect(signal.aborted).toBe(true);
+  await act(async()=>resolve(candidate));
+  expect(mocks.manualSave).not.toHaveBeenCalled();
+  expect(mocks.historySave).not.toHaveBeenCalled();
+});
+it('loads a historical suggestion on request and waits for Save', async () => {
   await render();
+  expect(mocks.preview).not.toHaveBeenCalled();
+  await requestHistory();
   expect(document.body.textContent).toContain('已自动补查历史仓库采购');
   expect(document.querySelector('#manual-cost-value').value).toBe('0.35');
   expect(document.querySelector('#manual-cost-reason')).toBeNull();
@@ -78,7 +119,7 @@ it('keeps an explicit different amount as an ordinary manual correction', async 
 });
 it('does not overwrite a typed amount when the historical lookup finishes later', async () => {
   let resolve; mocks.preview.mockReturnValue(new Promise(done => { resolve = done; }));
-  await render(); await edit('#manual-cost-value', '0.0000001');
+  await render(); await requestHistory(); await edit('#manual-cost-value', '0.0000001');
   await act(async () => resolve(candidate));
   expect(document.querySelector('#manual-cost-value').value).toBe('0.0000001');
   expect(document.querySelector('#manual-cost-reason')).toBeNull();

@@ -38,7 +38,7 @@ export function erpAssistantSetupState(serviceStatus, extension) {
 async function checkInboxService() {
   const context = await getActiveMemberContext();
   const [payload, extensionPayload] = await Promise.all([
-    getErpRequestHistory({ workspaceId: context.workspaceId }),
+    getErpRequestHistory({ workspaceId: context.workspaceId, summaryOnly: true }),
     getErpExtensionStatus(),
   ]);
   const records = Array.isArray(payload?.records) ? payload.records : [];

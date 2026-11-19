@@ -26,7 +26,7 @@ it.each(['completed','paused','partial'])('offers explicit recollection alongsid
   props.task={requestId:'R',taskId:'T',status,batches:[status==='completed'?{deliveryId:'D'}:{status:'pending'}]};
   props.onRecollect=vi.fn();props.recollectReady=true;await render();
   expect(button('重新获取 ERP 成本').disabled).toBe(false);
-  if(status==='completed')expect(button('成本已采集').disabled).toBe(true);
+  if(status==='completed')expect([...host.querySelectorAll('button')].map(item=>item.textContent)).toEqual(['重新获取 ERP 成本']);
   if(status==='paused')expect(button('继续成本核算').disabled).toBe(false);
   await act(async()=>button('重新获取 ERP 成本').click());
   expect(props.onRecollect).toHaveBeenCalledOnce();expect(runtime.startErpCollection).not.toHaveBeenCalled();

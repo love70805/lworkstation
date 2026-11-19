@@ -32,6 +32,21 @@ function envelopeFixture({ batchId = "ERP-BATCH-INBOX-IT", deliveryId = "DELIVER
 }
 
 describe("ERP 本机收件箱", () => {
+  it('streams lightweight live summaries without changing original evidence or losing equal-count updates', async () => {
+    const received = await receiveErpCostInboxEnvelope({ envelope: envelopeFixture() });
+    const original = await db.erpCostInbox.get(received.id);
+    const read = () => listErpCostInbox({ ledgerId: 'LEDGER-IT', statuses: [], displayOnly: true });
+    const summaries = await read();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ id: received.id, displayOnly: true, batchId: original.batchId, status: original.status });
+    expect(JSON.stringify(summaries)).not.toContain('purchaseRecords');
+    expect((await listErpCostInbox({ ledgerId: 'LEDGER-IT', statuses: [] }))[0]).toEqual(original);
+    expect(await db.erpCostInbox.get(received.id)).toEqual(original);
+    await db.erpCostInbox.update(received.id, { status: 'rejected' });
+    expect((await read())[0].status).toBe('rejected');
+    expect(await listErpCostInbox({ ledgerId: 'LEDGER-IT', statuses: ['pending'], displayOnly: true })).toEqual([]);
+    expect(await listErpCostInbox({ ledgerId: 'OTHER', statuses: [], displayOnly: true })).toEqual([]);
+  });
   it("stores a batch once and treats retries as idempotent", async () => {
     const envelope = envelopeFixture();
     const first = await receiveErpCostInboxEnvelope({ envelope, receivedVia: "test" });

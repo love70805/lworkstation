@@ -28,6 +28,30 @@ function harness(size = 12, creation = { executionProtocol: 2, costFlow: 'task' 
 
 const group = (skcs, sourceMode = 'bulk', fallbackReason) => ({ platformSkcs: skcs, sourceMode, ...(fallbackReason ? { fallbackReason } : {}) });
 
+test('workbook overflow persists scoped exports, and a later receipt partition inherits its source', () => {
+  const h = harness(1079); h.resume();
+  const root = h.start(), middle = 540;
+  const halves = [root.platformSkcs.slice(0, middle), root.platformSkcs.slice(middle)].map(skcs => group(skcs, 'bulk', 'workbook_too_large'));
+  const workbookLimit = { kind: 'expandedBytes', actual: 150 * 1024 * 1024, limit: 128 * 1024 * 1024 };
+  for (const [children, measurement] of [[halves.toReversed(), workbookLimit], [halves, { ...workbookLimit, actual: 1 }],
+    [[{ ...halves[0], sourceMode: 'legacy' }, halves[1]], workbookLimit]]) {
+    assert.throws(() => h.partition(root, children, { workbookLimit: measurement }), { code: 'ERP_TASK_PARTITION_INVALID' });
+    assert.equal(h.task.batches.length, 1);
+    assert.equal(h.task.firstWorkbookLimit, undefined);
+  }
+  const { batches } = h.partition(root, halves, { workbookLimit });
+  assert.deepEqual(batches.map(batch => batch.bulkExportSkcs.length), [540, 539]);
+  assert.deepEqual(h.task.firstWorkbookLimit, { ...workbookLimit, skcCount: 1079 });
+  h.control({ action: 'pause' }); h.resume();
+  const left = h.start(batches[0]);
+  const pieces = h.partition(left, [group(left.platformSkcs.slice(0, 270)), group(left.platformSkcs.slice(270))]).batches;
+  assert.ok(pieces.every(piece => piece.platformSkcs.length === 270));
+  for (const piece of pieces) {
+    assert.deepEqual(piece.bulkExportSkcs, halves[0].platformSkcs);
+    assert.deepEqual(piece.parentWorkbookLimit, workbookLimit);
+  }
+});
+
 test('delivery pause retains its bounded explanation and original unsent identity until continuation', () => {
   const h = harness(2); h.resume(); const batch = h.start();
   h.batchCall(batch, { state: 'collected', resultDeliveryId: 'RETAINED-OR-UNCONFIRMED' });

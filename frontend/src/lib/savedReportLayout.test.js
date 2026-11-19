@@ -37,7 +37,7 @@ it('keeps tables compact while separating counts, identifiers and amounts with p
  expect(alignment(book,'20店','E2')).toContain('borderId="1"');
  expect(alignment(book,'代发表','E2')).toContain('fontId="5"');
  expect(alignment(book,'代发表','D2')).toContain('fontId="0"');
- expect(source(book,'xl/styles.xml')).toContain('rgb="FFDCE8F1"');
+ expect(source(book,'xl/styles.xml')).toContain('rgb="FFDDE5F3"');
  expect(source(book,'xl/worksheets/sheet3.xml')).toContain('ht="28"');
  expect(book.Sheets['代发表'].E2).toMatchObject({t:'s',v:dispatchRows[0].order1688});
  expect(book.Sheets['扣款'].D2).toMatchObject({t:'n',v:-4.152509999,z:'General'});
@@ -101,7 +101,8 @@ it.each(['pre_deduction','financial'])('colors only numeric losses in new %s exp
     expect(book.Sheets['20店'].J2).toMatchObject({ t:'n', v:-10.12 });
     for (const [sheet, address, font] of [
       ['20店','J2',6], ['20店','J3',0], ['20店','J4',0], ['20店','J5',0], ['20店','J6',7],
-      ['汇总表','J3',6], ['汇总表','J7',7], ['汇总表','J8',7], ['汇总表','N3',6], ['汇总表','N4',7],
+      ['汇总表','J3',6], ['汇总表','J7',7], ['汇总表',kind === 'financial' ? 'J10' : 'J8',7], ['汇总表','N3',6], ['汇总表','N4',7],
+      ...(kind === 'financial' ? [['汇总表','J8',4], ['汇总表','J9',7]] : []),
       ['汇总表',kind === 'financial' ? 'N9' : 'N8',7],
       ...(kind === 'financial' ? [['20店','J7',4], ['20店','J8',7], ['扣款','D2',3]] : []),
     ]) expect(alignment(book,sheet,address), sheet + ' ' + address).toContain('fontId="' + font + '"');

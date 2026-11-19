@@ -39,7 +39,7 @@ it('reads monthly series and SKC detail only within the active workspace and inv
   await expect(readLedgerPeriodSalesDetails({ ...scope, ledgerId: 'F' })).rejects.toThrow('工作区');
 });
 it("reads exact scoped rows and rejects foreign workspaces, ledgers and stores at repository", async () => {
-  expect(db.verno).toBe(15);
+  expect(db.verno).toBe(16);
   expect((await listLedgerSummaries()).map((ledger) => ledger.id)).toEqual(["L"]);
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L", store: "甲" })).monthTotalsExact.revenueExact).toBe("0.009");
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L" })).monthTotalsExact.revenueExact).toBe("4.009");

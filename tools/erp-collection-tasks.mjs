@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { ERP_ADOPTION_COUNTS } from '../integrations/contracts/erp-adoption-counts.mjs';
+import { hasFinishedCostAttemptWithIssues } from '../integrations/contracts/erp-cost-attempt.mjs';
 
 const PREFIX = '/erp/v1/collection-tasks';
 const LEASE_MS = 2 * 60 * 60 * 1000;
@@ -9,6 +11,13 @@ const stable = value => Array.isArray(value) ? `[${value.map(stable).join(',')}]
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const timestamp = now => new Date(now).toISOString();
 const hash = value => crypto.createHash('sha256').update(stable(value)).digest('hex');
+
+export function normalizeWorkbookLimit(value) {
+  if (!['fileBytes', 'expandedBytes', 'sheetRows', 'sheetColumns'].includes(value?.kind)
+    || !Number.isSafeInteger(value.limit) || value.limit <= 0
+    || !Number.isSafeInteger(value.actual) || value.actual <= value.limit) return null;
+  return { kind: value.kind, actual: value.actual, limit: value.limit };
+}
 
 export function collectionScopeHash(request) {
   return hash({ workspaceId: request.workspaceId, ledgerId: request.ledgerId, ledgerPeriod: request.ledgerPeriod,
@@ -94,8 +103,13 @@ export function recoverCollectionTasks(records, instanceId, now = Date.now()) {
     const unfinishedCatalog = ['cost_complete','partial'].includes(task.status)
       && task.batches.some(batch => batch.deliveryId && batch.catalogStatus !== 'completed');
     const lostRunner = task.runnerId && Date.parse(task.runnerLeaseExpiresAt) <= now;
-    if ((task.status === 'running' || task.status === 'ready' || unfinishedCatalog && (task.catalogMode !== 'on_demand' || task.runnerId))
-      && (task.instanceId !== instanceId || Date.parse(task.leaseExpiresAt) <= now || lostRunner)) {
+    const needsRecovery = task.instanceId !== instanceId || Date.parse(task.leaseExpiresAt) <= now || lostRunner;
+    if (!needsRecovery) continue;
+    if (task.runnerId && task.catalogMode === 'on_demand' && hasFinishedCostAttemptWithIssues(task)) {
+      // Closing the app between the last lookup and release leaves a stale
+      // executor. Keep the finished outcome and allow an explicit retry.
+      delete task.runnerId; delete task.runnerLeaseExpiresAt; changed = true;
+    } else if (task.status === 'running' || task.status === 'ready' || unfinishedCatalog && (task.catalogMode !== 'on_demand' || task.runnerId)) {
       task.status = 'paused'; task.recoveryRequired = true; task.updatedAt = timestamp(now); changed = true;
       delete task.runnerId; delete task.runnerLeaseExpiresAt;
     }
@@ -152,10 +166,26 @@ function partitionRunningBatch(task, batch, payload, now) {
       ...(group.fallbackReason == null ? {} : { fallbackReason: group.fallbackReason }) };
   });
   if (seen.size !== original.size) fail('ERP_TASK_PARTITION_INVALID', '拆分范围未覆盖全部原目标。', 400);
+  const workbookLimit = normalizeWorkbookLimit(payload.workbookLimit);
+  if (payload.workbookLimit != null) {
+    const middle = Math.ceil(batch.platformSkcs.length / 2);
+    if (!workbookLimit || normalized.length !== 2 || normalized[0].platformSkcs.length !== middle
+      || normalized.some(group => group.sourceMode !== 'bulk' || group.fallbackReason !== 'workbook_too_large')
+      || normalized.flatMap(group => group.platformSkcs).some((skc, index) => skc !== batch.platformSkcs[index])) {
+      fail('ERP_TASK_PARTITION_INVALID', '采购表超限时须按原顺序对半拆分并重新批量导出。', 400);
+    }
+  }
   // Validate every group before touching the task. Retire the original attempt
   // so a delayed result cannot overlap any newly assigned scope.
-  const batches = normalized.map(group => ({ ...group, batchId: `${task.taskId}:part:${crypto.randomUUID()}`,
-    parentBatchId: batch.batchId, status: 'pending', attemptId: null }));
+  const batches = normalized.map(group => {
+    // A workbook split changes the ERP query. A receipt split keeps its verified source scope.
+    const bulkExportSkcs = workbookLimit ? group.platformSkcs : batch.bulkExportSkcs;
+    return { ...group, batchId: `${task.taskId}:part:${crypto.randomUUID()}`,
+      ...(group.sourceMode === 'bulk' && bulkExportSkcs ? { bulkExportSkcs } : {}),
+      ...(workbookLimit || batch.parentWorkbookLimit ? { parentWorkbookLimit: workbookLimit || batch.parentWorkbookLimit } : {}),
+      parentBatchId: batch.batchId, status: 'pending', attemptId: null };
+  });
+  if (workbookLimit && !task.firstWorkbookLimit) task.firstWorkbookLimit = { ...workbookLimit, skcCount: batch.platformSkcs.length };
   task.batches.splice(task.batches.indexOf(batch), 1, ...batches);
   task.updatedAt = timestamp(now);
   return { status: 200, body: { task: refresh(task), batches } };
@@ -168,7 +198,13 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   const parts = url.pathname.slice(PREFIX.length).split('/').filter(Boolean).map(decodeURIComponent);
   if (!parts.length && method === 'GET') {
     const tasks = records.filter(item => item.kind === 'collection-task' && ['workspaceId','ledgerId','requestId'].every(key => !url.searchParams.get(key) || item[key] === url.searchParams.get(key)));
-    return { status: 200, body: { tasks: tasks.toSorted((left,right) => String(right.createdAt).localeCompare(String(left.createdAt))).map(task => refresh(structuredClone(task))) } };
+    const progressOnly = url.searchParams.get('view') === 'progress';
+    const sorted = tasks.toSorted((left,right) => String(right.createdAt).localeCompare(String(left.createdAt)));
+    return { status: 200, body: { tasks: sorted.map(task => {
+      if (!progressOnly) return refresh(structuredClone(task));
+      const { requestSnapshot, ...header } = task;
+      return refresh({ ...header, expectedSkus: task.expectedSkus ?? requestSnapshot?.expectedSkus ?? [] });
+    }) } };
   }
   if (!parts.length && method === 'POST') {
     if (payload.costFlow != null && (payload.executionProtocol !== 2 || payload.costFlow !== 'task')) fail('ERP_TASK_MODE_INVALID', '成本任务执行方式无效。', 400);
@@ -252,6 +288,7 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         if (payload.catalogMode != null && !['on_demand', 'after_costs'].includes(payload.catalogMode)) fail('ERP_TASK_MODE_INVALID', '商品资料整理方式无效。', 400);
         if (payload.executionTarget === 'desktop') task.executionTarget = 'desktop';
         const mode = payload.mode ?? 'cost';
+        if (payload.deliveryOnly != null && (typeof payload.deliveryOnly !== 'boolean' || mode !== 'cost')) fail('ERP_TASK_MODE_INVALID', '暂存回传方式无效。', 400);
         if (!['cost', 'catalog'].includes(mode) || payload.retryFailed != null && typeof payload.retryFailed !== 'boolean'
           || payload.refreshCatalog != null && (typeof payload.refreshCatalog !== 'boolean' || mode !== 'catalog')) fail('ERP_TASK_MODE_INVALID', '任务继续方式无效。', 400);
         if (mode === 'catalog' && task.batches.some(batch => !batch.deliveryId)) fail('ERP_TASK_COST_FIRST', '请先完成成本采集，再按需补齐商品资料。');
@@ -259,7 +296,8 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
         if (!refreshCompletedCatalog && (task.runnerId && Date.parse(task.runnerLeaseExpiresAt) > now && task.status !== 'paused'
           || task.status === 'ready' && task.runMode === mode && !payload.retryFailed
             && (!payload.catalogMode || payload.catalogMode === task.catalogMode))) return { status: 200, body: { task: refresh(task), idempotent: true } };
-        for (const batch of task.batches) if (batch.status === 'running' || payload.retryFailed && ['failed', 'incomplete'].includes(batch.status)) resetAttempt(batch);
+        if (payload.deliveryOnly) task.deliveryOnly = true; else delete task.deliveryOnly;
+        for (const batch of task.batches) if (batch.status === 'running' || !task.deliveryOnly && payload.retryFailed && ['failed', 'incomplete'].includes(batch.status)) resetAttempt(batch);
         if (payload.refreshCatalog) for (const batch of task.batches) {
           delete batch.catalogStatus; delete batch.catalogError; delete batch.catalogUpdatedAt;
         }
@@ -368,17 +406,23 @@ export function handleCollectionTaskRequest(records, { method, url, payload = {}
   if (parts[1] === 'adoption') {
     const batch = task.batches.find(item => item.deliveryId === payload.deliveryId);
     if (!batch) fail('ERP_TASK_RECEIPT_NOT_FOUND', '采用报告没有对应的已送达批次。');
-    if (payload.state === 'pending') {
+    // Older clients also used "pending" for a finished evaluation with zero
+    // adopted prices. Those reports carry the local evaluation timestamp.
+    if (payload.state === 'pending' && !payload.processedAt) {
+      if (!batch.adoption && !batch.adoptionReportedAt) return { status: 200, body: { task: refresh(task), idempotent: true } };
       batch.adoption = null; delete batch.adoptionReportedAt; task.updatedAt = timestamp(now);
       return { status: 200, body: { task: refresh(task) } };
     }
     const adoption = {};
-    for (const key of ['adoptedCount','protectedCount','evidenceIncompleteCount','missingCount','anomalyCount','manualEffectiveCount','expectedCount','supersededCount']) {
+    for (const key of ERP_ADOPTION_COUNTS) {
       const value = Number(payload[key] ?? 0);
       if (!Number.isSafeInteger(value) || value < 0) fail('ERP_TASK_ADOPTION_INVALID', '采用报告数量无效。', 400);
       adoption[key] = value;
     }
     if (adoption.adoptedCount + adoption.manualEffectiveCount > task.expectedSkus.filter(item => batch.platformSkcs.some(skc => canonical(skc) === canonical(item.platformSkc))).length) fail('ERP_TASK_ADOPTION_INVALID', '采用数量超出批次账本范围。',400);
+    if (batch.adoptionReportedAt && ERP_ADOPTION_COUNTS.every(key => batch.adoption?.[key] === adoption[key])) {
+      return { status: 200, body: { task: refresh(task), idempotent: true } };
+    }
     batch.adoption = adoption; batch.adoptionReportedAt = timestamp(now); task.updatedAt = timestamp(now);
     return { status: 200, body: { task: refresh(task) } };
   }

@@ -48,7 +48,6 @@ export async function repairLegacyTechnicalAuditActors({
 }
 
 export async function getSyncStatusSnapshot({ workspaceId = DEFAULT_WORKSPACE_ID } = {}) {
-  const events = await db.auditEvents.where("workspaceId").equals(workspaceId).toArray();
   const counts = {
     pending: 0,
     inFlight: 0,
@@ -56,8 +55,13 @@ export async function getSyncStatusSnapshot({ workspaceId = DEFAULT_WORKSPACE_ID
     failed: 0,
     terminalFailed: 0,
   };
-  for (const event of events) {
-    if (event.localOnly) continue;
+  let totalEvents = 0, latestSynced, oldestPending, latestFailure;
+  await db.auditEvents.where("workspaceId").equals(workspaceId).each(event => {
+    totalEvents++;
+    if (event.syncState === SYNC_STATES.SYNCED && (!latestSynced || String(event.syncedAt ?? '').localeCompare(String(latestSynced.at ?? '')) > 0)) latestSynced = { at: event.syncedAt };
+    if (event.syncState === SYNC_STATES.FAILED && (!latestFailure || String(event.syncClaimedAt ?? '').localeCompare(String(latestFailure.at ?? '')) > 0)) latestFailure = { at: event.syncClaimedAt, error: event.syncError };
+    if (isRetryableEvent(event) && (!oldestPending || String(event.createdAt ?? '').localeCompare(String(oldestPending.at ?? '')) < 0)) oldestPending = { at: event.createdAt };
+    if (event.localOnly) return;
     const state = event.syncState ?? SYNC_STATES.PENDING;
     if (state === SYNC_STATES.IN_FLIGHT) counts.inFlight += 1;
     else if (state === SYNC_STATES.SYNCED) counts.synced += 1;
@@ -66,29 +70,20 @@ export async function getSyncStatusSnapshot({ workspaceId = DEFAULT_WORKSPACE_ID
       if (event.syncTerminal === true) counts.terminalFailed += 1;
     }
     else counts.pending += 1;
-  }
-  const latestSynced = events
-    .filter((event) => event.syncState === SYNC_STATES.SYNCED)
-    .toSorted((a, b) => String(b.syncedAt ?? "").localeCompare(String(a.syncedAt ?? "")))[0] ?? null;
-  const oldestPending = events
-    .filter(isRetryableEvent)
-    .toSorted((a, b) => String(a.createdAt ?? "").localeCompare(String(b.createdAt ?? "")))[0] ?? null;
-  const latestFailure = events
-    .filter((event) => event.syncState === SYNC_STATES.FAILED)
-    .toSorted((a, b) => String(b.syncClaimedAt ?? "").localeCompare(String(a.syncClaimedAt ?? "")))[0] ?? null;
+  });
 
   return {
     workspaceId,
-    totalEvents: events.length,
+    totalEvents,
     pendingCount: counts.pending,
     inFlightCount: counts.inFlight,
     syncedCount: counts.synced,
     failedCount: counts.failed,
     terminalFailedCount: counts.terminalFailed,
     retryableCount: counts.pending + counts.failed - counts.terminalFailed,
-    oldestPendingAt: oldestPending?.createdAt ?? null,
-    latestSyncedAt: latestSynced?.syncedAt ?? null,
-    latestError: latestFailure?.syncError ?? null,
+    oldestPendingAt: oldestPending?.at ?? null,
+    latestSyncedAt: latestSynced?.at ?? null,
+    latestError: latestFailure?.error ?? null,
   };
 }
 

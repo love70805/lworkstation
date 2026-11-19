@@ -1,10 +1,11 @@
 import { db } from '../db/clientDatabase';
+import { readCostSaleIdentities } from './costActionSources';
 import { sourceRevision, assertSourceRevision, retrySourceRead } from '../db/derivedCache';
 import { getActiveMemberContext } from './selectionRepository';
 import { listErpCostAnomalyReview, saveManualCostOverrideGroup } from './profitRepository';
 import { assertLedgerCostEditingReady, assertCachedLedgerCostEditingReady } from './erpCostEditingGuard';
 import { canonicalPlatformSku, canonicalWarehouseSku } from '../../domain/identifiers';
-import { selectManualOverride, storeSkuKey } from '../../domain/manualCostOverride';
+import { createManualOverrideLookup, manualCostConflicts, storeSkuKey } from '../../domain/manualCostOverride';
 import { buildLedgerSkuIdentityIndex } from '../../domain/ledgerCostIdentity';
 import { accountingApprovals } from '../../domain/inventoryAccounting';
 import { readAccountingMode } from './inventoryAccountingRepository';
@@ -12,12 +13,14 @@ import { indexErpAnomalyEvidence } from '../../domain/erpAnomalyEvidence';
 import { canonicalJson } from '../../domain/profitReports';
 
 // Use the current complete ERP evidence group, never catalog names or an old mapping.
-export async function previewSharedManualCost({ ledgerId, store, platformSku }) {
+export async function previewSharedManualCost({ ledgerId, store, platformSku, signal }) {
   return retrySourceRead(async () => {
     const revision = sourceRevision(), member = await getActiveMemberContext();
     const ledger = await db.ledgers.get(ledgerId);
     if (!ledger || ledger.workspaceId !== member.workspaceId) return null;
-    const review = await listErpCostAnomalyReview(ledgerId);
+    signal?.throwIfAborted();
+    const review = await listErpCostAnomalyReview(ledgerId, undefined, { signal });
+    signal?.throwIfAborted();
     const items = [...review.pending, ...review.ignored];
     const keys = new Set(items.filter(r => canonicalPlatformSku(r.platformSku) === canonicalPlatformSku(platformSku)).map(r => r.groupKey));
     if (keys.size !== 1) return null;
@@ -26,16 +29,18 @@ export async function previewSharedManualCost({ ledgerId, store, platformSku }) 
     const evidence = indexErpAnomalyEvidence(receipt?.envelope?.batch, ledger.period).get(canonicalWarehouseSku(warehouseSku));
     if (!evidence) return null;
     const skus = new Set(group.map(r => canonicalPlatformSku(r.platformSku)));
-    const sales = await db.salesRows.where('ledgerId').equals(ledgerId).toArray();
+    const sales = await readCostSaleIdentities(ledger, false);
+    signal?.throwIfAborted();
     const identities = buildLedgerSkuIdentityIndex(sales), mode = await readAccountingMode(ledger.workspaceId);
     const approvals = accountingApprovals(await db.costApprovals.where('ledgerId').equals(ledgerId).toArray(), mode);
+    const manualFor = createManualOverrideLookup(approvals), conflicts = manualCostConflicts(approvals, ledger);
     const members = new Map();
     for (const row of sales) {
       if (!skus.has(canonicalPlatformSku(row.platformSku)) || identities.get(canonicalPlatformSku(row.platformSku))?.platformSkcs.size > 1) continue;
       const key = storeSkuKey(row.store, row.platformSku);
-      const manual = selectManualOverride(approvals, { workspaceId: ledger.workspaceId, ledgerId, store: row.store, platformSku: row.platformSku });
+      const manual = manualFor({ workspaceId: ledger.workspaceId, ledgerId, store: row.store, platformSku: row.platformSku });
       members.set(key, { store: row.store, platformSku: row.platformSku, manualId: manual?.id ?? null, unitCost: manual?.approvedAmount ?? null,
-        included: key === storeSkuKey(store, platformSku) || !manual });
+        included: key === storeSkuKey(store, platformSku) || !manual && !conflicts.has(key) });
     }
     const rows = [...members.values()].sort((a,b) => storeSkuKey(a.store,a.platformSku).localeCompare(storeSkuKey(b.store,b.platformSku)));
     if (rows.length < 2 || !members.has(storeSkuKey(store, platformSku))) return null;

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CLIENT_DATABASE_NAME,
   CLIENT_DATABASE_V11_STORES,
+  BACKUP_MIGRATION_DATABASE_PREFIX, createBackupSeedDatabase, createClientDatabase,
   ERP_TEST_DATA_RESET_ACTION,
   db,
 } from "./db/clientDatabase";
@@ -550,7 +551,7 @@ describe("v12 database upgrade", () => {
       }
 
       await db.open();
-      expect(db.verno).toBe(15);
+      expect(db.verno).toBe(16);
 
       const restored = await db.auditEvents.where("eventId").equals("EVT-V13-MISCLASSIFIED-SYNCED").first();
       expect(restored).toMatchObject({
@@ -596,4 +597,28 @@ describe("v12 database upgrade", () => {
       Object.assign(runtimeConfig, previous);
     }
   });
+});
+it("indexes old costs and decisions without altering their evidence or archived reports", async () => {
+  const name = BACKUP_MIGRATION_DATABASE_PREFIX + 'cost-index-test';
+  const old = createBackupSeedDatabase(name, 15), current = createClientDatabase(name);
+  const row = { id:1, ledgerId:'L', workspaceId:'W', batchId:'B', platformSku:'sku', canonicalPlatformSku:'SKU',
+    publishedAt:'2026-09-01', sourceEnvelopeBatchId:'S', warehouseSku:'warehouse', sourceOrder:[1,2,'S'], resolutions:[{action:'ignore_anomaly',originalUnitPrice:0}], purchaseRecords:[{unitPrice:0}] };
+  const legacy = { id:2, ledgerId:'L', batchId:'B', platformSku:'legacy' };
+  const batch = { id:'B', ledgerId:'L', workspaceId:'W', status:'published', publishedAt:row.publishedAt, sourceOrder:[1,2,'S'] };
+  const report = { id:'R', ledgerId:'L', workspaceId:'W', snapshot:{cost:3} };
+  try {
+    await old.erpCostRows.bulkAdd([row,legacy]);
+    await old.erpCostBatches.add(batch);
+    await old.profitReports.add(report);
+    old.close();
+    await current.open();
+    expect(await current.erpCostRows.where('[ledgerId+resolutions.length]').equals(['L',1]).primaryKeys()).toEqual([1]);
+    expect(await current.erpCostRows.where('[ledgerId+workspaceId+batchId+platformSku+canonicalPlatformSku+publishedAt+sourceEnvelopeBatchId+warehouseSku+sourceOrder]')
+      .equals(['L','W','B','sku','SKU',row.publishedAt,'S','warehouse',row.sourceOrder]).primaryKeys()).toEqual([1]);
+    expect(await current.erpCostBatches.where('[ledgerId+workspaceId+status+publishedAt+sourceOrder]')
+      .equals(['L','W','published',row.publishedAt,batch.sourceOrder]).primaryKeys()).toEqual(['B']);
+    expect(await current.erpCostRows.toArray()).toEqual([row,legacy]);
+    expect(await current.erpCostBatches.get('B')).toEqual(batch);
+    expect(await current.profitReports.get('R')).toEqual(report);
+  } finally { old.close(); current.close(); await Dexie.delete(name); }
 });

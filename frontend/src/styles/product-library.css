@@ -45,6 +45,8 @@
 .sort-control select { min-height: 34px; padding: 5px 28px 5px 10px; border: 1px solid var(--control-border); border-radius: var(--radius-md); outline: 0; background: var(--surface); color: var(--text); }
 .sort-control select:focus-visible { outline: 2px solid var(--primary-bright); outline-offset: 2px; }
 .product-table-panel { overflow: clip; }
+.catalog-opening-table th:first-child { width: 68px; }
+.catalog-opening-table tbody tr { cursor: pointer; }
 .product-table { min-width: 1740px; table-layout: fixed; }
 .product-table tbody tr { cursor: pointer; }
 .product-table th:first-child, .product-table td:first-child { width: 48px; padding-left: 18px; padding-right: 8px; text-align: center; }

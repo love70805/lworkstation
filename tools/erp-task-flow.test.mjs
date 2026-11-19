@@ -15,6 +15,42 @@ assert.equal(whole.task.batches.length, 1);
 assert.equal(whole.deliveries.reduce((sum, item) => sum + item.sourceMeta.requestCount, 0), whole.calls.length);
 assert.doesNotMatch(whole.body, /分批采集|第\s*\d+\s*\/\s*\d+\s*批|重试失败批次/);
 
+const tallBook = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(tallBook, { A1: { t: 's', v: '合成采购表' }, A100002: { t: 'n', v: 1 }, '!ref': 'A1:A100002' }, 'Sheet1');
+const tallBytes = XLSX.write(tallBook, { type: 'array', bookType: 'xlsx', compression: true });
+const tallMeasurement = { kind: 'sheetRows', actual: 100002, limit: 100001 };
+const oversizedFixture = url => {
+  const scope = url.searchParams.get('sku')?.split(' ') || [];
+  if (url.pathname.endsWith('/export-purchase-order') && scope.includes('SKC-2')) return { binary: tallBytes };
+  return fixture(url);
+};
+const oversized = await scenario(5, 'recursive-workbook-split', { ...options, fixture: oversizedFixture,
+  expectedDeliveries: 3, firstBatchListLimit: 4 });
+const exportScopes = result => result.calls.filter(call => call.endpoint === 'export-purchase-order').map(call => call.target);
+assert.deepEqual(exportScopes(oversized), ['SKC-0 SKC-1 SKC-2 SKC-3 SKC-4', 'SKC-0 SKC-1 SKC-2', 'SKC-0 SKC-1', 'SKC-2', 'SKC-3 SKC-4']);
+assert.deepEqual(oversized.task.firstWorkbookLimit, { ...tallMeasurement, skcCount: 5 });
+assert.deepEqual(oversized.deliveries.map(receipt => receipt.sourceMeta.collectionMethod), ['bulk_export', 'legacy', 'bulk_export']);
+assert.deepEqual(oversized.deliveries.map(receipt => receipt.sourceMeta.historyTargetSku), ['SKC-0,SKC-1', 'SKC-2', 'SKC-3,SKC-4']);
+assert.deepEqual(oversized.deliveries[1].sourceMeta.workbookLimit, tallMeasurement);
+assert.equal(oversized.deliveries.reduce((sum, receipt) => sum + receipt.sourceMeta.bulkExportCount, 0), 5);
+assert.equal(oversized.deliveries.reduce((sum, receipt) => sum + receipt.sourceMeta.requestCount, 0), oversized.calls.length);
+const detailCalls = oversized.calls.filter(call => call.endpoint === 'purchase-order-details');
+assert.equal(detailCalls.length, 48);
+assert.ok(detailCalls.every(call => call.target.startsWith('PO-SKC-2-')));
+const splitRows = oversized.deliveries.flatMap(receipt => receipt.rows);
+assert.deepEqual(splitRows.map(row => row.platformSku).sort(), ['SKU-0', 'SKU-1', 'SKU-2', 'SKU-3', 'SKU-4']);
+assert.ok(splitRows.every(row => Number(row.unitCost ?? row.previewUnitCost) === 5));
+const fileLimit = 32 * 1024 * 1024;
+const resumedSplit = await scenario(5, 'resume-workbook-split', { ...options, lostPartition: true,
+  expectedDeliveries: 3, firstBatchListLimit: 4, fixture: url => {
+    if (url.pathname.endsWith('/export-purchase-order') && url.searchParams.get('sku').split(' ').length === 5) {
+      return { binary: new ArrayBuffer(0), contentLength: String(fileLimit + 1) };
+    }
+    return oversizedFixture(url);
+  } });
+assert.deepEqual(exportScopes(resumedSplit), exportScopes(oversized));
+assert.deepEqual(resumedSplit.task.firstWorkbookLimit, { kind: 'fileBytes', actual: fileLimit + 1, limit: fileLimit, skcCount: 5 });
+
 // One uncertain short mapping must not turn nine valid costs into native reads.
 const partialFixture = async url => {
   const response = fixture(url);
@@ -80,5 +116,32 @@ assert.ok(large.deliveries.flatMap(item => item.rows).every(row => Number(row.un
 assert.equal(large.calls.filter(call => call.endpoint === 'export-purchase-order').length, 1);
 assert.equal(large.calls.filter(call => call.endpoint === 'purchase-order-details').length, 0);
 assert.equal(large.deliveries.reduce((sum, item) => sum + item.sourceMeta.requestCount, 0), large.calls.length);
+
+// The same shared-warehouse export fits a single HTTP receipt, but needs
+// more than the standalone extension's storage budget to queue that receipt.
+const quotaCase = { ...options, fixture: sharedFixture };
+const standard = await scenario(280, 'standard-storage', { ...quotaCase, expectCapacitySplit: true });
+const desktop = await scenario(280, 'desktop-storage', { ...quotaCase, desktopStorage: true });
+assert.equal(desktop.deliveries.length, 1);
+assert.ok(desktop.peakStorageBytes > 10 * 1024 * 1024 && desktop.peakStorageBytes < 32 * 1024 * 1024);
+const costs = result => result.deliveries.flatMap(receipt => receipt.rows.map(row => [row.platformSku, row.unitCost])).sort();
+assert.deepEqual(costs(desktop), costs(standard));
+assert.equal(desktop.calls.filter(call => call.endpoint === 'export-purchase-order').length, 1);
+
+// Each half fits as a workbook. Its receipt needs smaller pieces that must reuse that half's verified source.
+const splitAndQueue = await scenario(64, 'workbook-then-receipt-split', { ...options, storageQuotaBytes: 300 * 1024,
+  firstBatchListLimit: 3, expectCapacitySplit: true, fixture: url => {
+    if (url.pathname.endsWith('/export-purchase-order') && url.searchParams.get('sku').split(' ').length === 64) return { binary: tallBytes };
+    return sharedFixture(url);
+  } });
+assert.deepEqual(exportScopes(splitAndQueue).map(target => target.split(' ').length), [64, 32, 32]);
+assert.ok(splitAndQueue.deliveries.length > 2);
+assert.equal(new Set(splitAndQueue.deliveries.flatMap(receipt => receipt.rows.map(row => row.platformSku))).size, 64);
+for (const receipt of splitAndQueue.deliveries) {
+  const source = receipt.sourceMeta.historyTargetSku.split(',');
+  assert.equal(source.length, 32);
+  assert.ok(receipt.querySkcs.every(skc => source.includes(skc)));
+  assert.equal(receipt.sourceMeta.collectionMethod, 'bulk_export');
+}
 
 console.log('Whole-task collection: one normal receipt, scoped fallback, unchanged costs and legacy recovery passed');

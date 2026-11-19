@@ -92,11 +92,11 @@ it.each(['finalized', 'locked'])('keeps historical recovery available for editab
   const saved = await saveRecoveredWarehouseCost({ ...input, expectedUnitCost: 0.35 });
   expect(saved.approvedAmount).toBe(0.35);
 });
-it('does not let an isolated manual cost suppress an ordinary missing-cost suggestion', async () => {
+it('honors the same confirmed zero and skips the missing-cost suggestion in ordinary mode', async () => {
   await toggleAccountingMode(workspaceId);
   await saveManualCostOverride({ ...input, unitCost: 0, reason: '人工输入单件成本并确认更正' });
   await toggleAccountingMode(workspaceId);
-  expect((await previewRecoveredWarehouseCost(input))?.unitCost).toBe(0.35);
+  expect(await previewRecoveredWarehouseCost(input)).toBeNull();
 });
 it('calculates recovered evidence in the current context and refuses an obsolete draft', async () => {
   const candidate = await previewRecoveredWarehouseCost(input);
@@ -105,7 +105,10 @@ it('calculates recovered evidence in the current context and refuses an obsolete
   await expect(saveRecoveredWarehouseCost({ ...input, expectedUnitCost: candidate.unitCost, expectedAccountingMode: 'weighted' })).rejects.toThrow('上下文已变化');
   expect(await db.costApprovals.count()).toBe(0);
   const saved = await saveRecoveredWarehouseCost({ ...input, expectedUnitCost: 0.2, expectedAccountingMode: 'historical_lowest' });
-  expect(saved).toMatchObject({ approvedAmount: 0.2, accountingMode: 'historical_lowest' });
+  expect(saved.approvedAmount).toBe(0.2);
+  expect(saved.accountingMode).toBeUndefined();
+  await toggleAccountingMode(workspaceId);
+  expect(await previewRecoveredWarehouseCost(input)).toBeNull();
 });
 it('rejects source-wide incomplete history even when the selected warehouse says complete', async () => {
   const incomplete = structuredClone((await db.erpCostInbox.get(receipt.id)).envelope);

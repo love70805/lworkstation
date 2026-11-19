@@ -5,8 +5,8 @@ import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerC
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 import { costEvaluationPeriod } from './inventoryAccounting';
 
-export const REPORT_FORMULA_VERSION = "monthly-report@1-exact-supplements";
-export const REPORT_TEMPLATE_VERSION = "profit-zebra@14-profit-colors";
+export const REPORT_FORMULA_VERSION = "monthly-report@3-optional-dispatch";
+export const REPORT_TEMPLATE_VERSION = "profit-zebra@16-store-deductions";
 // Only newly generated, complete files carry this marker. Existing snapshots
 // retain the archived-layout conversion path without migration.
 export const REPORT_DOWNLOAD_FORMAT = 'profit-final-file@1';
@@ -31,17 +31,10 @@ export async function sha256(value) {
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, allowMissing = false }) {
-  const identities = buildLedgerSkuIdentityIndex(salesRows);
-  const costs = new Map(erpCosts.map(row => [canonicalPlatformSku(row.platformSku), row]));
+// An exported report keeps every source reference. The interactive page needs
+// the same exact sums, the source count and its first reference only.
+export function groupReportSales(salesRows, preview = false) {
   const groups = new Map();
-  const manualGroups = new Map();
-  for (const approval of approvals ?? []) {
-    if (manualSnapshot(approval)?.kind !== "manual_override") continue;
-    const key = storeSkuKey(manualSnapshot(approval).store, approval.platformSku);
-    if (!manualGroups.has(key)) manualGroups.set(key, []);
-    manualGroups.get(key).push(approval);
-  }
   for (const source of salesRows) {
     if (/盘亏/.test(source.movementType ?? "")) continue;
     if (source.isDeduction || Number(source.penalty ?? 0) !== 0 || /扣款|罚款|违约/.test(source.movementType ?? "")) throw new Error("台账含旧罚款记录，请重新导入纯销售台账，并将扣款登记到独立扣款来源，避免重复扣款。");
@@ -50,14 +43,32 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
     const row = groups.get(key);
     row.quantityExact = new Exact(row.quantityExact).plus(exact(source.quantityExact ?? source.quantity)).toFixed();
     row.revenueExact = new Exact(row.revenueExact).plus(exact(source.amountExact ?? source.amount)).toFixed();
-    row.sourceRows.push({ id: source.id, batchId: source.batchId, sourceSheet: source.sourceSheet, sourceRow: source.sourceRow });
+    if (!preview || !row.sourceRows.length) row.sourceRows.push({ id: source.id, batchId: source.batchId, sourceSheet: source.sourceSheet, sourceRow: source.sourceRow });
+    if (preview) row.sourceRowCount = (row.sourceRowCount ?? 0) + 1;
   }
   if (!groups.size) throw new Error("账本没有可生成报告的销售明细。");
+  return [...groups.values()];
+}
+
+export function buildReportProducts(input, checkPeriod) {
+  return priceReportGroups(input, groupReportSales(input.salesRows), checkPeriod);
+}
+
+export function priceReportGroups({ ledger, salesRows, erpCosts, approvals, allowMissing = false }, groups, checkPeriod) {
+  const identities = buildLedgerSkuIdentityIndex(salesRows);
+  const costs = new Map(erpCosts.map(row => [canonicalPlatformSku(row.platformSku), row]));
+  const manualGroups = new Map();
+  for (const approval of approvals ?? []) {
+    if (manualSnapshot(approval)?.kind !== "manual_override") continue;
+    const key = storeSkuKey(manualSnapshot(approval).store, approval.platformSku);
+    if (!manualGroups.has(key)) manualGroups.set(key, []);
+    manualGroups.get(key).push(approval);
+  }
   const rate = exact(ledger.warehouseRate ?? "0.7", { nonnegative: true });
-  return [...groups.values()].map(row => {
+  return groups.map(row => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const cost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveLedgerCostDecision({ ...scope, identity: identities.get(row.canonicalPlatformSku), period: costEvaluationPeriod(ledger), erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) });
+    const decision = resolveLedgerCostDecision({ ...scope, accountingMode: ledger.accountingMode, identity: identities.get(row.canonicalPlatformSku), period: costEvaluationPeriod(ledger), erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) }, checkPeriod);
     if (!decision.eligibleForExactProfit) {
       if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId, costIdentityIssue:decision.identityIssue ?? null };
       if (decision.identityIssue) throw new Error(`${describeLedgerCostIdentityIssue(decision.identityIssue)}不能生成报告。`);
@@ -75,9 +86,9 @@ export function buildReportProducts({ ledger, salesRows, erpCosts, approvals, al
 export function reportTotals(products, dispatchQuantityExact, warehouseRateExact, deductions = []) {
   const stores = [...new Set(products.map(row => row.store))];
   if (deductions.some(row => !stores.includes(row.store))) throw new Error("扣款店铺不在未扣款报告基础中。");
-  const dispatchAmountExact = new Exact(dispatchQuantityExact).times(warehouseRateExact).toFixed();
+  const dispatchAmountExact = dispatchQuantityExact === null ? null : new Exact(dispatchQuantityExact).times(warehouseRateExact).toFixed();
   const productProfitExact = exactSum(products, "profitExact");
-  const preDeductionExact = new Exact(productProfitExact).plus(dispatchAmountExact).toFixed();
+  const preDeductionExact = dispatchAmountExact === null ? productProfitExact : new Exact(productProfitExact).plus(dispatchAmountExact).toFixed();
   const deductionExact = exactSum(deductions, "signedAmountExact");
   return { quantityExact: exactSum(products,"quantityExact"), revenueExact: exactSum(products,"revenueExact"), purchaseCostExact: exactSum(products,"purchaseCostExact"), warehouseCostExact: exactSum(products,"warehouseCostExact"), productProfitExact, dispatchQuantityExact, dispatchAmountExact, preDeductionExact, deductionExact, profitExact: new Exact(preDeductionExact).minus(deductionExact).toFixed(), stores: stores.map(store => {
     const lines = products.filter(row => row.store === store);

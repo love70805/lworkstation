@@ -15,6 +15,7 @@
   const LOOPBACK_COMMIT_TIMEOUT_MS = 60000;
   const MAX_COST_PAYLOAD_BYTES = 25 * 1024 * 1024;
   const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
+  const DESKTOP_STORAGE_BUDGET_BYTES = 32 * 1024 * 1024;
   const STORAGE_HEADROOM_BYTES = 256 * 1024;
   const ERP_PAGE_PATH = '/view/system/purchaseOrderModule/purchasingManagement.html';
   const activeDeliveries = new Set();
@@ -94,9 +95,9 @@
   async function cleanCheckpoints() {
     const stored = await chrome.storage.local.get(CHECKPOINT_KEY);
     const currentVersion = chrome.runtime.getManifest().version;
-    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60'];
+    const compatible = ['8.0.29', '8.0.30', '8.0.31', '8.0.32', '8.0.33', '8.0.34', '8.0.35', '8.0.36', '8.0.37', '8.0.38', '8.0.39', '8.0.40', '8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.61'];
     const records = (Array.isArray(stored[CHECKPOINT_KEY]) ? stored[CHECKPOINT_KEY] : []).filter(item => item.schemaVersion === 1 && (item.extensionVersion === currentVersion
-      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.61'].includes(currentVersion) && compatible.includes(item.extensionVersion)
+      || ['8.0.41', '8.0.42', '8.0.43', '8.0.44', '8.0.45', '8.0.46', '8.0.47', '8.0.48', '8.0.49', '8.0.50', '8.0.51', '8.0.52', '8.0.53', '8.0.54', '8.0.55', '8.0.56', '8.0.57', '8.0.58', '8.0.59', '8.0.60', '8.0.61', '8.0.62'].includes(currentVersion) && compatible.includes(item.extensionVersion)
         && Number(item.extensionVersion.split('.').at(-1)) < Number(currentVersion.split('.').at(-1)))
       && Number.isFinite(item.updatedAt) && Date.now() - item.updatedAt >= 0 && Date.now() - item.updatedAt < CHECKPOINT_TTL_MS).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
     while (checkpointBytes(records) > CHECKPOINT_MAX_BYTES) records.pop();
@@ -555,8 +556,12 @@
   }
   async function costStorageCapacity(record, records = null) {
     const retained = records ?? await readPending();
-    const quota = Number.isSafeInteger(chrome.storage.local.QUOTA_BYTES) && chrome.storage.local.QUOTA_BYTES > 0
+    // Chromium still reports QUOTA_BYTES as 10 MiB with unlimitedStorage.
+    // The desktop runtime grants it to the bundled extension at load time.
+    const nativeQuota = Number.isSafeInteger(chrome.storage.local.QUOTA_BYTES) && chrome.storage.local.QUOTA_BYTES > 0
       ? chrome.storage.local.QUOTA_BYTES : DEFAULT_STORAGE_QUOTA_BYTES;
+    const quota = chrome.runtime.getManifest().permissions?.includes('unlimitedStorage')
+      ? DESKTOP_STORAGE_BUDGET_BYTES : nativeQuota;
     const used = typeof chrome.storage.local.getBytesInUse === 'function'
       ? await chrome.storage.local.getBytesInUse(null) : jsonBytes(retained) + PENDING_RESULTS_KEY.length;
     if (!Number.isSafeInteger(used) || used < 0) throw loopbackError('ERP_STORAGE_CHECK_FAILED', '本机暂存容量尚未确认，请继续原任务重试。', 503);

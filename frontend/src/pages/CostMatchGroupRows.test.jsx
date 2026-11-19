@@ -6,7 +6,7 @@ import CostMatchGroupRows from "./CostMatchGroupRows";
 
 let container, root;
 const variant = (platformSku, extra = {}) => ({ platformSku, canonicalPlatformSku: platformSku, platformSkc: "SKC-1", sourcePlatformSku: platformSku, status: "matched", unitCost: 4.59, attribute: "白色 / L", ...extra });
-const storeLine = (id, store, extra = {}) => ({ id, store, decision: { eligibleForExactProfit: true, unitCost: 4.59 }, erpCost: { publishedAt: "2026-09-01T00:00:00Z" }, ...extra });
+const storeLine = (id, store, extra = {}) => ({ id, store, decision: { source: 'erp', eligibleForExactProfit: true, unitCost: 4.59 }, erpCost: { publishedAt: "2026-09-01T00:00:00Z" }, ...extra });
 
 async function render(variants, reviewRowsBySku = new Map(), extra = {}) {
   const props = {
@@ -60,7 +60,7 @@ describe("cost matching shared SKU and store rows", () => {
 
   it("uses SKU and evidence row spans for multiple stores with distinct effective values and matching actions", async () => {
     const erp = storeLine("ERP", "甲店");
-    const manual = storeLine("MANUAL", "名称较长的乙店", { manualOverride: { approvedAt: "2026-09-02T00:00:00Z" }, decision: { eligibleForExactProfit: true, unitCost: 0 } });
+    const manual = storeLine("MANUAL", "名称较长的乙店", { manualOverride: { approvedAt: "2026-09-02T00:00:00Z" }, decision: { source: 'manual_override', eligibleForExactProfit: true, unitCost: 0 } });
     const missing = storeLine("MISSING", "丙店", { erpCost: null, decision: { eligibleForExactProfit: false } });
     const props = await render([variant("SKU-A"), variant("SKU-B")], new Map([["SKU-A", [erp, manual]], ["SKU-B", [missing]]]));
     const rows = [...container.querySelectorAll("tbody > tr")];
@@ -82,10 +82,20 @@ describe("cost matching shared SKU and store rows", () => {
   });
 
   it("preserves candidate and manual adopted statuses without mislabelling the effective store cost", async () => {
-    await render([variant("SKU-A", { status: "anomaly_pending", unitCost: 9, evidenceComplete: true, costDecision: { selectedRecords: [{}] } })], new Map([["SKU-A", [storeLine("M", "甲店", { manualOverride: {}, decision: { eligibleForExactProfit: true, unitCost: 0.00001 } })]]]), { candidateSkuSet: new Set(["SKU-A"]) });
+    await render([variant("SKU-A", { status: "anomaly_pending", unitCost: 9, evidenceComplete: true, costDecision: { selectedRecords: [{}] } })], new Map([["SKU-A", [storeLine("M", "甲店", { manualOverride: {}, decision: { source: 'manual_override', eligibleForExactProfit: true, unitCost: 0.00001 } })]]]), { candidateSkuSet: new Set(["SKU-A"]) });
     expect(container.querySelector(".cost-match-candidate-cell").textContent).toContain("采购异常待处理");
     expect(container.querySelector(".cost-match-current-cell").textContent).toContain("0.00001");
     expect(container.querySelector(".cost-match-current-cell").textContent).toContain("人工更正有效");
+  });
+
+  it('shows the chosen ERP price and its date when the shared manual price is higher', async () => {
+    const row = storeLine('L', '甲店', { manualOverride: { approvedAmount: 8, approvedAt: '2026-11-15T12:00:00Z' },
+      decision: { eligibleForExactProfit: true, source: 'erp', unitCost: 5 } });
+    await render([variant('SKU-A')], new Map([['SKU-A', [row]]]));
+    const current = container.querySelector('.cost-match-current-cell');
+    expect(current.textContent).toContain('¥5.0000');
+    expect(current.textContent).toContain('ERP 已采用 · ' + new Date(row.erpCost.publishedAt).toLocaleDateString('zh-CN'));
+    expect(current.textContent).not.toContain('人工更正有效');
   });
 
   it("keeps conflicting attribute provenance in the shared identity cell", async () => {

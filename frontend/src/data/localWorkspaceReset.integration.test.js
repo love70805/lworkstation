@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { db, clearLocalWorkspaceData, DEFAULT_WORKSPACE_ID, createOrGetMonthlyLedger } from './database';
+import { db, clearLocalWorkspaceData, DEFAULT_WORKSPACE_ID, createOrGetMonthlyLedger, getDataSecuritySnapshot } from './database';
 import { costDraftKey } from '../lib/costMatchingDraft';
 import { BUSINESS_PREFERENCE_FIELDS } from '../lib/businessPreferencesBackup';
 import { runWorkspaceBackgroundTask } from '../lib/workspaceBackgroundTasks';
@@ -78,14 +78,34 @@ it('drains an in-flight delivery before reset and prevents another recovery cycl
     await ready;
     await db.erpCostRows.add({ ledgerId: 'OLD-LEDGER', platformSku: 'LATE', unitCost: 10 });
   });
-  const reset = clearLocalWorkspaceData();
+  const progress = vi.fn();
+  const reset = clearLocalWorkspaceData('local-user', { onProgress: progress });
+  expect(progress).toHaveBeenCalledWith('正在等待后台完成当前写入…');
   expect(clearInboxData).not.toHaveBeenCalled();
   const lateCycle = vi.fn();
   expect(await runWorkspaceBackgroundTask(lateCycle)).toBeNull();
   expect(lateCycle).not.toHaveBeenCalled();
   finishDelivery(); await delivery; await reset;
   expect(await db.erpCostRows.count()).toBe(0);
+  expect(progress.mock.calls.map(([message]) => message)).toEqual([
+    '正在等待后台完成当前写入…', '正在清空桌面收件和采集任务…', '正在清空本机账本和业务记录…',
+  ]);
   expect(await runWorkspaceBackgroundTask(() => 'new cycle')).toBe('new cycle');
+});
+
+it('counts the local backup tables without loading sales or purchase evidence', async () => {
+  await db.salesRows.add({ ledgerId: 'OLD-LEDGER', workspaceId: DEFAULT_WORKSPACE_ID, platformSku: 'OLD-SKU' });
+  const read = vi.fn(row => row);
+  const watched = [db.salesRows, db.erpCostRows, db.erpCostInbox, db.products];
+  for (const table of watched) table.hook('reading').subscribe(read);
+  try {
+    const snapshot = await getDataSecuritySnapshot();
+    expect(snapshot.tableCounts).toMatchObject({ salesRows: 1, erpCostRows: 1, profitReports: 1 });
+    expect(snapshot.summary.recordCount).toBe(Object.values(snapshot.tableCounts).reduce((sum, n) => sum + n, 0));
+    expect(read).not.toHaveBeenCalled();
+  } finally {
+    for (const table of watched) table.hook('reading').unsubscribe(read);
+  }
 });
 
 it('clears browser-only data without requiring a backup API', async () => {

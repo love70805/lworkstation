@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { getActiveMemberContext, listLedgerSummaries } from '../data/database';
-import { readLedgerSalesRows } from '../data/repositories/ledgerReadCache';
+import { readLedgerScopeRows } from '../data/repositories/ledgerReadCache';
 import { workspaceLedgerQuery } from './workspaceNavigation';
 
 export function useWorkspaceLedgerScope() {
@@ -21,7 +21,7 @@ export function useWorkspaceLedgerScope() {
       const requested = ledgers.find(item => item.id === requestedId);
       if (requestedId && !requested) return { search, workspaceId: member.workspaceId, ledgers, error: '指定账本不存在或不属于当前工作区，请重新选择账本。' };
       const selected = requested || ledgers[0] || null;
-      const rows = selected ? await readLedgerSalesRows(member.workspaceId, selected.id) : [];
+      const rows = selected ? await readLedgerScopeRows(member.workspaceId, selected.id) : [];
       if ((await getActiveMemberContext()).workspaceId !== member.workspaceId) return null;
       const query = selected ? workspaceLedgerQuery(selected.id, search, rows, Boolean(requested), { workspaceId: member.workspaceId }) : new URLSearchParams();
       return { search, workspaceId: member.workspaceId, ledgers, selected, stores: [...new Set(rows.map(row => row.store).filter(Boolean))].sort(), store: query.get('store') || 'all', query: query.toString() };
@@ -41,7 +41,7 @@ export function useWorkspaceLedgerScope() {
       const targetId = next.get('ledger');
       if (targetId !== result.selected?.id) {
         if (!result.ledgers.some(ledger => ledger.id === targetId)) throw new Error('指定账本不存在或不属于当前工作区，请重新选择账本。');
-        const rows = await readLedgerSalesRows(result.workspaceId, targetId, { strict: true });
+        const rows = await readLedgerScopeRows(result.workspaceId, targetId, { strict: true });
         if (token !== generation.current) return;
         // The URL still names the source ledger until its supplier reference has
         // been validated and rebound against the selected month's actual rows.

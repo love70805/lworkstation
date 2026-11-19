@@ -187,7 +187,7 @@ function createWorkspaceErpCollector({ requestInbox, createView, getContext, che
       if (['stopped','invalidated'].includes(owner.task.status)) throw Object.assign(new Error('旧任务已结束，请重新准备当前范围。'), { code: 'ERP_TASK_STOPPED' });
       if (owner.task.status === 'completed') { publish(owner, 'completed'); return snapshot(); }
       if (queued(owner.task) && owner.task.executionTarget === 'desktop') { if (!await fence(owner, revision)) return snapshot(); }
-      else owner.task = (await control('request_resume', { executionTarget: 'desktop', catalogMode: 'on_demand', mode: input.mode === 'catalog' ? 'catalog' : 'cost', retryFailed: input.retryFailed === true }, owner)).task;
+      else owner.task = (await control('request_resume', { executionTarget: 'desktop', catalogMode: 'on_demand', mode: input.mode === 'catalog' ? 'catalog' : 'cost', retryFailed: input.retryFailed === true, ...(input.deliveryOnly === true ? {deliveryOnly:true} : {}) }, owner)).task;
       if (!owns(owner, revision)) return snapshot();
       if (owner.task.runnerId) {
         owner.hasRun = true; publish(owner, owner.task.status); startTimer(); return snapshot();

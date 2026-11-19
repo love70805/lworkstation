@@ -43,6 +43,22 @@ it('reads cost evidence in bounded chunks and never transfers raw financial copi
   expect((await db.erpCostRows.toArray())[0].evidence).toEqual(evidence);
 });
 
+it('omits unpublishable purchase details from catalog workers while preserving the full source and the reference result', async () => {
+  const batchId = 'COST-ONLY';
+  await db.erpCostBatches.add({ id:batchId, workspaceId:'W', ledgerId:'L', status:'published', sourceContract:{sourceMeta:{catalogPublication:{mode:'on_demand'}}} });
+  await db.erpCostRows.add({ batchId, ledgerId:'L', workspaceId:'W', platformSkc:'SKC-A', platformSku:'SKU-A',
+    unitCost:9, purchaseRecords:[{recordId:'QA',supplierName:'采购供应商'}] });
+  const full = buildSelectionReferenceRows({ ...await getSelectionReferenceSnapshot(), compactEvidence:true }).find(row=>row.platformSku==='SKU-A');
+  const worker = vi.spyOn(computations,'runDerivedComputation');
+  const {computedReferenceRows} = await getSelectionReferenceSnapshot({compact:true});
+  const lean = worker.mock.calls.find(([kind])=>kind==='selection')[1].erpCosts[0];
+  expect(lean).toMatchObject({platformSku:'SKU-A',platformSkc:'SKC-A',ledgerId:'L',catalogEligible:false});
+  expect(lean.purchaseRecords).toBeUndefined();
+  const projected = computedReferenceRows.find(row=>row.platformSku==='SKU-A');
+  for (const field of ['referenceUnitCost','referenceKind','coverSalesQuantity','supplierName','platformSkcEvidence']) expect(projected[field]).toEqual(full[field]);
+  expect((await db.erpCostRows.toCollection().first()).purchaseRecords).toHaveLength(1);
+});
+
 it('reuses after process cache clear, then invalidates same-count edit, replacement and workspace switch', async () => {
   const compute = vi.spyOn(computations, 'runDerivedComputation');
   await getSelectionReferenceSnapshot({ compact: true });
@@ -147,7 +163,7 @@ it('reuses immutable ledger facts after a real product save, including after pro
     await getSelectionReferenceSnapshot({ compact: true });
   }
   const keys = await derivedCacheDb.entries.toCollection().primaryKeys();
-  expect(keys.filter(key => key.includes('selection-reference@6-product-archive'))).toHaveLength(1);
+  expect(keys.filter(key => key.includes('selection-reference@7-profit-coverage'))).toHaveLength(1);
   expect(keys.filter(key => key.includes('selection-ledger-facts@5-sales-inputs'))).toHaveLength(1);
   expect(read).not.toHaveBeenCalled();
 });
@@ -166,7 +182,7 @@ it('reuses reference calculations for audit-only writes while keeping the source
 it('refreshes final financial/context projections while reusing unchanged sales facts and rejecting aborted source writes', async () => {
   await getSelectionReferenceSnapshot({ compact: true });
   const mutations = [
-    [() => db.importBatches.update('B', { fileHash: 'changed' }), true],
+    [() => db.importBatches.update('B', { fileHash: 'changed' }), false],
     [() => db.salesRows.toCollection().modify({ unitPrice: 0 }), true],
     [() => db.ledgers.update('L', { status: 'finalized' }), false],
     [() => db.erpCostRows.add({ workspaceId: 'W', ledgerId: 'L', platformSku: 'SKU-A', unitCost: 1 }), false],

@@ -1,5 +1,38 @@
+import { hasFinishedCostAttemptWithIssues } from '../../../integrations/contracts/erp-cost-attempt.mjs';
+
+export { hasFinishedCostAttemptWithIssues };
+
 export function hasPendingErpCatalog(task) {
   return (task?.batches ?? []).some(batch => batch.deliveryId && batch.catalogStatus !== 'completed');
+}
+
+export const ERP_COST_ROUND_ENDED = '本轮成本采集已结束';
+
+// Callers supply receipts from the current ledger. A registered request or an
+// empty inbox alone cannot establish that a round has been evaluated.
+export function canReviewErpCostRound(task, inboxes, hasPublishedCosts = false) {
+  const batches = task?.batches ?? [];
+  const deliveries = new Set(batches.map(batch => batch.deliveryId).filter(Boolean));
+  const related = task ? inboxes.filter(row => deliveries.has(row.deliveryId)
+    || !deliveries.size && task.status === 'stopped' && task.requestId && row.requestId === task.requestId) : inboxes;
+  const live = related.filter(row => !['voided', 'rejected'].includes(row.status));
+  if (live.some(row => row.adoptionPending || row.adoptionFailure || !(row.adoption || row.appliedBatchId || row.status === 'applied'))) return false;
+  if (!task) return live.length > 0 || hasPublishedCosts;
+  if (task.status === 'invalidated') return false;
+  const received = new Set(related.map(row => row.deliveryId));
+  if ([...deliveries].some(id => !received.has(id))) return false;
+  if (task.status === 'stopped') return live.length > 0;
+  return hasFinishedCostAttemptWithIssues(task) || batches.length > 0 && batches.every(batch => batch.deliveryId);
+}
+
+export function unfinishedCostTaskHint(task) {
+  if (!task || task.runMode === 'catalog' || ['stopped', 'invalidated', 'completed'].includes(task.status) || hasFinishedCostAttemptWithIssues(task)) return '';
+  const batches = task.batches ?? [];
+  if (batches.length && batches.every(batch => batch.deliveryId)) return '';
+  const pendingSkcs = new Set(batches.filter(batch => !batch.deliveryId).flatMap(batch => batch.platformSkcs ?? [])
+    .map(skc => String(skc).trim().toUpperCase()).filter(Boolean));
+  const count = pendingSkcs.size ? `，还有 ${pendingSkcs.size} 个 SKC 未送达` : '';
+  return `${task.ledgerPeriod ? task.ledgerPeriod + ' ' : ''}采集任务尚未完成${count}。`;
 }
 
 // Adoption reports update the task long after procurement has stopped. Cost
@@ -16,9 +49,20 @@ export function erpCostCollectionTiming(task) {
 
 export function isActiveErpCollection(task) {
   if (!task || ['stopped', 'completed', 'invalidated'].includes(task.status)) return false;
-  if (task.catalogMode === 'on_demand' && task.runMode !== 'catalog' && erpCostCollectionTiming(task).completed) return false;
+  if (task.catalogMode === 'on_demand' && task.runMode !== 'catalog'
+    && (erpCostCollectionTiming(task).completed || hasFinishedCostAttemptWithIssues(task))) return false;
   if (task.status === 'cost_complete' && task.catalogMode === 'on_demand' && !task.runnerId) return false;
   return task.status !== 'cost_complete' || hasPendingErpCatalog(task);
+}
+
+// Task lists are newest first. An older paused task must not replace the
+// finished round's missing items and retry action on the ledger page.
+export function currentLedgerCollectionTask(tasks) {
+  const latest = tasks[0];
+  if (hasFinishedCostAttemptWithIssues(latest)) {
+    return tasks.find(task => task.runnerId && ['running', 'pausing'].includes(task.status) && isActiveErpCollection(task)) ?? latest;
+  }
+  return tasks.find(isActiveErpCollection) ?? latest ?? null;
 }
 
 // Task preparation and a durable receipt are not proof of an active ERP read.
@@ -43,6 +87,7 @@ export function erpCollectionPresentation(task) {
   const running = catalogRunning || costRunning || delivering || preparingCatalog || awaitingAdoption || task?.status === 'pausing';
   const terminal = !task || ['stopped', 'completed', 'invalidated'].includes(task.status);
   const costIssues = batches.some(batch => ['failed', 'incomplete'].includes(batch.status));
+  const finishedWithIssues = hasFinishedCostAttemptWithIssues(task);
   const catalogOnly = costDelivered && !costIssues && catalogPending;
   const neverStarted = batches.every(batch => batch.status === 'pending' && !batch.deliveryId && !batch.catalogStatus);
   const pendingCost = batches.some(batch => ['pending', 'running', 'collected'].includes(batch.status));
@@ -76,7 +121,7 @@ export function erpCollectionPresentation(task) {
   } else if (awaitingAdoption) {
     state = 'cost_adoption'; title = '成本已送达，正在完成本机核算';
     description = '整项任务核算完成后，统一复用暂存资料补全商品并自动建档；无需再次请求已取得的 ERP 资料。';
-  } else if (queued || claimed && !running) {
+  } else if (queued || claimed && !running && !finishedWithIssues) {
     state = 'queued'; title = queued ? '继续请求已保存，等待 ERP 接续' : 'ERP 已接续，正在准备读取';
     description = task.executionTarget === 'desktop'
       ? '工作台正在等待后台 ERP 确认接收；请保持 ERP 已登录。若连接未确认，可使用重新连接 ERP 接续原任务。'
@@ -107,9 +152,9 @@ export function erpCollectionPresentation(task) {
     description = adoptionUnconfirmed ? '采集与资料检查已结束，本机核算结果尚未确认；请以成本采用明细为准。'
       : '成本是否已采用以明细为准；无需继续采集。'; tone = adoptionUnconfirmed ? 'info' : 'success';
   } else if (costIssues || batches.some(batch => batch.catalogStatus === 'failed')) {
-    state = 'attention'; title = task.runMode === 'catalog' ? '商品档案仍有缺项，待继续补齐' : costIssues ? '采集已结束，成本证据仍需核对' : '成本已回传，商品资料仍需处理';
-    description = '请查看具体 SKU、SKC 和异常原因。图片、链接缺项单独补齐，已采用成本可继续核算利润。'; tone = 'warning';
+    state = 'attention'; title = task.runMode === 'catalog' ? '商品档案仍有缺项，待继续补齐' : finishedWithIssues ? ERP_COST_ROUND_ENDED : costIssues ? '仍有采购成本待采集' : '成本已回传，商品资料仍需处理';
+    description = finishedWithIssues ? '请核对已回传的采购证据，仍可重试未完成项。' : '请查看具体 SKU、SKC 和异常原因。图片、链接缺项单独补齐，已采用成本可继续核算利润。'; tone = 'warning';
   }
   return { state, title, description, tone, running, catalogPending, catalogOnly, canResume, adoptionUnconfirmed,
-    canStop: isActiveErpCollection(task), canRetry: !running && !terminal && !queued && !claimed && costIssues };
+    canStop: isActiveErpCollection(task) && (!finishedWithIssues || running), canRetry: !running && !terminal && !queued && !claimed && costIssues };
 }

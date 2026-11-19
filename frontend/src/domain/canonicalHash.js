@@ -47,7 +47,7 @@ export function* canonicalJsonChunks(value) {
 
 // Only a small UTF-8 buffer is passed to the incremental hash. Yield between
 // chunks so export progress can paint while a large snapshot is being checked.
-export async function hashJsonChunks(chunks) {
+export async function hashJsonChunks(chunks, { yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)) } = {}) {
   const hash = sha256.create();
   let buffer = '', lastYield = performance.now();
   try {
@@ -56,7 +56,7 @@ export async function hashJsonChunks(chunks) {
       if (buffer.length < HASH_CHARS) continue;
       hash.update(encoder.encode(buffer)); buffer = '';
       if (performance.now() - lastYield >= 16) {
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await yieldControl();
         lastYield = performance.now();
       }
     }
@@ -65,7 +65,7 @@ export async function hashJsonChunks(chunks) {
   } finally { hash.destroy(); }
 }
 
-export const hashCanonicalJson = value => hashJsonChunks(canonicalJsonChunks(value));
+export const hashCanonicalJson = (value, options) => hashJsonChunks(canonicalJsonChunks(value), options);
 
 // A write transaction must not leave its active IDB task while validating the
 // final source snapshot. It still uses bounded buffers, without a timer or an
