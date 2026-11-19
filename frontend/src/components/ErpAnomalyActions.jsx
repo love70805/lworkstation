@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Button, Modal, useToast } from './UI';
 import { listErpCostAnomalyReview, setErpCostAnomaliesIgnored } from '../data/repositories/profitRepository';
 import { canonicalPlatformSku, canonicalWarehouseSku } from '../domain/identifiers';
 import { storeSkuKey } from '../domain/manualCostOverride';
 import { ERP_COST_ANOMALY_LABELS } from '../domain/erpCostResolution';
+import { beginCostReview } from '../lib/costReviewActivity';
+import { purchaseEvidenceDigest } from '../domain/erpInboxSummary';
 
 const EMPTY = [];
 const itemKey = item => JSON.stringify([item.inboxId, canonicalWarehouseSku(item.warehouseSku)]);
@@ -13,7 +15,7 @@ function groupAnomalies(items) {
   for (const item of items) {
     if (!item.inboxId || !item.warehouseSku) continue;
     const key = item.groupKey ?? itemKey(item), group = groups.get(key) ?? { key, inboxId: item.inboxId, warehouseSku: item.warehouseSku, members: new Map(), prices: new Set(), reasons: new Set(), skus: new Set() };
-    group.members.set(itemKey(item), { inboxId: item.inboxId, warehouseSku: item.warehouseSku });
+    group.members.set(itemKey(item), { inboxId: item.inboxId, warehouseSku: item.warehouseSku, ...(item.evidenceKey ? {evidenceKey:item.evidenceKey} : {}) });
     group.prices.add(item.originalUnitPrice);
     for (const reason of item.reasons ?? []) group.reasons.add(ERP_COST_ANOMALY_LABELS[reason] ?? reason);
     if (item.platformSku) group.skus.add(item.platformSku);
@@ -84,22 +86,100 @@ export default function ErpAnomalyActions(props) {
   return <LedgerAnomalyActions key={props.ledgerId} {...props} />;
 }
 
-function LedgerAnomalyActions({ ledgerId, locked = false, blockedReason = '', onReview, renderEditor, missingRows = EMPTY, inboxes, reviewRows = EMPTY }) {
+function LedgerAnomalyActions({ ledgerId, locked = false, blockedReason = '', onReview, renderEditor, missingRows: sourceMissing = EMPTY, inboxes, reviewRows: sourceRows = EMPTY, costSnapshot, summaryEntries, loadOnOpen = false, pendingHint = false, receiptsReady = true }) {
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(null), [error, setError] = useState('');
+  useEffect(() => open ? beginCostReview() : undefined,[open]);
   const operationRef = useRef(null);
   const [editing, setEditing] = useState(null), [editingBusy, setEditingBusy] = useState(false), [savedMessage, setSavedMessage] = useState('');
   const [tab, setTab] = useState('pending'), [selected, setSelected] = useState(new Set()), [limit, setLimit] = useState(30);
   const [attempt, setAttempt] = useState(0);
   const { notify } = useToast();
+  const hasSummary = loadOnOpen && summaryEntries != null;
+  const readEnabled = receiptsReady && (!loadOnOpen || open && !editing && (tab !== 'missing' || !hasSummary));
+  const inFlight = useRef(null);
+  const [partial, setPartial] = useState(null), [committed, setCommitted] = useState(null);
+  const [savedPreview, setSavedPreview] = useState(null);
+  const [manualSaves, setManualSaves] = useState(new Map());
+  const [awaitingCosts, setAwaitingCosts] = useState(null);
+  const [bulk, setBulk] = useState(false);
+  const returnPosition = useRef(null);
+  useLayoutEffect(() => {
+    if (editing || !returnPosition.current) return;
+    const { body, top } = returnPosition.current;
+    if (body.isConnected) body.scrollTop = top;
+    returnPosition.current = null;
+  },[editing]);
+  const reviewRows = useMemo(() => manualSaves.size ? sourceRows.map(row => {
+    const saved = manualSaves.get(storeSkuKey(row.store,row.platformSku));
+    if (!saved || row.manualOverride?.id === saved.id || row.decision?.identityIssue) return row;
+    return {...row, manualOverride:saved, decision:{...row.decision,eligibleForExactProfit:true}};
+  }) : sourceRows, [sourceRows,manualSaves]);
+  // Receipt summaries and the profit snapshot refresh independently. An
+  // adopted price can leave the exception list before its new cost arrives.
+  const missingRows = useMemo(() => sourceMissing.filter(row => {
+    const key = storeSkuKey(row.store, row.platformSku);
+    return row.decision?.identityIssue || (!manualSaves.has(key) && !(awaitingCosts?.snapshot === costSnapshot && awaitingCosts?.keys.has(key)));
+  }),[sourceMissing, manualSaves, awaitingCosts, costSnapshot]);
+  useEffect(() => {
+    if (awaitingCosts && awaitingCosts.snapshot !== costSnapshot) setAwaitingCosts(null);
+  },[costSnapshot, awaitingCosts]);
+  useEffect(() => {
+    if (!manualSaves.size) return;
+    const remaining = new Map(manualSaves);
+    for (const row of sourceRows) {
+      const key = storeSkuKey(row.store,row.platformSku), saved = remaining.get(key);
+      if (saved && (row.manualOverride?.id === saved.id || row.manualOverride?.approvedAt > saved.approvedAt)) remaining.delete(key);
+    }
+    if (remaining.size !== manualSaves.size) setManualSaves(remaining);
+  },[sourceRows,manualSaves]);
+  useEffect(() => () => inFlight.current?.controller.abort(), [ledgerId,inboxes,readEnabled,attempt]);
+  const summaryGroups = useMemo(() => {
+    const rows = new Map(reviewRows.map(row => [row.id, row]));
+    const groups = new Map();
+    for (const entry of summaryEntries ?? EMPTY) {
+      if (entry.state !== 'anomaly_pending') continue;
+      const target = rows.get(entry.reviewRowId);
+      if (!target || target.manualOverride && target.decision?.eligibleForExactProfit) continue;
+      const key = entry.reviewGroup ?? JSON.stringify([entry.inboxId, entry.warehouseSku || entry.platformSku]);
+      if (!groups.has(key)) groups.set(key, { key, inboxId: entry.inboxId, warehouseSku: entry.warehouseSku, target, labels: [], reasons: new Set(), previewPrice:entry.originalPricePreview });
+      const group = groups.get(key);
+      if (group.previewPrice !== entry.originalPricePreview) group.previewPrice = undefined;
+      group.labels.push([target.platformSku, target.store, target.attribute].filter(Boolean).join(' · '));
+      group.reasons.add(entry.inlineReason || entry.reasonText);
+    }
+    if (savedPreview && savedPreview.inboxes === inboxes && savedPreview.costSnapshot === costSnapshot) {
+      for (const key of savedPreview.keys) groups.delete(key);
+    }
+    return [...groups.values()];
+  }, [summaryEntries, reviewRows, savedPreview, inboxes, costSnapshot]);
   const loaded = useLiveQuery(async () => {
+    inFlight.current?.controller.abort();
+    if (!readEnabled || operationRef.current?.scoped) return null;
+    const controller = new AbortController();
+    const job = { controller, inboxes, attempt };
+    job.read = () => job.promise ??= listErpCostAnomalyReview(ledgerId, attempt ? undefined : inboxes, {
+      signal: controller.signal,
+      onProgress: hasSummary ? view => { if (!controller.signal.aborted) setPartial({...view,job}); } : undefined,
+    });
+    inFlight.current = job;
     try {
-      // After a write, read durable receipts rather than a parent snapshot that
-      // may still be waiting for its own live query to refresh.
-      const { pending, ignored } = await listErpCostAnomalyReview(ledgerId, attempt ? undefined : inboxes);
+      if (hasSummary && !attempt) await new Promise(resolve => setTimeout(resolve, 180));
+      controller.signal.throwIfAborted();
+      const { pending, ignored } = await job.read();
+      controller.signal.throwIfAborted();
       return { ledgerId, inboxes, attempt, pending, ignored };
-    } catch (failure) { return { ledgerId, inboxes, attempt, error: failure.message || '无法读取价格异常。' }; }
-  }, [ledgerId, inboxes, attempt]);
-  const current = loaded?.ledgerId === ledgerId && loaded.inboxes === inboxes && loaded.attempt === attempt ? loaded : null;
+    } catch (failure) { return controller.signal.aborted ? null : { ledgerId, inboxes, attempt, error: failure.message || '无法读取价格异常。' }; }
+  }, [ledgerId, inboxes, attempt, readEnabled]);
+  const fresh = loaded?.ledgerId === ledgerId && loaded.inboxes === inboxes && loaded.attempt === attempt ? loaded : null;
+  const current = fresh ?? (committed?.attempt === attempt ? committed : null);
+  const summaryMode = hasSummary && !current;
+  const checkedMembers = useMemo(() => {
+    const found = new Map();
+    if (partial && !partial.job.controller.signal.aborted)
+      for (const group of groupAnomalies(partial.pending)) for (const key of group.members.keys()) found.set(key,group);
+    return found;
+  },[partial]);
+  const tabCount = count => summaryMode && receiptsReady ? count : current ? (current.error ? '—' : count) : '…';
   const ignored = current?.ignored ?? EMPTY;
   const ignoredGroups = useMemo(() => groupAnomalies(ignored), [ignored]);
   const coverage = useMemo(() => partitionManualCoverage(groupAnomalies(current?.pending ?? EMPTY), reviewRows), [current?.pending, reviewRows]);
@@ -110,62 +190,141 @@ function LedgerAnomalyActions({ ledgerId, locked = false, blockedReason = '', on
   const groups = tab === 'pending' ? pendingGroups : tab === 'manual' ? manualGroups : ignoredGroups;
   const chosen = groups.filter(item => selected.has(item.key));
   const visibleGroups = useMemo(() => open ? describeGroups(groups.slice(0, limit), inboxes ?? EMPTY, reviewRows) : EMPTY, [open, groups, limit, inboxes, reviewRows]);
-  useEffect(() => {
-    if (busy?.refreshAttempt == null || busy.refreshAttempt !== current?.attempt) return;
-    operationRef.current = null;
-    setBusy(null);
-  }, [busy, current]);
   function review(item) {
-    if (renderEditor && item.target) { setSavedMessage(''); setEditing(item.target); return; }
+    if (renderEditor && item.target) {
+      const body = document.querySelector('[role="dialog"] .anomaly-tabs')?.closest('.modal-body');
+      if (body) returnPosition.current = { body, top:body.scrollTop };
+      setSavedMessage(''); setEditing({ ...item.target, detailInboxId: item.inboxId }); return;
+    }
     setOpen(false); onReview?.({ inboxId: item.inboxId, warehouseSku: item.warehouseSku, platformSku: item.target.platformSku, store: item.target.store });
   }
-  function show(nextTab) { setTab(nextTab); setSelected(new Set()); setLimit(30); setError(''); setOpen(true); }
-  async function apply(value, items, kind = 'row') {
-    if (locked || operationRef.current || !current || current.error || !items?.length) return;
-    const operation = { kind, count: items.length, key: items.length === 1 ? items[0].key : null };
+  function show(nextTab) {
+    setBulk(false);
+    setTab(nextTab); setSelected(new Set()); setLimit(30); setError(''); setOpen(true);
+  }
+  async function apply(value, items, kind = 'row', previewJob = null, preview = null) {
+    if (locked || operationRef.current || !(current || previewJob || preview) || current?.error || !items?.length) return;
+    const operation = { kind, count: items.length, key: items.length === 1 ? items[0].key : null, scoped: Boolean(preview) };
     operationRef.current = operation;
     setBusy(operation); setError('');
     try {
+      let base = current;
+      if (previewJob || preview) {
+        if (preview) {
+          inFlight.current?.controller.abort();
+          base = await listErpCostAnomalyReview(ledgerId, undefined, { warehouseSku: preview.warehouseSku });
+        } else {
+          base = await previewJob.read();
+          previewJob.controller.signal.throwIfAborted();
+        }
+        const verified = partitionManualCoverage(groupAnomalies(base.pending),reviewRows).pending;
+        if (preview) {
+          const member = itemKey(preview), group = verified.find(item => item.members.has(member));
+          const evidence = group?.members.get(member)?.evidenceKey;
+          if (!evidence || group.prices.size !== 1 || !group.prices.has(preview.previewPrice) || await purchaseEvidenceDigest(evidence) !== preview.key) {
+            throw new Error('采购记录或原价已变化，请查看最新价格后再处理。');
+          }
+          items = [group];
+        } else {
+          const keys = new Set(items.map(item => item.key));
+          items = verified.filter(group => keys.has(group.key));
+        }
+        if (!items.length) throw new Error('此项已更新，请查看当前列表。');
+      }
       const result = await setErpCostAnomaliesIgnored({ ledgerId, ignored: value,
+        ...(preview && base.revision ? { expectedReviewRevision: base.revision } : {}),
         selectedItems: items.flatMap(item => [...item.members.values()]) });
+      if (value && costSnapshot && result.results) {
+        const selectedSkus = new Set(items.flatMap(item => [...item.skus].map(canonicalPlatformSku)));
+        const published = new Set(result.results.flatMap(receipt => receipt.adoption?.items ?? EMPTY)
+          .filter(item => item.costRowId != null && selectedSkus.has(item.canonicalPlatformSku)).map(item => item.canonicalPlatformSku));
+        const previouslyMissing = new Set(missingRows.map(row => storeSkuKey(row.store,row.platformSku)));
+        const keys = reviewRows.filter(row => published.has(canonicalPlatformSku(row.platformSku)))
+          .map(row => storeSkuKey(row.store,row.platformSku)).filter(key => !previouslyMissing.has(key));
+        if (keys.length) setAwaitingCosts(prior => ({snapshot:costSnapshot, keys:new Set([...(prior?.snapshot === costSnapshot ? prior.keys : []), ...keys])}));
+      }
+      if (preview) {
+        if (result.changedCount) setSavedPreview(prior => ({ inboxes, costSnapshot, ignoredCount: base.noPriorIgnores ? 1 : null,
+          keys: new Set([...(prior && prior.inboxes === inboxes && prior.costSnapshot === costSnapshot ? prior.keys : []), preview.key]) }));
+        setCommitted(null);
+      } else {
+        const selectedKeys = new Set(items.map(item => item.key));
+        const from = value ? 'pending' : 'ignored', to = value ? 'ignored' : 'pending';
+        const matches = row => selectedKeys.has(row.groupKey ?? itemKey(row));
+        const refreshed = result.changedCount ? {
+          [from]:base[from].filter(row => !matches(row)), [to]:[...base[to],...base[from].filter(matches)],
+        } : {pending:base.pending, ignored:base.ignored};
+        setSavedPreview(null);
+        setCommitted({ ledgerId, inboxes, attempt:attempt+1, ...refreshed });
+      }
       setSelected(new Set());
-      setBusy({ ...operation, refreshAttempt: attempt + 1 });
+      setBulk(false);
       setAttempt(attempt + 1);
       notify(value ? result.changedCount ? '已忽略价格异常，可用原价参与核算。没有可用采购数据的项目仍待补齐。' : '这些异常已处理，正在刷新列表。' : '已恢复相同采购证据的异常提醒。人工更正保留，ERP 成本已重新核对。');
-    } catch (failure) { setError(failure.message); operationRef.current = null; setBusy(null); }
+    } catch (failure) { setError(failure.message); if (preview) setAttempt(value => value + 1); }
+    finally { operationRef.current = null; setBusy(null); }
   }
-  if (!missingRows.length && !pendingGroups.length && !ignoredGroups.length && !manualCount && !open && !busy && !error && !current?.error) return null;
+  function savedManual(value) {
+    const approvals = (Array.isArray(value) ? value : [value]).filter(row => row?.id && row.referenceCost?.store);
+    if (approvals.length) setManualSaves(previous => {
+      const next = new Map(previous);
+      for (const row of approvals) next.set(storeSkuKey(row.referenceCost.store,row.platformSku),row);
+      return next;
+    });
+    setSavedMessage('成本已保存。');
+  }
+  const deferred = loadOnOpen && !open;
+  const hasPrices = pendingGroups.length > 0 || !current && pendingHint;
+  const ignoredHint = deferred && inboxes?.some(inbox => inbox.costResolutions?.some(item => item.action === 'ignore_anomaly'));
+  if (!missingRows.length && !hasPrices && !ignoredGroups.length && !manualCount && !ignoredHint && !open && !busy && !error && !current?.error) return null;
   const readError = current?.error ? <div role="alert">读取价格异常失败。{current.error} <Button onClick={() => setAttempt(value => value + 1)}>重试</Button></div> : null;
   return <div className="erp-anomaly-actions">
-    <div className="page-actions">{pendingGroups.length || missingRows.length ? <Button onClick={() => show(pendingGroups.length ? 'pending' : 'missing')}>{blockedReason ? '查看暂存异常' : '核对价格异常'}</Button> : null}
+    <div className="page-actions">{hasPrices || missingRows.length ? <Button onClick={() => show(hasPrices ? 'pending' : 'missing')}>{hasPrices ? '核对价格异常' : '补录缺失成本'}</Button> : null}
       {manualCount ? <Button variant="ghost" onClick={() => show('manual')}>已人工更正 · {manualCount}</Button> : null}
-      {ignoredGroups.length ? <Button variant="ghost" onClick={() => show('ignored')}>已忽略异常 · {ignoredGroups.length}</Button> : null}</div>
+      {ignoredGroups.length || ignoredHint ? <Button variant="ghost" onClick={() => show('ignored')}>{ignoredGroups.length ? '已忽略异常 · '+ignoredGroups.length : '已忽略异常'}</Button> : null}</div>
     {!open && readError}
     {error && !open ? <p role="alert">{error}</p> : null}
     <Modal open={open} title="价格异常" description="价格异常可更正或按原价忽略（含 0 元）；没有成本需补录，不能忽略。同月同仓、相同采购证据可一次更正，已有人工值保留。" onClose={() => !busy && !editingBusy && (editing ? setEditing(null) : setOpen(false))}
       footer={editing ? null : <><Button disabled={Boolean(busy)} onClick={() => setOpen(false)}>关闭</Button>
-        {tab === 'pending' && (pendingGroups.length > 0 || busy?.kind === 'all') && <Button loading={busy?.kind === 'all'} disabled={locked || Boolean(busy) || !current} onClick={() => apply(true, pendingGroups, 'all')}>忽略剩余异常（{busy?.kind === 'all' ? busy.count : pendingGroups.length}）</Button>}
-        {tab === 'ignored' ? <Button loading={busy?.kind === 'all'} disabled={locked || Boolean(busy) || !groups.length} onClick={() => apply(false, groups, 'all')}>恢复本月全部提醒</Button> : null}
-        {['pending', 'ignored'].includes(tab) ? <Button variant="primary" loading={busy?.kind === 'selected'} disabled={locked || Boolean(busy) || !chosen.length} onClick={() => apply(tab === 'pending', chosen, 'selected')}>{tab === 'pending' ? '忽略选中' : '恢复选中'}（{busy?.kind === 'selected' ? busy.count : chosen.length} 项）</Button> : null}</>}>
-      {editing ? renderEditor(editing, () => setEditing(null), () => { setAttempt(value => value + 1); setSavedMessage('成本已保存。'); }, setEditingBusy) : <>
+        {!summaryMode && !current?.error && ['pending','ignored'].includes(tab) && groups.length > 0 &&
+          <Button disabled={locked || Boolean(busy)} aria-expanded={bulk} onClick={() => setBulk(!bulk)}>{bulk ? '收起批量处理' : '批量处理'}</Button>}
+        {bulk && tab === 'pending' && pendingGroups.length > 0 && <Button loading={busy?.kind === 'all'} disabled={locked || Boolean(busy) || !current} onClick={() => apply(true, pendingGroups, 'all')}>忽略本月全部店铺剩余 {pendingGroups.length} 项</Button>}
+        {bulk && tab === 'ignored' && groups.length > 0 ? <Button loading={busy?.kind === 'all'} disabled={locked || Boolean(busy)} onClick={() => apply(false, groups, 'all')}>恢复本月全部店铺 {groups.length} 项提醒</Button> : null}
+        {!summaryMode && (chosen.length > 0 || bulk) && ['pending', 'ignored'].includes(tab) ? <Button variant="primary" loading={busy?.kind === 'selected'} disabled={locked || Boolean(busy) || !chosen.length} onClick={() => apply(tab === 'pending', chosen, 'selected')}>{tab === 'pending' ? '忽略选中' : '恢复选中'}（{busy?.kind === 'selected' ? busy.count : chosen.length} 项）</Button> : null}</>}>
+      {editing ? renderEditor(editing, () => setEditing(null), savedManual, setEditingBusy) : <>
       <div className="anomaly-tabs" role="tablist" aria-label="异常处理状态">
-        <Button role="tab" aria-selected={tab === 'pending'} disabled={Boolean(busy)} onClick={() => show('pending')}>待核对 · {pendingGroups.length}</Button>
-        <Button role="tab" aria-selected={tab === 'missing'} disabled={Boolean(busy)} onClick={() => show('missing')}>没有成本 · {missingRows.length}</Button>
-        <Button role="tab" aria-selected={tab === 'manual'} disabled={Boolean(busy)} onClick={() => show('manual')}>已人工更正 · {manualCount}</Button>
-        <Button role="tab" aria-selected={tab === 'ignored'} disabled={Boolean(busy)} onClick={() => show('ignored')}>已忽略 · {ignoredGroups.length}</Button>
+        <Button role="tab" aria-selected={tab === 'pending'} disabled={Boolean(busy)} onClick={() => show('pending')}>待核对 · {tabCount(summaryMode ? summaryGroups.length : pendingGroups.length)}</Button>
+        <Button role="tab" aria-selected={tab === 'missing'} disabled={Boolean(busy)} onClick={() => show('missing')}>没有成本 · {tabCount(missingRows.length)}</Button>
+        <Button role="tab" aria-selected={tab === 'manual'} disabled={Boolean(busy)} onClick={() => show('manual')}>已人工更正 · {tabCount(manualCount)}</Button>
+        <Button role="tab" aria-selected={tab === 'ignored'} disabled={Boolean(busy)} onClick={() => show('ignored')}>已忽略 · {summaryMode ? (savedPreview?.inboxes === inboxes ? savedPreview?.ignoredCount : null) ?? '查看记录' : tabCount(ignoredGroups.length)}</Button>
       </div>
       {savedMessage ? <p role="status">{savedMessage}</p> : null}
       {blockedReason ? <p className="cost-correction-help" role="status">{blockedReason}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       {readError}
       {manualCount && tab !== 'missing' ? <p className="cost-correction-help">{manualCount} 项已保存人工更正，移出待核对与批量忽略范围；原始采购证据仍保留。撤销更正后可重新核对。</p> : null}
-      {tab === 'missing' ? <>
+      {summaryMode && !receiptsReady ? <div role="status">
+        <p>当前账本有 {reviewRows.filter(row => !row.decision?.eligibleForExactProfit).length} 条店铺 SKU 待核对，正在整理采购异常分类。</p>
+        {reviewRows.filter(row => !row.decision?.eligibleForExactProfit).slice(0, 8).map(row => <p key={row.id}>{row.platformSku} · {row.store}</p>)}
+      </div> : !current && !summaryMode ? <p role="status">正在读取价格异常…<progress aria-label="读取异常" /></p> : summaryMode && tab === 'pending' ? <>
+        <p role="status">当前账本核对摘要 · {summaryGroups.length} 项采购价格异常{!locked && summaryGroups.length ? ' · 正在核对原价' : ''}</p>
+        {summaryGroups.slice(0, limit).map(item => {
+          const checked = item.warehouseSku && checkedMembers.get(itemKey(item));
+          const preview = item.warehouseSku && item.previewPrice != null && /^[a-f0-9]{64}$/.test(item.key);
+          return <div className="anomaly-select-row" key={item.key}><div className="anomaly-item-text">
+          <button className="inline-link" onClick={() => review(item)}>{item.labels.join('、')}</button>
+          <small>{checked ? '原始采购单价 ' + [...checked.prices].map(price => '¥'+price).join('、') : preview ? '原始采购单价 ¥'+item.previewPrice : [...item.reasons].join('；')}</small></div>
+          {(checked || preview) && !locked ? <Button disabled={Boolean(busy)} loading={busy?.kind === 'row' && busy.key === (checked?.key ?? item.key)}
+            onClick={() => preview && (!checked || checked.prices.size === 1 && checked.prices.has(item.previewPrice)) ? apply(true,[item],'row',null,item) : apply(true,[checked],'row',partial.job)}>按原价忽略</Button> : <Button onClick={() => review(item)}>查看采购详情</Button>}</div>;
+        })}
+        {summaryGroups.length > limit && <Button onClick={() => setLimit(value => value + 30)}>显示更多</Button>}
+      </> : tab === 'missing' ? <>
         <p>没有可用采购成本。请按真实单件成本补录，保存后自动计算利润；只有真实零成本才填 0。</p>
         {missingRows.slice(0,limit).map(row => <div className="anomaly-select-row" key={row.id}><div className="anomaly-item-text"><strong>{row.platformSku} · {row.store}</strong><small>{row.attribute}</small></div>
           <Button onClick={() => review({target:row})}>{locked ? '查看详情' : '补录成本'}</Button></div>)}
         {!missingRows.length ? <p>本月没有缺成本的 SKU。</p> : null}
         {limit < missingRows.length ? <Button onClick={() => setLimit(value => value + 30)}>显示更多</Button> : null}
-      </> : !current ? <p role="status">正在读取价格异常…<progress aria-label="读取异常" /></p> : <>
+      </> : <>
         {groups.length && tab !== 'manual' ? <label className="anomaly-select-all"><input type="checkbox" aria-label="全选本列表" disabled={locked || Boolean(busy)} checked={chosen.length === groups.length}
           onChange={event => setSelected(event.target.checked ? new Set(groups.map(item => item.key)) : new Set())} />全选本列表（{groups.length} 项）<span>已选 {chosen.length} 项 · 本月全部店铺</span></label> : groups.length || tab === 'manual' && manualRows.length || current?.error ? null : <p>{tab === 'pending' ? '本月没有可忽略的价格异常。缺少采购数据的项目请补齐成本。' : tab === 'manual' ? '本月没有已人工更正的异常项目。' : '本月没有已忽略的异常。'}</p>}
         {visibleGroups.map(item => <div className="anomaly-select-row" key={item.key}>
@@ -175,7 +334,7 @@ function LedgerAnomalyActions({ ledgerId, locked = false, blockedReason = '', on
             <small>原始采购单价 {[...item.prices].map(price => `¥${price}`).join('、')} · {tab === 'ignored' ? '异常已忽略' : [...item.reasons].join('；')}</small>
             {item.manualCount ? <small>{item.manualCount} 条店铺 SKU 已人工更正{tab === 'pending' ? '，其余关联 SKU 仍待核对；忽略不会覆盖人工值。' : '，原始异常仅供追溯。'}</small> : null}
             <small>仓库商品 {item.warehouseSku} · 回传批次 {item.batch}</small></div>
-          {tab !== 'manual' ? <Button loading={busy?.kind === 'row' && busy.key === item.key} disabled={locked || Boolean(busy)} onClick={() => apply(tab === 'pending', [item])}>{tab === 'pending' ? '忽略此项' : '恢复提醒'}</Button> : null}
+          {tab !== 'manual' ? <Button loading={busy?.kind === 'row' && busy.key === item.key} disabled={locked || Boolean(busy)} onClick={() => apply(tab === 'pending', [item])}>{tab === 'pending' ? '按原价忽略' : '恢复提醒'}</Button> : null}
         </div>)}
         {tab === 'manual' ? manualRows.slice(0,limit).map(row => <div className="anomaly-select-row" key={row.id ?? storeSkuKey(row.store,row.platformSku)}><div className="anomaly-item-text"><strong>{row.platformSku} · {row.store}</strong><small>人工成本 ¥{row.manualOverride.approvedAmount} / 件</small></div><Button onClick={() => review({target:row})}>查看更正</Button></div>) : null}
         {Math.max(groups.length, tab === 'manual' ? manualRows.length : 0) > limit ? <Button onClick={() => setLimit(value => value + 30)}>显示更多</Button> : null}

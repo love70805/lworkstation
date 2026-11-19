@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { getSelectionPrestorageAutomationSnapshot, promoteSelectionPrestorageRecords } from '../data/repositories/selectionRepository';
 import { useSelectionRead } from './SelectionReadState';
 import { useToast } from './UI';
@@ -6,11 +6,17 @@ import { runWorkspaceBackgroundTask, subscribeWorkspaceResumed } from '../lib/wo
 import { prestorageAttemptFingerprint } from '../lib/prestorageAttemptFingerprint';
 
 export default function SelectionPrestorageAutomation() {
-  const read = useSelectionRead(getSelectionPrestorageAutomationSnapshot);
+  const loading = useRef(null);
+  const readCandidates = useCallback(() => {
+    loading.current?.abort();
+    loading.current = new AbortController();
+    return getSelectionPrestorageAutomationSnapshot({ signal: loading.current.signal });
+  }, []);
+  const read = useSelectionRead(readCandidates);
   const { notify } = useToast();
   const attempted = useRef(new Map());
   const pending = useRef(null), running = useRef(false), mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; loading.current?.abort(); }; }, []);
   useEffect(() => {
     const retry = () => { attempted.current.clear(); read.retry(); };
     window.addEventListener('lworkstation:retry-prestorage', retry);

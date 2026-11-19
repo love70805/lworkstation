@@ -9,9 +9,29 @@ import { ProfitViewsContent } from './ProfitPanel';
 import { ToastProvider } from '../components/UI';
 const state=vi.hoisted(()=>({snapshot:{ledger:{id:'L',workspaceId:'W',period:'2026-08',status:'draft',warehouseRate:0.7},rows:[{store:'甲',supplierNumber:'货号A',platformSku:'A',platformSkc:'S',quantity:2,amount:10,sourceAddedDate:'2026-08-01'},{store:'乙',supplierNumber:'货号B',platformSku:'B',platformSkc:'T',quantity:3,amount:30,sourceAddedDate:'2026-08-01'}],costs:[],approvals:[],profitLines:[]}}));
 vi.mock('../hooks/useLatestSalesImport',()=>({useLatestSalesImport:()=>state.snapshot}));
+vi.mock('../hooks/useErpCollectionTasks',()=>({useErpCollectionTasks:()=>({tasks:[
+  {workspaceId:'other',ledgerId:'L',ledgerPeriod:'2026-08',status:'running',batches:[],summary:{total:999,delivered:888}},
+  {workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-08',status:'running',batches:[],summary:{total:90,delivered:51}},
+]})}));
 vi.mock('./MonthlyReportManager',()=>({default:({onOpenCosts})=><button onClick={onOpenCosts}>补齐本月成本</button>}));
 vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext,suppliedSnapshot})=>{state.costSnapshot=suppliedSnapshot;return <div data-testid="cost-scope">{validatedContext.store}</div>;}}));
 let root,container;
+it('allows navigation and shows the selected ledger task before the amounts are available',async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ const original=state.snapshot;state.snapshot=undefined;
+ try {
+  container=document.createElement('div');document.body.append(container);root=createRoot(container);
+  await act(async()=>root.render(<MemoryRouter initialEntries={['/profit?ledger=L']}><ToastProvider>
+    <ProfitViewsContent selectedLedger={original.ledger} monthControl={<select aria-label="核算月份"><option>2026-08</option></select>} />
+  </ToastProvider></MemoryRouter>));
+  expect(container.querySelector('[aria-label="核算月份"]').disabled).toBe(false);
+  expect(container.textContent).toContain('已送达 51 / 90 个 SKC');
+  expect(container.textContent).not.toContain('888');
+  expect(container.querySelector('.profit-summary-products')).toBeNull();
+  expect(container.querySelector('[data-testid="cost-scope"]')).toBeNull();
+  expect([...container.querySelectorAll('button')].some(b=>b.textContent==='月度账本'&&!b.disabled)).toBe(true);
+ } finally {state.snapshot=original;}
+});
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.restoreAllMocks();});
 it('replaces profit scope through all → 甲 → 乙 and never renders sales analytics',async()=>{
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();

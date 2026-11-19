@@ -16,6 +16,7 @@ export function matchesCostQuery(match, query) {
     match.supplierName,
     match.supplier1688Url,
     match.orderNumber,
+    match.purchaseSearchText,
     ...(match.costDecision?.selectedRecords ?? []).flatMap(record => [record.order1688, record.purchaseOrderNo, record.purchaseOrderId, record.purchaseDate]),
     ...(match.purchaseRecords ?? []).flatMap(record => [record.order1688, record.purchaseOrderNo, record.purchaseOrderId]),
     match.productName,
@@ -154,10 +155,10 @@ export function describeEvidenceIssues(match = {}) {
   if (match.periodReviewRequired || match.legacyMonthExclusions) {
     issues.push({ key: "costPeriod", label: "旧成本选样待复核", detail: match.legacyMonthExclusions ? "旧采集规则曾遗漏核算月及以前的采购，请重新采集或人工更正。" : "原采用成本不符合本次 Beta 的含当月最近三笔规则或证据不完整，原金额保留，暂不计入本月利润。" });
   }
-  if (!match.periodReviewRequired && !match.legacyMonthExclusions && match.costDecision?.costPeriod && match.costDecision.selectedRecords.length === 0) {
+  if (!match.periodReviewRequired && !match.legacyMonthExclusions && match.costDecision?.costPeriod && match.costDecision.selectedRecords?.length === 0) {
     issues.push({ key: "costPeriod", label: "采购日期范围", detail: `${match.costDecision.costPeriod} 及以前没有可用采购记录，后续月份未计入。` });
   }
-  if (excludedRecords.length > 0) issues.push({ key: "excludedRecords", label: "排除记录", detail: `发现 ${excludedRecords.length} 条已排除记录，原因仅保留在审计证据中。` });
+  if (excludedRecords.length > 0) issues.push({ key: "excludedRecords", label: "排除记录", detail: `ERP 采集时排除了 ${excludedRecords.length} 笔订单。` });
   if (mappingFailures.length > 0) issues.push({ key: "mappingFailures", label: "映射失败", detail: `发现 ${mappingFailures.length} 条平台 SKU/SKC 映射失败记录。` });
   if (detailFailures.length > 0) issues.push({ key: "detailFailures", label: "明细失败", detail: `发现 ${detailFailures.length} 条采购明细读取失败记录。` });
   if (mappingWarnings.length > 0) issues.push({ key: "mappingSourceWarnings", label: "平台身份映射", detail: mappingWarnings.map((warning) => readableSourceWarning(warning, match)).join("；") });

@@ -82,6 +82,9 @@ function formatCheckTime(value) {
   return new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
+const readShellSummary = () => getWorkspaceOperationalSummary({ includeRecordCount: false });
+const readMaintenanceNavigation = () => getWorkspaceOperationalSummary({ includeRecordCount: false, navigationOnly: true });
+
 export default function AppShell({ children, pageClass = "" }) {
   const location = useLocation();
   const { pathname } = location;
@@ -102,7 +105,10 @@ export default function AppShell({ children, pageClass = "" }) {
   const backupPendingRef = useRef(false);
   const [supportCopied, setSupportCopied] = useState(false);
   const [appearance, setAppearance] = useState(readAppearance);
-  const connectionCheck = useSystemSnapshot(getWorkspaceOperationalSummary);
+  const needsRecordCount = openMenu === "environment" || openDialog === "settings";
+  const maintenanceNavigation = (pathname === '/diagnostics' || pathname === '/data-security') && !openMenu && !openDialog;
+  const summaryReader = maintenanceNavigation ? readMaintenanceNavigation : readShellSummary;
+  const connectionCheck = useSystemSnapshot(needsRecordCount ? getWorkspaceOperationalSummary : summaryReader);
   const workspaceSummary = connectionCheck.data;
   const checkingConnection = connectionCheck.refreshing;
   const lastCheckedAt = connectionCheck.checkedAt;
@@ -412,7 +418,7 @@ export default function AppShell({ children, pageClass = "" }) {
         <div className="topbar-actions" ref={menuRef} onKeyDown={menuKeys}>
           <div className="topbar-control environment-control">
             <button className="environment-chip" aria-haspopup="menu" aria-expanded={openMenu === "environment"} onClick={() => toggleMenu("environment")}><i /> {cloudEnvironment}</button>
-            {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统与备份<ChevronRight size={16} /></button></div> : null}
+            {openMenu === "environment" ? <div className="topbar-popover environment-popover" role="menu"><div className="popover-heading"><span className="popover-icon"><HardDrive size={18} /></span><span><strong>本机工作区</strong><small>数据保存在本机 IndexedDB；此处只检查能否读取</small></span></div><div className="popover-detail"><span>本机数据库 <b>{connectionLabel}</b></span><span>数据模式 <b>正式本机数据</b></span><span>当前记录 <b>{workspaceSummary?.recordCount != null ? workspaceSummary.recordCount.toLocaleString("zh-CN") : '--'}</b></span><span>最后检查 <b>{formatCheckTime(lastCheckedAt)}</b></span></div>{connectionCheck.error ? <p className="system-inline-error" role="alert">{connectionCheck.error}</p> : null}<button className="popover-link" disabled={checkingConnection} onClick={checkLocalWorkspace}>{checkingConnection ? "正在检查" : "重新检查连接"}<RefreshCw className={checkingConnection ? "spin" : ""} size={16} /></button><button className="popover-link" onClick={() => navigate('/diagnostics')}>打开系统与备份<ChevronRight size={16} /></button></div> : null}
           </div>
           {workspaceSummary?.pendingCaptureCount > 0 ? <Button icon={Inbox} onClick={() => navigate("/products?view=pending")}>历史资料（{workspaceSummary.pendingCaptureCount}）</Button> : null}
           <span className="topbar-separator" />
@@ -453,7 +459,7 @@ export default function AppShell({ children, pageClass = "" }) {
           {backupWarning ? <p className="system-operation-warning" role="status">{backupWarning}</p> : null}
           <div><span><strong>界面语言</strong><small>导航、状态和提示均使用中文</small></span><b>简体中文</b></div>
           <div><span><strong>数据保存位置</strong><small>IndexedDB 本地数据不会自动上传云端</small></span><b>仅本机</b></div>
-          <div><span><strong>当前数据量</strong><small>商品、账本、成本与审计等全部本地记录</small></span><b>{workspaceSummary ? workspaceSummary.recordCount.toLocaleString("zh-CN") : "读取中"}</b></div>
+          <div><span><strong>当前数据量</strong><small>商品、账本、成本与审计等全部本地记录</small></span><b>{workspaceSummary?.recordCount != null ? workspaceSummary.recordCount.toLocaleString("zh-CN") : "读取中"}</b></div>
           {desktopRuntime?.desktop ? <div className="desktop-close-preference"><span><label htmlFor="desktop-close-behavior"><strong>关闭窗口时</strong></label><small>{closePreference.status === 'loading' ? '正在读取桌面偏好…' : closePreference.trayAvailable === false ? '系统托盘当前不可用，关闭窗口会退出应用。' : closePreference.closeBehavior === 'quit' ? '退出应用并停止后台收件。' : '隐藏到系统托盘，继续后台收件。'}</small>{closePreference.error ? <small className="system-inline-error" role="alert">{closePreference.error}</small> : null}</span><select id="desktop-close-behavior" className="select-input" value={closePreference.closeBehavior ?? ''} disabled={savingClosePreference || closePreference.status !== 'ready'} onChange={event => changeClosePreference(event.target.value)}>{closePreference.status !== 'ready' ? <option value="">未读取</option> : null}<option value="tray">隐藏到托盘</option><option value="quit">退出应用</option></select></div> : null}
           <button type="button" disabled={backingUp} onClick={exportLocalBackup}><Download size={18} /><span><strong>{backingUp ? "正在导出备份" : "导出本机备份"}</strong><small>生成包含当前工作区全部表的 JSON 文件</small></span><ChevronRight size={16} /></button>
         </div>

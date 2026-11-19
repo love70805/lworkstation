@@ -28,8 +28,14 @@ export async function validateReportBackup(tables) {
     if(report.kind==='pre_deduction'&&base)fail();
     const kinds=new Set();
     for(const id of report.adoptedBatchIds??[]){const batch=batches.get(id);if(!sameScope(report,batch)||kinds.has(batch.kind))fail();kinds.add(batch.kind);}
-    if(report.dispatchState === 'not_recorded') { if(kinds.has('dispatch') || exact(report.totalsExact.dispatchQuantityExact) !== '0')fail(); }
-    else if(!kinds.has('dispatch'))fail();
+    const dispatchQuantity = report.totalsExact.dispatchQuantityExact;
+    if(report.dispatchState === 'not_recorded') {
+      // Earlier exports stored zero for an absent batch. Validate those frozen totals verbatim.
+      const legacyFormula = report.formulaVersion == null
+        || ['monthly-report@1-exact-supplements','monthly-report@2-shared-manual'].includes(report.formulaVersion);
+      const legacyZero = legacyFormula && dispatchQuantity === '0';
+      if(kinds.has('dispatch') || (dispatchQuantity !== null && !legacyZero))fail();
+    } else if(!kinds.has('dispatch') || dispatchQuantity == null)fail();
     if(report.kind==='financial'&&!kinds.has('deduction'))fail();
     const lines=reportLines.filter(row=>row.reportId===report.id).sort((a,b)=>a.ordinal-b.ordinal);
     if(lines.length!==report.lineCount||lines.some((row,i)=>row.ordinal!==i))fail();

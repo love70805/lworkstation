@@ -12,7 +12,7 @@ import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 import { createContinuousCatalogQueue, continuousCatalogPath } from "../domain/continuousCatalogQueue";
 
 const delayedWrite = vi.hoisted(() => ({ wait: null, input: null }));
-const editorSnapshotOverride = vi.hoisted(() => ({ value: null, error: null }));
+const editorSnapshotOverride = vi.hoisted(() => ({ value: null, error: null, pending: null }));
 const catalogRequests = vi.hoisted(() => ({ input: null, registered: false }));
 vi.mock("../data/repositories/erpCatalogRepository", async (importOriginal) => {
   const actual = await importOriginal();
@@ -21,7 +21,12 @@ vi.mock("../data/repositories/erpCatalogRepository", async (importOriginal) => {
 vi.mock("../components/AppShell", () => ({ default: ({ children }) => <main>{children}</main> }));
 vi.mock("../data/database", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, getProductEditorSnapshot: async input => { if (editorSnapshotOverride.error) throw editorSnapshotOverride.error; return editorSnapshotOverride.value ?? actual.getProductEditorSnapshot(input); }, saveProductCatalogRecord: async (input) => { delayedWrite.input = input; if (delayedWrite.wait) await delayedWrite.wait; return actual.saveProductCatalogRecord(input); } };
+  return { ...actual, getProductEditorSnapshot: async input => {
+    if (editorSnapshotOverride.error) throw editorSnapshotOverride.error;
+    const result = editorSnapshotOverride.value ?? await actual.getProductEditorSnapshot(input);
+    if (editorSnapshotOverride.pending) await editorSnapshotOverride.pending;
+    return result;
+  }, saveProductCatalogRecord: async (input) => { delayedWrite.input = input; if (delayedWrite.wait) await delayedWrite.wait; return actual.saveProductCatalogRecord(input); } };
 });
 
 let container, root, router;
@@ -42,18 +47,19 @@ const change = (element, value) => act(async () => {
   element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
 });
 const click = (name) => act(async () => button(name).click());
-const mount = async (url, { library = false, initialEntries, initialIndex, readError = false } = {}) => {
+const mount = async (url, { library = false, initialEntries, initialIndex, readError = false, storedPreview = false } = {}) => {
   router = createMemoryRouter([
     { path: "/products/edit", element: <ProductEditor /> },
     { path: "/products", element: library ? <ProductLibrary /> : <p>商品列表</p> },
   ], { initialEntries: initialEntries ?? ["/products", url], initialIndex });
   await act(async () => root.render(<ToastProvider><RouterProvider router={router} /></ToastProvider>));
-  await waitFor(() => readError ? container.textContent.includes("商品资料读取失败") : library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索预存资料" : "搜索待确认采集") : input("商品名称"));
+  if (storedPreview) return waitFor(() => input("商品名称") && container.textContent.includes("可先修改基本信息"));
+  await waitFor(() => readError ? container.textContent.includes("商品资料读取失败") : library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索预存资料" : "搜索待确认采集") : input("商品名称") && !container.textContent.includes("可先修改基本信息"));
 };
 
 beforeEach(async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  delayedWrite.wait = null; delayedWrite.input = null; catalogRequests.input = null; catalogRequests.registered = false; editorSnapshotOverride.value = null; editorSnapshotOverride.error = null;
+  delayedWrite.wait = null; delayedWrite.input = null; catalogRequests.input = null; catalogRequests.registered = false; editorSnapshotOverride.value = null; editorSnapshotOverride.error = null; editorSnapshotOverride.pending = null;
   await db.delete(); await db.open();
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -127,6 +133,31 @@ describe("product editing workflow", () => {
     expect(profiles[1].sourceLinks).toHaveLength(1);
     expect(await db.supplierOffers.count()).toBe(0);
   });
+  it('keeps early name, tag and variant edits through receipt hydration and a real save', async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    let finish;
+    editorSnapshotOverride.pending = new Promise(resolve => { finish = resolve; });
+    try {
+      await mount(`/products/edit?product=${product.id}`, { storedPreview: true });
+      expect(input('商品名称').value).toBe(draft.name);
+      expect(input('第 1 个规格名称').value).toBe('红色');
+      expect(input('平台 SKC').disabled).toBe(true);
+      await change(input('商品名称'), '先输入的名称');
+      await change(input('商品标签'), '手工标签');
+      await change(input('第 1 个规格名称'), '深红');
+      input('商品名称').focus();
+      expect(button('保存修改').disabled).toBe(false);
+      await click('保存修改');
+      expect(button('等待核对后保存').disabled).toBe(true);
+      expect((await db.products.get(product.id)).name).toBe(draft.name);
+    } finally { finish(); }
+    await waitFor(async () => (await db.products.get(product.id)).name === '先输入的名称');
+    expect(document.activeElement).toBe(input('商品名称'));
+    expect(input('第 1 个规格名称').value).toBe('深红');
+    expect((await db.products.get(product.id)).tags).toEqual(['手工标签']);
+    expect((await db.platformSkus.where('productId').equals(product.id).first()).attribute).toBe('深红');
+  });
+
   it("recovers a failed editor read instead of remaining on a loading screen", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     editorSnapshotOverride.error = new Error("隔离读取故障");
@@ -275,7 +306,7 @@ describe("product editing workflow", () => {
     expect((await db.supplierOffers.toArray())[0]).toMatchObject({ platformSku: "SKU-B", supplierName: "乙", purchaseUnitPrice: 7, landedUnitCost: 7 });
     await act(async () => { await router.navigate("/products"); });
     await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
-    await waitFor(() => input("乙 SKU-B 采购价")?.value === "7");
+    await waitFor(() => input("乙 SKU-B 采购价")?.value === "7" && !input("乙 SKU-B 采购价").matches(':disabled'));
     expect(input("第 2 个采购价").value).toBe("");
     const offersBefore = await db.supplierOffers.toArray();
     const savedAt = (await db.products.get(product.id)).updatedAt;

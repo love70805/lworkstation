@@ -42,7 +42,9 @@ export const CLIENT_DATABASE_V11_STORES = {
 
 // Both the live database and isolated backup upgrades use these exact migrations.
 export function createClientDatabase(name, { observeChanges = false } = {}) {
-const db = new Dexie(name);
+// The UI caches revisioned projections. Retaining every decoded purchase
+// envelope or sales chunk in Dexie's live-query result cache defeats that bound.
+const db = new Dexie(name, { cache: 'disabled' });
 if (observeChanges) installDerivedInvalidation(db);
 
 db.version(1).stores({
@@ -360,6 +362,14 @@ db.version(15).stores({
   monthlySupplementRows: "id,workspaceId,ledgerId,batchId,[ledgerId+kind]",
   profitReports: "id,workspaceId,ledgerId,[ledgerId+kind],[ledgerId+revision],baseReportId",
   profitReportLines: "id,workspaceId,ledgerId,reportId,[reportId+lineKind],[reportId+store]",
+});
+
+// IndexedDB populates these keys for existing rows without rewriting business
+// records. Legacy rows missing a compound-key field use the original read path.
+db.version(16).stores({
+  erpCostRows: CLIENT_DATABASE_V11_STORES.erpCostRows
+    + ",[ledgerId+resolutions.length],[ledgerId+workspaceId+batchId+platformSku+canonicalPlatformSku+publishedAt+sourceEnvelopeBatchId+warehouseSku+sourceOrder]",
+  erpCostBatches: CLIENT_DATABASE_V11_STORES.erpCostBatches + ",[ledgerId+workspaceId+status+publishedAt+sourceOrder]",
 });
 
 db.auditEvents.hook("creating", (_primaryKey, event) => {

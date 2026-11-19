@@ -27,6 +27,6 @@ export async function readSupplementWorkbook(file, kind) {
     const range=sheet['!ref']?{s:{r:0,c:0},e:XLSX.utils.decode_range(sheet['!ref']).e}:undefined;
     const cells=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,defval:"",blankrows:true,range});
     const sourceRows=cells.map((_,index)=>index+1);
-    return {fileHash,fileName:file.name,sheetName,sourceFormat:'xlsx',cells,sourceRows,recordRows:sourceRows,merges:sheet['!merges']??[],headerRow:headerRow(cells,sourceRows)};
+    return {fileHash,fileName:file.name,sheetName,sourceFormat:'xlsx',cells,sourceRows,recordRows:sourceRows,merges:sheet['!merges']??[],date1904:Boolean(workbook.Workbook?.WBProps?.date1904),headerRow:headerRow(cells,sourceRows)};
   }).filter(source=>source.cells.slice(source.headerRow).some(row=>row.some(value=>String(value??'').trim()&&!/^无$/.test(String(value).trim()))));
 }

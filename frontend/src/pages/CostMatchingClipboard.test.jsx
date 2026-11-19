@@ -35,13 +35,13 @@ function ScopeControls({ nextScopeHref }) {
   const [params, setParams] = useSearchParams();
   return <><input aria-label="测试查询范围" value={params.get('q') ?? ''} onChange={event => { const next = new URLSearchParams(params); next.set('q', event.target.value); setParams(next); }} />{nextScopeHref && <button onClick={()=>setParams(new URL(nextScopeHref,'http://localhost').searchParams)}>测试切换逐店范围</button>}</>;
 }
-async function render(skcs, status = 'ready', { costs = [], approvals = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [], supplierNumbers = [], nextScopeHref } = {}) {
+async function render(skcs, status = 'ready', { costs = [], approvals = [], initialEntry = '/', ledgerId = 'L', stores = [], contextStore = 'all', skuIds = [], supplierNumbers = [], nextScopeHref, compact = false } = {}) {
   mocks.snapshot = {
     ledger: { id: ledgerId, workspaceId: 'W', period: '2026-08', status },
     rows: skcs.map((platformSkc, index) => ({ workspaceId: 'W', ledgerId, store: stores[index] ?? '甲', platformSkc, platformSku: skuIds[index] ?? `SKU-${index}`, supplierNumber:supplierNumbers[index], quantity: 1, amount: 10 })),
     costs, approvals,
   };
-  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><ScopeControls nextScopeHref={nextScopeHref} /><CostMatchingContent validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[initialEntry]}><ScopeControls nextScopeHref={nextScopeHref} /><CostMatchingContent compact={compact} validatedContext={{ workspaceId: 'W', ledgerId, store: contextStore }} /></MemoryRouter>));
 }
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -81,9 +81,59 @@ function completedCostTask() {
   mocks.requests=[{id:'OLD',workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-08',platformSkcs:['SKC-A','SKC-B'],expectedSkus:[{platformSku:'SKU-0',platformSkc:'SKC-A',store:'甲'},{platformSku:'SKU-1',platformSkc:'SKC-B',store:'甲'}]}];
   mocks.register.mockImplementation(async input=>({id:'FRESH',workspaceId:input.ledger.workspaceId,ledgerId:input.ledger.id,ledgerPeriod:input.ledger.period,platformSkcs:input.platformSkcs,expectedSkus:input.expectedSkus}));
 }
+it('keeps the narrower retry available after a launch error even when an older paused task exists', async () => {
+  completedCostTask();
+  const original = mocks.tasks[0];
+  original.status = 'partial';
+  original.batches = [
+    { batchId: 'A', status: 'incomplete', deliveryId: 'WAITING', platformSkcs: ['SKC-A'] },
+    { batchId: 'B', status: 'failed', platformSkcs: ['SKC-B'] },
+  ];
+  mocks.tasks.push({ ...original, taskId: 'HISTORY', requestId: 'HISTORY', status: 'paused', batches: [{ status: 'pending', platformSkcs: ['SKC-A'] }] });
+  mocks.controlTask.mockImplementation(async (id, {action}) => {
+    if (action === 'stop' && id === original.taskId) mocks.tasks[0] = { ...original, status: 'stopped' };
+    return { task: mocks.tasks[0] };
+  });
+  const start = window.shopeersDesktopRuntime.startErpCollection;
+  start.mockResolvedValueOnce({ ok: false, error: '暂未连接' }).mockResolvedValueOnce({ ok: true, status: 'waiting_ack' });
+  await render(['SKC-A', 'SKC-B', 'SKC-C']);
+  const open = () => act(async () => button('重新获取 ERP 成本').click());
+  const choose = scope => act(async () => container.querySelector(`input[name="erp-cost-scope"][value="${scope}"]`).click());
+  expect(button('重试未完成项')).toBeUndefined();
+  await open();
+  const scopes = [...container.querySelectorAll('fieldset label')].map(label => label.textContent);
+  expect(scopes).toEqual(['重试本轮未完成项（1 个 SKU）','仅补缺成本（2 个 SKU）','重新采集当前全部（3 个 SKU）']);
+  expect(container.querySelector('input[name="erp-cost-scope"]:checked').value).toBe('missing');
+  await choose('retry');
+  await act(async () => button('取消').click());
+  expect(start).not.toHaveBeenCalled(); expect(mocks.controlTask).not.toHaveBeenCalled();
+  await open(); await choose('retry');
+  await act(async () => button('确认重试').click());
+  expect(start).toHaveBeenCalledOnce(); expect(container.textContent).toContain('暂未连接');
+  expect(button('确认重试')?.disabled).toBe(false);
+  await act(async () => button('确认重试').click());
+  expect(start.mock.calls.map(([input]) => input.requestId)).toEqual(['FRESH', 'FRESH']);
+  expect(mocks.controlTask).toHaveBeenCalledOnce();
+  expect(mocks.register.mock.calls.find(([,deps]) => deps.rejectedRequestId === 'OLD')[0].platformSkcs).toEqual(['SKC-B']);
+});
+it('defaults to the previous unread SKU when every current price is manual and rejects a changed task identity', async () => {
+  completedCostTask();
+  const task = mocks.tasks[0];
+  Object.assign(task, {status:'partial', batches:[{status:'failed', platformSkcs:['SKC-A']}]});
+  const approvals = [{id:'MANUAL',workspaceId:'W',ledgerId:'L',platformSku:'SKU-0',status:'approved',currency:'CNY',approvedAmount:0,
+    approvedBy:'finance',approvedAt:'2026-08-31T00:00:00Z',reason:'人工确认',referenceCost:{kind:'manual_override',store:'甲'}}];
+  await render(['SKC-A'], 'ready', {approvals});
+  await act(async()=>button('重新获取 ERP 成本').click());
+  expect(container.querySelector('input[name="erp-cost-scope"]:checked').value).toBe('retry');
+  expect(container.querySelector('input[value=missing]')).toBeNull();
+  mocks.tasks[0] = { ...task, taskId:'REPLACEMENT' };
+  await render(['SKC-A'], 'ready', {approvals});
+  expect(button('确认重试').disabled).toBe(true);
+  expect(window.shopeersDesktopRuntime.startErpCollection).not.toHaveBeenCalled();
+});
 it('confirms the displayed filtered scope before replacing a completed task and never repins stale task state', async () => {
   completedCostTask();await render(['SKC-A','SKC-B'],'ready',{initialEntry:'/?q=SKU-1'});
-  expect(button('成本已采集').disabled).toBe(true);
+  expect(button('成本已采集')).toBeUndefined();
   await act(async()=>button('重新获取 ERP 成本').click());
   const dialog=container.querySelector('[role="dialog"]');
   expect(dialog.textContent).toContain('2026-08');expect(dialog.textContent).toContain('1 个 SKC / 1 个 SKU');expect(dialog.textContent).toContain('商品 SKC：SKC-B');
@@ -299,6 +349,27 @@ const formalCost = {
   publishedAt: '2026-09-01T00:00:00Z', resolutionStatus: 'resolved', evidenceComplete: true,
   selectedRecordIds: ['P-1'], purchaseRecords: [{ recordId: 'P-1', warehouseSku: 'WH-1', purchaseDate: '2026-08-10', quantity: 1, unitPrice: 10, eligible: true }],
 };
+it('continues an unstarted whole-ledger task with only the still-unpriced SKU, even on the all-products view', async () => {
+  completedCostTask();
+  Object.assign(mocks.tasks[0], {status:'paused', batches:[{status:'pending',platformSkcs:['SKC-A','SKC-B']}]});
+  await render(['SKC-A','SKC-B'],'ready',{costs:[{...formalCost,platformSkc:'SKC-A'}]});
+  await act(async()=>collectionButton().click());
+  expect(mocks.controlTask).toHaveBeenCalledExactlyOnceWith('OLD-TASK', expect.objectContaining({action:'stop',requestId:'OLD'}));
+  const [input]=mocks.register.mock.calls.find(([,options])=>options.rejectedRequestId==='OLD');
+  expect(input.platformSkcs).toEqual(['SKC-B']);
+  expect(input.expectedSkus.map(r=>r.platformSku)).toEqual(['SKU-1']);
+  expect(window.shopeersDesktopRuntime.startErpCollection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({requestId:'FRESH'}));
+});
+it('drains an existing staged return before starting any narrower ERP query', async () => {
+  completedCostTask();
+  Object.assign(mocks.tasks[0], {status:'paused',batches:[{status:'collected',platformSkcs:['SKC-A'],resultDeliveryId:'QUEUED'},
+    {status:'pending',platformSkcs:['SKC-B']}]});
+  await render(['SKC-A','SKC-B'],'ready',{costs:[{...formalCost,platformSkc:'SKC-A'}]});
+  await act(async()=>collectionButton().click());
+  expect(window.shopeersDesktopRuntime.startErpCollection).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({requestId:'OLD',deliveryOnly:true}));
+  expect(mocks.controlTask).not.toHaveBeenCalled();
+  expect(mocks.register).not.toHaveBeenCalled();
+});
 function incomingFixture(ledgerId) {
   const request = { id: `REQ-${ledgerId}`, workspaceId: 'W', ledgerId, ledgerPeriod: '2026-08', platformSkcs: ['SKC-1'], expectedSkus: [{ platformSku: 'SKU-0', platformSkc: 'SKC-1' }] };
   const batch = buildErpCostBatchEnvelope({ batchId: `B-${ledgerId}`, workspaceId: 'W', ledgerId, requestId: request.id, platformSkcs: request.platformSkcs, expectedSkus: request.expectedSkus,
@@ -318,6 +389,52 @@ function exceptionReceipt(ledgerId, number, platformSku, records) {
     adoption: { version: 'erp-auto-adoption@1', state: 'partial', summary: { adoptedCount: 0, remainingCount: 1, anomalyCount: 1 }, items: [{ platformSku, canonicalPlatformSku: platformSku, state: 'anomaly_pending' }] },
   } };
 }
+it.each([false,true])('shows the price entry only after this round and its local evaluation finish (compact %s)', async compact => {
+  const ledgerId = 'REVIEW-AFTER-ROUND';
+  const { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{recordId:'ONE',purchaseDate:'2026-08-10',quantity:1,unitPrice:1}]);
+  const draw = () => render(['SKC-1'],'ready',{ledgerId,compact});
+  const hidden = () => {
+    expect(button('核对价格异常')).toBeUndefined();
+    expect(button('查看暂存异常')).toBeUndefined();
+    expect(button('补录缺失成本')).toBeUndefined();
+  };
+  mocks.requests = [request];
+  await draw(); hidden();
+  const batch = {batchId:'B',platformSkcs:['SKC-1'],status:'running'};
+  const task = {workspaceId:'W',ledgerId,ledgerPeriod:'2026-08',requestId:request.id,taskId:'T',status:'running',batches:[batch]};
+  mocks.tasks = [task];
+  mocks.inboxRecords = [{...inbox,requestId:'OLD',deliveryId:'OLD'}];
+  await draw(); hidden();
+  task.status = 'partial';
+  Object.assign(batch,{status:'incomplete',deliveryId:'D'});
+  await draw(); hidden();
+  mocks.inboxRecords = [{...inbox,deliveryId:'D',adoptionPending:true}];
+  await draw(); hidden();
+  mocks.inboxRecords = [{...inbox,deliveryId:'D',adoptionFailure:{message:'保存失败'}}];
+  await draw(); hidden();
+  mocks.inboxRecords = [{...inbox,deliveryId:'D'}];
+  await draw(); expect(button('核对价格异常')).toBeDefined();
+  await act(async()=>button('核对价格异常').click());
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  mocks.tasks = [{...task,status:'ready',batches:[{status:'pending',platformSkcs:['SKC-1']}]}];
+  await draw(); hidden(); expect(container.querySelector('[role="dialog"]')).toBeNull();
+  mocks.tasks = [];
+  await draw(); expect(button('核对价格异常')).toBeDefined();
+});
+
+it('warns about the unfinished round and its remaining SKCs before a confirmed replacement', async () => {
+  completedCostTask();
+  Object.assign(mocks.tasks[0], {status:'paused',batches:[{deliveryId:'D',status:'delivered',platformSkcs:['SKC-A']},{status:'pending',platformSkcs:['SKC-B']}]});
+  await render(['SKC-A','SKC-B']);
+  await act(async()=>button('重新获取 ERP 成本').click());
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog.textContent).toContain('2026-08 采集任务尚未完成，还有 1 个 SKC 未送达');
+  expect(dialog.textContent).toContain('确认重新获取会结束原任务');
+  await act(async()=>button('取消',dialog).click());
+  expect(mocks.controlTask).not.toHaveBeenCalled();
+  expect(window.shopeersDesktopRuntime.startErpCollection).not.toHaveBeenCalled();
+});
+
 it('keeps manual editing and purchase confirmation alongside evidence in one dialog', async () => {
   const ledgerId = 'SINGLE-PRICE-DIALOG', { request, inbox } = exceptionReceipt(ledgerId, 1, 'SKU-0', [{ recordId: 'ONE', purchaseDate: '2026-08-10', quantity: 10, unitPrice: 1 }]);
   mocks.requests = [request]; mocks.inboxRecords = [{ ...inbox, status: 'loaded' }];
@@ -344,8 +461,9 @@ it('confirms the existing purchase prices in the same dialog without transcribin
   await render(['SKC-1'], 'cost_pending', { ledgerId });
   await act(async () => button('查看证据').click());
   const dialog = container.querySelector('[role="dialog"]');
-  expect(dialog.querySelector('.cost-evidence-details').open).toBe(true);
-  expect(dialog.textContent).toContain('3 笔待核对采购');
+  const evidence = dialog.querySelector('.purchase-review');
+  expect(evidence.querySelectorAll('.purchase-review-reason')).toHaveLength(3);
+  expect(evidence.textContent).toContain('最近的合格采购（3 笔）');
   mocks.retry.mockRejectedValueOnce(new Error('保存暂不可用'));
   await act(async () => button('确认采购价正确').click());
   expect(dialog.querySelector('[role="alert"]').textContent).toBe('保存暂不可用');
@@ -407,9 +525,9 @@ it('binds separately opened SKU details to their own receipts without a next-ite
   const dialog = container.querySelector('[role="dialog"]');
   expect(dialog.textContent).toContain('甲 · SKU-2');
   expect(dialog.textContent).toContain('近期采购价格相比历史下降');
-  expect(dialog.textContent).toContain('仓库 SKU：WH-2');
-  expect(dialog.textContent).toContain('10 件 × ¥1.5500');
-  expect(dialog.textContent).not.toContain('仓库 SKU：WH-1');
+  expect(dialog.textContent).toContain('仓库 SKU WH-2');
+  expect(dialog.textContent).toContain('¥1.5500/件');
+  expect(dialog.textContent).not.toContain('仓库 SKU WH-1');
   expect(button('保存并下一项')).toBeUndefined();
   expect(mocks.saveManual).toHaveBeenCalledExactlyOnceWith({ ledgerId, store: '甲', platformSku: 'SKU-0', unitCost: '0', reason: '人工输入单件成本并确认更正' });
   expect(mocks.switchInbox).not.toHaveBeenCalled();
@@ -485,14 +603,14 @@ it('shows adopted purchase evidence and saves with Enter only after explicit man
   const dialog = container.querySelector('[role="dialog"]');
   expect(dialog.textContent).toContain('成本详情');
   expect(dialog.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.0000/件');
-  const purchases = dialog.querySelector('.cost-evidence-details');
-  expect(purchases.open).toBe(true);
+  const purchases = dialog.querySelector('.purchase-review-list');
+  expect(purchases.closest('details')).toBeNull();
   expect(purchases.textContent).toContain('2026-08-10');
-  expect(purchases.textContent).toContain('1 件 × ¥10.0000');
+  expect(purchases.textContent).toContain('¥10.0000/件');
   expect(dialog.querySelector('#manual-cost-value')).toBeNull();
   expect(button('保存更正', dialog)).toBeUndefined();
   await act(async () => {
-    purchases.querySelector('summary').focus();
+    dialog.querySelector('.cost-evidence-details summary').focus();
     document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   });
   expect(mocks.saveManual).not.toHaveBeenCalled();
@@ -599,7 +717,7 @@ it.each(['finalized', 'locked'])('keeps evidence and manual correction available
   await act(async () => button('详情').click());
   const dialog = container.querySelector('[role="dialog"]');
   expect(dialog.textContent).not.toContain('已定稿或锁定');
-  expect(dialog.querySelector('.cost-evidence-details').open).toBe(true);
+  expect(dialog.querySelector('.purchase-review-list').textContent).toContain('¥10.0000/件');
   await act(async () => button('人工更正', dialog).click());
   expect(dialog.querySelector('#manual-cost-value').value).toBe('10');
 });

@@ -2,6 +2,62 @@ import { expect, it, vi } from 'vitest';
 vi.mock('../data/database', () => ({ listErpCostAdoptionStates: vi.fn() }));
 import { syncErpCollectionAdoptions } from './erpCollectionAdoption';
 import { readErpCollectionActivity } from './erpCollectionActivity';
+import { ERP_ADOPTION_COUNTS } from '../../../integrations/contracts/erp-adoption-counts.mjs';
+import { handleCollectionTaskRequest } from '../../../tools/erp-collection-tasks.mjs';
+
+it('reports a locally evaluated missing price once, survives restart and reports a later correction', async () => {
+  const task = { kind:'collection-task', workspaceId:'FINISHED', taskId:'T', requestId:'R', status:'partial', runMode:'cost',
+    expectedSkus:[{platformSkc:'A',platformSku:'S'}], batches:[{status:'incomplete',platformSkcs:['A'],deliveryId:'D'}] };
+  const receipt = {workspaceId:task.workspaceId,deliveryId:'D',status:'pending',adoptionPending:false,
+    adoption:{state:'pending',processedAt:'2026-11-19T10:43:05Z',summary:{expectedCount:1,missingCount:1,adoptedCount:0}}};
+  const report = vi.fn(async (taskId, {workspaceId,deliveryId,adoption}) =>
+    handleCollectionTaskRequest([task], {method:'POST', url:new URL('http://localhost/erp/v1/collection-tasks/'+taskId+'/adoption'),
+      payload:{workspaceId,deliveryId,state:adoption.state,processedAt:adoption.processedAt,...adoption.summary}}).body);
+  const sync = () => syncErpCollectionAdoptions({ workspaceId:task.workspaceId, listTasks:async()=>({tasks:[structuredClone(task)]}),
+    listInboxes:async()=>[receipt], report, publishCatalog:async()=>{} });
+  await sync();
+  expect(task.batches[0]).toMatchObject({adoptionReportedAt:expect.any(String),adoption:{missingCount:1,adoptedCount:0}});
+  const recordedAt = task.updatedAt;
+  await sync(); await sync();
+  expect(task.updatedAt).toBe(recordedAt);
+  expect(report).toHaveBeenCalledTimes(1);
+  receipt.adoption = {state:'applied',summary:{expectedCount:1,adoptedCount:1,manualEffectiveCount:1}};
+  await sync(); await sync();
+  expect(report).toHaveBeenCalledTimes(2);
+  expect(task.batches[0].adoption).toMatchObject({missingCount:0,adoptedCount:0,manualEffectiveCount:1});
+});
+
+it('recognizes a durable matching outcome after restart and sends a changed outcome', async () => {
+  const saved = Object.fromEntries(ERP_ADOPTION_COUNTS.map(key => [key, 0]));
+  Object.assign(saved, {adoptedCount: 2, manualEffectiveCount: 1, expectedCount: 3});
+  const batch = {deliveryId: 'D', status:'delivered', adoptionReportedAt:'saved', adoption:saved};
+  const task = {workspaceId:'RESUME', taskId:'T', batches:[batch]};
+  const summary = {adoptedCount:3, manualEffectiveCount:1, expectedCount:3};
+  const report = vi.fn(), publishCatalog = vi.fn();
+  const deps = {workspaceId:'RESUME', listTasks:async()=>({tasks:[task]}), listInboxes:async()=>[
+    {workspaceId:'RESUME',deliveryId:'D',status:'applied',adoption:{state:'applied',summary}},
+  ], report, publishCatalog};
+  await syncErpCollectionAdoptions(deps);
+  expect(report).not.toHaveBeenCalled();
+  expect(publishCatalog).toHaveBeenCalledOnce();
+  summary.adoptedCount = 2;
+  await syncErpCollectionAdoptions(deps);
+  expect(report).toHaveBeenCalledOnce();
+  expect(report.mock.calls[0][1].adoption.summary.adoptedCount).toBe(1);
+});
+
+it('finishes the current report when clearing starts and leaves later reports for a new cycle', async () => {
+  let stop = false;
+  const publishCatalog = vi.fn(), report = vi.fn(async () => { stop = true; });
+  const ids = ['A','B'];
+  await syncErpCollectionAdoptions({workspaceId:'CLEAR', shouldStop:()=>stop, report, publishCatalog,
+    listTasks:async()=>({tasks:[{taskId:'T', batches:ids.map(deliveryId=>({deliveryId}))}]}),
+    listInboxes:async()=>ids.map(deliveryId=>({workspaceId:'CLEAR',deliveryId,adoption:{summary:{}}})),
+  });
+  expect(report).toHaveBeenCalledOnce();
+  expect(report.mock.calls[0][1].deliveryId).toBe('A');
+  expect(publishCatalog).not.toHaveBeenCalled();
+});
 
 it('publishes catalog only after every durable calculation report succeeds and uses the returned task state', async () => {
   const task = { workspaceId: 'BARRIER-W', taskId: 'T', catalogMode: 'after_costs', batches: [{ deliveryId: 'D1' }, { deliveryId: 'D2' }] };

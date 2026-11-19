@@ -68,7 +68,7 @@ it.each([{ok:false,error:'synthetic desktop disk failure'},undefined])('keeps an
 });
 
 it('derives required tables from all declared schemas and accepts genuine earlier versions', () => {
-  expect(Object.keys(CLIENT_DATABASE_BACKUP_SCHEMAS)).toHaveLength(15);
+  expect(Object.keys(CLIENT_DATABASE_BACKUP_SCHEMAS)).toHaveLength(16);
   expect(CLIENT_DATABASE_BACKUP_SCHEMAS[1]).toEqual(['importBatches', 'salesRows', 'settings']);
   expect(CLIENT_DATABASE_BACKUP_SCHEMAS[15]).toEqual(db.tables.map(table => table.name));
   for (const [version, names] of Object.entries(CLIENT_DATABASE_BACKUP_SCHEMAS)) {

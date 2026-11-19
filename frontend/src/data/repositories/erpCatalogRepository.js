@@ -17,9 +17,9 @@ const sameCatalogBasis = (a, b) => a.workspaceId === b.workspaceId && a.ledgerId
   && JSON.stringify(a.sourceProductIds.toSorted()) === JSON.stringify(b.sourceProductIds.toSorted());
 
 async function confirmedIdentities(context, snapshot = null) {
-  const [products, skus, rows, batches, ledgers] = snapshot
-    ? [snapshot.products, snapshot.platformSkus, snapshot.salesRows, snapshot.importBatches, snapshot.ledgers]
-    : await Promise.all([db.products.toArray(), db.platformSkus.toArray(), db.salesRows.where("workspaceId").equals(context.workspaceId).toArray(), db.importBatches.toArray(), db.ledgers.toArray()]);
+  const [products, skus, batches, ledgers] = snapshot
+    ? [snapshot.products, snapshot.platformSkus, snapshot.importBatches, snapshot.ledgers]
+    : await Promise.all([db.products.toArray(), db.platformSkus.toArray(), db.importBatches.toArray(), db.ledgers.toArray()]);
   const visible = products.filter(product => selectionRecordVisible(product, context));
   const productIds = new Set(visible.map(product => product.id));
   const ledgerIds = new Set(ledgers.filter(ledger => ledger.workspaceId === context.workspaceId).map(ledger => ledger.id));
@@ -32,7 +32,11 @@ async function confirmedIdentities(context, snapshot = null) {
     byIdentity.set(JSON.stringify([pair(identity), identity.productId]), identity);
   };
   for (const item of skus) if (item.workspaceId === context.workspaceId && productIds.has(item.productId)) add(item);
-  for (const row of rows) if (row.workspaceId === context.workspaceId && ledgerIds.has(row.ledgerId) && batchById.get(row.batchId)?.ledgerId === row.ledgerId) add(row);
+  const addSale = row => {
+    if (row.workspaceId === context.workspaceId && ledgerIds.has(row.ledgerId) && batchById.get(row.batchId)?.ledgerId === row.ledgerId) add(row);
+  };
+  if (snapshot) snapshot.salesRows.forEach(addSale);
+  else await db.salesRows.where('workspaceId').equals(context.workspaceId).each(addSale);
   const identities = [...byIdentity.values()];
   return { products: visible, identities, ledgers };
 }
@@ -46,7 +50,8 @@ export async function readTrustedErpCostInboxCatalogRecords(context, snapshot = 
   const query = excludedBatchIds.size
     ? db.erpCostInbox.where('batchId').noneOf([...excludedBatchIds])
     : db.erpCostInbox.where('workspaceId').equals(context.workspaceId);
-  const inboxes = await query.filter(row => row.workspaceId === context.workspaceId && !['rejected', 'voided'].includes(row.status)).toArray();
+  const catalogAllowed = await readErpCatalogPublicationGate(context.workspaceId);
+  const inboxes = await query.filter(row => row.workspaceId === context.workspaceId && !['rejected', 'voided'].includes(row.status) && catalogAllowed(row.envelope?.batch)).toArray();
   if (!inboxes.length) return [];
   const requests = providedRequests ?? await db.erpCostRequests.where('workspaceId').equals(context.workspaceId).toArray();
   const local = await confirmedIdentities(context, snapshot);
@@ -66,9 +71,7 @@ export async function readTrustedErpCostInboxCatalogRecords(context, snapshot = 
   };
   const ledgerById = new Map(local.ledgers.filter(item => item.workspaceId === context.workspaceId).map(item => [item.id, item]));
   const records = [];
-  const catalogAllowed = await readErpCatalogPublicationGate(context.workspaceId);
   for (const inbox of inboxes) {
-    if (!catalogAllowed(inbox.envelope?.batch)) continue;
     const request = requestById.get(inbox.requestId);
     const ledger = ledgerById.get(inbox.ledgerId);
     if (inbox.workspaceId !== context.workspaceId || !request || !ledger

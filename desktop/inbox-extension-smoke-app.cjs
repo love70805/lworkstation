@@ -62,6 +62,18 @@ app.whenReady().then(async () => {
     await configure('erp', target, extension.id, { workspaceId: 'SYNTHETIC-WORKSPACE' });
     popup = new BrowserWindow({ show: false, webPreferences: { session: target, sandbox: true, contextIsolation: true } });
     await popup.loadURL(`chrome-extension://${extension.id}/popup/popup.html`);
+    // Verify native quota enforcement using only this smoke's temporary profile.
+    const readBack = await evaluate(`(async () => {
+      const payload = 'x'.repeat(16 * 1024 * 1024);
+      try {
+        await chrome.storage.local.set({ smokeQuotaProbe: payload });
+        return (await chrome.storage.local.get('smokeQuotaProbe')).smokeQuotaProbe === payload;
+      } finally {
+        await chrome.storage.local.remove('smokeQuotaProbe');
+      }
+    })()`);
+    assert.equal(readBack, true);
+    checks.push('Bundled desktop extension persists and reads back 16 MiB in the isolated profile');
     const background = await fs.readFile(path.join(resources, 'integrations/erp-assistant-extension/src/background.js'), 'utf8');
     // Run the original heartbeat through native chrome.storage/fetch with a
     // deterministic trigger; the full native ERP smoke also covers worker events.

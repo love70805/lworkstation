@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect } from "react";
-import { createBrowserRouter, RouterProvider, Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { createBrowserRouter, RouterProvider, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
 import SelectionPrestorageAutomation from "./components/SelectionPrestorageAutomation";
 import DesktopAccountingBridge from './components/DesktopAccountingBridge';
@@ -24,7 +24,7 @@ import { acknowledgeSelectionCapture, pollSelectionCaptureInbox } from "./lib/se
 import { getErpAssistantRouteTarget } from "./lib/desktopRuntime";
 import { syncErpCollectionAdoptions } from './lib/erpCollectionAdoption';
 import { publishErpCollectionReceiptError } from './lib/erpCollectionActivity';
-import { runWorkspaceBackgroundTask, subscribeWorkspaceResumed } from './lib/workspaceBackgroundTasks';
+import { isWorkspaceResetting, runWorkspaceBackgroundTask, subscribeWorkspaceResumed } from './lib/workspaceBackgroundTasks';
 import { subscribeErpInboxRefresh, erpInboxRecoveryInterval } from './lib/erpInboxEvents';
 import { liveQuery } from 'dexie';
 import { db } from './data/db/clientDatabase';
@@ -55,7 +55,8 @@ export async function runErpInboxCycle({
   parseRecord = value => ({ envelope: value }),
   receive = receiveErpCostInboxEnvelope,
   acknowledge = acknowledgeErpInbox,
-  recover = recoverErpCostInboxAdoptions,
+  deferReviewed = () => false,
+  recover = options => recoverErpCostInboxAdoptions({ ...options, background: true, shouldStop: isDisposed, deferReviewed }),
   recoverDrafts = recoverCompleteErpCostDrafts,
   syncTaskAdoptions = null,
   onReceiptStatus = publishErpCollectionReceiptError,
@@ -116,9 +117,11 @@ export async function runErpInboxCycle({
     receiptFailures.push(message);
   }
   try {
+    if (isDisposed()) return { received, failures, recovered: false };
     const results = await recover({ workspaceId: context.workspaceId });
+    if (isDisposed()) return { received, failures, recovered: false };
     if (syncTaskAdoptions) {
-      try { await syncTaskAdoptions({ workspaceId: context.workspaceId }); }
+      try { await syncTaskAdoptions({ workspaceId: context.workspaceId, shouldStop: isDisposed }); }
       catch (error) { failures.push(error); }
     }
     const recoveryFailures = Array.isArray(results) ? results.filter(result => result.error) : [];
@@ -174,10 +177,13 @@ async function getInboxContext() {
   return context;
 }
 
-function ErpInboxListener() {
+function ErpInboxListener({ maintenancePage }) {
+  const maintenance = useRef(maintenancePage);
+  useEffect(() => { maintenance.current = maintenancePage; }, [maintenancePage]);
   useEffect(() => {
     let disposed = false;
-    const poll = createErpInboxPoller({ getContext: getInboxContext, isDisposed: () => disposed, syncTaskAdoptions: syncErpCollectionAdoptions });
+    const shouldStop = () => disposed || isWorkspaceResetting();
+    const poll = createErpInboxPoller({ getContext: getInboxContext, isDisposed: shouldStop, deferReviewed: () => maintenance.current, syncTaskAdoptions: syncErpCollectionAdoptions });
     void poll();
     let catalogRunning = false, catalogQueued = false;
     const pollCatalog = async () => {
@@ -187,7 +193,7 @@ function ErpInboxListener() {
       try {
         do {
           catalogQueued = false;
-          await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ getContext: getInboxContext, isDisposed: () => disposed }));
+          await runWorkspaceBackgroundTask(() => runErpCatalogInboxCycle({ getContext: getInboxContext, isDisposed: shouldStop }));
         } while (catalogQueued && !disposed);
       }
       finally { catalogRunning = false; }
@@ -306,6 +312,17 @@ function CloudSyncListener() {
 
 function AppContent() {
   const erpAssistantRouteTarget = getErpAssistantRouteTarget();
+  const { pathname } = useLocation();
+  const profitRoute = /^\/profit\/?$/.test(pathname);
+  const maintenancePage = /^\/(diagnostics|data-security)\/?$/.test(pathname);
+  const allowPrestorage = !profitRoute && !maintenancePage;
+  const [prestorageReady, setPrestorageReady] = useState(false);
+  useEffect(() => {
+    if (!allowPrestorage) { setPrestorageReady(false); return; }
+    // A brief navigation through Home should not start a full catalog read.
+    const timer = setTimeout(() => setPrestorageReady(true), 1000);
+    return () => clearTimeout(timer);
+  }, [allowPrestorage]);
   return (
       <ToastProvider>
         <RuntimeConfigurationGate>
@@ -313,8 +330,8 @@ function AppContent() {
             <WorkspacePreferenceRecoveryGate>
             <MemberContextGate>
               <DesktopAccountingBridge />
-              <ErpInboxListener />
-              <SelectionPrestorageAutomation />
+              <ErpInboxListener maintenancePage={maintenancePage} />
+              {allowPrestorage && prestorageReady && <SelectionPrestorageAutomation />}
               <LegacySelectionInboxRecovery />
               <CloudSyncListener />
               <Suspense fallback={<RouteLoader />}>

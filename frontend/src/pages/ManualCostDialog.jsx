@@ -6,6 +6,7 @@ import { saveManualCostOverride, revokeManualCostOverride } from "../data/reposi
 import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { previewRecoveredWarehouseCost, saveRecoveredWarehouseCost } from '../data/repositories/warehouseHistoryRecoveryRepository';
 import { formatCostPurchaseEvidence, formatErpUnitCost, formatManualUnitCost } from '../lib/profitPrecision';
+import { beginCostReview } from '../lib/costReviewActivity';
 
 function EmbeddedCostForm({ title, description, children, footer }) {
   return <section><h3>{title}</h3><p>{description}</p>{children}<div className="page-actions">{footer}</div></section>;
@@ -16,35 +17,45 @@ export default function ManualCostDialog({
   className = "", viewFirst = false, title = viewFirst ? "成本详情" : "人工更正成本", formFirst = false, saveLabel = "保存更正", purchaseConfirmation = null,
 }) {
   const ownGuard = useCostEditingGuard(editingGuard ? null : ledger.workspaceId, ledger.id);
+  useEffect(() => open ? beginCostReview() : undefined,[open]);
   const costGuard = editingGuard ?? ownGuard;
   const protectedReadOnly = readOnly || costGuard.blocked;
   const identityIssue = row.decision?.identityIssue ?? row.costIdentityIssue;
   const identityConflict = identityIssue?.code === 'ledger_sku_skc_conflict';
   const currentAmount = row.unitCost == null || row.decision?.eligibleForExactProfit === false ? "" : String(row.unitCost);
-  const erpApplied = hasEffectiveErpCost || row.costSource === "erp";
-  const manualApplied = Boolean(row.manualOverride) || row.costSource === "manual_override";
-  const [amount, setAmount] = useState(currentAmount);
+  const effectiveSource = row.decision?.source ?? row.costSource;
+  const erpApplied = hasEffectiveErpCost || effectiveSource === "erp";
+  const hasManual = Boolean(row.manualOverride) || effectiveSource === "manual_override";
+  const editAmount = row.manualCostConflict ? "" : String(row.manualOverride?.approvedAmount ?? currentAmount);
+  const [amount, setAmount] = useState(editAmount);
   const [editRequested, setEditRequested] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [historyCandidate, setHistoryCandidate] = useState(null);
+  const [lookup, setLookup] = useState(null);
+  const [lookupStatus, setLookupStatus] = useState('');
   const [sharedPlan, setSharedPlan] = useState(null), [shareCost, setShareCost] = useState(false);
   const editedRef = useRef(false);
   const amountRef = useRef(null);
   const savingRef = useRef(false);
   const openingMode = useRef(ledger.accountingMode);
+  const openingApprovalId = useRef(row.manualOverride?.id);
+  const subject = JSON.stringify([ledger.workspaceId, ledger.id, row.store, row.platformSku]);
+  const openingSubject = useRef(subject);
   useEffect(() => { onBusyChange?.(saving); return () => onBusyChange?.(false); }, [saving, onBusyChange]);
   const canEdit = !protectedReadOnly && !identityConflict;
   const showForm = canEdit && (!viewFirst || editRequested);
   const invalid = saving || amount.trim() === "" || !Number.isFinite(Number(amount)) || Number(amount) < 0;
   useEffect(() => {
     if (!costGuard.blocked) return;
-    setEditRequested(false); setShareCost(false); setAmount(currentAmount); setHistoryCandidate(null); editedRef.current = false;
-  }, [costGuard.blocked, currentAmount]);
+    setEditRequested(false); setShareCost(false); setAmount(editAmount); setHistoryCandidate(null); editedRef.current = false;
+  }, [costGuard.blocked, editAmount]);
 
   useEffect(() => {
     if (!open) setEditRequested(false);
   }, [open]);
+  const lookupKey = JSON.stringify([ledger.id, row.store, row.platformSku]);
+  const lookupOpen = lookup === lookupKey && open && showForm;
   useEffect(() => {
     if (!open || !showForm || !(formFirst || viewFirst)) return;
     const timer = window.setTimeout(() => {
@@ -54,48 +65,55 @@ export default function ManualCostDialog({
     return () => window.clearTimeout(timer);
   }, [open, showForm, formFirst, viewFirst, editRequested]);
   useEffect(() => {
-    if (!open || !showForm || erpApplied || manualApplied) return;
-    let canceled = false;
-    void previewRecoveredWarehouseCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, ...(openingMode.current ? { expectedAccountingMode: openingMode.current } : {}) }).then(candidate => {
-      if (canceled || !candidate) return;
-      setHistoryCandidate(candidate);
-      if (!editedRef.current) setAmount(String(candidate.unitCost));
-    }).catch(() => { /* Ordinary manual correction remains available. */ });
-    return () => { canceled = true; };
-  }, [open, showForm, erpApplied, manualApplied, ledger.id, row.store, row.platformSku]);
-
-  useEffect(() => {
-    if (!open || !showForm) return;
-    let canceled = false; setSharedPlan(null);
-    void previewSharedManualCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku }).then(plan => {
-      if (!canceled) setSharedPlan(plan);
-    }).catch(() => { if (!canceled) setSharedPlan(null); });
-    return () => { canceled = true; };
-  }, [open, showForm, ledger.id, row.store, row.platformSku]);
+    if (!lookupOpen) return;
+    const controller = new AbortController();
+    const scope = { ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, signal: controller.signal };
+    setLookupStatus('正在查询历史采购与同仓商品…');
+    void Promise.allSettled([
+      erpApplied || hasManual || row.manualCostConflict ? null : previewRecoveredWarehouseCost({ ...scope, expectedAccountingMode: openingMode.current }),
+      previewSharedManualCost(scope),
+    ]).then(([history, shared]) => {
+      if (controller.signal.aborted) return;
+      const candidate = history.value, plan = shared.value;
+      setHistoryCandidate(candidate ?? null); setSharedPlan(plan ?? null);
+      if (candidate && !editedRef.current) setAmount(String(candidate.unitCost));
+      setLookupStatus(history.status === 'rejected' || shared.status === 'rejected' ? '部分资料读取失败，可重新查询。' : candidate || plan ? '' : '没有可用的历史采购或同仓更正建议。');
+    });
+    return () => controller.abort();
+  }, [lookupOpen, ledger.id, row.store, row.platformSku, row.manualCostConflict, erpApplied, hasManual]);
 
   function startCorrection() {
-    setAmount(currentAmount);
+    openingMode.current = ledger.accountingMode;
+    openingApprovalId.current = row.manualOverride?.id;
+    openingSubject.current = subject;
+    setAmount(editAmount);
     setHistoryCandidate(null);
     editedRef.current = false;
     setEditRequested(true);
   }
 
-  const historySuggestion = showForm && !erpApplied && !manualApplied ? historyCandidate : null;
+  const historySuggestion = showForm && !erpApplied && !hasManual && !row.manualCostConflict ? historyCandidate : null;
   const act = async (revoke) => {
     if (savingRef.current || protectedReadOnly || (revoke ? !row.manualOverride : !showForm || invalid)) return;
     savingRef.current = true;
     setSaving(true); setError("");
     try {
-      if (openingMode.current !== ledger.accountingMode) throw new Error('核算上下文已变化，请重新打开成本明细。');
       const useHistory = historySuggestion && Number(amount) === historySuggestion.unitCost;
+      // A typed shared price and revoking an identified approval do not depend
+      // on the selected ERP formula. A suggested price or group still does.
+      const dependsOnMode = !revoke && (!editedRef.current || useHistory || shareCost);
+      if (openingSubject.current !== subject || (dependsOnMode && openingMode.current !== ledger.accountingMode)) throw new Error('核算上下文已变化，请重新打开成本明细。');
+      if (openingApprovalId.current !== row.manualOverride?.id) throw new Error('人工成本已变化，请重新打开成本明细。');
+      const modeCheck = dependsOnMode && openingMode.current ? { expectedAccountingMode: openingMode.current } : {};
       const reason = useHistory ? historySuggestion.reason : '人工输入单件成本并确认更正';
-      if (revoke) await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: row.manualOverride.id, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
-      else if (shareCost && sharedPlan) await saveSharedManualCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount,
+      let saved;
+      if (revoke) await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: openingApprovalId.current });
+      else if (shareCost && sharedPlan) saved = await saveSharedManualCost({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount,
         fingerprint: sharedPlan.fingerprint, expectedAccountingMode: openingMode.current });
-      else if (useHistory) await saveRecoveredWarehouseCost({
+      else if (useHistory) saved = await saveRecoveredWarehouseCost({
         ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, inboxId: historySuggestion.inboxId, expectedUnitCost: amount, reason, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
-      else await saveManualCostOverride({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount, reason, ...(openingMode.current ? {expectedAccountingMode:openingMode.current} : {}) });
-      onSaved?.(); onClose();
+      else saved = await saveManualCostOverride({ ledgerId: ledger.id, store: row.store, platformSku: row.platformSku, unitCost: amount, reason, ...modeCheck });
+      onSaved?.(saved); onClose();
     } catch (failure) { setError(failure.message); } finally { savingRef.current = false; setSaving(false); }
   };
   const confirmPurchases = async () => {
@@ -112,8 +130,8 @@ export default function ManualCostDialog({
   if (viewFirst && !evidence) {
     const records = formatCostPurchaseEvidence(row);
     let currentCost = "缺少有效成本";
-    if (currentAmount && manualApplied) currentCost = `人工更正 · ${formatManualUnitCost(currentAmount)}/件`;
-    else if (currentAmount && erpApplied) currentCost = `ERP 已采用 · ${formatErpUnitCost(currentAmount)}/件`;
+    if (currentAmount && erpApplied) currentCost = `ERP 已采用 · ${formatErpUnitCost(currentAmount)}/件`;
+    else if (currentAmount && hasManual) currentCost = `人工更正 · ${formatManualUnitCost(currentAmount)}/件`;
     evidence = <div className="cost-detail-current">
       <strong>{currentCost}</strong>
       {records && <small className="cost-purchase-summary">{records}</small>}
@@ -124,7 +142,7 @@ export default function ManualCostDialog({
   let description = scope;
   if (protectedReadOnly) description += "。当前只读。";
   else if (identityConflict && row.manualOverride) description += "。已保存的人工金额可撤销。";
-  else if (showForm) description += shareCost && sharedPlan ? `。本次同时更正下方 ${sharedPlan.rows.filter(r => r.included).length} 条店铺 SKU，操作自动留痕。` : "。更正仅对本月这家店的该 SKU 生效，操作自动留痕。";
+  else if (showForm) description += shareCost && sharedPlan ? `。本次同时更正下方 ${sharedPlan.rows.filter(r => r.included).length} 条店铺 SKU，两种核算方式共用人工价。` : "。本月这家店的该 SKU 在两种核算方式中共用一笔人工价。";
 
   const Frame = embedded ? EmbeddedCostForm : Modal;
   return <Frame open={open} title={title} className={className} description={description} onClose={() => !saving && onClose()}
@@ -135,6 +153,8 @@ export default function ManualCostDialog({
       {canEdit && !showForm && <Button disabled={saving} onClick={startCorrection}>人工更正</Button>}
     </>}>
     {costGuard.blocked ? <p className="cost-correction-help" role="status"><strong>{costGuard.title}</strong><br />{costGuard.message}</p> : null}
+    {row.manualCostConflict ? <p className="cost-correction-help" role="status">旧账本记录了不同的人工价（{row.manualCostConflict.map(formatManualUnitCost).join('、')}）。在此确认本月单件成本后，两种核算方式共用该金额。</p> : null}
+    {ledger.accountingMode === 'historical_lowest' && row.manualOverride?.approvedAmount != null && erpApplied && currentAmount !== '' ? <p className="cost-correction-help">已保存人工价 {formatManualUnitCost(row.manualOverride.approvedAmount)}/件，本次最低成本核算取 ERP 价 {formatErpUnitCost(currentAmount)}/件。</p> : null}
     {canEdit && purchaseConfirmation ? <section className="cost-confirm-purchases" aria-label="确认采购原价">
       <div><strong>使用采购原价</strong><p>{purchaseConfirmation.description}</p></div>
       <Button variant="primary" disabled={saving} onClick={confirmPurchases}>{saving ? '正在保存…' : '确认采购价正确'}</Button>
@@ -153,6 +173,8 @@ export default function ManualCostDialog({
           }
         }} />
     </div>}
+    {showForm && !lookupOpen && <Button variant="ghost" onClick={() => setLookup(lookupKey)}>查询历史采购与同仓商品</Button>}
+    {lookupOpen && lookupStatus && <p role="status">{lookupStatus}{lookupStatus.includes('失败') && <Button onClick={() => setLookup(null)}>返回查询入口</Button>}</p>}
     {showForm && sharedPlan && sharedPlan.rows.filter(r => r.included).length > 1 ? <section className="cost-correction-help">
       <label><input type="checkbox" checked={shareCost} disabled={saving} onChange={event => setShareCost(event.target.checked)} /> 同时更正同仓的 {sharedPlan.rows.filter(r => r.included).length} 条店铺 SKU</label>
       <p>仓库 SKU：{sharedPlan.warehouseSku}。仅限本月相同采购证据；其他已确认人工成本保留。</p>

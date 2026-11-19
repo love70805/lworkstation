@@ -10,7 +10,7 @@ import { buildProfitQuery, filterProfitRowsByScope, readProfitFilter } from './p
 
 const mocks = vi.hoisted(() => ({ member: vi.fn(), ledgers: vi.fn(), rows: vi.fn(), error: vi.fn(), targetRows: [] }));
 vi.mock('../data/database', () => ({ getActiveMemberContext: mocks.member, listLedgerSummaries: mocks.ledgers }));
-vi.mock('../data/repositories/ledgerReadCache', () => ({ readLedgerSalesRows: mocks.rows }));
+vi.mock('../data/repositories/ledgerReadCache', () => ({ readLedgerScopeRows: mocks.rows }));
 
 function Harness() {
   const scope = useWorkspaceLedgerScope(), { search } = useLocation(), params = new URLSearchParams(search);

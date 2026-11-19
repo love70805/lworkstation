@@ -24,6 +24,9 @@ function themeXml(fontColors, fills, grid, divider) {
 // Older saved reports use their original six font slots when projected for download.
 export const reportThemeXml = themeXml(Array(6).fill('FF000000'),
   ['FFCADFF2', 'FFFAFBFC', 'FFF0F6F6'], 'FFCBD5E1', 'FFAFBDCD');
-export const profitThemeXml = themeXml(
+export const previousProfitThemeXml = themeXml(
   ['FF253448', 'FF253448', 'FF243C50', 'FF253448', 'FF253448', 'FF253448', 'FF9B4B50', 'FF9B4B50'],
   ['FFDCE8F1', 'FFF7F9FB', 'FFEAF1F1'], 'FFDAE1E8', 'FFB7C7D2');
+export const profitThemeXml = themeXml(
+  ['FF283446', 'FF283446', 'FF243957', 'FF85571C', 'FF85571C', 'FF283446', 'FF9B4B50', 'FF9B4B50'],
+  ['FFDDE5F3', 'FFF8F9FC', 'FFEBEEF5'], 'FFDDE1E9', 'FFBCC7D7');

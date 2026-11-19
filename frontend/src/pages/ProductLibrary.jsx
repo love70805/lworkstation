@@ -13,9 +13,9 @@ import SelectionReadState, { useSelectionRead } from "../components/SelectionRea
 import { readProductLibraryViewState, saveProductLibraryViewState } from "../components/productLibraryViewState";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
 import ProductCollectionTools from '../components/ProductCollectionTools';
-import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionReferenceSnapshot, getSelectionPrestorageSnapshot, promoteSelectionPrestorageRecords, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
+import { getActiveMemberContext, bulkUpdateProductCatalogSalesStatus, getSelectionPrestorageSnapshot, promoteSelectionPrestorageRecords, getSelectionStatusDefinitions, listPendingCaptureRecords, listProductCatalogRecords, mergeProductSkcRecords, previewProductSkcMerge, saveSelectionStatusDefinitions } from "../data/database";
 import { exportWorkbook } from "../lib/spreadsheetExport";
-import { buildSelectionReferenceRows, groupSelectionReferenceRows } from "../lib/selectionReferences";
+import { groupSelectionReferenceRows } from "../lib/selectionReferences";
 import { createSelectionSearchIndex, normalizeSelectionSearchQuery } from "../lib/selectionSearch";
 import { CaptureQueueView } from "./CaptureQueue";
 import { activeSelectionStatusDefinitions, canonicalProductStatusId, createCustomSelectionStatus, normalizeSelectionStatusDefinitions, resolveProductStatus, selectionStatusById } from "../domain/selectionStatuses";
@@ -86,7 +86,7 @@ function readProductFilters(workspaceId, view) {
 }
 
 function ProductThumb({ product }) {
-  if (product.image) return <img className="product-thumb" src={product.image} alt="" />;
+  if (product.image) return <img className="product-thumb" src={product.image} loading="lazy" decoding="async" alt="" />;
   return <span className={`product-thumb product-placeholder ${product.status === "inactive" ? "danger" : ""}`}>{product.status === "inactive" ? <AlertCircle size={20} /> : <Image size={20} />}</span>;
 }
 
@@ -118,10 +118,35 @@ export default function ProductLibrary() {
   const requestedView = params.get("view");
   const view = requestedView === "reference" ? "reference" : requestedView === "pending" ? "pending" : "official";
   if (!context) return <AppShell pageClass="product-library-page"><SelectionReadState read={contextRead} label="选品工作区" /></AppShell>;
-  return <ProductLibraryView key={`${context.workspaceId}:${view}`} workspaceId={context.workspaceId} view={view} />;
+  return <ProductLibraryData key={JSON.stringify([context.workspaceId, context.memberId, context.role, context.canSeeAllSelection])} workspaceId={context.workspaceId} view={view} />;
 }
 
-function ProductLibraryView({ workspaceId, view }) {
+async function readLibraryReferences() {
+  const { rows, products, unlinkedReadiness } = await getSelectionPrestorageSnapshot();
+  return { rows, products, unlinkedReadiness };
+}
+
+function ProductLibraryData({ workspaceId, view }) {
+  const [headers, setHeaders] = useState();
+  const readOfficialProducts = useCallback(() => listProductCatalogRecords({ includeDrafts: false, onProducts: products => {
+    setHeaders(products.map(({ id, name, platformSkc, store, updatedAt, imageUrl, image }) =>
+      ({ id, name, platformSkc, store: store || '未分配', updatedAt, image: imageUrl ?? image })));
+  } }), []);
+  const catalogRead = useSelectionRead(readOfficialProducts);
+  const statusRead = useSelectionRead(getSelectionStatusDefinitions);
+  const referenceRead = useSelectionRead(readLibraryReferences);
+  const captureRead = useSelectionRead(listPendingCaptureRecords);
+  return <ProductLibraryView key={view} workspaceId={workspaceId} view={view} headers={headers} catalogRead={catalogRead} statusRead={statusRead} referenceRead={referenceRead} captureRead={captureRead} />;
+}
+
+const catalogHeaderColumns = [
+  { id: 'image', header: '商品图', enableSorting: false, cell: ({ row }) => <ProductThumb product={row.original} /> },
+  { accessorKey: 'name', header: 'SKC 商品档案', cell: ({ row }) => <div className="product-name-cell"><strong>{row.original.name || '未命名商品'}</strong><small className="mono">{row.original.platformSkc || '未填写 SKC'}</small></div> },
+  { accessorKey: 'store', header: '店铺' },
+  { accessorKey: 'updatedAt', header: '最后更新', cell: ({ getValue }) => formatUpdatedAt(getValue()) },
+];
+
+function ProductLibraryView({ workspaceId, view, headers, catalogRead, statusRead, referenceRead, captureRead }) {
   const routeNavigate = useNavigate();
   const tableRef = useRef(null);
   const savedView = useMemo(() => readProductLibraryViewState(workspaceId, view), [workspaceId, view]);
@@ -166,22 +191,23 @@ function ProductLibraryView({ workspaceId, view }) {
   const [mergePreview, setMergePreview] = useState(null);
   const [mergeConfirmOpen, setMergeConfirmOpen] = useState(false);
   const [mergingSkcRecords, setMergingSkcRecords] = useState(false);
-  const catalogRead = useSelectionRead(listProductCatalogRecords);
-  const statusRead = useSelectionRead(getSelectionStatusDefinitions);
   const catalogState = catalogRead.status !== "ready" ? catalogRead : statusRead;
   const catalogSnapshot = catalogState.status === "ready" ? catalogRead.data : undefined;
-  const catalogProductsRaw = useMemo(() => (catalogSnapshot ?? EMPTY_ROWS).filter(product => product.status !== "draft"), [catalogSnapshot]);
-  const readCompactReferences = useCallback(async () => {
-    const staged = await getSelectionPrestorageSnapshot();
-    return { ...staged.sourceSnapshot, prestorageProducts: staged.products, unlinkedReadiness: staged.unlinkedReadiness };
-  }, []);
-  const referenceRead = useSelectionRead(readCompactReferences);
+  // Rich filters may match incoming SKUs, other stores or reference costs.
+  // Show confirmed identities early only for an unfiltered catalog.
+  const canOpenHeaders = view === 'official' && catalogState.status === 'loading' && headers?.length
+    && !query.trim() && !supplierNumber.trim() && store === 'all' && status === 'all' && recordStatus === 'all'
+    && dataStatus === 'all' && salesLabel === 'all' && !missingOnly && !duplicatesOnly && ['name', 'updated'].includes(productSort);
+  const visibleHeaders = useMemo(() => canOpenHeaders ? headers.toSorted((a, b) => productSort === 'name'
+    ? String(a.name ?? '').localeCompare(String(b.name ?? ''), 'zh-CN') : String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''))) : null,
+  [canOpenHeaders, headers, productSort]);
+  const catalogProductsRaw = catalogSnapshot ?? EMPTY_ROWS;
   const referenceSnapshot = referenceRead.data;
-  const allReferenceRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows(referenceSnapshot) : EMPTY_ROWS, [referenceSnapshot]);
+  const allReferenceRows = referenceSnapshot?.rows ?? EMPTY_ROWS;
   const referenceRows = useMemo(() => store === "all" ? allReferenceRows : allReferenceRows.map(row => ({ ...row,
     automaticSalesTag: row.automaticSalesTagsByStore?.[store] ?? null,
   })), [allReferenceRows, store]);
-  const placement = useMemo(() => selectionCatalogPlacement({ products: catalogProductsRaw, rows: referenceRows, drafts: referenceSnapshot?.prestorageProducts ?? EMPTY_ROWS }), [catalogProductsRaw, referenceRows, referenceSnapshot]);
+  const placement = useMemo(() => selectionCatalogPlacement({ products: catalogProductsRaw, rows: referenceRows, drafts: referenceSnapshot?.products ?? EMPTY_ROWS }), [catalogProductsRaw, referenceRows, referenceSnapshot]);
   const pendingReferences = placement.pendingRows;
   const prestorageProducts = placement.pendingDrafts;
   const prestorageById = useMemo(() => new Map(prestorageProducts.map(product => [product.id, product])), [prestorageProducts]);
@@ -196,7 +222,7 @@ function ProductLibraryView({ workspaceId, view }) {
   }, [prestorageProducts]);
   const [checkingPrestorage, setCheckingPrestorage] = useState(false);
   const catalogProducts = useMemo(() => {
-    const tags = new Map(referenceRows.filter(row => row.platformSkc).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag]));
+    const tags = store !== "all" ? new Map(referenceRows.filter(row => row.platformSkc).map(row => [canonicalPlatformSkc(row.platformSkc), row.automaticSalesTag])) : null;
     return catalogProductsRaw.map(product => ({ ...product,
       ...(store !== "all" && referenceSnapshot ? { automaticSalesTag: tags.get(canonicalPlatformSkc(product.platformSkc)) ?? null } : {}),
       incomingReferences: placement.incomingByProduct.get(product.id) ?? [],
@@ -204,7 +230,6 @@ function ProductLibraryView({ workspaceId, view }) {
       catalogStoreNames: [...new Set([product.store, ...(placement.storesByProduct.get(product.id) ?? [])].filter(Boolean))],
     }));
   }, [catalogProductsRaw, referenceRows, referenceSnapshot, store, placement]);
-  const captureRead = useSelectionRead(listPendingCaptureRecords);
   const pendingCaptures = captureRead.data ?? EMPTY_ROWS;
   const salesStatusDefinitions = useMemo(() => normalizeSelectionStatusDefinitions(statusRead.data), [statusRead.data]);
   const activeSalesStatuses = useMemo(() => activeSelectionStatusDefinitions(salesStatusDefinitions), [salesStatusDefinitions]);
@@ -304,6 +329,7 @@ function ProductLibraryView({ workspaceId, view }) {
   }), [negativeOnly, pendingReferences, referenceSource, salesLabel, store, normalizedSupplierNumber]);
   const filteredReferences = useMemo(() => scopedReferences.filter((row) => matchesReferenceQuery(row, normalizedQuery)), [scopedReferences, normalizedQuery]);
   const groupedReferences = useMemo(() => {
+    if (view !== 'reference') return EMPTY_ROWS;
     const groups = groupSelectionReferenceRows(filteredReferences).map(group => {
       const draft = prestorageById.get(group.productId) ?? (!group.productId && group.variants.every(row => !row.platformSkcConflict)
         ? prestorageBySkc.get(canonicalPlatformSkc(group.variants[0]?.platformSkc ?? '')) : null);
@@ -313,16 +339,17 @@ function ProductLibraryView({ workspaceId, view }) {
         prestorageReadiness: draft?.readiness ?? (!group.productId ? referenceSnapshot?.unlinkedReadiness?.[group.variants[0]?.platformSkc ? canonicalPlatformSkc(group.variants[0].platformSkc) : `SKU:${group.variants[0]?.canonicalPlatformSku}`] : undefined),
       };
     });
+    const groupedIds = new Set(groups.map(group => group.productId));
     for (const product of prestorageProducts) {
-        if (product.draft.variants.some(variant => variant.platformSku) || groups.some(group => group.productId === product.id)) continue;
+        if (product.draft.variants.some(variant => variant.platformSku) || groupedIds.has(product.id)) continue;
         if (store !== "all" && product.store !== store || negativeOnly || referenceSource !== "all") continue;
         if (!matchesProductQuery({ ...product, skus: [] }, normalizedQuery) || !matchesProductSupplier(product, normalizedSupplierNumber)) continue;
         groups.push({ id: `prestorage-${product.id}`, productId: product.id, productStatus: "draft", platformSkc: product.platformSkc || "未填写平台 SKC", productName: product.name || "未命名商品", skuCount: 0, variants: [], prestorageReadiness: product.readiness });
     }
     return groups;
-  }, [filteredReferences, prestorageById, prestorageBySkc, prestorageProducts, referenceSnapshot, store, negativeOnly, referenceSource, normalizedQuery, normalizedSupplierNumber]);
-  const pendingGroupCount = new Set([...pendingReferences.map(row => row.platformSkc ? canonicalPlatformSkc(row.platformSkc) : `SKU:${row.canonicalPlatformSku}`),
-    ...prestorageProducts.map(product => product.platformSkc ? canonicalPlatformSkc(product.platformSkc) : `PRODUCT:${product.id}`)]).size;
+  }, [view, filteredReferences, prestorageById, prestorageBySkc, prestorageProducts, referenceSnapshot, store, negativeOnly, referenceSource, normalizedQuery, normalizedSupplierNumber]);
+  const pendingGroupCount = useMemo(() => new Set([...pendingReferences.map(row => row.platformSkc ? canonicalPlatformSkc(row.platformSkc) : `SKU:${row.canonicalPlatformSku}`),
+    ...prestorageProducts.map(product => product.platformSkc ? canonicalPlatformSkc(product.platformSkc) : `PRODUCT:${product.id}`)]).size, [pendingReferences, prestorageProducts]);
   const recheckPrestorage = async () => {
     if (checkingPrestorage) return;
     setCheckingPrestorage(true);
@@ -668,7 +695,7 @@ function ProductLibraryView({ workspaceId, view }) {
 
       <ProductCollectionTools workspaceId={workspaceId} />
       <div className="product-view-tabs" role="tablist" aria-label="商品管理视图">
-        <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : "—"}</small></button>
+        <button role="tab" aria-selected={view === "official"} className={view === "official" ? "active" : ""} onClick={() => changeView("official")}><CheckCircle2 size={17} /><span>选品商品库</span><small>{catalogState.status === "ready" ? catalogProducts.length : catalogState.status === "loading" ? headers?.length ?? "—" : "—"}</small></button>
         <button role="tab" aria-selected={view === "reference"} className={view === "reference" ? "active" : ""} onClick={() => changeView("reference")}><BarChart3 size={17} /><span>预存区</span><small>{referenceRead.status === "ready" && catalogState.status === "ready" ? pendingGroupCount : "—"}</small></button>
         {pendingCount > 0 || view === "pending" ? <button role="tab" aria-selected={view === "pending"} className={view === "pending" ? "active" : ""} onClick={() => changeView("pending")}><Inbox size={17} /><span>历史采集</span><small>{captureRead.status === "ready" ? pendingCount : "—"}</small></button> : null}
       </div>
@@ -733,7 +760,7 @@ function ProductLibraryView({ workspaceId, view }) {
               {duplicateSkcGroups.length ? <button aria-pressed={duplicatesOnly} className={`filter-chip ${duplicatesOnly ? "active" : ""}`} onClick={() => setDuplicatesOnly(value => !value)}><Copy size={17} />重复 SKC（{duplicateSkcGroups.length}）</button> : null}
             </>}
             activeFilters={officialActiveFilters} onClear={resetOfficialFilters}
-            result={catalogState.status === "ready" ? `匹配 ${filteredProducts.length} / ${catalogProducts.length} 条` : "正在读取商品档案"}
+            result={catalogState.status === "ready" ? `匹配 ${filteredProducts.length} / ${catalogProducts.length} 条` : visibleHeaders ? `${visibleHeaders.length} 件商品档案可打开，正在读取参考成本与销量` : "正在读取商品档案"}
             tools={<><div className="library-column-switch" role="group" aria-label="商品表格字段"><button aria-pressed={columnView === "compact"} onClick={() => setColumnView("compact")}>常用列</button><button aria-pressed={columnView === "all"} onClick={() => setColumnView("all")}>全部字段</button></div><label className="sort-control">排序<select value={productSort} onChange={event => setProductSort(event.target.value)}><option value="updated">最后更新</option><option value="coverage">成本覆盖情况</option><option value="lowestCost">最低 SKU 参考成本</option><option value="name">商品名称</option></select></label><Button variant="ghost" icon={Settings2} disabled={statusRead.status !== "ready"} onClick={() => setStatusManagerOpen(true)}>管理状态</Button>{duplicateSkcGroups.length ? <Button variant="ghost" icon={GitMerge} onClick={openMergeManager}>整理重复 SKC</Button> : null}</>}
           />
           <Panel className="product-table-panel">
@@ -753,15 +780,15 @@ function ProductLibraryView({ workspaceId, view }) {
                 </div>
               </div>
             ) : null}
-            {catalogState.status !== "ready" ? <SelectionReadState read={catalogState} label="商品档案" /> : <DataTable
-              className={columnView === "all" ? "product-table product-table-all" : "product-table product-table-compact"}
+            {catalogState.status !== "ready" && !visibleHeaders ? <SelectionReadState read={catalogState} label="商品档案" /> : <DataTable
+              className={visibleHeaders ? "catalog-opening-table" : columnView === "all" ? "product-table product-table-all" : "product-table product-table-compact"}
               scrollLabel="商品档案表格，可横向滚动，纵向随页面浏览"
               ref={tableRef}
               initialViewState={savedView?.table}
-              dataReady={catalogSnapshot !== undefined}
+              dataReady={catalogSnapshot !== undefined || Boolean(visibleHeaders)}
               paginationResetKey={JSON.stringify([deferredQuery, store, status, recordStatus, salesLabel, dataStatus, missingOnly, duplicatesOnly, productSort, deferredSupplierNumber])}
-              columns={visibleProductColumns}
-              data={tableProducts}
+              columns={visibleHeaders ? catalogHeaderColumns : visibleProductColumns}
+              data={visibleHeaders ?? tableProducts}
               getRowId={catalogRowId}
               getRowProps={catalogRowProps}
               emptyState={catalogProducts.length === 0

@@ -1,9 +1,21 @@
 import { expect, it } from 'vitest';
 import { historicalLowestCosts } from './inventoryAccounting';
 import { resolveFormalCostDecision } from './costPolicy';
+import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision } from './ledgerCostIdentity';
 import { reconcileErpCostRows } from './erpCosts';
 const record = (recordId, unitPrice, patch = {}) => ({ recordId, warehouseSku: 'WH', quantity: 2, unitPrice, purchaseDate: '2026-01-10', ...patch });
 const cost = purchaseRecords => ({ id: 1, platformSku: 'SKU', platformSkc: 'SKC', warehouseSku: 'WH', evidenceComplete: true, purchaseRecords, publishedAt: '2026-10-01' });
+
+it.each([[8,5,'erp'],[3,3,'manual_override'],[0,0,'manual_override'],[0.0000001,0.0000001,'manual_override'],[5,5,'manual_override']])('compares manual %s with eligible ERP five in lowest mode', (amount, result, source) => {
+  const scope = { workspaceId: 'W', ledgerId: 'L', store: '甲', platformSku: 'SKU' };
+  const manualOverride = { ...scope, id: 'A', status: 'approved', currency: 'CNY', approvedAmount: amount, approvedBy: 'finance', approvedAt: '2026-11-01', reason: '实价', referenceCost: { kind: 'manual_override', store: '甲' } };
+  const erpCost = { id: 'ERP', platformSku: 'SKU', platformSkc: 'SKC', unitCost: 5, resolutionStatus: 'resolved', currency: 'CNY' };
+  const selection = { ...scope, manualOverride, erpCost };
+  expect(resolveLedgerCostDecision(selection)).toMatchObject({ source:'manual_override', unitCost:amount, approvalId:'A' });
+  expect(resolveLedgerCostDecision({ ...selection, accountingMode:'historical_lowest' })).toMatchObject({ source, unitCost:result, sourceRecordId:source === 'erp' ? 'ERP' : 'A' });
+  const identity = buildLedgerSkuIdentityIndex([{ platformSku:'SKU', platformSkc:'OTHER' }]).get('SKU');
+  expect(resolveLedgerCostDecision({ ...selection, identity, accountingMode:'historical_lowest' })).toMatchObject({ source:'manual_override', unitCost:amount });
+});
 
 it('compares the unit costs derived from recorded totals rather than base prices', () => {
   const input = cost([

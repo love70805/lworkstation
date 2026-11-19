@@ -34,12 +34,12 @@ export async function withCurrentLedgerResults(ledgers) {
     const revision = sourceRevision();
     const results=[];
     for(const original of new Map(ledgers.filter(Boolean).map(ledger => [ledger.id, ledger])).values()){
-      const snapshot=await getLedgerSnapshot(original.id, { summaryOnly: true });
+      const snapshot=await getLedgerSnapshot(original.id, { summaryOnly: true, profitPage: true });
       if(!snapshot)continue;
       const ledger=snapshot.ledger;
       const lines=await readCachedReportProducts({snapshot});
       const missing=lines.some(line=>line.unitCostExact==null);
-      const [dispatch,deduction]=await Promise.all([readAccountingSupplement(ledger.id,'dispatch',ledger.accountingMode),readAccountingSupplement(ledger.id,'deduction',ledger.accountingMode)]);
+      const [dispatch,deduction]=await Promise.all([readAccountingSupplement(ledger,'dispatch'),readAccountingSupplement(ledger,'deduction')]);
       const stores=[...new Set(lines.map(line=>line.store))];
       const complete=deduction&&stores.every(store=>deduction.coveredStores.includes(store));
       const productProfit=lines.reduce((sum,line)=>sum.plus(line.profitExact??0),new Exact(0));

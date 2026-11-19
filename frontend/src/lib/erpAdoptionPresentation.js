@@ -38,7 +38,7 @@ export function summarizeAdoptionForDisplay(adoption, { status = null, failure =
   const remainingCount = summary.remainingCount ?? 0;
   const details = [
     `ERP 自动采用 ${automaticCount} 项`,
-    summary.manualEffectiveCount ? `人工更正仍有效 ${summary.manualEffectiveCount} 项` : null,
+    summary.manualEffectiveCount ? `已保留人工价 ${summary.manualEffectiveCount} 项` : null,
     summary.anomalyCount ? `采购异常 ${summary.anomalyCount} 项` : null,
     summary.evidenceIncompleteCount ? `证据不完整 ${summary.evidenceIncompleteCount} 项` : null,
     summary.missingCount ? `未取得成本 ${summary.missingCount} 项` : null,
@@ -56,7 +56,7 @@ export function summarizeAdoptionForDisplay(adoption, { status = null, failure =
 
 export const ERP_ADOPTION_ITEM_LABELS = Object.freeze({
   adopted: "本次 ERP 已自动采用",
-  manual_effective: "ERP 证据已存，人工更正有效",
+  manual_effective: "ERP 证据已存，已保留人工价",
   anomaly_pending: "采购异常待处理",
   evidence_incomplete: "采购证据不完整",
   missing: "未取得 ERP 成本",

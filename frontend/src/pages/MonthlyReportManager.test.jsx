@@ -10,7 +10,7 @@ const mock=vi.hoisted(()=>({preview:vi.fn(),adopt:vi.fn(),read:vi.fn()}));
 vi.mock('../data/repositories/profitReportRepository',()=>({previewMonthlySupplement:mock.preview,adoptMonthlySupplement:mock.adopt}));
 vi.mock('../lib/monthlySupplementImport',()=>({readSupplementWorkbook:mock.read}));
 const base={ledger:{id:'L',workspaceId:'W',period:'2026-08'},stores:['甲'],adoptedRows:[]};
-const source=(hash='NEW',cells=[['登记人','店铺','订单号','数量'],['甲人','甲','A',3],['乙人','甲','B',7]])=>({fileHash:hash,fileName:`${hash}.csv`,sheetName:'CSV',sourceFormat:'csv',headerRow:1,cells,sourceRows:cells.map((_,i)=>i+1),recordRows:cells.map((_,i)=>i+1)});
+const source=(hash='NEW',cells=[['登记人','店铺','订单号','数量'],['甲人','甲','A',3],['乙人','甲','B',7]])=>({fileHash:hash,fileName:`2026年8月-${hash}.csv`,sheetName:'CSV',sourceFormat:'csv',headerRow:1,cells,sourceRows:cells.map((_,i)=>i+1),recordRows:cells.map((_,i)=>i+1)});
 let root,container;
 function check(input,state=base){return {candidate:normalizeSupplementCandidate(input,{ledger:state.ledger,stores:state.stores}),inputSignature:'signature',expectedBatchId:state.dispatch?.id??null};}
 async function mount(state=base,kind='dispatch'){
@@ -26,6 +26,23 @@ const supplier=code=>[...container.querySelectorAll('.report-supplier-option')].
 async function toggle(code,checked){await act(async()=>Simulate.change(supplier(code),{target:{checked}}));}
 async function upload(sources){await act(async()=>Simulate.change(container.querySelector('input[type=file]'),{target:{files:[{sources}]}}));}
 afterEach(async()=>{if(root)await act(async()=>root.unmount());container?.remove();root=null;});
+it('preselects only the ledger month and applies exactly the checked months to the saved rows',async()=>{
+ const mixed={...source('DATES',[['日期','登记人','订单号','数量'],['2026/8/1','甲人','A',3],['9月1日','甲人','B',7],['2025-08-01','甲人','C',11],['日期不明','甲人','D',4]]),fileName:'代发.csv'};
+ await mount();await upload([mixed]);await change(field('登记人'),'甲人');
+ const month=label=>[...container.querySelectorAll('.dispatch-month-options label')].find(el=>el.textContent===label).querySelector('input');
+ expect(month('2026-08（核算月）').checked).toBe(true);
+ for(const label of ['2025-08','2026-09','未识别月份'])expect(month(label).checked).toBe(false);
+ expect(mock.preview.mock.calls.at(-1)[0].rows.map(row=>row.businessId)).toEqual(['A']);
+ await act(async()=>month('2026-09').click());expect(container.textContent).toContain('采用 10 件');
+ await act(async()=>button('导入本月来源').click());
+ expect(mock.adopt.mock.calls[0][0].rows.map(row=>row.sourcePeriod)).toEqual(['2026-08','2026-09']);
+});
+it('leaves unmatched months and undated sources unchecked without creating a zero batch',async()=>{
+ await mount();await upload([{...source(),fileName:'代发.csv',sheetName:'7月'},{...source('UNKNOWN'),fileName:'代发.csv'}]);
+ await change(field('登记人'),'甲人');
+ expect(container.textContent).toContain('未找到 2026-08');expect(mock.preview).not.toHaveBeenCalled();
+ expect(button('导入本月来源').disabled).toBe(true);
+});
 it('defaults to no registrant, searches identified names and previews append/replacement totals without mutating prior sources',async()=>{
  const prior=Object.freeze({fileHash:'OLD',fileName:'old.xlsx',sheetName:'旧来源'});
  const state={...base,dispatch:{id:'OLD',sources:Object.freeze([prior]),adoptedQuantityExact:'10',revision:1,rowCount:1},adoptedRows:[{kind:'dispatch',fileHash:'OLD',sourceSheet:'旧来源',sourceRow:2,ownerMarker:'此前人员',quantityExact:'10'}]};
@@ -139,7 +156,7 @@ it('does not ask again about previously reviewed conflicts when adding unrelated
 });
 
 it('shows unassigned XLSX source rows outside adopted quantities and explains counted text numbers without another confirmation',async()=>{
- await mount();const s={...source('XLSX',[['登记人','店铺','SKC','订单号','数量'],['甲人','甲','A','O1',100],['','','B','O2','23'],['','','C','O3',28]]),fileName:'isolated.xlsx',sheetName:'月度',sourceFormat:'xlsx',merges:[{s:{r:1,c:0},e:{r:2,c:0}}]};
+ await mount();const s={...source('XLSX',[['登记人','店铺','SKC','订单号','数量'],['甲人','甲','A','O1',100],['','','B','O2','23'],['','','C','O3',28]]),fileName:'2026年8月代发.xlsx',sheetName:'月度',sourceFormat:'xlsx',merges:[{s:{r:1,c:0},e:{r:2,c:0}}]};
  await upload([s]);await change(field('登记人'),'甲人');
  expect(container.textContent).toContain('1 条登记人不明记录');expect(container.textContent).toContain('共 23 件，已计入预览');
  expect(container.textContent).toContain('采用 123 件');expect(container.textContent).toContain('O3');

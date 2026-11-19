@@ -30,17 +30,29 @@ import {
   getActiveMemberContext,
   selectionRecordVisible,
 } from "./selectionRepository";
-export async function getWorkspaceOperationalSummary() {
+let lastNavigationSummary;
+export async function getWorkspaceOperationalSummary({ includeRecordCount = true, navigationOnly = false } = {}) {
   return retrySourceRead(async () => {
     const observable = await observeSourceRevision();
     const revision = sourceRevision();
     const context = await getActiveMemberContext();
     assertSourceRevision(revision);
-    const compute = () => readWorkspaceOperationalSummary(context, observable);
+    const scope = [context.workspaceId, context.memberId, context.role];
+    const key = JSON.stringify([revision, ...scope]);
+    if (navigationOnly) {
+      if (observable && lastNavigationSummary?.key === key) return lastNavigationSummary.value;
+      const captures = (await summaryProjection('captures')).filter(row => selectionRecordVisible(row, context));
+      assertSourceRevision(revision);
+      return { ...buildWorkspaceOperationalSummary({ captures }), navigationOnly: true, recordCount: null };
+    }
+    const compute = () => readWorkspaceOperationalSummary(context, observable, includeRecordCount);
     const summary = observable ? await cachedDerived({
-      scope: [context.workspaceId, context.memberId, context.role], formula: "workspace-operational-summary@3", revision, compute,
+      scope, formula: includeRecordCount ? "workspace-operational-summary@4-shared-manual" : "workspace-shell-summary@2-shared-manual", revision, compute,
     }) : await compute();
     assertSourceRevision(revision);
+    const {pendingCaptureCount, blockedCaptureCount, latestCaptureAt, missingCostCount, latestOpenLedger} = summary;
+    lastNavigationSummary = {key, value: {pendingCaptureCount, blockedCaptureCount, latestCaptureAt, missingCostCount,
+      latestOpenLedger: latestOpenLedger && {id:latestOpenLedger.id, period:latestOpenLedger.period, status:latestOpenLedger.status, updatedAt:latestOpenLedger.updatedAt}, recordCount:null}};
     return summary;
   });
 }
@@ -80,7 +92,7 @@ async function cachedWorkspaceCount(table,context,ledgerIds) {
   return revision?cachedDerived({scope:[context.workspaceId,...(table.name==='erpCostRows'?[ledgerIds.toSorted()]:[])],formula:`workspace-summary-count@1:${table.name}`,revision,revisionReader,boundedMemory:true,compute}):compute();
 }
 
-async function readWorkspaceOperationalSummary(context, observable) {
+async function readWorkspaceOperationalSummary(context, observable, includeRecordCount) {
   const inWorkspace = (record) => record.workspaceId === context.workspaceId;
   const ledgers = await db.ledgers.where("workspaceId").equals(context.workspaceId).toArray();
   const ledgerIds = ledgers.map((ledger) => ledger.id);
@@ -90,7 +102,7 @@ async function readWorkspaceOperationalSummary(context, observable) {
     summaryProjection('platformSkus'),
     // The shell displays one timestamp, not the immutable audit payloads.
     db.auditEvents.orderBy("createdAt").reverse().filter(inWorkspace).first(),
-    Promise.all(db.tables.map(async (table) => {
+    includeRecordCount ? Promise.all(db.tables.map(async (table) => {
       if (table.name === "workspaces") return [table.name, await table.where("id").equals(context.workspaceId).count()];
       // Settings are device metadata. Keep their existing global count semantics.
       if (table.name === "settings") return [table.name, await table.count()];
@@ -105,7 +117,7 @@ async function readWorkspaceOperationalSummary(context, observable) {
       // Legacy ERP rows have no workspace index; derive ownership through their ledger.
       if (table.name === "erpCostRows") return [table.name, await cachedWorkspaceCount(table,context,ledgerIds)];
       return [table.name, 0];
-    })),
+    })) : [],
   ]);
 
   const visibleProducts = products.filter((product) => selectionRecordVisible(product, context));
@@ -121,7 +133,7 @@ async function readWorkspaceOperationalSummary(context, observable) {
   tableCounts.platformSkus = visibleSkus.length;
   const verifiedLedgers = await withVerifiedLedgerCostSummaries(ledgers);
 
-  return buildWorkspaceOperationalSummary({
+  const summary = buildWorkspaceOperationalSummary({
     captures: visibleCaptures,
     products: visibleProducts,
     platformSkus: visibleSkus,
@@ -129,6 +141,7 @@ async function readWorkspaceOperationalSummary(context, observable) {
     auditEvents: latestActivity ? [{ createdAt: latestActivity.createdAt }] : [],
     tableCounts,
   });
+  return includeRecordCount ? summary : { ...summary, recordCount: null };
 }
 
 export async function createWorkspaceBackupPayload() {
@@ -235,31 +248,41 @@ export async function recordCloudSeedImportReceipt({
 }
 
 export async function getDataSecuritySnapshot() {
-  const [summary, lastBackupSetting, lastCloudSeedSetting, lastCloudImportSetting, lastSyncRecoverySetting, auditEvents, tableCountEntries] = await Promise.all([
-    getWorkspaceOperationalSummary(),
+  // This panel reports the local database that the backup and clear commands
+  // operate on. Counting object stores needs neither ledger coverage nor evidence.
+  const [lastBackupSetting, lastCloudSeedSetting, lastCloudImportSetting, lastSyncRecoverySetting, tableCountEntries, auditEvents] = await Promise.all([
     db.settings.get("lastBackupExport"),
     db.settings.get("lastCloudSeedExport"),
     db.settings.get("lastCloudSeedImport"),
     db.settings.get("lastSyncRecovery"),
-    db.auditEvents.where('objectType').anyOf(['backup','cloud_migration','cloud_recovery','workspace']).toArray(),
     Promise.all(db.tables.map(async (table) => [table.name, await table.count()])),
+    recentSecurityEvents(),
   ]);
-  const securityEvents = auditEvents
-    .filter((event) => ["backup", "cloud_migration", "cloud_recovery"].includes(event.objectType) || event.action === "workspace_reset")
-    .toSorted((a, b) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
-    .slice(0, 20);
+  const tableCounts = Object.fromEntries(tableCountEntries);
   return {
-    summary,
+    summary: { recordCount: Object.values(tableCounts).reduce((sum, count) => sum + count, 0) },
     lastBackup: lastBackupSetting?.value ?? null,
     lastCloudSeed: lastCloudSeedSetting?.value ?? null,
     lastCloudImport: lastCloudImportSetting?.value ?? null,
     lastSyncRecovery: lastSyncRecoverySetting?.value ?? null,
-    backupEvents: securityEvents.filter((event) => event.objectType === "backup"),
-    securityEvents,
-    tableCounts: Object.fromEntries(tableCountEntries),
+    backupEvents: auditEvents.filter((event) => event.objectType === "backup"),
+    securityEvents: auditEvents,
+    tableCounts,
   };
 }
 
+async function recentSecurityEvents() {
+  const events = [];
+  await db.auditEvents.where('objectType').anyOf(['backup','cloud_migration','cloud_recovery','workspace']).each(event => {
+    if (event.objectType === 'workspace' && event.action !== 'workspace_reset') return;
+    const { id, createdAt, action, objectId, objectType, after = {} } = event;
+    const { fileName, recordCount, sourceGeneratedAt, importVersion, insertedCount, sourceCursor } = after ?? {};
+    events.push({id, createdAt, action, objectId, objectType, after: {fileName, recordCount, sourceGeneratedAt, importVersion, insertedCount, sourceCursor}});
+    events.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+    if (events.length > 20) events.pop();
+  });
+  return events;
+}
 export function inspectWorkspaceBackupPayload(payload) {
   return validateWorkspaceBackupPayload(payload, {
     tableNames: db.tables.map(table => table.name), schemas: CLIENT_DATABASE_BACKUP_SCHEMAS,
@@ -403,15 +426,17 @@ export async function restoreWorkspaceSyncRecoveryPayload(payload, restoredBy = 
 }
 
 export async function clearLocalWorkspaceData(clearedBy = "local-user",{onProgress}={}) {
+  onProgress?.('正在等待后台完成当前写入…');
   return withWorkspaceReset(async () => {
     if(readPreferenceRestoreJournal()||await db.settings.get(DESKTOP_RESTORE_COMMIT))throw new Error('上次恢复尚未完成，请先重试恢复检查。');
     let desktopCleared=false;
     try {
-      onProgress?.('正在清空本机数据…');
+      onProgress?.('正在清空桌面收件和采集任务…');
       await clearDesktopInboxData(undefined,{confirmation:WORKSPACE_CLEAR_CONFIRMATION});
       desktopCleared=true;
       clearAllCostDrafts();
       clearBusinessPreferences();
+      onProgress?.('正在清空本机账本和业务记录…');
       await clearWorkspaceTables(clearedBy);
       return {ok:true};
     }catch(error){error.clearStarted=desktopCleared||error.clearStarted===true;throw error;}

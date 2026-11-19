@@ -6,6 +6,10 @@ import { derivedCacheDb, cachedDerived, clearDerivedMemory, sourceRevision, Stal
 import { setActiveMemberContext } from './repositories/selectionRepository';
 import { readLedgerSalesAnalytics } from './repositories/salesAnalyticsRepository';
 import { readLedgerSalesRows } from './repositories/ledgerReadCache';
+import { readPageSaleChunks } from './repositories/ledgerPageSalesRepository';
+import { readCostSaleIdentities } from './repositories/costActionSources';
+import { readActionCostRows } from './repositories/profitCostIndex';
+import { readProfitPageSales, warmImportedProfitSales } from './repositories/profitPageSalesRepository';
 import { getLedgerSnapshot } from './repositories/profitRepository';
 import { readCachedReportProducts } from './repositories/derivedComputationService';
 import { buildReportProducts } from '../domain/profitReports';
@@ -33,6 +37,54 @@ beforeEach(async () => {
   await db.salesRows.add({ workspaceId: 'W', ledgerId: 'L', store: '甲', platformSku: 'A', quantity: 1, amount: 0.009, amountExact: '0.009', sourceAddedDate: '2026-08-01' });
 });
 afterEach(async () => { await db.delete(); await derivedCacheDb.delete(); vi.unstubAllGlobals(); });
+it('prepares imported profit sales at idle and the next page reuses the same calculation', async () => {
+  const ledger = await db.ledgers.get('L');
+  const idle = vi.fn();
+  vi.stubGlobal('requestIdleCallback',idle);
+  const worker = vi.spyOn(computation,'runDerivedComputation');
+  try {
+    warmImportedProfitSales(ledger.id,ledger.workspaceId);
+    expect(idle).toHaveBeenCalledOnce();
+    expect(worker).not.toHaveBeenCalled();
+    idle.mock.calls[0][0]();
+    await vi.waitFor(()=>expect(worker.mock.calls.some(([kind])=>kind === 'profit-page-sales')).toBe(true));
+    await readProfitPageSales(ledger);
+    expect(worker.mock.calls.filter(([kind])=>kind === 'profit-page-sales')).toHaveLength(1);
+  } finally { worker.mockRestore(); }
+});
+it('reuses identities from an actual page read and invalidates them after changing a sale in place', async () => {
+  const ledger = await db.ledgers.get('L');
+  await readPageSaleChunks('W','L');
+  const reads = vi.spyOn(IDBObjectStore.prototype, 'getAll');
+  expect((await readCostSaleIdentities(ledger,false)).map(row=>row.platformSku)).toEqual(['A']);
+  expect(reads.mock.contexts.some(store=>store.name === 'salesRows')).toBe(false);
+  const sale = await db.salesRows.toCollection().first();
+  await db.salesRows.update(sale.id,{platformSku:'B'});
+  expect((await readCostSaleIdentities(ledger,false)).map(row=>row.platformSku)).toEqual(['B']);
+  expect(reads.mock.contexts.some(store=>store.name === 'salesRows')).toBe(true);
+  reads.mockRestore();
+});
+it('reuses existing cost facts across a native append and drops them on a remote revision', async () => {
+  const ledger = await db.ledgers.get('L');
+  const base = {workspaceId:'W', ledgerId:'L', batchId:'B', platformSku:'S', platformSkc:'C', unitCost:2};
+  const first = await db.erpCostRows.add({...base});
+  const facts = () => db.transaction('r',db.erpCostRows,async () => {
+    const result=new Map();
+    await readActionCostRows(ledger, item=>result.set(item.header.id,item.coverage.unitCost));
+    return result;
+  });
+  expect((await facts()).get(first)).toBe(2);
+  const raw = vi.spyOn(IDBObjectStore.prototype,'getAll');
+  const second = await db.erpCostRows.add({...base,platformSku:'T',unitCost:3});
+  expect((await facts()).get(second)).toBe(3);
+  raw.mockClear();
+  await facts();
+  expect(raw.mock.contexts.some(store=>store.name === 'erpCostRows')).toBe(false);
+  localStorage.setItem('shopeers-table-source-revision-v1:erpCostRows',crypto.randomUUID());
+  await facts();
+  expect(raw.mock.contexts.some(store=>store.name === 'erpCostRows')).toBe(true);
+  raw.mockRestore();
+});
 it('settles a live summary larger than the cache limit while still observing actual source edits', async () => {
   let runs=0;const values=[];
   const subscription=liveQuery(async()=>{
@@ -113,12 +165,13 @@ it('reuses persisted exact results after closing databases and discarding proces
   expect(compute).toHaveBeenCalledTimes(3);
 });
 
-it('shares one raw snapshot and persists consumed sales summaries', async () => {
+it('shares the raw snapshot for detail callers and retains only chart aggregates for navigation', async () => {
   const first = await readLedgerSalesRows('W', 'L');
   expect(await readLedgerSalesRows('W', 'L')).toBe(first);
   expect(await readLedgerSalesRows('foreign', 'L')).toEqual([]);
   const result = await readLedgerSalesAnalytics({ workspaceId: 'W', ledgerId: 'L' });
-  expect(result.sourceRows).toBe(first);
+  expect(result).not.toHaveProperty('sourceRows');
+  expect(result.chartMonth.daily[0].revenueExact).toBe('0.009');
   expect(result.monthTotalsExact.revenueExact).toBe('0.009');
   expect(await derivedCacheDb.entries.count()).toBe(1);
   clearDerivedMemory();

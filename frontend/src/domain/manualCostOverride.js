@@ -4,6 +4,16 @@ export const manualSnapshot = (approval) => approval?.referenceSnapshot ?? appro
 export const storeIdentity = (store) => String(store ?? "").normalize("NFKC").trim();
 export const storeSkuKey = (store, sku) => JSON.stringify([storeIdentity(store), canonicalPlatformSku(sku)]);
 
+export function manualCostConflicts(approvals = [], ledger) {
+  const conflicts = new Map();
+  for (const row of approvals) {
+    if (row.manualCostConflict && row.workspaceId === ledger?.workspaceId && row.ledgerId === ledger?.id) {
+      conflicts.set(storeSkuKey(manualSnapshot(row).store, row.platformSku), row.manualCostConflict);
+    }
+  }
+  return conflicts;
+}
+
 export function validManualOverride(approval, { workspaceId, ledgerId, store, platformSku }) {
   const snapshot = manualSnapshot(approval);
   const raw = approval?.approvedAmount;

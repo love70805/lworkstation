@@ -23,13 +23,13 @@ function purchaseFacts(record, index, warehouseSku, period) {
 // Compare complete purchase facts, not a batch ID or a rounded/aggregated price.
 // Keys are transient, collision-free canonical strings; no large fingerprint is
 // persisted on each resolution. Catalog decoration is not financial evidence.
-export function indexErpAnomalyEvidence(batch, period) {
+export function indexErpAnomalyEvidence(batch, period, wanted = null) {
   const result = new Map(), seen = new Set();
   const boundary = erpBatchAdoptionBoundary(batch);
   if (boundary.globalReasons.length) return result;
   for (const evidence of batch?.warehouseEvidence ?? []) {
     const warehouse = canonicalWarehouseSku(evidence.warehouseSku);
-    if (!warehouse) continue;
+    if (!warehouse || (wanted && !wanted.has(warehouse))) continue;
     if (seen.has(warehouse)) { result.delete(warehouse); continue; }
     seen.add(warehouse);
     if (boundary.blockedWarehouses.has(warehouse) || batch.rows.some(row => canonicalWarehouseSku(row.warehouseSku) === warehouse && boundary.blockedSkus.has(canonicalPlatformSku(row.platformSku)))) continue;

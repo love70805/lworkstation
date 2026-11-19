@@ -16,7 +16,14 @@ function retainWorker(worker) {
   entry.timer?.unref?.();
   idleWorkers.push(entry);
 }
-export function runDerivedComputation(kind, input, { signal, onProgress } = {}) {
+let pageJob = Promise.resolve();
+export function runDerivedComputation(kind, input, options = {}) {
+  if (!input.pageChunks) return runWorker(kind, input, options);
+  const result = pageJob.then(() => runWorker(kind, input, options));
+  pageJob = result.then(() => {}, () => {});
+  return result;
+}
+function runWorker(kind, input, { signal, onProgress } = {}) {
   const cancelled = () => Object.assign(new Error('后台计算已取消。'), { name: 'AbortError' });
   if (signal?.aborted) return Promise.reject(cancelled());
   // Tests and unsupported browsers retain precisely the same domain functions.
@@ -32,7 +39,7 @@ export function runDerivedComputation(kind, input, { signal, onProgress } = {}) 
       finished = true;
       signal?.removeEventListener('abort', onAbort);
       worker.onmessage = null; worker.onerror = null;
-      if (error) worker.terminate(); else retainWorker(worker);
+      if (error || input.pageChunks) worker.terminate(); else retainWorker(worker);
       error ? reject(error) : resolve(value);
     };
     const onAbort = () => finish(cancelled());
@@ -63,10 +70,14 @@ export function runDerivedComputation(kind, input, { signal, onProgress } = {}) 
 
 export async function readCachedReportProducts({ snapshot, warehouseRate = snapshot?.ledger?.warehouseRate, onStatus }) {
   if (!snapshot?.ledger) return [];
-  const compute = () => runDerivedComputation('profit', { ledger: { ...snapshot.ledger, warehouseRate }, salesRows: snapshot.rows, erpCosts: snapshot.costs ?? [], approvals: snapshot.approvals ?? [], allowMissing: true }, { onProgress: progress => onStatus?.(progress.label) });
+  const kind = snapshot.profitPage ? 'profit-page' : 'profit';
+  const compute = () => {
+    if (snapshot.pageSales?.reportError) throw new Error(snapshot.pageSales.reportError);
+    return runDerivedComputation(kind, { ledger: { ...snapshot.ledger, warehouseRate }, salesRows: snapshot.rows, pageGroups: snapshot.pageSales?.groups, erpCosts: snapshot.costs ?? [], approvals: snapshot.approvals ?? [], allowMissing: true }, { onProgress: progress => onStatus?.(progress.label) });
+  };
   // Supplied/testing snapshots without a verified source revision cannot be persisted.
   if (!snapshot.dataVersion) return compute();
   const revisionOptions = snapshot.revisionKind === 'ledger' ? { revisionReader: ledgerSnapshotRevision } : snapshot.revisionKind === 'inventory' ? { revisionReader: inventoryCalculationRevision } : snapshot.revisionKind === 'inventory-lowest' ? { revisionReader: inventoryLowestRevision } : {};
   assertSourceRevision(snapshot.dataVersion, revisionOptions.revisionReader);
-  return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, snapshot.ledger.accountingMode ?? 'weighted', 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@10-purchase-total`, revision: snapshot.dataVersion, ...revisionOptions, compute, onStatus });
+  return cachedDerived({ scope: [snapshot.ledger.workspaceId, snapshot.ledger.id, snapshot.ledger.period, snapshot.ledger.accountingMode ?? 'weighted', 'all', String(warehouseRate)], formula: `${REPORT_FORMULA_VERSION}:products@10-purchase-total${snapshot.profitPage ? ':profit-page' : ''}`, revision: snapshot.dataVersion, ...revisionOptions, compute, onStatus });
 }

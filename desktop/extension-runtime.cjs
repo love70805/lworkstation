@@ -72,7 +72,7 @@ async function injectRuntimeContract(directory, port, runtimeId) {
     }
     if (fsSync.existsSync(manifestPath)) {
       const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-      manifest.permissions = [...new Set([...(manifest.permissions || []), "storage"])]
+      manifest.permissions = [...new Set([...(manifest.permissions || []), "storage", "unlimitedStorage"])]
         .sort((left, right) => left.localeCompare(right));
       await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     }

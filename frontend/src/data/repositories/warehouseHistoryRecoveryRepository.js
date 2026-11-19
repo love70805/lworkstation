@@ -1,10 +1,12 @@
 import { assertLedgerCostEditingReady } from './erpCostEditingGuard';
 import { db } from '../db/clientDatabase';
+import { readCostSaleIdentities } from './costActionSources';
+import Dexie from 'dexie';
 import { getActiveMemberContext } from './selectionRepository';
 import { getLatestLedgerCosts, readErpHistoryMappings, saveManualCostOverride } from './profitRepository';
 import { canonicalPlatformSku, canonicalPlatformSkc, canonicalWarehouseSku } from '../../domain/identifiers';
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision } from '../../domain/ledgerCostIdentity';
-import { selectManualOverride, storeIdentity } from '../../domain/manualCostOverride';
+import { selectManualOverride, manualCostConflicts, storeIdentity, storeSkuKey } from '../../domain/manualCostOverride';
 import { erpLedgerVersion } from '../../domain/erpLedgerVersion';
 import { validateErpCostInboxEnvelope } from '../../domain/erpInboxContract';
 import { planWarehouseHistoryCosts, WAREHOUSE_HISTORY_FORMAT } from '../../domain/erpWarehouseHistory';
@@ -23,7 +25,7 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null, exp
   const mode = await readAccountingMode(member.workspaceId);
   if (expectedAccountingMode && expectedAccountingMode !== mode) throw new Error('核算上下文已变化，请重新打开成本明细。');
   const ledger = { ...original, accountingMode: mode };
-  const rows = await db.salesRows.where('ledgerId').equals(ledgerId).toArray();
+  const rows = await readCostSaleIdentities(ledger, false);
   const target = rows.find(row => storeIdentity(row.store) === storeIdentity(store) && canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku));
   if (!target) return null;
   const identity = buildLedgerSkuIdentityIndex(rows).get(canonicalPlatformSku(platformSku));
@@ -33,8 +35,10 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null, exp
   ]);
   const costs = await accountingCosts(ledger, originalCosts, mode, rows);
   const scope = { workspaceId: ledger.workspaceId, ledgerId, store, platformSku };
-  const decision = resolveLedgerCostDecision({ ...scope, period: costEvaluationPeriod(ledger), identity,
-    manualOverride: selectManualOverride(accountingApprovals(approvals, mode), scope), erpCost: costs.find(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku)) });
+  const visibleApprovals = accountingApprovals(approvals, mode);
+  if (manualCostConflicts(visibleApprovals, ledger).has(storeSkuKey(store, platformSku))) return null;
+  const decision = resolveLedgerCostDecision({ ...scope, accountingMode: mode, period: costEvaluationPeriod(ledger), identity,
+    manualOverride: selectManualOverride(visibleApprovals, scope), erpCost: costs.find(row => canonicalPlatformSku(row.platformSku) === canonicalPlatformSku(platformSku)) });
   if (decision.eligibleForExactProfit) return null;
   // Re-read current published identities so a subsequently voided or conflicting
   // source cannot be adopted merely because a request once carried it.
@@ -82,7 +86,14 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null, exp
 }
 
 export function previewRecoveredWarehouseCost(input) {
-  return db.transaction('r', tables(), async () => readCandidate(input));
+  return db.transaction('r', tables(), async () => {
+    const tx = Dexie.currentTransaction, signal = input.signal;
+    signal?.throwIfAborted();
+    const abort = () => tx.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    try { return await readCandidate(input); }
+    finally { signal?.removeEventListener('abort', abort); }
+  });
 }
 
 export async function saveRecoveredWarehouseCost({ expectedUnitCost, reason, ...input }) {

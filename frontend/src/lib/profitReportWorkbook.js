@@ -90,13 +90,18 @@ export function profitReportSheetWidths(sheet,name){
   return null;
 }
 function productRows(products) {return [headers(productHeaders),...groupProfitExportProducts(products).map(row=>detailRow([{...identifier(row.groupSkc??row.platformSkc),mergeSkc:String(row.platformSkc??row.groupSkc??'').trim()!==''},identifier(row.platformSku),text(row.attribute),number(row.quantityExact,2),number(row.revenueExact),identifier(row.exportOrderNumber??profitOrderNumberForExport(row),1),number(row.unitCostExact),number(row.purchaseCostExact),number(row.warehouseCostExact),profitNumber(row.profitExact)])),bandRow([text("合计"),null,null,number(exactSum(products,"quantityExact"),2),number(exactSum(products,"revenueExact")),null,null,number(exactSum(products,"purchaseCostExact")),number(exactSum(products,"warehouseCostExact")),profitNumber(exactSum(products,"profitExact"))])];}
-function groupedProductRows(products, stores) {
+function storeDeductionRows(store) {
+  return [['扣款', deductionNumber(store.deductionExact)], ['扣后利润', profitNumber(store.financialProfitExact)]]
+    .map(([label, amount]) => bandRow([text(label), ...Array(8).fill(null), amount]));
+}
+function groupedProductRows(products, stores, financial) {
   const rows=[headers(productHeaders)];
   for(const store of stores){
     rows.push([{...text(store.store),bold:true,band:true,mergeAcross:10},...Array(9).fill(null)]);
     const details=productRows(products.filter(row=>row.store===store.store)).slice(1);
     details.at(-1)[0].value=`${store.store} 小计`;
     rows.push(...details);
+    if (financial) rows.push(...storeDeductionRows(store));
   }
   const total=productRows(products).at(-1);total[0].value='商品总计';rows.push(total);return rows;
 }
@@ -115,18 +120,24 @@ export function buildProfitDeductionSheet(report,rows,registry) {
 
 export function buildProfitReportWorkbook({report,products,dispatchRows=[],deductionRows=[],legacyLayout=false}) {
   const financial=report.kind==="financial",totals=report.totalsExact;
-  const right=[[],headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),profitNumber(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),profitNumber(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),[text("代发"),number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)],...(financial?[[text("扣款"),null,deductionNumber(totals.deductionExact)]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,profitNumber(financial?totals.profitExact:totals.preDeductionExact)])];
-  const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores),right,11),widths:[...productWidths,2,16,12,20],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"center","right"]}];
+  const hasDispatch = totals.dispatchQuantityExact !== null;
+  const dispatchSummary = hasDispatch
+    ? [text("代发"), number(totals.dispatchQuantityExact,2), number(totals.dispatchAmountExact)]
+    : [text("代发（未录入）")];
+  const right=[[],headers(["店铺","销量","利润"]),...totals.stores.map(store=>[text(store.store),number(store.quantityExact,2),profitNumber(store.profitExact)]),bandRow([text("商品合计"),number(totals.quantityExact,2),profitNumber(totals.productProfitExact)]),[],headers(["项目","数量（件）","金额（元）"]),dispatchSummary,...(financial?[[text("扣款"),null,deductionNumber(totals.deductionExact)]]:[]),bandRow([text(financial?"扣后利润合计":"利润合计"),null,profitNumber(financial?totals.profitExact:totals.preDeductionExact)])];
+  const sheets=[{name:"汇总表",rows:combine(groupedProductRows(products,totals.stores,financial && !legacyLayout),right,11),widths:[...productWidths,2,16,12,20],alignment:[null,null,null,"center","right",null,"right","right","right","right",null,null,"center","right"]}];
   // Reserve template names before sanitizing dynamic store tabs.
   const used=new Set(["汇总表","代发表","扣款","核算采购"]);
   for(const store of totals.stores){
     const rows=productRows(products.filter(row=>row.store===store.store));
-    if(financial)rows.push(bandRow([text('扣款'),null,null,null,null,null,null,null,null,deductionNumber(store.deductionExact)]),bandRow([text('扣后利润'),null,null,null,null,null,null,null,null,profitNumber(store.financialProfitExact)]));
+    if(financial)rows.push(...storeDeductionRows(store));
     sheets.push({name:safeSheet(store.store,used),rows,widths:productWidths,alignment:[null,null,null,'center','right',null,'right','right','right','right']});
   }
-  const dispatchDetails=orderSupplementPresentation(visibleDispatchRows(dispatchRows));
-  const dispatchTable=mergeDispatchPresentation([headers(dispatchHeaders),...dispatchDetails.map(row=>detailRow([identifier(row.store),identifier(row.platformSkc),identifier(row.businessId),number(row.quantityExact,2),identifier(dispatchOrderNumberForExport(row))]))],dispatchDetails);
-  sheets.push({name:"代发表",rows:combine(dispatchTable,[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:dispatchWidths,rowHeight:reportRowHeight,alignment:['center','center','center','center','center',null,'center','right']});
+  if (hasDispatch) {
+    const dispatchDetails=orderSupplementPresentation(visibleDispatchRows(dispatchRows));
+    const dispatchTable=mergeDispatchPresentation([headers(dispatchHeaders),...dispatchDetails.map(row=>detailRow([identifier(row.store),identifier(row.platformSkc),identifier(row.businessId),number(row.quantityExact,2),identifier(dispatchOrderNumberForExport(row))]))],dispatchDetails);
+    sheets.push({name:"代发表",rows:combine(dispatchTable,[headers(["汇总数量","总价"]),bandRow([number(totals.dispatchQuantityExact,2),number(totals.dispatchAmountExact)])],6),widths:dispatchWidths,rowHeight:reportRowHeight,alignment:['center','center','center','center','center',null,'center','right']});
+  }
   if(financial)sheets.push(deductionSheet(report,deductionRows));
   const registry=createStyles(legacyLayout);
   const sheetFiles=sheets.map((sheet,i)=>[`xl/worksheets/sheet${i+1}.xml`,sheetXml(sheet.rows[0]?.[1]?.value==='SKU'?mergeProfitSkcRows(sheet.rows):sheet.rows,sheet.widths,registry,sheet.alignment,sheet.rowHeight)]);
@@ -160,7 +171,8 @@ export function base64ToBytes(value){
   return result;
 }
 export async function prepareReportDownload(report, { dispatchRows, deductionRows, useStoredFile=false } = {}) {
-  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&report.templateVersion===REPORT_TEMPLATE_VERSION
+  if (report.bytes instanceof Uint8Array && !report.id && !dispatchRows && !deductionRows) return report.bytes;
+  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&[REPORT_TEMPLATE_VERSION,'profit-zebra@15-optional-dispatch','profit-zebra@14-profit-colors'].includes(report.templateVersion)
     &&(useStoredFile||!dispatchRows&&!deductionRows)){
     const bytes=base64ToBytes(report.fileBase64);
     if(bytes[0]!==80||bytes[1]!==75||!report.fileSha256||await sha256(bytes)!==report.fileSha256)throw new Error('报告文件校验失败，请检查完整报告备份。');
@@ -172,8 +184,12 @@ export async function prepareReportDownload(report, { dispatchRows, deductionRow
     const { restoreSavedDeductions } = await import('./savedReportDeductions');
     bytes=restoreSavedDeductions(bytes,report,deductionRows);
   }
-  const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
-  bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@13-summary-layout','profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
+  if (report.totalsExact?.dispatchQuantityExact !== null) {
+    const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
+    bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@15-optional-dispatch','profit-zebra@14-profit-colors','profit-zebra@13-summary-layout','profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
+  } else if (dispatchRows?.length) {
+    throw new Error('这份报告未录入代发，无法补齐代发单号。');
+  }
   const { formatSavedReportLayout } = await import('./savedReportLayout');
   return formatSavedReportLayout(bytes);
 }

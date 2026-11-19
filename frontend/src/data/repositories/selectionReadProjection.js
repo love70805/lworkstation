@@ -10,7 +10,12 @@ const PURCHASE_FIELDS = ['recordId', 'warehouseSku', 'productName', 'purchaseOrd
   'supplierName', 'supplier1688Url', 'supplier1688Links', 'purchaseCatalog'];
 const pick = (row, fields) => Object.fromEntries(fields.filter(key => row[key] !== undefined).map(key => [key, row[key]]));
 
-export function projectSelectionErpCost(row) {
+// Cost-only batches contribute SKU identity and the month used for cover sales.
+// Their purchase and supplier details cannot populate a product archive.
+const COST_ONLY_FIELDS = ['id', 'workspaceId', 'ledgerId', 'period', 'platformSku', 'sku', 'canonicalPlatformSku',
+  'platformSkc', 'batchId', 'finalizedAt', 'publishedAt', 'calculatedAt', 'updatedAt'];
+export function projectSelectionErpCost(row, { costOnly = false } = {}) {
+  if (costOnly) return pick(row, COST_ONLY_FIELDS);
   return { ...pick(row, COST_FIELDS),
     ...(Array.isArray(row.purchaseRecords) ? { purchaseRecords: row.purchaseRecords.map(record => pick(record, PURCHASE_FIELDS)) } : {}) };
 }

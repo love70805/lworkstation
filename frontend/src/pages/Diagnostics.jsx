@@ -20,11 +20,20 @@ const RUNTIME_COPY = getRuntimeEnvironmentCopy();
 const APP_VERSION = RUNTIME_COPY.application;
 
 async function readDiagnosticsState() {
-  const [security, storage, events, sync] = await Promise.all([
+  const [security, storage] = await Promise.all([
     getDataSecuritySnapshot(), navigator.storage?.estimate?.() ?? null,
-    db.auditEvents.orderBy('createdAt').reverse().limit(20).toArray(), getSyncStatusSnapshot(),
   ]);
-  return { security, storage, events, sync };
+  return { security, storage };
+}
+
+const readNothing = () => null;
+async function readRecentActions() {
+  const events = [];
+  await db.auditEvents.orderBy('createdAt').reverse().limit(20).each(event => {
+    const { id, createdAt, objectType, action } = event;
+    events.push({ id, createdAt, objectType, action, description: describeAuditEvent(event) });
+  });
+  return events;
 }
 
 function formatBytes(value) {
@@ -76,8 +85,12 @@ export default function Diagnostics() {
   const { notify } = useToast();
   const check = useSystemSnapshot(readDiagnosticsState);
   const diagnostics = check.data?.security;
-  const recentEvents = check.data?.events ?? [];
-  const syncStatus = check.data?.sync;
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const logs = useSystemSnapshot(logsOpen ? readRecentActions : readNothing);
+  const sync = useSystemSnapshot(syncOpen ? getSyncStatusSnapshot : readNothing);
+  const recentEvents = logs.data ?? [];
+  const syncStatus = sync.data;
   const storageEstimate = check.data?.storage;
   const refreshing = check.refreshing;
   const [syncing, setSyncing] = useState(false);
@@ -146,6 +159,9 @@ export default function Diagnostics() {
   };
 
   const copySummary = async () => {
+    let outbox;
+    try { outbox = await getSyncStatusSnapshot(); }
+    catch (error) { notify(`诊断摘要读取失败：${error.message}`, 'error'); return; }
     const text = [
       `Lworkstation ${APP_VERSION}`,
       `环境：${RUNTIME_COPY.environment}`,
@@ -154,7 +170,7 @@ export default function Diagnostics() {
       `本机存储：${quotaBytes > 0 ? `${formatBytes(usageBytes)} / ${formatBytes(quotaBytes)}` : "当前环境未提供配额"}`,
       `最近备份：${lastBackup ? formatDateTime(lastBackup.generatedAt) : "尚未导出"}`,
       `云端协作：${runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "未配置"}`,
-      `待上传审计：${syncStatus?.retryableCount ?? "读取中"}`,
+      `待上传审计：${outbox.retryableCount}`,
     ].join(" | ");
     try {
       await navigator.clipboard.writeText(text);
@@ -164,7 +180,10 @@ export default function Diagnostics() {
     }
   };
 
-  const exportReport = () => {
+  const exportReport = async () => {
+    let outbox, actions;
+    try { [outbox, actions] = await Promise.all([getSyncStatusSnapshot(), readRecentActions()]); }
+    catch (error) { notify(`诊断摘要读取失败：${error.message}`, 'error'); return; }
     const generatedAt = new Date().toISOString();
     const report = {
       format: "shopeers-local-diagnostics",
@@ -183,15 +202,15 @@ export default function Diagnostics() {
         recordCount: lastBackup.recordCount,
         sizeBytes: lastBackup.sizeBytes,
       } : null,
-      sync: syncStatus ? {
+      sync: {
         provider: runtimeConfig.syncProvider,
         cloudConfigured: runtimeSummary.cloudConfigured,
-        pendingCount: syncStatus.pendingCount,
-        inFlightCount: syncStatus.inFlightCount,
-        failedCount: syncStatus.failedCount,
-        syncedCount: syncStatus.syncedCount,
-      } : null,
-      recentActions: recentEvents.map((event) => ({
+        pendingCount: outbox.pendingCount,
+        inFlightCount: outbox.inFlightCount,
+        failedCount: outbox.failedCount,
+        syncedCount: outbox.syncedCount,
+      },
+      recentActions: actions.map((event) => ({
         createdAt: event.createdAt,
         objectType: event.objectType,
         action: event.action,
@@ -232,7 +251,8 @@ export default function Diagnostics() {
         </div>
       </section>
 
-      <details className="system-advanced"><summary>高级：云端协作</summary>
+      <details className="system-advanced" onToggle={event => setSyncOpen(event.currentTarget.open)}><summary>高级：云端协作</summary>
+        {syncOpen && sync.error && <p role="alert">同步状态读取失败：{sync.error}</p>}
         <Panel className="diagnostic-card"><CloudOff size={22} /><div><h2>云端协作</h2><Badge tone={syncHealth?.status === "ok" ? "success" : runtimeSummary.cloudConfigured ? "info" : "neutral"}>{syncHealth?.status === "ok" ? "服务正常" : runtimeSummary.cloudConfigured ? "已配置" : "未配置"}</Badge></div><strong className="mono">{syncHealth?.backend ?? (runtimeSummary.cloudConfigured ? runtimeConfig.syncProvider : "仅本机")}</strong><p>{syncHealth?.status === "error" ? syncHealth.message : runtimeSummary.cloudConfigured ? "同步端点已配置，可上传本地审计 outbox" : "当前数据不会自动上传或与其他成员同步"}</p><footer><span>待上传审计：{syncStatus?.retryableCount ?? "读取中"}</span><span className="diagnostic-card-actions"><button className="diagnostic-sync-button" disabled={checkingSyncHealth || !runtimeSummary.cloudConfigured} onClick={checkSyncHealth}><RefreshCw size={13} />{checkingSyncHealth ? "检查中" : "检查服务"}</button><button className="diagnostic-sync-button" disabled={syncing || !runtimeSummary.cloudConfigured || !(syncStatus?.retryableCount > 0)} onClick={syncNow}><CloudUpload size={13} />{syncing ? "同步中" : "立即同步"}</button></span></footer></Panel>
       </details>
 
@@ -241,15 +261,15 @@ export default function Diagnostics() {
           <div className="panel-title"><Activity size={20} /><h2>近期操作记录</h2><Badge>最近 20 条</Badge></div>
           <div className="action-row"><Button icon={Copy} onClick={copySummary}>复制摘要</Button><Button icon={Download} onClick={exportReport}>导出摘要</Button></div>
         </div>
-        <details className="diagnostic-log-details">
-          <summary>查看操作详情（{recentEvents.length} 条）</summary>
+        <details className="diagnostic-log-details" onToggle={event => setLogsOpen(event.currentTarget.open)}>
+          <summary>查看操作详情{diagnostics?.tableCounts ? `（${Math.min(20, diagnostics.tableCounts.auditEvents ?? 0)} 条）` : ''}</summary>
         <div className="terminal-log">
           {recentEvents.map((event) => {
-            const item = describeAuditEvent(event);
+            const item = event.description;
             const logTone = item.tone === "success" ? "info" : item.tone;
             return <div className="log-line" key={event.id}><span className="log-time">[{formatDateTime(event.createdAt)}]</span><strong className={`log-${logTone}`}>{item.title}</strong><span className="log-source">[{event.objectType ?? "workspace"}]</span><span>{item.detail}</span></div>;
           })}
-          {recentEvents.length === 0 ? <p className="log-awaiting">{check.status === 'ready' ? '暂无本机操作记录。导入销售台账、保存商品或导出备份后会显示在这里。' : check.status === 'error' ? '操作记录读取失败，请重试本机检查。' : '正在读取操作记录…'}</p> : null}
+          {logsOpen && recentEvents.length === 0 ? <p className="log-awaiting">{logs.error ? `操作记录读取失败：${logs.error}` : logs.data ? '暂无本机操作记录。导入销售台账、保存商品或导出备份后会显示在这里。' : '正在读取操作记录…'}</p> : null}
         </div>
         </details>
       </Panel>

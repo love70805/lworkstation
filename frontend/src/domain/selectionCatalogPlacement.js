@@ -15,8 +15,10 @@ export function selectionCatalogPlacement({ products = [], rows = [], drafts = [
     return candidates.length === 1 ? candidates[0] : null;
   };
   const incomingByProduct = new Map(), draftsByProduct = new Map(), storesByProduct = new Map();
+  const conflictingDraftIds = new Set();
   const pendingRows = [], pendingDrafts = [];
   for (const row of rows) {
+    if (row.productId && (row.platformSkcConflict || row.erpCatalogRelationshipConflict)) conflictingDraftIds.add(row.productId);
     const owner = byId.get(row.productId);
     const target = owner ?? (!row.platformSkcConflict && !row.erpCatalogRelationshipConflict ? parent(row) : null);
     if (!target) { pendingRows.push(row); continue; }
@@ -26,8 +28,7 @@ export function selectionCatalogPlacement({ products = [], rows = [], drafts = [
   for (const draft of drafts) {
     const target = parent(draft);
     // Keep genuinely conflicting branches in the queue until their identity is resolved.
-    const hasConflict = rows.some(row => row.productId === draft.id && (row.platformSkcConflict || row.erpCatalogRelationshipConflict));
-    if (!target || hasConflict) { pendingDrafts.push(draft); continue; }
+    if (!target || conflictingDraftIds.has(draft.id)) { pendingDrafts.push(draft); continue; }
     draftsByProduct.set(target.id, [...(draftsByProduct.get(target.id) ?? []), draft]);
   }
   return { pendingRows, pendingDrafts, incomingByProduct, draftsByProduct, storesByProduct };

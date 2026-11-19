@@ -34,11 +34,12 @@ function VariantIdentity({ item, storeCount }) {
 function CurrentStoreCost({ line }) {
   if (!line) return <span className="cost-match-no-store">无对应店铺明细</span>;
   if (line.decision.identityIssue) return <div className="cost-match-store-result"><strong>{line.store || '店铺未填'}</strong><span>归属待核对</span><small>台账 SKC：{line.platformSkc || '未填写'}{line.decision.identityIssue.erpPlatformSkc ? `；ERP SKC：${line.decision.identityIssue.erpPlatformSkc}` : ''}</small><small>{line.manualOverride ? '人工金额保留，先核对父级归属' : 'ERP 原始成本保留，暂不计入利润'}</small></div>;
-  const effectiveAt = line.manualOverride?.approvedAt ?? line.erpCost?.publishedAt;
+  const manual = line.decision.source === 'manual_override';
+  const effectiveAt = line.decision.eligibleForExactProfit && (manual ? line.manualOverride?.approvedAt : line.erpCost?.publishedAt);
   return <div className="cost-match-store-result">
     <strong>{line.store || "店铺未填"}</strong>
-    <span className="mono">{line.decision.eligibleForExactProfit ? line.manualOverride ? formatManualUnitCost(line.decision.unitCost) : formatErpUnitCost(line.decision.unitCost) : "待补成本"}</span>
-    <small>{line.manualOverride ? "人工更正有效" : line.decision.eligibleForExactProfit ? "ERP 已采用" : "未采用有效成本"}{effectiveAt ? ` · ${new Date(effectiveAt).toLocaleDateString("zh-CN")}` : ""}</small>
+    <span className="mono">{line.decision.eligibleForExactProfit ? manual ? formatManualUnitCost(line.decision.unitCost) : formatErpUnitCost(line.decision.unitCost) : "待补成本"}</span>
+    <small>{line.decision.eligibleForExactProfit ? manual ? "人工更正有效" : "ERP 已采用" : "未采用有效成本"}{effectiveAt ? ` · ${new Date(effectiveAt).toLocaleDateString("zh-CN")}` : ""}</small>
   </div>;
 }
 

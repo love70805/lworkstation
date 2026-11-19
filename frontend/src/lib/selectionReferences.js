@@ -123,6 +123,12 @@ export function buildSelectionReferenceRows({
   const manualCostHistoryBySku = groupBySku(catalogManualCosts);
   const manualCostBySku = groupBySku((catalogManualCosts ?? []).filter((item) => item.status === "active"));
   const profitBySku = groupBySku(profitLines);
+  const positiveProfitSkus = new Set();
+  for (const line of profitLines) {
+    const value = Number(line.formalUnitCost ?? line.unitCost);
+    const sku = line.canonicalPlatformSku || line.platformSku || line.sku;
+    if (String(sku ?? '').trim() && Number.isFinite(value) && value > 0) positiveProfitSkus.add(canonicalPlatformSku(sku));
+  }
   const offerBySku = groupBySku((supplierOffers ?? []).filter((offer) => offer.status !== "superseded"));
   const catalogCostBySku = groupBySku(erpCatalogReferences);
   const coverageBySkc = new Map();
@@ -246,6 +252,7 @@ export function buildSelectionReferenceRows({
       referenceConfirmedBy: referenceCost?.referenceKind === "manual_confirmed" ? referenceCost.confirmedBy ?? null : null,
       manualCostHistoryCount: manualCostHistory.length,
       latestLedgerId: latestProfit?.ledgerId ?? null,
+      hasPositiveProfitCost: positiveProfitSkus.has(canonicalSku),
       latestPeriod: latestProfit?.period ?? null,
       latestQuantity,
       coverSalesQuantity: coverSales.get(canonicalSku) ?? null,

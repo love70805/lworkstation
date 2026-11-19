@@ -2,12 +2,15 @@
     'use strict';
     const EXPORT_PATH = '/purchase/purchase/v1/export-purchase-order';
     const MAX_BYTES = 32 * 1024 * 1024;
-    const MAX_ROWS = 100000;
+    const workbookLimits = Object.freeze({ fileBytes: MAX_BYTES, expandedBytes: 128 * 1024 * 1024, sheetRows: 100001, sheetColumns: 256 });
     const REQUIRED = ['采购单号', '仓库SKU', '平台SKU', '采购数量', '采购单价', '采购总价', '创建时间', '采购状态', '1688订单状态'];
     const text = value => String(value ?? '').normalize('NFKC').trim();
     const key = value => text(value).toUpperCase();
     const pairKey = (order, warehouse) => JSON.stringify([key(order), key(warehouse)]);
     const fallback = reason => Object.assign(new Error('批量采购需要原方式核验：' + reason), { code: 'ERP_BULK_FALLBACK', reason });
+    const workbookSizeError = (kind, actual) => Object.assign(fallback('workbook_too_large'), {
+        workbookLimit: { kind, actual, limit: workbookLimits[kind] },
+    });
     const interrupted = error => error?.name === 'AbortError' || ['ERP_LOGIN_REQUIRED', 'ERP_PERMISSION_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error?.code) || error?.status === 429;
     function assertRunning(run) { if (run.controller.signal.aborted) throw run.controller.signal.reason || new DOMException('采集已取消', 'AbortError'); }
     function decimal(value) {
@@ -30,7 +33,8 @@
     }
     function inspectZip(buffer) {
         const bytes = new Uint8Array(buffer);
-        if (bytes.byteLength < 22 || bytes.byteLength > MAX_BYTES || bytes[0] !== 80 || bytes[1] !== 75) throw fallback('invalid_workbook');
+        if (bytes.byteLength > MAX_BYTES) throw workbookSizeError('fileBytes', bytes.byteLength);
+        if (bytes.byteLength < 22 || bytes[0] !== 80 || bytes[1] !== 75) throw fallback('invalid_workbook');
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         let end = -1;
         for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 65557); offset--) {
@@ -42,9 +46,9 @@
         for (let index = 0; index < count; index++) {
             if (position + 46 > bytes.length || view.getUint32(position, true) !== 0x02014b50 || (view.getUint16(position + 8, true) & 1)) throw fallback('unsupported_workbook');
             expanded += view.getUint32(position + 24, true);
-            if (expanded > 128 * 1024 * 1024) throw fallback('workbook_too_large');
             position += 46 + view.getUint16(position + 28, true) + view.getUint16(position + 30, true) + view.getUint16(position + 32, true);
         }
+        if (expanded > workbookLimits.expandedBytes) throw workbookSizeError('expandedBytes', expanded);
     }
     function parseWorkbook(buffer, digest, xlsx = global.XLSX) {
         if (!xlsx?.read || !/^[a-f0-9]{64}$/.test(digest)) throw fallback('workbook_reader_unavailable');
@@ -55,7 +59,8 @@
         for (const name of book.SheetNames) {
             const candidate = book.Sheets[name];
             const range = xlsx.utils.decode_range(candidate['!ref'] || 'A1');
-            if (range.e.r > MAX_ROWS || range.e.c > 255) throw fallback('workbook_too_large');
+            if (range.e.r + 1 > workbookLimits.sheetRows) throw workbookSizeError('sheetRows', range.e.r + 1);
+            if (range.e.c + 1 > workbookLimits.sheetColumns) throw workbookSizeError('sheetColumns', range.e.c + 1);
             const values = xlsx.utils.sheet_to_json(candidate, { header: 1, raw: true, defval: null, blankrows: true });
             const names = (values[0] || []).map(text);
             if (REQUIRED.every(header => names.includes(header))) {
@@ -227,7 +232,7 @@
         async function collect(filters, run, context) {
             assertRunning(run);
             const whole = run.task?.requestSnapshot || context;
-            const scopeSkcs = (whole.platformSkcs || context.platformSkcs).map(item => text(item?.platformSkc ?? item));
+            const scopeSkcs = (run.bulkExportSkcs || whole.platformSkcs || context.platformSkcs).map(item => text(item?.platformSkc ?? item));
             const expectedSkus = whole.expectedSkus || context.expectedSkus;
             const query = { ...filters, sku: scopeSkcs.join(' ') };
             const cacheKey = JSON.stringify([run.task?.taskId || run.requestId, run.task?.scopeHash, run.runnerId, run.queryCapturedAt, expectedSkus, query]);
@@ -311,5 +316,5 @@
         }
         return Object.freeze({ collect, clear });
     }
-    global.ShopeersErpBulkPurchase = Object.freeze({ create, parseWorkbook, EXPORT_PATH, MAX_BYTES, interrupted });
+    global.ShopeersErpBulkPurchase = Object.freeze({ create, parseWorkbook, workbookSizeError, EXPORT_PATH, MAX_BYTES, interrupted });
 })(typeof window === 'object' ? window : globalThis);

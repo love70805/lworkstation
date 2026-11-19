@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import CostAttention from './CostAttention';
 import ErpAnomalyActions from './ErpAnomalyActions';
+import { purchaseEvidenceDigest } from '../domain/erpInboxSummary';
 
 const state = vi.hoisted(() => ({ pending: vi.fn(), ignored: vi.fn(), save: vi.fn(), notify: vi.fn() }));
 vi.mock('dexie-react-hooks', async () => {
@@ -44,13 +45,33 @@ it('shows the missing count without a duplicate filter button', async () => {
   expect(host.querySelector('[role="status"]')).toBeNull();
 });
 
+it('shows one loading state until the receipts and verified anomaly counts are ready', async () => {
+  const props = { loadOnOpen: true, pendingHint: true, locked: true, missingRows: [{ id: 'M', store: '甲', platformSku: 'M' }] };
+  let finish;
+  state.pending.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await render({ ...props, receiptsReady: false });
+  await click('核对价格异常');
+  const tabs = () => [...host.querySelectorAll('[role="tab"]')].map(node => node.textContent);
+  expect(state.pending).not.toHaveBeenCalled();
+  expect(tabs().every(label => label.endsWith('…'))).toBe(true);
+  expect(host.querySelectorAll('[role="dialog"] progress')).toHaveLength(1);
+  await render({ ...props, receiptsReady: true });
+  expect(tabs().every(label => label.endsWith('…'))).toBe(true);
+  await act(async () => finish([price('B', 'WH')]));
+  expect(tabs()).toEqual(['待核对 · 1', '没有成本 · 1', '已人工更正 · 0', '已忽略 · 0']);
+  expect(host.querySelector('progress')).toBeNull();
+  expect(button('按原价忽略').disabled).toBe(true);
+});
+
 it('counts separate receipts once per warehouse and writes exactly the displayed month selection', async () => {
   state.pending.mockResolvedValue([price('A','W','SKU-1',0), price('A','w','SKU-2'), price('A','W','SKU-2'), price('B','W')]);
   await render();
-  expect(button('忽略剩余异常（2）')).toBeUndefined();
+  expect(button('忽略本月全部店铺剩余 2 项')).toBeUndefined();
   await click('核对价格异常');
-  expect(button('忽略剩余异常（2）').closest('[role="dialog"]')).not.toBeNull();
-  await click('忽略剩余异常（2）');
+  expect(button('忽略本月全部店铺剩余 2 项')).toBeUndefined();
+  await click('批量处理');
+  expect(button('忽略本月全部店铺剩余 2 项').closest('[role="dialog"]')).not.toBeNull();
+  await click('忽略本月全部店铺剩余 2 项');
   expect(state.save).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'A', warehouseSku: 'W' }, { inboxId: 'B', warehouseSku: 'W' }] });
   expect(host.textContent).toContain('含 0 元');
   expect(state.notify).toHaveBeenCalledWith(expect.stringContaining('没有可用采购数据的项目仍待补齐'));
@@ -79,7 +100,8 @@ it('groups ignored evidence, opens details and supports individual and full revo
   expect(host.querySelector('[role="dialog"]').textContent).toContain('¥0、¥1');
   await click('恢复提醒');
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId: 'L', ignored: false, selectedItems: [{ inboxId: 'I', warehouseSku: 'W' }] });
-  await click('恢复本月全部提醒');
+  await click('批量处理');
+  await click('恢复本月全部店铺 1 项提醒');
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId: 'L', ignored: false, selectedItems: [{ inboxId:'I', warehouseSku:'W' }] });
   await click('SKU · 甲');
   expect(onReview).toHaveBeenCalledWith({ inboxId:'I', warehouseSku:'W', platformSku:'SKU', store:'甲' });
@@ -90,14 +112,16 @@ it('hides stale counts during a new month or receipt read, and offers a safe ret
   state.pending.mockResolvedValueOnce(old).mockRejectedValueOnce(new Error('收件读取失败')).mockResolvedValueOnce(next);
   await render({ inboxes: [] });
   await click('核对价格异常');
-  expect(button('忽略剩余异常（1）')).toBeDefined();
+  await click('批量处理');
+  expect(button('忽略本月全部店铺剩余 1 项')).toBeDefined();
   await render({ inboxes: [{ id:'new' }], ledgerId:'N' });
   expect(host.querySelector('[role="alert"]').textContent).toContain('收件读取失败');
-  expect(button('忽略剩余异常（1）')).toBeUndefined();
+  expect(button('忽略本月全部店铺剩余 1 项')).toBeUndefined();
   expect(state.save).not.toHaveBeenCalled();
   await click('重试');
   await click('核对价格异常');
-  await click('忽略剩余异常（2）');
+  await click('批量处理');
+  await click('忽略本月全部店铺剩余 2 项');
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId:'N', ignored:true, selectedItems:[{inboxId:'new',warehouseSku:'W'},{inboxId:'new',warehouseSku:'X'}] });
 });
 
@@ -106,26 +130,27 @@ it('retains write failures for retry and disables changes while saving or locked
   state.save.mockRejectedValueOnce(new Error('写入失败'));
   await render();
   await click('核对价格异常');
-  await click('忽略剩余异常（1）');
+  await click('批量处理');
+  await click('忽略本月全部店铺剩余 1 项');
   expect(host.querySelector('[role="alert"]').textContent).toBe('写入失败');
   let finish; state.save.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await click('忽略剩余异常（1）');
-  expect(button('忽略剩余异常（1）').disabled).toBe(true);
+  await click('忽略本月全部店铺剩余 1 项');
+  expect(button('忽略本月全部店铺剩余 1 项').disabled).toBe(true);
   await act(async () => finish({ changedCount: 1 }));
   expect(host.querySelector('[role="alert"]')).toBeNull();
   await render({ locked:true });
-  expect(button('忽略剩余异常（1）').disabled).toBe(true);
+  expect(button('按原价忽略').disabled).toBe(true);
 });
 
 it('ignores only the checked groups and allows a single group directly', async () => {
   state.pending.mockResolvedValue(['W-0','W-1','W-2'].map(sku => price('I',sku)));
   await render();
   await click('核对价格异常');
-  expect(button('忽略选中（0 项）').disabled).toBe(true);
+  expect(button('忽略选中（0 项）')).toBeUndefined();
   await act(async () => { const boxes = host.querySelectorAll('.anomaly-select-row input'); boxes[0].click(); boxes[2].click(); });
   await click('忽略选中（2 项）');
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'I', warehouseSku: 'W-0' }, { inboxId: 'I', warehouseSku: 'W-2' }] });
-  expect(button('忽略选中（0 项）').disabled).toBe(true);
+  expect(button('忽略选中（0 项）')).toBeUndefined();
   await act(async () => host.querySelectorAll('.anomaly-select-row button')[1].click());
   expect(state.save).toHaveBeenLastCalledWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'I', warehouseSku: 'W-1' }] });
 });
@@ -135,7 +160,7 @@ it('shows no actions without anomalies and keeps only history after they are han
   expect(host.textContent).toBe('');
   state.ignored.mockResolvedValue([{inboxId:'I',warehouseSku:'W',originalUnitPrice:0}]);
   await render({ inboxes:[{ id:'I', ledgerId:'L', status:'applied', costResolutions:[{ action:'ignore_anomaly', warehouseSku:'W', originalUnitPrice:0 }] }] });
-  expect(button('忽略剩余异常（0）')).toBeUndefined();
+  expect(button('忽略本月全部店铺剩余 0 项')).toBeUndefined();
   expect(button('核对价格异常')).toBeUndefined();
   expect(button('已忽略异常 · 1')).toBeDefined();
 });
@@ -144,19 +169,21 @@ it('moves corrected items out of the pending count immediately and restores them
   state.pending.mockResolvedValue(Array.from({ length: 7 }, (_, i) => price('I', `W-${i}`, `SKU-${i}`)));
   const rows = Array.from({ length: 7 }, (_, i) => ({ platformSku: `SKU-${i}`, store: '甲', decision: { eligibleForExactProfit: false } }));
   await render({ reviewRows: rows }); await click('核对价格异常');
-  expect(button('忽略剩余异常（7）')).toBeDefined();
+  await click('批量处理');
+  expect(button('忽略本月全部店铺剩余 7 项')).toBeDefined();
   const corrected = rows.map((row, i) => i ? row : { ...row, manualOverride: { id: 'M', approvedAmount: 0 }, decision: { eligibleForExactProfit: true } });
   await render({ reviewRows: corrected });
-  expect(button('忽略剩余异常（7）')).toBeUndefined();
-  expect(button('忽略剩余异常（6）')).toBeDefined();
-  await click('忽略剩余异常（6）');
+  expect(button('忽略本月全部店铺剩余 7 项')).toBeUndefined();
+  expect(button('忽略本月全部店铺剩余 6 项')).toBeDefined();
+  await click('忽略本月全部店铺剩余 6 项');
   expect(state.save.mock.lastCall[0].selectedItems).toEqual(Array.from({ length: 6 }, (_, i) => ({ inboxId: 'I', warehouseSku: `W-${i + 1}` })));
   await click('已人工更正 · 1');
   expect(host.querySelectorAll('.anomaly-select-row')).toHaveLength(1);
   expect(host.querySelector('.anomaly-select-row input')).toBeNull();
-  expect(button('忽略此项')).toBeUndefined();
+  expect(button('按原价忽略')).toBeUndefined();
   await render({ reviewRows: rows }); await click('待核对 · 7');
-  expect(button('忽略剩余异常（7）')).toBeDefined();
+  await click('批量处理');
+  expect(button('忽略本月全部店铺剩余 7 项')).toBeDefined();
 });
 
 it('keeps a shared warehouse pending when another store still needs a cost', async () => {
@@ -166,9 +193,10 @@ it('keeps a shared warehouse pending when another store still needs a cost', asy
     { platformSku: 'SHARED', store: '乙', decision: { eligibleForExactProfit: false } },
   ] });
   await click('核对价格异常');
-  expect(button('忽略剩余异常（1）')).toBeDefined();
+  await click('批量处理');
+  expect(button('忽略本月全部店铺剩余 1 项')).toBeDefined();
   expect(host.querySelector('.anomaly-select-row').textContent).toContain('其余关联 SKU 仍待核对');
-  await click('忽略剩余异常（1）');
+  await click('忽略本月全部店铺剩余 1 项');
   expect(state.save).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'I', warehouseSku: 'W' }] });
 });
 
@@ -187,11 +215,11 @@ it('selects all groups including rows beyond the first 30 and clears selection a
   await render({ ledgerId:'NEW' });
   expect(host.querySelector('[role="dialog"]')).toBeNull();
   await click('已忽略异常 · 35');
-  expect(button('恢复选中（0 项）').disabled).toBe(true);
+  expect(button('恢复选中（0 项）')).toBeUndefined();
 });
 
 
-it('blocks same-tick duplicate submits and stays busy until a durable post-write read finishes', async () => {
+it('blocks duplicate writes and unlocks right after commit while the durable view refreshes', async () => {
   const old = [price('I', 'W')];
   state.pending.mockResolvedValueOnce(old);
   let finishRead, finishWrite;
@@ -199,19 +227,21 @@ it('blocks same-tick duplicate submits and stays busy until a durable post-write
   state.save.mockImplementationOnce(() => new Promise(resolve => { finishWrite = resolve; }));
   const staleInboxes = [{ id: 'I' }];
   await render({ inboxes: staleInboxes }); await click('核对价格异常');
-  const submit = button('忽略剩余异常（1）');
+  await click('批量处理');
+  const submit = button('忽略本月全部店铺剩余 1 项');
   await act(async () => { submit.click(); submit.click(); });
   expect(state.save).toHaveBeenCalledTimes(1);
   expect(submit.getAttribute('aria-busy')).toBe('true');
   expect(button('忽略选中（0 项）').hasAttribute('aria-busy')).toBe(false);
   await act(async () => finishWrite({ changedCount: 1 }));
-  expect(button('忽略剩余异常（1）').disabled).toBe(true);
+  expect(button('忽略本月全部店铺剩余 1 项')).toBeUndefined();
+  expect(button('已忽略 · 1').disabled).toBe(false);
+  expect(button('关闭').disabled).toBe(false);
   expect(state.pending).toHaveBeenLastCalledWith('L', undefined);
-  await click('忽略剩余异常（1）');
   expect(state.save).toHaveBeenCalledTimes(1);
   state.ignored.mockResolvedValue(old);
   await act(async () => finishRead([]));
-  expect(button('忽略剩余异常（1）')).toBeUndefined();
+  expect(button('忽略本月全部店铺剩余 1 项')).toBeUndefined();
   expect(button('已忽略 · 1').disabled).toBe(false);
 });
 
@@ -219,15 +249,35 @@ it('groups identical evidence across current partial receipts into one action wi
   state.pending.mockResolvedValue([{ ...price('I', 'W', 'A'), groupKey: 'SAME-EVIDENCE' }, { ...price('J', 'W', 'B'), groupKey: 'SAME-EVIDENCE' }]);
   await render(); await click('核对价格异常');
   expect(host.querySelectorAll('.anomaly-select-row')).toHaveLength(1);
-  await click('忽略剩余异常（1）');
+  await click('按原价忽略');
   expect(state.save).toHaveBeenCalledExactlyOnceWith({ ledgerId: 'L', ignored: true, selectedItems: [{ inboxId: 'I', warehouseSku: 'W' }, { inboxId: 'J', warehouseSku: 'W' }] });
+});
+
+it.each([false,true])('accepts a click on the displayed original price and rechecks the full purchase identity (changed %s)', async changed => {
+  const row = {id:'S',platformSku:'SKU',store:'甲',decision:{eligibleForExactProfit:false}};
+  const key = await purchaseEvidenceDigest('original-purchase');
+  const entry = {state:'anomaly_pending',reviewRowId:'S',inboxId:'I',warehouseSku:'W',reviewGroup:key,originalPricePreview:1};
+  let complete;
+  state.pending.mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve;}));
+  await render({loadOnOpen:true,pendingHint:true,reviewRows:[row],summaryEntries:[entry]});
+  await click('核对价格异常');
+  expect(host.textContent).toContain('原始采购单价 ¥1');
+  await click('按原价忽略');
+  expect(state.save).not.toHaveBeenCalled();
+  await act(async()=>complete([{...price('I','W'),evidenceKey:changed?'other-purchase':'original-purchase'}]));
+  if (changed) {
+    await vi.waitFor(()=>expect(host.querySelector('[role="alert"]')?.textContent).toContain('采购记录或原价已变化'));
+    expect(state.save).not.toHaveBeenCalled();
+  } else {
+    await vi.waitFor(()=>expect(state.save).toHaveBeenCalledExactlyOnceWith({ledgerId:'L',ignored:true,selectedItems:[{inboxId:'I',warehouseSku:'W',evidenceKey:'original-purchase'}]}));
+  }
 });
 
 it('reports a failed post-write read and allows retry without resubmitting the completed decision', async () => {
   state.pending.mockResolvedValueOnce([price('I', 'W')]).mockRejectedValueOnce(new Error('刷新失败')).mockResolvedValue([]);
-  await render(); await click('核对价格异常'); await click('忽略剩余异常（1）');
+  await render(); await click('核对价格异常'); await click('按原价忽略');
   expect(host.querySelector('[role="alert"]').textContent).toContain('刷新失败');
-  expect(button('忽略剩余异常（1）')).toBeUndefined();
+  expect(button('忽略本月全部店铺剩余 1 项')).toBeUndefined();
   await click('重试');
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(state.save).toHaveBeenCalledTimes(1);
@@ -235,7 +285,7 @@ it('reports a failed post-write read and allows retry without resubmitting the c
 it('keeps missing costs separate from ignorable prices and edits inside the same dialog', async () => {
   const row={id:'ROW',platformSku:'MISSING',store:'甲'};
   const renderEditor=(item,onClose,onSaved)=><div data-editor>{item.platformSku}<button onClick={()=>{onSaved();onClose();}}>模拟保存</button></div>;
-  await render({missingRows:[row],renderEditor});await click('核对价格异常');
+  await render({missingRows:[row],renderEditor});expect(button('核对价格异常')).toBeUndefined();await click('补录缺失成本');
   const dialog=host.querySelector('[role="dialog"]');expect(button('没有成本 · 1').getAttribute('aria-selected')).toBe('true');
   expect(button('忽略选中（0 项）')).toBeUndefined();expect(host.querySelector('input[type=checkbox]')).toBeNull();
   await click('补录成本');expect(host.querySelector('[role="dialog"]')).toBe(dialog);

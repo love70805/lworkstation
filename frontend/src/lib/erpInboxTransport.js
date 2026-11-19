@@ -47,8 +47,8 @@ export async function registerErpBridgeRequest({ request, expectedSkus = [] } = 
   });
 }
 
-export function getErpRequestHistory({ workspaceId } = {}) {
-  return requestInbox({ route: "/erp/v1/requests", query: { workspaceId, includeHistory: true } });
+export function getErpRequestHistory({ workspaceId, summaryOnly = false } = {}) {
+  return requestInbox({ route: "/erp/v1/requests", query: { workspaceId, includeHistory: true, ...(summaryOnly ? {view:'summary'} : {}) } });
 }
 
 export function getErpExtensionStatus() {
@@ -56,7 +56,7 @@ export function getErpExtensionStatus() {
 }
 
 export async function listErpCollectionTasks({ workspaceId, ledgerId, requestId, signal } = {}) {
-  const payload = await requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId, ledgerId, requestId } }, { signal });
+  const payload = await requestInbox({ route: '/erp/v1/collection-tasks', query: { workspaceId, ledgerId, requestId, view: 'progress' } }, { signal });
   const runtime = globalThis.window?.shopeersDesktopRuntime;
   if (!runtime?.getErpCollection || !payload.tasks?.some(task => task.executionTarget === 'desktop' && ['ready','paused'].includes(task.status))) return payload;
   // Presentation only: never write a desktop snapshot back to a durable task.

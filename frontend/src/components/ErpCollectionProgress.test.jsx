@@ -2,7 +2,27 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import ErpCollectionProgress from './ErpCollectionProgress';
+import CostAttention from './CostAttention';
+import { erpCostEditingGuard } from '../domain/erpCostEditingGuard';
 import { isActiveErpCollection } from '../domain/erpCollectionStatus';
+
+it('shows the same settled or evaluating state above and below the missing-cost list and keeps the retry action', () => {
+  const task = { workspaceId: 'W', ledgerId: 'L', requestId: 'R', status: 'partial', catalogMode: 'on_demand', phase: 'cost',
+    batches: [{ batchId: 'A', status: 'incomplete', deliveryId: 'D', platformSkcs: ['A'] }, { batchId: 'B', status: 'failed', platformSkcs: ['B'] }] };
+  const receipt = { workspaceId: 'W', ledgerId: 'L', requestId: 'R', deliveryId: 'D' };
+  for (const pending of [true, false]) {
+    const inboxes = [{ ...receipt, adoptionPending: pending }];
+    const guard = erpCostEditingGuard({ workspaceId: 'W', ledgerId: 'L', tasks: [task], inboxes });
+    const top = renderToStaticMarkup(<CostAttention missing={2} guard={guard} />);
+    const card = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={inboxes} editingGuard={guard} onRecollect={() => {}} recollectReady costScopeEmpty retryScopeEmpty={false} />);
+    const title = pending ? '本轮采集已结束，正在核验已回传成本' : '本轮成本采集已结束';
+    expect(top).toContain(title); expect(card).toContain(title);
+    expect(card).not.toMatch(/停止采集|暂停采集|当前阶段：采购成本/);
+    const panel = document.createElement('div');
+    panel.innerHTML = card;
+    expect([...panel.querySelectorAll('.page-actions button')].map(button => button.textContent)).toEqual(['重新获取 ERP 成本']);
+  }
+});
 
 it('ends cost timing at the last receipt and locates each unresolved platform mapping', () => {
   const task = { status: 'partial', phase: 'cost', createdAt: '2026-10-17T17:48:00Z', updatedAt: '2026-10-17T20:19:00Z',
@@ -21,6 +41,26 @@ it('does not count a collected idempotency key as a durable delivery or adoption
   expect(html).toContain('已送达 <strong>0 / 1</strong>');
   expect(html).toContain('已采用 <strong>0</strong>');
   expect(html).toContain('停止采集');
+});
+
+it('lists just the affected SKUs across delivered receipts and leaves unknown scopes uncounted', () => {
+  const expectedSkus = ['GOOD', 'HOLE', 'MANUAL', 'PRICE'].map((platformSku, i) => ({ platformSku, platformSkc: 'SKC-' + i }));
+  const task = { status: 'partial', expectedSkus, batches: [
+    { batchId: 'I', status: 'incomplete', platformSkcs: ['SKC-0','SKC-1','SKC-2'], deliveryId: 'I' },
+    { batchId: 'P', status: 'delivered', platformSkcs: ['SKC-3'], deliveryId: 'P' },
+    { batchId: 'U', status: 'incomplete', platformSkcs: ['UNKNOWN-A','UNKNOWN-B'], deliveryId: 'U' },
+  ] };
+  const inboxes = [{ deliveryId: 'I', adoption: { items: [
+    { platformSku: 'GOOD', state: 'adopted' }, { platformSku: 'HOLE', state: 'missing' }, { platformSku: 'MANUAL', state: 'manual_effective' },
+  ] } }, { deliveryId: 'P', adoption: { items: [{ platformSku: 'PRICE', state: 'anomaly_pending' }] } }];
+  const html = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={inboxes} />);
+  expect(html).toContain('成本证据待补齐，涉及 1 个 SKC · 1 个 SKU');
+  expect(html).toContain('平台 SKU：HOLE · SKC：SKC-1'); expect(html).not.toContain('平台 SKU：GOOD');
+  expect(html).not.toContain('采购价格异常待核对');
+  const finished = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[...inboxes, {deliveryId:'U',adoption:{items:[]}}]} />);
+  expect(finished).toContain('采购价格异常待核对，涉及 1 个 SKC · 1 个 SKU');
+  expect(html).toContain('1 份回执尚无完整的逐项核验结果');
+  expect(html).not.toContain('UNKNOWN-A'); expect(html).not.toContain('平台 SKU：MANUAL');
 });
 it('preserves task scope and offers continued supplement after costs arrive', () => {
   const task = { status: 'cost_complete', batches: [{ platformSkcs: ['A'], status: 'delivered', deliveryId: 'D', catalogStatus: 'failed' }] };
@@ -53,7 +93,7 @@ it('separates durable cost delivery, finished catalog checks and material comple
 
 it('offers material continuation for a partial task with all cost receipts', () => {
   const html = renderToStaticMarkup(<ErpCollectionProgress task={{ status: 'partial', batches: [{ platformSkcs: ['A'], status: 'incomplete', deliveryId: 'D', catalogStatus: 'failed' }] }} />);
-  expect(html).toContain('继续原任务'); expect(html).toContain('重试未完成项');
+  expect(html).toContain('继续原任务'); expect(html).not.toContain('>重试未完成项<');
 });
 
 it('explains background work and does not ask users to continue an active material read', () => {
@@ -102,11 +142,11 @@ it('shows whole-task scope and weights progress by SKCs when exception ranges ha
     ] };
   const html = renderToStaticMarkup(<ErpCollectionProgress task={task} />);
   expect(html).toContain('范围 4 个 SKC / 5 个 SKU');
-  expect(html).toContain('已送达 3 / 4 个 SKC');
-  expect(html).toContain('aria-label="ERP 成本送达进度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="3"');
-  expect(html).toContain('剩余 1 个 SKC');
+  expect(html).toContain('已送达 <strong>3 / 4</strong> SKC');
+  expect(html).not.toContain('role="progressbar"');
+  expect(html).toContain('本轮未送达 1 个 SKC');
   expect(html).toContain('SKC：D · 仓库映射待补查');
-  expect(html).toContain('重试未完成项');
+  expect(html).not.toContain('>重试未完成项<');
   expect(html).not.toMatch(/批次|\d+ \/ \d+ 批|固定/);
 });
 
@@ -132,7 +172,8 @@ it('finishes every cost indicator when local adoption is done but the old execut
   const html = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[{ workspaceId: 'W', deliveryId: 'D',
     adoption: { items: [{ platformSku: 'S', state: 'adopted' }, { platformSku: 'EXCEPTION', state: 'anomaly_pending' }] } }]} />);
   expect(html).toContain('成本已更新');
-  expect(html).toContain('已送达 1 / 1 个 SKC');
+  expect(html).toContain('已送达 <strong>1 / 1</strong> SKC');
+  expect(html).not.toContain('role="progressbar"');
   for (const stale of ['正在等待 ERP', '等待进度确认', '暂停采集', '停止采集', 'collection-progress-pulse', '当前阶段：成本证据核对']) expect(html).not.toContain(stale);
   const pending = renderToStaticMarkup(<ErpCollectionProgress task={task} inboxes={[]} />);
   expect(pending).toContain('正在核验并更新利润');

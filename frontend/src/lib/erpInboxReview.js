@@ -95,7 +95,16 @@ function matchesForReview(inbox, request, ledger, scope, wantedSkus) {
     const expectedSkus = [...scope].filter(([sku]) => wantedSkus.has(sku)).map(([, row]) => row);
     const costRows = result.rows.filter(row => wantedSkus.has(skuOf(row)) && row.ledgerScopeRole === "expected");
     const reconciliation = reconcileErpCostRows({ workspaceId: ledger.workspaceId, period: ledger.period, expectedSkus, costRows, resolutions: inbox.costResolutions ?? [] });
-    return { matches: new Map(reconciliation.matches.map(row => [row.canonicalPlatformSku, row])), boundary: erpBatchAdoptionBoundary(result.batch), error: null };
+    const matches = new Map(reconciliation.matches.map(row => [row.canonicalPlatformSku, row]));
+    const row = costRows.length === 1 ? costRows[0] : null;
+    const match = row && matches.get(skuOf(row));
+    // A receipt containing only cancelled orders has no cost candidate.
+    // Keep its evidence available for this exact SKU without adopting a price.
+    if (match?.status === 'missing' && row.excludedRecords?.length && !row.mappingFallback && skcOf(row) === skcOf(match)) {
+      matches.set(skuOf(row), { ...match, sourcePlatformSku: row.platformSku, sourceWarehouseSku: row.warehouseSku,
+        excludedRecords: row.excludedRecords, purchaseRecords: row.purchaseRecords, evidenceComplete: row.evidenceComplete, evidenceRef: row.evidenceRef });
+    }
+    return { matches, boundary: erpBatchAdoptionBoundary(result.batch), error: null };
   } catch (error) {
     return { matches: new Map(), boundary: null, error: error.message || "采购证据无法读取。" };
   }
@@ -184,8 +193,15 @@ function reviewEntry({ batch, request, ledger, item, row, match, boundary, error
 // Only classify a price when the durable adoption outcome and its source agree.
 // Mixed purchase prices need the full selected sample in the detail dialog.
 function inlineReason(entry, evidence) {
-  if (!evidence?.evidenceComplete || evidence.sourceWarnings?.length || !Array.isArray(evidence.purchaseRecords)) return null;
+  if (!evidence?.evidenceComplete || evidence.sourceWarnings?.length) return null;
   if (!entry.warehouseSku || !text(evidence.warehouseSku) || canonicalWarehouseSku(evidence.warehouseSku) !== canonicalWarehouseSku(entry.warehouseSku)) return null;
+  if (!Array.isArray(evidence.purchaseRecords)) {
+    const summary = evidence.reviewPriceSummary;
+    if (!summary) return null;
+    if (entry.state === 'missing' && !summary.count) return '无可用采购记录';
+    if (entry.state !== 'anomaly_pending') return null;
+    return [0, 1].includes(summary.uniformSpecialPrice) ? `${summary.uniformSpecialPrice} 元采购价待核实` : '采购价异常待核实';
+  }
   const records = evidence.purchaseRecords;
   if (entry.state === 'missing' && !records.length) return '无可用采购记录';
   if (entry.state !== 'anomaly_pending') return null;
@@ -276,8 +292,12 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
       const evidence = list(inbox.envelope?.batch?.warehouseEvidence);
       evidenceByInbox.set(inbox.id, new Map(evidence.map(item => [item.evidenceRef, item])));
     }
-    const reason = inlineReason(entry, evidenceByInbox.get(inbox.id).get(entry.evidenceRef));
-    return reason ? { ...entry, inlineReason: reason } : entry;
+    const evidence = evidenceByInbox.get(inbox.id).get(entry.evidenceRef);
+    const reason = inlineReason(entry, evidence);
+    if (!reason) return entry;
+    const price = evidence.originalAnomalyPrice ?? evidence.reviewPriceSummary?.uniformSpecialPrice;
+    return { ...entry, inlineReason: reason, reviewGroup: evidence.reviewGroup,
+      ...(entry.state === 'anomaly_pending' && Number.isFinite(price) && price >= 0 && evidence.reviewGroup ? {originalPricePreview:price} : {}) };
   });
   return { batches, exceptions };
 }
@@ -285,6 +305,7 @@ export function buildErpInboxReview({ inboxes = [], requests = [], ledger, revie
 // A summary never authorizes a cost. Opened details validate just their selected
 // receipt, and every write still goes through the authoritative repository.
 export function readErpInboxReviewEvidence({ inbox, request, ledger, platformSku, reviewRow = null }) {
+  if (inbox?.displayOnly) return { match: null, error: '请读取完整回传后核对采购证据。' };
   if (!ledger || !inbox || !belongsToLedger(inbox, request, ledger)) return { match: null, error: '回传不属于当前账本。' };
   const sku = skuOf({ platformSku }), scope = expectedScope(inbox, request);
   if (!sku || !scope.has(sku)) return { match: null, error: '当前 SKU 不属于本批登记范围。' };

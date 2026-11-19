@@ -18,7 +18,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function scenario(size, mode = '', options = {}) {
   const expectedDeliveries = options.expectedDeliveries ?? (options.taskFlow ? 1 : Math.ceil(size / 5));
   const skcs = Array.from({length:size},(_,i) => `SKC-${i}`);
-  const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
+  const request = { kind:'request', requestId:'REQ', workspaceId:'WS', ledgerId:'LEDGER', ledgerPeriod:'2026-08', ledgerVersion:'IMPORT-1', registeredAt:new Date(Date.now()-60000).toISOString(), status:'registered', platformSkcs:skcs.map(platformSkc => ({platformSkc,canonicalPlatformSkc:platformSkc})), expectedSkus:options.expectedSkus ?? skcs.map((platformSkc,i)=>({platformSkc,platformSku:`SKU-${i}`,store:'店铺一'})) };
   const records = [request], deliveries = [], catalogs = [], calls = [], errors = [], listTimes = new Map(), windows = [], claims = [];
   const storage = { shopeersErpInboxBaseUrl:'http://127.0.0.1:5397', shopeersErpInboxCapability:'SYNTHETIC-CAPABILITY-01234567890123456789', shopeersErpWorkspaceId:'WS' };
   const storageQuota = options.storageQuotaBytes ?? 10 * 1024 * 1024;
@@ -29,9 +29,9 @@ export async function scenario(size, mode = '', options = {}) {
   const chrome = { storage:{local:{QUOTA_BYTES:storageQuota,getBytesInUse:async()=>storageBytes(storage),get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,structuredClone(storage[key])])),set:async values=>{
     if(options.storageResume && !storageRejected && values.shopeersErpPendingCostResultsV2?.length) { storageRejected=true;throw new Error('Resource::kQuotaBytes quota exceeded'); }
     const bytes=storageBytes({...storage,...values});
-    if(bytes>storageQuota)throw new Error('Resource::kQuotaBytes quota exceeded');
+    if(!options.desktopStorage && bytes>storageQuota)throw new Error('Resource::kQuotaBytes quota exceeded');
     peakStorageBytes=Math.max(peakStorageBytes,bytes);Object.assign(storage,structuredClone(values));
-  }}},runtime:{getManifest:()=>({version:extensionVersion}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
+  }}},runtime:{getManifest:()=>({version:extensionVersion,permissions:options.desktopStorage ? ['storage','unlimitedStorage'] : ['storage']}),onMessage:{addListener:fn=>{dispatch=fn;}},onInstalled:{addListener(){}},onStartup:{addListener(){}}},alarms:{create(){},onAlarm:{addListener(){}}} };
   const context = vm.createContext({ __SHOPEERS_ERP_BACKGROUND_TEST__:true,chrome,URL,AbortController,TextEncoder,crypto:webcrypto,setTimeout,clearTimeout,console,fetch:async(raw,init={})=>{
     const url = new URL(raw), payload = init.body ? JSON.parse(init.body) : {};
     // The longstanding scenarios exercise saved/older five-SKC tasks. New
@@ -107,7 +107,13 @@ export async function scenario(size, mode = '', options = {}) {
         const binary=xlsx.write(book,{type:'array',bookType:'xlsx'});
         return {ok:true,status:200,headers:{get:name=>name==='content-type'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':null},arrayBuffer:async()=>binary};
       }
-      if(options.fixture){const value=await options.fixture(url);if(value?.binary)return {ok:true,status:200,headers:{get:name=>name==='content-type'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':null},arrayBuffer:async()=>value.binary};return {ok:true,status:200,json:async()=>value};}
+      if (options.fixture) {
+        const value = await options.fixture(url);
+        if (value?.binary) return { ok: true, status: 200, headers: { get: name => ({
+          'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-length': value.contentLength,
+        })[name] ?? null }, arrayBuffer: async () => value.binary };
+        return { ok: true, status: 200, json: async () => value };
+      }
       const id=target.split('-').at(-1);
       const data=endpoint==='product-page'?[{itemId:`WH-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-page'?[{purchaseOrderId:`PO-${mode==='shared-orders'?Number(id)%20:id}`}]:endpoint==='purchase-order-details'?[{purchaseOrderDetailId:`D-${id}`,itemId:`WH-${id}`,creationTime:'2026-08-20',purchaseQuantity:2,purchaseUnitPrice:4}]:Array.from({length:mode==='shared-orders'?size/20:1},(_,index)=>({associatedProductId:`WH-${id}`,barcodeSkuid:`SKU-${Number(id)+index*20}`,barcodeSkcid:`SKC-${Number(id)+index*20}`}));
       return {ok:true,status:200,json:async()=>({code:0,count:data.length,data})};

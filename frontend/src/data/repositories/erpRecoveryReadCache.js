@@ -3,6 +3,9 @@ import { cachedDerived, derivedCacheDb, sourceRevision, tableRevisionReader } fr
 import { canonicalPlatformSku, canonicalPlatformSkc } from '../../domain/identifiers';
 import { version as appVersion } from '../../../package.json';
 import Dexie from 'dexie';
+import { forEachLedgerChunk } from './ledgerReadCache';
+import { readPageSaleChunks } from './ledgerPageSalesRepository';
+import { pageRecoveryIdentities } from '../../domain/ledgerPageSales';
 
 const salesRevision = tableRevisionReader('salesRows');
 const inputTables = ['costApprovals', 'erpCostRows', 'erpCostBatches', 'importBatches', 'erpCostInbox', 'erpCostRequests'];
@@ -12,6 +15,7 @@ const inputRevision = () => {
   return revisions.every(Boolean) ? JSON.stringify(revisions) : null;
 };
 const results = new Map();
+class DeferredReceiptReview extends Error {}
 const loadedScopes = new Set(), dirtyScopes = new Set();
 const memoKey = member => `erp-recovery:${JSON.stringify([appVersion, member.workspaceId, member.memberId, member.role])}`;
 
@@ -54,16 +58,41 @@ async function digestValue(value) {
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function fingerprintRow(table, row) {
+  if (table !== 'erpCostRows' || !row.evidence || Array.isArray(row.evidence) || typeof row.evidence !== 'object') return digestValue(row);
+  // IndexedDB preserves these shared references. Encode an explicit reference
+  // only for an identical object; independently edited evidence retains its full content.
+  const evidence = { ...row.evidence }, shared = [];
+  for (const key of ['purchaseRecords', 'excludedRecords', 'sourceWarnings', 'costDecision']) {
+    if (row[key] && row[key] === evidence[key]) { shared.push(key); delete evidence[key]; }
+  }
+  return digestValue([shared, { ...row, evidence }]);
+}
+
+export function adoptionCostHeader(row) {
+  const { id, workspaceId, batchId, platformSku, warehouseSku, sourceWarehouseSku, sourceEnvelopeBatchId, sourceOrder, resolutions } = row;
+  return { id, workspaceId, batchId, platformSku, warehouseSku, sourceWarehouseSku, sourceEnvelopeBatchId, sourceOrder, resolutions };
+}
+
+export function adoptionBatchHeader(row) {
+  const { workspaceId, status, sourceOrder, publishedAt, adoption } = row;
+  return { workspaceId, status, sourceOrder, publishedAt, adoption };
+}
+
 // These projections only decide whether a background no-op can be skipped.
 // They are never inputs to a financial write or a replacement for validation.
-async function readSalesIdentities(ledgerId) {
+async function readSalesIdentities(ledgerId, parent) {
   const compute = async () => {
+    if (parent && !Dexie.currentTransaction) {
+      const chunks = await readPageSaleChunks(parent.workspaceId, ledgerId, { parent });
+      if (!chunks.some(chunk => chunk.foreign)) return pageRecoveryIdentities(chunks, ledgerId);
+    }
     const identities = new Map();
-    for (const row of await db.salesRows.where('ledgerId').equals(ledgerId).toArray()) {
+    await forEachLedgerChunk(db.salesRows, ledgerId, 1000, row => {
       const identity = { workspaceId: row.workspaceId, ledgerId: row.ledgerId,
         store: row.store, platformSku: row.platformSku, sku: row.sku, platformSkc: row.platformSkc };
       identities.set(JSON.stringify(identity), identity);
-    }
+    });
     return [...identities.values()];
   };
   const revision = salesRevision();
@@ -71,34 +100,61 @@ async function readSalesIdentities(ledgerId) {
     revision, revisionReader: salesRevision, persist: false, boundedMemory: true, compute }) : compute();
 }
 
-async function readLedgerInputs(ledgerId, readScope) {
+async function readRecoveryTable(ledgerId, table, reader, defer) {
   const compute = async () => {
-    const inputs = {};
-    for (const table of inputTables) {
-      const rows = [], keys = await db.table(table).where('ledgerId').equals(ledgerId).primaryKeys();
-      for (let offset = 0; offset < keys.length; offset += 16) {
-        const chunk = await db.table(table).bulkGet(keys.slice(offset, offset + 16));
-        for (const row of chunk) {
-          // Only explicit ignores in other receipts can authorize reuse. Keep
-          // their complete evidence fingerprint, never a price/count shortcut.
-          if (!row || table === 'erpCostInbox' && !row.costResolutions?.some(item => item.action === 'ignore_anomaly')) continue;
-          rows.push({ id: row.id, platformSku: row.platformSku, sku: row.sku,
-            batchId: row.batchId, sourceEnvelopeBatchId: row.sourceEnvelopeBatchId, fingerprint: await digestValue(row) });
-        }
-      }
-      inputs[table] = rows;
+    const rows = [], keys = await db.table(table).where('ledgerId').equals(ledgerId).primaryKeys();
+    const chunkSize = ['erpCostBatches','erpCostInbox'].includes(table) ? 1 : 8;
+    for (let offset = 0; offset < keys.length; offset += chunkSize) {
+      if (defer?.()) throw new DeferredReceiptReview();
+      const chunk = await db.table(table).bulkGet(keys.slice(offset, offset + chunkSize));
+      const relevant = chunk.filter(row => row && (table !== 'erpCostInbox' || row.costResolutions?.some(item => item.action === 'ignore_anomaly')));
+      const entries = await Promise.all(relevant.map(async row => {
+        const { id, platformSku, sku, batchId, sourceEnvelopeBatchId } = row;
+        const entry = { id, platformSku, sku, batchId, sourceEnvelopeBatchId, fingerprint: await fingerprintRow(table, row) };
+        if (table === 'erpCostRows') entry.header = adoptionCostHeader(row);
+        if (table === 'erpCostBatches') entry.header = adoptionBatchHeader(row);
+        return entry;
+      }));
+      rows.push(...entries);
     }
-    return inputs;
+    return rows;
   };
+  const version = reader();
+  return version ? cachedDerived({ scope: [ledgerId, table], formula: 'erp-recovery-table-fingerprints@2', revision: version,
+    revisionReader: reader, boundedMemory: true, compute }) : compute();
+}
+
+async function readLedgerInputs(ledgerId, readScope, defer) {
   const revision = inputRevision();
   if (revision && readScope?.inputs?.ledgerId === ledgerId && readScope.inputs.revision === revision) return readScope.inputs.value;
-  const value = await (revision ? cachedDerived({ scope: [ledgerId], formula: 'erp-recovery-ledger-fingerprints@3',
-    revision, revisionReader: inputRevision, persist: false, boundedMemory: true, compute }) : compute());
+  const value = {};
+  // Changing an approval or receiving another envelope does not invalidate
+  // complete fingerprints of untouched purchase tables. Keep large reads serial.
+  for (const [i, table] of inputTables.entries()) value[table] = await readRecoveryTable(ledgerId, table, inputReaders[i], defer);
   // Only tiny, content-complete fingerprints remain in this optional cache.
   // The raw evidence is released after each chunk. Financial/context changes
   // still force revalidation; unrelated notifications reuse unchanged inputs.
   if (revision && revision === inputRevision() && readScope) readScope.inputs = { ledgerId, revision, value };
   return value;
+}
+
+// Only a read-only probe can use this hint. An actual adoption independently
+// rechecks reusable decisions in its business write transaction.
+export function recoveryIgnoreIds(readScope, ledgerId) {
+  const inputs = readScope?.inputs;
+  if (!inputs || inputs.ledgerId !== ledgerId || inputs.revision !== inputRevision()) return null;
+  return inputs.value.erpCostInbox.map(row => row.id);
+}
+
+// Reuse only the headers just read while hashing the same source version.
+// A later write always obtains independent authoritative inputs inside its transaction.
+export async function readRecoveryAdoptionInputs(readScope, ledgerId) {
+  const inputs = readScope?.inputs;
+  if (!inputs || inputs.ledgerId !== ledgerId || inputs.revision !== inputRevision()) return null;
+  const [approvals, salesRows] = await Promise.all([db.costApprovals.where('ledgerId').equals(ledgerId).toArray(), readSalesIdentities(ledgerId)]);
+  if (inputs.revision !== inputRevision()) return null;
+  return { approvals, salesRows, batchById: new Map(inputs.value.erpCostBatches.map(row => [row.id, row.header])),
+    costHeaders: inputs.value.erpCostRows.map(row => row.header), coverageHeads: null };
 }
 
 export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, getContext, readScope }) {
@@ -111,9 +167,20 @@ export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, get
     if (revision && candidate?.workspaceId === workspaceId && member.workspaceId === workspaceId
       && ['admin', 'finance'].includes(member.role) && ['pending', 'loaded'].includes(candidate.status)
       && (!ledgerId || candidate.ledgerId === ledgerId)) {
-      prepared = { ledgerId: candidate.ledgerId, revision, value: await readLedgerInputs(candidate.ledgerId, readScope) };
+      const reviewed = candidate.adoption?.version && !candidate.adoptionPending && !candidate.adoptionFailure;
+      const defer = () => readScope?.shouldStop?.() || (reviewed && readScope?.deferReviewed?.());
+      if (defer()) return { deferred: true };
+      try {
+        const value = await readLedgerInputs(candidate.ledgerId, readScope, defer);
+        if (defer()) return { deferred: true };
+        const parent = await db.ledgers.get(candidate.ledgerId), saleVersion = salesRevision();
+        const sales = saleVersion && parent?.workspaceId === workspaceId ? await readSalesIdentities(candidate.ledgerId, parent) : null;
+        prepared = { ledgerId: candidate.ledgerId, revision, value, sales, saleVersion };
+      }
+      catch (error) { if (error instanceof DeferredReceiptReview) return { deferred: true }; throw error; }
     }
   }
+  if (readScope?.shouldStop?.()) return { deferred: true };
   const snapshot = await db.transaction('r', db.settings, db.ledgers, db.erpCostInbox, db.erpCostRequests,
     db.salesRows, db.costApprovals, db.erpCostRows, db.erpCostBatches, db.importBatches, async () => {
       const inbox = await db.erpCostInbox.get(inboxId), member = await getContext();
@@ -125,7 +192,7 @@ export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, get
       // Legacy request inference has broader dependencies; keep its full path.
       if (!ledger || !request?.expectedSkus?.length) return { metadata };
       if (!prepared || prepared.ledgerId !== inbox.ledgerId || prepared.revision !== inputRevision()) return { metadata };
-      const sales = await readSalesIdentities(inbox.ledgerId), inputs = prepared.value;
+      const sales = prepared.sales && prepared.saleVersion === salesRevision() ? prepared.sales : await readSalesIdentities(inbox.ledgerId), inputs = prepared.value;
       const queried = new Set((inbox.envelope?.batch?.query?.platformSkcs ?? []).map(row => skcOf(typeof row === 'string' ? { platformSkc: row } : row)).filter(Boolean));
       const wanted = new Set(request.expectedSkus.filter(row => queried.has(skcOf(row))).map(skuOf).filter(Boolean));
       const costs = inputs.erpCostRows.filter(row => !skuOf(row) || wanted.has(skuOf(row)) || row.sourceEnvelopeBatchId === inbox.batchId);
@@ -136,32 +203,32 @@ export async function readErpRecoveryProbe({ inboxId, workspaceId, ledgerId, get
         ignoredEvidence: inputs.erpCostInbox, requests: inputs.erpCostRequests,
         sales,
         approvals: inputs.costApprovals.filter(row => wanted.has(skuOf(row))),
-        costs, batches: inputs.erpCostBatches.filter(row => batchIds.has(row.id)) };
+        costs: costs.map(row => row.fingerprint), batches: inputs.erpCostBatches.filter(row => batchIds.has(row.id)).map(row => row.fingerprint) };
       const result = inbox.adoption ? { id: inbox.id, inboxId: inbox.id, batchId: inbox.appliedBatchId, status: inbox.status,
         adoption: inbox.adoption, ...inbox.adoption.summary, matchedCount: inbox.adoption.summary?.adoptedCount, idempotent: true } : null;
       return { metadata, signatureInput, result, memoKey: memoKey(member), revision: sourceRevision(), key: JSON.stringify([appVersion, workspaceId, inbox.ledgerId, member.memberId, member.role, inbox.id]) };
     });
   const { signatureInput, ...probe } = snapshot;
   if (!signatureInput || !globalThis.crypto?.subtle) return probe;
-  // Hash each complete evidence object once per sweep, then sign a small
-  // manifest. Previously every pending receipt stringified the same complete
-  // ledger costs and batches, creating repeated large strings and byte copies.
-  // No source field is omitted: equal-count/raw edits still change signatures.
+  // Arrays here contain identity fields or complete content hashes, never
+  // purchase bodies. Sign them in bounded blocks to avoid a WebCrypto job per SKU.
   const fingerprints = readScope ? (readScope.fingerprints ??= new WeakMap()) : new WeakMap();
   const fingerprint = async value => {
+    if (Array.isArray(value) && value.length > 512) {
+      const chunks = [];
+      for (let i = 0; i < value.length; i += 512) chunks.push(await digestValue(value.slice(i, i + 512)));
+      return digestValue(['blocks', value.length, chunks]);
+    }
+    return digestValue(value);
+  };
+  const cachedFingerprint = async value => {
     if (value == null || typeof value !== 'object') return digestValue(value);
-    if (!fingerprints.has(value)) fingerprints.set(value, digestValue(value));
+    if (!fingerprints.has(value)) fingerprints.set(value, fingerprint(value));
     return fingerprints.get(value);
   };
   const manifest = {};
-  for (const [key, value] of Object.entries(signatureInput)) {
-    if (Array.isArray(value)) {
-      const hashes = [];
-      for (const row of value) hashes.push(await fingerprint(row));
-      manifest[key] = hashes;
-    } else manifest[key] = await fingerprint(value);
-  }
-  return { ...probe, signature: await digestValue(manifest) };
+  for (const [key, value] of Object.entries(signatureInput)) manifest[key] = await cachedFingerprint(value);
+  return { ...probe, signature: await digestValue(manifest), hasPreviousCheck: results.has(probe.key) };
 }
 
 export function cachedErpRecoveryResult(probe) {

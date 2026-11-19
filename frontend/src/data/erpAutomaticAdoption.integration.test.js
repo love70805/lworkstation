@@ -11,8 +11,11 @@ import { recoverCompleteErpCostDrafts } from '../lib/erpLegacyDraftRecovery';
 import { buildErpInboxQueue } from '../domain/erpInboxMatching';
 import { sourceRevision, selectionFactsRevision } from './db/derivedCache';
 import { calculateFormalLedgerRows } from '../domain/ledgerProfit';
-import { setErpCostAnomaliesIgnored, listIgnoredErpCostAnomalies, listPendingErpCostAnomalies, updateLedgerWarehouseRate } from './repositories/profitRepository';
+import { calculateLedgerCostCoverage } from '../domain/costCoverage';
+import { setErpCostAnomaliesIgnored, listIgnoredErpCostAnomalies, listPendingErpCostAnomalies, updateLedgerWarehouseRate, listErpCostInbox, listErpCostAnomalyReview } from './repositories/profitRepository';
 import { previewProfitReport, saveProfitReport, readProfitReportDownload } from './repositories/profitReportRepository';
+import { readActionCostRows } from './repositories/profitCostIndex';
+import { indexedErpInboxSummary, purchaseEvidenceDigest } from '../domain/erpInboxSummary';
 beforeEach(async()=>{await db.delete();await db.open();await setActiveMemberContext({workspaceId:DEFAULT_WORKSPACE_ID,memberId:'finance',role:'finance'});});
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
 async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:00Z',id='1',recordsB=null}={}){
@@ -23,6 +26,104 @@ async function seed({prices=[5,0],incomplete=false,requestAt='2026-09-01T00:00:0
  const batch=buildErpCostBatchEnvelope({batchId:`B-${id}`,workspaceId:ledger.workspaceId,ledgerId:ledger.id,requestId:request.id,platformSkcs:request.platformSkcs,expectedSkus,generatedAt:requestAt,results:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,mappings:[row],previewUnitCost:prices[i]})),warehouseEvidence:expectedSkus.map((row,i)=>({warehouseSku:`WH-${row.platformSku}`,evidenceComplete:!(incomplete&&i===1),purchaseRecords:i===1&&recordsB?recordsB:[{recordId:`R-${row.platformSku}`,purchaseDate:'2026-08-01',quantity:2,unitPrice:prices[i]}]}))});
  return {ledger,request,batch,envelope:buildErpCostInboxEnvelope({batch,deliveryId:`D-${id}`,sentAt:requestAt})};
 }
+it('reviews original anomaly evidence when the page supplies only lightweight or stale receipt summaries', async () => {
+ const {ledger,envelope}=await seed(); await receiveErpCostInboxEnvelope({envelope});
+ const expected=await listErpCostAnomalyReview(ledger.id);
+ const summaries=await listErpCostInbox({ledgerId:ledger.id,statuses:[],displayOnly:true});
+ expect(expected.pending).toHaveLength(1);
+ expect(await listErpCostAnomalyReview(ledger.id,summaries)).toEqual(expected);
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id});
+ const ignored=await listErpCostAnomalyReview(ledger.id,summaries);
+ expect(ignored.pending).toHaveLength(0);expect(ignored.ignored).toHaveLength(1);
+ await setErpCostAnomaliesIgnored({ledgerId:ledger.id,ignored:false});
+ const restored=await listErpCostAnomalyReview(ledger.id,summaries);
+ expect(restored.pending).toHaveLength(1);expect(restored.ignored).toHaveLength(0);
+ expect((await db.erpCostInbox.toCollection().first()).envelope).toEqual(envelope);
+});
+
+it('skips superseded originals on review, reuses a completed read, and falls back after an equal-count evidence change', async () => {
+ const first = await seed({ id: 'old', prices: [8, 1] });
+ const previous = await receiveErpCostInboxEnvelope({ envelope: first.envelope });
+ const second = await seed({ id: 'new', prices: [8, 0], requestAt: '2026-09-02T00:00:00Z' });
+ const latest = await receiveErpCostInboxEnvelope({ envelope: second.envelope });
+ const original = await db.erpCostInbox.get(latest.id);
+ const reads = vi.spyOn(db.erpCostInbox, 'get');
+ const check = () => listErpCostAnomalyReview(first.ledger.id);
+ expect((await check()).pending).toMatchObject([{ inboxId: latest.id, originalUnitPrice: 0 }]);
+ expect(reads.mock.calls.map(([id]) => id)).toEqual([latest.id]);
+ reads.mockClear();
+ await check();
+ expect(reads).not.toHaveBeenCalled();
+ original.envelope.batch.summary.outputRowCount++;
+ await db.erpCostInbox.put(original);
+ expect((await check()).pending).toMatchObject([{ inboxId: previous.id, originalUnitPrice: 1 }]);
+ expect(reads.mock.calls.map(([id]) => id)).toEqual([latest.id, previous.id]);
+});
+it('validates the selected purchase evidence again when its price changed after opening the list', async () => {
+  const {ledger,envelope} = await seed();
+  const receipt = await receiveErpCostInboxEnvelope({envelope});
+  const [selected] = (await listErpCostAnomalyReview(ledger.id)).pending;
+  expect(selected.evidenceKey).toBeTruthy();
+  const changed = await seed({prices:[5,1]});
+  await db.erpCostInbox.update(receipt.id, {envelope:changed.envelope});
+  const events = await db.auditEvents.count();
+  await expect(setErpCostAnomaliesIgnored({ledgerId:ledger.id, selectedItems:[selected]})).rejects.toThrow('采购证据已变化');
+  expect(await db.auditEvents.count()).toBe(events);
+  expect((await listErpCostAnomalyReview(ledger.id)).pending[0].originalUnitPrice).toBe(1);
+});
+it('shows the anomalous original price even when normal history has another price', async () => {
+  const recordsB=[{recordId:'regular',purchaseDate:'2026-08-01',quantity:2,unitPrice:5},
+    {recordId:'check',purchaseDate:'2026-08-02',quantity:2,unitPrice:1}];
+  const {ledger,envelope}=await seed({recordsB});
+  const receipt=await receiveErpCostInboxEnvelope({envelope});
+  const summary=await indexedErpInboxSummary(await db.erpCostInbox.get(receipt.id),ledger.period);
+  const header=summary.envelope.batch.warehouseEvidence.find(row=>row.warehouseSku==='WH-B');
+  const verified=(await listErpCostAnomalyReview(ledger.id)).pending.find(row=>row.warehouseSku==='WH-B');
+  expect(header.reviewPriceSummary.uniformSpecialPrice).toBeNull();
+  expect(header.originalAnomalyPrice).toBe(1);
+  expect(header.reviewGroup).toBe(await purchaseEvidenceDigest(verified.evidenceKey));
+});
+it('selects the same current receipt and rejects an intervening change before a first-click ignore', async () => {
+  const older = await seed({ id:'old', prices:[6, 1] });
+  await receiveErpCostInboxEnvelope({envelope:older.envelope});
+  const latest = await seed({ id:'new', prices:[6, 0], requestAt:'2026-09-02T00:00:00Z' });
+  const receipt = await receiveErpCostInboxEnvelope({envelope:latest.envelope});
+  const scoped = () => listErpCostAnomalyReview(older.ledger.id, undefined, {warehouseSku:'WH-B'});
+  const first = await scoped();
+  expect(first.pending).toEqual((await listErpCostAnomalyReview(older.ledger.id)).pending);
+  expect(first.pending).toMatchObject([{inboxId:receipt.id, originalUnitPrice:0}]);
+  expect(first.noPriorIgnores).toBe(true);
+  await db.erpCostRequests.update(latest.request.id, {requestedAt:'2026-09-03T00:00:00Z'});
+  await expect(setErpCostAnomaliesIgnored({ledgerId:older.ledger.id, selectedItems:first.pending, expectedReviewRevision:first.revision})).rejects.toThrow('采购记录已变化');
+  const current = await scoped();
+  await setErpCostAnomaliesIgnored({ledgerId:older.ledger.id, selectedItems:current.pending, expectedReviewRevision:current.revision});
+  expect((await scoped()).ignored).toMatchObject([{inboxId:receipt.id, originalUnitPrice:0}]);
+});
+it('reuses committed cost facts across appends but reads replacements and rolled back edits correctly', async () => {
+  const {ledger,envelope} = await seed();
+  await receiveErpCostInboxEnvelope({envelope});
+  const original = await db.erpCostRows.toCollection().first();
+  const facts = () => db.transaction('r', db.erpCostRows, async () => {
+    const rows = new Map();
+    await readActionCostRows(ledger,item => rows.set(item.header.id,item.coverage.unitCost));
+    return rows;
+  });
+  expect((await facts()).get(original.id)).toBe(5);
+  const extra = {...original, unitCost:4};
+  delete extra.id;
+  const added = await db.erpCostRows.add(extra);
+  expect((await facts()).get(added)).toBe(4);
+  await expect(db.transaction('rw', db.erpCostRows, async () => {
+    await db.erpCostRows.update(original.id,{unitCost:12});
+    expect((await facts()).get(original.id)).toBe(12);
+    throw new Error('rollback');
+  })).rejects.toThrow('rollback');
+  expect((await facts()).get(original.id)).toBe(5);
+  await db.erpCostRows.update(original.id,{unitCost:8});
+  expect((await facts()).get(original.id)).toBe(8);
+  await db.erpCostRows.delete(added);
+  expect((await facts()).has(added)).toBe(false);
+});
 it('ignores actual zero prices without asserting correctness, survives reopening, and revokes only ignored costs', async () => {
  const {ledger,envelope}=await seed(); await receiveErpCostInboxEnvelope({envelope});
  await setErpCostAnomaliesIgnored({ledgerId:ledger.id});
@@ -195,6 +296,32 @@ it('reads sales once when confirming and independently publishing a purchase ins
  expect(result.adoption.summary.adoptedCount).toBe(2);
  expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.unitCost).sort()).toEqual([1,5]);
  expect((await db.ledgers.get(ledger.id)).status).toBe('ready');
+});
+it('preserves previous purchase evidence and full coverage when a newer owned batch was voided', async () => {
+  const first = await seed({ prices: [5, 8], id: 'coverage-old' });
+  const { ledger } = first;
+  await receiveErpCostInboxEnvelope({ envelope: first.envelope });
+  const original = await getLatestLedgerCosts(ledger.id);
+  const { id: _previousId, ...raw } = original[0];
+  const third = { ...raw, platformSku: 'C', canonicalPlatformSku: 'C', platformSkc: 'SKC-C' };
+  await db.salesRows.add({ workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: '甲', platformSku: 'C', platformSkc: 'SKC-C' });
+  await db.erpCostBatches.add({ id: 'withdrawn-C', ledgerId: ledger.id, workspaceId: ledger.workspaceId, status: 'voided' });
+  await db.erpCostRows.bulkAdd([third, { ...third, batchId: 'withdrawn-C', publishedAt: '2098-01-01' },
+    { ...raw, workspaceId: 'another-workspace', publishedAt: '2099-01-01' }]);
+
+  const second = await seed({ prices: [7, 9], id: 'coverage-new', requestAt: '2026-09-02T00:00:00Z' });
+  const receipt = await receiveErpCostInboxEnvelope({ envelope: second.envelope });
+  expect(receipt.adoption?.summary.adoptedCount).toBe(2);
+  const persisted = await db.erpCostInbox.get(receipt.id);
+  const audit = await db.auditEvents.where('objectId').equals(persisted.appliedBatchId).filter(event => event.action === 'published').first();
+  expect(audit.after.previousCosts).toEqual(original);
+  const costs = await getLatestLedgerCosts(ledger.id);
+  expect(costs.map(row => [row.platformSku, row.unitCost])).toEqual([['A', 7], ['B', 9]]);
+  expect(audit.after.snapshot.rows).toEqual(costs);
+  const full = calculateLedgerCostCoverage({ salesRows: await db.salesRows.toArray(), erpCosts: costs,
+    approvals: [], workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: ledger.period });
+  expect(full).toMatchObject({ expectedCount: 3, erpMatchedCount: 2, missingCount: 1, unresolvedSkus: ['C'] });
+  expect((await db.ledgers.get(ledger.id)).costSummary).toMatchObject(full);
 });
 it('preserves the receipt but never adopts a batch bound to an earlier ledger import', async () => {
  const {ledger,request,envelope}=await seed({prices:[5,8],id:'changed-import'});

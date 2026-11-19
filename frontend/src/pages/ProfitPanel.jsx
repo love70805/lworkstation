@@ -15,9 +15,12 @@ import {
   updateLedgerWarehouseRate,
 } from "../data/database";
 import { readCachedReportProducts } from "../data/repositories/derivedComputationService";
+import { listErpCostInbox } from '../data/repositories/profitRepository';
 import { presentReportProducts } from "../lib/profitPresentation";
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
+import { useErpCollectionTasks } from "../hooks/useErpCollectionTasks";
+import { currentLedgerCollectionTask, erpCollectionPresentation } from "../domain/erpCollectionStatus";
 import { formatErpUnitCost, formatManualUnitCost, formatProfitAmount, summarizeProfitRows } from "../lib/profitPrecision";
 import { countProfitIdentities, groupProfitRowsBySkc } from "../lib/profit";
 import { storeSkuKey } from "../domain/manualCostOverride";
@@ -233,20 +236,21 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       meta: { headerStyle: { width: "142px", position: "sticky", right: 0, zIndex: 2, background: "var(--surface)" }, cellStyle: { position: "sticky", right: 0, zIndex: 1, background: "var(--surface)" } },
       cell: ({ row }) => {
         const item = row.original;
-        const ignored = costBySku.get(canonicalPlatformSku(item.platformSku))?.resolutions?.some(resolution => resolution.action === 'ignore_anomaly');
+        const cost = costBySku.get(canonicalPlatformSku(item.platformSku));
+        const ignored = cost?.ignoredAnomaly || cost?.resolutions?.some(resolution => resolution.action === 'ignore_anomaly');
         const entry = reviewReasons?.get(storeSkuKey(item.store, item.platformSku));
         const priceReview = !item.finalizable && entry?.state === 'anomaly_pending';
         const mappingIssue = item.costIdentityIssue || (!item.finalizable && entry?.mappingIssue);
-        const mode = item.finalizable || priceReview || mappingIssue ? 'details' : 'edit';
-        const status = mappingIssue ? '归属待核对' : item.finalizable
+        const mode = !mappingIssue && item.manualCostConflict ? 'edit' : item.finalizable || priceReview || mappingIssue ? 'details' : 'edit';
+        const status = mappingIssue ? '归属待核对' : item.manualCostConflict ? '人工价待确认' : item.finalizable
           ? item.costSource === 'manual_override' ? '人工更正' : ignored ? '异常已忽略' : 'ERP 已采用'
           : entry?.inlineReason ?? '原因待查';
-        const action = mappingIssue ? '核对映射' : item.finalizable ? '成本详情' : priceReview ? '核对采购价' : '补录成本';
+        const action = mappingIssue ? '核对映射' : item.manualCostConflict ? '确认人工价' : item.finalizable ? '成本详情' : priceReview ? '核对采购价' : '补录成本';
         const open = () => {
           if (onCostDetails) onCostDetails({ store: item.store, platformSku: item.platformSku, mode, ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId });
           else setManualTarget({ ...item, mode });
         };
-        return <div className="profit-status-actions"><Badge tone={item.finalizable && !ignored ? 'success' : 'warning'}>{status}</Badge><button className="inline-link" onClick={open}>{action}</button></div>;
+        return <div className="profit-status-actions"><Badge tone={item.finalizable && !ignored && !item.manualCostConflict ? 'success' : 'warning'}>{status}</Badge><button className="inline-link" onClick={open}>{action}</button></div>;
       },
     },
   ], [costBySku, onCostDetails, reviewReasons, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
@@ -325,7 +329,18 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   );
 }
 
-export function ProfitViewsContent({ monthControl = null }) {
+function OpeningProfitTask({ ledger }) {
+  const { tasks, error } = useErpCollectionTasks(ledger.workspaceId, ledger.id);
+  const owned = tasks.filter(task => task.workspaceId === ledger.workspaceId && task.ledgerId === ledger.id && task.ledgerPeriod === ledger.period && task.runMode !== 'catalog');
+  const task = currentLedgerCollectionTask(owned);
+  return <Panel role="status" className="profit-opening">
+    {task && !error ? <p data-profit-task-status><strong>{erpCollectionPresentation(task).title}</strong>
+      {Number.isInteger(task.summary?.delivered) && Number.isInteger(task.summary?.total) ? ` · 已送达 ${task.summary.delivered} / ${task.summary.total} 个 SKC` : ''}</p> : null}
+    <p>正在读取本月销售与成本，核算完成后显示利润明细。</p>
+  </Panel>;
+}
+
+export function ProfitViewsContent({ monthControl = null, selectedLedger = null }) {
   const [readiness, setReadiness] = useState(null);
   const [reportState, setReportState] = useState(null);
   const [supplementEditor, setSupplementEditor] = useState(null);
@@ -335,7 +350,11 @@ export function ProfitViewsContent({ monthControl = null }) {
   const [retry, setRetry] = useState(0);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const snapshot = useLatestSalesImport(params.get("ledger"), undefined, retry);
+  const snapshot = useLatestSalesImport(params.get("ledger"), undefined, retry, true);
+  const headerLedgerId = selectedLedger?.id ?? params.get('ledger');
+  useEffect(() => {
+    if (headerLedgerId) void listErpCostInbox({ ledgerId:headerLedgerId, displayOnly:true, statuses:[] }).catch(() => {});
+  }, [headerLedgerId]);
   useEffect(() => { setSupplementEditor(null); setCostTarget(null); }, [snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const filter = useMemo(() => readProfitFilter(params, snapshot?.ledger?.id, { workspaceId: snapshot?.ledger?.workspaceId }), [params, snapshot?.ledger?.id, snapshot?.ledger?.workspaceId]);
   const store = filter.storeFilter;
@@ -348,13 +367,15 @@ export function ProfitViewsContent({ monthControl = null }) {
     setParams(nextParams, { replace: true });
     saveProfitFilter(snapshot.ledger.id, next);
   };
-  if (snapshot === undefined) return <Panel role="status">正在读取月度账本…<progress aria-label="读取账本" /></Panel>;
+  const ledger = snapshot?.ledger ?? selectedLedger;
+  const header = ledger && <PageHeader title="利润核算" eyebrow={ledger.period} description="按当前台账与成本核算，导出本月利润表。"
+    actions={<div className="profit-workspace-controls">{monthControl}{snapshot?.ledger && <label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={event => changeScope({storeFilter:event.target.value})}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label>}<Button icon={CalendarDays} onClick={() => navigate('/ledger')}>月度账本</Button></div>} />;
+  if (snapshot === undefined) return <>{header}{selectedLedger ? <OpeningProfitTask ledger={selectedLedger} /> : <Panel role="status">正在读取月度账本…<progress aria-label="读取账本" /></Panel>}</>;
   if (snapshot?.error) return <Panel><p role="alert">账本读取失败：{snapshot.error}</p><Button onClick={() => setRetry(value => value + 1)}>重新读取</Button></Panel>;
   if (!snapshot?.ledger) return <Panel><EmptyState icon={CalendarDays} title="开始本月利润核算" description="导入销售台账后，在这里采集成本、处理异常并导出利润表。" action={<Button variant="primary" onClick={() => navigate('/import-preview')}>导入月度台账</Button>} /></Panel>;
   if (store !== 'all' && !stores.includes(store)) return <Panel><p role="alert">当前账本没有此店铺。</p><Button onClick={() => changeScope({storeFilter:'all'})}>查看全部店铺</Button></Panel>;
   return <>
-    <PageHeader title="利润核算" eyebrow={snapshot.ledger.period} description="随时调整台账与成本，重新核算并导出；历史报表保留原样。"
-      actions={<div className="profit-workspace-controls">{monthControl}<label>店铺 <select className="select-input" aria-label="查看店铺" value={store} onChange={event => changeScope({storeFilter:event.target.value})}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label><Button icon={CalendarDays} onClick={() => navigate('/ledger')}>月度账本</Button></div>} />
+    {header}
     <section id="monthly-report-section" className="profit-report-section profit-report-top" tabIndex={-1} aria-label="本月报告">
       <MonthlyReportManager compact key={'report/'+snapshot.ledger.id} ledgerId={snapshot.ledger.id} workspaceId={snapshot.ledger.workspaceId}
         onState={setReportState} editor={supplementEditor} onEdit={setSupplementEditor}

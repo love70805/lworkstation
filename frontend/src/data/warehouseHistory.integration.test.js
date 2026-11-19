@@ -48,11 +48,11 @@ it('allows legacy editable months but blocks foreign workspaces and incomplete r
   await expect(saveWarehouseHistoryCosts({ledgerId,history})).rejects.toThrow('未完成');
   expect(await db.costApprovals.toArray()).toEqual(before);
 });
-it('keeps history imports isolated from manual costs in another accounting context',async()=>{
+it('preserves an existing shared manual cost when preparing history in the other mode',async()=>{
   await toggleAccountingMode(workspaceId);
   await saveManualCostOverride({ledgerId,store:'甲店',platformSku:'SKU-A',unitCost:0,reason:'人工输入单件成本并确认更正'});
   await toggleAccountingMode(workspaceId);
-  expect((await previewWarehouseHistoryCosts({ledgerId,history:warehouseHistoryFixture()})).ready).toHaveLength(1);
+  expect((await previewWarehouseHistoryCosts({ledgerId,history:warehouseHistoryFixture()})).ready).toHaveLength(0);
 });
 it('uses all-history minimum evidence on import and rejects a preview after switching contexts',async()=>{
   const history=warehouseHistoryFixture();
@@ -60,8 +60,11 @@ it('uses all-history minimum evidence on import and rejects a preview after swit
   await toggleAccountingMode(workspaceId);
   expect((await previewWarehouseHistoryCosts({ledgerId,history})).ready[0]?.unitCost).toBe(0.01);
   const result=await saveWarehouseHistoryCosts({ledgerId,history,expectedAccountingMode:'historical_lowest'});
-  expect((await db.costApprovals.get(result.savedIds[0])).accountingMode).toBe('historical_lowest');
+  const saved = await db.costApprovals.get(result.savedIds[0]);
+  expect(saved.approvedAmount).toBe(0.01);
+  expect(saved.accountingMode).toBeUndefined();
   await toggleAccountingMode(workspaceId);
+  expect((await previewWarehouseHistoryCosts({ledgerId,history})).ready).toHaveLength(0);
   const before=await db.costApprovals.toArray();
   await expect(saveWarehouseHistoryCosts({ledgerId,history,expectedAccountingMode:'historical_lowest'})).rejects.toThrow('上下文已变化');
   expect(await db.costApprovals.toArray()).toEqual(before);

@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.61';
+    const EXTENSION_VERSION = '8.0.62';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -420,10 +420,18 @@
                 }
                 let workbookBody;
                 if (options.workbook && !/json/i.test(response.headers?.get?.('content-type') || '')) {
-                    if (Number(response.headers?.get?.('content-length')) > (32 * 1024 * 1024)) throw new CostError('ERP 导出文件过大');
+                    const bulk = window.ShopeersErpBulkPurchase;
+                    const checkSize = size => {
+                        if (size <= (bulk?.MAX_BYTES ?? 32 * 1024 * 1024)) return;
+                        const error = new CostError('ERP 导出文件过大');
+                        if (path === bulk?.EXPORT_PATH) Object.assign(error, bulk.workbookSizeError('fileBytes', size));
+                        throw error;
+                    };
+                    const declaredBytes = Number(response.headers?.get?.('content-length'));
+                    if (Number.isSafeInteger(declaredBytes)) checkSize(declaredBytes);
                     const buffer = await Promise.race([response.arrayBuffer(), aborted]);
                     const bytes = new Uint8Array(buffer);
-                    if (bytes.byteLength > (32 * 1024 * 1024)) throw new CostError('ERP 导出文件过大');
+                    checkSize(bytes.byteLength);
                     if (bytes[0] === 80 && bytes[1] === 75) return { code: 0, buffer };
                     try { workbookBody = JSON.parse(new TextDecoder().decode(bytes)); }
                     catch { throw new CostError('ERP 导出格式异常', '未取得可校验的工作簿，请重试或使用手动导入。'); }
@@ -1500,7 +1508,10 @@
         run.readMetrics = { requestCount: 0, requestRetryCount: 0, requestErrorCount: 0, rateLimitCount: 0, peakRequestConcurrency: 0, requestDurationMs: 0 };
         run.controller.signal.readMetrics = run.readMetrics;
         if (!bulkPurchaseCollector) bulkPurchaseCollector = module.create({ policy: resultPolicy,
-            requestExport: (query, owner) => apiGetRetry(module.EXPORT_PATH, query, owner.controller.signal, '后台批量采购导出', { workbook: true }),
+            requestExport: (query, owner) => {
+                owner.readMetrics.bulkExportCount = (owner.readMetrics.bulkExportCount || 0) + 1;
+                return apiGetRetry(module.EXPORT_PATH, query, owner.controller.signal, '后台批量采购导出', { workbook: true });
+            },
             requestList: (query, owner) => apiGetRetry(LIST_PATH, query, owner.controller.signal, '采购范围核验'),
             readMappings: (warehouse, owner) => catalogCollector.mappings(warehouse, owner, true),
             readDetails: readOrderDetails, aggregate: aggregateDetails,
@@ -1521,12 +1532,12 @@
             if (run.task?.costFlow === 'task' && querySkcs.length > 1) {
                 throw Object.assign(error, { code: 'ERP_BULK_FALLBACK', readMetrics: { ...run.readMetrics, ...error.bulkMetrics, durationMs: Date.now() - startedAt } });
             }
-            const attempted = { ...run.readMetrics };
+            const attempted = { ...run.readMetrics, ...error.bulkMetrics };
             setLoading('正在补查采购成本', '当前范围需要核验，改用原读取方式');
             const state = await runLegacyCalculation(filters, run);
-            for (const field of ['requestCount', 'requestRetryCount', 'requestErrorCount', 'rateLimitCount', 'requestDurationMs']) state.meta[field] = (state.meta[field] || 0) + (attempted[field] || 0);
-            state.meta.peakRequestConcurrency = Math.max(state.meta.peakRequestConcurrency || 0, attempted.peakRequestConcurrency || 0);
+            addCollectionMetrics(state.meta, attempted);
             Object.assign(state.meta, { collectionMethod: 'legacy', bulkFallbackCount: 1,
+                ...(error.workbookLimit ? { workbookLimit: error.workbookLimit } : {}),
                 bulkFallbackReason: /^[a-z_]{1,80}$/.test(error.reason || '') ? error.reason : 'bulk_source_unavailable', durationMs: Date.now() - startedAt });
             return state;
         }
@@ -1850,10 +1861,13 @@
     function partitionCostScope(batch, error) {
         const skcs = batch.platformSkcs;
         if (skcs.length < 2) return [];
-        if (error.code === 'ERP_COST_PAYLOAD_LARGE') {
+        const oversizedWorkbook = error.reason === 'workbook_too_large';
+        if (oversizedWorkbook || error.code === 'ERP_COST_PAYLOAD_LARGE') {
             const middle = Math.ceil(skcs.length / 2);
-            return [skcs.slice(0, middle), skcs.slice(middle)].map(platformSkcs => ({ platformSkcs,
-                sourceMode: batch.sourceMode || 'bulk', ...(batch.fallbackReason ? { fallbackReason: batch.fallbackReason } : {}) }));
+            const sourceMode = oversizedWorkbook ? 'bulk' : batch.sourceMode || 'bulk';
+            const fallbackReason = oversizedWorkbook ? error.reason : batch.fallbackReason;
+            return [skcs.slice(0, middle), skcs.slice(middle)].map(platformSkcs => ({ platformSkcs, sourceMode,
+                ...(fallbackReason ? { fallbackReason } : {}) }));
         }
         const reason = /^[a-z_]{1,80}$/.test(error.reason || '') ? error.reason : 'bulk_source_unavailable';
         const failed = new Set((error.fallbackSkcs || []).map(resultPolicy.canonical));
@@ -1895,13 +1909,17 @@
             finally { heartbeatBusy = false; }
         }, 3000);
         try {
-            const pending = task.runMode === 'catalog' ? [] : [...task.batches];
+            const pending = task.runMode === 'catalog' ? [] : task.deliveryOnly
+                ? task.batches.filter(batch => !batch.deliveryId && batch.status === 'collected' && batch.resultDeliveryId) : [...task.batches];
+            const unreadSkcs = pending.filter(batch => !batch.deliveryId && ['pending', 'running'].includes(batch.status)).flatMap(batch => batch.platformSkcs);
+            const resumeBulkScope = pending.some(batch => batch.deliveryId || batch.status === 'collected') ? new Set(unreadSkcs.map(value => String(value).normalize('NFKC').trim().toUpperCase())) : null;
             while (pending.length) {
                 const initial = pending.shift();
                 if (run.cancelledByUser || run.pauseRequested) break;
                 task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
                 let batch = task.batches.find(item => item.batchId === initial.batchId);
                 if (['delivered','failed','incomplete'].includes(batch.status)) continue;
+                if (task.deliveryOnly && batch.status !== 'collected') continue;
                 if (batch.status === 'collected' && batch.resultDeliveryId) {
                     const retry = await bridge.retry(batch.resultDeliveryId);
                     task = (await taskOperation({ action: 'get', taskId: task.taskId })).task;
@@ -1912,6 +1930,7 @@
                         await taskOperation({ action: 'batch', taskId: task.taskId, batchId: batch.batchId, attemptId: batch.attemptId, state: 'pending' });
                     }
                 }
+                if (task.deliveryOnly) continue;
                 if (task.status === 'paused') { run.pauseRequested = true; break; }
                 if (['stopped','invalidated'].includes(task.status)) { run.cancelledByUser = true; break; }
                 const started = await taskOperation({ action: 'batch', taskId: task.taskId, batchId: batch.batchId, state: 'running', phase: 'cost' });
@@ -1919,6 +1938,11 @@
                 run.batchId = batch.batchId;
                 run.batchSourceMode = batch.sourceMode;
                 run.batchFallbackReason = batch.fallbackReason;
+                run.bulkExportSkcs = batch.bulkExportSkcs || (batch.sourceMode === 'bulk' && batch.fallbackReason === 'workbook_too_large' ? batch.platformSkcs : null);
+                if (resumeBulkScope) {
+                    const allowed = new Set([...resumeBulkScope, ...batch.platformSkcs.map(value => String(value).normalize('NFKC').trim().toUpperCase())]);
+                    run.bulkExportSkcs = (run.bulkExportSkcs || snapshot.platformSkcs).filter(item => allowed.has(String(item?.platformSkc ?? item).normalize('NFKC').trim().toUpperCase()));
+                }
                 run.catalogPhase = false; run.readProgress = null;
                 run.batchSkcs = batch.platformSkcs; run.controller = new AbortController();
                 run.controller.signal.deadlineAt = Date.now() + COST_STAGE_BUDGET_MS;
@@ -1990,7 +2014,8 @@
                         && ['ERP_BULK_FALLBACK', 'ERP_COST_PAYLOAD_LARGE'].includes(error.code)) {
                         const groups = partitionCostScope(batch, error);
                         if (groups.length > 1) {
-                            const partition = await taskOperation({ action: 'batch', ...identity, state: 'partition', groups });
+                            const partition = await taskOperation({ action: 'batch', ...identity, state: 'partition', groups,
+                                ...(error.workbookLimit ? { workbookLimit: error.workbookLimit } : {}) });
                             run.deferredReadMetrics = addCollectionMetrics(run.deferredReadMetrics || {}, error.readMetrics);
                             task = partition.task; run.task = task;
                             pending.unshift(...partition.batches);
@@ -2061,6 +2086,7 @@
                     updateTaskStatus(task);
                 }
             }
+            if (task.deliveryOnly && !['stopped','invalidated'].includes(task.status)) run.pauseRequested = true;
             if (run.pauseRequested && !run.cancelledByUser) task = (await taskOperation({ action: 'control', taskId: task.taskId, control: 'pause', ...(run.pauseReason ? { reason: run.pauseReason } : {}) })).task;
             run.task = task; run.costReadComplete = true;
             updateTaskStatus(task);

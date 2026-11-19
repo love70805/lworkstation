@@ -85,8 +85,9 @@ it('reports ambiguous or unavailable ownership and keeps the sales import and ot
   ]);
   const result = await commit(item([row('owned'), row('missing', ''), row('duplicate', '重复'),
     row('multi', '父A'), row('multi', '父B'), row('attrs', '父C', '红'), row('attrs', '父C', '蓝'), row('collision', '重复'), row('ok', '父D')]));
-  expect(result.catalog.createdProductCount).toBe(1);
+  expect(result.catalog.createdProductCount).toBe(2);
   expect(result.catalog.issues.map(issue => issue.reason).sort()).toEqual(['attribute_conflict', 'duplicate_skc', 'duplicate_sku', 'missing_skc', 'owned_other_skc', 'skc_conflict'].sort());
+  expect((await state()).skus.find(sku => sku.platformSku === 'attrs')).toMatchObject({attribute: ''});
   expect(await db.salesRows.count()).toBe(9);
   expect((await db.platformSkus.get('S')).productId).toBe('P');
 });

@@ -73,6 +73,30 @@ test('reads reordered headers without selection exports shifting fields', () => 
     assert.equal(parsed.records[0].purchaseQuantity, 2);
 });
 
+test('workbook limits report the measured file, expanded archive or sheet extent', () => {
+    const check = (buffer, kind, actual, limit) => assert.throws(() => module.parseWorkbook(buffer, 'a'.repeat(64)), error => {
+        assert.equal(error.reason, 'workbook_too_large');
+        assert.deepEqual({ ...error.workbookLimit }, { kind, actual, limit });
+        return true;
+    });
+    check(new ArrayBuffer(module.MAX_BYTES + 1), 'fileBytes', module.MAX_BYTES + 1, module.MAX_BYTES);
+    const bytes = workbook(standard([{}]));
+    const directory = new DataView(bytes);
+    const end = bytes.byteLength - 22;
+    assert.equal(directory.getUint32(end, true), 0x06054b50);
+    let position = directory.getUint32(end + 16, true), expanded = 0;
+    const maxExpanded = 128 * 1024 * 1024;
+    directory.setUint32(position + 24, maxExpanded, true);
+    for (let i = 0; i < directory.getUint16(end + 10, true); i++) {
+        expanded += directory.getUint32(position + 24, true);
+        position += 46 + directory.getUint16(position + 28, true) + directory.getUint16(position + 30, true) + directory.getUint16(position + 32, true);
+    }
+    check(bytes, 'expandedBytes', expanded, maxExpanded);
+    const wide = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wide, xlsx.utils.aoa_to_sheet([Array(257).fill('字段')]), 'Sheet1');
+    check(xlsx.write(wide, { type: 'array', bookType: 'xlsx' }), 'sheetColumns', 257, 256);
+});
+
 test('short exact mappings use ledger parents with no mapping requests', async () => {
     const h = harness(standard([{ price: 3 }, { price: 5 }, { price: 4 }]));
     const state = await h.collect();

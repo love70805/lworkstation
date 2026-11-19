@@ -1,19 +1,16 @@
-import { readProfitReportFreshness } from '../data/repositories/profitReportRepository';
 import { useCostEditingGuard } from '../hooks/useCostEditingGuard';
-import { sourceRevision } from '../data/db/derivedCache';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Button, Modal, Panel, useToast } from "../components/UI";
-import { readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement, createCurrentProfitReport } from "../data/repositories/profitReportRepository";
+import { readMonthlyReportState, previewMonthlySupplement, adoptMonthlySupplement, createCurrentProfitReport } from "../data/repositories/profitReportRepository";
 import { inspectSupplementSource, suggestSupplementMapping, supplementFields, supplementHeaders, supplementMarkers, suggestSupplementStore, suggestDeductionStore, supplementRowIdentity, supplementRowLabel, normalizeSupplementCandidate, legacyUnassignedDispatchRows } from "../domain/monthlySupplements";
 import { readSupplementWorkbook } from "../lib/monthlySupplementImport";
+import { dispatchSourcePeriods } from '../domain/dispatchPeriods';
 import { downloadReportFile } from "../lib/profitReportWorkbook";
 import { Exact, displayMoney, exactSum } from "../domain/profitReports";
-import { currentLedgerResult, reportReadiness, hasSavedFinancialReport } from "../domain/ledgerWorkflow";
+import { reportReadiness } from "../domain/ledgerWorkflow";
 import { includesSearch } from '../lib/textSearch';
-import DispatchOrderDownload from './DispatchOrderDownload';
 import SupplementSupplierPicker, { ALL_SUPPLEMENT_MARKERS } from '../components/SupplementSupplierPicker';
-import { profitReportFileName } from '../domain/profitReportPresentation';
 
 const fieldLabels={owner:'登记人',date:'日期',store:'实际店铺',platformSkc:'SKC',supplierNumber:'供方货号',businessId:'业务单号',order1688:'1688单号',quantity:'数量',amount:'采用金额列'};
 const ALL_MARKERS=ALL_SUPPLEMENT_MARKERS;
@@ -26,7 +23,7 @@ function sourceSelected(source,kind,selection) {
   if(!(Number(source.mapping[kind==='dispatch'?'owner':'supplierNumber'])>=0))return true;
   return supplementMarkers(source,kind).some(marker=>Array.isArray(selection)?selection.includes(marker):marker===selection);
 }
-function buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows}) {
+function buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows,periodIndex,selectedPeriods}) {
   const input={kind,ledgerId:state.ledger.id,workspaceId:state.ledger.workspaceId,period:state.ledger.period,mode,rows:[],sources:[],reviewedCrossFileConflicts:reviewed};
   const stats={addedRows:[],retainedCount:0,skipped:0,duplicates:0,sourceCount:0,unassigned:[],unmappedSources:[]};
   try {
@@ -37,6 +34,9 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,retaini
       const selectedCodes=Array.isArray(selection)?selection:null;
       const hasSelection=selectedCodes?selectedCodes.length>0:Boolean(selection);
       if(!hasSelection&&!zeroStores.length)return {ready:false,stats};
+      if(kind==='dispatch' && !sources.some(source=>periodIndex.get(source)?.periods.some(period=>selectedPeriods.has(period)))) {
+        return {ready:false,error:'所选月份没有代发记录。请核对来源月份或调整勾选。',stats};
+      }
       const retained=retaining&&current?state.adoptedRows.filter(row=>row.kind===kind):[];
       // Preserve a previously explicit manual aggregate when adding source files.
       if(retaining&&current?.mode==='manual'&&kind==='dispatch'&&!retained.length)retained.push({kind,manual:true,store:'',quantityExact:current.adoptedQuantityExact,sourceName:'此前手工总代发',sourceRow:1});
@@ -44,11 +44,14 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,retaini
       const priorKeys=new Set(retained.map(supplementRowIdentity)),seen=new Set(priorKeys);
       for(const source of sources) {
         const includeAll=selection===ALL_MARKERS;
+        const months=periodIndex.get(source);
+        if(months && !months.periods.some(period=>selectedPeriods.has(period)))continue;
         if(!sourceSelected(source,kind,selection))continue;
         const missing=missingSourceFields(source,kind);
         if(missing.length)throw new Error(`${source.fileName} / ${source.sheetName}：未识别${missing.map(field=>fieldLabels[field]).join('、')}列，请展开此来源的高级设置。`);
         stats.sourceCount++;
-        const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll||selectedCodes?'':selection,supplierNumbers:selectedCodes??undefined,includeAll,store:source.store,stores:state.stores});
+        const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll||selectedCodes?'':selection,supplierNumbers:selectedCodes??undefined,includeAll,store:source.store,stores:state.stores,
+          periodScope:months && {rows:months.rows,selected:selectedPeriods}});
         stats.skipped+=parsed.ignored.filter(row=>row.reason==='missing_quantity').length;
         stats.unassigned.push(...parsed.ignored.filter(row=>row.reason==='unassigned_owner').map(row=>({...row,sourceName:source.fileName})));
         if(parsed.errors.length){
@@ -85,10 +88,13 @@ export function SupplementEditor({ state, kind, onClose }) {
   const {notify}=useToast(),current=state[kind];
   const [selection,setSelection]=useState(kind==='deduction'?[]:''),[search,setSearch]=useState(''),[reviewed,setReviewed]=useState(false),[excludedRows,setExcludedRows]=useState([]);
   const [mode,setMode]=useState('files'),[sources,setSources]=useState([]),[retaining,setRetaining]=useState(true),[amounts,setAmounts]=useState({}),[zeroStores,setZeroStores]=useState([]);
+  const [selectedPeriods,setSelectedPeriods]=useState(()=>new Set([state.ledger.period]));
+  const periodIndex=useMemo(()=>new Map(kind==='dispatch' ? sources.map(source=>[source,dispatchSourcePeriods(source,state.ledger.period)]) : []),[sources,kind,state.ledger.period]);
+  const availablePeriods=useMemo(()=>[...new Set([...periodIndex.values()].flatMap(source=>source.periods))].sort(),[periodIndex]);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[previewPending,setPreviewPending]=useState(false),[preview,setPreview]=useState(null),[retry,setRetry]=useState(0);
   const [showAllSources,setShowAllSources]=useState(false),storeInputs=useRef(new Map());
   const markers=useMemo(()=>[...new Set(sources.flatMap(source=>supplementMarkers(source,kind)))].sort((a,b)=>a.localeCompare(b,'zh-CN')),[sources,kind]);
-  const draft=useMemo(()=>buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows}),[state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows]);
+  const draft=useMemo(()=>buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows,periodIndex,selectedPeriods}),[state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows,periodIndex,selectedPeriods]);
   const activePreview=preview?.draft===draft?preview:null;
   const finalCandidate=activePreview?.candidate;
   const hasSelection=Array.isArray(selection)?selection.length>0:Boolean(selection);
@@ -135,7 +141,7 @@ export function SupplementEditor({ state, kind, onClose }) {
   const blocked=Boolean(finalCandidate?.conflicts?.length&&!finalCandidate.reviewedCrossFileConflicts);
   const priorKeys=new Set(state.adoptedRows.filter(row=>row.kind===kind).map(supplementRowIdentity));
   const visibleConflicts=(finalCandidate?.conflicts??[]).filter(row=>!(current?.reviewedCrossFileConflicts&&retaining&&priorKeys.has(supplementRowIdentity(row))&&priorKeys.has(supplementRowIdentity({fileHash:row.previousFileHash,sourceSheet:row.previousSourceSheet,sourceRow:row.previousSourceRow}))));
-  return <Modal open size="large" className="report-import" title={`${state.ledger.period} · ${kind==='dispatch'?'代发':'扣款'}来源`} description="本工作区整月全部店铺，收到或录入日期不改变账本月份。" onClose={()=>!busy&&onClose()} footer={<>
+  return <Modal open size="large" className="report-import" title={`${state.ledger.period} · ${kind==='dispatch'?'代发':'扣款'}来源`} description={kind==='dispatch'?'默认只计入核算月的代发记录。':'本工作区整月全部店铺，收到或录入日期不改变账本月份。'} onClose={()=>!busy&&onClose()} footer={<>
     {current&&finalCandidate?<p className="report-replacement">整月 {oldTotal} → {finalTotal} {unit}；导入后更新 r{current.revision}，旧版本保留。{mode==='files'&&retaining?'已有来源保留。':'全部已有来源将被本次内容替换。'}</p>:null}
     <Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy||previewPending||!activePreview||blocked} onClick={adopt}>{current?'导入并更新本月来源':'导入本月来源'}</Button>
   </>}>
@@ -145,6 +151,12 @@ export function SupplementEditor({ state, kind, onClose }) {
       <label className="report-upload">选择文件<input type="file" multiple accept={kind==='dispatch'?'.xlsx,.csv':'.xlsx'} disabled={busy} onChange={event=>{void upload(event.target.files);event.target.value='';}} /></label>
       {sources.length?<div className="report-selection">
         {kind==='deduction'?<SupplementSupplierPicker markers={markers} selection={selection} search={search} onSearch={setSearch} onChange={value=>{invalidate();setSelection(value);}} disabled={busy}/>:<>
+          <fieldset className="dispatch-month-options"><legend>计入的来源月份</legend>
+            {availablePeriods.map(period=><label key={period}><input type="checkbox" checked={selectedPeriods.has(period)} disabled={busy}
+              onChange={event=>{const checked=event.target.checked;invalidate();setSelectedPeriods(previous=>{const next=new Set(previous);if(checked)next.add(period);else next.delete(period);return next;});}}/>
+              {period}{period===state.ledger.period?'（核算月）':''}</label>)}
+            {!availablePeriods.includes(state.ledger.period) && <small>来源中未找到 {state.ledger.period} 的记录。</small>}
+          </fieldset>
           <label>搜索登记人<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="搜索源表姓名" disabled={busy}/></label>
           <label>登记人<select aria-label="登记人" value={selection} disabled={busy} onChange={event=>{invalidate();setSelection(event.target.value);}}><option value="">请选择登记人</option><option value={ALL_MARKERS}>全部登记人（所有有效记录）</option>{markers.filter(marker=>marker===selection||includesSearch(marker,search)).map(marker=><option key={marker}>{marker}</option>)}</select></label>
         </>}
@@ -193,18 +205,10 @@ export function AdoptedDispatchNotice({ rows = [], locked = false }) {
 export default function MonthlyReportManager({ ledgerId, workspaceId, missingCostCount, onOpenCosts, onState, editor, onEdit, compact = false }) {
   const costGuard = useCostEditingGuard(workspaceId, ledgerId);
   const {notify}=useToast();
-  const [retry,setRetry]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false),[orderDownload,setOrderDownload]=useState(null);
+  const [retry,setRetry]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const exportingRef=useRef(false);
   const [exportStage,setExportStage]=useState('');
-  const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,data:await readMonthlyReportState(ledgerId)};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry]);
-  const latest = state?.ledgerId === ledgerId && state?.workspaceId === workspaceId ? state.data?.reports?.[0] : null;
-  const freshness = useLiveQuery(async () => {
-    if (!latest || busy) return null;
-    try { return await readProfitReportFreshness(latest.id); }
-    catch (error) { return { reportId: latest.id, status: 'error', error: error.message }; }
-  }, [latest?.id, ledgerId, workspaceId, retry, busy], null);
-  const currentFreshness = freshness && latest && freshness.reportId === latest.id && (freshness.status === 'error' || freshness.sourceRevision === sourceRevision()) ? freshness : null;
-  const reportTime = value => new Date(value).toLocaleString('zh-CN', { year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false });
+  const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,data:await readMonthlyReportState(ledgerId,{includeReports:false})};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry]);
   useEffect(()=>{onState?.(state);},[state,onState]);
   if(!state||state.ledgerId!==ledgerId)return <Panel>正在读取本月报告...</Panel>;
   if(state.error)return <Panel><p role="alert">{state.error}</p><Button onClick={()=>setRetry(value=>value+1)}>重新读取报告</Button></Panel>;
@@ -212,8 +216,10 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   const missing=missingCostCount===undefined?data.ledger.costSummary?.missingCount:missingCostCount;
   const readiness=reportReadiness({...data,ledger:{...data.ledger,operationWorkflow:2},missingCount:missing});
   const nextKind=readiness.financialReady?'financial':'pre_deduction';
-  async function download(reportId){setBusy(true);setError('');try{const saved=await readProfitReportDownload(reportId);await downloadReportFile(saved.report,{dispatchRows:saved.dispatchRows,deductionRows:saved.deductionRows,useStoredFile:true});}catch(error){setError(error.message);}finally{setBusy(false);}}
-  async function prepareOrderDownload(reportId){setBusy(true);setError('');try{setOrderDownload(await readProfitReportDownload(reportId));}catch(error){setError(error.message);}finally{setBusy(false);}}
+  let costStatus = nextKind === 'financial' ? '本次包含各店扣款' : '本次为未扣款利润';
+  if (costGuard.blocked) costStatus = costGuard.title;
+  else if (missing == null) costStatus = '正在核对成本';
+  else if (missing > 0) costStatus = [costGuard.title, `还有 ${missing} 条店铺 SKU 待补成本`].filter(Boolean).join('，');
   async function exportCurrent(){
     if(exportingRef.current || costGuard.blocked)return;
     exportingRef.current=true;
@@ -228,26 +234,18 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   }
   return <Panel className="monthly-report-manager" id="monthly-reports" tabIndex={-1}>
     {!compact ? <div className="report-heading"><h2>本月报告 · {data.ledger.period}</h2></div> : null}
-    <div className="report-primary-actions"><p role="status">{costGuard.blocked?'成本核算尚未结束，当前结果仍会变化':missing==null?'正在核对成本':missing?'还有 '+missing+' 条店铺 SKU 待补成本':nextKind==='financial'?'本次包含各店扣款':'本次为未扣款利润'}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>{costGuard.blocked?'查看临时结果':'补齐成本'}</Button>:null}<Button variant="primary" loading={busy} disabled={busy||costGuard.blocked||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
+    <div className="report-primary-actions"><p role="status">{costStatus}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>{costGuard.lastConfirmedFinished?'查看缺成本项':costGuard.blocked?'查看临时结果':'补齐成本'}</Button>:null}<Button variant="primary" loading={busy} disabled={busy||costGuard.blocked||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
 
     {exportStage ? <div className="erp-collection-meter" role="status"><span>{exportStage}</span><progress aria-label="报告导出进度" /></div> : null}
-    <details open={compact ? undefined : true}><summary>代发、扣款与导出记录</summary>
-    <p>按当前台账和成本直接导出，数据可随时更新。代发未录入时按 0 计；扣款未齐时导出未扣款报告。</p>
+    <details open={compact ? undefined : true}><summary>代发与扣款</summary>
+    <p>代发可选填，未录入时导出的利润不含代发。扣款未齐时可导出未扣款报告。</p>
     <AdoptedDispatchNotice rows={data.adoptedRows} />
     <div className="report-sources-summary">
-      <div><strong>代发</strong><p>{data.dispatch?'已登记 '+data.dispatch.adoptedQuantityExact+' 件 · ¥'+displayMoney(new Exact(data.dispatch.adoptedQuantityExact).times(data.ledger.warehouseRate??'0.7')):'未录入 · 本次按 0 计'}</p><Button disabled={busy} onClick={()=>onEdit('dispatch')}>{data.dispatch?'更新代发':'登记代发'}</Button></div>
+      <div><strong>代发</strong><p>{data.dispatch?'已登记 '+data.dispatch.adoptedQuantityExact+' 件 · ¥'+displayMoney(new Exact(data.dispatch.adoptedQuantityExact).times(data.ledger.warehouseRate??'0.7')):'未录入'}</p><Button disabled={busy} onClick={()=>onEdit('dispatch')}>{data.dispatch?'更新代发':'登记代发'}</Button></div>
       <div><strong>独立扣款</strong><p>{data.deduction?'已登记 ¥'+displayMoney(data.deduction.signedAmountExact):'未录入'}{readiness.missingStores.length?' · 部分店铺待取得':''}</p><Button disabled={busy} onClick={()=>onEdit('deduction')}>{data.deduction?'更新扣款':'登记扣款'}</Button></div>
     </div>
 
-    {data.reports.length?<details><summary>历史导出（{data.reports.length}）</summary>{data.reports.map(report=><div className="report-history-row" key={report.id}><span>{report.kind==='financial'?'利润表':'未扣款报告'} · r{report.revision} · {reportTime(report.createdAt)} · ¥{report.displayTotals.profit}</span><Button disabled={busy} onClick={()=>download(report.id)}>下载此报告</Button><Button disabled={busy} onClick={()=>prepareOrderDownload(report.id)}>补齐代发单号</Button></div>)}</details>:null}
     </details>
-    {latest ? <div className="report-latest-state" role="status">
-      {latest ? <><span>最近导出：{latest.kind === 'financial' ? '利润表' : '未扣款报告'} · r{latest.revision} · <time dateTime={latest.createdAt}>{reportTime(latest.createdAt)}</time></span>
-        <strong className={'report-source-' + (currentFreshness?.status ?? 'loading')}>{busy ? '文件处理完成后核对来源' : !currentFreshness ? '正在核对来源…' : currentFreshness.status === 'current' ? '与当前来源一致' : currentFreshness.status === 'changed' ? '来源已变化，请重新导出' : currentFreshness.status === 'unknown' ? '历史报告未记录来源状态，需重新导出核对' : '来源状态读取失败'}</strong>
-        {currentFreshness?.status === 'error' ? <Button onClick={()=>setRetry(value=>value+1)}>重试核对</Button> : null}
-        <Button variant="ghost" disabled={busy} onClick={()=>download(latest.id)}>下载最近报告</Button></> : <span>尚未导出报告。导出后将在此保留类型、版本和来源状态。</span>}
-    </div> : null}
-    {orderDownload?<DispatchOrderDownload key={orderDownload.report.id} saved={orderDownload} onClose={()=>setOrderDownload(null)} />:null}
     {editor?<SupplementEditor key={ledgerId+'/'+editor} state={data} kind={editor} onClose={()=>onEdit(null)} />:null}
     {error?<p role="alert">{error}</p>:null}
   </Panel>;

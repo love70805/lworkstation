@@ -3,7 +3,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { liveQuery } from 'dexie';
 import { db } from './db/clientDatabase';
 import { setActiveMemberContext } from './repositories/selectionRepository';
-import { getLedgerSnapshot, saveManualCostOverride, revokeManualCostOverride, updateLedgerWarehouseRate } from './repositories/profitRepository';
+import { getLedgerSnapshot, getProfitPageCostEvidence, saveManualCostOverride, revokeManualCostOverride, updateLedgerWarehouseRate } from './repositories/profitRepository';
 import { readAccountingMode, toggleAccountingMode, readHistoricalLowestCosts } from './repositories/inventoryAccountingRepository';
 import { readCachedReportProducts } from './repositories/derivedComputationService';
 import { previewProfitReport, saveProfitReport, readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement } from './repositories/profitReportRepository';
@@ -11,6 +11,17 @@ import { createWorkspaceBackupPayload, restoreWorkspaceBackupPayload } from './r
 import { calculateWarehouseCostDecision } from '../domain/erpCostResolution';
 import { buildReportProducts } from '../domain/profitReports';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
+import { packProfitSearch, unpackProfitSearch } from '../domain/profitPageProjection';
+import { readLedgerScopeRows } from './repositories/ledgerReadCache';
+
+it('round-trips the complete searchable purchase numbers in a large cached month', async () => {
+  const text = '采购单 / 中文 "订单" 2026-10-11 \n'.repeat(7000);
+  const input = { resolutionIndex: { publishedIds: ['B'], resolutions: [] },
+    costs: [{ id: 17, purchaseSearchText: text }, { id: 18 }, { id: 19, purchaseSearchText: '尾号' }] };
+  const packed = await packProfitSearch(input);
+  expect(packed.searchBytes.byteLength).toBeLessThan(text.length);
+  expect(await unpackProfitSearch(structuredClone(packed))).toEqual(input);
+});
 
 beforeEach(async () => {
   const storage = new Map();
@@ -27,6 +38,56 @@ beforeEach(async () => {
 });
 afterEach(async () => { await db.delete(); vi.unstubAllGlobals(); });
 const lines = snapshot => buildReportProducts({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
+it('refreshes cached sales and navigation after a same-count edit and refuses a foreign month switch',async()=>{
+  const row=await db.salesRows.where('ledgerId').equals('L').first();
+  const before=await getLedgerSnapshot('L',{profitPage:true});
+  expect((await readCachedReportProducts({snapshot:before}))[0].revenueExact).toBe('40');
+  expect(await readLedgerScopeRows('W','L')).toEqual([{store:'甲',supplierNumber:'SUP'}]);
+  await db.salesRows.update(row.id,{amount:43,supplierNumber:'NEW'});
+  const after=await getLedgerSnapshot('L',{profitPage:true});
+  expect((await readCachedReportProducts({snapshot:after}))[0].revenueExact).toBe('43');
+  expect(await readLedgerScopeRows('W','L')).toEqual([{store:'甲',supplierNumber:'NEW'}]);
+  await db.salesRows.add({...row,id:undefined,workspaceId:'other',store:'外部'});
+  expect(await readLedgerScopeRows('W','L')).toEqual([{store:'甲',supplierNumber:'NEW'}]);
+  await expect(readLedgerScopeRows('W','L',{strict:true})).rejects.toThrow('跨工作区');
+});
+it.each(['weighted', 'historical_lowest'])('opens a %s profit projection and fetches the selected original only for its owning scope', async mode => {
+  if (mode === 'historical_lowest') await toggleAccountingMode('W');
+  const original = await getLedgerSnapshot('L');
+  const page = await getLedgerSnapshot('L', { profitPage: true });
+  const fields = rows => rows.map(({ quantityExact, revenueExact, unitCostExact, purchaseCostExact, warehouseCostExact, profitExact, costSourceRecordId }) =>
+    ({ quantityExact, revenueExact, unitCostExact, purchaseCostExact, warehouseCostExact, profitExact, costSourceRecordId }));
+  expect(fields(await readCachedReportProducts({ snapshot: page }))).toEqual(fields(lines(original)));
+  expect(page.ledger.costSummary).toEqual(original.ledger.costSummary);
+  const [cost] = page.costs;
+  expect(cost.purchaseRecords).toBeUndefined();
+  expect(cost.costDecision?.purchaseRecords).toBeUndefined();
+  const scope = { workspaceId: 'W', ledgerId: 'L', mode, id: cost.id, batchId: cost.batchId, platformSku: 'SKU', selection: cost };
+  const evidence = await getProfitPageCostEvidence(scope);
+  expect(evidence.purchaseRecords).toEqual(original.costs[0].purchaseRecords);
+  if (mode === 'historical_lowest') {
+    expect(evidence.costDecision.selectedRecordIds).toEqual(['later']);
+    expect(evidence.purchaseReview.costDecision.selectedRecordIds).toEqual(['c','b','a']);
+    expect(evidence.purchaseReview.costDecision.baseline.sampleCount).toBe(4);
+  }
+  expect(await getProfitPageCostEvidence({ ...scope, platformSku: 'OTHER' })).toBeNull();
+  expect(await getProfitPageCostEvidence({ ...scope, workspaceId: 'OTHER' })).toBeNull();
+  await db.erpCostBatches.update('B', { status: 'voided' });
+  expect(await getProfitPageCostEvidence(scope)).toBeNull();
+  expect((await getLedgerSnapshot('L', { profitPage: true })).costs).toEqual([]);
+});
+
+it('rejects later or unverified purchases and gives the same manual cost in a projected month', async () => {
+  const source = await db.erpCostRows.toCollection().first();
+  const future = { ...source.purchaseRecords[0], recordId: 'future', purchaseDate: '2027-01-01' };
+  await db.erpCostRows.update(source.id, { purchaseRecords: [...source.purchaseRecords, future], selectedRecordIds: [future.recordId],
+    costDecision: { ...source.costDecision, selectedRecords: [future], selectedRecordIds: [future.recordId] } });
+  const before = await getLedgerSnapshot('L', { profitPage: true });
+  expect((await readCachedReportProducts({ snapshot: before }))[0].unitCostExact).toBeNull();
+  await saveManualCostOverride({ledgerId:'L', store:'甲', platformSku:'SKU', unitCost:0, reason:'synthetic test'});
+  const after = await getLedgerSnapshot('L', { profitPage: true });
+  expect((await readCachedReportProducts({ snapshot: after }))[0]).toMatchObject({unitCostExact:'0', costSource:'manual_override'});
+});
 async function exportReport() { const input = { ledgerId: 'L', kind: 'pre_deduction' }, preview = await previewProfitReport(input); return saveProfitReport(input, { expectedFingerprint: preview.fingerprint }); }
 
 it('reuses both computed results and purchase evidence across mode switches without another ERP read', async () => {
@@ -80,17 +141,91 @@ it('keeps explicit zero manual costs first in either system', async () => {
   expect(lines(await getLedgerSnapshot('L'))[0]).toMatchObject({ unitCostExact: '0', costSource: 'manual_override' });
 });
 
-it('isolates manual edits and revocations without changing the original approvals or ledger', async () => {
-  const primary=await saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU',unitCost:0,reason:'原核算零成本'});
-  const original=await db.costApprovals.get(primary.id), ledger=await db.ledgers.get('L');
+const manualScope = { ledgerId: 'L', store: '甲', platformSku: 'SKU', reason: '本月实价' };
+
+async function currentPrice(amount, source) {
+  const original = lines(await getLedgerSnapshot('L'))[0];
+  expect(original).toMatchObject({ unitCostExact: amount, costSource: source });
+  const page = await getLedgerSnapshot('L', { profitPage: true });
+  expect((await readCachedReportProducts({ snapshot: page }))[0]).toMatchObject({
+    unitCostExact: amount, costSource: source, costSourceRecordId: original.costSourceRecordId,
+  });
+}
+
+it('uses one manual approval through both editors, cost selection, report export and revocation', async () => {
+  const first = await saveManualCostOverride({ ...manualScope, unitCost: 0 });
+  const frozen = await exportReport();
   await toggleAccountingMode('W');
-  const own=await saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU',unitCost:3,reason:'当前盘点调整'});
-  expect(lines(await getLedgerSnapshot('L'))[0].unitCostExact).toBe('3');
-  expect(await db.costApprovals.get(primary.id)).toEqual(original);expect(await db.ledgers.get('L')).toEqual(ledger);
-  await revokeManualCostOverride({ledgerId:'L',approvalId:own.id});
-  expect(lines(await getLedgerSnapshot('L'))[0].unitCostExact).toBe('2');
-  await toggleAccountingMode('W');expect(lines(await getLedgerSnapshot('L'))[0].unitCostExact).toBe('0');
-  expect(await db.costApprovals.get(primary.id)).toEqual(original);
+  const next = await saveManualCostOverride({ ...manualScope, unitCost: 3 });
+  expect(next.accountingMode).toBeUndefined();
+  expect(await db.costApprovals.get(first.id)).toMatchObject({ status: 'revoked' });
+  expect((await db.costApprovals.toArray()).filter(row => row.status === 'approved')).toEqual([next]);
+  await currentPrice('2', 'erp');
+  expect((await exportReport()).totalsExact.purchaseCostExact).toBe('4');
+  await toggleAccountingMode('W');
+  await currentPrice('3', 'manual_override');
+  expect((await exportReport()).totalsExact.purchaseCostExact).toBe('6');
+  await expect(revokeManualCostOverride({ ledgerId: 'L', approvalId: first.id })).rejects.toThrow();
+  await revokeManualCostOverride({ ledgerId: 'L', approvalId: next.id });
+  await currentPrice('9', 'erp');
+  await toggleAccountingMode('W');
+  await currentPrice('2', 'erp');
+  expect((await readProfitReportDownload(frozen.id)).report.fileBase64).toBe(frozen.fileBase64);
+});
+
+it('carries a lone legacy lowest-mode approval into both calculations and honors a linked revocation in its original scope', async () => {
+  const saved = await saveManualCostOverride({ ...manualScope, unitCost: 0.0000002 });
+  await db.costApprovals.update(saved.id, { accountingMode: 'historical_lowest' });
+  await currentPrice('0.0000002', 'manual_override');
+  await db.costApprovals.put({ ...saved, id: 'OTHER-STORE-REVOCATION', status: 'revoked', accountingMode: 'historical_lowest',
+    sourceApprovalId: saved.id, referenceCost: { ...saved.referenceCost, store: '乙' } });
+  await toggleAccountingMode('W');
+  await currentPrice('0.0000002', 'manual_override');
+  await db.costApprovals.update(saved.id, { accountingMode: 'weighted' });
+  await db.costApprovals.put({ ...saved, id: 'OLD-REVOCATION', status: 'revoked', accountingMode: 'historical_lowest', sourceApprovalId: saved.id });
+  await currentPrice('2', 'erp');
+  await toggleAccountingMode('W');
+  await currentPrice('9', 'erp');
+  expect((await db.costApprovals.get(saved.id)).status).toBe('approved');
+});
+
+it('does not choose between legacy conflicting amounts and replaces both after one explicit correction', async () => {
+  const normal = await saveManualCostOverride({ ...manualScope, unitCost: 8 });
+  const alternate = { ...normal, id: 'OLD-LOW', accountingMode: 'historical_lowest', approvedAmount: 3,
+    approvedAt: '2026-12-01T00:00:00Z', referenceCost: { ...normal.referenceCost, unitCost: 3 } };
+  await db.costApprovals.add(alternate);
+  await currentPrice('9', 'erp');
+  for (const approval of (await getLedgerSnapshot('L')).approvals) expect(approval.manualCostConflict.toSorted()).toEqual([3,8]);
+  await toggleAccountingMode('W');
+  await currentPrice('2', 'erp');
+  expect(await db.costApprovals.get(normal.id)).toEqual(normal);
+  expect(await db.costApprovals.get(alternate.id)).toEqual(alternate);
+  const confirmed = await saveManualCostOverride({ ...manualScope, unitCost: 1 });
+  await currentPrice('1', 'manual_override');
+  await toggleAccountingMode('W');
+  await currentPrice('1', 'manual_override');
+  expect((await db.costApprovals.toArray()).filter(row => row.status === 'approved')).toEqual([confirmed]);
+  const revocations = (await db.auditEvents.toArray()).filter(row => row.action === 'manual_override_revoked');
+  expect(revocations.map(row => row.objectId).sort()).toEqual([normal.id,alternate.id].sort());
+});
+
+it('updates ordinary coverage when the only manual cost is saved or revoked in lowest mode', async () => {
+  await db.erpCostRows.clear();
+  await toggleAccountingMode('W');
+  const [first, second] = await Promise.all([7, 8].map(unitCost => saveManualCostOverride({ ...manualScope, unitCost })));
+  const active = (await db.costApprovals.toArray()).filter(row => row.status === 'approved');
+  expect(active).toHaveLength(1);
+  expect([first.id, second.id]).toContain(active[0].id);
+  expect((await db.ledgers.get('L')).costSummary).toMatchObject({ manualOverrideCount: 1, missingCount: 0 });
+  await toggleAccountingMode('W'); await currentPrice(String(active[0].approvedAmount), 'manual_override');
+  await toggleAccountingMode('W');
+  await revokeManualCostOverride({ ledgerId: 'L', approvalId: active[0].id });
+  expect((await db.ledgers.get('L')).costSummary).toMatchObject({ manualOverrideCount: 0, missingCount: 1 });
+  for (let i = 0; i < 2; i++) {
+    const page = await getLedgerSnapshot('L', { profitPage: true });
+    expect((await readCachedReportProducts({ snapshot: page }))[0].unitCostExact).toBeNull();
+    await toggleAccountingMode('W');
+  }
 });
 
 it('uses complete unadopted receipts independently of the ordinary monthly cutoff', async () => {
@@ -183,7 +318,7 @@ it('rejects a manual cost draft after its accounting context changes', async () 
   expect(await db.costApprovals.toArray()).toEqual(before);
 });
 
-it('keeps source changes and export previews isolated between accounting contexts',async()=>{
+it('rejects a stale preview across modes and shares the newest adopted deduction',async()=>{
   const source=amount=>({ledgerId:'L',workspaceId:'W',period:'2026-08',kind:'deduction',mode:'manual',rows:[{kind:'deduction',manual:true,store:'甲',signedAmountExact:String(amount)}]});
   const primary=source(5);await adoptMonthlySupplement(primary,await previewMonthlySupplement(primary));
   const stale=await previewMonthlySupplement(source(8));
@@ -193,10 +328,25 @@ it('keeps source changes and export previews isolated between accounting context
   expect((await readMonthlyReportState('L')).deduction.signedAmountExact).toBe('10');
   const backup=await createWorkspaceBackupPayload();await restoreWorkspaceBackupPayload(backup);
   await toggleAccountingMode('W');
-  expect((await readMonthlyReportState('L')).deduction.signedAmountExact).toBe('5');
+  expect((await readMonthlyReportState('L')).deduction.signedAmountExact).toBe('10');
 });
 
-it('pins an explicitly adopted source even when it equals the ordinary baseline', async () => {
+it('uses the latest explicit warehouse-rate edit in a legacy split ledger and shares the next edit', async () => {
+  const setting = {key:'inventory-rate:W:L',value:'0.4',updatedAt:'2026-10-02T00:00:00Z'};
+  await db.settings.put(setting);
+  await db.ledgers.update('L',{updatedAt:'2026-10-10T00:00:00Z'});
+  expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(0.4);
+  await db.auditEvents.add({workspaceId:'W',objectType:'monthly_ledger',objectId:'L',action:'warehouse_rate_updated',
+    after:{warehouseRate:0.7},createdAt:'2026-10-03T00:00:00Z'});
+  await toggleAccountingMode('W');
+  expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(0.7);
+  await updateLedgerWarehouseRate('L',0);
+  await toggleAccountingMode('W');
+  expect(await db.settings.get(setting.key)).toBeUndefined();
+  expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(0);
+});
+
+it('uses the most recent ordinary deduction after a prior identical adoption in lowest mode', async () => {
   const source = amount => ({ ledgerId: 'L', workspaceId: 'W', period: '2026-08', kind: 'deduction', mode: 'manual', rows: [{ kind: 'deduction', manual: true, store: '甲', signedAmountExact: String(amount) }] });
   await adoptMonthlySupplement(source(5), await previewMonthlySupplement(source(5)));
   await toggleAccountingMode('W');
@@ -204,7 +354,7 @@ it('pins an explicitly adopted source even when it equals the ordinary baseline'
   await toggleAccountingMode('W');
   await adoptMonthlySupplement(source(8), await previewMonthlySupplement(source(8)));
   await toggleAccountingMode('W');
-  expect((await readMonthlyReportState('L')).deduction.signedAmountExact).toBe('5');
+  expect((await readMonthlyReportState('L')).deduction.signedAmountExact).toBe('8');
 });
 
 it('exports isolated revisions without finalizing, allows later edits, and preserves previous files through backup and restore', async () => {
@@ -220,7 +370,7 @@ it('exports isolated revisions without finalizing, allows later edits, and prese
   expect((await readMonthlyReportState('L')).reports.map(report => report.id)).toEqual([low.id]);
   await db.ledgers.update('L', { status: 'finalized' });
   await updateLedgerWarehouseRate('L', 1);
-  expect((await db.ledgers.get('L')).warehouseRate).toBe(0.7);
+  expect((await db.ledgers.get('L')).warehouseRate).toBe(1);
   expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(1);
   const revised = await exportReport();
   expect(revised.revision).toBe(2);
@@ -231,5 +381,5 @@ it('exports isolated revisions without finalizing, allows later edits, and prese
   expect((await readProfitReportDownload(normal.id)).report.fileBase64).toBe(original);
   expect((await readProfitReportDownload(revised.id)).report.fileSha256).toBe(revised.fileSha256);
   await toggleAccountingMode('W');
-  expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(0.7);
+  expect((await getLedgerSnapshot('L')).ledger.warehouseRate).toBe(1);
 });

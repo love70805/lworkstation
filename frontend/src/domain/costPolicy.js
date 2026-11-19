@@ -4,7 +4,7 @@ import { DEFAULT_CURRENCY } from "./erpCosts";
 import { validManualOverride } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@11-explicit-anomaly-ignore";
+export const COST_POLICY_VERSION = "formal-cost-policy@12-shared-manual";
 
 function text(value) {
   const normalized = String(value ?? "").trim();
@@ -117,26 +117,29 @@ export function resolveFormalCostDecision({
   workspaceId,
   store,
   manualOverride = null,
+  accountingMode = 'weighted',
   ledgerId,
   period = null,
   platformSku,
   erpCost = null,
   reference1688Cost = null,
   approval = null,
-}) {
+}, checkPeriod = isErpCostWithinPeriod) {
   const normalizedSku = normalizePlatformSku(platformSku);
   const canonicalSku = canonicalPlatformSku(normalizedSku);
   const reasons = [];
-  if (validManualOverride(manualOverride, { workspaceId, ledgerId, store, platformSku })) {
+  const manual = validManualOverride(manualOverride, { workspaceId, ledgerId, store, platformSku });
+  const normalizedErp = manual && accountingMode !== 'historical_lowest' ? { candidate: null, issues: [] }
+    : normalizeCandidate(erpCost, canonicalSku, "erp");
+  if (normalizedErp.candidate && !checkPeriod(erpCost, period)) {
+    normalizedErp.candidate = null;
+    normalizedErp.issues.push("erp_cost_period_unverified");
+  }
+  if (manual && (!normalizedErp.candidate || Number(manualOverride.approvedAmount) <= normalizedErp.candidate.unitCost)) {
     return { status: "final", calculationMode: "exact", eligibleForExactProfit: true,
       workspaceId, ledgerId, store, platformSku: normalizedSku, canonicalPlatformSku: canonicalSku,
       source: "manual_override", unitCost: Number(manualOverride.approvedAmount), currency: DEFAULT_CURRENCY,
       sourceRecordId: manualOverride.id, approvalId: manualOverride.id, reasons: [], policyVersion: COST_POLICY_VERSION };
-  }
-  const normalizedErp = normalizeCandidate(erpCost, canonicalSku, "erp");
-  if (normalizedErp.candidate && !isErpCostWithinPeriod(erpCost, period)) {
-    normalizedErp.candidate = null;
-    normalizedErp.issues.push("erp_cost_period_unverified");
   }
   reasons.push(...normalizedErp.issues);
 
