@@ -6,8 +6,11 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SalesAnalytics from './SalesAnalytics';
 import { buildSalesMonth } from '../domain/salesChartModel';
 import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
+import { buildSalesProfitAnalysis } from '../domain/salesProfitAnalysis';
+import { groupReportSales } from '../domain/profitReports';
 
-const mocks = vi.hoisted(() => ({ month: vi.fn(), months: vi.fn(), detail: vi.fn() }));
+const mocks = vi.hoisted(() => ({ month: vi.fn(), months: vi.fn(), detail: vi.fn(), profit: vi.fn() }));
+vi.mock('../data/repositories/salesProfitAnalysisRepository', () => ({ readSalesProfitAnalysis: mocks.profit }));
 vi.mock('../data/repositories/salesAnalyticsRepository', () => ({
   readLedgerSalesAnalytics: mocks.month, readWorkspaceSalesMonths: mocks.months, readLedgerPeriodSalesDetails: mocks.detail,
 }));
@@ -50,6 +53,34 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 
 const openStore = async (name = '甲') => click([...container.querySelectorAll('.sales-store-entry')].find(node => node.textContent.includes(name)));
 const monthBar = period => [...container.querySelectorAll('.sales-month-group')].find(node => node.getAttribute('aria-label').startsWith(period));
+
+it('defaults to reconciled profit, locates a losing product beyond page one and keeps the chosen metric', async () => {
+  const period = '2026-08';
+  const rows = source(period).map(row => ({ ...row, supplierNumber: 'SUP' }));
+  const costs = rows.map(row => ({
+    platformSku: row.platformSku, platformSkc: row.platformSkc, unitCost: row.platformSku === 'SKU-13' ? 40 : 0.1,
+    checkedPeriod: period, withinPeriod: true, resolutionStatus: 'resolved', currency: 'CNY',
+  }));
+  mocks.profit.mockResolvedValue(buildSalesProfitAnalysis({ ledger: { id: 'L', workspaceId: 'W2', period, accountingMode: 'weighted', warehouseRate: 0 },
+    rows, identities: rows, groups: groupReportSales(rows), costs, approvals: [] }));
+  await act(async () => root.render(<SalesAnalytics {...props} workspaceId="W2" />));
+  expect(button('商品利润').getAttribute('aria-pressed')).toBe('true');
+  await openDay(); await openStore();
+  expect(container.querySelector('.sales-store-pie')).toBeNull();
+  expect(container.querySelector('.sales-profit-insights').textContent).toContain('亏损合计');
+  await click(container.querySelector('[aria-label^="亏损最多，"]'));
+  expect(container.querySelector('tr[data-highlighted] strong').textContent).toBe('SKC-13');
+  expect(container.querySelector('.sales-pagination').textContent).toContain('第 4/4 页');
+  const total = container.querySelector('.sales-selected-store-totals').textContent;
+  await click(button('只看亏损'));
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
+  expect(container.querySelector('.sales-selected-store-totals').textContent).toBe(total);
+  await click(button('销量'));
+  expect(container.querySelector('.sales-store-pie')).not.toBeNull();
+  await click(button('趋势'));
+  await openDay();
+  expect(button('销量').getAttribute('aria-pressed')).toBe('true');
+});
 
 it('defaults to twelve calendar slots and one total column, preserving missing months', async () => {
   expect(mocks.months).not.toHaveBeenCalled();
@@ -122,7 +153,7 @@ it('returns directly to the filtered chart after changing dates, including while
   expect(container.querySelector('.sales-store-entry').textContent).toContain('甲');
 });
 
-it('selects a product from any table cell and keeps its search, page and matching legend and slice', async () => {
+it('selects a product from any table cell or slice and keeps its search, page and share', async () => {
   await openDay();
   await click(container.querySelector('tbody tr td:last-child'));
   await change(container.querySelector('.sales-details-controls input'), 'SKC-');
@@ -132,11 +163,13 @@ it('selects a product from any table cell and keeps its search, page and matchin
   await click(row.querySelector('td:last-child'));
   expect(row.getAttribute('data-highlighted')).toBe('true');
   expect(row.querySelector('button').getAttribute('aria-pressed')).toBe('true');
-  expect(container.querySelector('.sales-pie-legend [aria-pressed="true"]').textContent).toContain(skc);
+  expect(container.querySelector('.sales-period-composition .sales-chart-note').textContent).toContain('选中商品占销售额');
   expect(container.querySelector('.sales-store-pie [aria-pressed="true"]').getAttribute('aria-label')).toMatch(skc);
   expect(container.querySelector('.sales-details-controls input').value).toBe('SKC-');
   expect(container.querySelector('.sales-pagination').textContent).toContain('第 2/3 页');
-  await click(container.querySelector('.sales-pie-legend button'));
+  const first = container.querySelector('tbody strong').textContent;
+  const slice = [...container.querySelectorAll('.sales-store-pie [role="button"]')].find(item => item.getAttribute('aria-label').startsWith(first + ' '));
+  await act(async () => Simulate.click(slice));
   expect(container.querySelector('tbody tr:first-child button').getAttribute('aria-pressed')).toBe('true');
   expect(container.querySelector('.sales-details-controls input').value).toBe('SKC-');
   expect(mocks.detail).toHaveBeenCalledTimes(1);

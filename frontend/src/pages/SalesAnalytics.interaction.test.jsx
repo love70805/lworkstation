@@ -6,6 +6,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SalesAnalytics from './SalesAnalytics';
 import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 const mock = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('../data/repositories/salesProfitAnalysisRepository', () => ({ readSalesProfitAnalysis: async () => null }));
 vi.mock('../data/repositories/salesAnalyticsRepository', () => ({
   readLedgerSalesAnalytics: mock.read,
   readWorkspaceSalesMonths: vi.fn(async () => []),
@@ -43,19 +44,19 @@ it('replaces daily stacks with a store pie, retains SKC details and preserves ho
   await act(async () => container.querySelector('.sales-daily-bar').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(0);
   expect(container.querySelectorAll('.sales-store-pie [role="button"]')).toHaveLength(2);
-  expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(2);
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+  expect(container.querySelector('.sales-pie-legend')).toBeNull();
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
   await act(async () => container.querySelector('.sales-store-entry').click());
   expect(container.textContent).toContain('SKC');
-  expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(5);
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
   expect(container.querySelectorAll('.sales-store-pie [role="button"]').length).toBeGreaterThan(5);
-  const firstLegend = container.querySelector('.sales-pie-legend button').textContent;
+  const firstProduct = container.querySelector('tbody strong').textContent;
   const table = container.querySelector('.sales-day-table'); table.scrollLeft = 200; document.documentElement.scrollTop = 400;
   await act(async () => Simulate.scroll(table));
   await act(async () => find('下一页').click());
-  expect(container.querySelectorAll('.sales-pie-legend button')).toHaveLength(5);
-  expect(container.querySelector('.sales-pie-legend button').textContent).not.toBe(firstLegend);
-  expect(container.querySelector('tbody tr').textContent).toContain(container.querySelector('.sales-pie-legend button span').childNodes[0].textContent);
+  expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
+  expect(container.querySelector('tbody strong').textContent).not.toBe(firstProduct);
   expect(table.scrollLeft).toBe(200); expect(document.documentElement.scrollTop).toBe(400);
   await act(async () => find('趋势').click());
   expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);

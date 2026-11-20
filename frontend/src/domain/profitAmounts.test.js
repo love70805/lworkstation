@@ -1,9 +1,11 @@
 import { expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { buildReportProducts, legacyReportLine, reportTotals } from './profitReports';
+import { buildReportProducts, groupReportSales, legacyReportLine, reportTotals } from './profitReports';
 import { buildProfitReportWorkbook } from '../lib/profitReportWorkbook';
 import { summarizeProfitRows } from '../lib/profitPrecision';
 import { profitCostFields } from './profitPageProjection';
+import { costEvaluationPeriod } from './inventoryAccounting';
+import { buildSalesProfitAnalysis, combinedProfit } from './salesProfitAnalysis';
 
 it('reconciles thirds to the cent across SKUs, page projections and the Excel file in either mode', () => {
   const salesRows = [1, 2].map((_, i) => ({ store:'甲', platformSku:'SKU'+i, platformSkc:'SKC', quantity:1, amount:2 }));
@@ -24,5 +26,12 @@ it('reconciles thirds to the cent across SKUs, page projections and the Excel fi
     expect(sheet.H4.v).toBe(Number(cost));
     expect(sheet.J4.v).toBe(Number(profit));
     if (accountingMode === 'weighted') expect(sheet.G2.f).toBe('1/3');
+    const dated = salesRows.map((row, i) => ({ ...row, sourceAddedDate: '2026-10-0' + (i + 1) }));
+    const analysis = buildSalesProfitAnalysis({
+      ledger: { ...input.ledger, period: '2026-10' }, identities: dated, rows: dated, groups: groupReportSales(dated),
+      costs: erpCosts.map(row => ({ ...profitCostFields(row, null), checkedPeriod: costEvaluationPeriod({ accountingMode, period: '2026-10' }), withinPeriod: true })), approvals: [],
+    });
+    expect(analysis.month.total).toMatchObject({ purchaseCostExact: cost, profitExact: profit });
+    expect(combinedProfit(Object.values(analysis.days).map(day => day.total))).toBe(profit);
   }
 });
