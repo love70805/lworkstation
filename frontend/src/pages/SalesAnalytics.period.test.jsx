@@ -66,8 +66,8 @@ it('defaults to reconciled profit, locates a losing product beyond page one and 
   await act(async () => root.render(<SalesAnalytics {...props} workspaceId="W2" />));
   expect(button('商品利润').getAttribute('aria-pressed')).toBe('true');
   await openDay(); await openStore();
-  expect(container.querySelector('.sales-store-pie')).toBeNull();
-  expect(container.querySelector('.sales-profit-insights').textContent).toContain('亏损合计');
+  expect(container.querySelector('.sales-store-pie')).not.toBeNull();
+  expect(container.querySelector('.sales-period-composition').textContent).toContain('亏损合计');
   await click(container.querySelector('[aria-label^="亏损最多，"]'));
   expect(container.querySelector('tr[data-highlighted] strong').textContent).toBe('SKC-13');
   expect(container.querySelector('.sales-pagination').textContent).toContain('第 4/4 页');
@@ -80,6 +80,59 @@ it('defaults to reconciled profit, locates a losing product beyond page one and 
   await click(button('趋势'));
   await openDay();
   expect(button('销量').getAttribute('aria-pressed')).toBe('true');
+});
+
+async function showStoreProfits(profits) {
+  const period = '2026-08', date = period + '-01';
+  const rows = ['27', '20'].map(store => ({ store, platformSku: 'SKU' + store, platformSkc: 'SKC' + store,
+    supplierNumber: 'SUP', sourceAddedDate: date, quantityExact: '1', amountExact: '100' }));
+  const costs = rows.flatMap((row, i) => profits[i] == null ? [] : [{ ...row, unitCost: 100 - profits[i],
+    checkedPeriod: period, withinPeriod: true, resolutionStatus: 'resolved', currency: 'CNY' }]);
+  mocks.month.mockResolvedValue({ period, sourceRows: rows });
+  mocks.detail.mockResolvedValue(aggregatePeriodSalesDetails(rows, { period, date }));
+  mocks.profit.mockResolvedValue(buildSalesProfitAnalysis({ ledger: { id: 'L', workspaceId: 'W2', period, accountingMode: 'weighted', warehouseRate: 0 },
+    rows, identities: rows, groups: groupReportSales(rows), costs, approvals: [] }));
+  await act(async () => root.render(<SalesAnalytics {...props} workspaceId="W2" />));
+}
+
+it.each([
+  [[20, 60], '利润构成', ['25%', '75%']],
+  [[20, -60], '盈利构成', ['100%']],
+  [[-20, -60], '亏损构成', ['25%', '75%']],
+  [[0, 0], '利润构成', []],
+])('uses signed amounts for profit pies at %j', async (profits, heading, shares) => {
+  await showStoreProfits(profits);
+  expect([...byLabel('趋势指标').querySelectorAll('button')].map(node => node.textContent)).toEqual(['商品利润', '销量']);
+  await openDay();
+  expect(container.querySelector('.sales-period-composition h3').textContent).toBe(heading);
+  const slices = [...container.querySelectorAll('.sales-store-pie [role="button"]')];
+  expect(slices.map(item => item.getAttribute('aria-label').split(' ').at(-1)).sort()).toEqual(shares);
+  if (profits[1] < 0) expect(container.querySelector('.sales-composition-notes').textContent).toContain('亏损合计');
+  if (!shares.length) expect(container.textContent).toContain('商品利润为 0');
+  if (slices.length) {
+    await act(async () => Simulate.keyDown(slices[0], { key: 'Enter' }));
+    await click(container.querySelector('tbody td:last-child'));
+    expect(container.querySelector('.sales-store-pie [aria-pressed="true"]')).not.toBeNull();
+  }
+});
+
+it('replaces sales with profit in the same slot for a fully costed store and keeps the quantity preference', async () => {
+  await showStoreProfits([20, null]);
+  const labels = () => [...byLabel('趋势指标').querySelectorAll('button')].map(node => node.textContent);
+  expect(labels()).toEqual(['销售额', '销量']);
+  await openDay();
+  expect(labels()).toEqual(['销售额', '销量']);
+  await openStore('27');
+  expect(labels()).toEqual(['商品利润', '销量']);
+  await click(button('销量'));
+  await click(button('返回店铺')); await openStore('20');
+  expect(labels()).toEqual(['销售额', '销量']);
+  expect(button('销量').getAttribute('aria-pressed')).toBe('true');
+  await click(button('趋势')); await click(button('20'));
+  expect(labels()).toEqual(['商品利润', '销量']);
+  await click(button('商品利润'));
+  expect(container.querySelector('.sales-month-totals').textContent).toContain('所选店铺合计 · 商品利润 ¥20');
+  expect(container.querySelector('.sales-daily-bar').getAttribute('aria-label')).toContain('商品利润 ¥20');
 });
 
 it('defaults to twelve calendar slots and one total column, preserving missing months', async () => {

@@ -2,7 +2,7 @@ import { useId, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { salesSegments, salesGroupedSegments, salesStoreColor, salesStoreKey } from '../domain/salesChartModel';
 import Decimal from 'decimal.js';
 const value = input => input == null ? '待查' : new Decimal(input).toFixed();
-const statusText = day => ({ future: '未发生', unobserved: '尚未统计', unknown: '数据待查' }[day?.status] || '数据待查');
+const statusText = day => ({ future: '未发生', unobserved: '尚未统计', unknown: '数据待查', absent_store: '所选店铺无记录' }[day?.status] || '数据待查');
 const metricLabel = { revenueExact: '销售额', quantityExact: '销量', profitExact: '商品利润' };
 const metricValue = (number, metric) => metric === 'profitExact' && number != null ? new Decimal(number).toDecimalPlaces(2, Decimal.ROUND_DOWN).toFixed() : value(number);
 export const salesPair = (day, metric) => metric === 'profitExact' && day?.revenueExact != null

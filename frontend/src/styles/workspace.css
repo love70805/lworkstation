@@ -483,7 +483,3 @@
   .workspace-ledger-heading .button, .workspace-ledger-controls .workspace-flow .button { min-height: 44px; }
 }
 .workspace-daily-trend .sales-analytics { margin: 0; }
-
-/* Give the active detail table the full work area, with workspace tools below it. */
-.workspace-layout.dashboard-layout:has(.sales-period-details) { grid-template-columns: minmax(0, 1fr); }
-.workspace-layout:has(.sales-period-details) .workspace-secondary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); align-items: start; }
