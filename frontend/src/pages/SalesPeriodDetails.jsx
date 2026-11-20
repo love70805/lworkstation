@@ -5,6 +5,7 @@ import { Button } from '../components/UI';
 import { salesStoreColor, salesStoreKey } from '../domain/salesChartModel';
 import { revealListStart } from '../lib/pageListScroll';
 import { combinedProfit, skuProfitBreakdown } from '../domain/salesProfitAnalysis';
+import { sumCostAmounts } from '../domain/profitAmounts';
 
 const Exact = Decimal.clone({ precision: 80 });
 const PAGE_SIZE = 5;
@@ -155,6 +156,7 @@ function BreakdownAmount({ row, mode, onChooseStore }) {
 function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange }) {
   const { query, page, scrollLeft, lossOnly: savedLossOnly } = { ...EMPTY_STATE, ...state };
   const skuView = Boolean(chosenStore && productView !== 'skc');
+  const isSkuSubset = skuView && ['earning', 'loss', 'pending'].includes(productView);
   const hasSkuDetail = Boolean(selectedTotals?.skuRows);
   const comparison = !chosenStore && metric !== 'quantityExact' && data.stores?.some(item => item.breakdown);
   const lossOnly = data.hasProfitAnalysis && savedLossOnly && !skuView;
@@ -170,6 +172,15 @@ function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseSt
     : chosenStore ? data.rows.filter(row => salesStoreKey(row.store) === chosenStore) : data.stores ?? [], [data.rows, data.stores, chosenStore, skuView, selectedTotals, productView]);
   const scopeBreakdown = useMemo(() => comparison && storeRows.every(row => row.breakdown)
     ? skuProfitBreakdown(storeRows.flatMap(row => row.skuRows)) : null, [comparison, storeRows]);
+  const subsetAmounts = useMemo(() => {
+    if (!isSkuSubset || !storeRows.length) return null;
+    return {
+      revenue: valueTotal(storeRows, 'revenueExact'),
+      warehouse: valueTotal(storeRows, 'warehouseCostExact'),
+      purchase: storeRows.every(row => row.purchaseCostExact != null) ? sumCostAmounts(storeRows, 'purchaseCostExact').decimal() : null,
+      profit: combinedProfit(storeRows),
+    };
+  }, [storeRows, isSkuSubset]);
   const sortedRows = useMemo(() => {
     const ascending = sort === 'lossFirst' || sort === 'skuLoss';
     const value = row => sort === 'skuLoss' ? row.breakdown?.lossExact : row[sort === 'lossFirst' ? 'profitExact' : sort];
@@ -229,7 +240,8 @@ function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseSt
       <div className="sales-period-products">
         <h3>{chosenStore ? (selectedTotals?.store ?? chosenStore) + ' · 该店商品明细' : (data.hasStoreSelection ? '当期所选店铺' : '当期全部店铺')}</h3>
         {scopeBreakdown && <p className="sales-list-scope">{scopeBreakdown.pending > 0 && '已核部分 · '}盈利 SKU 合计 {money(scopeBreakdown.earningExact)} · 亏损 SKU 合计 <b className="sales-loss">{money(scopeBreakdown.lossExact)}</b>{scopeBreakdown.pending > 0 && ' · ' + scopeBreakdown.pending + ' 个 SKU 待核'}</p>}
-        {chosenStore && selectedTotals && data.hasProfitAnalysis && <p className="sales-list-scope">采购成本 {money(selectedTotals.purchaseCostExact)} · 仓储费 {money(selectedTotals.warehouseCostExact)}{storeRows.length > 0 && ['earning', 'loss'].includes(productView) && ' · ' + productViews[productView] + ' 合计 ' + money(combinedProfit(storeRows))}</p>}
+        {subsetAmounts ? <p className="sales-list-scope">{productViews[productView]} 合计 · 销售原额 {money(subsetAmounts.revenue)} · 采购成本 {money(subsetAmounts.purchase)} · 仓储费 {money(subsetAmounts.warehouse)} · 商品利润 {money(subsetAmounts.profit)}</p>
+          : chosenStore && selectedTotals && data.hasProfitAnalysis && !isSkuSubset && <p className="sales-list-scope">店铺采购成本 {money(selectedTotals.purchaseCostExact)} · 仓储费 {money(selectedTotals.warehouseCostExact)}</p>}
         {data.status === 'unknown' ? <p role="status">{data.availability === 'future' ? '该日期尚未发生，未按零计算。' : data.availability === 'unobserved' ? '该日期尚未统计，未按零计算。' : '期间数据待查，空白未按零计算。'}</p> : <>
           {data.status === 'known_zero' ? <p>{data.date ? '当天' : '本月'}已知销售额与销量为 0，无商品记录。</p> : null}
           <div className="sales-details-controls"><label htmlFor={searchId}>{chosenStore ? '查找商品' : '查找店铺'}<input id={searchId} value={query} placeholder={chosenStore ? 'SKC、SKU 或店铺' : '店铺名称'} onChange={event => onStateChange({ query: event.target.value, page: 0, scrollLeft: 0 })} /></label>

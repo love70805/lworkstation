@@ -399,6 +399,7 @@ it('follows two selected stores from a date to a losing SKU inside a profitable 
   expect(container.querySelector('.sales-product-view select').value).toBe('loss');
   expect(container.querySelector('tbody strong').textContent).toBe('RED');
   expect(container.querySelector('tbody tr').lastElementChild.textContent).toContain('¥-10');
+  expect(container.querySelector('.sales-period-products > .sales-list-scope').textContent).toBe('亏损 SKU 合计 · 销售原额 ¥20 · 采购成本 ¥30 · 仓储费 ¥0 · 商品利润 ¥-10');
   await click(byLabel('下一日'));
   expect(container.textContent).toContain('该店本期没有亏损 SKU');
   await click(byLabel('上一日')); await click(button('返回店铺'));
