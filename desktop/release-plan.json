@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/release-2.1.0",
+  "integrationBranch": "codex/profit-report-red-2.1.1",
   "requiredCommits": [
     {
-      "module": "release-2.1-main-baseline",
-      "commit": "83f7ef7083f4de37782fb2a59ac26049e40a41d8"
+      "module": "release-2.1.0",
+      "commit": "0a8ada1d9c6c70f900efb9ca42714fec19bb1d13"
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { displayMoney, exactSum, REPORT_DOWNLOAD_FORMAT, REPORT_TEMPLATE_VERSION, sha256 } from "../domain/profitReports";
+import { displayMoney, exactSum, FINAL_FILE_TEMPLATES, REPORT_DOWNLOAD_FORMAT, REPORT_TEMPLATE_VERSION, sha256 } from "../domain/profitReports";
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 import { groupProfitExportProducts, mergeArchivedSkcSheet, mergeProfitSkcRows } from './profitSkcLayout';
 import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
@@ -172,7 +172,7 @@ export function base64ToBytes(value){
 }
 export async function prepareReportDownload(report, { dispatchRows, deductionRows, useStoredFile=false } = {}) {
   if (report.bytes instanceof Uint8Array && !report.id && !dispatchRows && !deductionRows) return report.bytes;
-  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&[REPORT_TEMPLATE_VERSION,'profit-zebra@15-optional-dispatch','profit-zebra@14-profit-colors'].includes(report.templateVersion)
+  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&FINAL_FILE_TEMPLATES.includes(report.templateVersion)
     &&(useStoredFile||!dispatchRows&&!deductionRows)){
     const bytes=base64ToBytes(report.fileBase64);
     if(bytes[0]!==80||bytes[1]!==75||!report.fileSha256||await sha256(bytes)!==report.fileSha256)throw new Error('报告文件校验失败，请检查完整报告备份。');
@@ -186,7 +186,7 @@ export async function prepareReportDownload(report, { dispatchRows, deductionRow
   }
   if (report.totalsExact?.dispatchQuantityExact !== null) {
     const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
-    bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@15-optional-dispatch','profit-zebra@14-profit-colors','profit-zebra@13-summary-layout','profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
+    bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![...FINAL_FILE_TEMPLATES,'profit-zebra@13-summary-layout','profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
   } else if (dispatchRows?.length) {
     throw new Error('这份报告未录入代发，无法补齐代发单号。');
   }

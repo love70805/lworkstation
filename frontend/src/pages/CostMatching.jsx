@@ -10,7 +10,7 @@ import { runDerivedComputation } from '../data/repositories/derivedComputationSe
 import { canReviewErpCostRound, currentLedgerCollectionTask, erpCollectionPresentation, hasFinishedCostAttemptWithIssues, isActiveErpCollection } from '../domain/erpCollectionStatus';
 import { useErpCollectionTasks } from '../hooks/useErpCollectionTasks';
 import ErpCollectionProgress from '../components/ErpCollectionProgress';
-import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
+import { formatAccountingUnitCost } from "../lib/profitPrecision";
 import PurchaseEvidenceDetails from '../components/PurchaseEvidenceDetails';
 import { erpAdoptionReadiness } from "../domain/erpAdoptionReadiness";
 import { ERP_COST_BATCH_VERSION } from "../domain/erpCostBatchEnvelope";
@@ -1184,7 +1184,7 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     ? { ...sourceCost, status: targetRow.decision.eligibleForExactProfit ? 'matched' : 'unresolved', sourcePlatformSku: sourceCost.platformSku, sourceWarehouseSku: sourceCost.warehouseSku } : null;
   const evidenceMatch = adoptedMatch ?? targetRow?.match;
   const targetDetails = targetRow ? <>
-        <div className="cost-detail-current"><strong>{targetRow.decision.eligibleForExactProfit ? targetRow.decision.source === 'manual_override' ? `人工更正 · ${formatManualUnitCost(targetRow.decision.unitCost)}/件` : `ERP 已采用 · ${formatErpUnitCost(targetRow.decision.unitCost)}/件` : priceAnomalyRowIds.has(targetRow.id) ? "成本异常" : "没有成本"}</strong>{!targetRow.decision.eligibleForExactProfit && !priceAnomalyRowIds.has(targetRow.id) ? <small>没有可用于核算的采购成本。ERP 档案已删除或没有采购记录时，请补录真实单件成本，保存后自动计算利润；只有真实零成本才填 0。</small> : null}<small>{targetCostExplanation}</small>{targetRow.decision.source === 'manual_override' ? <small>人工更正未关联可用采购凭证时，导出单号留空。可在下方核对原始 ERP 返回。</small> : null}
+        <div className="cost-detail-current"><strong>{targetRow.decision.eligibleForExactProfit ? targetRow.decision.source === 'manual_override' ? `人工更正 · ${formatAccountingUnitCost(targetRow.decision.unitCost)}/件` : `ERP 已采用 · ${formatAccountingUnitCost(targetRow.decision.unitCost)}/件` : priceAnomalyRowIds.has(targetRow.id) ? "成本异常" : "没有成本"}</strong>{!targetRow.decision.eligibleForExactProfit && !priceAnomalyRowIds.has(targetRow.id) ? <small>没有可用于核算的采购成本。ERP 档案已删除或没有采购记录时，请补录真实单件成本，保存后自动计算利润；只有真实零成本才填 0。</small> : null}<small>{targetCostExplanation}</small>{targetRow.decision.source === 'manual_override' ? <small>人工更正未关联可用采购凭证时，导出单号留空。可在下方核对原始 ERP 返回。</small> : null}
           {targetRow.decision.identityIssue || targetReviewEntry?.mappingIssue ? <Button onClick={openLedgerImport}>检查导入映射</Button> : null}</div>
         <section className="cost-detail-evidence"><h3>ERP 采购证据</h3><ErpResponseDetails failures={erpFailures.filter(item => item.platformSku ? canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(targetRow.platformSku) : !item.warehouseSku || item.warehouseSku === targetRow.match?.sourceWarehouseSku)} />
           {selectedCost && !currentEvidence && !evidenceMatch ? <p role="status">正在读取此 SKU 的采购证据…</p>
@@ -1231,6 +1231,8 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     if (row) setManualTarget({ id: row.id, mode: 'details', inboxId: item.inboxId });
   }} />;
   const canOfferRecollection = Boolean(collectionTask || selectedRecollection || persistedCostRows.length || workspaceInboxRecords.length);
+  const quietRecollection = compact && reviewReady && !costGuard.blocked && costScopeEmpty && missingStoreSkus === 0
+    && expectedSkus.length > 0 && canOfferRecollection && Boolean(globalThis.window?.shopeersDesktopRuntime?.startErpCollection);
   const showTaskProgress = finishedWithIssues || activeCollection && !collectionTask.batches?.every(batch => batch.deliveryId);
   const recollectionLauncherProps = { onRecollect: canOfferRecollection ? openRecollection : undefined, recollectReady: canChooseScope, preparing: recollectionBusy || collectionBusy,
     onStart: narrowOnContinue ? startSupplement : undefined, supplement: Boolean(narrowOnContinue), ...(compact || expectedSkus.length ? { scopeEmpty: costScopeEmpty } : {}) };
@@ -1241,16 +1243,20 @@ function CostMatchingBody({ validatedContext, onPublished, suppliedSnapshot, com
     onScope={choice => { setRecollectionError(''); setRecollectionIntent(value => ({ ...value, choice, input: value.scopes[choice] })); }}
     onClose={() => { if (!recollectionBusyRef.current) setRecollectionIntent(null); }} onConfirm={confirmRecollection} />;
   if (compact) return <section className="profit-cost-tools" aria-label="成本采集与异常处理">
-    <p className="profit-collection-scope">当前筛选范围 · {describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
+    <div className="profit-collection-toolbar">
+      <p className="profit-collection-scope">当前筛选范围 · {describeProfitFilter(profitFilter)} · {platformSkcs.length} 个 SKC / {expectedSkus.length} 个 SKU</p>
+      {quietRecollection && <Button variant="ghost" className="profit-recollect-link"
+        disabled={!canChooseScope || recollectionBusy || collectionBusy} onClick={openRecollection}>重新获取 ERP 成本</Button>}
+    </div>
     {remaining.expectedSkus.length > 0 && remaining.expectedSkus.length < (collectionRequest?.expectedSkus?.length ?? expectedSkus.length) &&
       <p className="profit-collection-scope">待补采范围 · {remaining.platformSkcs.length} 个 SKC / {remaining.expectedSkus.length} 个 SKU</p>}
-    {!finishedWithIssues && <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
+    {!quietRecollection && !finishedWithIssues && <ErpCollectionLauncher workspaceId={snapshot.ledger.workspaceId} ledgerId={snapshot.ledger.id} requestId={effectiveRequestId}
       ready={registrationReady && !scopeHasIdentityConflict && !costScopeEmpty} task={collectionTask} onStarted={collection.refresh} onRegistrationRetry={retryCollectionRegistration} {...recollectionLauncherProps} />}
     <CostAttention guard={costGuard} noCostCount={reviewReady ? noCostRows.length : undefined} missing={missingStoreSkus} hasAnomalies={reviewReady && hasPendingAnomalies}
       collected={reviewReady}>{anomalyActions}</CostAttention>
     {collectionTask ? <details className="profit-task-record" open={showTaskProgress ? true : undefined}>
       <summary>{showTaskProgress ? (finishedWithIssues && costGuard.title || erpCollectionPresentation(progressTask).title) : '成本采集记录'}</summary>
-      <ErpCollectionProgress {...taskActions} costScopeEmpty={costScopeEmpty} retryScopeEmpty={retryScopeEmpty} editingGuard={costGuard} task={progressTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}
+      <ErpCollectionProgress {...taskActions} onRecollect={quietRecollection ? undefined : taskActions.onRecollect} costScopeEmpty={costScopeEmpty} retryScopeEmpty={retryScopeEmpty} editingGuard={costGuard} task={progressTask} inboxes={workspaceInboxRecords} onControl={controlCollection} busy={collectionBusy}
         locked={locked} error={collectionError || collection.error} statusError={collection.error} />
     </details> : collection.error ? <ErpCollectionProgress error={collection.error} onRefresh={collection.refresh} /> : null}
     {registrationState.status === 'failed' ? <p role="alert">{registrationState.message}<Button onClick={() => setRegistrationRetry(value => value + 1)}>重试连接</Button></p> : null}

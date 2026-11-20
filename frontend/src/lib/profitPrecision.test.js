@@ -43,17 +43,17 @@ describe("ERP precision from evidence to ledger exits", () => {
     expect(resolveFormalCostDecision({ platformSku: "SKU", erpCost: { unitCost: unitPrice, resolutionStatus: "resolved" } }).eligibleForExactProfit).toBe(unitPrice >= 0.0001);
   });
 
-  it.each([[0.003, 2, 0.006, 0.01], [0.009, 1, 0.009, 0.01], [0.0001, 1, 0.0001, 0]])("accumulates untruncated %s × %s", (cost, qty, raw, total) => {
+  it.each([[0.003, 2], [0.009, 1], [0.0001, 1]])("uses a zero-cent accounting unit for a confirmed positive %s × %s", (cost, qty) => {
     const rows = [line(cost, qty), line(cost, qty)];
-    expect(rows[0]).toMatchObject({ unitCost: cost, purchaseCost: raw, profit: -raw });
-    expect(summarizeProfitRows(rows)).toMatchObject({ purchaseCosts: total, matchedProfit: total ? -total : 0 });
+    expect(rows[0]).toMatchObject({ unitCost: 0, purchaseCost: 0, profit: 0 });
+    expect(summarizeProfitRows(rows)).toMatchObject({ purchaseCosts: 0, matchedProfit: 0 });
   });
 
-  it("preserves ten decimal places and large repeated sums", () => {
+  it("keeps the exact quantity product after truncating the unit, including repeated sums", () => {
     const row = line(1.2345, 1.234567);
-    expect(row.purchaseCost).toBe(1.5240729615);
-    expect(row.profit).toBe(-1.5240729615);
-    expect(summarizeProfitRows(Array.from({ length: 10000 }, () => row))).toMatchObject({ purchaseCosts: 15240.72, matchedProfit: -15240.72 });
+    expect(row.purchaseCost).toBe(1.51851741);
+    expect(row.profit).toBe(-1.51851741);
+    expect(summarizeProfitRows(Array.from({ length: 10000 }, () => row))).toMatchObject({ purchaseCosts: 15185.17, matchedProfit: -15185.17 });
   });
 
   it("does not accumulate group or filtered summaries into ledger totals", () => {
@@ -64,13 +64,13 @@ describe("ERP precision from evidence to ledger exits", () => {
     expect(filtered).toHaveLength(1);
     expect(summarizeProfitRows(filtered).purchaseCosts).toBe(0);
     expect(summarizeProfitRows(rows.toReversed())).toEqual(before);
-    expect(before).toMatchObject({ purchaseCosts: 0.01, matchedProfit: 1.98, profitRate: 99.4 });
+    expect(before).toMatchObject({ purchaseCosts: 0, matchedProfit: 2, profitRate: 100 });
   });
 
-  it("sums 1.2301-cost line profits before truncation", () => {
+  it("sums line profits using the adopted 1.23 unit price", () => {
     const rows = [line(1.2301, 1, 2), line(1.2301, 1, 2)];
-    expect(rows[0].profit).toBe(0.7699);
-    expect(summarizeProfitRows(rows).matchedProfit).toBe(1.53);
+    expect(rows[0].profit).toBe(0.77);
+    expect(summarizeProfitRows(rows).matchedProfit).toBe(1.54);
   });
 
   it("preserves raw subprecision confirmation values while blocking formal publication", () => {
@@ -101,9 +101,9 @@ describe("ERP precision from evidence to ledger exits", () => {
     expect(formatErpUnitCost(0.0097)).toBe("¥0.0097");
     const rows = [line(0.003, 2), line(0.003, 2)];
     const exported = buildProfitExportRows(rows, { status: "ready" }, summarizeProfitRows(rows));
-    expect(exported[0]["总件数*成本"]).toBe(0.006);
-    expect(exported[0].利润).toBe(-0.006);
-    expect(exported[2]["总件数*成本"]).toBe(0.01);
+    expect(exported[0]["总件数*成本"]).toBe(0);
+    expect(exported[0].利润).toBe(0);
+    expect(exported[2]["总件数*成本"]).toBe(0);
     expect(exported[0].公式版本).toBe(PROFIT_FORMULA_VERSION);
   });
 
@@ -128,8 +128,8 @@ describe("ERP precision from evidence to ledger exits", () => {
     expect(exported[0].关联单号).toBe("00000000000000000123");
     expect(exported[1].关联单号).toBe("");
     expect(exported[0].核算采购明细).toContain("123456789012345678901234");
-    expect(exported[0]["总件数*成本"]).toBe(0.006);
-    expect(exported[0].利润).toBe(-0.006);
+    expect(exported[0]["总件数*成本"]).toBe(0);
+    expect(exported[0].利润).toBe(0);
     expect(exported[0].公式版本).toBe("saved-formula");
     expect(rows).toEqual(before);
   });

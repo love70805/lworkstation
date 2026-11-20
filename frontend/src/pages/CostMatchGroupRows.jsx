@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "../components/UI";
 import { isUnmappedCostMatch } from "../lib/costMatching";
 import { ERP_ADOPTION_ITEM_LABELS } from "../lib/erpAdoptionPresentation";
-import { formatErpUnitCost, formatManualUnitCost } from "../lib/profitPrecision";
+import { formatErpUnitCost, formatAccountingUnitCost } from "../lib/profitPrecision";
 
 const columnLabels = ["平台 SKC", "平台 SKU / 属性", "ERP 证据 / 候选", "当前采用结果", "详情与更正"];
 
@@ -38,7 +38,7 @@ function CurrentStoreCost({ line }) {
   const effectiveAt = line.decision.eligibleForExactProfit && (manual ? line.manualOverride?.approvedAt : line.erpCost?.publishedAt);
   return <div className="cost-match-store-result">
     <strong>{line.store || "店铺未填"}</strong>
-    <span className="mono">{line.decision.eligibleForExactProfit ? manual ? formatManualUnitCost(line.decision.unitCost) : formatErpUnitCost(line.decision.unitCost) : "待补成本"}</span>
+    <span className="mono">{line.decision.eligibleForExactProfit ? formatAccountingUnitCost(line.decision.unitCost) : "待补成本"}</span>
     <small>{line.decision.eligibleForExactProfit ? manual ? "人工更正有效" : "ERP 已采用" : "未采用有效成本"}{effectiveAt ? ` · ${new Date(effectiveAt).toLocaleDateString("zh-CN")}` : ""}</small>
   </div>;
 }

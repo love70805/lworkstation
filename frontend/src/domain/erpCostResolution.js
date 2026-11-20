@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
-import { effectivePurchaseAmount, normalizePurchaseEvidenceRecord, purchaseEvidenceUnitPrice, validateCostPeriod } from "./erpPurchaseEvidence";
+import { effectivePurchaseAmount, normalizePurchaseEvidenceRecord, purchaseEvidenceUnitPrice, purchaseTotalValue, weightedPurchaseAmounts, validateCostPeriod } from "./erpPurchaseEvidence";
 import { selectLatestPurchaseRecords } from "./erpPurchaseSelection";
 export { normalizePurchaseEvidenceRecord } from "./erpPurchaseEvidence";
 
@@ -188,16 +188,15 @@ export function calculateWarehouseCostDecision({
       resolution,
     };
   });
-  const totalQuantity = resolvedRecords.reduce((sum, record) => sum.plus(record.quantity || 0), new Decimal(0));
-  const totalPrice = resolvedRecords.reduce((sum, record) => (
-    sum.plus(effectivePurchaseAmount(record))
-  ), new Decimal(0));
+  const { totalPrice, totalQuantity, unit } = weightedPurchaseAmounts(
+    resolvedRecords.map(effectivePurchaseAmount), resolvedRecords.map(record => record.quantity),
+  );
   const unresolvedAnomalyCount = anomalies.filter((anomaly) => anomaly.status === "pending").length;
   const hasInvalidPrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice)
     || record.effectiveUnitPrice < 0 || record.effectiveUnitPrice === 0 && record.resolution?.action !== "ignore_anomaly");
-  const computedUnitCost = totalQuantity.gt(0)
-    ? totalPrice.div(totalQuantity).toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber()
-    : null;
+  // Keep the ERP candidate for audit. The selected ERP/manual price is converted
+  // to cents once at the point of use in profit accounting.
+  const computedUnitCost = unit?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null;
   const resolutionStatus = evidenceComplete
     && selectedRecords.length > 0
     && unresolvedAnomalyCount === 0
@@ -215,7 +214,7 @@ export function calculateWarehouseCostDecision({
     selectedRecords: resolvedRecords,
     calculationCount: resolvedRecords.length,
     totalQuantity: totalQuantity.toNumber(),
-    totalPrice: totalPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
+    totalPrice: purchaseTotalValue(totalPrice.toFixed()),
     unitCost: computedUnitCost,
     formalUnitCost: resolutionStatus === "resolved" ? computedUnitCost : null,
     baseline: detection.baseline,

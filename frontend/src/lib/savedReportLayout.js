@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { profitReportSheetWidths, writeReportArchive } from './profitReportWorkbook';
-import { previousProfitThemeXml, profitThemeXml, reportThemeXml, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
+import { previousProfitThemeXml, profitThemeXml, reportThemeXml, storeDeductionThemeV16, reportBorder, reportRowHeight, reportHeaderHeight } from './profitReportTheme';
 import { dispatchColumns } from './dispatchReportLayout';
 import { clearReportMergeValues } from './reportMergedCells';
 import { lowerSavedReportSummary, unfreezeReportSheet } from './reportSummaryLayout';
@@ -64,7 +64,7 @@ export function formatSavedReportLayout(bytes){
     files.set(file,new TextEncoder().encode(unfreezeReportSheet(xml)));
   }
   let themed=styles.replace(block[0],`<cellXfs count="${originals.length+variants.length}">${block[1]}${variants.join('')}</cellXfs>`);
-  const theme = [profitThemeXml, previousProfitThemeXml].find(theme => styles.includes(theme.fonts)) ?? reportThemeXml;
+  const theme = [profitThemeXml, storeDeductionThemeV16, previousProfitThemeXml].find(theme => styles.includes(theme.fonts)) ?? reportThemeXml;
   for(const [tag,xml] of Object.entries(theme)){
     const pattern=new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`);if(!pattern.test(themed))return fail();
     themed=themed.replace(pattern,xml);

@@ -27,6 +27,14 @@ for (const purchaseTotalPrice of [null, '', -1, 'invalid']) {
 }
 assert.equal(policy.purchaseAmounts({ purchaseQuantity: 12, purchaseUnitPrice: 2.4, serviceUnitPrice: 0.6, purchaseTotalPrice: 0 }).unitPrice, 0, 'real zero and missing totals remain distinct');
 
+const preciseTotal = '1.299999999999999999999999';
+assert.equal(policy.parsePurchaseResponse('{"data":{"purchaseTotalPrice":1.299999999999999999999999},"code":0}').data.purchaseTotalPrice, preciseTotal);
+assert.equal(policy.purchaseAmounts({ purchaseQuantity: 1, purchaseTotalPrice: preciseTotal }).totalPrice, preciseTotal);
+const combined = policy.purchaseTotals([preciseTotal, preciseTotal, preciseTotal].map(totalPrice => ({ amountBasis: 'purchase_total', totalPrice, quantity: 1 })));
+assert.equal(combined.totalPrice, '3.899999999999999999999997');
+assert.equal(combined.unitCost, '1.2999');
+assert.equal(policy.samePurchaseTotal(preciseTotal, 1.3), false);
+
 const diagnosticRecords = [
   { warehouseSku: 'MISSING', unitPrice: null },
   { warehouseSku: 'INVALID', unitPrice: -2 },

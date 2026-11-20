@@ -62,8 +62,8 @@ it('puts each store’s signed deduction and net profit under its summary block 
  expect(amounts).toEqual([-4,-2.75,20]);
  expect(amounts.reduce((sum, n) => sum+n, 0) + Number(totals.dispatchAmountExact)).toBe(Number(totals.profitExact));
  const xml = new TextDecoder().decode(bytes);
- expect(xml).toContain('rgb="FF85571C"');
- expect(xml).toContain('rgb="FF9B4B50"');
+ const fonts = xml.match(/<fonts\b[^>]*>([\s\S]*?)<\/fonts>/)[1].match(/<font>[\s\S]*?<\/font>/g);
+ for (const id of [3, 4, 6, 7]) expect(fonts[id]).toContain('rgb="FFC00000"');
 });
 
 it('handles colliding, reserved and long store names without losing any store',()=>{
@@ -91,7 +91,7 @@ it.each(['pre_deduction','financial'])("exports one text order per SKU without a
  expect(book.SheetNames).toEqual(['汇总表','合成甲店','合成乙店','代发表',...(kind==='financial'?['扣款']:[])]);
  expect(new TextDecoder().decode(result.bytes)).not.toContain('name="核算采购"');
  expect(result.templateVersion).toBe(REPORT_TEMPLATE_VERSION);
- expect(result.templateVersion).toBe("profit-zebra@16-store-deductions");
+ expect(result.templateVersion).toBe("profit-zebra@17-unit-cents");
  const summaryRows=XLSX.utils.sheet_to_json(book.Sheets["汇总表"],{header:1});
  rows.forEach((row,index)=>{
   const summary=summaryRows.find(cells=>cells[1]===row.platformSku);

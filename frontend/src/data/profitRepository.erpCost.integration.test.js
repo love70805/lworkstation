@@ -213,22 +213,22 @@ it("publishes true low cost without correction, finalizes exact values and reloa
   expect(cost.purchaseRecords.map((row) => row.unitPrice)).toEqual([0.01, 0.009, 0.009]);
   const decision = resolveFormalCostDecision({ platformSku: "SKU-AUDIT", erpCost: cost });
   const exact = calculateExactProfitLine({ quantity: 1.234567, revenue: 1, warehouseRate: 0, costDecision: decision });
-  expect(exact.purchaseCost).toBe(0.0119752999);
-  const summary = { quantity: 1.234567, revenue: 1, purchaseCost: 0.01, warehouseCost: 0, penalty: 0, profit: 0.98 };
+  expect(exact.purchaseCost).toBe(0);
+  const summary = { quantity: 1.234567, revenue: 1, purchaseCost: 0, warehouseCost: 0, penalty: 0, profit: 1 };
   const args = { ledgerId: ledger.id, formulaVersion: PROFIT_FORMULA_VERSION, profitSummary: summary,
     profitLines: [{ ...exact, platformSku: "SKU-AUDIT", store: "合成测试", costSourceRecordId: decision.sourceRecordId, costApprovalId: null }] };
   await adoptZeroDispatch(ledger.id);
   await finalizeMonthlyLedger(args);
   const snapshot = await getLedgerSnapshot(ledger.id);
-  expect(snapshot.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001, formulaVersion: REPORT_FORMULA_VERSION });
+  expect(snapshot.profitLines[0]).toMatchObject({ purchaseCost: 0, profit: 1, formulaVersion: REPORT_FORMULA_VERSION });
   expect(snapshot.ledger.profitSummary).toMatchObject(summary);
   const exported = buildProfitExportRows(savedProfitRows(snapshot.profitLines), snapshot.ledger, savedProfitSummary(summary));
-  expect(exported[0]["总件数*成本"]).toBe(0.0119752999);
+  expect(exported[0]["总件数*成本"]).toBe(0);
   await finalizeMonthlyLedger(args);
   expect((await db.profitReports.where('ledgerId').equals(ledger.id).toArray())).toHaveLength(2);
-  expect((await getLedgerSnapshot(ledger.id)).profitLines).toMatchObject([{ purchaseCost: 0.0119752999, profit: 0.9880247001 }]);
+  expect((await getLedgerSnapshot(ledger.id)).profitLines).toMatchObject([{ purchaseCost: 0, profit: 1 }]);
   const backup = JSON.parse(JSON.stringify(await createWorkspaceBackupPayload()));
-  expect(backup.tables.profitLines[0]).toMatchObject({ purchaseCost: 0.0119752999, profit: 0.9880247001 });
+  expect(backup.tables.profitLines[0]).toMatchObject({ purchaseCost: 0, profit: 1 });
   expect(backup.tables.erpCostRows[0].unitCost).toBe(0.0097);
   const audit = (await db.auditEvents.toArray()).find((event) => event.action === "report_saved");
   expect(audit).toMatchObject({ localOnly: true, objectType: "local_profit_report" });

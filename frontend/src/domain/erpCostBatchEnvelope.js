@@ -16,7 +16,7 @@ import {
 } from "./identifiers";
 import { normalizeErpCatalogFields, normalizeErpCatalogCoverage } from "./erpCatalogFields";
 import { normalizeErpHistoryMappings } from '../../../integrations/contracts/erp-history-mappings.mjs';
-import { PURCHASE_TOTAL_BASIS } from "./erpPurchaseEvidence";
+import { PURCHASE_TOTAL_BASIS, purchaseTotalValue } from "./erpPurchaseEvidence";
 
 export const ERP_COST_BATCH_FORMAT = "shopeers-erp-cost-batch";
 export const ERP_COST_BATCH_VERSION = 2;
@@ -124,7 +124,7 @@ function normalizePurchaseRecord(record, index, warehouseSku, excluded = false) 
     productName: optionalText(record.productName ?? record.name),
     quantity,
     unitPrice,
-    totalPrice: purchaseTotal ? totalPrice : totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    totalPrice: purchaseTotal ? purchaseTotalValue(record.totalPrice ?? record.price, totalPrice) : totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
     ...(purchaseTotal ? { amountBasis: PURCHASE_TOTAL_BASIS,
       purchaseUnitPrice: optionalFiniteNumber(record.purchaseUnitPrice, "原采购单价", { minimum: 0 }),
       serviceUnitPrice: optionalFiniteNumber(record.serviceUnitPrice, "服务单价", { minimum: 0 }) } : {}),

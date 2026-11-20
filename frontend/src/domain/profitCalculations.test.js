@@ -69,7 +69,7 @@ describe("exact and reference profit", () => {
     });
   });
 
-  it("keeps exact ERP line amounts and existing revenue warehouse penalty rules", () => {
+  it("truncates the adopted unit before multiplication and preserves other ledger rules", () => {
     const result = calculateExactProfitLine({
       revenue: 20.999,
       quantity: 3,
@@ -88,12 +88,12 @@ describe("exact and reference profit", () => {
 
     expect(result).toMatchObject({
       revenue: 20.99,
-      unitCost: 4.239,
-      purchaseCost: 12.717,
+      unitCost: 4.23,
+      purchaseCost: 12.69,
       warehouseCost: 2.34,
       penalty: 0.23,
-      profit: 5.703,
-      profitRate: 27.17,
+      profit: 5.73,
+      profitRate: 27.29,
     });
   });
 });

@@ -52,7 +52,7 @@ describe("cost matching shared SKU and store rows", () => {
       expect(row.querySelector(".cost-match-sku-cell").textContent).toContain(variants[index].platformSku);
       expect(row.querySelector(".cost-match-candidate-cell").textContent).toContain("4.5900");
       expect(row.querySelector(".cost-match-current-cell").textContent).toContain(`店铺${index + 1}`);
-      expect(row.querySelector(".cost-match-current-cell").textContent).toContain(`${index + 1}.0000`);
+      expect(row.querySelector(".cost-match-current-cell").textContent).toContain(`${index + 1}.00`);
       expect(row.querySelector("button").getAttribute("aria-label")).toContain(variants[index].platformSku);
     });
     expect(rows[0].querySelector(".cost-match-identity").textContent).toContain(variants[0].attribute);
@@ -84,7 +84,7 @@ describe("cost matching shared SKU and store rows", () => {
   it("preserves candidate and manual adopted statuses without mislabelling the effective store cost", async () => {
     await render([variant("SKU-A", { status: "anomaly_pending", unitCost: 9, evidenceComplete: true, costDecision: { selectedRecords: [{}] } })], new Map([["SKU-A", [storeLine("M", "甲店", { manualOverride: {}, decision: { source: 'manual_override', eligibleForExactProfit: true, unitCost: 0.00001 } })]]]), { candidateSkuSet: new Set(["SKU-A"]) });
     expect(container.querySelector(".cost-match-candidate-cell").textContent).toContain("采购异常待处理");
-    expect(container.querySelector(".cost-match-current-cell").textContent).toContain("0.00001");
+    expect(container.querySelector(".cost-match-current-cell").textContent).toContain("¥0.00");
     expect(container.querySelector(".cost-match-current-cell").textContent).toContain("人工更正有效");
   });
 
@@ -93,7 +93,7 @@ describe("cost matching shared SKU and store rows", () => {
       decision: { eligibleForExactProfit: true, source: 'erp', unitCost: 5 } });
     await render([variant('SKU-A')], new Map([['SKU-A', [row]]]));
     const current = container.querySelector('.cost-match-current-cell');
-    expect(current.textContent).toContain('¥5.0000');
+    expect(current.textContent).toContain('¥5.00');
     expect(current.textContent).toContain('ERP 已采用 · ' + new Date(row.erpCost.publishedAt).toLocaleDateString('zh-CN'));
     expect(current.textContent).not.toContain('人工更正有效');
   });

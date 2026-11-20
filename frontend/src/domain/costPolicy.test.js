@@ -104,7 +104,7 @@ describe("formal cost policy", () => {
     expect(decision.reasons).toContain("approval_ledger_mismatch");
   });
 
-  it("preserves ERP four decimals and keeps 1688 at two", () => {
+  it("truncates the selected ERP unit to cents and keeps 1688 reference-only", () => {
     const erp = resolveFormalCostDecision({
       ledgerId: "LEDGER-1",
       platformSku: "SKU-1",
@@ -117,7 +117,7 @@ describe("formal cost policy", () => {
       approval: { ...approval, approvedAmount: 5.239 },
     });
 
-    expect(erp.unitCost).toBe(4.239);
+    expect(erp.unitCost).toBe(4.23);
     expect(fallback.unitCost).toBe(5.23);
   });
 });

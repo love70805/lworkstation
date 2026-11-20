@@ -1,3 +1,4 @@
+import { purchaseTotalValue } from './erpPurchaseEvidence.js';
 import { normalizeErpCatalogFields, normalizeErpCatalogMappings, normalizeErpCatalogCoverage, normalizeErpCatalogUrl } from './erpCatalogFields.js';
 import { canonicalPlatformSkc, canonicalPlatformSku, canonicalWarehouseSku, normalizePlatformSkc, normalizePlatformSku, normalizeWarehouseSku, normalizeWorkspaceId } from './identifiers.js';
 
@@ -102,7 +103,7 @@ export function normalizeErpCatalogPurchaseEvidence(value) {
       if (record?.amountBasis != null && record.amountBasis !== 'purchase_total') throw new Error('采购金额口径无效。');
       return {
         recordId: required(record?.recordId ?? record?.id, `ERP 资料第 ${index + 1} 条采购记录 ID`), warehouseSku,
-      productName: optional(record?.productName ?? record?.name), quantity: number(record?.quantity ?? record?.qty, '采购数量'), unitPrice: number(record?.unitPrice, '采购单价'), totalPrice: number(record?.totalPrice, '采购金额'),
+      productName: optional(record?.productName ?? record?.name), quantity: number(record?.quantity ?? record?.qty, '采购数量'), unitPrice: number(record?.unitPrice, '采购单价'), totalPrice: purchaseTotalValue(record?.totalPrice, number(record?.totalPrice, '采购金额')),
       ...(record?.amountBasis === 'purchase_total' ? { amountBasis: 'purchase_total', purchaseUnitPrice: number(record.purchaseUnitPrice, '原采购单价'), serviceUnitPrice: number(record.serviceUnitPrice, '服务单价') } : {}),
       purchaseDate: optional(record?.purchaseDate ?? record?.date), order1688: optional(record?.order1688), purchaseOrderNo: optional(record?.purchaseOrderNo), purchaseOrderId: optional(record?.purchaseOrderId),
       supplierName: optional(record?.supplierName), supplier1688Url: normalizeErpCatalogUrl(record?.supplier1688Url), ...normalizeErpCatalogFields(record, { includeMappings: false }),

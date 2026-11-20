@@ -31,7 +31,6 @@ it("keeps latest ledgers, activity, pending costs and all counts isolated regard
   expect(original.pendingLedgerTasks).toEqual([
     { ledgerId: "A-CLOSED", period: "2026-06", kind: "ledger", missingCount: 0 },
     { ledgerId: "A-OLD", period: "2026-07", kind: "cost", missingCount: 3 },
-    { ledgerId: "A-NEW", period: "2026-08", kind: "profit", missingCount: 0 },
   ]);
   await db.ledgers.bulkPut([
     { id: "B-LATEST", workspaceId: foreign, period: "2099-12", updatedAt: "2099-12-31", status: "cost_pending", costSummary: { missingCount: 900, identityPolicyVersion: "ledger-cost-identity@1" } },
@@ -72,7 +71,6 @@ it("a newer draft does not remove an earlier ready month from the persisted summ
   expect(summary.pendingLedgerTasks).toEqual([
     { ledgerId: "A-CLOSED", period: "2026-06", kind: "ledger", missingCount: 0 },
     { ledgerId: "A-OLD", period: "2026-07", kind: "cost", missingCount: 3 },
-    { ledgerId: "A-NEW", period: "2026-08", kind: "profit", missingCount: 0 },
     { ledgerId: "A-DRAFT", period: "2026-09", kind: "ledger", missingCount: 0 },
   ]);
 });

@@ -140,7 +140,7 @@ it('ignores actual zero prices without asserting correctness, survives reopening
  expect((await getLatestLedgerCosts(ledger.id)).map(row=>row.platformSku)).toEqual(['A']);
  expect(await listIgnoredErpCostAnomalies(ledger.id)).toEqual([]);
  const after=await getLedgerSnapshot(ledger.id);
- expect(calculateFormalLedgerRows({ledger:after.ledger,salesRows:after.rows,erpCosts:after.costs,approvals:after.approvals}).find(row=>row.platformSku==='B')).toMatchObject({costSource:'manual_override',unitCost:0.002});
+ expect(calculateFormalLedgerRows({ledger:after.ledger,salesRows:after.rows,erpCosts:after.costs,approvals:after.approvals}).find(row=>row.platformSku==='B')).toMatchObject({costSource:'manual_override',unitCost:0});
  expect((await db.erpCostInbox.toArray())[0].envelope).toEqual(envelope);
 });
 it('ignoring cannot turn absent, blank, incomplete or precision-lost evidence into a cost',async()=>{
@@ -170,7 +170,7 @@ it.each([8, 0, 0.0000001])('preserves manual %s after ignoring all anomalies and
  expect(await db.costApprovals.get(manual.id)).toEqual(manual);
  const snapshot = await getLedgerSnapshot(ledger.id);
  const rows = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
- expect(rows.find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost, costSource: 'manual_override' });
+ expect(rows.find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost: unitCost < 0.01 ? 0 : unitCost, costSource: 'manual_override' });
  expect(rows.find(row => row.platformSku === 'B' && row.store === '乙')).toMatchObject({ unitCost: 1, costSource: 'erp' });
  await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: manual.id });
  const after = await getLedgerSnapshot(ledger.id);
@@ -268,7 +268,7 @@ it('scopes single and multiple anomaly decisions to the selected products, with 
  expect(await listIgnoredErpCostAnomalies(ledger.id)).toEqual([]);
  expect(await getLatestLedgerCosts(ledger.id)).toEqual([]);
  const after=await getLedgerSnapshot(ledger.id);
- expect(calculateFormalLedgerRows({ledger:after.ledger,salesRows:after.rows,erpCosts:after.costs,approvals:after.approvals}).find(row=>row.platformSku==='B')).toMatchObject({costSource:'manual_override',unitCost:0.002});
+ expect(calculateFormalLedgerRows({ledger:after.ledger,salesRows:after.rows,erpCosts:after.costs,approvals:after.approvals}).find(row=>row.platformSku==='B')).toMatchObject({costSource:'manual_override',unitCost:0});
  expect((await db.erpCostInbox.get(receipt.id)).envelope).toEqual(envelope);
 });
 it('applies multi-receipt selections atomically and rolls the whole selection back on invalid evidence', async () => {
@@ -676,7 +676,7 @@ it.each([0, 0.0000001])('keeps store-scoped manual priority at %s while adopting
   await processErpCostInboxAdoption({ inboxId: receipt.id, resolutions: [confirmedPrice('R-B')] });
   let snapshot = await getLedgerSnapshot(ledger.id);
   const products = calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals });
-  expect(products.find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost, costSource: 'manual_override' });
+  expect(products.find(row => row.platformSku === 'B' && row.store === '甲')).toMatchObject({ unitCost: unitCost < 0.01 ? 0 : unitCost, costSource: 'manual_override' });
   expect(products.find(row => row.platformSku === 'B' && row.store === '乙')).toMatchObject({ unitCost: 1, costSource: 'erp' });
   await revokeManualCostOverride({ ledgerId: ledger.id, approvalId: manual.id });
   snapshot = await getLedgerSnapshot(ledger.id);
@@ -791,7 +791,7 @@ it('restores reminders across identical copies without resurrecting ignores or c
   expect((await getLatestLedgerCosts(old.ledger.id)).map(row => row.platformSku)).toEqual(['A']);
   expect(await db.costApprovals.get(manual.id)).toEqual(manual);
   const snapshot = await getLedgerSnapshot(old.ledger.id);
-  expect(calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals }).find(row => row.platformSku === 'B')).toMatchObject({ costSource: 'manual_override', unitCost: 0.002 });
+  expect(calculateFormalLedgerRows({ ledger: snapshot.ledger, salesRows: snapshot.rows, erpCosts: snapshot.costs, approvals: snapshot.approvals }).find(row => row.platformSku === 'B')).toMatchObject({ costSource: 'manual_override', unitCost: 0 });
   expect((await readProfitReportDownload(report.id)).report.fileBase64).toBe(report.fileBase64);
   expect((await db.erpCostInbox.get(a.id)).envelope).toEqual(old.envelope);
 });

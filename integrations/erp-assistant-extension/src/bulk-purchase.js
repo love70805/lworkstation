@@ -13,10 +13,10 @@
     });
     const interrupted = error => error?.name === 'AbortError' || ['ERP_LOGIN_REQUIRED', 'ERP_PERMISSION_REQUIRED', 'ERP_COLLECTION_PAUSED', 'ERP_SERVICE_UNAVAILABLE'].includes(error?.code) || error?.status === 429;
     function assertRunning(run) { if (run.controller.signal.aborted) throw run.controller.signal.reason || new DOMException('采集已取消', 'AbortError'); }
-    function decimal(value) {
+    function decimal(value, keepSource = false) {
         const source = text(value);
         if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(source) || !Number.isFinite(Number(source))) throw fallback('invalid_numeric_field');
-        return Number(source);
+        return keepSource && typeof value === "string" ? source : Number(source);
     }
     function dateText(value, xlsx) {
         let source;
@@ -50,10 +50,31 @@
         }
         if (expanded > workbookLimits.expandedBytes) throw workbookSizeError('expandedBytes', expanded);
     }
+    function sourcePurchaseTotals(book, sheetName, column) {
+        const readPart = path => {
+            const bytes = book.files?.[path]?.content;
+            if (!bytes) throw fallback('purchase_amount_source_unavailable');
+            return new TextDecoder().decode(bytes);
+        };
+        const id = book.Workbook?.Sheets?.find(sheet => sheet.name === sheetName)?.id;
+        const links = readPart('xl/_rels/workbook.xml.rels').match(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g) || [];
+        const attr = (tag, name) => tag.match(new RegExp('\\s' + name + '\\s*=\\s*(["\\x27])([^"\\x27]*)\\1'))?.[2];
+        const entry = id && links.find(tag => attr(tag, 'Id') === id);
+        if (!entry || attr(entry, 'TargetMode') === 'External' || !attr(entry, 'Target')) throw fallback('purchase_amount_source_unavailable');
+        const sheetPath = new URL(attr(entry, 'Target'), 'https://workbook.invalid/xl/workbook.xml').pathname.slice(1);
+        const cells = new RegExp('<(?:[\\w.-]+:)?c\\b(?=[^>]*\\sr\\s*=\\s*["\\x27]' + column
+            + '(\\d+)["\\x27])[^>]*>\\s*<(?:[\\w.-]+:)?v\\b[^>]*>([^<]+)</(?:[\\w.-]+:)?v>', 'g');
+        const totals = new Map();
+        for (const [, row, amount] of readPart(sheetPath).matchAll(cells)) {
+            const cell = book.Sheets[sheetName][column + row];
+            if (cell?.t === 'n') totals.set(Number(row), String(cell.v) === amount ? cell.v : amount);
+        }
+        return totals;
+    }
     function parseWorkbook(buffer, digest, xlsx = global.XLSX) {
         if (!xlsx?.read || !/^[a-f0-9]{64}$/.test(digest)) throw fallback('workbook_reader_unavailable');
         inspectZip(buffer);
-        const book = xlsx.read(new Uint8Array(buffer), { type: 'array', cellFormula: true, cellHTML: false, cellStyles: false, cellDates: false });
+        const book = xlsx.read(new Uint8Array(buffer), { type: 'array', bookFiles: true, cellFormula: true, cellHTML: false, cellStyles: false, cellDates: false });
         if (book.Workbook?.WBProps?.date1904) throw fallback('unsupported_workbook');
         let sheet, sheetName, rows, headers;
         for (const name of book.SheetNames) {
@@ -71,6 +92,7 @@
         if (!sheet) throw fallback('purchase_columns_missing');
         if (new Set(headers.filter(Boolean)).size !== headers.filter(Boolean).length) throw fallback('duplicate_headers');
         const columns = Object.fromEntries(headers.map((name, index) => [name, index]));
+        const purchaseTotals = sourcePurchaseTotals(book, sheetName, xlsx.utils.encode_col(columns['采购总价']));
         const records = [], pairs = new Set(), duplicateWarehouses = new Set(), orders = new Set();
         for (let index = 1; index < rows.length; index++) {
             const values = rows[index];
@@ -79,6 +101,8 @@
             for (const name of REQUIRED) {
                 if (sheet[xlsx.utils.encode_cell({ r: index, c: columns[name] })]?.f) throw fallback('formula_in_purchase_evidence');
             }
+            const purchaseTotal = get('采购总价');
+            if (typeof purchaseTotal === 'number' && !purchaseTotals.has(index + 1)) throw fallback('purchase_amount_source_unavailable');
             const warehouseSku = text(get('仓库SKU')), order = text(get('采购单号'));
             if (!warehouseSku || !order || typeof get('采购单号') === 'number' && Math.abs(get('采购单号')) >= 1e15) throw fallback('purchase_identity_missing');
             const pair = pairKey(order, warehouseSku);
@@ -89,7 +113,7 @@
             records.push({ itemId: warehouseSku, detailId: `bulk:${digest}:${sheetName}:${index + 1}`,
                 _purchaseOrderNo: order, _purchaseOrderId: order, _orderNo1688: text(get('1688订单号')),
                 purchaseQuantity: decimal(get('采购数量')), purchaseUnitPrice: decimal(get('采购单价')),
-                purchaseTotalPrice: decimal(get('采购总价')),
+                purchaseTotalPrice: decimal(purchaseTotals.get(index + 1) ?? purchaseTotal, true),
                 ...(columns['服务单价'] != null ? { serviceUnitPrice: decimal(text(get('服务单价')) || '0') } : {}),
                 creationTime: dateText(get('创建时间'), xlsx), platformSkuList: text(get('平台SKU')), platformSkuListLength: String(get('平台SKU') ?? '').length,
                 tradeName: text(get('商品名称')), imageUrl: text(get('图片链接')), _supplierName: supplierName,
@@ -210,7 +234,7 @@
                 if (!order?.purchaseOrderId) throw fallback('purchase_identity_missing');
                 const matches = (await readDetails(order, run)).filter(detail => key(detail.itemId) === warehouse);
                 if (matches.length !== 1 || Number(matches[0].purchaseQuantity) !== row.purchaseQuantity || Number(matches[0].purchaseUnitPrice) !== row.purchaseUnitPrice
-                    || policy.purchaseAmounts(matches[0]).totalPrice !== row.purchaseTotalPrice) throw fallback('purchase_snapshot_changed');
+                    || !policy.samePurchaseTotal(policy.purchaseAmounts(matches[0]).totalPrice, row.purchaseTotalPrice)) throw fallback('purchase_snapshot_changed');
                 const detail = matches[0];
                 const date = policy.purchaseDateInfo(detail.creationTime);
                 if (!date) throw fallback('invalid_purchase_date');

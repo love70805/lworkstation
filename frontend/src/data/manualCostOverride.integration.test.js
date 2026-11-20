@@ -38,22 +38,23 @@ describe("manual exact cost overrides", () => {
     expect((await db.ledgers.get(ledgerId)).costSummary).toMatchObject({ expectedCount: 2, missingCount: 1 });
     await save("乙", 0.0000001);
     result = await lines();
-    expect(result[1]).toMatchObject({ unitCost: 0.0000001, purchaseCost: 0.01, profit: 0.99 });
+    expect(result[1]).toMatchObject({ unitCost: 0, purchaseCost: 0, profit: 1 });
     expect((await db.ledgers.get(ledgerId)).status).toBe("ready");
   });
   it.each(["2026-07-01", "2026-08-31"])("keeps manual priority and revocation restores latest eligible ERP: %s", async purchaseDate => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
     await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, warehouseSku: "WH", platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate, unitPrice: 0.009, quantity: 1 }] });
-    expect((await lines())[0].unitCost).toBe(0.003);
+    expect(manual.approvedAmount).toBe(0.003);
+    expect((await lines())[0].unitCost).toBe(0);
     await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
-    expect((await lines())[0]).toMatchObject({ unitCost: 0.009, costSource: "erp" });
+    expect((await lines())[0]).toMatchObject({ unitCost: 0, costSource: "erp" });
   });
   it.each(["2026-09-01", null])("does not restore future or undated ERP after manual revocation: %s", async purchaseDate => {
     const manual = await save("甲", 0.003);
     await db.erpCostBatches.put({ id: "ERP", ledgerId, workspaceId, status: "published" });
     await db.erpCostRows.add({ batchId: "ERP", ledgerId, workspaceId, platformSku: "SHARED", unitCost: 0.009, resolutionStatus: "resolved", publishedAt: new Date().toISOString(), selectedRecordIds: ["R1"], purchaseRecords: [{ recordId: "R1", purchaseDate, unitPrice: 0.009, quantity: 1 }] });
-    expect((await lines())[0]).toMatchObject({ unitCost: 0.003, costSource: "manual_override" });
+    expect((await lines())[0]).toMatchObject({ unitCost: 0, costSource: "manual_override" });
     await revokeManualCostOverride({ ledgerId, approvalId: manual.id });
     expect((await lines())[0]).toMatchObject({ unitCost: null, costSource: null });
     expect((await db.ledgers.get(ledgerId)).status).toBe("cost_pending");
@@ -84,7 +85,7 @@ describe("manual exact cost overrides", () => {
     await adoptZeroDispatch(ledgerId);
     await finalizeMonthlyLedger({ ledgerId, formulaVersion: PROFIT_FORMULA_VERSION, profitLines: current, profitSummary: { profit: 999 } });
     const snapshot = await getLedgerSnapshot(ledgerId);
-    expect(snapshot.ledger.profitSummary).toMatchObject({ purchaseCost: 0.03, profit: 1.97 });
+    expect(snapshot.ledger.profitSummary).toMatchObject({ purchaseCost: 0, profit: 2 });
     await expect(save("甲", 1)).resolves.toBeDefined();
     await expect(revokeManualCostOverride({ ledgerId, approvalId: other.id })).resolves.toBeNull();
     expect((await getLedgerSnapshot(ledgerId)).profitLines).toEqual(snapshot.profitLines);

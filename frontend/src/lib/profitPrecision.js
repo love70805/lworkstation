@@ -71,6 +71,7 @@ export function formatProfitAmount(value) {
   return `¥${amount.toDecimalPlaces(2, Decimal.ROUND_DOWN).toFixed(2)}`;
 }
 
+export const formatAccountingUnitCost = value => `¥${new ExactSummary(value).toFixed(2, Decimal.ROUND_DOWN)}`;
 export const formatErpUnitCost = (value) => `¥${new Decimal(value).toDecimalPlaces(4, Decimal.ROUND_DOWN).toFixed(4)}`;
 export const formatManualUnitCost = (value) => `¥${new Decimal(value).toFixed()}`;
 
@@ -87,7 +88,7 @@ export function formatCostPurchaseEvidence(row) {
 export function buildProfitExportRows(rows, ledger, summary) {
   const version = isProfitSnapshot(ledger) ? ledger.formulaVersion : PROFIT_FORMULA_VERSION;
   const rule = version === PROFIT_FORMULA_VERSION
-    ? "明细保留原始精度；Decimal累计后汇总向零截断两位，利润按精确成本计算"
+    ? "采用单件成本向零截到两位后乘以销量，代发和扣款按来源金额计算"
     : "历史定稿快照：保留已存金额和公式版本，不重新计算";
   return [...rows.map((row) => ({
     SKC: row.groupSkc, SKU: row.platformSku, 属性: row.attribute,

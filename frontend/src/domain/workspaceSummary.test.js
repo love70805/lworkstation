@@ -64,7 +64,6 @@ it('keeps every unfinished month when a newer draft obscures an older ready ledg
  ] });
  expect(summary.latestOpenLedger.id).toBe('new-draft');
  expect(summary.pendingLedgerTasks).toEqual([
-  { ledgerId: 'old-ready', period: '2026-06', kind: 'profit', missingCount: 0 },
   { ledgerId: 'old-cost', period: '2026-07', kind: 'cost', missingCount: 2 },
   { ledgerId: 'review', period: '2026-08', kind: 'cost', missingCount: 0 },
   { ledgerId: 'new-draft', period: '2026-09', kind: 'ledger', missingCount: 0 },

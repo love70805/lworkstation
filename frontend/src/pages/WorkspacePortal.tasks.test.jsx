@@ -32,7 +32,7 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
 
-it.each([["cost_pending", "下一步：核对成本", "cost"], ["ready", "下一步：导出本月报告", "detail"]])("opens the selected %s month from its primary workflow action", async (status, label, view) => {
+it.each([["cost_pending", "下一步：核对成本", "cost"], ["ready", "查看本月利润", "detail"]])("opens the selected %s month from its primary workflow action", async (status, label, view) => {
   const selected = { id: "selected/month", period: "2026-07", status, costSummary: { missingCount: status === "cost_pending" ? 2 : 0 } };
   mocks.scope = { ready: true, context: { selected, query: "ledger=selected%2Fmonth&store=测试店" }, retry: vi.fn() };
   await render([selected]);
@@ -49,33 +49,32 @@ afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 });
 
-it("shows and opens an older ready month even when the latest month is a draft", async () => {
+it("keeps a ready month out of outstanding tasks when a newer draft exists", async () => {
   await render([
     { id: "old/ready", period: "2026-06", status: "ready", updatedAt: "2026-07-01", costSummary: { missingCount: 0 } },
     { id: "new-draft", period: "2026-09", status: "draft", updatedAt: "2026-10-12" },
   ]);
-  expect(container.querySelector(".tasks-panel .widget-count").textContent).toBe("2 项");
-  expect(container.querySelector(".tasks-panel").textContent).toContain("2026-06 利润待确认");
-  expect(container.querySelector(".task-empty")).toBeNull();
-  await act(async () => container.querySelector('button[aria-label="2026-06 利润待确认：核对利润"]').click());
-  expect(container.querySelector("output").textContent).toBe("/profit?ledger=old%2Fready");
+  expect(container.querySelector(".tasks-panel .widget-count").textContent).toBe("1 项");
+  expect(container.querySelector(".tasks-panel").textContent).not.toContain("2026-06");
+  await act(async () => container.querySelector('button[aria-label="2026-09 账本待完善：查看台账"]').click());
+  expect(container.querySelector("output").textContent).toBe("/ledger?ledger=new-draft");
 });
 
 it("counts and exposes all remaining months with their own routes while closed months stay out", async () => {
   await render([
-    { id: "aug", period: "2026-08", status: "ready", costSummary: { missingCount: 0 } },
-    { id: "june", period: "2026-06", status: "ready", costSummary: { missingCount: 0 } },
+    { id: "aug", period: "2026-08", status: "draft" },
+    { id: "june", period: "2026-06", status: "cost_pending", costSummary: { missingCount: 1 } },
     { id: "july", period: "2026-07", status: "cost_pending", costSummary: { missingCount: 2 } },
     { id: "sep", period: "2026-09", status: "draft" },
     { id: "closed", period: "2026-05", status: "finalized" },
     { id: "locked", period: "2026-04", status: "locked" },
   ], [{ id: "C", status: "pending" }]);
   expect(container.querySelector(".tasks-panel .widget-count").textContent).toBe("5 项");
-  expect([...container.querySelectorAll(".tasks-panel > .task-list .task-item strong")].map(item => item.textContent)).toEqual(["待确认采集", "2026-06 利润待确认", "2026-07 成本待补"]);
+  expect([...container.querySelectorAll(".tasks-panel > .task-list .task-item strong")].map(item => item.textContent)).toEqual(["待确认采集", "2026-06 成本待补", "2026-07 成本待补"]);
   const remaining = container.querySelector(".task-more");
   expect(remaining.open).toBe(false);
   expect(remaining.querySelector("summary").textContent).toBe("查看其余 2 项待办");
-  expect([...remaining.querySelectorAll(".task-item strong")].map(item => item.textContent)).toEqual(["2026-08 利润待确认", "2026-09 账本待完善"]);
+  expect([...remaining.querySelectorAll(".task-item strong")].map(item => item.textContent)).toEqual(["2026-08 账本待完善", "2026-09 账本待完善"]);
   remaining.open = true;
   await act(async () => remaining.querySelector('button[aria-label="2026-09 账本待完善：查看台账"]').click());
   expect(container.querySelector("output").textContent).toBe("/ledger?ledger=sep");

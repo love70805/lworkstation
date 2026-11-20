@@ -21,7 +21,7 @@ import { canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { useErpCollectionTasks } from "../hooks/useErpCollectionTasks";
 import { currentLedgerCollectionTask, erpCollectionPresentation } from "../domain/erpCollectionStatus";
-import { formatErpUnitCost, formatManualUnitCost, formatProfitAmount, summarizeProfitRows } from "../lib/profitPrecision";
+import { formatProfitAmount, summarizeProfitRows } from "../lib/profitPrecision";
 import { countProfitIdentities, groupProfitRowsBySkc } from "../lib/profit";
 import { storeSkuKey } from "../domain/manualCostOverride";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
@@ -202,7 +202,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       enableSorting: false,
       size: 100,
       meta: { headerStyle: { width: "100px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
-      cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{row.original.costSource === "manual_override" ? formatManualUnitCost(row.original.unitCost) : row.original.costSource === "erp" ? formatErpUnitCost(row.original.unitCost) : currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <span className="pending-text" aria-label="缺少单件成本">—</span>,
+      cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <span className="pending-text" aria-label="缺少单件成本">—</span>,
     },
     {
       id: "purchaseCost", accessorFn: row => row.purchaseCostExact ?? row.purchaseCost,

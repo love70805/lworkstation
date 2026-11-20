@@ -1,17 +1,18 @@
-import Decimal from "decimal.js";
+import { Exact } from "./profitAmounts";
+export { Exact } from "./profitAmounts";
 import { canonicalPlatformSku } from "./identifiers";
 import { createLedgerGroupKey, createLedgerSkuKey } from "./ledgerImport";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from './ledgerCostIdentity';
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 import { costEvaluationPeriod } from './inventoryAccounting';
 
-export const REPORT_FORMULA_VERSION = "monthly-report@3-optional-dispatch";
-export const REPORT_TEMPLATE_VERSION = "profit-zebra@16-store-deductions";
+export const REPORT_FORMULA_VERSION = "monthly-report@4-unit-cents";
+export const REPORT_TEMPLATE_VERSION = "profit-zebra@17-unit-cents";
+export const FINAL_FILE_TEMPLATES = [REPORT_TEMPLATE_VERSION, "profit-zebra@16-store-deductions", "profit-zebra@15-optional-dispatch", "profit-zebra@14-profit-colors"];
 // Only newly generated, complete files carry this marker. Existing snapshots
 // retain the archived-layout conversion path without migration.
 export const REPORT_DOWNLOAD_FORMAT = 'profit-final-file@1';
 export const REPORT_TABLES = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
-export const Exact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 export function exact(value, { nonnegative = false } = {}) {
   if (value == null || String(value).trim() === "") throw new Error("金额或数量尚未填写。");
   let number;
@@ -19,7 +20,7 @@ export function exact(value, { nonnegative = false } = {}) {
   if (!number.isFinite() || (nonnegative && number.isNegative())) throw new Error("金额或数量必须为有效的非负十进制数。");
   return number.toFixed();
 }
-export const displayMoney = value => new Exact(value).toDecimalPlaces(2, Decimal.ROUND_DOWN).toFixed(2);
+export const displayMoney = value => new Exact(value).toDecimalPlaces(2, Exact.ROUND_DOWN).toFixed(2);
 export const exactSum = (rows, key) => rows.reduce((sum, row) => sum.plus(row[key] ?? 0), new Exact(0)).toFixed();
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;

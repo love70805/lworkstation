@@ -1,4 +1,5 @@
-当前 ERP Assistant：8.0.62
+当前 ERP Assistant：8.0.63
+批量取数与逐单读取均保留采购总价的原始精度。
 
 唯一源码位于 integrations/erp-assistant-extension/。
 桌面版直接加载内置助手；外部 Chrome 用户解压当前 ZIP 后，加载包含 manifest.json 的目录并刷新 ERP。

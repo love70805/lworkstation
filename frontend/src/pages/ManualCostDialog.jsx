@@ -5,7 +5,7 @@ import { Button, Modal } from "../components/UI";
 import { saveManualCostOverride, revokeManualCostOverride } from "../data/repositories/profitRepository";
 import { describeLedgerCostIdentityIssue } from '../domain/ledgerCostIdentity';
 import { previewRecoveredWarehouseCost, saveRecoveredWarehouseCost } from '../data/repositories/warehouseHistoryRecoveryRepository';
-import { formatCostPurchaseEvidence, formatErpUnitCost, formatManualUnitCost } from '../lib/profitPrecision';
+import { formatCostPurchaseEvidence, formatAccountingUnitCost, formatManualUnitCost } from '../lib/profitPrecision';
 import { beginCostReview } from '../lib/costReviewActivity';
 
 function EmbeddedCostForm({ title, description, children, footer }) {
@@ -130,8 +130,8 @@ export default function ManualCostDialog({
   if (viewFirst && !evidence) {
     const records = formatCostPurchaseEvidence(row);
     let currentCost = "缺少有效成本";
-    if (currentAmount && erpApplied) currentCost = `ERP 已采用 · ${formatErpUnitCost(currentAmount)}/件`;
-    else if (currentAmount && hasManual) currentCost = `人工更正 · ${formatManualUnitCost(currentAmount)}/件`;
+    if (currentAmount && erpApplied) currentCost = `ERP 已采用 · ${formatAccountingUnitCost(currentAmount)}/件`;
+    else if (currentAmount && hasManual) currentCost = `人工更正 · ${formatAccountingUnitCost(currentAmount)}/件`;
     evidence = <div className="cost-detail-current">
       <strong>{currentCost}</strong>
       {records && <small className="cost-purchase-summary">{records}</small>}
@@ -154,7 +154,7 @@ export default function ManualCostDialog({
     </>}>
     {costGuard.blocked ? <p className="cost-correction-help" role="status"><strong>{costGuard.title}</strong><br />{costGuard.message}</p> : null}
     {row.manualCostConflict ? <p className="cost-correction-help" role="status">旧账本记录了不同的人工价（{row.manualCostConflict.map(formatManualUnitCost).join('、')}）。在此确认本月单件成本后，两种核算方式共用该金额。</p> : null}
-    {ledger.accountingMode === 'historical_lowest' && row.manualOverride?.approvedAmount != null && erpApplied && currentAmount !== '' ? <p className="cost-correction-help">已保存人工价 {formatManualUnitCost(row.manualOverride.approvedAmount)}/件，本次最低成本核算取 ERP 价 {formatErpUnitCost(currentAmount)}/件。</p> : null}
+    {ledger.accountingMode === 'historical_lowest' && row.manualOverride?.approvedAmount != null && erpApplied && currentAmount !== '' ? <p className="cost-correction-help">已保存人工价 {formatManualUnitCost(row.manualOverride.approvedAmount)}/件，本次最低成本核算取 ERP 价 {formatAccountingUnitCost(currentAmount)}/件。</p> : null}
     {canEdit && purchaseConfirmation ? <section className="cost-confirm-purchases" aria-label="确认采购原价">
       <div><strong>使用采购原价</strong><p>{purchaseConfirmation.description}</p></div>
       <Button variant="primary" disabled={saving} onClick={confirmPurchases}>{saving ? '正在保存…' : '确认采购价正确'}</Button>

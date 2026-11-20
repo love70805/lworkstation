@@ -1,7 +1,7 @@
 import { isErpCostWithinPeriod } from './erpCostPeriod';
 
 const costFields = ['id', 'batchId', 'ledgerId', 'workspaceId', 'platformSku', 'canonicalPlatformSku', 'platformSkc',
-  'warehouseSku', 'unitCost', 'amount', 'currency', 'publishedAt', 'resolutionStatus', 'unresolvedAnomalyCount',
+  'warehouseSku', 'unitCost', 'unitCostExact', 'amount', 'currency', 'publishedAt', 'resolutionStatus', 'unresolvedAnomalyCount',
   'accountingMode', 'orderNumber', 'supplierName', 'supplier1688Url', 'productName', 'attribute'];
 export const saleFields = ['id', 'batchId', 'ledgerId', 'workspaceId', 'store', 'platformSkc', 'platformSku', 'sku',
   'groupKey', 'skuKey', 'supplierNumber', 'attribute', 'quantity', 'quantityExact', 'amount', 'amountExact', 'penalty',

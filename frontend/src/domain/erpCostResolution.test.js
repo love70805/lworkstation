@@ -7,6 +7,8 @@ import {
   selectFormalPurchaseRecords,
 } from "./erpCostResolution";
 
+import { resolveFormalCostDecision } from './costPolicy';
+
 function record(id, date, unitPrice, quantity = 1, extra = {}) {
   return {
     recordId: id,
@@ -111,6 +113,18 @@ describe("ERP Lworkstation-owned resolutions", () => {
     ] });
     expect(result).toMatchObject({ totalQuantity: 27, totalPrice: 102, formalUnitCost: 3.7777, selectedRecordIds: ["A", "B", "C"] });
     expect(result.selectedRecords[0]).toMatchObject({ unitPrice: 3, totalPrice: 36, amountBasis: "purchase_total" });
+  });
+
+  it.each([
+    [['1.2222','1.2223','1.3333'], '3.7778', 1.25],
+    [Array(3).fill('1.299999999999999999999999'), '3.899999999999999999999997', 1.29],
+    [['1.239','1.239','1.252'], '3.73', 1.24],
+  ])('uses full source totals %j before truncating the adopted weighted unit', (amounts, total, applied) => {
+    const result = calculateWarehouseCostDecision({ warehouseSku: 'WH-1', purchaseRecords: amounts.map((value, i) =>
+      record(String(i), '2034-06-12', 9, 1, { amountBasis:'purchase_total', totalPrice:value })) });
+    expect(String(result.totalPrice)).toBe(total);
+    expect(result.purchaseRecords.map(row => String(row.totalPrice))).toEqual(amounts);
+    expect(resolveFormalCostDecision({ platformSku:'SKU', erpCost:{unitCost:result.formalUnitCost, resolutionStatus:result.resolutionStatus} }).unitCost).toBe(applied);
   });
 
   it("sums original amounts without rounding repeating per-item prices first", () => {
@@ -233,7 +247,7 @@ describe("ERP Lworkstation-owned resolutions", () => {
       ],
     });
 
-    expect(result).toMatchObject({ totalPrice: 3.71, unitCost: 1.239, formalUnitCost: 1.239 });
+    expect(result).toMatchObject({ totalPrice: 3.717, unitCost: 1.239, formalUnitCost: 1.239 });
   });
 
   it("independently excludes cancelled, current-month and invalid records", () => {
