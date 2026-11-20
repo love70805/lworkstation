@@ -1,4 +1,6 @@
-import { displayMoney, exactSum, REPORT_DOWNLOAD_FORMAT, REPORT_TEMPLATE_VERSION, sha256 } from "../domain/profitReports";
+import { selectedPurchaseBasis } from "../domain/erpPurchaseEvidence";
+import { CostFraction } from "../domain/profitAmounts";
+import { displayMoney, exactSum, FINAL_FILE_TEMPLATES, REPORT_DOWNLOAD_FORMAT, REPORT_TEMPLATE_VERSION, sha256 } from "../domain/profitReports";
 import { profitOrderNumberForExport } from "./profitOrderDisplay";
 import { groupProfitExportProducts, mergeArchivedSkcSheet, mergeProfitSkcRows } from './profitSkcLayout';
 import { dispatchOrderNumberForExport } from '../domain/dispatchOrderNumber';
@@ -28,7 +30,7 @@ function zip(files) {
 }
 const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
-const formats=[0,49,3,168,165,166,164];
+const formats=[0,49,3,168,165,166,164,167];
 function createStyles(legacyLayout) {
   const theme = legacyLayout ? reportThemeXml : profitThemeXml;
   // Style zero also applies to unspecified/blank cells throughout the worksheet.
@@ -53,7 +55,7 @@ function createStyles(legacyLayout) {
       return keys.get(key);
     },
     xml() {
-      return `${declaration}<styleSheet xmlns="${ns}"><numFmts count="4"><numFmt numFmtId="164" formatCode="#,##0.####################"/><numFmt numFmtId="168" formatCode="0.00"/><numFmt numFmtId="165" formatCode="0.000000"/><numFmt numFmtId="166" formatCode="0.0000"/></numFmts>${theme.fonts}${theme.fills}${theme.borders}<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${definitions.length}">${definitions.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+      return `${declaration}<styleSheet xmlns="${ns}"><numFmts count="5"><numFmt numFmtId="167" formatCode="0.00######"/><numFmt numFmtId="164" formatCode="#,##0.####################"/><numFmt numFmtId="168" formatCode="0.00"/><numFmt numFmtId="165" formatCode="0.000000"/><numFmt numFmtId="166" formatCode="0.0000"/></numFmts>${theme.fonts}${theme.fills}${theme.borders}<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${definitions.length}">${definitions.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
     }
   };
 }
@@ -75,7 +77,8 @@ function sheetXml(rows,widths,registry,alignment=[],rowHeight=reportRowHeight){
   return `${declaration}<worksheet xmlns="${ns}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${column(widths.length-1)}${Math.max(rows.length,1)}"/><sheetViews><sheetView workbookViewId="0" showGridLines="0"></sheetView></sheetViews><sheetFormatPr defaultRowHeight="24"/><cols>${widths.map((width,i)=>`<col min="${i+1}" max="${i+1}" width="${width}" customWidth="1"/>`).join("")}</cols><sheetData>${rows.map((cells,i)=>`<row r="${i+1}" ht="${i?rowHeight:reportHeaderHeight}" customHeight="1">${cells.map((cell,j)=>{
     if(cell==null)return "";const c=typeof cell==="object"?cell:text(cell);const style=registry.id(c,i,alignment[j]);
     if(c.blank)return `<c r="${column(j)}${i+1}" s="${style}"/>`;
-    return c.number?`<c r="${column(j)}${i+1}" s="${style}" t="n"><v>${xml(c.value)}</v></c>`:`<c r="${column(j)}${i+1}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xml(c.value)}</t></is></c>`;
+    const formula = c.formula ? "<f>" + xml(c.formula.replaceAll("{row}", String(i + 1))) + "</f>" : "";
+    return c.number?`<c r="${column(j)}${i+1}" s="${style}" t="n">${formula}<v>${xml(c.value)}</v></c>`:`<c r="${column(j)}${i+1}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xml(c.value)}</t></is></c>`;
   }).join("")}</row>`).join("")}</sheetData>${rows.some(cells=>cells.some(cell=>cell?.mergeAcross||cell?.mergeDown))?`<mergeCells>${rows.flatMap((cells,i)=>cells.flatMap((cell,j)=>cell?.mergeAcross||cell?.mergeDown?[`<mergeCell ref="${column(j)}${i+1}:${column(j+(cell.mergeAcross??1)-1)}${i+(cell.mergeDown??1)}"/>`]:[])).join('')}</mergeCells>`:''}<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
 }
 const detailRow = cells => cells.map(cell=>cell?{...cell,detail:true}:null);
@@ -89,7 +92,24 @@ export function profitReportSheetWidths(sheet,name){
   if(name==='扣款'&&sheet?.D1?.v==='扣款金额')return sheet.E1?.v==='实际店铺'?[26,27,25,21,12,2,12,21]:deductionWidths;
   return null;
 }
-function productRows(products) {return [headers(productHeaders),...groupProfitExportProducts(products).map(row=>detailRow([{...identifier(row.groupSkc??row.platformSkc),mergeSkc:String(row.platformSkc??row.groupSkc??'').trim()!==''},identifier(row.platformSku),text(row.attribute),number(row.quantityExact,2),number(row.revenueExact),identifier(row.exportOrderNumber??profitOrderNumberForExport(row),1),number(row.unitCostExact),number(row.purchaseCostExact),number(row.warehouseCostExact),profitNumber(row.profitExact)])),bandRow([text("合计"),null,null,number(exactSum(products,"quantityExact"),2),number(exactSum(products,"revenueExact")),null,null,number(exactSum(products,"purchaseCostExact")),number(exactSum(products,"warehouseCostExact")),profitNumber(exactSum(products,"profitExact"))])];}
+// Preserve the chosen unit in the file. For ordinary Excel integers the
+// quotient in cents also avoids floating-point errors at the truncation boundary.
+function productCostCells(row) {
+  if (!row.accountingMode) return [number(row.unitCostExact), number(row.purchaseCostExact)];
+  const regular = row.accountingMode !== 'historical_lowest';
+  const unit = {value: row.unitCostExact, format: regular ? 7 : 3, number:true};
+  const basis = regular && row.costPurchaseRecords?.length && selectedPurchaseBasis(row.costPurchaseRecords);
+  if (basis && basis.amount.length + basis.quantity.length < 8000) unit.formula = basis.amount + '/' + basis.quantity;
+  const cost = number(row.purchaseCostExact);
+  const fraction = CostFraction.from(row.unitCostFraction ?? row.unitCostExact);
+  const quantity = CostFraction.from(row.quantityExact);
+  const product = fraction.n * quantity.n * 100n;
+  if (quantity.d === 1n && String(product < 0n ? -product : product).length <= 15 && String(fraction.d).length <= 15 && String(fraction.n).length <= 15) {
+    cost.formula = 'QUOTIENT(D{row}*' + fraction.n + '*100,' + fraction.d + ')/100';
+  }
+  return [unit, cost];
+}
+function productRows(products) {return [headers(productHeaders),...groupProfitExportProducts(products).map(row=>detailRow([{...identifier(row.groupSkc??row.platformSkc),mergeSkc:String(row.platformSkc??row.groupSkc??'').trim()!==''},identifier(row.platformSku),text(row.attribute),number(row.quantityExact,2),number(row.revenueExact),identifier(row.exportOrderNumber??profitOrderNumberForExport(row),1),...productCostCells(row),number(row.warehouseCostExact),profitNumber(row.profitExact)])),bandRow([text("合计"),null,null,number(exactSum(products,"quantityExact"),2),number(exactSum(products,"revenueExact")),null,null,number(exactSum(products,"purchaseCostExact")),number(exactSum(products,"warehouseCostExact")),profitNumber(exactSum(products,"profitExact"))])];}
 function storeDeductionRows(store) {
   return [['扣款', deductionNumber(store.deductionExact)], ['扣后利润', profitNumber(store.financialProfitExact)]]
     .map(([label, amount]) => bandRow([text(label), ...Array(8).fill(null), amount]));
@@ -172,7 +192,7 @@ export function base64ToBytes(value){
 }
 export async function prepareReportDownload(report, { dispatchRows, deductionRows, useStoredFile=false } = {}) {
   if (report.bytes instanceof Uint8Array && !report.id && !dispatchRows && !deductionRows) return report.bytes;
-  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&[REPORT_TEMPLATE_VERSION,'profit-zebra@15-optional-dispatch','profit-zebra@14-profit-colors'].includes(report.templateVersion)
+  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&FINAL_FILE_TEMPLATES.includes(report.templateVersion)
     &&(useStoredFile||!dispatchRows&&!deductionRows)){
     const bytes=base64ToBytes(report.fileBase64);
     if(bytes[0]!==80||bytes[1]!==75||!report.fileSha256||await sha256(bytes)!==report.fileSha256)throw new Error('报告文件校验失败，请检查完整报告备份。');
@@ -186,7 +206,7 @@ export async function prepareReportDownload(report, { dispatchRows, deductionRow
   }
   if (report.totalsExact?.dispatchQuantityExact !== null) {
     const { restoreSavedDispatchOrders } = await import('./savedDispatchOrders');
-    bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![REPORT_TEMPLATE_VERSION,'profit-zebra@15-optional-dispatch','profit-zebra@14-profit-colors','profit-zebra@13-summary-layout','profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
+    bytes=restoreSavedDispatchOrders(bytes, dispatchRows, { allowMissingStore: ![...FINAL_FILE_TEMPLATES,'profit-zebra@13-summary-layout','profit-zebra@12-source-row-order','profit-zebra@11-black-source-merges','profit-zebra@10-optional-dispatch-store'].includes(report.templateVersion) });
   } else if (dispatchRows?.length) {
     throw new Error('这份报告未录入代发，无法补齐代发单号。');
   }

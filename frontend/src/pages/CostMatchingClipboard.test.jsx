@@ -349,6 +349,18 @@ const formalCost = {
   publishedAt: '2026-09-01T00:00:00Z', resolutionStatus: 'resolved', evidenceComplete: true,
   selectedRecordIds: ['P-1'], purchaseRecords: [{ recordId: 'P-1', warehouseSku: 'WH-1', purchaseDate: '2026-08-10', quantity: 1, unitPrice: 10, eligible: true }],
 };
+it('places one secondary recollection action beside the completed scope and opens confirmation', async () => {
+  completedCostTask();
+  mocks.inboxRecords = [{ id:'IN-1',workspaceId:'W',ledgerId:'L',requestId:'OLD',deliveryId:'OLD-RECEIPT',status:'applied',appliedBatchId:'B-1' }];
+  await render(['SKC-A'],'ready',{compact:true,costs:[{...formalCost,ledgerId:'L',platformSkc:'SKC-A'}]});
+  const actions = [...container.querySelectorAll('button')].filter(node=>node.textContent==='重新获取 ERP 成本');
+  expect(actions).toHaveLength(1);
+  expect(actions[0].closest('.profit-collection-toolbar')).toBeTruthy();
+  await act(async()=>actions[0].click());
+  expect(container.querySelector('[role="dialog"]').textContent).toContain('重新获取 ERP 成本');
+  expect(window.shopeersDesktopRuntime.startErpCollection).not.toHaveBeenCalled();
+});
+
 it('continues an unstarted whole-ledger task with only the still-unpriced SKU, even on the all-products view', async () => {
   completedCostTask();
   Object.assign(mocks.tasks[0], {status:'paused', batches:[{status:'pending',platformSkcs:['SKC-A','SKC-B']}]});
@@ -593,7 +605,7 @@ it('refreshes an open cost dialog when the formal ERP cost is adopted', async ()
   await act(async () => button('详情').click());
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('没有成本');
   await render(['SKC-1'], 'ready', { ledgerId: 'DIALOG-FRESH', costs: [formalCost] });
-  expect(container.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.0000/件');
+  expect(container.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.00/件');
   expect(container.querySelector('.cost-detail-current')?.textContent).toContain('正式成本已生效');
 });
 it('shows adopted purchase evidence and saves with Enter only after explicit manual correction', async () => {
@@ -602,7 +614,7 @@ it('shows adopted purchase evidence and saves with Enter only after explicit man
   await act(async () => button('详情').click());
   const dialog = container.querySelector('[role="dialog"]');
   expect(dialog.textContent).toContain('成本详情');
-  expect(dialog.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.0000/件');
+  expect(dialog.querySelector('.cost-detail-current strong').textContent).toBe('ERP 已采用 · ¥10.00/件');
   const purchases = dialog.querySelector('.purchase-review-list');
   expect(purchases.closest('details')).toBeNull();
   expect(purchases.textContent).toContain('2026-08-10');

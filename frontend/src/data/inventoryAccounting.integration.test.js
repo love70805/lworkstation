@@ -180,7 +180,7 @@ it('carries a lone legacy lowest-mode approval into both calculations and honors
   await db.costApprovals.put({ ...saved, id: 'OTHER-STORE-REVOCATION', status: 'revoked', accountingMode: 'historical_lowest',
     sourceApprovalId: saved.id, referenceCost: { ...saved.referenceCost, store: '乙' } });
   await toggleAccountingMode('W');
-  await currentPrice('0.0000002', 'manual_override');
+  await currentPrice('0', 'manual_override');
   await db.costApprovals.update(saved.id, { accountingMode: 'weighted' });
   await db.costApprovals.put({ ...saved, id: 'OLD-REVOCATION', status: 'revoked', accountingMode: 'historical_lowest', sourceApprovalId: saved.id });
   await currentPrice('2', 'erp');

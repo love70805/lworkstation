@@ -27,6 +27,9 @@ export const reportThemeXml = themeXml(Array(6).fill('FF000000'),
 export const previousProfitThemeXml = themeXml(
   ['FF253448', 'FF253448', 'FF243C50', 'FF253448', 'FF253448', 'FF253448', 'FF9B4B50', 'FF9B4B50'],
   ['FFDCE8F1', 'FFF7F9FB', 'FFEAF1F1'], 'FFDAE1E8', 'FFB7C7D2');
-export const profitThemeXml = themeXml(
-  ['FF283446', 'FF283446', 'FF243957', 'FF85571C', 'FF85571C', 'FF283446', 'FF9B4B50', 'FF9B4B50'],
-  ['FFDDE5F3', 'FFF8F9FC', 'FFEBEEF5'], 'FFDDE1E9', 'FFBCC7D7');
+function storeReportTheme(deduction, loss) {
+  return themeXml(['FF283446', 'FF283446', 'FF243957', deduction, deduction, 'FF283446', loss, loss],
+    ['FFDDE5F3', 'FFF8F9FC', 'FFEBEEF5'], 'FFDDE1E9', 'FFBCC7D7');
+}
+export const storeDeductionThemeV16 = storeReportTheme('FF85571C', 'FF9B4B50');
+export const profitThemeXml = storeReportTheme('FFC00000', 'FFC00000');

@@ -95,7 +95,7 @@ export async function readHistoricalLowestCosts(workspaceId) {
   // separate cache database. Only ordinary reads publish reusable projections.
   if (Dexie.currentTransaction) return compute();
   await observeInventoryRevision(true);
-  return cachedDerived({ scope: [workspaceId], formula: 'inventory-lowest@5-evidence-origin', revisionReader: inventoryEvidenceRevision, revision: inventoryEvidenceRevision(), compute });
+  return cachedDerived({ scope: [workspaceId], formula: 'inventory-lowest@6-source-decimals', revisionReader: inventoryEvidenceRevision, revision: inventoryEvidenceRevision(), compute });
 }
 
 // Retrieve the full history only when opening the selected minimum's details.

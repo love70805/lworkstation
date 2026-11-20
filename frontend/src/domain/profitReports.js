@@ -1,17 +1,18 @@
-import Decimal from "decimal.js";
+import { Exact, purchaseAmounts, sumCostAmounts } from "./profitAmounts";
+export { Exact } from "./profitAmounts";
 import { canonicalPlatformSku } from "./identifiers";
 import { createLedgerGroupKey, createLedgerSkuKey } from "./ledgerImport";
 import { buildLedgerSkuIdentityIndex, resolveLedgerCostDecision, describeLedgerCostIdentityIssue } from './ledgerCostIdentity';
 import { selectManualOverride, manualSnapshot, storeSkuKey } from "./manualCostOverride";
 import { costEvaluationPeriod } from './inventoryAccounting';
 
-export const REPORT_FORMULA_VERSION = "monthly-report@3-optional-dispatch";
-export const REPORT_TEMPLATE_VERSION = "profit-zebra@16-store-deductions";
+export const REPORT_FORMULA_VERSION = "monthly-report@4-mode-precision";
+export const REPORT_TEMPLATE_VERSION = "profit-zebra@17-mode-precision";
+export const FINAL_FILE_TEMPLATES = [REPORT_TEMPLATE_VERSION, "profit-zebra@16-store-deductions", "profit-zebra@15-optional-dispatch", "profit-zebra@14-profit-colors"];
 // Only newly generated, complete files carry this marker. Existing snapshots
 // retain the archived-layout conversion path without migration.
 export const REPORT_DOWNLOAD_FORMAT = 'profit-final-file@1';
 export const REPORT_TABLES = ["monthlySupplementBatches", "monthlySupplementRows", "profitReports", "profitReportLines"];
-export const Exact = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_DOWN });
 export function exact(value, { nonnegative = false } = {}) {
   if (value == null || String(value).trim() === "") throw new Error("金额或数量尚未填写。");
   let number;
@@ -19,8 +20,10 @@ export function exact(value, { nonnegative = false } = {}) {
   if (!number.isFinite() || (nonnegative && number.isNegative())) throw new Error("金额或数量必须为有效的非负十进制数。");
   return number.toFixed();
 }
-export const displayMoney = value => new Exact(value).toDecimalPlaces(2, Decimal.ROUND_DOWN).toFixed(2);
-export const exactSum = (rows, key) => rows.reduce((sum, row) => sum.plus(row[key] ?? 0), new Exact(0)).toFixed();
+export const displayMoney = value => new Exact(value).toDecimalPlaces(2, Exact.ROUND_DOWN).toFixed(2);
+export const exactSum = (rows, key) => key === 'purchaseCostExact' || key === 'profitExact'
+  ? sumCostAmounts(rows, key).decimal()
+  : rows.reduce((sum, row) => sum.plus(row[key] ?? 0), new Exact(0)).toFixed();
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value).filter(key => value[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
@@ -74,10 +77,8 @@ export function priceReportGroups({ ledger, salesRows, erpCosts, approvals, allo
       if (decision.identityIssue) throw new Error(`${describeLedgerCostIdentityIssue(decision.identityIssue)}不能生成报告。`);
       throw new Error(`${row.store} / ${row.platformSku} 缺少正式成本，不能生成报告。`);
     }
-    const unitCostExact = exact(decision.unitCost, { nonnegative: true });
-    const purchaseCostExact = new Exact(row.quantityExact).times(unitCostExact).toFixed();
     const warehouseCostExact = new Exact(row.quantityExact).times(rate).toFixed();
-    return { ...row, unitCostExact, purchaseCostExact, warehouseCostExact, profitExact: new Exact(row.revenueExact).minus(purchaseCostExact).minus(warehouseCostExact).toFixed(), costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, orderNumber: cost?.orderNumber ?? "",
+    return { ...row, ...purchaseAmounts(decision, row.quantityExact, row.revenueExact, warehouseCostExact), accountingMode: decision.accountingMode, warehouseCostExact, costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, orderNumber: cost?.orderNumber ?? "",
       costPurchaseRecords: decision.source === "erp" ? adoptedCostEvidence(cost).selected : [],
       costResolutionVersion: decision.source === "erp" ? adoptedCostEvidence(cost).decision?.resolutionVersion ?? null : null };
   }).sort((a,b) => a.store.localeCompare(b.store,"zh-CN") || a.groupSkc.localeCompare(b.groupSkc) || a.platformSku.localeCompare(b.platformSku));
@@ -87,14 +88,17 @@ export function reportTotals(products, dispatchQuantityExact, warehouseRateExact
   const stores = [...new Set(products.map(row => row.store))];
   if (deductions.some(row => !stores.includes(row.store))) throw new Error("扣款店铺不在未扣款报告基础中。");
   const dispatchAmountExact = dispatchQuantityExact === null ? null : new Exact(dispatchQuantityExact).times(warehouseRateExact).toFixed();
-  const productProfitExact = exactSum(products, "profitExact");
-  const preDeductionExact = dispatchAmountExact === null ? productProfitExact : new Exact(productProfitExact).plus(dispatchAmountExact).toFixed();
+  const productProfit = sumCostAmounts(products, "profitExact");
+  const productProfitExact = productProfit.decimal();
+  const preDeduction = productProfit.plus(dispatchAmountExact ?? 0);
+  const preDeductionExact = preDeduction.decimal();
   const deductionExact = exactSum(deductions, "signedAmountExact");
-  return { quantityExact: exactSum(products,"quantityExact"), revenueExact: exactSum(products,"revenueExact"), purchaseCostExact: exactSum(products,"purchaseCostExact"), warehouseCostExact: exactSum(products,"warehouseCostExact"), productProfitExact, dispatchQuantityExact, dispatchAmountExact, preDeductionExact, deductionExact, profitExact: new Exact(preDeductionExact).minus(deductionExact).toFixed(), stores: stores.map(store => {
+  return { quantityExact: exactSum(products,"quantityExact"), revenueExact: exactSum(products,"revenueExact"), purchaseCostExact: exactSum(products,"purchaseCostExact"), warehouseCostExact: exactSum(products,"warehouseCostExact"), productProfitExact, dispatchQuantityExact, dispatchAmountExact, preDeductionExact, deductionExact, profitExact: preDeduction.minus(deductionExact).decimal(), stores: stores.map(store => {
     const lines = products.filter(row => row.store === store);
     const deductionExact = exactSum(deductions.filter(row => row.store === store), "signedAmountExact");
-    const profitExact = exactSum(lines,"profitExact");
-    return { store, quantityExact: exactSum(lines,"quantityExact"), revenueExact: exactSum(lines,"revenueExact"), profitExact, deductionExact, financialProfitExact: new Exact(profitExact).minus(deductionExact).toFixed() };
+    const storeProfit = sumCostAmounts(lines,"profitExact");
+    const profitExact = storeProfit.decimal();
+    return { store, quantityExact: exactSum(lines,"quantityExact"), revenueExact: exactSum(lines,"revenueExact"), profitExact, deductionExact, financialProfitExact: storeProfit.minus(deductionExact).decimal() };
   }) };
 }
 

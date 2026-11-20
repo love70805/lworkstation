@@ -1,9 +1,10 @@
+import { CostFraction } from './profitAmounts';
 import { Exact } from './profitReports';
 import { currentLedgerResult, hasSavedFinancialReport } from './ledgerWorkflow';
 import { accountingMode } from './inventoryAccounting';
 
 // A read-only, whole-ledger projection. Filtered product subtotals never enter it.
-export function monthlyProfitSummary({ ledger, reportState, productProfitExact, missingCostCount }) {
+export function monthlyProfitSummary({ ledger, reportState, productProfitExact, productProfitFraction, missingCostCount }) {
   if (!reportState || reportState.ledgerId !== ledger.id || reportState.workspaceId !== ledger.workspaceId) return { status: 'loading' };
   if (reportState.error) return { status: 'error', error: reportState.error };
   const data = reportState.data;
@@ -25,7 +26,7 @@ export function monthlyProfitSummary({ ledger, reportState, productProfitExact, 
   const missingStores = deduction ? data.stores.filter(store => !deduction.coveredStores.includes(store)) : data.stores;
   const products = frozen ? base.totalsExact.productProfitExact : productProfitExact;
   const costsPending = !frozen && (missingCostCount !== 0 || products == null);
-  const profitExact = costsPending ? null : new Exact(products).plus(dispatchAmountExact ?? '0').minus(deductionExact ?? '0').toFixed();
+  const profitExact = costsPending ? null : CostFraction.from((!frozen && productProfitFraction) || products).plus(dispatchAmountExact ?? '0').minus(deductionExact ?? '0').decimal();
   return {
     status: 'ready', dispatchRecorded, dispatchQuantityExact, dispatchAmountExact, rateExact, deductionExact, missingStores, costsPending, profitExact,
     label: deductionExact === null ? '未扣款利润' : missingStores.length ? '暂计利润' : '本月利润',

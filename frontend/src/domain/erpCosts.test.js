@@ -96,7 +96,7 @@ describe("ERP v8.0-compatible cost selection", () => {
       { id: "R1", warehouseSku: "WH-1", purchaseDate: "2026-07-01", quantity: 3, unitPrice: 1.239, purchaseOrderNo: "P1" },
     ], { currentYearMonth: 202608 });
 
-    expect(result.costs[0]).toMatchObject({ totalPrice: 3.71, unitCost: 1.239, algorithmVersion: "erp-v8.0-compatible@3-beta-latest-three" });
+    expect(result.costs[0]).toMatchObject({ totalPrice: 3.717, unitCost: 1.239, algorithmVersion: "erp-v8.0-compatible@3-beta-latest-three" });
   });
 
   it("recognizes cancelled payment and 1688 order states even when the ERP field name varies", () => {

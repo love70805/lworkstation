@@ -11,7 +11,7 @@ export function buildWorkspaceTaskItems(summary) {
     if (task.kind === "cost") {
       items.push({ kind: "cost", tone: "warning", title: `${month} 成本${task.missingCount > 0 ? "待补" : "待核对"}`, detail: task.missingCount > 0 ? `${task.missingCount} 条平台 SKU 待补成本` : "核对本月正式成本与待确认项", action: "核对成本", path: `/cost-matching?${query}` });
     } else if (task.kind === "profit") {
-      items.push({ kind: "profit", tone: "success", title: `${month} 利润待确认`, detail: "成本已齐，等待人工核对并保存报告", action: "核对利润", path: `/profit?${query}` });
+      continue;
     } else {
       items.push({ kind: "ledger", tone: "info", title: `${month} 账本待完善`, detail: "检查销售台账与成本准备状态", action: "查看台账", path: `/ledger?${query}` });
     }

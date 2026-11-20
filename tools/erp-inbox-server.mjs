@@ -1,6 +1,6 @@
 import { validateErpCatalogRequest, buildErpCatalogInboxEnvelope, normalizeErpCatalogPurchaseEvidence } from './erp-inbox-server-catalog-contract.mjs';
 import { normalizeErpCatalogCoverage, normalizeErpUnitConversion } from './erp-inbox-server-catalog-contract.mjs';
-import { erpCatalogRequestProgress } from './erp-inbox-server-catalog-contract.mjs';
+import { erpCatalogRequestProgress, originalPurchaseTotal } from './erp-inbox-server-catalog-contract.mjs';
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
@@ -473,7 +473,7 @@ function sanitizePurchaseRecord(record, warehouseSku, index, excluded = false) {
     ...sanitizeCatalogFields(record),
     quantity,
     unitPrice,
-    totalPrice: purchaseTotal ? totalPrice : totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
+    totalPrice: purchaseTotal ? originalPurchaseTotal(record.totalPrice ?? record.price, totalPrice) : totalPrice ?? (quantity != null && unitPrice != null ? Number((quantity * unitPrice).toFixed(4)) : null),
     ...(purchaseTotal ? { amountBasis: 'purchase_total', purchaseUnitPrice: optionalNumber(record.purchaseUnitPrice), serviceUnitPrice: optionalNumber(record.serviceUnitPrice) } : {}),
     purchaseDate: String(record?.purchaseDate ?? record?.date ?? "").trim(),
     order1688: String(record?.order1688 ?? "").trim(),

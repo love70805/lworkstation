@@ -1,7 +1,8 @@
+import { weightedCostFraction } from './erpPurchaseEvidence';
 import { isErpCostWithinPeriod } from './erpCostPeriod';
 
 const costFields = ['id', 'batchId', 'ledgerId', 'workspaceId', 'platformSku', 'canonicalPlatformSku', 'platformSkc',
-  'warehouseSku', 'unitCost', 'amount', 'currency', 'publishedAt', 'resolutionStatus', 'unresolvedAnomalyCount',
+  'warehouseSku', 'unitCost', 'unitCostExact', 'amount', 'currency', 'publishedAt', 'resolutionStatus', 'unresolvedAnomalyCount',
   'accountingMode', 'orderNumber', 'supplierName', 'supplier1688Url', 'productName', 'attribute'];
 export const saleFields = ['id', 'batchId', 'ledgerId', 'workspaceId', 'store', 'platformSkc', 'platformSku', 'sku',
   'groupKey', 'skuKey', 'supplierNumber', 'attribute', 'quantity', 'quantityExact', 'amount', 'amountExact', 'penalty',
@@ -19,6 +20,10 @@ export const profitSaleFields = row => pick(row, saleFields);
 // Built from the owned source row. The write, export and audit paths always verify the original evidence.
 export function profitCostFields(row, period) {
   const result = pick(row, costFields);
+  if (row.accountingMode !== 'historical_lowest') {
+    const basis = weightedCostFraction(row);
+    if (basis) result.unitCostFraction = basis;
+  }
   result.checkedPeriod = period;
   result.withinPeriod = isErpCostWithinPeriod(row, period);
   result.ignoredAnomaly = row.resolutions?.some(item => item.action === 'ignore_anomaly') === true;

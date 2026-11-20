@@ -73,6 +73,21 @@ test('reads reordered headers without selection exports shifting fields', () => 
     assert.equal(parsed.records[0].purchaseQuantity, 2);
 });
 
+test('preserves the original purchase total from both numeric and text export cells', () => {
+    const raw = '1.299999999999999999999999';
+    const bytes = workbook(standard([{ total: 1.3 }, { total: raw }]));
+    const archive = xlsx.CFB.read(new Uint8Array(bytes), { type: 'array' });
+    const sheet = archive.FileIndex[archive.FullPaths.findIndex(path => path.endsWith('/xl/worksheets/sheet1.xml'))];
+    const xml = Buffer.from(sheet.content).toString('utf8');
+    const amended = xml.replace(/(<c r="F2"[^>]*><v>)1\.3(<\/v>)/, '$1' + raw + '$2');
+    assert.notEqual(amended, xml);
+    sheet.content = Buffer.from(amended);
+    sheet.size = sheet.content.length;
+    const source = xlsx.CFB.write(archive, { type: 'buffer', fileType: 'zip' });
+    const parsed = module.parseWorkbook(source, digest(source));
+    assert.deepEqual(Array.from(parsed.records, row => row.purchaseTotalPrice), [raw, raw]);
+});
+
 test('workbook limits report the measured file, expanded archive or sheet extent', () => {
     const check = (buffer, kind, actual, limit) => assert.throws(() => module.parseWorkbook(buffer, 'a'.repeat(64)), error => {
         assert.equal(error.reason, 'workbook_too_large');

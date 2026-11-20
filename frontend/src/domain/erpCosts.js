@@ -12,6 +12,7 @@ import {
 } from "./identifiers";
 import { calculateWarehouseCostDecision } from "./erpCostResolution";
 import { hasLegacyMonthExclusions, isErpCostWithinPeriod } from "./erpCostPeriod";
+import { purchaseTotalValue, weightedPurchaseAmounts } from "./erpPurchaseEvidence";
 import { purchaseOrderSummary } from "./erpPurchaseSelection";
 import { normalizeErpCatalogFields } from "./erpCatalogFields";
 
@@ -358,8 +359,10 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
     const date = parsePurchaseDate(record.purchaseDate ?? record.creationTime ?? record.date);
     const quantity = positiveDecimal(record.quantity ?? record.qty ?? record.purchaseQuantity);
     const unitPrice = finiteDecimal(record.unitPrice ?? record.purchaseUnitPrice);
+    const sourceTotal = Object.hasOwn(record, "purchaseTotalPrice") ? record.purchaseTotalPrice : record.amountBasis === "purchase_total" ? record.totalPrice ?? null : undefined;
+    const amount = sourceTotal == null ? null : finiteDecimal(sourceTotal);
 
-    if (!warehouseSkuText || !date || !quantity || !unitPrice) {
+    if (!warehouseSkuText || !date || !quantity || (sourceTotal === undefined ? !unitPrice : !amount || amount.lt(0))) {
       skippedInvalid += 1;
       return;
     }
@@ -375,7 +378,7 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
       name: optionalText(record.name ?? record.tradeName) ?? "",
       quantity,
       unitPrice,
-      totalPrice: quantity.times(unitPrice),
+      totalPrice: amount ?? quantity.times(unitPrice),
       date: date.text,
       timestamp: date.timestamp,
       order1688: optionalText(record.order1688 ?? record.purchaseOrderNo1688),
@@ -395,8 +398,7 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
       return b.purchaseOrderId.localeCompare(a.purchaseOrderId, "zh-CN", { numeric: true });
     });
     const selected = selectLegacyCostRecords(sorted, maxRecords);
-    const totalQuantity = selected.reduce((sum, record) => sum.plus(record.quantity), new Decimal(0));
-    const totalPrice = selected.reduce((sum, record) => sum.plus(record.totalPrice), new Decimal(0));
+    const { totalPrice, totalQuantity, unit } = weightedPurchaseAmounts(selected.map(record => record.totalPrice), selected.map(record => record.quantity));
     const newest = selected[0];
     const oldest = selected[selected.length - 1];
 
@@ -408,8 +410,8 @@ export function calculateLegacyWarehouseCosts(records, { currentYearMonth = null
       calculationCount: selected.length,
       dateRange: newest.date === oldest.date ? newest.date : `${oldest.date} ~ ${newest.date}`,
       totalQuantity: totalQuantity.toNumber(),
-      totalPrice: totalPrice.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber(),
-      unitCost: totalPrice.div(totalQuantity).toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber(),
+      totalPrice: purchaseTotalValue(totalPrice.toFixed()),
+      unitCost: unit.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber(),
       selectedRecordIds: selected.map((record) => record.id),
       algorithmVersion: ERP_COST_CALCULATION_VERSION,
       currency: DEFAULT_CURRENCY,

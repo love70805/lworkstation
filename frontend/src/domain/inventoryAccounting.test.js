@@ -6,7 +6,7 @@ import { reconcileErpCostRows } from './erpCosts';
 const record = (recordId, unitPrice, patch = {}) => ({ recordId, warehouseSku: 'WH', quantity: 2, unitPrice, purchaseDate: '2026-01-10', ...patch });
 const cost = purchaseRecords => ({ id: 1, platformSku: 'SKU', platformSkc: 'SKC', warehouseSku: 'WH', evidenceComplete: true, purchaseRecords, publishedAt: '2026-10-01' });
 
-it.each([[8,5,'erp'],[3,3,'manual_override'],[0,0,'manual_override'],[0.0000001,0.0000001,'manual_override'],[5,5,'manual_override']])('compares manual %s with eligible ERP five in lowest mode', (amount, result, source) => {
+it.each([[8,5,'erp'],[3,3,'manual_override'],[0,0,'manual_override'],[0.0000001,0,'manual_override'],[5,5,'manual_override']])('compares manual %s with eligible ERP five in lowest mode', (amount, result, source) => {
   const scope = { workspaceId: 'W', ledgerId: 'L', store: '甲', platformSku: 'SKU' };
   const manualOverride = { ...scope, id: 'A', status: 'approved', currency: 'CNY', approvedAmount: amount, approvedBy: 'finance', approvedAt: '2026-11-01', reason: '实价', referenceCost: { kind: 'manual_override', store: '甲' } };
   const erpCost = { id: 'ERP', platformSku: 'SKU', platformSkc: 'SKC', unitCost: 5, resolutionStatus: 'resolved', currency: 'CNY' };
@@ -14,7 +14,7 @@ it.each([[8,5,'erp'],[3,3,'manual_override'],[0,0,'manual_override'],[0.0000001,
   expect(resolveLedgerCostDecision(selection)).toMatchObject({ source:'manual_override', unitCost:amount, approvalId:'A' });
   expect(resolveLedgerCostDecision({ ...selection, accountingMode:'historical_lowest' })).toMatchObject({ source, unitCost:result, sourceRecordId:source === 'erp' ? 'ERP' : 'A' });
   const identity = buildLedgerSkuIdentityIndex([{ platformSku:'SKU', platformSkc:'OTHER' }]).get('SKU');
-  expect(resolveLedgerCostDecision({ ...selection, identity, accountingMode:'historical_lowest' })).toMatchObject({ source:'manual_override', unitCost:amount });
+  expect(resolveLedgerCostDecision({ ...selection, identity, accountingMode:'historical_lowest' })).toMatchObject({ source:'manual_override', unitCost:amount < 0.01 ? 0 : amount });
 });
 
 it('compares the unit costs derived from recorded totals rather than base prices', () => {
@@ -25,6 +25,15 @@ it('compares the unit costs derived from recorded totals rather than base prices
   const before = structuredClone(input);
   expect(historicalLowestCosts([input])[0]).toMatchObject({ unitCost: 4, selectedRecordIds: ['low-total'] });
   expect(input).toEqual(before);
+});
+
+it('compares the original totals on opposite sides of a cent before applying the selected unit cost', () => {
+  const minimum = historicalLowestCosts([cost([
+    record('above', 1.3, { quantity: 1, totalPrice: '1.300000000000000000000001', amountBasis: 'purchase_total' }),
+    record('below', 1.3, { quantity: 1, totalPrice: '1.299999999999999999999999', amountBasis: 'purchase_total' }),
+  ])])[0];
+  expect(minimum.selectedRecordIds).toEqual(['below']);
+  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: minimum }).unitCost).toBe(1.29);
 });
 
 it('selects the all-time minimum including purchases after the ledger month without changing source evidence', () => {
@@ -55,8 +64,8 @@ it('keeps the minimum price attached to its actual 1688 or purchase order number
 it('preserves a tiny positive minimum through formal profit cost resolution', () => {
   const minimum = historicalLowestCosts([cost([record('tiny', 0.000001, { purchaseOrderNo: 'QA-TINY' })])])[0];
   expect(minimum.unitCost).toBe(0.000001);
-  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: minimum })).toMatchObject({ eligibleForExactProfit: true, unitCost: 0.000001 });
-  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: { ...minimum, accountingMode: 'weighted' } }).eligibleForExactProfit).toBe(false);
+  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: minimum })).toMatchObject({ eligibleForExactProfit: true, unitCost: 0 });
+  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: { ...minimum, accountingMode: 'weighted' } })).toMatchObject({eligibleForExactProfit:true,unitCost:0.000001});
   expect(reconcileErpCostRows({ workspaceId: 'W', expectedSkus: [{ platformSku: 'SKU', platformSkc: 'SKC' }], costRows: [minimum] }).matches[0]).toMatchObject({ status: 'matched', unitCost: 0.000001 });
 });
 

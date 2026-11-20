@@ -1,6 +1,6 @@
 import Decimal from 'decimal.js';
 import { canonicalPlatformSku, canonicalPlatformSkc, canonicalWarehouseSku } from './identifiers';
-import { normalizePurchaseEvidenceRecord } from './erpPurchaseEvidence';
+import { normalizePurchaseEvidenceRecord, weightedPurchaseAmounts, PURCHASE_TOTAL_BASIS } from './erpPurchaseEvidence';
 import { normalizedResolution } from './erpCostResolution';
 import { purchaseOrderSummary } from './erpPurchaseSelection';
 import { manualSnapshot, storeIdentity, validManualOverride } from './manualCostOverride';
@@ -66,6 +66,9 @@ function evidenceOrder(cost) {
   return [timestamp(cost.sourceGeneratedAt) || timestamp(cost.sourceOrder?.[1]) || timestamp(cost.generatedAt) || timestamp(cost.publishedAt),
     timestamp(cost.sourceOrder?.[0]), cost.sourceEnvelopeBatchId ?? cost.sourceOrder?.[2] ?? cost.batchId ?? ''];
 }
+function compareUnitPrice(left, right) {
+  return new Decimal(left.unitCostExact ?? left.unitCost).cmp(right.unitCostExact ?? right.unitCost);
+}
 function compareEvidence(left, right) {
   return compareErpSourceOrder(evidenceOrder(left), evidenceOrder(right))
     // For the same immutable snapshot, keep its formally recorded corrections.
@@ -89,7 +92,8 @@ export function createHistoricalLowestAccumulator() {
       if (!minimum) continue;
       const key = JSON.stringify([minimum.canonicalPlatformSku, minimum.canonicalPlatformSkc]);
       const previous = best.get(key);
-      if (!previous || previous.unitCost > minimum.unitCost || previous.unitCost === minimum.unitCost && compareEvidence(previous, order) < 0) best.set(key, minimum);
+      const comparison = previous ? compareUnitPrice(minimum, previous) : -1;
+      if (comparison < 0 || comparison === 0 && compareEvidence(previous, order) < 0) best.set(key, minimum);
     }
     return [...best.values()];
   }
@@ -116,11 +120,14 @@ function lowestPurchaseForWarehouse(cost) {
   for (const record of records) {
     const resolution = resolutions.map(item => normalizedResolution(item, cost.warehouseSku, record)).find(Boolean);
     if (record.unitPrice == null && !resolution) continue;
-    const value = new Decimal(resolution?.resolvedUnitPrice ?? record.unitPrice);
+    const value = record.amountBasis === PURCHASE_TOTAL_BASIS && resolution?.action !== 'correct_price'
+      ? weightedPurchaseAmounts([record.totalPrice], [record.quantity]).unit
+      : new Decimal(resolution?.resolvedUnitPrice ?? record.unitPrice);
     if (!value.isFinite() || value.lt(0) || value.isZero() && resolution?.action !== 'ignore_anomaly') continue;
     const unitCost = value.toNumber();
     if (!(unitCost >= 0)) continue;
-    if (best && (best.unitCost < unitCost || best.unitCost === unitCost && compareEvidence(best, cost) >= 0)) continue;
+    const comparison = best ? value.cmp(best.unitCostExact ?? best.unitCost) : -1;
+    if (comparison > 0 || comparison === 0 && compareEvidence(best, cost) >= 0) continue;
     const selected = { ...record, effectiveUnitPrice: value.toNumber(), resolution };
     const decision = { resolutionStatus: 'resolved', resolutionVersion: 'inventory-lowest@2', evidenceComplete: true,
       purchaseRecords: [record], selectedRecords: [selected], selectedRecordIds: [record.recordId], resolutions: resolution ? [resolution] : [],
@@ -132,7 +139,7 @@ function lowestPurchaseForWarehouse(cost) {
       platformSku: cost.platformSku, canonicalPlatformSku: canonicalPlatformSku(cost.platformSku),
       platformSkc: cost.platformSkc, canonicalPlatformSkc: canonicalPlatformSkc(cost.platformSkc),
       warehouseSku: cost.warehouseSku, canonicalWarehouseSku: canonicalWarehouseSku(cost.warehouseSku), currency: cost.currency ?? 'CNY',
-      unitCost, accountingMode: LOWEST_ACCOUNTING,
+      unitCost, ...(value.eq(unitCost) ? {} : { unitCostExact: value.toFixed() }), accountingMode: LOWEST_ACCOUNTING,
       purchaseRecords: [record], selectedRecordIds: [record.recordId], costDecision: decision,
       resolutionStatus: 'resolved', unresolvedAnomalyCount: 0, ...purchaseOrderSummary([selected]), evidenceComplete: true };
   }

@@ -7,6 +7,7 @@ import MonthlyReportManager from "./MonthlyReportManager";
 import MonthlyProfitSummary from "./MonthlyProfitSummary";
 import { monthlyProfitSummary } from "../domain/monthlyProfitSummary";
 import { displayMoney } from "../domain/profitReports";
+import { formatAccountingUnitCost } from "../lib/profitPrecision";
 import ProfitGroups from "./ProfitGroups";
 import { Badge, Button, EmptyState, Modal, PageHeader, Panel, useToast } from "../components/UI";
 import ProfitScopeFilters from "../components/ProfitScopeFilters";
@@ -21,7 +22,7 @@ import { canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { useErpCollectionTasks } from "../hooks/useErpCollectionTasks";
 import { currentLedgerCollectionTask, erpCollectionPresentation } from "../domain/erpCollectionStatus";
-import { formatErpUnitCost, formatManualUnitCost, formatProfitAmount, summarizeProfitRows } from "../lib/profitPrecision";
+import { formatProfitAmount, summarizeProfitRows } from "../lib/profitPrecision";
 import { countProfitIdentities, groupProfitRowsBySkc } from "../lib/profit";
 import { storeSkuKey } from "../domain/manualCostOverride";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
@@ -163,7 +164,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   }, [onReadiness, snapshot?.ledger?.id, calculation.loading, calculation.error, ledgerSummary.missing]);
   const nextStep = ledgerNextStep(snapshot?.ledger, { missingCount: ledgerSummary.missing, loading: calculation.loading });
   const { revenue, totalUnits, purchaseCosts, warehouseFees, matchedProfit, missing, missingErp } = filteredSummary;
-  const monthlySummary = snapshot?.ledger ? monthlyProfitSummary({ ledger: snapshot.ledger, reportState, productProfitExact: ledgerSummary.exactTotals?.profit, missingCostCount: calculation.loading || calculation.error ? null : ledgerSummary.missing }) : null;
+  const monthlySummary = snapshot?.ledger ? monthlyProfitSummary({ ledger: snapshot.ledger, reportState, productProfitExact: ledgerSummary.exactTotals?.profit, productProfitFraction: ledgerSummary.profitFraction, missingCostCount: calculation.loading || calculation.error ? null : ledgerSummary.missing }) : null;
 
   const allMissingCostsHref = buildProfitHref({ ledgerId: snapshot?.ledger?.id, view: 'cost', storeFilter: 'all', missingOnly: true });
 
@@ -202,7 +203,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       enableSorting: false,
       size: 100,
       meta: { headerStyle: { width: "100px", textAlign: "right" }, cellStyle: { textAlign: "right" } },
-      cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{row.original.costSource === "manual_override" ? formatManualUnitCost(row.original.unitCost) : row.original.costSource === "erp" ? formatErpUnitCost(row.original.unitCost) : currency(row.original.unitCost)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <span className="pending-text" aria-label="缺少单件成本">—</span>,
+      cell: ({ row }) => row.original.unitCost != null ? <span className={`mono table-number ${row.original.costSource === "erp" ? "profit-cost-formal" : "profit-cost-reference"}`}>{formatAccountingUnitCost(row.original.unitCostExact ?? row.original.unitCost, row.original.accountingMode ?? snapshot?.ledger?.accountingMode)}{row.original.costSource === "approved_1688" ? <small>人工参考</small> : null}</span> : row.original.reference1688Cost?.unitCost != null ? <span className="mono table-number profit-cost-reference" title="1688 参考成本">{currency(row.original.reference1688Cost.unitCost)}<small>参考</small></span> : <span className="pending-text" aria-label="缺少单件成本">—</span>,
     },
     {
       id: "purchaseCost", accessorFn: row => row.purchaseCostExact ?? row.purchaseCost,
@@ -307,7 +308,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       <p className="profit-subtotal-label">商品小计 · 当前筛选范围</p>
       <div className="profit-summary-strip profit-summary-products">
         <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
-        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "按采用单件成本 × 数量"}</small></div>
+        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : snapshot.ledger.accountingMode === "historical_lowest" ? "最低单价截到两位 × 销量" : "按完整单价 × 销量"}</small></div>
         <button className="profit-summary-item profit-summary-action" onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
         <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>商品利润</span><strong>{missing ? "待确认成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : "金额 − 采购 − 仓储"}</small></div>
       </div>

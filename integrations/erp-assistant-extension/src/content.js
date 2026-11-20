@@ -39,7 +39,7 @@
     let workspaceResetAt = 0;
     let workspaceStateRevision = 0;
     try { const marker = JSON.parse(window.localStorage.getItem(WORKSPACE_RESET_KEY) || 'null'); workspaceResetId = marker?.resetId || ''; workspaceResetAt = Date.parse(marker?.clearedAt || '') || 0; } catch { /* storage may be disabled */ }
-    const EXTENSION_VERSION = '8.0.62';
+    const EXTENSION_VERSION = '8.0.63';
     const resultPolicy = window.ShopeersErpResultPolicy;
     const requestContextPolicy = window.ShopeersErpRequestContext;
     if (!resultPolicy || !requestContextPolicy) {
@@ -436,7 +436,9 @@
                     try { workbookBody = JSON.parse(new TextDecoder().decode(bytes)); }
                     catch { throw new CostError('ERP 导出格式异常', '未取得可校验的工作簿，请重试或使用手动导入。'); }
                 }
-                const body = workbookBody || await Promise.race([response.json(), aborted]);
+                const body = workbookBody || (path === DETAIL_PATH && typeof response.text === 'function'
+                    ? resultPolicy.parsePurchaseResponse(await Promise.race([response.text(), aborted]))
+                    : await Promise.race([response.json(), aborted]));
                 if (body && typeof body === 'object') Object.defineProperty(body, '__erpDiagnostic', { value: resultPolicy.diagnosticResponse({ stage: context, httpStatus: response.status, code: body.code, msg: body.msg ?? body.message, count: body.count, data: body.data }) });
                 if (Number(body?.code) === 429) throw Object.assign(new CostError(context + '请求失败', 'HTTP 429 · ERP 请求过于频繁'), { status: 429, retryAfter: 1000 });
                 if (response.status === 401 || response.status === 403 || [401, 403].includes(Number(body?.code)) || /登录|login|session.*expired/i.test(String(body?.msg || body?.message || ''))) {
@@ -1317,8 +1319,7 @@
             const annotatedRecords = resultPolicy.annotateCostWarnings(records);
             const selected = selectCostRecords(annotatedRecords);
             const selectedRecords = new Set(selected);
-            const totalQty = selected.reduce((sum, record) => sum + record.qty, 0);
-            const totalPrice = selected.reduce((sum, record) => sum + record.totalPrice, 0);
+            const totals = resultPolicy.purchaseTotals(selected);
             const newest = selected[0];
             const oldest = selected[selected.length - 1];
             const sourceTypes = new Set(selected.map((record) => record.order1688 ? '1688' : '采购单'));
@@ -1368,10 +1369,8 @@
                 orderNumber: newest.order1688 || newest.purchaseOrderNo || '',
                 calcTimes: selected.length,
                 dateRange: newest.date === oldest.date ? newest.date : oldest.date + ' ~ ' + newest.date,
-                totalQty,
-                totalPrice: totalPrice.toFixed(2),
-                unitCost: (totalPrice / totalQty).toFixed(4),
-                proposedUnitCost: (totalPrice / totalQty).toFixed(4),
+                ...totals,
+                proposedUnitCost: totals.unitCost,
                 latestTimestamp: newest.timestamp,
                 supplierName: newest.supplierName || '',
                 supplier1688Url: newest.supplier1688Url || '',
@@ -1385,7 +1384,7 @@
                     orderNumber: record.order1688 || record.purchaseOrderNo || '',
                     sourceType: record.order1688 ? '1688' : '采购单',
                     qty: record.qty,
-                    price: record.totalPrice.toFixed(2),
+                    price: String(record.totalPrice),
                     unitPrice: record.unitPrice.toFixed(4),
                     warningReasons: record.warningReasons,
                     supplierName: record.supplierName,

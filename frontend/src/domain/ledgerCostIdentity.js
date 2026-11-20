@@ -56,6 +56,6 @@ export function resolveLedgerCostDecision({ identity, ...scope }, checkPeriod) {
     if (fallback.source === 'manual_override') return fallback;
   }
   return { ...decision, status: 'missing', calculationMode: null, eligibleForExactProfit: false,
-    source: null, unitCost: null, sourceRecordId: null, approvalId: null,
+    source: null, unitCost: null, unitCostExact: null, unitCostFraction: null, sourceRecordId: null, approvalId: null,
     reasons: [...decision.reasons, issue.code], identityIssue: issue };
 }

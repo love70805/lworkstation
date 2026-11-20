@@ -104,7 +104,7 @@ describe("formal cost policy", () => {
     expect(decision.reasons).toContain("approval_ledger_mismatch");
   });
 
-  it("preserves ERP four decimals and keeps 1688 at two", () => {
+  it("preserves the regular ERP unit and keeps 1688 reference-only", () => {
     const erp = resolveFormalCostDecision({
       ledgerId: "LEDGER-1",
       platformSku: "SKU-1",

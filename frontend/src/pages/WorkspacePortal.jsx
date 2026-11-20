@@ -120,13 +120,13 @@ export default function WorkspacePortal() {
 
   const workflowLedger = ledgerScope.context?.selected;
   const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
-  const workflowFrozen = false;
+  const resultsReady = nextStep.key === 'report';
   const workflowQuery = ledgerScope.context?.query ?? '';
-  const workflowStep = !workflowLedger ? 0 : workflowFrozen ? 3 : nextStep.key === 'cost' ? 1 : 2;
+  const workflowStep = !workflowLedger ? 0 : resultsReady ? 3 : 1;
   const workflowSteps = [
-    { title: workflowFrozen ? "查看销售台账" : "导入销售台账", detail: workflowLedger ? "沿用当前账本月份" : "先建立月度账本", path: workflowFrozen ? `/ledger?${workflowQuery}` : `/import-preview?${workflowQuery}` },
-    { title: workflowFrozen ? "查看成本" : "核对成本", detail: "ERP 默认，人工更正优先", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'cost') : "/import-preview" },
-    { title: workflowFrozen ? "查看本月报告" : "导出本月报告", detail: workflowFrozen ? "下载原文件或补充扣款" : "代发可选填，直接导出", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
+    { title: "导入销售台账", detail: workflowLedger ? "沿用当前账本月份" : "先建立月度账本", path: `/import-preview?${workflowQuery}` },
+    { title: "核对成本", detail: "ERP 默认，人工更正优先", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'cost') : "/import-preview" },
+    { title: "查看本月利润", detail: "核对明细，按需导出", path: workflowLedger ? profitWorkspaceHref(workflowQuery, 'detail') : "/import-preview" },
   ];
   const taskItems = useMemo(() => buildWorkspaceTaskItems(summary), [summary]);
   const workflowAction = workflowSteps[Math.min(workflowStep, workflowSteps.length - 1)];
@@ -151,7 +151,7 @@ export default function WorkspacePortal() {
 
       {summary ? <div className="dashboard-metric-grid">
         <Panel className="dashboard-metric-card"><span className="overview-icon primary"><PackageCheck size={19} /></span><span><small>已登记商品</small><strong>{summary?.productCount ?? 0}</strong><em>{summary?.platformSkuCount ?? 0} 个平台 SKU（含草稿）</em></span></Panel>
-        <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待核算账本</small><strong>{summary?.openLedgerCount ?? 0}</strong><em>进入当前月份继续处理</em></span></Panel>
+        <Panel className="dashboard-metric-card"><span className="overview-icon warning"><Hourglass size={19} /></span><span><small>待核算账本</small><strong>{summary?.pendingLedgerTasks?.length ?? 0}</strong><em>{summary?.pendingLedgerTasks?.length ? "进入当前月份继续处理" : "当前账本均已处理"}</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon info"><ShoppingCart size={19} /></span><span><small>{latestLedger ? `${latestLedger.period} 销售额` : "最近月度销售额"}</small><strong>{money(latestSales.revenue ?? 0)}</strong><em>总销量 {Number(latestSales.quantity ?? 0).toLocaleString("zh-CN")} 件</em></span></Panel>
         <Panel className="dashboard-metric-card"><span className="overview-icon success"><CircleDollarSign size={19} /></span><span><small>最近月度利润</small><strong>{latestFinalizedLedger && (latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit != null ? money((latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).profit) : "--"}</strong><em>{latestFinalizedLedger ? `${latestFinalizedLedger.period} · ${(latestFinalizedLedger.currentResult ?? currentLedgerResult(latestFinalizedLedger)).label}` : "尚无已核算账本"}</em></span></Panel>
       </div> : null}
@@ -160,7 +160,7 @@ export default function WorkspacePortal() {
       <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
           <div><h2 id="workspace-flow-title">{workflowLedger ? `${workflowLedger.period} 核算流程` : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
-          <Button variant="primary" disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{workflowFrozen ? workflowAction.title : `下一步：${workflowAction.title}`}</Button>
+          <Button variant={resultsReady ? "secondary" : "primary"} disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{resultsReady ? workflowAction.title : `下一步：${workflowAction.title}`}</Button>
         </div>
         <div className="workspace-flow-steps">
           {workflowSteps.map((step, index) => (

@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { CostFraction, Exact } from "./profitAmounts";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
 import { parseSalesAddedDate } from "./salesAnalytics";
 import { purchaseDateFacts } from "./erpPurchaseSelection";
@@ -10,13 +11,38 @@ const CANCELLED_PURCHASE_STATUS = /(?:^|[\s:：])(?:11|cancel(?:led)?|void(?:ed)
 
 export const PURCHASE_TOTAL_BASIS = "purchase_total";
 
+// Most ERP amounts fit the existing numeric representation. Preserve source
+// decimals as text whenever conversion to Number would change their value.
+export function purchaseTotalValue(value, numeric = finiteNumber(value)) {
+  if (numeric == null || typeof value !== "string") return numeric;
+  const amount = new Decimal(value.trim());
+  return amount.eq(numeric) ? numeric : amount.toFixed();
+}
+
 export function effectivePurchaseAmount(record) {
   // Legacy totals were synthesized from the base unit price. Only new source
   // evidence carries the recorded purchase-total basis. Corrections stay explicit.
   if (record.amountBasis === PURCHASE_TOTAL_BASIS && record.resolution?.action !== "correct_price") {
     return new Decimal(record.totalPrice);
   }
-  return new Decimal(record.quantity).times(record.effectiveUnitPrice ?? record.unitPrice);
+  return new Exact(record.quantity).times(record.effectiveUnitPrice ?? record.unitPrice);
+}
+
+export function weightedPurchaseAmounts(amounts, quantities) {
+  // Enough digits to add these finite decimals exactly, including values on
+  // opposite sides of a cent boundary that Number would represent identically.
+  const values = [...amounts, ...quantities].map(value => new Decimal(value));
+  let integerPlaces = 1, fractionPlaces = 0;
+  for (const value of values) {
+    integerPlaces = Math.max(integerPlaces, value.e + 1);
+    fractionPlaces = Math.max(fractionPlaces, value.decimalPlaces());
+  }
+  const precision = Math.max(40, integerPlaces + fractionPlaces + String(values.length).length + 8);
+  const Sum = precision <= Exact.precision ? Exact : Decimal.clone({ precision, rounding: Decimal.ROUND_DOWN });
+  const sum = entries => entries.reduce((total, entry) => total.plus(entry), new Sum(0));
+  const totalPrice = sum(amounts), totalQuantity = sum(quantities);
+  const unit = totalQuantity.gt(0) ? totalPrice.div(totalQuantity) : null;
+  return { totalPrice, totalQuantity, unit };
 }
 
 export function validateCostPeriod(period) {
@@ -29,7 +55,7 @@ export function purchaseRecordPeriod(record) {
   return date.dateStatus === "valid" ? date.sourceAddedDate.slice(0, 7) : null;
 }
 
-export function purchaseEvidenceUnitPrice(record, quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity), total = finiteNumber(record?.totalPrice ?? record?.price)) {
+export function purchaseEvidenceUnitPrice(record, quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity), total = purchaseTotalValue(record?.totalPrice ?? record?.price)) {
   if (record?.amountBasis === PURCHASE_TOTAL_BASIS) return quantity > 0 && total != null && total >= 0 ? new Decimal(total).div(quantity).toNumber() : null;
   return finiteNumber(record?.unitPrice ?? record?.purchaseUnitPrice);
 }
@@ -39,7 +65,7 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
   const warehouseSku = warehouseSkuText ? normalizeWarehouseSku(warehouseSkuText) : null;
   const quantity = finiteNumber(record?.quantity ?? record?.qty ?? record?.purchaseQuantity);
   const purchaseTotal = record?.amountBasis === PURCHASE_TOTAL_BASIS;
-  const totalPriceValue = finiteNumber(record?.totalPrice ?? record?.price);
+  const totalPriceValue = purchaseTotal ? purchaseTotalValue(record?.totalPrice ?? record?.price) : finiteNumber(record?.totalPrice ?? record?.price);
   const unitPrice = purchaseEvidenceUnitPrice(record, quantity, totalPriceValue);
   const exclusionReasons = [...new Set((Array.isArray(record?.exclusionReasons) ? record.exclusionReasons : []).map(text).filter(Boolean))];
   const purchaseDate = text(record?.purchaseDate ?? record?.date);
@@ -82,6 +108,28 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     eligible: (record?.eligible !== false || (period != null && hasOnlyLedgerExclusions)) && normalizedExclusionReasons.length === 0,
     selectedForPreview: Boolean(record?.selectedForPreview), exclusionReasons: normalizedExclusionReasons,
   };
+}
+
+export function selectedPurchaseBasis(selected) {
+  if (!selected.length) return null;
+  let total = new CostFraction(0n), quantities = new CostFraction(0n);
+  for (const row of selected) {
+    const quantity = row.quantity;
+    const recorded = row.amountBasis === PURCHASE_TOTAL_BASIS && row.resolution?.action !== 'correct_price';
+    const price = recorded ? row.totalPrice : row.effectiveUnitPrice ?? row.unitPrice;
+    if (price == null || quantity == null || !(Number(quantity) > 0) || !Number.isFinite(Number(price))) return null;
+    total = total.plus(recorded ? price : CostFraction.from(price).times(quantity));
+    quantities = quantities.plus(quantity);
+  }
+  return { amount: total.decimal(), quantity: quantities.decimal() };
+}
+
+export function weightedCostFraction(cost) {
+  if (cost?.unitCostFraction) return cost.unitCostFraction;
+  const selected = adoptedCostEvidence(cost).selected;
+  if (cost.selectedRecordIds?.length && selected.length !== cost.selectedRecordIds.length) return null;
+  const basis = selectedPurchaseBasis(selected);
+  return basis && CostFraction.from(basis.amount).dividedBy(basis.quantity).pair();
 }
 
 export function adoptedCostEvidence(cost) {

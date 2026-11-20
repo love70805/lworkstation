@@ -411,7 +411,7 @@
         const match = String(value).trim().replace(/^\+/, '').replace(/^\./, '0.').match(/^(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
         if (!match) return null;
         const scale = (match[2] || '').length - Number(match[3] || 0);
-        if (Math.abs(scale) > 100) return null;
+        if (Math.abs(Number(match[3] || 0)) > 308) return null;
         return { n: BigInt(match[1] + (match[2] || '')) * (scale < 0 ? 10n ** BigInt(-scale) : 1n), s: Math.max(0, scale) };
     }
 
@@ -425,10 +425,31 @@
         return s ? `${value.slice(0, -s)}.${value.slice(-s)}` : value;
     }
 
+    function sameDecimal(a, b) {
+        if (!a || !b) return false;
+        return a.n * 10n ** BigInt(b.s) === b.n * 10n ** BigInt(a.s);
+    }
+
+    function purchaseTotals(records) {
+        let qty = { n: 0n, s: 0 }, amount = { n: 0n, s: 0 };
+        for (const record of records) {
+            qty = addDecimal(qty, exactDecimal(record.quantity ?? record.qty));
+            amount = addDecimal(amount, purchaseEvidenceAmount(record));
+        }
+        const unitCost = qty.n ? decimalString({ n: amount.n * 10n ** BigInt(qty.s + 4) / (qty.n * 10n ** BigInt(amount.s)), s: 4 }) : null;
+        return { totalPrice: qty.n ? decimalString(amount) : null, totalQty: qty.n ? decimalString(qty) : null, unitCost };
+    }
+
     function decimalRatioNumber(amount, quantity) {
         if (!amount || !quantity?.n) return null;
         const scale = Math.max(0, 20 + quantity.n.toString().length - amount.n.toString().length + amount.s - quantity.s);
         return Number(decimalString({ n: amount.n * 10n ** BigInt(quantity.s + scale) / (quantity.n * 10n ** BigInt(amount.s)), s: scale }));
+    }
+
+    const purchaseDecimalFields = new Set(['purchaseTotalPrice', 'purchaseUnitPrice', 'serviceUnitPrice']);
+    function parsePurchaseResponse(json) {
+        return JSON.parse(json, (key, value, context) =>
+            typeof value === 'number' && context?.source && purchaseDecimalFields.has(key) ? context.source : value);
     }
 
     function purchaseAmounts(detail) {
@@ -444,7 +465,7 @@
         const totalPrice = total ? Number(decimalString(total)) : null;
         const unitPrice = decimalRatioNumber(total, quantity);
         return { amountBasis: 'purchase_total',
-            totalPrice: Number.isFinite(totalPrice) ? totalPrice : null,
+            totalPrice: !Number.isFinite(totalPrice) ? null : sameDecimal(total, exactDecimal(totalPrice)) ? totalPrice : decimalString(total),
             unitPrice: Number.isFinite(unitPrice) ? unitPrice : null,
             purchaseUnitPrice: purchase ? Number(decimalString(purchase)) : null,
             serviceUnitPrice: service ? Number(decimalString(service)) : null };
@@ -538,13 +559,7 @@
             const selected = annotateHistoricalWarnings([...history].sort((a, b) => purchaseDateInfo(b.purchaseDate).timestamp - purchaseDateInfo(a.purchaseDate).timestamp
                 || text(b.purchaseOrderId).localeCompare(text(a.purchaseOrderId), 'zh-CN', { numeric: true })
                 || text(b.recordId).localeCompare(text(a.recordId), 'zh-CN', { numeric: true })).slice(0, 3), history);
-            let qty = { n: 0n, s: 0 }, amount = { n: 0n, s: 0 };
-            selected.forEach(record => {
-                const q = exactDecimal(record.quantity);
-                qty = addDecimal(qty, q);
-                amount = addDecimal(amount, purchaseEvidenceAmount(record));
-            });
-            const unitCost = qty.n ? decimalString({ n: amount.n * 10n ** BigInt(qty.s + 4) / (qty.n * 10n ** BigInt(amount.s)), s: 4 }) : null;
+            const totals = purchaseTotals(selected);
             const details = selected.map(record => ({
                 recordId: record.recordId, date: record.purchaseDate,
                 orderNumber: record.order1688 || record.purchaseOrderNo || record.purchaseOrderId || '',
@@ -557,8 +572,7 @@
             const costWarnings = summarizeCostWarnings(selected);
             const preview = { ...result, ledgerPeriod: period, previewStatus: !period ? 'period_unknown' : !warehouse ? 'evidence_missing' : incomplete ? 'evidence_incomplete' : !selected.length ? 'no_purchase' : 'ready',
                 calcTimes: selected.length, selectedRecordIds: selected.map(record => record.recordId), details,
-                unitCost, proposedUnitCost: unitCost, totalQty: qty.n ? decimalString(qty) : null,
-                totalPrice: qty.n ? decimalString(amount) : null,
+                ...totals, proposedUnitCost: totals.unitCost,
                 dateRange: selected.length ? `${selected.at(-1).purchaseDate} ~ ${selected[0].purchaseDate}` : '',
                 orderNumber: details.map(detail => detail.orderNumber).join(' / '),
                 sourceType: [...new Set(details.map(detail => detail.sourceType))].join(' / '),
@@ -674,7 +688,10 @@ function diagnosticResponse(value) {
 }
 
     global.ShopeersErpResultPolicy = Object.freeze({
+        parsePurchaseResponse,
         purchaseAmounts,
+        purchaseTotals,
+        samePurchaseTotal: (a, b) => sameDecimal(exactDecimal(a), exactDecimal(b)),
         diagnosticResponse,
         historicalWarehouseTargets,
         purchaseStatusFields,

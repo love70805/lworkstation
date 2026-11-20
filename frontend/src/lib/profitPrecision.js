@@ -1,4 +1,5 @@
 import Decimal from "decimal.js";
+import { CostFraction } from "../domain/profitAmounts";
 import { canonicalPlatformSku } from "../domain/identifiers";
 import { createLedgerGroupKey } from "../domain/ledgerImport";
 import { PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
@@ -10,8 +11,8 @@ const money = (value) => value.toDecimalPlaces(2, Decimal.ROUND_DOWN).toNumber()
 
 // Only presentation/ledger exits truncate. Never accumulate these summaries.
 export function summarizeProfitRows(rows, costBySku = new Map()) {
-  let revenue = new ExactSummary(0), quantity = new ExactSummary(0), purchaseCost = new ExactSummary(0);
-  let warehouseCost = new ExactSummary(0), penalty = new ExactSummary(0), profit = new ExactSummary(0);
+  let revenue = new ExactSummary(0), quantity = new ExactSummary(0), purchaseTotal = new CostFraction(0n);
+  let warehouseCost = new ExactSummary(0), penalty = new ExactSummary(0), profitTotal = new CostFraction(0n);
   const missing = new Set(), missingErp = new Set();
   for (const row of rows) {
     revenue = revenue.plus(row.revenueExact ?? row.revenue ?? 0);
@@ -19,14 +20,16 @@ export function summarizeProfitRows(rows, costBySku = new Map()) {
     warehouseCost = warehouseCost.plus(row.warehouseCostExact ?? row.warehouseCost ?? 0);
     penalty = penalty.plus(row.penaltyExact ?? row.penalty ?? 0);
     if (row.finalizable) {
-      purchaseCost = purchaseCost.plus(row.purchaseCostExact ?? row.purchaseCost ?? 0);
-      profit = profit.plus(row.profitExact ?? row.profit ?? 0);
+      purchaseTotal = purchaseTotal.plus(row.purchaseCostFraction ?? row.purchaseCostExact ?? row.purchaseCost ?? 0);
+      profitTotal = profitTotal.plus(row.profitFraction ?? row.profitExact ?? row.profit ?? 0);
     } else {
       missing.add(storeSkuKey(row.store, row.canonicalPlatformSku));
       if (!costBySku.has(row.canonicalPlatformSku)) missingErp.add(row.canonicalPlatformSku);
     }
   }
+  const purchaseCost = new ExactSummary(purchaseTotal.decimal()), profit = new ExactSummary(profitTotal.decimal());
   return {
+    profitFraction: profitTotal.pair(),
     exactTotals: { revenue: revenue.toFixed(), quantity: quantity.toFixed(), purchaseCost: purchaseCost.toFixed(), warehouseCost: warehouseCost.toFixed(), penalty: penalty.toFixed(), profit: profit.toFixed() },
     revenue: money(revenue),
     totalUnits: quantity.toNumber(),
@@ -71,6 +74,12 @@ export function formatProfitAmount(value) {
   return `¥${amount.toDecimalPlaces(2, Decimal.ROUND_DOWN).toFixed(2)}`;
 }
 
+export function formatAccountingUnitCost(value, mode = 'weighted') {
+  const unit = new ExactSummary(value);
+  if (mode === 'historical_lowest') return '¥' + unit.toFixed(2, Decimal.ROUND_DOWN);
+  const shown = unit.toDecimalPlaces(8, Decimal.ROUND_HALF_UP);
+  return '¥' + shown.toFixed(Math.max(2, shown.decimalPlaces()));
+}
 export const formatErpUnitCost = (value) => `¥${new Decimal(value).toDecimalPlaces(4, Decimal.ROUND_DOWN).toFixed(4)}`;
 export const formatManualUnitCost = (value) => `¥${new Decimal(value).toFixed()}`;
 
@@ -87,7 +96,7 @@ export function formatCostPurchaseEvidence(row) {
 export function buildProfitExportRows(rows, ledger, summary) {
   const version = isProfitSnapshot(ledger) ? ledger.formulaVersion : PROFIT_FORMULA_VERSION;
   const rule = version === PROFIT_FORMULA_VERSION
-    ? "明细保留原始精度；Decimal累计后汇总向零截断两位，利润按精确成本计算"
+    ? (ledger.accountingMode === 'historical_lowest' ? "最低模式取低后单价截到两位再乘销量" : "常规模式按完整单件成本核算，ERP 采购总价乘销量后除以采购件数")
     : "历史定稿快照：保留已存金额和公式版本，不重新计算";
   return [...rows.map((row) => ({
     SKC: row.groupSkc, SKU: row.platformSku, 属性: row.attribute,

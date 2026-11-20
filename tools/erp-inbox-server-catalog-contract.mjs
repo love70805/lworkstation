@@ -159,6 +159,11 @@ function canonicalWarehouseSku(value) {
 }
 
 // frontend/src/domain/erpCatalogRequest.js
+function originalPurchaseTotal(value, checked) {
+  if (checked == null || typeof value !== "string") return checked;
+  const source = value.trim();
+  return source === String(checked) ? checked : source;
+}
 var ERP_CATALOG_REQUEST_KIND = "catalog";
 var ERP_CATALOG_MESSAGE_TYPE = "shopeers.erp.catalog.batch";
 var ERP_CATALOG_INBOX_FORMAT = "shopeers-erp-catalog-inbox";
@@ -277,7 +282,7 @@ function normalizeErpCatalogPurchaseEvidence(value) {
         productName: optional(record?.productName ?? record?.name),
         quantity: number(record?.quantity ?? record?.qty, "\u91C7\u8D2D\u6570\u91CF"),
         unitPrice: number(record?.unitPrice, "\u91C7\u8D2D\u5355\u4EF7"),
-        totalPrice: number(record?.totalPrice, "\u91C7\u8D2D\u91D1\u989D"),
+        totalPrice: originalPurchaseTotal(record?.totalPrice, number(record?.totalPrice, "\u91C7\u8D2D\u91D1\u989D")),
         ...record?.amountBasis === "purchase_total" ? { amountBasis: "purchase_total", purchaseUnitPrice: number(record.purchaseUnitPrice, "\u539F\u91C7\u8D2D\u5355\u4EF7"), serviceUnitPrice: number(record.serviceUnitPrice, "\u670D\u52A1\u5355\u4EF7") } : {},
         purchaseDate: optional(record?.purchaseDate ?? record?.date),
         order1688: optional(record?.order1688),
@@ -351,6 +356,7 @@ export {
   normalizeErpCatalogCoverage,
   normalizeErpCatalogPurchaseEvidence,
   normalizeErpUnitConversion,
+  originalPurchaseTotal,
   validateErpCatalogInboxEnvelope,
   validateErpCatalogRequest
 };

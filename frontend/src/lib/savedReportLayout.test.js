@@ -97,7 +97,7 @@ it.each(['pre_deduction','financial'])('colors only numeric losses in new %s exp
   const download = await prepareReportDownload(archive, kind === 'financial' ? { deductionRows: deductions } : {});
   for (const bytes of [built.bytes, download]) {
     const book = read(bytes);
-    expect(source(book, 'xl/styles.xml')).toContain('rgb="FF9B4B50"');
+    expect(source(book, 'xl/styles.xml')).toContain('rgb="FFC00000"');
     expect(book.Sheets['20店'].J2).toMatchObject({ t:'n', v:-10.12 });
     for (const [sheet, address, font] of [
       ['20店','J2',6], ['20店','J3',0], ['20店','J4',0], ['20店','J5',0], ['20店','J6',7],
