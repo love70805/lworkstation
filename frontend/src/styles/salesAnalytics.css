@@ -175,3 +175,11 @@ html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sa
 @container (min-width: 760px) {
   .sales-period-layout { grid-template-columns: minmax(175px, .85fr) minmax(0, 3.5fr); gap: 24px; }
 }
+@container (max-width: 840px) {
+  .sales-period-layout:has(.sales-profit-insights) { grid-template-columns: minmax(0, 1fr); }
+  .sales-profit-insights { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 20px; align-items: start; }
+  .sales-profit-insights h3 { grid-column: 1 / -1; }
+  .sales-profit-distribution, .sales-profit-counts, .sales-profit-insights > p { grid-column: 1; }
+  .sales-profit-leaders { grid-column: 2; grid-row: 2 / span 3; }
+  .sales-profit-insights .sales-selected-analysis { grid-column: 1 / -1; margin: 2px 0; }
+}
