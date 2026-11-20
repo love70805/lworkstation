@@ -165,6 +165,11 @@ html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sa
 .sales-analytics .has-profit-columns th small { display: block; margin-top: 3px; font-size: 12px; font-weight: 400; color: var(--text-muted); }
 .sales-analytics .has-profit-columns td:not(:first-child) small { font-size: 12px; font-weight: 400; line-height: 1.5; }
 .sales-analytics .sales-profit-cell.sales-loss small { color: inherit; }
+.sales-analytics .sales-amount-link { padding: 4px 0; border: 0; background: transparent; color: var(--primary); font: inherit; font-variant-numeric: tabular-nums; text-align: right; cursor: pointer; }
+.sales-analytics .sales-amount-link.sales-loss { color: var(--danger); }
+.sales-analytics .sales-amount-link span, .sales-profit-cell small .sales-amount-link { text-decoration: underline; text-underline-offset: 3px; }
+.sales-analytics .sales-amount-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.sales-analytics .sales-details-controls .sales-product-view { flex: 1 1 124px; }
 @container (max-width: 600px) {
   .sales-period-composition { grid-template-columns: minmax(0, 148px) minmax(0, 1fr); column-gap: 16px; }
   .sales-period-composition .sales-store-pie { max-width: 148px; margin: 0; }

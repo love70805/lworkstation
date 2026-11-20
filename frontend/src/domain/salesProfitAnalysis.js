@@ -41,16 +41,25 @@ function finish(bucket) {
 const mapValues = (map, fn) => Object.fromEntries([...map].map(([key, value]) => [key, fn(value)]));
 const finishPeriod = period => ({ total: finish(period.total), stores: mapValues(period.stores, finish), products: mapValues(period.products, finish) });
 
+function priceSku(revenue, quantity, unitCost, rate) {
+  const warehouse = new Exact(quantity).times(rate);
+  const purchase = unitCost == null ? null : CostFraction.from(unitCost).times(quantity);
+  const profit = purchase && CostFraction.from(revenue).minus(warehouse).minus(purchase);
+  return { warehouseCostExact: warehouse.toFixed(), purchaseCostExact: purchase?.decimal() ?? null, purchaseCostFraction: purchase?.pair(),
+    profitExact: profit?.decimal() ?? null, profitFraction: profit?.pair() };
+}
+
 // Establish identity and price against the whole ledger, even when a day or store is selected.
 // Monthly dispatch and deductions have no sale-line identity. The monthly profit report owns them.
 export function buildSalesProfitAnalysis({ ledger, identities, costs, approvals, groups, rows, store = 'all' }) {
   const lines = priceReportGroups({ ledger, salesRows: identities, erpCosts: costs, approvals, allowMissing: true }, groups, profitCostWithinPeriod);
   const inScope = name => store === 'all' || salesStoreKey(name) === salesStoreKey(store);
   const month = periodBucket(), days = new Map(), prices = new Map();
+  const warehouseRate = ledger.warehouseRate ?? '0.7';
   for (const line of lines) {
     if (!inScope(line.store)) continue;
     addLine(month, line);
-    if (rows) prices.set(storeSkuKey(line.store, line.platformSku), line);
+    prices.set(storeSkuKey(line.store, line.platformSku), line.unitCostFraction ?? line.unitCostExact);
   }
   if (rows) {
     const byDaySku = new Map();
@@ -62,24 +71,20 @@ export function buildSalesProfitAnalysis({ ledger, identities, costs, approvals,
       const identity = storeSkuKey(sale.store, sku);
       const key = JSON.stringify([date, identity, sale.platformSkc]);
       const group = get(byDaySku, key, () => ({
-        date, skc: sale.platformSkc, revenue: new Exact(0), quantity: new Exact(0),
-        price: prices.get(identity) ?? { store: sale.store, canonicalPlatformSku: canonicalPlatformSku(sku), unitCostExact: null },
+        date, skc: sale.platformSkc, store: sale.store, sku: canonicalPlatformSku(sku),
+        revenue: new Exact(0), quantity: new Exact(0), unitCost: prices.get(identity),
       }));
       group.revenue = group.revenue.plus(sale.amountExact ?? sale.amount);
       group.quantity = group.quantity.plus(sale.quantityExact ?? sale.quantity);
     }
-    for (const { date, price, skc, revenue, quantity } of byDaySku.values()) {
-      const warehouse = quantity.times(ledger.warehouseRate ?? '0.7');
-      const purchase = price.unitCostExact == null ? null : CostFraction.from(price.unitCostFraction ?? price.unitCostExact).times(quantity);
-      const profit = purchase && CostFraction.from(revenue).minus(warehouse).minus(purchase);
+    for (const { date, store, sku, skc, revenue, quantity, unitCost } of byDaySku.values()) {
       addLine(get(days, date, periodBucket), {
-        store: price.store, platformSkc: skc, canonicalPlatformSku: price.canonicalPlatformSku,
-        revenueExact: revenue, quantityExact: quantity, warehouseCostExact: warehouse,
-        purchaseCostFraction: purchase?.pair(), profitFraction: profit?.pair(), profitExact: profit?.decimal(),
+        store, platformSkc: skc, canonicalPlatformSku: sku, revenueExact: revenue, quantityExact: quantity,
+        ...priceSku(revenue, quantity, unitCost, warehouseRate),
       });
     }
   }
-  return { accountingMode: ledger.accountingMode, month: finishPeriod(month), days: mapValues(days, finishPeriod) };
+  return { accountingMode: ledger.accountingMode, warehouseRate, unitCosts: Object.fromEntries(prices), month: finishPeriod(month), days: mapValues(days, finishPeriod) };
 }
 
 // A legacy aggregate may cover a different set of records. Only join results with matching sales.
@@ -105,11 +110,33 @@ export function withChartProfit(month, analysis) {
 export function withDetailProfit(detail, analysis, date) {
   if (!detail || !analysis?.month || detail.status === 'unknown') return detail;
   const period = date ? analysis.days[date] : analysis.month;
+  const byStore = new Map();
+  for (const sku of detail.skuRows ?? []) {
+    const amounts = priceSku(sku.revenueExact, sku.quantityExact, analysis.unitCosts?.[sku.key], analysis.warehouseRate ?? '0.7');
+    get(byStore, salesStoreKey(sku.store), () => []).push({ ...sku, ...amounts });
+  }
   return { ...detail, accountingMode: analysis.accountingMode, hasProfitAnalysis: true,
     totalsExact: withAmounts(detail.totalsExact, period?.total ?? (detail.status === 'known_zero' ? zeroAmounts : null)),
-    stores: detail.stores.map(row => withAmounts(row, period?.stores[salesStoreKey(row.store)])),
+    stores: detail.stores.map(row => {
+      const key = salesStoreKey(row.store), priced = withAmounts(row, period?.stores[key]);
+      const skuRows = byStore.get(key);
+      if (priced === row || !skuRows?.length || !analysis.unitCosts) return priced;
+      return { ...priced, skuRows, breakdown: skuProfitBreakdown(skuRows) };
+    }),
     rows: detail.rows.map(row => withAmounts(row, period?.products[row.key])),
   };
+}
+
+// Classify the signed total for each SKU in this store and period, after returns and sales offset.
+export function skuProfitBreakdown(rows) {
+  let earnings = zero(), losses = zero(), earned = 0, lost = 0, pending = 0;
+  for (const row of rows) {
+    if (row.profitExact == null) { pending++; continue; }
+    const amount = CostFraction.from(row.profitFraction ?? row.profitExact);
+    if (amount.n > 0n) { earnings = earnings.plus(amount); earned++; }
+    if (amount.n < 0n) { losses = losses.plus(amount); lost++; }
+  }
+  return { earningExact: pending === rows.length ? null : earnings.decimal(), lossExact: pending === rows.length ? null : losses.decimal(), earned, lost, pending };
 }
 
 export function combinedProfit(rows) {

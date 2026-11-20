@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/contained-profit-trend-2.1.4",
+  "integrationBranch": "codex/selected-store-profit-2.1.5",
   "requiredCommits": [
     {
-      "module": "release-2.1.3",
-      "commit": "c0116c0c46bf049c938b2ac77c3c6be6521b369d"
+      "module": "release-2.1.4",
+      "commit": "fcf74d97d7b6d380c01ff3b905a9d185d19dd25b"
     }
   ]
 }

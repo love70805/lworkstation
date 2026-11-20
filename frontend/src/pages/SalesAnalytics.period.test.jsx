@@ -72,7 +72,7 @@ it('defaults to reconciled profit, locates a losing product beyond page one and 
   expect(container.querySelector('tr[data-highlighted] strong').textContent).toBe('SKC-13');
   expect(container.querySelector('.sales-pagination').textContent).toContain('第 4/4 页');
   const total = container.querySelector('.sales-selected-store-totals').textContent;
-  await click(button('只看亏损'));
+  await change(container.querySelector('.sales-product-view select'), 'loss');
   expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
   expect(container.querySelector('.sales-selected-store-totals').textContent).toBe(total);
   await click(button('销量'));
@@ -107,7 +107,7 @@ it.each([
   expect(container.querySelector('.sales-period-composition h3').textContent).toBe(heading);
   const slices = [...container.querySelectorAll('.sales-store-pie [role="button"]')];
   expect(slices.map(item => item.getAttribute('aria-label').split(' ').at(-1)).sort()).toEqual(shares);
-  if (profits[1] < 0) expect(container.querySelector('.sales-composition-notes').textContent).toContain('亏损合计');
+  if (profits[1] < 0) expect(container.querySelector('.sales-composition-notes').textContent).toContain('亏损店铺合计');
   if (!shares.length) expect(container.textContent).toContain('商品利润为 0');
   if (slices.length) {
     await act(async () => Simulate.keyDown(slices[0], { key: 'Enter' }));
@@ -158,7 +158,7 @@ it('shows all products in five-row pages and searches beyond the old top five in
   expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
   expect(container.querySelector('[aria-label="SKC 构成"] .sales-store-pie')).not.toBeNull();
   expect(container.querySelector('.sales-selected-store-totals').textContent).toContain('销量 2145 件');
-  expect(container.querySelector('.sales-details-heading p').textContent).toBe(total);
+  expect(container.querySelector('.sales-details-heading p').textContent).toBe(total.replace('当日全部店铺合计', '店铺合计'));
   expect(container.textContent).not.toContain('Top 5');
   await change(container.querySelector('input'), 'SKC-03');
   expect(container.querySelector('tbody strong').textContent).toBe('SKC-03');
@@ -201,8 +201,9 @@ it('returns directly to the filtered chart after changing dates, including while
   expect(container.querySelector('.sales-selected-store-totals').textContent).toContain('待查');
   await click(button('返回趋势'));
   await click(button('清空店铺'));
-  await openDay();
-  expect(container.querySelectorAll('.sales-detail-path button')).toHaveLength(1);
+  expect(container.querySelector('.sales-daily-bar')).toBeNull();
+  expect(container.textContent).toContain('请选择至少一家店铺');
+  await click(button('全选店铺')); await openDay();
   expect(container.querySelector('.sales-store-entry').textContent).toContain('甲');
 });
 
@@ -348,11 +349,9 @@ it('ignores late period results after rapid month changes', async () => {
 it('applies the selected comparison stores to month details and never treats empty selection as all stores', async () => {
   await click(button('按月')); await click(button('店铺对比'));
   await click(button('清空店铺'));
-  await click(monthBar('2026-08'));
+  expect(monthBar('2026-08')).toBeUndefined();
   expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(0);
-  expect(container.textContent).toContain('未选择店铺');
-  expect(container.querySelector('.sales-details-heading').textContent).toContain('当月全部店铺合计');
-  await click(button('返回趋势'));
+  expect(container.textContent).toContain('请选择至少一家店铺');
   await click(container.querySelector('.sales-store-legend input'));
   await click(monthBar('2026-08'));
   expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(1);
@@ -371,4 +370,42 @@ it('keeps full SKC composition while searching and jumps to the chosen product p
   expect(container.querySelector('.sales-details-controls input').value).toBe('');
   expect(container.querySelector('[data-highlighted="true"]').textContent).toContain('SKC-12');
   expect(container.querySelector('.sales-pagination').textContent).toContain('第 3/4 页');
+});
+
+it('follows two selected stores from a date to a losing SKU inside a profitable SKC and back', async () => {
+  const period = '2026-08';
+  const rows = [
+    ['27','S','GREEN',70,1], ['27','S','RED',5,1], ['27','S','RED',15,2],
+    ['680','B','OTHER',50,1], ['20','EXCLUDE','HIDDEN',900,1],
+  ].map(([store, platformSkc, platformSku, amount, quantity]) => ({
+    store, platformSkc, platformSku, sourceAddedDate: period + '-01', supplierNumber: 'SUP',
+    amountExact: String(amount), quantityExact: String(quantity),
+  }));
+  rows.push({ ...rows[0], sourceAddedDate: period + '-02' });
+  const costs = ['GREEN','RED','OTHER','HIDDEN'].map(platformSku => ({
+    platformSku, unitCost: 10, checkedPeriod: period, withinPeriod: true, resolutionStatus: 'resolved', currency: 'CNY',
+  }));
+  mocks.month.mockResolvedValue({ period, sourceRows: rows });
+  mocks.detail.mockImplementation(async ({date}) => aggregatePeriodSalesDetails(rows,{period,date}));
+  mocks.profit.mockResolvedValue(buildSalesProfitAnalysis({ ledger: { period, warehouseRate: 0, accountingMode: 'weighted' },
+    rows, identities: rows, groups: groupReportSales(rows), costs, approvals: [] }));
+  await act(async () => root.render(<SalesAnalytics {...props} workspaceId="comparison" />));
+  await click(button('20'));
+  expect(container.querySelector('.sales-daily-bar').getAttribute('aria-label')).toContain('商品利润 ¥90');
+  await openDay();
+  expect([...container.querySelectorAll('.sales-store-entry')].map(node => node.dataset.storeKey).sort()).toEqual(['27','680']);
+  expect(container.querySelector('.sales-details-heading p').textContent).toContain('当日所选店铺合计 · 商品利润 ¥90');
+  await click(byLabel('27 店，查看亏损 SKU，1 个'));
+  expect(container.querySelector('.sales-product-view select').value).toBe('loss');
+  expect(container.querySelector('tbody strong').textContent).toBe('RED');
+  expect(container.querySelector('tbody tr').lastElementChild.textContent).toContain('¥-10');
+  await click(byLabel('下一日'));
+  expect(container.textContent).toContain('该店本期没有亏损 SKU');
+  await click(byLabel('上一日')); await click(button('返回店铺'));
+  expect(container.querySelectorAll('.sales-store-entry')).toHaveLength(2);
+  await openStore('27');
+  expect(container.querySelector('.sales-product-view select').value).toBe('skc');
+  expect(container.querySelector('tbody strong').textContent).toBe('S');
+  await click(button('趋势'));
+  expect(button('20').getAttribute('aria-pressed')).toBe('false');
 });
