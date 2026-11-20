@@ -98,6 +98,50 @@ it('keeps the store across adjacent days and does not invent a zero for an absen
   expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
 });
 
+it('returns directly to the filtered chart after changing dates, including while details are loading', async () => {
+  await click(button('乙'));
+  await openDay();
+  expect(container.querySelector('.sales-details-heading h3').textContent).toBe('2026-08-01 甲 商品明细');
+  let finish;
+  mocks.detail.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await click(byLabel('下一日'));
+  expect(container.querySelector('.sales-details-heading h3').textContent).toBe('2026-08-02 甲 商品明细');
+  expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+  await act(async () => Simulate.keyDown(container.querySelector('.sales-day-details'), { key: 'Escape' }));
+  await act(async () => finish(aggregatePeriodSalesDetails(source('2026-08'), { period: '2026-08', date: '2026-08-02' })));
+  expect(container.querySelector('.sales-day-details')).toBeNull();
+  expect(button('甲').getAttribute('aria-pressed')).toBe('true');
+  expect(button('乙').getAttribute('aria-pressed')).toBe('false');
+  await openDay(1);
+  expect(container.textContent).toContain('该店在此期间无商品记录');
+  expect(container.querySelector('.sales-selected-store-totals').textContent).toContain('待查');
+  await click(button('返回趋势'));
+  await click(button('清空店铺'));
+  await openDay();
+  expect(container.querySelectorAll('.sales-detail-path button')).toHaveLength(1);
+  expect(container.querySelector('.sales-store-entry').textContent).toContain('甲');
+});
+
+it('selects a product from any table cell and keeps its search, page and matching legend and slice', async () => {
+  await openDay();
+  await click(container.querySelector('tbody tr td:last-child'));
+  await change(container.querySelector('.sales-details-controls input'), 'SKC-');
+  await click(button('下一页'));
+  const row = container.querySelectorAll('tbody tr')[2];
+  const skc = row.querySelector('strong').textContent;
+  await click(row.querySelector('td:last-child'));
+  expect(row.getAttribute('data-highlighted')).toBe('true');
+  expect(row.querySelector('button').getAttribute('aria-pressed')).toBe('true');
+  expect(container.querySelector('.sales-pie-legend [aria-pressed="true"]').textContent).toContain(skc);
+  expect(container.querySelector('.sales-store-pie [aria-pressed="true"]').getAttribute('aria-label')).toMatch(skc);
+  expect(container.querySelector('.sales-details-controls input').value).toBe('SKC-');
+  expect(container.querySelector('.sales-pagination').textContent).toContain('第 2/3 页');
+  await click(container.querySelector('.sales-pie-legend button'));
+  expect(container.querySelector('tbody tr:first-child button').getAttribute('aria-pressed')).toBe('true');
+  expect(container.querySelector('.sales-details-controls input').value).toBe('SKC-');
+  expect(mocks.detail).toHaveBeenCalledTimes(1);
+});
+
 it('direct month selection keeps the store and has independent list context for each month', async () => {
   await click(button('按月')); await click(monthBar('2026-08')); await openStore();
   await change(container.querySelector('input'), 'SKC-');

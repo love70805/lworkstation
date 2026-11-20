@@ -9,6 +9,7 @@ import SalesPeriodDetails, { showSalesValue } from './SalesPeriodDetails';
 
 const Exact = Decimal.clone({ precision: 80 });
 const workspaceColors = new Map();
+const detailKey = (period, storeKey) => JSON.stringify([period.ledgerId, period.date, storeKey, period.storeKeys]);
 
 function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreChange }) {
   const [metric, setMetric] = useState('revenueExact'), [view, setView] = useState('daily');
@@ -18,13 +19,14 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const colorAssignments = useRef(workspaceColors.get(workspaceId));
   const positions = useRef(new Map()), pendingRestore = useRef(null);
   const [hiddenStores, setHiddenStores] = useState([]);
-  const [chosenStore, setChosenStore] = useState(null), [listStates, setListStates] = useState({});
+  const [listStore, setListStore] = useState(null), [listStates, setListStates] = useState({});
+  const chosenStore = selection?.directStore ?? listStore;
   const [changing, setChanging] = useState(false), [storeError, setStoreError] = useState('');
   const alive = useRef(true), storeId = useId(), chartRef = useRef(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     setSelection(null); setHovered(null); setStoreError(''); setChanging(false);
-    setHiddenStores([]); setChosenStore(null); setListStates({});
+    setHiddenStores([]); setListStore(null); setListStates({});
   }, [store]);
   const scope = JSON.stringify([workspaceId, ledgerId, store]);
   const result = useLiveQuery(async () => {
@@ -44,6 +46,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const plottedMonths = useMemo(() => monthMode === 'overview' ? salesOverviewMonths(rangeMonths) : rangeMonths, [rangeMonths, monthMode]);
   const chartMonths = view === 'monthly' ? months : month ? [month] : [];
   const storeNames = [...new Map(chartMonths.flatMap(item => item.monthlySegments ?? item.daily.flatMap(day => day.segments)).map(segment => [salesStoreKey(segment.store), segment.store])).values()];
+  const visibleStoreKeys = storeNames.map(salesStoreKey).filter(key => !hiddenStores.includes(key));
   const visibleMonth = useMemo(() => month ? { ...month, daily: month.daily.map(day => ({ ...day, segments: day.segments.filter(segment => !hiddenStores.includes(salesStoreKey(segment.store))) })) } : null, [month, hiddenStores]);
   const scale = useMemo(() => view === 'monthly' ? salesGroupedScale(plottedMonths, metric, { monthly: true, hiddenStores: monthMode === 'overview' ? [] : hiddenStores }) : salesScale(visibleMonth ? [visibleMonth] : [], metric), [view, plottedMonths, monthMode, visibleMonth, metric, hiddenStores]);
   const detailScope = JSON.stringify([scope, selection]);
@@ -58,40 +61,49 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
       return { scope: detailScope, data: detail };
     } catch (error) { return { scope: detailScope, error: error.message }; }
   }, [workspaceId, ledgerId, store, selection, month, months]);
-  const contextKey = selection ? JSON.stringify([selection.ledgerId, selection.date, chosenStore, selection.storeKeys]) : 'trend';
+  const contextKey = selection ? detailKey(selection, chosenStore) : 'trend';
   function remember() {
     const nodes = [];
     for (let node = chartRef.current; node; node = node.parentElement) nodes.push({ node, top: node.scrollTop, left: node.scrollLeft });
     const focus = document.activeElement;
-    positions.current.set(contextKey, { x: window.scrollX, y: window.scrollY, nodes, focusLabel: focus?.getAttribute('aria-label'), storeKey: focus?.getAttribute('data-store-key') });
+    positions.current.set(contextKey, { x: window.scrollX, y: window.scrollY, nodes, focusLabel: focus?.getAttribute('aria-label'), storeKey: focus?.getAttribute('data-store-key'), date: focus?.getAttribute('data-date') });
   }
   function restore(key) { pendingRestore.current = key; }
+  const detailReady = !selection || details?.scope === detailScope;
   useLayoutEffect(() => {
-    if (pendingRestore.current !== contextKey || (selection && details?.scope !== detailScope)) return;
+    if (pendingRestore.current !== contextKey || !detailReady) return;
     const position = positions.current.get(contextKey);
-    pendingRestore.current = null;
-    if (!position) return;
+    if (!position) { pendingRestore.current = null; return; }
     const frame = requestAnimationFrame(() => {
+      pendingRestore.current = null;
       const candidates = [...(chartRef.current?.querySelectorAll('button, [role="button"]') ?? [])];
-      const focus = candidates.find(node => position.storeKey ? node.getAttribute('data-store-key') === position.storeKey : position.focusLabel && node.getAttribute('aria-label') === position.focusLabel);
+      const focus = candidates.find(node => (position.date && node.getAttribute('data-date') === position.date)
+        || (position.storeKey && node.getAttribute('data-store-key') === position.storeKey)
+        || (position.focusLabel && node.getAttribute('aria-label') === position.focusLabel));
       focus?.focus({ preventScroll: true });
       for (const item of position.nodes) if (item.node.isConnected) { item.node.scrollTop = item.top; item.node.scrollLeft = item.left; }
       window.scrollTo(position.x, position.y);
     });
     return () => cancelAnimationFrame(frame);
-  }, [contextKey, details, detailScope, selection]);
+  }, [contextKey, detailReady]);
   function select(next) {
-    remember(); setChosenStore(null); setSelection(next); setHovered(null);
-    restore(JSON.stringify([next.ledgerId, next.date, null, next.storeKeys]));
+    remember(); setListStore(null); setSelection(next); setHovered(null);
+    restore(detailKey(next, next.directStore ?? null));
+  }
+  function selectDay(date) {
+    // Aggregate-only months can draw a total but do not identify an individual store.
+    const names = store === 'all' ? month.stores ?? [] : [store];
+    const visible = names.filter(name => !hiddenStores.includes(salesStoreKey(name)));
+    select({ ledgerId, period: month.period, date, directStore: visible.length === 1 ? salesStoreKey(visible[0]) : null });
   }
   function close() {
-    remember(); setSelection(null); setChosenStore(null); setHovered(null); restore('trend');
+    remember(); setSelection(null); setListStore(null); setHovered(null); restore('trend');
   }
   function chooseStore(next) {
-    remember(); setChosenStore(next); restore(JSON.stringify([selection.ledgerId, selection.date, next, selection.storeKeys]));
+    remember(); setListStore(next); restore(detailKey(selection, next));
   }
   function changePeriod(next) {
-    remember(); setSelection(next); restore(JSON.stringify([next.ledgerId, next.date, chosenStore, next.storeKeys]));
+    remember(); setSelection(next); restore(detailKey(next, chosenStore));
   }
   async function changeStore(next) {
     setSelection(null); setStoreError(''); setChanging(true);
@@ -99,7 +111,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     catch (error) { if (alive.current) setStoreError(error.message || '店铺切换失败，请重试。'); }
     finally { if (alive.current) setChanging(false); }
   }
-  const periods = selection?.date ? (month?.daily ?? []).map(day => ({ ledgerId, period: month.period, date: day.date }))
+  const periods = selection?.date ? (month?.daily ?? []).map(day => ({ ...selection, date: day.date }))
     : rangeMonths.map(item => ({ ledgerId: item.ledgerId, period: item.period, ...(selection?.storeKeys ? { storeKeys: selection.storeKeys } : {}) }));
   const position = periods.findIndex(item => item.ledgerId === selection?.ledgerId && item.date === selection?.date);
   const listKey = contextKey;
@@ -161,12 +173,13 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     {!selection && (view === 'daily' || monthMode === 'comparison') && storeNames.length > 0 && storeNames.every(name => hiddenStores.includes(salesStoreKey(name))) ? <p role="status">{view === 'monthly' ? '未选择店铺，可勾选或全选店铺继续；全部店铺期间合计保留，所选明细为空。' : '店铺柱已全部隐藏，点击图例可重新显示；合计与明细保持原范围。'}</p> : null}
     <div ref={chartRef} className="sales-analysis-body">
       {!selection ? <div className="sales-charts-area">
-        {view === 'daily' ? <SalesMonthChart month={visibleMonth} sourceMonth={month} metric={metric} scale={scale} hovered={hovered} onHover={setHovered} onSelect={date => select({ ledgerId, period: month.period, date })} />
-          : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} hovered={hovered} onHover={setHovered} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: storeNames.map(salesStoreKey).filter(key => !hiddenStores.includes(key)) } : {}) })} />}
+        {view === 'daily' ? <SalesMonthChart month={visibleMonth} sourceMonth={month} metric={metric} scale={scale} hovered={hovered} onHover={setHovered} onSelect={selectDay} />
+          : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} hovered={hovered} onHover={setHovered} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: visibleStoreKeys } : {}) })} />}
         {hovered && view === 'daily' ? <div className="sales-day-tooltip"><SalesHoverSummary month={month} date={hovered} metric={metric} hiddenStores={hiddenStores} /></div> : null}
-      </div> : !details || details.scope !== detailScope ? <section className="sales-day-details sales-details-loading" aria-busy="true"><p role="status">正在读取 {selection.date || selection.period} {chosenStore ? '商品' : '店铺'}明细...</p><div className="sales-period-navigation"><Button aria-label={selection.date ? '上一日' : '上一月'} disabled={position <= 0} onClick={() => changePeriod(periods[position - 1])}>上一期</Button><select aria-label={selection.date ? '选择日期' : '选择月份'} value={selection.date || selection.period} onChange={event => changePeriod(periods.find(item => (item.date || item.period) === event.target.value))}>{periods.map(item => <option key={item.date || item.period} value={item.date || item.period}>{item.date || item.period}</option>)}</select><Button aria-label={selection.date ? '下一日' : '下一月'} disabled={position < 0 || position >= periods.length - 1} onClick={() => changePeriod(periods[position + 1])}>下一期</Button><Button onClick={close}>返回趋势</Button></div></section>
-        : details.error ? <section className="sales-day-details"><p role="alert">{details.error}</p><Button onClick={close}>返回趋势</Button></section>
-          : <SalesPeriodDetails key={listKey} data={scopedDetail} metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} state={listStates[listKey]} onStateChange={updateList} close={close} periods={periods} onPeriodChange={value => changePeriod(periods.find(item => (item.date || item.period) === value))} previous={position > 0 ? () => changePeriod(periods[position - 1]) : null} next={position >= 0 && position < periods.length - 1 ? () => changePeriod(periods[position + 1]) : null} />}
+      </div> : <SalesPeriodDetails key={listKey} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
+        metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} state={listStates[listKey]} onStateChange={updateList}
+        onBack={listStore ? () => chooseStore(null) : close} onTrend={listStore ? close : null}
+        periods={periods} onPeriodChange={changePeriod} position={position} />}
     </div>
   </Panel>;
 }
