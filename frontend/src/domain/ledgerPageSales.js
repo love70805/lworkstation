@@ -34,7 +34,8 @@ export function packPageSales(rows, workspaceId) {
 }
 
 export function expandPageSales(chunks, kind, { workspaceId, store = 'all', requireExplicitOwner = false }) {
-  const fields = new Set(kind === 'profit-page-sales' ? saleFields : kind === 'selection-facts' ? selectionSaleFields : chartFields);
+  const fields = new Set(kind === 'profit-page-sales' ? saleFields : kind === 'selection-facts' ? selectionSaleFields
+    : kind === 'sales-profit' ? [...chartFields, 'platformSku', 'sku', 'platformSkc'] : chartFields);
   const selectedStore = store === 'all' ? null : canonicalStore(store);
   const result = [];
   for (const chunk of chunks) {

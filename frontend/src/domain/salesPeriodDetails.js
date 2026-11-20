@@ -6,6 +6,7 @@ import { parseSalesAddedDate } from './salesAnalytics';
 const Exact = Decimal.clone({ precision: 80 });
 const empty = () => ({ revenueExact: '0', quantityExact: '0', count: 0 });
 const isSale = row => !row.isDeduction && !/盘亏|扣款|罚款|违约/.test(row.movementType ?? '');
+export const salesProductKey = (store, skc, sku) => JSON.stringify([salesStoreKey(store), skc, skc ? null : sku]);
 function add(target, row) {
   target.revenueExact = new Exact(target.revenueExact).plus(row.amountExact ?? row.amount ?? 0).toFixed();
   target.quantityExact = new Exact(target.quantityExact).plus(row.quantityExact ?? row.quantity ?? 0).toFixed();
@@ -27,7 +28,7 @@ export function aggregatePeriodSalesDetails(rows, { period, date = null }) {
     const store = row.store || '店铺待查', storeKey = salesStoreKey(store);
     const platformSkc = String(row.platformSkc ?? '').normalize('NFKC').trim();
     const sku = canonicalPlatformSku(row.platformSku ?? row.sku);
-    const key = JSON.stringify([storeKey, platformSkc, platformSkc ? null : sku]);
+    const key = salesProductKey(store, platformSkc, sku);
     if (!stores.has(storeKey)) stores.set(storeKey, { ...empty(), key: storeKey, store });
     if (!groups.has(key)) groups.set(key, { ...empty(), key, store, platformSkc, platformSkus: new Set() });
     const group = groups.get(key);

@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/sales-detail-navigation-2.1.2",
+  "integrationBranch": "codex/profit-trends-2.1.3",
   "requiredCommits": [
     {
-      "module": "release-2.1.1",
-      "commit": "69226cb74706e9cbe9bd088fee49ae4b062dc2b5"
+      "module": "release-2.1.2",
+      "commit": "f74b427d46da4632f0e1067b796839f20ffea638"
     }
   ]
 }

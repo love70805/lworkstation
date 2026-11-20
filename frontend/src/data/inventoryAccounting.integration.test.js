@@ -13,6 +13,7 @@ import { buildReportProducts } from '../domain/profitReports';
 import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { packProfitSearch, unpackProfitSearch } from '../domain/profitPageProjection';
 import { readLedgerScopeRows } from './repositories/ledgerReadCache';
+import { readSalesProfitAnalysis } from './repositories/salesProfitAnalysisRepository';
 
 it('round-trips the complete searchable purchase numbers in a large cached month', async () => {
   const text = '采购单 / 中文 "订单" 2026-10-11 \n'.repeat(7000);
@@ -142,6 +143,67 @@ it('keeps explicit zero manual costs first in either system', async () => {
 });
 
 const manualScope = { ledgerId: 'L', store: '甲', platformSku: 'SKU', reason: '本月实价' };
+
+it('reconciles daily profit with the monthly profit page after manual, mode and warehouse changes', async () => {
+  const source = await db.salesRows.toCollection().first();
+  await db.salesRows.update(source.id, { sourceAddedDate: '2026-08-01' });
+  const scope = { workspaceId: 'W', ledgerId: 'L' };
+  const values = [], errors = [];
+  const subscription = liveQuery(() => readSalesProfitAnalysis(scope)).subscribe({
+    next: result => values.push(result), error: error => errors.push(error),
+  });
+  async function check(expected) {
+    await vi.waitFor(() => expect(values.at(-1)?.days['2026-08-01'].total.profitExact).toBe(expected));
+    const [official] = await readCachedReportProducts({ snapshot: await getLedgerSnapshot('L', { profitPage: true }) });
+    const amounts = { profitExact: expected, purchaseCostExact: official.purchaseCostExact, warehouseCostExact: official.warehouseCostExact };
+    expect(official.profitExact).toBe(expected);
+    expect(values.at(-1).month.total).toMatchObject(amounts);
+    expect(values.at(-1).days['2026-08-01'].stores['甲']).toMatchObject(amounts);
+    const monthly = await readSalesProfitAnalysis({ ...scope, daily: false });
+    expect(monthly.days).toEqual({});
+    expect(monthly.month).toEqual(values.at(-1).month);
+  }
+  try {
+    await check('20.6');
+    const manual = await saveManualCostOverride({ ...manualScope, unitCost: '3.1234' });
+    await check('32.3532');
+    await toggleAccountingMode('W');
+    await check('34.6');
+    await updateLedgerWarehouseRate('L', 1.25);
+    await check('33.5');
+    await revokeManualCostOverride({ ledgerId: 'L', approvalId: manual.id });
+    await toggleAccountingMode('W');
+    await check('19.5');
+    expect(errors).toEqual([]);
+  } finally { subscription.unsubscribe(); }
+});
+
+it('keeps missing costs pending, honors zero, and separates returns, unlocated sales and other workspaces', async () => {
+  const source = await db.salesRows.toCollection().first();
+  await db.salesRows.update(source.id, { sourceAddedDate: '2026-08-01' });
+  const missing = { ...source, id: undefined, store: '乙', platformSku: 'NEW', platformSkc: undefined, supplierNumber: 'SUP2', amount: 1, quantity: 3 };
+  await db.salesRows.bulkAdd([
+    { ...missing, sourceAddedDate: '2026-08-01' },
+    { ...missing, platformSku: 'NEW2', sourceAddedDate: '2026-08-01', amount: 2, quantity: 1 },
+    { ...source, id: undefined, amount: -2, quantity: -1, sourceAddedDate: '2026-08-02' },
+    { ...source, id: undefined, amount: 2, quantity: 1, sourceAddedDate: null },
+  ]);
+  const scope = { workspaceId: 'W', ledgerId: 'L' };
+  const result = await readSalesProfitAnalysis(scope);
+  expect(result.month.total).toMatchObject({ profitExact: null, purchaseCostExact: null, hasPriced: true, revenueExact: '43' });
+  expect(result.days['2026-08-01'].total.profitExact).toBeNull();
+  expect(result.days['2026-08-01'].stores['甲'].profitExact).toBe('20.6');
+  expect(result.days['2026-08-02'].total.profitExact).toBe('7.7');
+  expect((await readSalesProfitAnalysis({ ...scope, store: '甲' })).month.total.profitExact).toBe('20.6');
+  await saveManualCostOverride({ ...manualScope, store: '乙', platformSku: 'NEW', unitCost: 0 });
+  const after = await readSalesProfitAnalysis(scope);
+  expect(Object.values(after.days['2026-08-01'].products)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ revenueExact: '1', purchaseCostExact: '0', warehouseCostExact: '2.1', profitExact: '-1.1' }),
+    expect.objectContaining({ revenueExact: '2', purchaseCostExact: null, profitExact: null }),
+  ]));
+  expect(after.month.total.profitExact).toBeNull();
+  await expect(readSalesProfitAnalysis({ ...scope, workspaceId: 'other' })).rejects.toThrow('工作区');
+});
 
 async function currentPrice(amount, source) {
   const original = lines(await getLedgerSnapshot('L'))[0];

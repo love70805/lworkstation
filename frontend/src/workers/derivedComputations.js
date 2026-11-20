@@ -1,6 +1,7 @@
 import { aggregateDailySales, aggregateDailySalesDetails } from '../domain/salesAnalytics';
 import { buildReportProducts, priceReportGroups } from '../domain/profitReports';
 import { buildSalesMonth } from '../domain/salesChartModel';
+import { buildSalesProfitAnalysis } from '../domain/salesProfitAnalysis';
 import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 import { buildSelectionReferenceRows } from '../lib/selectionReferences';
 import { prepareSelectionSalesFacts } from '../domain/selectionSalesFacts';
@@ -29,6 +30,7 @@ export function computeDerived(kind, input) {
   if (kind === 'selection-facts') return packSelectionSalesFacts(prepareSelectionSalesFacts(input), input.ledgers[0]);
   if (kind === 'selection') return buildSelectionReferenceRows({ ...input, compactEvidence: true, includeStoreTags: true });
   if (kind === 'period-detail') return aggregatePeriodSalesDetails(input.rows, input);
+  if (kind === 'sales-profit') return buildSalesProfitAnalysis(input);
   if (kind === 'sales') {
     const result = aggregateDailySales(input.rows, { period: input.period, includeSkuStats: false });
     return { ...result, chartMonth: buildSalesMonth({ ...result, sourceRows: input.rows }, { store: input.store, today: input.today }) };

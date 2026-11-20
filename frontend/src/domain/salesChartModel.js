@@ -97,9 +97,13 @@ function nice(value) {
 export function salesScale(months, metric) {
   let high = 0, low = 0;
   for (const month of months) for (const day of month.daily) {
-    if (day[metric] == null) continue;
+    if (day[metric] == null && metric !== 'profitExact') continue;
     let positive = 0, negative = 0;
-    for (const segment of day.segments) { const value = Number(segment[metric]); if (value >= 0) positive += value; else negative += value; }
+    for (const segment of day.segments) {
+      if (segment[metric] == null) continue;
+      const value = Number(segment[metric]);
+      if (value >= 0) positive += value; else negative += value;
+    }
     high = Math.max(high, positive); low = Math.min(low, negative);
   }
   const max = nice(high) || (low ? 0 : 1), min = -nice(-low), range = max - min;
@@ -107,8 +111,8 @@ export function salesScale(months, metric) {
 }
 export function salesSegments(day, metric, scale) {
   let positive = 0, negative = 0;
-  const validPercent = day[metric] != null && new Exact(day[metric]).gt(0) && day.segments.every(segment => new Exact(segment[metric]).gte(0));
-  return day.segments.map(segment => {
+  const validPercent = day[metric] != null && new Exact(day[metric]).gt(0) && day.segments.every(segment => segment[metric] != null && new Exact(segment[metric]).gte(0));
+  return day.segments.filter(segment => segment[metric] != null).map(segment => {
     const value = Number(segment[metric]), height = Math.abs(value) / scale.range * 100;
     const top = value >= 0 ? scale.zero - positive - height : scale.zero + negative;
     if (value >= 0) positive += height; else negative += height;
@@ -135,9 +139,9 @@ export function salesGroupedScale(months, metric, { monthly = false, hiddenStore
   return { max, min, range, zero: max / range * 100 };
 }
 export function salesGroupedSegments(day, metric, scale) {
-  if (day[metric] == null) return [];
+  if (day[metric] == null && metric !== 'profitExact') return [];
   const segments = day.segments.filter(segment => segment[metric] != null && Number.isFinite(Number(segment[metric])));
-  const validPercent = new Exact(day[metric]).gt(0) && segments.every(segment => new Exact(segment[metric]).gte(0));
+  const validPercent = day[metric] != null && new Exact(day[metric]).gt(0) && segments.every(segment => new Exact(segment[metric]).gte(0));
   return segments.map(segment => {
     const value = Number(segment[metric]), height = Math.abs(value) / scale.range * 100;
     return { ...segment, height, top: value >= 0 ? scale.zero - height : scale.zero, percent: validPercent ? new Exact(segment[metric]).div(day[metric]).times(100).toDecimalPlaces(1).toFixed() : null };
