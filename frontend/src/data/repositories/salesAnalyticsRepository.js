@@ -61,7 +61,7 @@ export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, stor
   return readScopedSales({ ...scope, allowMissingStore: true }, async (rows, period) => ({
     ...await cachedSales({
       scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date],
-      formula: 'period-skc-details@1',
+      formula: 'period-sku-details@2',
       compute: () => runDerivedComputation('period-detail', { rows, period, date }),
     }), scope,
   }));

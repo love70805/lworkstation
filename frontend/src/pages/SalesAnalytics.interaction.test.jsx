@@ -70,7 +70,7 @@ it('search changes reset pagination without destroying the input element', async
   expect(container.querySelector('input')).toBe(input);
   expect(document.activeElement).toBe(input);
   expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
-  expect(container.textContent).toContain('第 1/1 页');
+  expect(container.querySelector('.sales-pagination')).toBeNull();
 });
 
 
@@ -83,12 +83,13 @@ it('opens the only visible store from the daily chart and restores the legend on
   expect(segments).toHaveLength(2);
   expect(parseFloat(segments[0].style.top) + parseFloat(segments[0].style.height)).toBeCloseTo(100);
   expect(parseFloat(segments[1].style.top) + parseFloat(segments[1].style.height)).toBeCloseTo(parseFloat(segments[0].style.top));
-  const legend = container.querySelector('.sales-store-legend button');
+  const legend = find('甲');
   await act(async () => legend.click());
   expect(legend.getAttribute('aria-pressed')).toBe('false');
   expect(container.querySelectorAll('.sales-stack-segment')).toHaveLength(1);
-  expect(container.querySelector('.sales-month-totals').textContent).toContain('250');
+  expect(container.querySelector('.sales-month-totals').textContent).toContain('所选店铺合计 · 销售原额 ¥130 · 销量 13 件');
   const visibleStore = container.querySelector('.sales-store-legend [aria-pressed="true"]').textContent;
+  expect(visibleStore).toBe('乙');
   await act(async () => container.querySelector('.sales-daily-bar').click());
   expect(container.querySelector('.sales-details-heading h3').textContent).toContain(visibleStore + ' 商品明细');
   expect(container.querySelectorAll('tbody .sales-product-entry')).toHaveLength(5);

@@ -5,7 +5,8 @@ import { buildProfitReportWorkbook } from '../lib/profitReportWorkbook';
 import { summarizeProfitRows } from '../lib/profitPrecision';
 import { profitCostFields } from './profitPageProjection';
 import { costEvaluationPeriod } from './inventoryAccounting';
-import { buildSalesProfitAnalysis, combinedProfit } from './salesProfitAnalysis';
+import { buildSalesProfitAnalysis, combinedProfit, withDetailProfit } from './salesProfitAnalysis';
+import { aggregatePeriodSalesDetails } from './salesPeriodDetails';
 
 it('reconciles thirds to the cent across SKUs, page projections and the Excel file in either mode', () => {
   const salesRows = [1, 2].map((_, i) => ({ store:'甲', platformSku:'SKU'+i, platformSkc:'SKC', quantity:1, amount:2 }));
@@ -33,5 +34,8 @@ it('reconciles thirds to the cent across SKUs, page projections and the Excel fi
     });
     expect(analysis.month.total).toMatchObject({ purchaseCostExact: cost, profitExact: profit });
     expect(combinedProfit(Object.values(analysis.days).map(day => day.total))).toBe(profit);
+    const detail = withDetailProfit(aggregatePeriodSalesDetails(dated, { period:'2026-10' }), analysis);
+    expect(detail.stores[0].breakdown).toMatchObject({ earningExact:profit, lossExact:'0', earned:2, pending:0 });
+    expect(combinedProfit(detail.stores[0].skuRows)).toBe(totals.profitExact);
   }
 });
