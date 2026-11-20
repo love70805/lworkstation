@@ -73,7 +73,7 @@ it('search changes reset pagination without destroying the input element', async
 });
 
 
-it('keeps monthly data lazy, stacks daily stores on a shared column, and keeps hidden filters visual', async () => {
+it('opens the only visible store from the daily chart and restores the legend on return', async () => {
   expect(container.textContent).not.toContain('对比月份');
   expect(container.querySelector('[aria-label="趋势周期"] [aria-pressed="true"]').textContent).toBe('按日');
   expect(mock.read).toHaveBeenCalledTimes(1);
@@ -87,9 +87,13 @@ it('keeps monthly data lazy, stacks daily stores on a shared column, and keeps h
   expect(legend.getAttribute('aria-pressed')).toBe('false');
   expect(container.querySelectorAll('.sales-stack-segment')).toHaveLength(1);
   expect(container.querySelector('.sales-month-totals').textContent).toContain('250');
+  const visibleStore = container.querySelector('.sales-store-legend [aria-pressed="true"]').textContent;
   await act(async () => container.querySelector('.sales-daily-bar').click());
-  expect(container.querySelector('.sales-list-scope').textContent).toContain('2/2');
-  expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+  expect(container.querySelector('.sales-details-heading h3').textContent).toContain(visibleStore + ' 商品明细');
+  expect(container.querySelectorAll('tbody .sales-product-entry')).toHaveLength(5);
+  expect(container.querySelectorAll('.sales-detail-path button')).toHaveLength(1);
+  await act(async () => find('返回趋势').click());
+  expect(container.querySelector('.sales-store-legend [aria-pressed="true"]').textContent).toBe(visibleStore);
 });
 it('hover and keyboard focus keep chart and details DOM stable without extra data reads', async () => {
   const bar = container.querySelector('.sales-daily-bar');

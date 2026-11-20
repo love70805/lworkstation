@@ -72,9 +72,9 @@ it('distinguishes a known zero day from an unlocated unknown day',async()=>{
 it('uses the period read contract for date clicks and refreshes it when the scope reloads',async()=>{
  mocks.month.mockImplementation(async()=>({...aggregateDailySales(rows,{period,includeSkuStats:false}),sourceRows:rows}));
  await render({ledgerId:'cached'});
- await click(dayButton());await click(container.querySelector('.sales-store-entry'));
+ await click(dayButton());
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');
- await click(button('趋势'));
+ await click(button('返回趋势'));
  await click(container.querySelectorAll('.sales-daily-bar')[1]);
  expect(container.querySelector('.sales-details-heading p').textContent).toContain('¥-0.009');
  expect(mocks.day).toHaveBeenCalledTimes(2);

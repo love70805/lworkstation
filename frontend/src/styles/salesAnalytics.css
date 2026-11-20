@@ -92,7 +92,7 @@
 /* Vivid categorical colors, shared by bars, pie slices and legends. */
 .sales-analytics { --sales-palette-0: #3b82f6; --sales-palette-1: #10b981; --sales-palette-2: #8b5cf6; --sales-palette-3: #f59e0b; --sales-palette-4: #06b6d4; --sales-palette-5: #f43f5e; --sales-palette-6: #6366f1; --sales-palette-7: #f97316; --sales-palette-8: #84b51c; --sales-palette-9: #d946ef; --sales-overview: var(--sales-palette-0); }
 html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sales-palette-1: #34d399; --sales-palette-2: #a78bfa; --sales-palette-3: #fbbf24; --sales-palette-4: #22d3ee; --sales-palette-5: #fb7185; --sales-palette-6: #818cf8; --sales-palette-7: #fb923c; --sales-palette-8: #a3d635; --sales-palette-9: #e879f9; }
-.sales-month-controls, .sales-month-window, .sales-detail-path, .sales-store-selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.sales-month-controls, .sales-month-window, .sales-detail-toolbar, .sales-store-selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .sales-month-controls > p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--text-muted); }
 .sales-month-controls label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .sales-month-controls select { width: auto; min-width: 0; }
@@ -112,11 +112,20 @@ html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sa
 .sales-column-value { position: absolute; left: 50%; transform: translate(-50%, -100%); font-size: 12px; white-space: nowrap; color: var(--text); }
 /* Product drilldown retains the same composition/detail columns. */
 .sales-pie-legend span { min-width: 0; overflow-wrap: anywhere; }
-.sales-day-table tr[data-highlighted="true"] { background: var(--surface-hover); outline: 2px solid var(--primary); outline-offset: -2px; }
+.sales-day-table tbody tr { cursor: pointer; }
+.sales-day-table tbody tr:hover { background: var(--surface-hover); }
+.sales-day-table tr[data-highlighted="true"] { background: var(--primary-soft); }
+.sales-day-table tr[data-highlighted="true"], .sales-day-table tr:has(.sales-product-entry:focus-visible) { outline: 2px solid var(--primary); outline-offset: -2px; }
 .sales-period-composition { min-width: 0; }
 
-.sales-detail-path { font-size: 12px; color: var(--text-muted); }
-.sales-detail-path > span { overflow-wrap: anywhere; }
+.sales-detail-toolbar { justify-content: space-between; }
+.sales-detail-path, .sales-detail-path .button { display: flex; align-items: center; gap: 6px; }
+.sales-trend-shortcut, .sales-product-entry { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.sales-trend-shortcut { padding: 8px; color: var(--primary); }
+.sales-trend-shortcut:hover { text-decoration: underline; }
+.sales-product-entry { display: block; width: 100%; padding: 0; text-align: left; overflow-wrap: anywhere; }
+.sales-product-entry:focus-visible { outline: none; }
+.sales-store-entry:focus-visible, .sales-trend-shortcut:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 .sales-store-entry { min-height: 40px; text-align: left; overflow-wrap: anywhere; border-color: transparent; }
 .sales-analytics .sales-period-products table { table-layout: fixed; width: 100%; }
 .sales-analytics .sales-period-products th:first-child { width: 42%; }
