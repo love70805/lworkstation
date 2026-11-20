@@ -11,4 +11,5 @@ assert.equal((await readFile(path.join(root, 'tools/erp-inbox-server-catalog-con
 const contract = await import('./erp-inbox-server-catalog-contract.mjs');
 assert.equal(contract.ERP_CATALOG_MESSAGE_TYPE, 'shopeers.erp.catalog.batch');
 assert.equal(typeof contract.normalizeErpCatalogPurchaseEvidence, 'function');
+assert.equal(contract.originalPurchaseTotal('3.14159265358979323846', 3.141592653589793), '3.14159265358979323846');
 console.log('ERP catalog runtime source/bundle parity passed');

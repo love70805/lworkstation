@@ -2299,7 +2299,7 @@ async function readProfitPageCosts(ledger) {
   if (Dexie.currentTransaction) return (await scanProfitPageCosts(ledger, true)).costs;
   await observePublishedCostRevision();
   const revision = publishedCostRevision();
-  const packed = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period], formula: 'profit-page-costs@5-unit-source',
+  const packed = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period], formula: 'profit-page-costs@6-unit-fractions',
     revisionReader: publishedCostRevision, revision, compute: async () => {
       const capture = readActionCosts.capture(ledger);
       const result = await scanProfitPageCosts(ledger, true);

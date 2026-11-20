@@ -7,6 +7,7 @@ import {
   selectFormalPurchaseRecords,
 } from "./erpCostResolution";
 
+import { purchaseAmounts } from './profitAmounts';
 import { resolveFormalCostDecision } from './costPolicy';
 
 function record(id, date, unitPrice, quantity = 1, extra = {}) {
@@ -119,12 +120,16 @@ describe("ERP Lworkstation-owned resolutions", () => {
     [['1.2222','1.2223','1.3333'], '3.7778', 1.25],
     [Array(3).fill('1.299999999999999999999999'), '3.899999999999999999999997', 1.29],
     [['1.239','1.239','1.252'], '3.73', 1.24],
-  ])('uses full source totals %j before truncating the adopted weighted unit', (amounts, total, applied) => {
+  ])('uses full source totals %j for the regular unit and truncates only the lowest mode', (amounts, total, applied) => {
     const result = calculateWarehouseCostDecision({ warehouseSku: 'WH-1', purchaseRecords: amounts.map((value, i) =>
       record(String(i), '2034-06-12', 9, 1, { amountBasis:'purchase_total', totalPrice:value })) });
     expect(String(result.totalPrice)).toBe(total);
     expect(result.purchaseRecords.map(row => String(row.totalPrice))).toEqual(amounts);
-    expect(resolveFormalCostDecision({ platformSku:'SKU', erpCost:{unitCost:result.formalUnitCost, resolutionStatus:result.resolutionStatus} }).unitCost).toBe(applied);
+    const erpCost = { ...result, costDecision: result };
+    const regular = resolveFormalCostDecision({ platformSku:'SKU', erpCost });
+    expect(regular.unitCost).toBeCloseTo(Number(total) / 3, 13);
+    expect(purchaseAmounts(regular, 3, 10, 0).purchaseCostExact).toBe(total);
+    expect(resolveFormalCostDecision({ platformSku:'SKU', erpCost, accountingMode:'historical_lowest' }).unitCost).toBe(applied);
   });
 
   it("sums original amounts without rounding repeating per-item prices first", () => {

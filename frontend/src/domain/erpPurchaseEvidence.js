@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { Exact } from "./profitAmounts";
+import { CostFraction, Exact } from "./profitAmounts";
 import { canonicalWarehouseSku, normalizeWarehouseSku } from "./identifiers";
 import { parseSalesAddedDate } from "./salesAnalytics";
 import { purchaseDateFacts } from "./erpPurchaseSelection";
@@ -108,6 +108,28 @@ export function normalizePurchaseEvidenceRecord(record, index = 0, fallbackWareh
     eligible: (record?.eligible !== false || (period != null && hasOnlyLedgerExclusions)) && normalizedExclusionReasons.length === 0,
     selectedForPreview: Boolean(record?.selectedForPreview), exclusionReasons: normalizedExclusionReasons,
   };
+}
+
+export function selectedPurchaseBasis(selected) {
+  if (!selected.length) return null;
+  let total = new CostFraction(0n), quantities = new CostFraction(0n);
+  for (const row of selected) {
+    const quantity = row.quantity;
+    const recorded = row.amountBasis === PURCHASE_TOTAL_BASIS && row.resolution?.action !== 'correct_price';
+    const price = recorded ? row.totalPrice : row.effectiveUnitPrice ?? row.unitPrice;
+    if (price == null || quantity == null || !(Number(quantity) > 0) || !Number.isFinite(Number(price))) return null;
+    total = total.plus(recorded ? price : CostFraction.from(price).times(quantity));
+    quantities = quantities.plus(quantity);
+  }
+  return { amount: total.decimal(), quantity: quantities.decimal() };
+}
+
+export function weightedCostFraction(cost) {
+  if (cost?.unitCostFraction) return cost.unitCostFraction;
+  const selected = adoptedCostEvidence(cost).selected;
+  if (cost.selectedRecordIds?.length && selected.length !== cost.selectedRecordIds.length) return null;
+  const basis = selectedPurchaseBasis(selected);
+  return basis && CostFraction.from(basis.amount).dividedBy(basis.quantity).pair();
 }
 
 export function adoptedCostEvidence(cost) {

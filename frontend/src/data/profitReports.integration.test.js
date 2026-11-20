@@ -134,7 +134,7 @@ it('directly exports a self-contained monthly report and keeps the ledger editab
  const saved=await report('financial'),state=await readMonthlyReportState('L');
  expect(saved).toMatchObject({kind:'financial',operationWorkflow:2,accountingMode:'weighted',baseReportId:null,registrantNames:['张三'],fileName:'张三2026年8月利润表.xlsx'});
  expect(state.ledger.status).toBe('ready');expect(await db.profitLines.count()).toBe(2);
- expect(saved.totalsExact.profitExact).toBe('69.3172');
+ expect(saved.totalsExact.profitExact).toBe('69.31719995');
  expect((await withCurrentLedgerResults([state.ledger]))[0].currentResult).toMatchObject({state:'current',profit:69.31});
  expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(1);
  const before=JSON.stringify(await readSavedProfitReport(saved.id));
@@ -165,7 +165,7 @@ it('blocks direct formal saves for missing sources, partial stores, missing cost
 });
 it('uses explicit zero dispatch and deductions for a direct formal report',async()=>{
  await adopt('dispatch',{adoptedQuantityExact:'0'});await adopt('deduction',{rows:['甲','乙'].map(store=>({kind:'deduction',manual:true,store,signedAmountExact:'0'}))});
- const saved=await report('financial');expect(saved.totalsExact).toMatchObject({dispatchAmountExact:'0',deductionExact:'0',profitExact:'-0.682'});
+ const saved=await report('financial');expect(saved.totalsExact).toMatchObject({dispatchAmountExact:'0',deductionExact:'0',profitExact:'-0.68200005'});
  expect(saved.fileName).toBe('2026年8月利润表.xlsx');
  const book=XLSX.read(await prepareReportDownload(saved),{type:'array'});
  expect(book.Sheets['代发表'].G2).toMatchObject({t:'n',v:0});
@@ -209,9 +209,9 @@ it('derives legacy download names from the verified frozen dispatch after live s
 it('updates the whole-month projection after adoption and matches exact report previews without rewriting a frozen file',async()=>{
  const project=async()=>{
    const data=await readMonthlyReportState('L');
-   return monthlyProfitSummary({ledger:data.ledger,reportState:{ledgerId:'L',workspaceId:'W',data},productProfitExact:'-0.682',missingCostCount:0});
+   return monthlyProfitSummary({ledger:data.ledger,reportState:{ledgerId:'L',workspaceId:'W',data},productProfitExact:'-0.68200005',missingCostCount:0});
  };
- expect(await project()).toMatchObject({dispatchRecorded:false,dispatchAmountExact:null,profitExact:'-0.682'});await adopt('dispatch');
+ expect(await project()).toMatchObject({dispatchRecorded:false,dispatchAmountExact:null,profitExact:'-0.68200005'});await adopt('dispatch');
  const before=await previewProfitReport({ledgerId:'L',kind:'pre_deduction'});
  expect((await project()).profitExact).toBe(before.report.totalsExact.preDeductionExact);
  const saved=await report(),savedJson=JSON.stringify(saved);await adopt('deduction');
@@ -411,7 +411,7 @@ it('preserves explicit empty-adoption validation and rejects stale adoption/repo
 });
 it('retains export revisions while costs, dispatch and deductions remain directly editable',async()=>{
  await adopt('dispatch');const base=await report();
- expect(base.totalsExact).toMatchObject({revenueExact:'0.018',dispatchAmountExact:'70',preDeductionExact:'69.318'});
+ expect(base.totalsExact).toMatchObject({revenueExact:'0.018',dispatchAmountExact:'70',preDeductionExact:'69.31799995'});
  expect((await db.ledgers.get('L')).status).toBe('ready');
  await adopt('dispatch',{adoptedQuantityExact:'101'});
  await saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU1',unitCost:1,reason:'更新盘点成本'});
@@ -532,7 +532,7 @@ it('saves and restores an immutable report without dispatch, including the legac
 it('saves a direct financial report without dispatch while keeping shop dispatch rows traceable when entered', async()=>{
  const step=async(label,operation)=>{try{return await operation();}catch(error){throw new Error(label+': '+error.name+': '+error.message,{cause:error});}};
  await step('deduction',()=>adopt('deduction'));const formal=await step('financial',()=>report('financial'));
- expect(formal).toMatchObject({dispatchState:'not_recorded',totalsExact:{dispatchAmountExact:null,profitExact:'-0.6828'}});
+ expect(formal).toMatchObject({dispatchState:'not_recorded',totalsExact:{dispatchAmountExact:null,profitExact:'-0.68280005'}});
  const file=XLSX.read(await prepareReportDownload(formal,{dispatchRows:[],deductionRows:(await readProfitReportDownload(formal.id)).deductionRows}),{type:'array'});
  expect(file.SheetNames).toContain('扣款');expect(file.SheetNames).not.toContain('代发表');
  await step('backup',async()=>validateReportBackup((await createWorkspaceBackupPayload()).tables));

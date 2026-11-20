@@ -194,9 +194,11 @@ export function calculateWarehouseCostDecision({
   const unresolvedAnomalyCount = anomalies.filter((anomaly) => anomaly.status === "pending").length;
   const hasInvalidPrice = resolvedRecords.some((record) => !Number.isFinite(record.effectiveUnitPrice)
     || record.effectiveUnitPrice < 0 || record.effectiveUnitPrice === 0 && record.resolution?.action !== "ignore_anomaly");
-  // Keep the ERP candidate for audit. The selected ERP/manual price is converted
-  // to cents once at the point of use in profit accounting.
-  const computedUnitCost = unit?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null;
+  // The evidence preview retains its historical four-place presentation. Formal
+  // weighted accounting reads the original amounts and quantities.
+  const evidenceUnit = unit?.toDecimalPlaces(4, Decimal.ROUND_DOWN).toNumber() ?? null;
+  const recordedPositive = unit?.gt(0) && resolvedRecords.every(row => row.amountBasis === 'purchase_total');
+  const computedUnitCost = evidenceUnit === 0 && recordedPositive ? unit.toNumber() : evidenceUnit;
   const resolutionStatus = evidenceComplete
     && selectedRecords.length > 0
     && unresolvedAnomalyCount === 0

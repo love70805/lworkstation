@@ -176,7 +176,7 @@ it('uses one manual approval through both editors, cost selection, report export
 it('carries a lone legacy lowest-mode approval into both calculations and honors a linked revocation in its original scope', async () => {
   const saved = await saveManualCostOverride({ ...manualScope, unitCost: 0.0000002 });
   await db.costApprovals.update(saved.id, { accountingMode: 'historical_lowest' });
-  await currentPrice('0', 'manual_override');
+  await currentPrice('0.0000002', 'manual_override');
   await db.costApprovals.put({ ...saved, id: 'OTHER-STORE-REVOCATION', status: 'revoked', accountingMode: 'historical_lowest',
     sourceApprovalId: saved.id, referenceCost: { ...saved.referenceCost, store: '乙' } });
   await toggleAccountingMode('W');

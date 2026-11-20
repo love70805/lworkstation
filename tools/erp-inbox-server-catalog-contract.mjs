@@ -159,6 +159,11 @@ function canonicalWarehouseSku(value) {
 }
 
 // frontend/src/domain/erpCatalogRequest.js
+function originalPurchaseTotal(value, checked) {
+  if (checked == null || typeof value !== "string") return checked;
+  const source = value.trim();
+  return source === String(checked) ? checked : source;
+}
 var ERP_CATALOG_REQUEST_KIND = "catalog";
 var ERP_CATALOG_MESSAGE_TYPE = "shopeers.erp.catalog.batch";
 var ERP_CATALOG_INBOX_FORMAT = "shopeers-erp-catalog-inbox";
@@ -253,11 +258,6 @@ function validateErpCatalogRequest(value) {
 function buildErpCatalogRequest(value = {}) {
   return validateErpCatalogRequest({ ...value, kind: ERP_CATALOG_REQUEST_KIND, requestedAt: value.requestedAt ?? (/* @__PURE__ */ new Date()).toISOString() });
 }
-// A decimal string can contain more significant digits than a JS number.
-export function originalPurchaseTotal(value, checked) {
-  return checked != null && typeof value === "string" ? value.trim() : checked;
-}
-
 function number(value, label) {
   if (value == null || String(value).trim() === "") return null;
   const result = Number(value);
@@ -356,6 +356,7 @@ export {
   normalizeErpCatalogCoverage,
   normalizeErpCatalogPurchaseEvidence,
   normalizeErpUnitConversion,
+  originalPurchaseTotal,
   validateErpCatalogInboxEnvelope,
   validateErpCatalogRequest
 };

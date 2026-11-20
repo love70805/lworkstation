@@ -38,7 +38,7 @@ function CurrentStoreCost({ line }) {
   const effectiveAt = line.decision.eligibleForExactProfit && (manual ? line.manualOverride?.approvedAt : line.erpCost?.publishedAt);
   return <div className="cost-match-store-result">
     <strong>{line.store || "店铺未填"}</strong>
-    <span className="mono">{line.decision.eligibleForExactProfit ? formatAccountingUnitCost(line.decision.unitCost) : "待补成本"}</span>
+    <span className="mono">{line.decision.eligibleForExactProfit ? formatAccountingUnitCost(line.decision.unitCostExact ?? line.decision.unitCost, line.decision.accountingMode) : "待补成本"}</span>
     <small>{line.decision.eligibleForExactProfit ? manual ? "人工更正有效" : "ERP 已采用" : "未采用有效成本"}{effectiveAt ? ` · ${new Date(effectiveAt).toLocaleDateString("zh-CN")}` : ""}</small>
   </div>;
 }

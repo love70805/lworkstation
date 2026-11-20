@@ -1,9 +1,9 @@
 import Decimal from "decimal.js";
-import { accountingUnitCost } from "./profitAmounts";
+import { purchaseAmounts } from "./profitAmounts";
 import { assertDomain } from "./errors";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 
-export const PROFIT_FORMULA_VERSION = "monthly-profit@5-unit-cents";
+export const PROFIT_FORMULA_VERSION = "monthly-profit@5-mode-precision";
 export const DEFAULT_WAREHOUSE_RATE = 0.7;
 
 function finiteDecimal(value, label) {
@@ -17,11 +17,11 @@ function finiteDecimal(value, label) {
   return amount;
 }
 
-function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty, erpPrecision = false, formal = false }) {
+function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty, erpPrecision = false, decision = null }) {
   const revenueValue = finiteDecimal(revenue, "销售金额").toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const quantityValue = finiteDecimal(quantity, "销量");
   const rawCost = finiteDecimal(unitCost, "单件成本");
-  const costValue = formal ? accountingUnitCost(rawCost) : rawCost.toDecimalPlaces(erpPrecision ? 4 : 2, Decimal.ROUND_DOWN);
+  const costValue = decision ? rawCost : rawCost.toDecimalPlaces(erpPrecision ? 4 : 2, Decimal.ROUND_DOWN);
   const warehouseRateValue = finiteDecimal(warehouseRate, "仓储费率").toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const penaltyValue = finiteDecimal(penalty, "扣款").toDecimalPlaces(2, Decimal.ROUND_DOWN);
 
@@ -30,7 +30,8 @@ function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty, 
   const rawPurchaseCost = quantityValue.times(costValue);
   const purchaseCost = erpPrecision ? rawPurchaseCost : rawPurchaseCost.toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const warehouseCost = quantityValue.times(warehouseRateValue).toDecimalPlaces(2, Decimal.ROUND_DOWN);
-  const rawProfit = revenueValue.minus(purchaseCost).minus(warehouseCost).minus(penaltyValue);
+  const amounts = decision && purchaseAmounts(decision, quantityValue, revenueValue, warehouseCost, penaltyValue);
+  const rawProfit = amounts ? new Decimal(amounts.profitExact) : revenueValue.minus(purchaseCost).minus(warehouseCost).minus(penaltyValue);
   const profit = erpPrecision ? rawProfit : rawProfit.toDecimalPlaces(2, Decimal.ROUND_DOWN);
   const profitRate = revenueValue.eq(0) ? null : profit.div(revenueValue).times(100);
 
@@ -38,7 +39,8 @@ function calculateValues({ revenue, quantity, unitCost, warehouseRate, penalty, 
     revenue: revenueValue.toNumber(),
     quantity: quantityValue.toNumber(),
     unitCost: costValue.toNumber(),
-    purchaseCost: purchaseCost.toNumber(),
+    ...(amounts ?? {}),
+    purchaseCost: amounts ? Number(amounts.purchaseCostExact) : purchaseCost.toNumber(),
     warehouseCost: warehouseCost.toNumber(),
     penalty: penaltyValue.toNumber(),
     profit: profit.toNumber(),
@@ -72,7 +74,7 @@ export function calculateExactProfitLine({
     };
   }
 
-  const values = calculateValues({ revenue, quantity, unitCost: costDecision.unitCost, warehouseRate, penalty, erpPrecision: true, formal: true });
+  const values = calculateValues({ revenue, quantity, unitCost: costDecision.unitCost, warehouseRate, penalty, erpPrecision: true, decision: costDecision });
   return {
     ...values,
     calculationMode: "exact",

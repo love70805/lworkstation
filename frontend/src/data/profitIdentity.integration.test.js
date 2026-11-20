@@ -65,7 +65,7 @@ it('blocks a unique changed parent against old ERP evidence while manual zero/ti
   await revokeManualCostOverride({ledgerId:ledger.id,approvalId:zero.id});
   await expect(previewProfitReport(reportInput(ledger))).rejects.toThrow('不一致');
   await saveManualCostOverride({ledgerId:ledger.id,store:'甲',platformSku:'SHARED',unitCost:0.0000001,reason:'真实微小成本'});
-  expect((await saveReport(ledger)).totalsExact.purchaseCostExact).toBe('0');
+  expect((await saveReport(ledger)).totalsExact.purchaseCostExact).toBe('0.0000001');
   expect((await getLatestLedgerCosts(ledger.id))[0]).toMatchObject({platformSkc:'SKC-A',unitCost:5});
 });
 

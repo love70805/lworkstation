@@ -19,7 +19,7 @@ it('normalizes identity across stores without rewriting source rows',()=>{
 
 it.each([0,0.0000001])('preserves manual %s for a unique parent but cannot use it to resolve multiple parents',amount=>{
   const approval=manual(amount),unique=buildLedgerSkuIdentityIndex([source('SKC-B')]).get('SKU');
-  expect(resolveLedgerCostDecision({...scope,identity:unique,erpCost:cost,manualOverride:approval})).toMatchObject({source:'manual_override',unitCost:0,eligibleForExactProfit:true});
+  expect(resolveLedgerCostDecision({...scope,identity:unique,erpCost:cost,manualOverride:approval})).toMatchObject({source:'manual_override',unitCost:amount,eligibleForExactProfit:true});
   const conflict=buildLedgerSkuIdentityIndex([source('SKC-A'),source('SKC-B','乙')]).get('SKU');
   const blocked=resolveLedgerCostDecision({...scope,identity:conflict,erpCost:cost,manualOverride:approval});
   expect(blocked).toMatchObject({unitCost:null,eligibleForExactProfit:false,identityIssue:{code:'ledger_sku_skc_conflict'}});

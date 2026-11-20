@@ -1,11 +1,12 @@
 import Decimal from "decimal.js";
-import { accountingUnitCost } from "./profitAmounts";
+import { accountingUnitCost, CostFraction } from "./profitAmounts";
+import { weightedCostFraction } from "./erpPurchaseEvidence";
 import { canonicalPlatformSku, normalizePlatformSku } from "./identifiers";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 import { validManualOverride } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
 
-export const COST_POLICY_VERSION = "formal-cost-policy@13-unit-cents";
+export const COST_POLICY_VERSION = "formal-cost-policy@13-accounting-modes";
 
 function text(value) {
   const normalized = String(value ?? "").trim();
@@ -41,7 +42,8 @@ function normalizeCandidate(candidate, expectedCanonicalSku, kind) {
   const currency = String(candidate.currency ?? DEFAULT_CURRENCY).trim().toUpperCase();
   const candidateSku = text(candidate.platformSku);
 
-  const belowEvidencePrecision = kind === "erp" && candidate.accountingMode !== "historical_lowest" && amount?.lt("0.0001");
+  const belowEvidencePrecision = kind === "erp" && candidate.accountingMode !== "historical_lowest"
+    && amount?.lt("0.0001") && !weightedCostFraction(candidate);
   if ((!amount?.gt(0) || belowEvidencePrecision) && !explicitZero) issues.push(`invalid_${kind}_amount`);
   if (currency !== DEFAULT_CURRENCY) issues.push(`unsupported_${kind}_currency`);
   if (kind === "erp" && !isResolvedErpCost(candidate)) {
@@ -113,11 +115,18 @@ function latestValidCost(items, kind) {
     .toSorted((a, b) => b._timestamp - a._timestamp)[0] ?? null;
 }
 
+function selectedPrice(raw, mode, erpCost) {
+  if (mode === 'historical_lowest') return { unitCost: accountingUnitCost(raw).toNumber(), accountingMode: mode };
+  const basis = erpCost && weightedCostFraction(erpCost);
+  const unit = CostFraction.from(basis || raw).decimal();
+  return { unitCost: Number(unit), unitCostExact: unit, accountingMode: mode, ...(basis ? {unitCostFraction:basis} : {}) };
+}
+
 export function resolveFormalCostDecision({
   workspaceId,
   store,
   manualOverride = null,
-  accountingMode = 'weighted',
+  accountingMode: requestedMode,
   ledgerId,
   period = null,
   platformSku,
@@ -125,6 +134,7 @@ export function resolveFormalCostDecision({
   reference1688Cost = null,
   approval = null,
 }, checkPeriod = isErpCostWithinPeriod) {
+  const accountingMode = requestedMode ?? erpCost?.accountingMode ?? 'weighted';
   const normalizedSku = normalizePlatformSku(platformSku);
   const canonicalSku = canonicalPlatformSku(normalizedSku);
   const reasons = [];
@@ -138,7 +148,7 @@ export function resolveFormalCostDecision({
   if (manual && (!normalizedErp.candidate || new Decimal(manualOverride.approvedAmount).lte(normalizedErp.candidate.unitCostExact ?? normalizedErp.candidate.unitCost))) {
     return { status: "final", calculationMode: "exact", eligibleForExactProfit: true,
       workspaceId, ledgerId, store, platformSku: normalizedSku, canonicalPlatformSku: canonicalSku,
-      source: "manual_override", unitCost: accountingUnitCost(manualOverride.approvedAmount).toNumber(), currency: DEFAULT_CURRENCY,
+      source: "manual_override", ...selectedPrice(manualOverride.approvedAmount, accountingMode), currency: DEFAULT_CURRENCY,
       sourceRecordId: manualOverride.id, approvalId: manualOverride.id, reasons: [], policyVersion: COST_POLICY_VERSION };
   }
   reasons.push(...normalizedErp.issues);
@@ -152,7 +162,7 @@ export function resolveFormalCostDecision({
       canonicalPlatformSku: canonicalSku,
       ledgerId: text(ledgerId),
       source: "erp",
-      unitCost: accountingUnitCost(normalizedErp.candidate.unitCostExact ?? normalizedErp.candidate.unitCost).toNumber(),
+      ...selectedPrice(normalizedErp.candidate.unitCostExact ?? normalizedErp.candidate.unitCost, accountingMode, erpCost),
       currency: DEFAULT_CURRENCY,
       sourceRecordId: normalizedErp.candidate.id,
       approvalId: null,

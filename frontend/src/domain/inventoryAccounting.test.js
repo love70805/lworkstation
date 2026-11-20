@@ -11,7 +11,7 @@ it.each([[8,5,'erp'],[3,3,'manual_override'],[0,0,'manual_override'],[0.0000001,
   const manualOverride = { ...scope, id: 'A', status: 'approved', currency: 'CNY', approvedAmount: amount, approvedBy: 'finance', approvedAt: '2026-11-01', reason: '实价', referenceCost: { kind: 'manual_override', store: '甲' } };
   const erpCost = { id: 'ERP', platformSku: 'SKU', platformSkc: 'SKC', unitCost: 5, resolutionStatus: 'resolved', currency: 'CNY' };
   const selection = { ...scope, manualOverride, erpCost };
-  expect(resolveLedgerCostDecision(selection)).toMatchObject({ source:'manual_override', unitCost:amount < 0.01 ? 0 : amount, approvalId:'A' });
+  expect(resolveLedgerCostDecision(selection)).toMatchObject({ source:'manual_override', unitCost:amount, approvalId:'A' });
   expect(resolveLedgerCostDecision({ ...selection, accountingMode:'historical_lowest' })).toMatchObject({ source, unitCost:result, sourceRecordId:source === 'erp' ? 'ERP' : 'A' });
   const identity = buildLedgerSkuIdentityIndex([{ platformSku:'SKU', platformSkc:'OTHER' }]).get('SKU');
   expect(resolveLedgerCostDecision({ ...selection, identity, accountingMode:'historical_lowest' })).toMatchObject({ source:'manual_override', unitCost:amount < 0.01 ? 0 : amount });
@@ -65,7 +65,7 @@ it('preserves a tiny positive minimum through formal profit cost resolution', ()
   const minimum = historicalLowestCosts([cost([record('tiny', 0.000001, { purchaseOrderNo: 'QA-TINY' })])])[0];
   expect(minimum.unitCost).toBe(0.000001);
   expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: minimum })).toMatchObject({ eligibleForExactProfit: true, unitCost: 0 });
-  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: { ...minimum, accountingMode: 'weighted' } }).eligibleForExactProfit).toBe(false);
+  expect(resolveFormalCostDecision({ platformSku: 'SKU', erpCost: { ...minimum, accountingMode: 'weighted' } })).toMatchObject({eligibleForExactProfit:true,unitCost:0.000001});
   expect(reconcileErpCostRows({ workspaceId: 'W', expectedSkus: [{ platformSku: 'SKU', platformSkc: 'SKC' }], costRows: [minimum] }).matches[0]).toMatchObject({ status: 'matched', unitCost: 0.000001 });
 });
 
