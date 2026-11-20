@@ -1,6 +1,6 @@
 # Lworkstation 2.1 使用指南
 
-适用于 Windows 本机桌面版 2.1.4。
+适用于 Windows 本机桌面版 2.1.5。
 
 ## 日常操作
 
