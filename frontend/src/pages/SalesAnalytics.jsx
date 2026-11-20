@@ -13,8 +13,13 @@ const Exact = Decimal.clone({ precision: 80 });
 const workspaceColors = new Map();
 const detailKey = (period, storeKey) => JSON.stringify([period.ledgerId, period.date, storeKey, period.storeKeys]);
 
+function storeTotals(rows) {
+  const sum = key => rows.reduce((total, row) => total.plus(row[key] ?? 0), new Exact(0)).toFixed();
+  return { revenueExact: sum('revenueExact'), quantityExact: sum('quantityExact'), profitExact: combinedProfit(rows) };
+}
+
 function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreChange }) {
-  const [metricChoice, setMetric] = useState(null), [view, setView] = useState('daily');
+  const [showQuantity, setShowQuantity] = useState(false), [view, setView] = useState('daily');
   const [selection, setSelection] = useState(null), [hovered, setHovered] = useState(null);
   const [monthMode, setMonthMode] = useState('overview'), [rangeLength, setRangeLength] = useState(12), [rangeEnd, setRangeEnd] = useState(null), [chartOffset, setChartOffset] = useState(0);
   if (!workspaceColors.has(workspaceId)) workspaceColors.set(workspaceId, new Map());
@@ -62,14 +67,10 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const rangeMonths = useMemo(() => salesRange.map(item => withChartProfit(item, profitData?.byLedger[item.ledgerId])), [salesRange, profitData]);
   const actualMonths = daily ? (month ? [month] : []) : rangeMonths.filter(item => !item.missingLedger && !item.missingStore);
   const canShowProfit = actualMonths.some(item => item.monthTotalsExact.hasPriced);
-  const readyForProfit = actualMonths.length > 0 && actualMonths.every(item => item.monthTotalsExact.profitExact != null);
-  const metric = metricChoice === 'profitExact' && !canShowProfit ? 'revenueExact' : metricChoice ?? (readyForProfit ? 'profitExact' : 'revenueExact');
   const plottedMonths = useMemo(() => monthMode === 'overview' ? salesOverviewMonths(rangeMonths) : rangeMonths, [rangeMonths, monthMode]);
   const chartMonths = view === 'monthly' ? months : month ? [month] : [];
   const storeNames = [...new Map(chartMonths.flatMap(item => item.monthlySegments ?? item.daily.flatMap(day => day.segments)).map(segment => [salesStoreKey(segment.store), segment.store])).values()];
   const visibleStoreKeys = storeNames.map(salesStoreKey).filter(key => !hiddenStores.includes(key));
-  const visibleMonth = useMemo(() => month ? { ...month, daily: month.daily.map(day => ({ ...day, segments: day.segments.filter(segment => !hiddenStores.includes(salesStoreKey(segment.store))) })) } : null, [month, hiddenStores]);
-  const scale = useMemo(() => view === 'monthly' ? salesGroupedScale(plottedMonths, metric, { monthly: true, hiddenStores: monthMode === 'overview' ? [] : hiddenStores }) : salesScale(visibleMonth ? [visibleMonth] : [], metric), [view, plottedMonths, monthMode, visibleMonth, metric, hiddenStores]);
   const detailScope = JSON.stringify([scope, selection]);
   const details = useLiveQuery(async () => {
     if (!selection) return null;
@@ -144,13 +145,33 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     if (!detail || !selection?.storeKeys) return detail;
     const keys = new Set(selection.storeKeys);
     const selected = detail.stores.filter(item => keys.has(salesStoreKey(item.store)));
-    const totalsExact = selected.reduce((sum, item) => {
-      for (const key of ['revenueExact', 'quantityExact']) sum[key] = new Exact(sum[key]).plus(item[key] ?? 0).toFixed();
-      return sum;
-    }, { revenueExact: '0', quantityExact: '0' });
-    totalsExact.profitExact = selected.length === keys.size ? combinedProfit(selected) : null;
+    const totalsExact = storeTotals(selected);
+    if (selected.length !== keys.size) totalsExact.profitExact = null;
     return { ...detail, stores: selected, rows: detail.rows.filter(item => keys.has(salesStoreKey(item.store))), totalsExact: detail.status === 'unknown' ? detail.totalsExact : totalsExact, periodTotalsExact: detail.totalsExact, hasStoreSelection: true, emptySelection: !keys.size, missingSelectedStores: keys.size - selected.length };
   }, [details, detailScope, selection, profitData]);
+  const chartAmounts = hiddenStores.length && (daily || monthMode === 'comparison') && visibleStoreKeys.length
+    ? actualMonths.flatMap(item => (item.monthlySegments ?? []).filter(segment => visibleStoreKeys.includes(salesStoreKey(segment.store))))
+    : actualMonths.map(item => item.monthTotalsExact);
+  const detailAmount = chosenStore ? scopedDetail?.stores.find(item => salesStoreKey(item.store) === chosenStore) : scopedDetail?.totalsExact;
+  const readyForProfit = scopedDetail?.status === 'data' && detailAmount
+    ? detailAmount.profitExact != null : chartAmounts.length > 0 && chartAmounts.every(item => item.profitExact != null);
+  const metric = showQuantity ? 'quantityExact' : readyForProfit ? 'profitExact' : 'revenueExact';
+  const showVisibleProfit = daily && !selection && metric === 'profitExact' && hiddenStores.length > 0 && visibleStoreKeys.length > 0;
+  const visibleMonth = useMemo(() => {
+    if (!month || !hiddenStores.length) return month;
+    const visible = row => !hiddenStores.includes(salesStoreKey(row.store));
+    return { ...month, monthTotalsExact: showVisibleProfit ? storeTotals((month.monthlySegments ?? []).filter(visible)) : month.monthTotalsExact,
+      daily: month.daily.map(day => {
+        const segments = day.segments.filter(visible);
+        if (!showVisibleProfit || day.status !== 'data') return { ...day, segments };
+        return segments.length ? { ...day, ...storeTotals(segments), segments }
+          : { ...day, status: 'absent_store', revenueExact: null, quantityExact: null, profitExact: null, segments };
+      }),
+    };
+  }, [month, hiddenStores, showVisibleProfit]);
+  const scale = useMemo(() => daily ? salesScale(visibleMonth ? [visibleMonth] : [], metric)
+    : salesGroupedScale(plottedMonths, metric, { monthly: true, hiddenStores: monthMode === 'overview' ? [] : hiddenStores }),
+  [daily, plottedMonths, monthMode, visibleMonth, metric, hiddenStores]);
   const comparisonTotals = rangeMonths.reduce((sum, item) => {
     for (const segment of item.monthlySegments ?? []) {
       if (hiddenStores.includes(salesStoreKey(segment.store))) continue;
@@ -176,13 +197,13 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
         {[['daily', '按日'], ['monthly', '按月']].map(([period, label]) => <Button key={period} aria-pressed={view === period}
           onClick={() => { if (view !== period) { setView(period); setSelection(null); setHovered(null); } }}>{label}</Button>)}
       </div>
-      <div role="group" aria-label="趋势指标"><Button disabled={!canShowProfit} aria-pressed={metric === 'profitExact'} onClick={() => setMetric('profitExact')}>商品利润</Button><Button aria-pressed={metric === 'revenueExact'} onClick={() => setMetric('revenueExact')}>销售额</Button><Button aria-pressed={metric === 'quantityExact'} onClick={() => setMetric('quantityExact')}>销量</Button></div>
+      <div role="group" aria-label="趋势指标"><Button aria-pressed={!showQuantity} onClick={() => setShowQuantity(false)}>{readyForProfit ? '商品利润' : '销售额'}</Button><Button aria-pressed={showQuantity} onClick={() => setShowQuantity(true)}>销量</Button></div>
     </div></div>
     {profitData && Object.keys(profitData.errors).length > 0 ? <p className="sales-profit-caption" role="status">利润读取提示 · {Object.values(profitData.errors)[0]}</p>
       : actualMonths.some(item => item.accountingMode) ? <p className="sales-profit-caption">{(actualMonths.find(item => item.accountingMode)?.accountingMode === 'historical_lowest' ? '最低成本核算' : '常规核算')} · 商品利润扣除采购成本和仓储费，月度代发与扣款见「利润核算」。{!readyForProfit ? (canShowProfit ? '部分成本待核。' : '成本待核，可先查看销售额和销量。') : ''}</p> : null}
     {changing ? <p role="status">正在切换店铺...</p> : null}{storeError ? <p role="alert">{storeError}</p> : null}
     {!selection && view === 'daily' ? <>
-      <div className="sales-month-totals"><p>{month.missingStore ? '该店不存在于本月来源' : month.coverage === 'unknown' ? '销售原额待查 · 销量待查' : <>{metric === 'profitExact' ? <strong>商品利润 {month.monthTotalsExact.profitExact == null ? '成本待核' : `¥${showSalesValue(month.monthTotalsExact.profitExact)}`} · </strong> : null}销售原额 ¥{showSalesValue(month.monthTotalsExact.revenueExact)} · 销量 {showSalesValue(month.monthTotalsExact.quantityExact, 6)} 件</>}{month.isCurrent ? ` · 统计截止 ${month.cutoff || '尚无有效日期'}` : ''}</p></div>
+      <div className="sales-month-totals"><p>{month.missingStore ? '该店不存在于本月来源' : month.coverage === 'unknown' ? '销售原额待查 · 销量待查' : <>{showVisibleProfit && '所选店铺合计 · '}{metric === 'profitExact' ? <strong>商品利润 {profitLabel(visibleMonth.monthTotalsExact.profitExact)} · </strong> : null}销售原额 ¥{showSalesValue(visibleMonth.monthTotalsExact.revenueExact)} · 销量 {showSalesValue(visibleMonth.monthTotalsExact.quantityExact, 6)} 件</>}{month.isCurrent ? ` · 统计截止 ${month.cutoff || '尚无有效日期'}` : ''}</p></div>
       {month.coverage !== 'complete' ? <p role="status">{month.coverage === 'unknown' ? '尚未取得销售数据，空白日期未视为零。' : `${month.unlocated} 条销售记录缺少有效月内添加日期；仅显示已定位记录，空白日期待查。请核对添加时间映射和账本月份。`}</p> : null}
     </> : null}
     {!selection && view === 'monthly' ? <div className="sales-month-controls">
@@ -201,9 +222,9 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     {!selection && (view === 'daily' || monthMode === 'comparison') && storeNames.length > 0 && storeNames.every(name => hiddenStores.includes(salesStoreKey(name))) ? <p role="status">{view === 'monthly' ? '未选择店铺，可勾选或全选店铺继续；全部店铺期间合计保留，所选明细为空。' : '店铺柱已全部隐藏，点击图例可重新显示；合计与明细保持原范围。'}</p> : null}
     <div ref={chartRef} className="sales-analysis-body">
       {!selection ? <div className="sales-charts-area">
-        {view === 'daily' ? <SalesMonthChart month={visibleMonth} sourceMonth={month} metric={metric} scale={scale} hovered={hovered} onHover={setHovered} onSelect={selectDay} />
+        {view === 'daily' ? <SalesMonthChart month={visibleMonth} sourceMonth={showVisibleProfit ? visibleMonth : month} metric={metric} scale={scale} hovered={hovered} onHover={setHovered} onSelect={selectDay} />
           : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} hovered={hovered} onHover={setHovered} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: visibleStoreKeys } : {}) })} />}
-        {hovered && view === 'daily' ? <div className="sales-day-tooltip"><SalesHoverSummary month={month} date={hovered} metric={metric} hiddenStores={hiddenStores} /></div> : null}
+        {hovered && view === 'daily' ? <div className="sales-day-tooltip"><SalesHoverSummary month={showVisibleProfit ? visibleMonth : month} date={hovered} metric={metric} hiddenStores={hiddenStores} /></div> : null}
       </div> : <SalesPeriodDetails key={listKey} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
         metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} state={listStates[listKey]} onStateChange={updateList}
         onBack={listStore ? () => chooseStore(null) : close} onTrend={listStore ? close : null}
