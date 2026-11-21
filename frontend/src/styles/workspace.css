@@ -456,6 +456,12 @@
 .workspace-ledger-controls .workspace-flow-heading h2 { font-size: 14px; }
 .workspace-ledger-controls .workspace-flow-step { min-height: 54px; background: var(--surface); }
 .workspace-ledger-controls .workspace-flow-step.active { background: var(--primary-soft); }
+.workspace-ledger-controls .workspace-flow.is-complete { padding-block: 7px; }
+.workspace-ledger-controls .is-complete .workspace-flow-heading { flex-flow: row wrap; align-items: center; gap: 6px 14px; margin: 0; }
+.workspace-flow-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 2px 6px 2px 0; border: 0; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+.workspace-flow-toggle:hover { color: var(--primary); }
+.workspace-flow-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.workspace-flow.is-complete .workspace-flow-steps { margin: 6px 0; }
 .workspace-page .dashboard-metric-card { min-height: 88px; box-shadow: none; container-type: inline-size; }
 .workspace-page .dashboard-metric-card strong { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: clamp(20px, 12cqi, 26px); }
 .workspace-page .dashboard-metric-card em { overflow: visible; text-overflow: clip; white-space: normal; }

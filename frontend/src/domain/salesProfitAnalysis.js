@@ -5,7 +5,7 @@ import { storeSkuKey } from './manualCostOverride';
 import { salesProductKey } from './salesPeriodDetails';
 import { salesStoreKey } from './salesChartModel';
 import { parseSalesAddedDate } from './salesAnalytics';
-import { canonicalPlatformSku } from './identifiers';
+import { canonicalPlatformSkc, canonicalPlatformSku } from './identifiers';
 
 const zero = () => new CostFraction(0n);
 const bucket = () => ({ revenue: new Exact(0), quantity: new Exact(0), warehouse: new Exact(0), purchase: zero(), profit: zero(), missing: false, priced: false });
@@ -142,4 +142,34 @@ export function skuProfitBreakdown(rows) {
 export function combinedProfit(rows) {
   if (!rows.length || rows.some(row => row?.profitExact == null)) return null;
   return rows.reduce((sum, row) => sum.plus(row.profitFraction ?? row.profitExact), zero()).decimal();
+}
+
+// A parent earns its place after all its variants, returns and selected stores net together.
+export function profitableSkcs(rows, unitCosts = {}) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!row.platformSkc?.trim()) continue;
+    const key = canonicalPlatformSkc(row.platformSkc);
+    const group = get(groups, key, () => ({ key, skc: row.platformSkc, purchase: zero(), profit: zero(), complete: true, min: null, max: null }));
+    if (row.profitExact == null || row.purchaseCostExact == null) { group.complete = false; continue; }
+    const profit = CostFraction.from(row.profitFraction ?? row.profitExact);
+    group.profit = group.profit.plus(profit);
+    // Existing chart snapshots retain the exact profit fraction even when purchase is a recurring decimal.
+    group.purchase = group.purchase.plus(CostFraction.from(row.revenueExact).minus(row.warehouseCostExact).minus(profit));
+    for (const sku of row.platformSkus ?? []) {
+      const unit = unitCosts[storeSkuKey(row.store, sku)];
+      if (unit == null) continue;
+      const value = new Exact(CostFraction.from(unit).decimal());
+      if (group.min == null || value.lt(group.min)) group.min = value;
+      if (group.max == null || value.gt(group.max)) group.max = value;
+    }
+  }
+  return [...groups.values()].filter(group => group.complete && group.profit.n > 0n)
+    .sort((a, b) => {
+      const diff = b.profit.n * a.profit.d - a.profit.n * b.profit.d;
+      return diff > 0n ? 1 : diff < 0n ? -1 : a.key.localeCompare(b.key);
+    })
+    .map(({ key, skc, profit, purchase, min, max }) => ({
+      key, skc, profit: profit.decimal(), purchase: purchase.decimal(), minUnit: min?.toFixed(), maxUnit: max?.toFixed(),
+    }));
 }

@@ -3,6 +3,7 @@ import { getActiveMemberContext } from "./selectionRepository";
 import { cachedDerived, sourceRevision, tableRevisionReader, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { readPageSaleChunks } from './ledgerPageSalesRepository';
+import { periodDetailColumns } from '../../domain/ledgerPageSales';
 import { runDerivedComputation } from './derivedComputationService';
 import { canonicalStore } from "../../domain/batchSalesImport";
 
@@ -58,13 +59,23 @@ export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store
 
 export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, store = 'all', date = null }) {
   const scope = { workspaceId, ledgerId, store, date };
-  return readScopedSales({ ...scope, allowMissingStore: true }, async (rows, period) => ({
-    ...await cachedSales({
+  return retrySourceRead(async () => {
+    const revision = sourceRevision();
+    const [current, ledger] = await Promise.all([getActiveMemberContext(), db.ledgers.get(ledgerId)]);
+    if (!workspaceId || current.workspaceId !== workspaceId || ledger?.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
+    if (!await observeSourceRevision()) await db.salesRows.count();
+    const { period } = ledger;
+    const detail = await cachedSales({
       scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date],
       formula: 'period-sku-details@2',
-      compute: () => runDerivedComputation('period-detail', { rows, period, date }),
-    }), scope,
-  }));
+      compute: async () => {
+        const chunks = await readPageSaleChunks(workspaceId, ledgerId, { parent: ledger });
+        return runDerivedComputation('period-detail', { detailChunks: chunks.map(periodDetailColumns), workspaceId, store, period, date });
+      },
+    });
+    assertSourceRevision(revision);
+    return { ...detail, scope };
+  });
 }
 
 export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {

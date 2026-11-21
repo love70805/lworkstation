@@ -6,6 +6,7 @@ import { salesStoreColor, salesStoreKey } from '../domain/salesChartModel';
 import { revealListStart } from '../lib/pageListScroll';
 import { combinedProfit, skuProfitBreakdown } from '../domain/salesProfitAnalysis';
 import { sumCostAmounts } from '../domain/profitAmounts';
+import ProfitableSkcs from './ProfitableSkcs';
 
 const Exact = Decimal.clone({ precision: 80 });
 const PAGE_SIZE = 5;
@@ -62,7 +63,7 @@ function pieComposition(rows, metric, total) {
   return { metricName: lossPie ? '亏损额' : profit && losses.length ? '盈利额' : metricName, slices, losses };
 }
 
-function StoreComposition({ rows, total, status, metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted }) {
+function StoreComposition({ rows, total, status, metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted, children }) {
   const products = Boolean(chosenStore), profit = metric === 'profitExact';
   const { metricName, slices, losses } = useMemo(() => pieComposition(rows, metric, total), [rows, metric, total]);
   const label = item => products ? (skuView ? item.platformSku || 'SKU 待查' : item.platformSkc || item.platformSkus?.join('、') || 'SKC 待补充') : item.store;
@@ -101,10 +102,11 @@ function StoreComposition({ rows, total, status, metric, chosenStore, skuView, o
       {profit && (positiveLeader || lossLeader) ? <div className="sales-composition-links">{positiveLeader && link('利润最高', positiveLeader)}{lossLeader && link('亏损最多', lossLeader)}</div> : null}
       {profit && selected?.profitExact != null && new Exact(selected.quantityExact).gt(0) ? <p>选中商品每件利润 <b>{money(new Exact(selected.profitExact).div(selected.quantityExact))}</b></p> : null}
     </div>
+    {children}
   </aside>;
 }
 
-export default function SalesPeriodDetails({ selection, data, error, metric, chosenStore, onChooseStore, productView, onProductView, state, onStateChange, onBack, onTrend, periods, onPeriodChange, position }) {
+export default function SalesPeriodDetails({ selection, data, error, metric, chosenStore, onChooseStore, productView, onProductView, state, onStateChange, onBack, onTrend, periods, onPeriodChange, position, unitCosts, catalog, onOpenProduct }) {
   const { date, period } = selection;
   const label = date || period;
   const headingRef = useRef(null);
@@ -136,7 +138,7 @@ export default function SalesPeriodDetails({ selection, data, error, metric, cho
     </div></div>
     {loading ? <div className="sales-details-loading" aria-busy="true"><p role="status">正在读取 {label} {chosenStore ? '商品' : '店铺'}明细...</p></div>
       : error ? <p role="alert">{error}</p>
-      : <SalesDetailList {...{ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange }} />}
+      : <SalesDetailList {...{ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange, unitCosts, catalog, onOpenProduct }} />}
   </section>;
 }
 
@@ -153,13 +155,13 @@ function BreakdownAmount({ row, mode, onChooseStore }) {
   </button> : amount == null ? '待核' : money(amount);
 }
 
-function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange }) {
+function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange, unitCosts, catalog, onOpenProduct }) {
   const { query, page, scrollLeft, lossOnly: savedLossOnly } = { ...EMPTY_STATE, ...state };
   const skuView = Boolean(chosenStore && productView !== 'skc');
   const isSkuSubset = skuView && ['earning', 'loss', 'pending'].includes(productView);
   const hasSkuDetail = Boolean(selectedTotals?.skuRows);
   const comparison = !chosenStore && metric !== 'quantityExact' && data.stores?.some(item => item.breakdown);
-  const lossOnly = data.hasProfitAnalysis && savedLossOnly && !skuView;
+  const lossOnly = Boolean(chosenStore && data.hasProfitAnalysis && savedLossOnly && !skuView);
   const savedSort = state?.sort;
   const entryMetric = useRef(metric);
   const defaultSort = productView === 'loss' ? 'lossFirst' : entryMetric.current;
@@ -236,7 +238,9 @@ function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseSt
     {data.unlocatedCount ? <p role="status">{data.date ? '仅含已定位到当天的记录；另有' : '本月包含'} {data.unlocatedCount} 条未定位到日期的记录。</p> : null}
     <div className={'sales-period-layout' + (chosenStore ? ' is-products' : '')}>
       <StoreComposition rows={data.status === 'unknown' ? [] : storeRows} total={skuView ? valueTotal(storeRows, metric) : (chosenStore ? selectedTotals : data.totalsExact)?.[metric]} status={data.status}
-        {...{ metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted }} />
+        {...{ metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted }}>
+        {data.status === 'data' && data.hasProfitAnalysis && !skuView && <ProfitableSkcs rows={chosenStore ? storeRows : data.rows} {...{ unitCosts, catalog, onOpenProduct }} />}
+      </StoreComposition>
       <div className="sales-period-products">
         <h3>{chosenStore ? (selectedTotals?.store ?? chosenStore) + ' · 该店商品明细' : (data.hasStoreSelection ? '当期所选店铺' : '当期全部店铺')}</h3>
         {scopeBreakdown && <p className="sales-list-scope">{scopeBreakdown.pending > 0 && '已核部分 · '}盈利 SKU 合计 {money(scopeBreakdown.earningExact)} · 亏损 SKU 合计 <b className="sales-loss">{money(scopeBreakdown.lossExact)}</b>{scopeBreakdown.pending > 0 && ' · ' + scopeBreakdown.pending + ' 个 SKU 待核'}</p>}
@@ -248,7 +252,7 @@ function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseSt
             <label htmlFor={sortId}>排序<select id={sortId} aria-label="排序" value={sort} onChange={event => onStateChange({ sort: event.target.value, page: 0, scrollLeft: 0 })}>{data.hasProfitAnalysis ? <><option value="profitExact">利润从高到低</option><option value="lossFirst">利润从低到高</option></> : null}{comparison && <option value="skuLoss">SKU 亏损额从多到少</option>}<option value="revenueExact">销售额从高到低</option><option value="quantityExact">销量从高到低</option></select></label>
             {chosenStore && (hasSkuDetail || skuView) ? <label className="sales-product-view">查看商品<select aria-label="查看商品" value={productView} onChange={event => { setHighlighted(null); onProductView(event.target.value); }}>
               {Object.entries(productViews).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-              : data.hasProfitAnalysis && <Button aria-pressed={Boolean(lossOnly)} onClick={() => onStateChange({ lossOnly: !lossOnly, page: 0, scrollLeft: 0 })}>{chosenStore ? '只看亏损' : '只看亏损店'}</Button>}
+              : chosenStore && data.hasProfitAnalysis && <Button aria-pressed={Boolean(lossOnly)} onClick={() => onStateChange({ lossOnly: !lossOnly, page: 0, scrollLeft: 0 })}>只看亏损</Button>}
             {query ? <Button onClick={() => onStateChange({ query: '', page: 0, scrollLeft: 0 })}>清空搜索</Button> : null}</div>
           <p className="sales-list-scope">{lossOnly ? '已核亏损项' : query.trim() ? '搜索结果' : skuView ? productViews[productView] : chosenStore ? '该店全部商品' : (data.hasStoreSelection ? '当期所选店铺' : '当期全部店铺')} {filtered.length}/{storeRows.length} 项 · 合计不随筛选或翻页变化</p>
           <div className={'sales-day-table' + (data.hasProfitAnalysis ? ' has-profit-columns' : '')} ref={tableRef} onScroll={event => onStateChange({ scrollLeft: event.currentTarget.scrollLeft })}>

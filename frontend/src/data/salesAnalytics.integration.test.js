@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, afterEach, expect, it } from "vitest";
 import { db } from "./db/clientDatabase";
-import { setActiveMemberContext } from "./repositories/selectionRepository";
+import { readSalesCatalogLinks, setActiveMemberContext } from "./repositories/selectionRepository";
 import { readLedgerSalesAnalytics, readLedgerDailySalesDetails, readLedgerPeriodSalesDetails, readWorkspaceSalesMonths } from "./repositories/salesAnalyticsRepository";
 import { listLedgerSummaries } from "./repositories/profitRepository";
 beforeEach(async () => {
@@ -44,6 +44,36 @@ it("reads exact scoped rows and rejects foreign workspaces, ledgers and stores a
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L", store: "甲" })).monthTotalsExact.revenueExact).toBe("0.009");
   expect((await readLedgerSalesAnalytics({ workspaceId: "W", ledgerId: "L" })).monthTotalsExact.revenueExact).toBe("4.009");
   for (const scope of [{ workspaceId: "foreign", ledgerId: "F" }, { workspaceId: "W", ledgerId: "F" }, { workspaceId: "W", ledgerId: "L", store: "不存在" }]) await expect(readLedgerSalesAnalytics(scope)).rejects.toThrow();
+});
+
+it('looks up catalog links only for unique visible SKCs, including drafts and legacy variant identities', async () => {
+  await setActiveMemberContext({workspaceId:'W',memberId:'member',role:'buyer'});
+  await db.products.bulkPut([
+    {id:'D', workspaceId:'W',status:'draft',platformSkc:'ａ'}, {id:'X',workspaceId:'foreign',platformSkc:'A'},
+    {id:'H',workspaceId:'W',platformSkc:'HIDDEN',visibility:'private',ownerId:'other'},
+    {id:'DEL',workspaceId:'W',platformSkc:'Z',status:'deleted'}, {id:'OLD',workspaceId:'W'},
+    {id:'ONE',workspaceId:'W',platformSkc:'B'}, {id:'TWO',workspaceId:'W',platformSkc:'b'},
+  ]);
+  await db.platformSkus.put({id:'V',productId:'OLD',workspaceId:'W',platformSkc:'Legacy',canonicalPlatformSku:'V'});
+  expect(await readSalesCatalogLinks('W')).toEqual(new Map([['A','D'],['B',null],['LEGACY','OLD']]));
+  expect((await readSalesCatalogLinks('foreign')).size).toBe(0);
+});
+
+it('opens the first and adjacent day from the chart columns and observes later source edits', async () => {
+  const scope={workspaceId:'W',ledgerId:'L'};
+  await db.salesRows.where('ledgerId').equals('L').modify({sourceAddedDate:'2026-08-01'});
+  await readLedgerSalesAnalytics(scope);
+  let reads=0;
+  const onRead = row => {reads++; return row};
+  db.salesRows.hook('reading', onRead);
+  try {
+    for (const date of ['2026-08-01','2026-08-02','2026-08-01']) await readLedgerPeriodSalesDetails({...scope,date});
+    expect(reads).toBe(0);
+    await db.salesRows.add({ledgerId:'L',store:'甲',sku:'LEGACY',quantity:1,amount:-2,sourceAddedDate:'2026-08-02'});
+    expect((await readLedgerPeriodSalesDetails({...scope,date:'2026-08-02'})).totalsExact.revenueExact).toBe('-2');
+    await setActiveMemberContext({workspaceId:'foreign',memberId:'other'});
+    await expect(readLedgerPeriodSalesDetails({...scope,date:'2026-08-01'})).rejects.toThrow('工作区');
+  } finally { db.salesRows.hook('reading').unsubscribe(onRead); }
 });
 
 it('reuses compact monthly summaries without rescanning raw source rows on warm reads', async () => {

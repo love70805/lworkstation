@@ -69,6 +69,19 @@ function formatRelativeTime(value) {
   return formatter.format(Math.round(deltaHours / 24), "day");
 }
 
+function CompletedMonthFlow({ period, action, children }) {
+  const [expanded, setExpanded] = useState(false);
+  return <section className="workspace-flow is-complete" aria-label={period + ' 核算流程'}>
+    <div className="workspace-flow-heading">
+      <button type="button" className="workspace-flow-toggle" aria-expanded={expanded} aria-controls="completed-flow-steps" onClick={() => setExpanded(!expanded)}>
+        <ChevronRight size={16} aria-hidden="true" />核算流程
+      </button>
+      {action}
+    </div>
+    <div id="completed-flow-steps" hidden={!expanded}>{children}</div>
+  </section>;
+}
+
 export default function WorkspacePortal() {
   const navigate = useNavigate();
   const { notify } = useToast();
@@ -130,6 +143,19 @@ export default function WorkspacePortal() {
   ];
   const taskItems = useMemo(() => buildWorkspaceTaskItems(summary), [summary]);
   const workflowAction = workflowSteps[Math.min(workflowStep, workflowSteps.length - 1)];
+  const workflowDisabled = !ledgerScope.ready || Boolean(ledgerScope.context?.error);
+  const openStep = path => navigate(path, { state: { importReturnTo: '/workspace?' + workflowQuery } });
+  const action = <Button variant={resultsReady ? 'secondary' : 'primary'} disabled={workflowDisabled} onClick={() => openStep(workflowAction.path)}>
+    {resultsReady ? workflowAction.title : '下一步：' + workflowAction.title}
+  </Button>;
+  const steps = <div className="workspace-flow-steps">{workflowSteps.map((step, index) => (
+    <button disabled={workflowDisabled} className={'workspace-flow-step ' + (index === workflowStep ? 'active' : index < workflowStep ? 'done' : '')}
+      key={step.title} onClick={() => openStep(step.path)} aria-current={index === workflowStep ? 'step' : undefined}>
+      <span className="workspace-flow-index">{index < workflowStep ? <Check size={14} /> : index + 1}</span>
+      <span><strong>{step.title}</strong><small>{step.detail}</small></span>
+      {index < workflowSteps.length - 1 && <ChevronRight className="workspace-flow-arrow" size={16} />}
+    </button>
+  ))}</div>;
 
   const runHealthCheck = () => {
     setHealthChecked(false);
@@ -157,26 +183,20 @@ export default function WorkspacePortal() {
       </div> : null}
 
       <WorkspaceLedgerControls scope={ledgerScope} onError={message => notify(`切换账本失败：${message}`, 'error')}>
-      <section className="workspace-flow" aria-labelledby="workspace-flow-title">
+      {resultsReady && !workflowDisabled ? <CompletedMonthFlow key={workflowLedger.id} period={workflowLedger.period} action={action}>{steps}</CompletedMonthFlow>
+        : <section className="workspace-flow" aria-labelledby="workspace-flow-title">
         <div className="workspace-flow-heading">
           <div><h2 id="workspace-flow-title">{workflowLedger ? `${workflowLedger.period} 核算流程` : "开始月度核算"}</h2><p>{ledgerScope.context?.error ? '请先重新选择有效账本。' : nextStep.text}</p></div>
-          <Button variant={resultsReady ? "secondary" : "primary"} disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} onClick={() => navigate(workflowAction.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })}>{resultsReady ? workflowAction.title : `下一步：${workflowAction.title}`}</Button>
+          {action}
         </div>
-        <div className="workspace-flow-steps">
-          {workflowSteps.map((step, index) => (
-            <button disabled={!ledgerScope.ready || Boolean(ledgerScope.context?.error)} className={`workspace-flow-step ${index === workflowStep ? "active" : ""} ${index < workflowStep ? "done" : ""}`} key={step.title} onClick={() => navigate(step.path, { state: { importReturnTo: `/workspace?${workflowQuery}` } })} aria-current={index === workflowStep ? "step" : undefined}>
-              <span className="workspace-flow-index">{index < workflowStep ? <Check size={14} /> : index + 1}</span>
-              <span><strong>{step.title}</strong><small>{step.detail}</small></span>
-              {index < workflowSteps.length - 1 ? <ChevronRight className="workspace-flow-arrow" size={16} /> : null}
-            </button>
-          ))}
-        </div>
-      </section>
+        {steps}
+      </section>}
       </WorkspaceLedgerControls>
       <div className="workspace-layout dashboard-layout">
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="销售与利润趋势">
-            {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} stores={ledgerScope.context.stores} /> : <Panel>
+            {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} stores={ledgerScope.context.stores}
+              onOpenProduct={id => navigate('/products/edit?product=' + encodeURIComponent(id))} /> : <Panel>
               <div className="panel-header"><div className="panel-title"><BarChart3 size={19} /><h2>销售与利润趋势</h2></div></div>
               <div className="dashboard-chart-empty">
                 <div>
