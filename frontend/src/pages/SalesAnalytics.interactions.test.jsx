@@ -28,6 +28,12 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 it('hover/focus reads both exact values without database work; toggling/reopening does not recalculate month',async()=>{
  expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
+ const markers = [...container.querySelectorAll('.sales-daily-bar .sales-bar-value')];
+ expect(markers.map(node => [node.closest('button').dataset.date, node.textContent])).toEqual([
+   ['2026-08-01','120'], ['2026-08-02','-0.009'],
+ ]);
+ expect(markers[1].classList.contains('negative')).toBe(true);
+ expect([...container.querySelectorAll('.sales-daily-bar')].filter(node => node.textContent === '0' + node.dataset.date.slice(8))).toHaveLength(0);
  await act(async()=>Simulate.mouseEnter(container.querySelectorAll('.sales-daily-bar')[1]));
  expect(container.querySelector('.sales-hover-summary').textContent).toContain('¥-0.009 · 销量 -0.5 件');
  expect(mocks.day).not.toHaveBeenCalled();

@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useSelectionRead } from '../components/SelectionReadState';
 import { readSalesProfitAnalysis } from '../data/repositories/salesProfitAnalysisRepository';
 import { canonicalPlatformSku } from '../domain/identifiers';
@@ -36,7 +37,7 @@ export function useProductSkuAccounting(workspaceId, historicalRows, params) {
       for (const [key,unit] of Object.entries(ledger.unitCosts)) {
         const [store,sku] = JSON.parse(key), item = index.get(sku);
         if (!item || (scopeLedger ? stores.length && !stores.includes(store) : !item.prices.some(price => price.ledgerId === id && storeIdentity(price.store) === store))) continue;
-        item.costs.push({ store, unit:unit == null ? null : CostFraction.from(unit).decimal(), rate:ledger.warehouseRate,
+        item.costs.push({ ledgerId:id, store, unit:unit == null ? null : CostFraction.from(unit).decimal(), rate:ledger.warehouseRate,
           period:ledger.period, mode:ledger.accountingMode, source:ledger.costSources?.[key] });
       }
     }
@@ -56,17 +57,16 @@ export function CurrentSkuPrice({ prices = empty, loading }) {
     {price.status === 'choose' && <small>{price.candidates.map(candidate => '¥' + candidate.priceExact).join(' / ')}</small>}
   </div>);
 }
-export function AccountingCosts({ costs, reference, loading, children }) {
+export function AccountingCosts({ costs, reference, loading, profitLink, linkState, skuLabel }) {
   const priced = costs.some(cost => cost.unit != null);
   return <div className="catalog-cost-cell">
-    {costs.map(cost => <div key={cost.store} className="catalog-accounting-value">
-      <strong title={cost.unit ?? undefined}>{cost.unit == null ? '核算成本待补' : money(cost.unit)}</strong>
+    {costs.map(cost => <div key={cost.ledgerId + ':' + cost.store} className="catalog-accounting-value">
+      <strong title={cost.unit ?? undefined}>{profitLink && cost.ledgerId ? <Link className="catalog-profit-link" to={profitLink(cost)} state={linkState} aria-label={`查看 ${cost.store} 店 ${skuLabel} 的利润明细和采购记录`} title="查看月度利润明细和采购记录">{cost.unit == null ? '核算成本待补' : money(cost.unit)}<span aria-hidden="true"> ›</span></Link> : cost.unit == null ? '核算成本待补' : money(cost.unit)}</strong>
       <small>{cost.store} 店 · {cost.period} · {modeName(cost.mode)}{cost.unit != null && ' · ' + (cost.source === 'manual_override' ? '人工更正' : 'ERP')}</small>
     </div>)}
     {reference.unitCost != null && <div className="catalog-accounting-value"><strong>{money(reference.unitCost)}</strong><small>{reference.sourceLabel} · 选品参考</small></div>}
     {reference.historical && reference.supplier && <small>当前 1688 报价 {money(reference.supplier.unitCost)}</small>}
     {!priced && !costs.length && reference.unitCost == null && <><strong>{loading ? '读取中' : '待补'}</strong>{!loading && <small>{({ not_checked:'尚未查询采购', incomplete:'采购证据尚未读齐', no_valid_purchase:'已读齐，无有效采购', mapping_conflict:'商品映射待核对' })[reference.erpPurchaseState] ?? '采购资料待补'}</small>}</>}
-    {children}
   </div>;
 }
 export function SkuUnitProfit({ prices = empty, costs = empty, reference }) {

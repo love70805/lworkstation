@@ -185,6 +185,18 @@
 .editor-secondary-details .form-field label { color: var(--text); }
 .editor-inline-note { margin: 12px 18px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .editor-dependent-fields { display: contents; }
+.catalog-record-fields { border:0; margin:0; padding:0; min-inline-size:0; }
+.catalog-record-fields.is-viewing :is(input, select, textarea):disabled { color:var(--text); opacity:1; -webkit-text-fill-color:var(--text); background:transparent; border-color:transparent; cursor:text; }
+.catalog-record-fields.is-viewing .table-input { padding-inline:0; }
+.catalog-record-fields.is-viewing select { appearance:none; }
+.catalog-record-fields.is-viewing :is(.attribute-source-choice, .identity-conflicts, .excluded-variant, .catalog-request-controls, .supplier-card-heading, .title-candidates) button { display:none; }
+.catalog-row-actions { display:inline-flex; gap:4px; align-items:center; vertical-align:top; }
+.catalog-row-actions :is(.catalog-cost-edit, .variant-remove) { margin:0; width:30px; height:30px; }
+.catalog-profit-link { color:var(--primary); text-underline-offset:3px; }
+.catalog-profit-link:hover, .catalog-profit-link:focus-visible { text-decoration:underline; }
+.profit-product-context { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 14px; padding:10px 0; }
+.profit-product-context span { color:var(--text-muted); }
+.profit-detail-area:has([data-profit-focus]) { scroll-margin-block-start:76px; }
 .catalog-variants-panel { min-height: 0; }
 .catalog-variants-panel > .field-error { margin: 0 18px 12px; }
 .catalog-variants-table { min-width: 900px; }

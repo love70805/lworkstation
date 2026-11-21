@@ -47,7 +47,7 @@ export default function ProfitWorkspacePage() {
       if (token !== generation.current || member.workspaceId !== context.workspaceId) return;
       const next = workspaceLedgerQuery(id, location.search, rows, Boolean(selected), { workspaceId: context.workspaceId });
       next.set("view", readProfitView(new URLSearchParams(location.search)) ?? "detail");
-      setSearchParams(next);
+      setSearchParams(next, {state:location.state});
     } catch (error) { notify(`切换月份失败：${error.message}`, "error"); }
     finally { if (token === generation.current) setSwitching(false); }
   }

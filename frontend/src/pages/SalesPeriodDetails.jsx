@@ -110,7 +110,7 @@ function StoreComposition({ rows, total, status, metric, chosenStore, skuView, o
   </aside>;
 }
 
-export default function SalesPeriodDetails({ selection, data, error, metric, chosenStore, onChooseStore, productView, onProductView, state, onStateChange, onBack, onTrend, periods, onPeriodChange, position, unitCosts, catalog, onOpenProduct }) {
+export default function SalesPeriodDetails({ selection, data, error, metric, chosenStore, onChooseStore, productView, onProductView, state, onStateChange, onBack, onTrend, periods, onPeriodChange, position, unitCosts, catalog, onOpenProduct, onOpenProfit }) {
   const { date, period } = selection;
   const label = date || period;
   const headingRef = useRef(null);
@@ -143,7 +143,7 @@ export default function SalesPeriodDetails({ selection, data, error, metric, cho
     </div></div>
     {loading ? <div className="sales-details-loading" aria-busy="true"><p role="status">正在读取 {label} {chosenStore ? '商品' : '店铺'}明细...</p></div>
       : error ? <p role="alert">{error}</p>
-      : <SalesDetailList {...{ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange, unitCosts, catalog, onOpenProduct }} />}
+      : <SalesDetailList {...{ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange, unitCosts, catalog, onOpenProduct, onOpenProfit }} />}
   </section>;
 }
 
@@ -160,7 +160,7 @@ function BreakdownAmount({ row, mode, onChooseStore }) {
   </button> : amount == null ? '待核' : money(amount);
 }
 
-function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange, unitCosts, catalog, onOpenProduct }) {
+function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseStore, productView, onProductView, state, onStateChange, unitCosts, catalog, onOpenProduct, onOpenProfit }) {
   const { query, page, scrollLeft, lossOnly: savedLossOnly } = { ...EMPTY_STATE, ...state };
   const skuView = Boolean(chosenStore && productView !== 'skc');
   const isSkuSubset = skuView && ['earning', 'loss', 'pending'].includes(productView);
@@ -244,7 +244,7 @@ function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseSt
     <div className={'sales-period-layout' + (chosenStore ? ' is-products' : '')}>
       <StoreComposition hasDispatch={data.hasDispatch && !skuView} rows={data.status === 'unknown' ? [] : storeRows} total={skuView ? valueTotal(storeRows, metric) : (chosenStore ? selectedTotals : data.totalsExact)?.[metric]} status={data.status}
         {...{ metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted }}>
-        {data.status === 'data' && data.hasProfitAnalysis && !skuView && <ProfitableSkcs hasDispatch={data.hasDispatch} rows={chosenStore ? storeRows : data.rows} {...{ unitCosts, catalog, onOpenProduct }} />}
+        {data.status === 'data' && data.hasProfitAnalysis && !skuView && <ProfitableSkcs hasDispatch={data.hasDispatch} rows={chosenStore ? storeRows : data.rows} {...{ unitCosts, catalog, onOpenProduct, onOpenProfit, state, onStateChange }} />}
       </StoreComposition>
       <div className="sales-period-products">
         <h3>{chosenStore ? (selectedTotals?.store ?? chosenStore) + ' · 该店商品明细' : (data.hasStoreSelection ? '当期所选店铺' : '当期全部店铺')}</h3>

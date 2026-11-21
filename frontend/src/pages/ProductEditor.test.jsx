@@ -48,12 +48,16 @@ const change = (element, value) => act(async () => {
   element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
 });
 const click = (name) => act(async () => button(name).click());
-const mount = async (url, { library = false, initialEntries, initialIndex, readError = false, storedPreview = false } = {}) => {
+const mount = async (url, { library = false, initialEntries, initialIndex, readError = false, storedPreview = false, edit = true } = {}) => {
   router = createMemoryRouter([
     { path: "/products/edit", element: <ProductEditor /> },
     { path: "/products", element: library ? <ProductLibrary /> : <p>商品列表</p> },
   ], { initialEntries: initialEntries ?? ["/products", url], initialIndex });
   await act(async () => root.render(<ToastProvider><RouterProvider router={router} /></ToastProvider>));
+  if (url.startsWith('/products/edit?product=') && !readError && edit) {
+    await waitFor(() => button("编辑资料"));
+    await click("编辑资料");
+  }
   if (storedPreview) return waitFor(() => input("商品名称") && container.textContent.includes("可先修改基本信息"));
   await waitFor(() => readError ? container.textContent.includes("商品资料读取失败") : library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索预存资料" : "搜索待确认采集") : input("商品名称") && !container.textContent.includes("可先修改基本信息"));
 };
@@ -159,6 +163,26 @@ describe("product editing workflow", () => {
     expect((await db.platformSkus.where('productId').equals(product.id).first()).attribute).toBe('深红');
   });
 
+  it("opens saved products in view mode, aligns edit actions, and discards only the current form edits", async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    await mount('/products/edit?product='+product.id,{edit:false});
+    expect(input("商品名称").closest("fieldset").disabled).toBe(true);
+    expect(container.querySelector(".catalog-row-actions")).toBeNull();
+    await click("编辑资料");
+    await waitFor(() => container.querySelector(".catalog-row-actions .catalog-cost-edit"));
+    expect(input("商品名称").closest("fieldset").disabled).toBe(false);
+    expect(container.querySelector(".catalog-row-actions .variant-remove")).toBeTruthy();
+    await change(input("商品名称"),"未保存的新名称");
+    await click("取消编辑");
+    await click("继续编辑");
+    expect(input("商品名称").value).toBe("未保存的新名称");
+    await click("取消编辑");
+    await click("放弃修改");
+    expect(input("商品名称").value).toBe(draft.name);
+    expect(input("商品名称").closest("fieldset").disabled).toBe(true);
+    expect((await db.products.get(product.id)).name).toBe(draft.name);
+  });
+
   it("recovers a failed editor read instead of remaining on a loading screen", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     editorSnapshotOverride.error = new Error("隔离读取故障");
@@ -168,6 +192,7 @@ describe("product editing workflow", () => {
     await click("重试读取");
     await waitFor(() => input("商品名称"));
     expect(input("商品名称").value).toBe(draft.name);
+    await click("编辑资料");
     await change(input("商品名称"), "重试后修改");
     await click("保存修改");
     await waitFor(async () => (await db.products.get(product.id)).name === "重试后修改");
@@ -307,6 +332,8 @@ describe("product editing workflow", () => {
     expect((await db.supplierOffers.toArray())[0]).toMatchObject({ platformSku: "SKU-B", supplierName: "乙", purchaseUnitPrice: 7, landedUnitCost: 7 });
     await act(async () => { await router.navigate("/products"); });
     await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
+    await waitFor(() => button("编辑资料"));
+    await click("编辑资料");
     await waitFor(() => input("乙 SKU-B 采购价")?.value === "7" && !input("乙 SKU-B 采购价").matches(':disabled') && input("第 2 个采购价"));
     expect(input("第 2 个采购价").value).toBe("");
     const offersBefore = await db.supplierOffers.toArray();
@@ -337,6 +364,8 @@ describe("product editing workflow", () => {
     expect(await db.supplierOffers.count()).toBe(0);
     const product = (await db.products.toArray())[0];
     await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
+    await waitFor(() => button("编辑资料"));
+    await click("编辑资料");
     await waitFor(() => button("保存预存资料"));
     expect(product.status).toBe("draft");
     expect(input("商品名称").value).toBe(product.name);

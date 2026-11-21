@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Plus, Warehouse } from "lucide-react";
 import AppShell from "../components/AppShell";
 import { CostMatchingContent } from "./CostMatching";
@@ -18,13 +18,13 @@ import {
 import { readCachedReportProducts } from "../data/repositories/derivedComputationService";
 import { listErpCostInbox } from '../data/repositories/profitRepository';
 import { presentReportProducts } from "../lib/profitPresentation";
-import { canonicalPlatformSku } from "../domain/identifiers";
+import { canonicalPlatformSkc, canonicalPlatformSku } from "../domain/identifiers";
 import { useLatestSalesImport } from "../hooks/useLatestSalesImport";
 import { useErpCollectionTasks } from "../hooks/useErpCollectionTasks";
 import { currentLedgerCollectionTask, erpCollectionPresentation } from "../domain/erpCollectionStatus";
 import { formatProfitAmount, summarizeProfitRows } from "../lib/profitPrecision";
 import { countProfitIdentities, groupProfitRowsBySkc } from "../lib/profit";
-import { storeSkuKey } from "../domain/manualCostOverride";
+import { storeIdentity, storeSkuKey } from "../domain/manualCostOverride";
 import { buildProfitHref, buildProfitQuery, filterProfitRowsByScope, searchProfitRows, readProfitFilter, readProfitView, saveProfitFilter } from "../lib/profitFilter";
 import ManualCostDialog from "./ManualCostDialog";
 import { ledgerNextStep } from "../domain/ledgerWorkflow";
@@ -50,7 +50,16 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { notify } = useToast();
+  const location = useLocation();
   const requestedLedgerId = searchParams.get("ledger");
+  const focus = useMemo(() => {
+    const skc = searchParams.get('focusSkc')?.trim();
+    if (!skc) return null;
+    const sku = searchParams.get('focusSku')?.trim();
+    return { skc, skcKey:canonicalPlatformSkc(skc), skuKey:sku ? canonicalPlatformSku(sku) : null,
+      stores:searchParams.getAll('focusStore').map(storeIdentity), mode:searchParams.get('fromMode') };
+  }, [searchParams]);
+  const handledFocus = useRef(null);
   const filterSearchKey = searchParams.toString();
   const initialFilterRef = useRef(null);
   if (initialFilterRef.current === null) initialFilterRef.current = readProfitFilter(searchParams, requestedLedgerId);
@@ -85,9 +94,9 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   }, [snapshot?.ledger?.id, snapshot?.ledger?.warehouseRate]);
 
   useEffect(() => {
-    if (!snapshot?.ledger?.id) return;
+    if (!snapshot?.ledger?.id || focus) return;
     saveProfitFilter(snapshot.ledger.id, { query, storeFilter, supplierSelection, supplierStoreSelection, missingOnly });
-  }, [missingOnly, query, snapshot?.ledger?.id, storeFilter, supplierSelection, supplierStoreSelection]);
+  }, [focus, missingOnly, query, snapshot?.ledger?.id, storeFilter, supplierSelection, supplierStoreSelection]);
 
   const costBySku = useMemo(() => new Map((snapshot?.costs ?? []).map(cost => [cost.canonicalPlatformSku ?? canonicalPlatformSku(cost.platformSku), cost])), [snapshot?.costs]);
   const [computed, setComputed] = useState(null);
@@ -111,22 +120,22 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const stores = useMemo(() => [...new Set(scopeRows.map((row) => row.store).filter(Boolean))].toSorted(), [scopeRows]);
   const suppliers = useMemo(() => [...new Set(scopeRows.filter((row) => storeFilter === "all" || row.store === storeFilter).map((row) => row.supplierNumber).filter(Boolean))].toSorted(), [scopeRows, storeFilter]);
   const filterState = useMemo(() => ({ query, storeFilter, supplierSelection, supplierStoreSelection, missingOnly, ...(supplierScopeError ? { supplierScopeError } : {}) }), [missingOnly, query, storeFilter, supplierSelection, supplierStoreSelection, supplierScopeError]);
-  const viewStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, filterState]);
+  const viewStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, filterState, ...(focus ? [focus] : [])]);
   const detailsStateKey = JSON.stringify([snapshot?.ledger?.workspaceId, snapshot?.ledger?.id, 'details']);
-  useEffect(() => { setDetailsOpen(readProfitViewState(detailsStateKey).detailsOpen !== false); }, [detailsStateKey]);
+  useEffect(() => { setDetailsOpen(Boolean(focus) || readProfitViewState(detailsStateKey).detailsOpen !== false); }, [detailsStateKey, focus]);
   const readyForDetails = Boolean(snapshot?.ledger && calculated.length);
   useLayoutEffect(() => {
-    if (!readyForDetails) return;
+    if (!readyForDetails || focus) return;
     const position = readProfitViewState(detailsStateKey).windowScrollY;
     if (Number.isFinite(position)) window.scrollTo({ top: position, behavior: 'auto' });
     return () => saveProfitViewState(detailsStateKey, { windowScrollY: window.scrollY });
-  }, [detailsStateKey, readyForDetails]);
+  }, [detailsStateKey, readyForDetails, focus]);
   const changeFilter = (patch) => {
     const next = { ...filterState, ...patch };
     const params = buildProfitQuery({ ledgerId: snapshot?.ledger?.id, workspaceId: snapshot?.ledger?.workspaceId, ...next, view: "detail" });
     params.set("store", next.storeFilter || "all");
     params.set("missing", next.missingOnly ? "1" : "0");
-    setSearchParams(params, { replace: true });
+    setSearchParams(params, { replace: true, state:location.state });
   };
   const showMissingCosts = () => {
     const patch = { missingOnly: true, storeFilter: 'all', query: '', supplierSelection: null, supplierStoreSelection: null, supplierScopeError: undefined };
@@ -153,7 +162,28 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
     return () => cancelAnimationFrame(frame);
   }, [filterState, detailsOpen, calculation.loading, revealSequence]);
   const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, supplierStoreSelection, missingOnly }), [calculated, storeFilter, supplierSelection, supplierStoreSelection, missingOnly]);
-  const filtered = useMemo(() => searchProfitRows(scopedRows, deferredQuery), [scopedRows, deferredQuery]);
+  const filtered = useMemo(() => {
+    if (!focus) return searchProfitRows(scopedRows, deferredQuery);
+    return scopedRows.filter(row => row.platformSkc?.trim() && canonicalPlatformSkc(row.platformSkc) === focus.skcKey
+      && (!focus.skuKey || (row.platformSku?.trim() && canonicalPlatformSku(row.platformSku) === focus.skuKey))
+      && (!focus.stores.length || focus.stores.includes(storeIdentity(row.store))));
+  }, [scopedRows, deferredQuery, focus]);
+  useEffect(() => {
+    if (!focus) { handledFocus.current = null; return; }
+    if (!detailsOpen || !readyForDetails || calculation.loading || calculation.error || !detailsPanel.current) return;
+    const key = JSON.stringify([location.key, requestedLedgerId, focus]);
+    if (handledFocus.current === key) return;
+    const frame = requestAnimationFrame(() => {
+      handledFocus.current = key;
+      detailsPanel.current?.querySelector('[data-profit-focus]')?.focus({preventScroll:true});
+      detailsPanel.current?.scrollIntoView?.({block:'start'});
+      if (focus.skuKey && filtered.length && new Set(filtered.map(row => row.store)).size === 1) {
+        const row = filtered[0];
+        onCostDetails?.({ store:row.store, platformSku:row.platformSku, mode:'details', ledgerId:snapshot.ledger.id, workspaceId:snapshot.ledger.workspaceId });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focus, detailsOpen, readyForDetails, calculation.loading, calculation.error, filtered, onCostDetails, requestedLedgerId, location.key, snapshot?.ledger]);
   const groupCache = useMemo(() => new WeakMap(), [calculated]);
   const groupedFiltered = useMemo(() => groupProfitRowsBySkc(filtered, groupCache), [filtered, groupCache]);
   const { skcCount, storeSkuCount } = useMemo(() => countProfitIdentities(filtered), [filtered]);
@@ -314,11 +344,17 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       </div>
 
       <div className="profit-detail-area" ref={detailsPanel}>
+      {focus && <div className="profit-product-context" tabIndex={-1} data-profit-focus>
+        <strong>{snapshot.ledger.period} 月度利润明细 · {focus.skc}</strong>
+        <span>{focus.stores.length ? '店铺 ' + focus.stores.join('、') : '全部店铺'}{focus.mode && focus.mode !== snapshot.ledger.accountingMode ? ' · 已按账本当前模式核算' : ''}</span>
+        <button type="button" className="inline-link" onClick={() => changeFilter({query:'',storeFilter:'all'})}>查看全部商品</button>
+      </div>}
       {scopeFilters}
       <details open={detailsOpen} onToggle={event => { const open = event.currentTarget.open; if (open !== detailsOpen) { setDetailsOpen(open); saveProfitViewState(detailsStateKey, { detailsOpen: open }); } }}><summary>查看利润明细与成本更正（{storeSkuCount} 条店铺 SKU）</summary>{detailsOpen ? <section aria-label="月度利润明细" className="panel profit-table-panel" aria-busy={query !== deferredQuery}>
+        {focus && !filtered.length && !calculation.loading ? <p className="editor-inline-note">该商品在所选店铺本月没有销售核算行。已采用的代发节省可在趋势明细中查看。</p> : null}
         <ProfitGroups key={viewStateKey} stateKey={viewStateKey} groups={groupedFiltered} columns={columns}
           skcCount={skcCount} storeSkuCount={storeSkuCount}
-          initiallyExpanded={missingOnly} expandRequest={!calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
+          initiallyExpanded={Boolean(focus) || missingOnly} expandRequest={focus && !calculation.loading ? viewStateKey : !calculation.loading && pendingReveal.current === filterIdentity(filterState) ? revealSequence : 0} />
       </section> : null}
       </details>
       </div>
@@ -350,6 +386,7 @@ export function ProfitViewsContent({ monthControl = null, selectedLedger = null 
   const [detailsRequest, setDetailsRequest] = useState(null);
   const [retry, setRetry] = useState(0);
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const snapshot = useLatestSalesImport(params.get("ledger"), undefined, retry, true);
   const headerLedgerId = selectedLedger?.id ?? params.get('ledger');
@@ -365,7 +402,7 @@ export function ProfitViewsContent({ monthControl = null, selectedLedger = null 
     const nextParams = buildProfitQuery({ ledgerId: snapshot.ledger.id, workspaceId: snapshot.ledger.workspaceId, ...next, view: "detail" });
     nextParams.set("store", next.storeFilter || "all");
     nextParams.set("missing", next.missingOnly ? "1" : "0");
-    setParams(nextParams, { replace: true });
+    setParams(nextParams, { replace: true, state:location.state });
     saveProfitFilter(snapshot.ledger.id, next);
   };
   const ledger = snapshot?.ledger ?? selectedLedger;

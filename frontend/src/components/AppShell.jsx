@@ -34,6 +34,7 @@ import { toggleAppearance } from "../lib/uiState";
 import { applyAppearance, readAppearance } from '../lib/appearance';
 import { profitWorkspaceHref, validatedLedgerSearch } from "../lib/workspaceNavigation";
 import CloudAuthDialog from "./CloudAuthDialog";
+import { readTrendOrigin, trendReturnLocation } from "../lib/trendNavigation";
 import ErpBackgroundNotice from './ErpBackgroundNotice';
 import { readAccountingMode } from '../data/repositories/inventoryAccountingRepository';
 import { LOWEST_ACCOUNTING } from '../domain/inventoryAccounting';
@@ -137,6 +138,8 @@ export default function AppShell({ children, pageClass = "" }) {
     : "环境：本机";
   const effectiveSidebarCollapsed = sidebarCollapsed ?? compactSidebar;
 
+  const productOrigin = pathname === '/profit' && typeof location.state?.productOrigin === 'string' && /^\/products\/edit\?/.test(location.state.productOrigin) ? location.state.productOrigin : null;
+  const trendOrigin = ['/products/edit','/profit'].includes(pathname) ? readTrendOrigin(location.state) : null;
   const backTarget = useMemo(() => {
     if (baseNavigation.some((item) => item.path === pathname) || pathname === '/data-security') return null;
     if (pathname.startsWith("/products") || pathname.startsWith("/capture")) return "/products";
@@ -412,7 +415,9 @@ export default function AppShell({ children, pageClass = "" }) {
         <div className="topbar-leading">
           <IconButton icon={Menu} label="打开导航" className="mobile-menu" aria-expanded={mobileOpen} aria-controls="app-navigation" onClick={() => setMobileOpen(true)} />
           {effectiveSidebarCollapsed ? <IconButton icon={PanelLeftOpen} label="展开导航" className="sidebar-expand" aria-expanded={false} aria-controls="app-navigation" onClick={() => { toggleSidebar(); brandToggleRef.current?.focus(); }} /> : null}
-          {backTarget ? <IconButton icon={ArrowLeft} label="返回上一级" className="global-back" onClick={goBack} /> : null}
+          {trendOrigin ? <button type="button" className="topbar-trend-return" onClick={() => navigate(trendOrigin.href,trendReturnLocation(trendOrigin))}><ArrowLeft size={17} />返回趋势明细</button>
+            : productOrigin ? <button type="button" className="topbar-trend-return" onClick={() => navigate(productOrigin,{replace:true})}><ArrowLeft size={17} />返回商品资料</button>
+            : backTarget ? <IconButton icon={ArrowLeft} label="返回上一级" className="global-back" onClick={goBack} /> : null}
         </div>
         {desktopRuntime?.edition === "beta" && <span className="edition-indicator" title={APP_VERSION_LABEL}>Beta 独立工作区</span>}
         <div className="topbar-actions" ref={menuRef} onKeyDown={menuKeys}>
