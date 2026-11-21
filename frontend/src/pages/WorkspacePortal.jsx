@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   ArrowUpRight,
@@ -17,6 +17,7 @@ import {
   TriangleAlert,
   Warehouse,
 } from "lucide-react";
+import { productProfitHref } from "../lib/trendNavigation";
 import AppShell from "../components/AppShell";
 import { Button, Panel, PageHeader, useToast } from "../components/UI";
 import { db, getActiveMemberContext, getWorkspaceOperationalSummary } from "../data/database";
@@ -84,6 +85,8 @@ function CompletedMonthFlow({ period, action, children }) {
 
 export default function WorkspacePortal() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const historyEntry = location.state?.trendEntry ?? location.key;
   const { notify } = useToast();
   const ledgerScope = useWorkspaceLedgerScope();
   const [refresh, setRefresh] = useState(0);
@@ -135,6 +138,7 @@ export default function WorkspacePortal() {
   const nextStep = ledgerNextStep(workflowLedger, { loading: !ledgerScope.ready });
   const resultsReady = nextStep.key === 'report';
   const workflowQuery = ledgerScope.context?.query ?? '';
+  const trendOrigin = { entry:historyEntry, href:'/workspace?' + workflowQuery, workspaceId:workflowLedger?.workspaceId };
   const workflowStep = !workflowLedger ? 0 : resultsReady ? 3 : 1;
   const workflowSteps = [
     { title: "导入销售台账", detail: workflowLedger ? "沿用当前账本月份" : "先建立月度账本", path: `/import-preview?${workflowQuery}` },
@@ -196,7 +200,12 @@ export default function WorkspacePortal() {
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="销售与利润趋势">
             {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} stores={ledgerScope.context.stores}
-              onOpenProduct={id => navigate('/products/edit?product=' + encodeURIComponent(id))} /> : <Panel>
+              historyEntry={historyEntry} onOpenProfit={scope => navigate(productProfitHref(scope),{state:{trendOrigin}})}
+              onOpenProduct={(id, scope) => {
+                const params = new URLSearchParams({ product:id, ledger:scope.ledgerId, mode:scope.mode });
+                for (const name of scope.stores) params.append('store',name);
+                navigate('/products/edit?' + params,{state:{trendOrigin}});
+              }} /> : <Panel>
               <div className="panel-header"><div className="panel-title"><BarChart3 size={19} /><h2>销售与利润趋势</h2></div></div>
               <div className="dashboard-chart-empty">
                 <div>

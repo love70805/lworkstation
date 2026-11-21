@@ -6,12 +6,14 @@ import SelectionSalesTag from "../components/SelectionSalesTag";
 import SelectionReadState, { useSelectionRead } from "../components/SelectionReadState";
 import ProductEditorLeaveGuard from "../components/ProductEditorLeaveGuard";
 import ErpCatalogEvidence from "../components/ErpCatalogEvidence";
+import { useProductSkuAccounting, accountingForVariant, AccountingCosts, CurrentSkuPrice, SkuUnitProfit } from "./ProductSkuAccounting";
 import ErpSupplierLinks from "../components/ErpSupplierLinks";
+import { productProfitHref, readTrendOrigin } from "../lib/trendNavigation";
 import { productLibraryReturnPath } from "../components/productLibraryViewState";
 import { Badge, Button, Modal, Panel, useToast } from "../components/UI";
 import { getActiveMemberContext, getProductEditorSnapshot, getSelectionReferenceSnapshot, getSelectionStatusDefinitions, saveCatalogManualCost, saveProductCatalogRecord, updateCaptureDraft } from "../data/database";
 import { productPrestorageReadiness } from "../domain/productPrestorage";
-import { normalizeProductTags, productDraftReferences, productSalePrice, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
+import { normalizeProductTags, productDraftReferences, productSaveReadiness, productReadinessIssueLabel } from "../domain/productSelectionDraft";
 import { ERP_CATALOG_GROUPS } from "../domain/erpCatalogRequest";
 import { erpSupplierLinks } from "../domain/erpCatalogPresentation";
 import { mergeErpCatalogSuppliers } from "../domain/erpProductCatalog";
@@ -140,6 +142,12 @@ function ProductEditor() {
   const referenceSku = searchParams.get("sku") ?? "";
   const referenceName = searchParams.get("name") ?? "";
   const queueId = searchParams.get("queue");
+  const existingRecord = Boolean(productId && !captureId && !queueId);
+  const [editing, setEditing] = useState(() => searchParams.get('edit') === '1');
+  const [discardEdit, setDiscardEdit] = useState(false);
+  const viewOnly = existingRecord && !editing;
+  const trendOrigin = readTrendOrigin(location.state);
+  const profitLinkState = {trendOrigin, productOrigin:location.pathname + location.search};
   const catalogQueue = readContinuousCatalogQueue(queueId);
   const queuePosition = Number(searchParams.get("position"));
   const queueItem = catalogQueue?.items[queuePosition];
@@ -339,7 +347,7 @@ function ProductEditor() {
 
   const historicalRows = useMemo(() => referenceSnapshot ? buildSelectionReferenceRows(referenceSnapshot) : [], [referenceSnapshot]);
   const draftReferences = useMemo(() => productDraftReferences(draft ?? {}, historicalRows), [draft, historicalRows]);
-  const referenceCosts = useMemo(() => draftReferences.map(reference => reference.unitCost), [draftReferences]);
+  const accounting = useProductSkuAccounting(referenceSnapshot?.workspaceId ?? snapshot?.context?.workspaceId, historicalRows, searchParams);
   const userStatus = useMemo(() => resolveProductStatus(draft ?? {}, salesStatusDefinitions), [draft, salesStatusDefinitions]);
   const selectedStatusDefinition = useMemo(() => selectionStatusById(salesStatusDefinitions, userStatus.statusId), [userStatus.statusId, salesStatusDefinitions]);
   const statusOptions = useMemo(() => {
@@ -582,6 +590,7 @@ function ProductEditor() {
       submittedSnapshot.current = snapshot;
       setSavedFingerprint(submitted.fingerprint);
       setSaved(true);
+      if (currentDraftRef.current.fingerprint === submitted.fingerprint && existingRecord) setEditing(false);
       if (next) await advanceCatalog({ saved: true, submittedFingerprint: submitted.fingerprint });
       return currentDraftRef.current.fingerprint === submitted.fingerprint;
     } catch (error) {
@@ -630,8 +639,21 @@ function ProductEditor() {
     }
   };
 
+  const cancelEditing = () => {
+    if (savedFingerprint && dirty) {
+      const savedForm = JSON.parse(savedFingerprint);
+      setDraft(savedForm.draft);
+      setTagsText(savedForm.tagsText);
+      provisionalFields.current?.basic.clear();
+      provisionalFields.current?.variants.clear();
+    }
+    setSaveAfterRead(false);
+    setSaveFieldErrors({});
+    setDiscardEdit(false);
+    setEditing(false);
+  };
   const breadcrumbTarget = returnTo;
-  const referenceCostCount = referenceCosts.filter(value => value != null && Number.isFinite(Number(value)) && Number(value) >= 0).length;
+  const referenceCostCount = draft.variants.filter((variant,index) => accountingForVariant(accounting,variant).costs.some(row => row.unit != null) || draftReferences[index]?.unitCost != null).length;
   const isAccountingDraft = snapshot.mode === "new" && (snapshot.prefill?.source === "erp" || Boolean(referenceSkc || referenceSku));
   const issueText = issue => saveReadiness.issues.includes(issue) ? productReadinessIssueLabel(issue) : null;
   const showFieldIssue = (id, issue) => issueText(issue) ? <small id={id} className="field-error" role="status">{issueText(issue)}</small> : null;
@@ -661,17 +683,23 @@ function ProductEditor() {
   return (
     <AppShell searchPlaceholder="搜索商品、SKU 或供应商..." pageClass="editor-page">
       <ProductEditorLeaveGuard dirty={dirty} saving={saving || advancing} canSave={coreReadReady} allowNavigationRef={allowNavigationRef} onSave={() => queueItem && !isPrestorageFlow ? confirmEntry({ stay: true }) : saveDraft({ stay: true })} />
-      <div className="editor-breadcrumb"><button onClick={() => navigate(breadcrumbTarget)}>商品管理</button><ChevronRight size={15} /><span>{modeLabel(snapshot)}</span></div>
+      <div className="editor-breadcrumb"><button onClick={() => navigate(breadcrumbTarget)}>商品管理</button><ChevronRight size={15} /><span>{viewOnly ? "商品详情" : modeLabel(snapshot)}</span></div>
       {queueId ? <div className="continuous-catalog-progress" role="status"><span>{queueItem ? `第 ${queuePosition + 1} 个 / 共 ${catalogQueue.items.length} 个` : "连续建档"}</span><span>{queueScopeError || queueError || "沿预存列表顺序补齐"}</span>{queueItem ? <Button variant="ghost" disabled={saving || advancing || Boolean(queueScopeError)} onClick={() => advanceCatalog()}>跳过</Button> : null}</div> : null}
       <div className="editor-titlebar">
         <div className="editor-heading"><h1>{draft.name || (snapshot.product || isPrestorageFlow || isAccountingDraft ? "补充商品资料" : "新建商品档案")}</h1>{dirty ? <Badge tone="warning">未保存修改</Badge> : saved ? <Badge tone="success">已保存</Badge> : null}</div>
-        <div className="page-actions"><Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>返回列表</Button>{readingReferences ? <Button variant="primary" icon={CheckCircle2} disabled={!dirty || saveAfterRead} onClick={() => setSaveAfterRead(true)}>{saveAfterRead ? "等待核对后保存" : isPrestorageFlow ? "保存预存资料" : "保存修改"}</Button> : isPrestorageFlow ? <><Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ stay: Boolean(queueItem) })}>保存预存资料</Button>{queueItem ? <Button loading={saving || advancing} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ next: true })}>保存并下一个</Button> : null}</> : queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</div>
+        <div className="page-actions">{!trendOrigin && <Button variant="ghost" disabled={saving || advancing} onClick={() => navigate(returnTo)}>返回列表</Button>}
+          {viewOnly ? <Button variant="primary" icon={Pencil} onClick={() => setEditing(true)}>编辑资料</Button> : <>
+            {existingRecord && <Button disabled={saving || advancing} onClick={() => dirty ? setDiscardEdit(true) : cancelEditing()}>取消编辑</Button>}
+            {readingReferences ? <Button variant="primary" icon={CheckCircle2} disabled={!dirty || saveAfterRead} onClick={() => setSaveAfterRead(true)}>{saveAfterRead ? "等待核对后保存" : isPrestorageFlow ? "保存预存资料" : "保存修改"}</Button> : isPrestorageFlow ? <><Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ stay: Boolean(queueItem) })}>保存预存资料</Button>{queueItem ? <Button loading={saving || advancing} disabled={saving || advancing || !canSavePrestorage || Boolean(queueScopeError || queueError)} onClick={() => saveDraft({ next: true })}>保存并下一个</Button> : null}</> : queueId ? <><Button loading={saving} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry()}>保存商品</Button><Button variant="primary" icon={CheckCircle2} loading={saving || advancing} disabled={saving || advancing || !canSave || Boolean(queueScopeError || queueError)} onClick={() => confirmEntry({ next: true })}>保存并下一个</Button></> : isFormalProduct ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={saveDraft}>保存修改</Button> : isAccountingDraft ? <Button variant="primary" icon={CheckCircle2} loading={saving} disabled={saving || !canSave} onClick={confirmEntry}>保存商品</Button> : <><Button loading={saving} disabled={saving || !draft.name.trim()} onClick={saveDraft}>保存草稿</Button><Button variant="primary" icon={CheckCircle2} disabled={!canSave || saving} onClick={() => setConfirmDialog(true)}>确认进入工作台</Button></>}</>}
+        </div>
       </div>
 
-      {readingReferences ? <p className="editor-inline-note" role="status">可先修改基本信息、规格名称和售价。点击保存后，系统会在销售和采购资料核对完成时写入。</p> : null}
+      {readingReferences && viewOnly && <p className="editor-inline-note" role="status">正在读取销售与采购资料…</p>}
+      {readingReferences && !viewOnly ? <p className="editor-inline-note" role="status">可先修改基本信息和规格名称。点击保存后，系统会在销售和采购资料核对完成时写入。</p> : null}
       {[["商品资料", snapshotRead], ["状态配置", statusRead], ["参考数据", referenceRead]].filter(([, read]) => read.status === "error").map(([label, read]) => <Panel key={label} role="alert"><p>{label}读取失败：{read.error} 已输入的内容仍保留。</p><Button onClick={read.retry}>重试{label}</Button></Panel>)}
-      {isPrestorageFlow && !readingReferences ? <Panel className="prestorage-editor-status" role="status"><p>{snapshot.product ? "草稿已保存在本机，可先参与核算；名称、属性和图片按需补齐。" : "商品资料可分次补齐，不影响已有台账核算。"}</p><strong>{prestorageReadiness.ready ? "资料已齐全，保存后自动进入选品库" : "资料仍在预存区，可分次补齐并保存"}</strong>{prestorageReadiness.ready ? null : <><p>待补齐：{prestorageReadiness.labels.join("、")}</p><details><summary>查看各 SKU 缺项</summary><ul>{prestorageReadiness.missing.map(item => <li key={item.key}>{item.platformSku ? `${item.platformSku}：` : ""}{item.label}{item.key.startsWith("attribute_") || item.key.endsWith("_attribute") ? <button className="inline-link" type="button" onClick={() => document.getElementById(`variant-${draft.variants.findIndex(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(item.platformSku))}-attribute`)?.focus()}>处理属性</button> : null}</li>)}</ul></details></>}</Panel> : null}
-      <div className="editor-grid">
+      {isPrestorageFlow && !viewOnly && !readingReferences ? <Panel className="prestorage-editor-status" role="status"><p>{snapshot.product ? "草稿已保存在本机，可先参与核算；名称、属性和图片按需补齐。" : "商品资料可分次补齐，不影响已有台账核算。"}</p><strong>{prestorageReadiness.ready ? "资料已齐全，保存后自动进入选品库" : "资料仍在预存区，可分次补齐并保存"}</strong>{prestorageReadiness.ready ? null : <><p>待补齐：{prestorageReadiness.labels.join("、")}</p><details><summary>查看各 SKU 缺项</summary><ul>{prestorageReadiness.missing.map(item => <li key={item.key}>{item.platformSku ? `${item.platformSku}：` : ""}{item.label}{item.key.startsWith("attribute_") || item.key.endsWith("_attribute") ? <button className="inline-link" type="button" onClick={() => document.getElementById(`variant-${draft.variants.findIndex(variant => canonicalPlatformSku(variant.platformSku) === canonicalPlatformSku(item.platformSku))}-attribute`)?.focus()}>处理属性</button> : null}</li>)}</ul></details></>}</Panel> : null}
+      {accounting.error && <p className="editor-inline-note" role="alert">核算成本读取失败 · {accounting.error} <Button variant="ghost" onClick={accounting.retry}>重试</Button></p>}
+      <fieldset className={'editor-grid catalog-record-fields' + (viewOnly ? ' is-viewing' : '')} disabled={viewOnly}>
         <Panel className="editor-basic-panel">
           <div className="section-heading"><h2>基本信息</h2>{prefill?.source === "erp" ? <Badge tone="info">ERP 来源 · {prefill.skuCount ?? draft.variants.length} 个 SKU</Badge> : null}</div>
           <div className="editor-basic-layout">
@@ -698,21 +726,19 @@ function ProductEditor() {
         </Panel>
 
         <Panel className="variants-panel catalog-variants-panel">
-          <div className="panel-header"><div className="panel-title"><h2>SKU 规格与成本</h2><span className="panel-subtitle">{isPrestorageFlow ? "资料可以逐步保存；全部缺项补齐后自动进入选品库。" : "名称和明确的 SKC—SKU 关系即可保存；图片、售价及参考成本可后续补充。"}</span></div><Button disabled={readingReferences} variant="ghost" icon={Plus} onClick={() => setDraft(current => { const variant = createVariant(); return { ...current, variants: [...current.variants, variant], suppliers: syncSupplierVariantAdded(current.suppliers, variant) }; })}>添加规格</Button></div>
+          <div className="panel-header"><div className="panel-title"><h2>SKU 规格与成本</h2>{!viewOnly && <span className="panel-subtitle">{isPrestorageFlow ? "资料可以逐步保存；全部缺项补齐后自动进入选品库。" : "商品名称和 SKC、SKU 归属明确后即可保存。"}</span>}</div>{!viewOnly && <Button disabled={readingReferences} variant="ghost" icon={Plus} onClick={() => setDraft(current => { const variant = createVariant(); return { ...current, variants: [...current.variants, variant], suppliers: syncSupplierVariantAdded(current.suppliers, variant) }; })}>添加规格</Button>}</div>
           {showFieldIssue("product-sku-error", "platform_sku_required")}
-          {pendingNewVariants.length ? <div className="catalog-new-data"><span>新资料有 {pendingNewVariants.length} 个明确 SKU，可带入当前草稿。</span><Button variant="ghost" onClick={addNewCatalogData}>带入新增资料</Button></div> : null}
+          {!viewOnly && pendingNewVariants.length ? <div className="catalog-new-data"><span>新资料有 {pendingNewVariants.length} 个明确 SKU，可带入当前草稿。</span><Button variant="ghost" onClick={addNewCatalogData}>带入新增资料</Button></div> : null}
           {unresolvedConflicts.length ? <div className="identity-conflicts" role="alert">{unresolvedConflicts.map((conflict, index) => <div key={`${conflict.platformSku}-${index}`}><span><strong className="mono">{conflict.platformSku}</strong> · {({ relationship_conflict: "SKC 与仓库映射存在冲突", owned_elsewhere: "已属于其他商品档案" })[conflict.reason] || conflict.reason || "身份关系存在冲突"}{conflict.productId ? <a href={`/products/edit?product=${encodeURIComponent(conflict.productId)}`}>查看对应档案</a> : null}</span><Button variant="ghost" onClick={() => excludeConflict(conflict)}>排除此冲突分支</Button></div>)}</div> : null}
           {draft.excludedIdentitySkus?.length ? <p className="editor-inline-note">已明确排除 {draft.excludedIdentitySkus.join("、")}；冲突线索会保留供后续补充。</p> : null}
           <div className="table-wrap" tabIndex="0" aria-label="SKU 规格与成本表，可横向滚动">
             <table className="data-table variants-table catalog-variants-table">
-              <thead><tr><th>平台属性 / 规格</th><th>平台 SKU</th><th>参考单件成本</th><th>当前售价</th><th>参考单件利润</th><th>详情</th><th>操作</th></tr></thead>
-              <tbody>{draft.variants.length === 0 ? <tr><td className="pending-text" colSpan="7">尚未添加平台 SKU 分支</td></tr> : draft.variants.map((variant, index) => {
+              <thead><tr><th>平台属性 / 规格</th><th>平台 SKU</th><th>参考单件成本</th><th>当前售价</th><th>参考单件利润</th><th>详情</th>{!viewOnly && <th>操作</th>}</tr></thead>
+              <tbody>{draft.variants.length === 0 ? <tr><td className="pending-text" colSpan={viewOnly ? 6 : 7}>尚未添加平台 SKU 分支</td></tr> : draft.variants.map((variant, index) => {
                 const platformSku = String(variant.platformSku ?? "").trim();
                 const reference = draftReferences[index] ?? {};
                 const referenceRow = reference.historical;
-                const cost = reference.unitCost;
-                const salePrice = productSalePrice(variant.salePrice);
-                const profit = salePrice != null && cost != null ? salePrice - cost - 0.7 : null;
+                const { prices, costs } = accountingForVariant(accounting,variant);
                 const skuIssue = issueText(`variant_${index}_platform_sku_duplicate`) || (platformSku && saveFieldErrors[canonicalPlatformSku(platformSku)]);
                 return <tr key={variant.id ?? index}>
                   <td><input disabled={readingReferences && !platformSku} id={`variant-${index}-attribute`} aria-label={`第 ${index + 1} 个规格名称`} aria-describedby={(prefill?.conflicts ?? []).some(item => item.field === "attribute" && canonicalPlatformSku(item.platformSku) === canonicalPlatformSku(platformSku)) ? `variant-${index}-attribute-source` : undefined} className="table-input catalog-text-input" value={variant.attribute ?? ""} onChange={event => updateVariant(index, "attribute", event.target.value)} placeholder="颜色 / 尺寸" />
@@ -723,27 +749,26 @@ function ProductEditor() {
                     </div>)}
                   </td>
                   <td><input disabled={readingReferences} id={`variant-${index}-sku`} aria-label={`第 ${index + 1} 个平台 SKU`} aria-invalid={Boolean(skuIssue)} aria-describedby={skuIssue ? `variant-${index}-sku-error` : undefined} className="table-input catalog-sku-input mono" value={variant.platformSku ?? ""} onChange={event => updateVariant(index, "platformSku", event.target.value)} />{skuIssue ? <small className="field-error" id={`variant-${index}-sku-error`}>{skuIssue}</small> : null}</td>
-                  <td><div className="catalog-cost-cell"><strong className="mono">{readingReferences ? "读取中" : cost == null ? "待补" : `¥${Number(cost).toFixed(reference.referenceKind?.startsWith("erp") ? 4 : 2)}`}</strong>{cost != null ? <small className="row-subtitle" title={referenceRow?.referenceNote}>{reference.sourceLabel}</small> : null}{!readingReferences && cost == null ? <small>{({ not_checked: "尚未查询采购", incomplete: "采购证据尚未读齐", no_valid_purchase: "已读齐，无有效采购", mapping_conflict: "商品映射待核对" })[reference.erpPurchaseState] ?? "采购资料待补"}</small> : null}{reference.historical && reference.supplier ? <small>当前 1688 报价 ¥{reference.supplier.unitCost.toFixed(2)}</small> : null}{currentProductId && platformSku && !readingReferences ? <button type="button" className="catalog-cost-edit" title="确认人工成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, cost)}><Pencil size={13} /></button> : null}</div></td>
-                  <td><input disabled={readingReferences && !platformSku} aria-label={`第 ${index + 1} 个售价`} className="table-input mono" type="number" min="0" step="0.01" value={variant.salePrice ?? ""} onChange={event => updateVariant(index, "salePrice", event.target.value)} />
-                    {platformSku && !draft.fieldEdits?.variants?.[canonicalPlatformSku(platformSku)]?.salePrice && variant.salePriceSource?.kind === "ledger" ? <details className="sale-price-source"><summary>{variant.salePriceSource.status === "choose" ? "售价待选择" : `台账 · ${variant.salePriceSource.sourceAddedAt?.slice(0, 10) ?? variant.salePriceSource.period}`}</summary>
-                      <small>{variant.salePriceSource.store} · {variant.salePriceSource.sourceAddedAt?.replace("T", " ").replace("+08:00", " 北京时间")}</small>
-                      {variant.salePriceSource.candidates?.map(candidate => <div key={candidate.priceExact}><span>¥{candidate.priceExact} · 净销 {candidate.quantityExact} 件</span>{variant.salePriceSource.status === "choose" ? <Button variant="ghost" onClick={() => updateVariant(index, "salePrice", candidate.value)}>采用 ¥{candidate.priceExact}</Button> : null}</div>)}
-                      <small>{variant.salePriceSource.sources?.map(source => `${source.store} · ${source.sourceSheet || "台账"} 第 ${source.sourceRow ?? "—"} 行 · 批次 ${source.batchId}`).join("；")}</small>
-                    </details> : null}</td>
-                  <td className={`mono ${profit != null && profit < 0 ? "danger-text" : ""}`}>{salePrice == null ? "待填写售价" : profit == null ? "待参考成本" : `¥${profit.toFixed(2)}`}</td>
-                  <td>{readingReferences ? null : <details className="sku-details"><summary>查看 / 编辑</summary><div className="sku-detail-fields">{[["warehouseSku", "ERP 仓库 SKU"], ["sourceSku", "1688 来源 SKU"], ["imageUrl", "SKU 图片链接"]].map(([field, label]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个 ${label}`} className="text-input" value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} /></label>)}{variant.purchaseSpecification ? <p>采购规格：{variant.purchaseSpecification}</p> : null}{referenceRow?.referenceEvidence?.unitConversion ? <p>平台 SKU 与仓库单位换算：{referenceRow.referenceEvidence.unitConversion.warehouseUnits} 个仓库单位对应 {referenceRow.referenceEvidence.unitConversion.platformUnits} 个平台单品</p> : null}<div className="sku-quote-fields">{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个${label}`} className="table-input mono" type="number" min={min} step={step} value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} />{showFieldIssue(`variant-${index}-${field}-error`, `variant_${index}_${field === "purchasePackCount" ? "purchase_pack_count_invalid" : "units_per_pack_invalid"}`)}</label>)}</div><small>报价只在主动修改时更新；采购规格与平台属性分别保留。</small></div></details>}</td>
-                  <td><button disabled={readingReferences} type="button" className="variant-remove" aria-label={`删除第 ${index + 1} 个规格`} onClick={() => removeVariant(index)}><Trash2 size={16} /></button></td>
+                  <td><AccountingCosts costs={costs} reference={reference} loading={readingReferences || accounting.loading}
+                    linkState={profitLinkState} profitLink={cost => productProfitHref({ledgerId:cost.ledgerId, skc:draft.platformSkc, sku:platformSku, stores:[cost.store], mode:cost.mode})}
+                    skuLabel={platformSku} /></td>
+                  <td><CurrentSkuPrice prices={prices} loading={readingReferences || referenceRead.status === 'loading'} /></td>
+                  <td><SkuUnitProfit {...{ prices,costs,reference }} /></td>
+                  <td>{readingReferences ? null : <details className="sku-details"><summary>{viewOnly ? "规格详情" : "查看 / 编辑"}</summary><div className="sku-detail-fields">{[["warehouseSku", "ERP 仓库 SKU"], ["sourceSku", "1688 来源 SKU"], ["imageUrl", "SKU 图片链接"]].map(([field, label]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个 ${label}`} className="text-input" value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} /></label>)}{variant.purchaseSpecification ? <p>采购规格：{variant.purchaseSpecification}</p> : null}{referenceRow?.referenceEvidence?.unitConversion ? <p>平台 SKU 与仓库单位换算：{referenceRow.referenceEvidence.unitConversion.warehouseUnits} 个仓库单位对应 {referenceRow.referenceEvidence.unitConversion.platformUnits} 个平台单品</p> : null}<div className="sku-quote-fields">{[["purchaseUnitPrice", "采购价", "0.01", "0"], ["purchasePackCount", "采购份数", "1", "0"], ["unitsPerPack", "每份单品数", "1", "1"]].map(([field, label, step, min]) => <label className="form-field" key={field}><span>{label}</span><input aria-label={`第 ${index + 1} 个${label}`} className="table-input mono" type="number" min={min} step={step} value={variant[field] ?? ""} onChange={event => updateVariant(index, field, event.target.value)} />{showFieldIssue(`variant-${index}-${field}-error`, `variant_${index}_${field === "purchasePackCount" ? "purchase_pack_count_invalid" : "units_per_pack_invalid"}`)}</label>)}</div><small>报价只在主动修改时更新；采购规格与平台属性分别保留。</small></div></details>}</td>
+                  {!viewOnly && <td><div className="catalog-row-actions">
+                    {currentProductId && platformSku && !readingReferences && <button type="button" className="catalog-cost-edit" title="编辑选品参考成本" aria-label={`确认 ${platformSku} 的人工成本`} onClick={() => openManualCostDialog(variant, reference.unitCost)}><Pencil size={15} /></button>}
+                    <button disabled={readingReferences} type="button" className="variant-remove" aria-label={`删除第 ${index + 1} 个规格`} onClick={() => removeVariant(index)}><Trash2 size={16} /></button></div></td>}
                 </tr>;
               })}</tbody>
             </table>
           </div>
           {draft.excludedVariants?.length ? <details className="editor-secondary-details excluded-variants"><summary>已排除规格（{draft.excludedVariants.length}）</summary>{draft.excludedVariants.map(variant => <div className="excluded-variant" key={variant.platformSku}><span><strong>{variant.attribute || variant.platformSku}</strong><small>{variant.platformSku} · {draft.variantChoices?.[canonicalPlatformSku(variant.platformSku)]?.reason || "已排除"}</small></span><Button disabled={readingReferences} variant="ghost" onClick={() => restoreVariant(variant)} aria-label={`恢复规格 ${variant.platformSku}`}>恢复</Button></div>)}</details> : null}
-          <p className="editor-inline-note">参考成本覆盖 {referenceCostCount}/{draft.variants.length} 个 SKU。ERP 与 1688 来源各自保留；本页保存不会写入月度正式利润。</p>
+          <p className="editor-inline-note">参考成本覆盖 {referenceCostCount}/{draft.variants.length} 个 SKU。当前售价取自最近台账。参考单件利润扣除同店成本和账本仓储费。</p>
         </Panel>
 
         <fieldset className="editor-dependent-fields" disabled={readingReferences} aria-label="供应商和 ERP 档案资料">
         <Panel className="supplier-list-panel">
-          <div className="panel-header"><div className="panel-title"><h2>供应商来源</h2><span className="panel-subtitle">每个供应商保留自己的链接和 SKU 关联</span></div><Button variant="ghost" icon={Plus} onClick={addSupplier}>添加供应商</Button></div>
+          <div className="panel-header"><div className="panel-title"><h2>供应商来源</h2><span className="panel-subtitle">每个供应商保留自己的链接和 SKU 关联</span></div>{!viewOnly && <Button variant="ghost" icon={Plus} onClick={addSupplier}>添加供应商</Button>}</div>
           <div className="editor-supplier-grid">{supplierRows.map((supplier, index) => <div className="supplier-card" key={supplier.id ?? index}>
             <div className="supplier-card-heading"><strong>{supplier.supplierName || `供应商 ${index + 1}`}</strong><span>{supplier.sourceUrl ? <a className="inline-link" href={supplier.sourceUrl} target="_blank" rel="noreferrer">打开来源<ExternalLink size={14} /></a> : null}{index > 0 ? <button type="button" className="icon-button danger" aria-label={`删除供应商 ${index + 1}`} onClick={() => removeSupplier(index)}><Trash2 size={16} /></button> : null}</span></div>
             <div className="form-field"><label htmlFor={`supplier-${index}-name`}>供应商名称</label><input id={`supplier-${index}-name`} aria-label={index === 0 ? "供应商名称" : `供应商 ${index + 1} 名称`} className="text-input" value={supplier.supplierName ?? ""} onChange={event => index === 0 ? updateDraft("supplierName", event.target.value) : updateSupplier(index, "supplierName", event.target.value)} /></div>
@@ -762,8 +787,9 @@ function ProductEditor() {
           <ErpCatalogEvidence sources={prefill?.sources} purchases={prefill?.purchases} />
         </details></Panel> : null}
         </fieldset>
-      </div>
+      </fieldset>
 
+      <Modal open={discardEdit} title="放弃本次编辑？" description="将恢复到上次保存的商品资料。" onClose={() => setDiscardEdit(false)} footer={<><Button onClick={() => setDiscardEdit(false)}>继续编辑</Button><Button onClick={cancelEditing}>放弃修改</Button></>} />
       <Modal open={confirmDialog} title={snapshot.product?.status === "active" ? "保存商品档案" : "确认进入工作台"} description="系统会在同一事务中写入商品档案、已填写的平台 SKU、1688 供应商资料和审计记录。" onClose={() => setConfirmDialog(false)} footer={<><Button onClick={() => setConfirmDialog(false)}>取消</Button><Button variant="primary" loading={saving} disabled={saving} onClick={confirmEntry}>确认写入</Button></>}>
         <div className="confirm-summary"><span><strong>商品</strong>{draft.name}</span><span><strong>平台 SKC</strong>{draft.platformSkc}</span><span><strong>平台 SKU</strong>{draft.variants.length} 个</span><span><strong>参考成本覆盖</strong>{referenceCostCount}/{draft.variants.length} SKU</span></div>
       </Modal>

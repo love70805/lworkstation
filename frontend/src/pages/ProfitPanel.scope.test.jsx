@@ -6,6 +6,7 @@ import { Simulate } from 'react-dom/test-utils';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ProfitViewsContent } from './ProfitPanel';
+import { productProfitHref } from '../lib/trendNavigation';
 import { ToastProvider } from '../components/UI';
 const state=vi.hoisted(()=>({snapshot:{ledger:{id:'L',workspaceId:'W',period:'2026-08',status:'draft',warehouseRate:0.7},rows:[{store:'甲',supplierNumber:'货号A',platformSku:'A',platformSkc:'S',quantity:2,amount:10,sourceAddedDate:'2026-08-01'},{store:'乙',supplierNumber:'货号B',platformSku:'B',platformSkc:'T',quantity:3,amount:30,sourceAddedDate:'2026-08-01'}],costs:[],approvals:[],profitLines:[]}}));
 vi.mock('../hooks/useLatestSalesImport',()=>({useLatestSalesImport:()=>state.snapshot}));
@@ -14,7 +15,7 @@ vi.mock('../hooks/useErpCollectionTasks',()=>({useErpCollectionTasks:()=>({tasks
   {workspaceId:'W',ledgerId:'L',ledgerPeriod:'2026-08',status:'running',batches:[],summary:{total:90,delivered:51}},
 ]})}));
 vi.mock('./MonthlyReportManager',()=>({default:({onOpenCosts})=><button onClick={onOpenCosts}>补齐本月成本</button>}));
-vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext,suppliedSnapshot})=>{state.costSnapshot=suppliedSnapshot;return <div data-testid="cost-scope">{validatedContext.store}</div>;}}));
+vi.mock('./CostMatching',()=>({CostMatchingContent:({validatedContext,suppliedSnapshot,reviewTarget})=>{state.costSnapshot=suppliedSnapshot;state.reviewTarget=reviewTarget;return <div data-testid="cost-scope">{validatedContext.store}</div>;}}));
 let root,container;
 it('allows navigation and shows the selected ledger task before the amounts are available',async()=>{
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;
@@ -88,6 +89,25 @@ it('keeps export above the unified details for a legacy cost URL while preservin
  expect(container.querySelector('#monthly-report-section').compareDocumentPosition(container.querySelector('[data-testid="cost-scope"]')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  expect(container.querySelector('.profit-sales-disclosure')).toBeNull();
  expect(container.querySelector('.sales-analytics')).toBeNull();
+});
+
+it('opens the exact monthly SKC, store and SKU, including its cost evidence target', async () => {
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ const original=state.snapshot, base=original.rows[0];
+ state.snapshot={...original,ledger:{...original.ledger,id:'FOCUS'},rows:[
+   {...base,platformSkc:'S',platformSku:'A',store:'甲'},
+   {...base,platformSkc:'S-more',platformSku:'A-extra',store:'甲'},
+   {...base,platformSkc:'S',platformSku:'A',store:'乙'},
+ ]};
+ try {
+   const href=productProfitHref({ledgerId:'FOCUS',skc:'s',sku:'a',stores:['甲']});
+   container=document.createElement('div');document.body.append(container);root=createRoot(container);
+   await act(async()=>root.render(<MemoryRouter initialEntries={[href]}><ToastProvider><ProfitViewsContent/></ToastProvider></MemoryRouter>));
+   await act(async()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+   expect(container.querySelectorAll('.profit-variant-row')).toHaveLength(1);
+   expect(container.querySelector('.profit-variant-row').textContent).not.toContain('A-extra');
+   expect(state.reviewTarget).toMatchObject({ledgerId:'FOCUS',workspaceId:'W',store:'甲',platformSku:'A',mode:'details'});
+ } finally { state.snapshot=original; }
 });
 
 it('reveals scoped missing rows from the adjacent filter and the whole month from the report action', async () => {

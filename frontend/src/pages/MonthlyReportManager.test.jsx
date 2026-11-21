@@ -54,6 +54,16 @@ it('defaults to no registrant, searches identified names and previews append/rep
  await change(field('已有来源处理'),'replace');expect(container.textContent).toContain('整月 10 → 3 件');expect(container.textContent).toContain('全部已有来源将被本次内容替换');
  expect(state.dispatch.sources).toHaveLength(1);await act(async()=>button('导入并更新本月来源').click());expect(mock.adopt).toHaveBeenCalledTimes(1);expect(mock.adopt.mock.calls[0][0].rows).toHaveLength(1);
 });
+it('enriches adopted rows from the same immutable file without adding the quantities again', async () => {
+ const csv=source('SAME',[['日期','登记人','店铺','SKC','订单号','数量'],['8月6日','甲人','甲','STYLE','A',3]]);
+ const prior={kind:'dispatch',fileHash:'SAME',sourceSheet:'CSV',sourceRow:2,ownerMarker:'甲人',platformSkc:'STYLE',businessId:'A',store:'甲',quantityExact:'3'};
+ await mount({...base,dispatch:{id:'PREVIOUS',kind:'dispatch',mode:'files',adoptedQuantityExact:'3',sources:[]},adoptedRows:[prior]});
+ await upload([csv]);await change(field('登记人'),'甲人');
+ expect(container.textContent).toContain('已从原表补全 1 行登记日期');
+ await act(async()=>button('导入并更新本月来源').click());
+ expect(mock.adopt.mock.calls[0][0].rows).toEqual([{...prior,dispatchDate:'2026-08-06',dispatchDateSourceRow:2}]);
+ expect(prior.dispatchDate).toBeUndefined();
+});
 it('keeps an explicit old manual aggregate when adding file records',async()=>{
  await mount({...base,dispatch:{mode:'manual',adoptedQuantityExact:'10',revision:1,rowCount:0,sources:[]}});await upload([source()]);await change(field('登记人'),'甲人');
  expect(container.textContent).toContain('整月 10 → 13 件');

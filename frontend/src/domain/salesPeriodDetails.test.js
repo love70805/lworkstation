@@ -25,8 +25,8 @@ it('ranks complete parents after offsetting stores, preserves exact costs and th
     {...priced('甲','SMALL','0.00005','0','0.00005'),platformSkus:['003']}];
   const costs={ [storeSkuKey('甲','001')]: '1', [storeSkuKey('乙','001')]: ['2','1'], [storeSkuKey('甲','003')]: '0' };
   expect(profitableSkcs(rows,costs)).toEqual([
-    {key:'ABC',skc:'ABC',profit:'7',purchase:'3',minUnit:'1',maxUnit:'2'},
-    {key:'SMALL',skc:'SMALL',profit:'0.00005',purchase:'0',minUnit:'0',maxUnit:'0'},
+    {key:'ABC',skc:'ABC',stores:['乙','甲'],salesProfit:'7',dispatch:'0',dispatchQuantity:'0',profit:'7',purchase:'3',minUnit:'1',maxUnit:'2'},
+    {key:'SMALL',skc:'SMALL',stores:['甲'],salesProfit:'0.00005',dispatch:'0',dispatchQuantity:'0',profit:'0.00005',purchase:'0',minUnit:'0',maxUnit:'0'},
   ]);
 });
 it('aggregates SKU branches by store and SKC without truncating money', () => {

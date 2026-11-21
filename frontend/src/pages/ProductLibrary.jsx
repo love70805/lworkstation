@@ -422,7 +422,7 @@ function ProductLibraryView({ workspaceId, view, headers, catalogRead, statusRea
         <strong className="truncate-name">{row.original.name || "未命名商品"}</strong>
         {row.original.status === 'draft' && row.original.attributes?.catalogOrigin === 'ledger_import' ? <Badge tone="warning">基础档案 · 待补全</Badge> : null}
         <span className="product-skc-identity"><strong className="mono">{row.original.platformSkc || "未填写 SKC"}</strong><button type="button" title="复制 SKC 与平台 SKU" aria-label={`复制 ${row.original.name} 的 SKC 与平台 SKU`} onClick={(event) => { event.stopPropagation(); copyProductIdentity(row.original); }}><Copy size={13} /></button></span>
-        {row.original.incomingReferences.length ? <button className="inline-link product-incoming-link" type="button" onClick={event => { event.stopPropagation(); navigate(`/products/edit?product=${encodeURIComponent(row.original.id)}`); }}>补齐 {row.original.incomingReferences.length} 个新增 SKU</button> : null}
+        {row.original.incomingReferences.length ? <button className="inline-link product-incoming-link" type="button" onClick={event => { event.stopPropagation(); navigate(`/products/edit?product=${encodeURIComponent(row.original.id)}&edit=1`); }}>补齐 {row.original.incomingReferences.length} 个新增 SKU</button> : null}
         {row.original.relatedDrafts.length ? <details className="product-related-drafts" onClick={event => event.stopPropagation()}><summary>同 SKC 另有 {row.original.relatedDrafts.length} 份预存资料</summary>{row.original.relatedDrafts.map(draft => <button key={draft.id} className="inline-link" type="button" onClick={() => navigate(`/products/edit?product=${encodeURIComponent(draft.id)}`)}>{draft.name || "未命名资料"} · 查看并整理</button>)}</details> : null}
         {row.original.tags?.length || duplicateSkcCountByProductId.has(row.original.id) ? <span className="product-tag-list">{duplicateSkcCountByProductId.has(row.original.id) ? <small className="product-conflict-tag">重复 SKC · {duplicateSkcCountByProductId.get(row.original.id)} 份档案</small> : null}{(row.original.tags ?? []).slice(0, 3).map((tag) => <small key={tag}>{tag}</small>)}</span> : null}
         {row.original.skuCount === 0 ? <span className="missing-sku"><AlertCircle size={12} />{row.original.pendingVariantCount ? `待分配平台 SKU · ${row.original.pendingVariantCount} 个属性分支` : "缺少平台 SKU"}</span> : <span className="product-sku-branches">{row.original.displaySkuReferences.map((sku) => <span className="product-sku-branch" key={sku.id ?? sku.platformSku}><strong className="mono">{sku.platformSku}</strong><small>{sku.attribute || "未填写属性"}</small></span>)}</span>}
@@ -462,7 +462,7 @@ function ProductLibraryView({ workspaceId, view, headers, catalogRead, statusRea
     cell: ({ row }) => <ReferenceGroupRows group={row.original}
       onOpenLedger={ledgerId => navigate(`/profit?ledger=${encodeURIComponent(ledgerId)}`)}
       onEdit={() => navigate(row.original.productId
-        ? `/products/edit?product=${encodeURIComponent(row.original.productId)}`
+        ? `/products/edit?product=${encodeURIComponent(row.original.productId)}${row.original.productStatus === "draft" ? "&edit=1" : ""}`
         : `/products/edit?skc=${encodeURIComponent(row.original.variants[0]?.platformSkcConflict ? "" : row.original.variants[0]?.platformSkc ?? "")}&sku=${encodeURIComponent(row.original.variants[0]?.platformSku ?? "")}`)}
     />,
   }], [navigate]);

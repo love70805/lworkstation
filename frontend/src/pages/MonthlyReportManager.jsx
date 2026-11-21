@@ -25,7 +25,7 @@ function sourceSelected(source,kind,selection) {
 }
 function buildSupplementDraft({state,kind,current,mode,sources,selection,retaining,amounts,zeroStores,reviewed,excludedRows,periodIndex,selectedPeriods}) {
   const input={kind,ledgerId:state.ledger.id,workspaceId:state.ledger.workspaceId,period:state.ledger.period,mode,rows:[],sources:[],reviewedCrossFileConflicts:reviewed};
-  const stats={addedRows:[],retainedCount:0,skipped:0,duplicates:0,sourceCount:0,unassigned:[],unmappedSources:[]};
+  const stats={addedRows:[],retainedCount:0,dated:0,skipped:0,duplicates:0,sourceCount:0,unassigned:[],unmappedSources:[]};
   try {
     if(mode==='manual') {
       if(kind==='dispatch') { input.rows=state.stores.filter(store=>String(amounts[store]??'').trim()!=='').map(store=>({kind,manual:true,store,quantityExact:amounts[store],sourceName:'人工录入',sourceRow:1})); if(!input.rows.length)return {ready:false,stats}; input.adoptedQuantityExact=exactSum(input.rows,'quantityExact'); }
@@ -42,6 +42,7 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,retaini
       if(retaining&&current?.mode==='manual'&&kind==='dispatch'&&!retained.length)retained.push({kind,manual:true,store:'',quantityExact:current.adoptedQuantityExact,sourceName:'此前手工总代发',sourceRow:1});
       input.rows=[...retained];input.sources=retaining&&current?[...(current.sources??[])]:[];stats.retainedCount=retained.length;
       const priorKeys=new Set(retained.map(supplementRowIdentity)),seen=new Set(priorKeys);
+      const retainedIndex = new Map(retained.map((row, i) => [supplementRowIdentity(row), i]));
       for(const source of sources) {
         const includeAll=selection===ALL_MARKERS;
         const months=periodIndex.get(source);
@@ -51,7 +52,7 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,retaini
         if(missing.length)throw new Error(`${source.fileName} / ${source.sheetName}：未识别${missing.map(field=>fieldLabels[field]).join('、')}列，请展开此来源的高级设置。`);
         stats.sourceCount++;
         const parsed=inspectSupplementSource(source,{kind,headerRow:source.headerRow,mapping:source.mapping,ownerMarker:includeAll||selectedCodes?'':selection,supplierNumbers:selectedCodes??undefined,includeAll,store:source.store,stores:state.stores,
-          periodScope:months && {rows:months.rows,selected:selectedPeriods}});
+          periodScope:months && {rows:months.rows,dates:months.dates,selected:selectedPeriods}});
         stats.skipped+=parsed.ignored.filter(row=>row.reason==='missing_quantity').length;
         stats.unassigned.push(...parsed.ignored.filter(row=>row.reason==='unassigned_owner').map(row=>({...row,sourceName:source.fileName})));
         if(parsed.errors.length){
@@ -62,7 +63,15 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,retaini
         for(const row of parsed.rows) {
           const key=supplementRowIdentity(row);
           if(excludedRows.includes(key)){removed.push({sourceRow:row.sourceRow,recordRow:row.recordRow,businessId:row.businessId});continue;}
-          if(seen.has(key)){stats.duplicates++;continue;}
+          if (seen.has(key)) {
+            const i = retainedIndex.get(key), prior = input.rows[i];
+            if (kind === 'dispatch' && row.dispatchDate && prior && !prior.dispatchDate
+              && ['store','platformSkc','ownerMarker','quantityExact','businessId'].every(field => (prior[field] ?? '') === (row[field] ?? ''))) {
+              input.rows[i] = { ...prior, dispatchDate: row.dispatchDate, dispatchDateSourceRow: row.dispatchDateSourceRow };
+              stats.dated++;
+            } else stats.duplicates++;
+            continue;
+          }
           seen.add(key);input.rows.push(row);stats.addedRows.push(row);
         }
         if(removed.length||stats.addedRows.some(row=>row.fileHash===source.fileHash&&row.sourceSheet===source.sheetName)||parsed.ignored.some(row=>['missing_quantity','unassigned_owner'].includes(row.reason)))input.sources.push({...parsed.source,excludedRows:removed});
@@ -72,7 +81,7 @@ function buildSupplementDraft({state,kind,current,mode,sources,selection,retaini
         if(input.rows.some(row=>row.store===store))throw new Error(`${store} 已有来源金额，不能同时标记无扣款。`);
         const row={kind,manual:true,store,signedAmountExact:'0',sourceName:'明确零扣款',sourceRow:1,businessId:''};input.rows.push(row);stats.addedRows.push(row);
       }
-      if(!stats.addedRows.length) {
+      if(!stats.addedRows.length && !stats.dated) {
         const error=stats.duplicates?'所选记录已在当前来源中，不会重复计数。':`所选${kind==='dispatch'?'登记人':'货号'}没有有效记录${stats.skipped?`，已跳过 ${stats.skipped} 条无数量记录`:''}。请调整筛选或来源。`;
         return {ready:false,error,stats};
       }
@@ -181,7 +190,8 @@ export function SupplementEditor({ state, kind, onClose }) {
     {draft.stats.skipped?<p role="status">已跳过 {draft.stats.skipped} 条无数量记录，来源位置已保留。</p>:null}
     {draft.stats.unassigned.length?<Panel className="report-source-notice"><p role="status">来源表有 {draft.stats.unassigned.length} 条登记人不明记录，已排除，未计入任何登记人。可在原表补齐登记人后重新导入。</p><details><summary>查看未归属记录</summary>{draft.stats.unassigned.slice(0,100).map(row=><p key={`${row.sourceName}/${row.sourceSheet}/${row.sourceRow}`}>{row.sourceName} / {row.sourceSheet} · {supplementRowLabel(row)} · {row.rawQuantity || '无数量'} 件</p>)}{draft.stats.unassigned.length>100?<p>仅显示前 100 条，完整位置保留在来源记录中。</p>:null}</details></Panel>:null}
     {draft.stats.addedRows.some(row=>row.quantityFromText)?<p role="status">已将 {draft.stats.addedRows.filter(row=>row.quantityFromText).length} 条文本数量识别为有效数字，共 {exactSum(draft.stats.addedRows.filter(row=>row.quantityFromText),'quantityExact')} 件，已计入预览。</p>:null}
-    {draft.stats.duplicates?<p>已有 {draft.stats.duplicates} 条重复源记录已跳过。</p>:null}
+    {draft.stats.dated > 0 && <p>已从原表补全 {draft.stats.dated} 行登记日期，原代发件数保留。</p>}
+      {draft.stats.duplicates?<p>已有 {draft.stats.duplicates} 条重复源记录已跳过。</p>:null}
     {previewPending?<p role="status">正在更新预览…</p>:null}
     {finalCandidate?<Panel className="report-adoption-preview"><strong>{state.ledger.period} 整月导入预览</strong>
       {mode==='files'?<p>本次筛选新增 {draft.stats.addedRows.length} 行 / {exactSum(draft.stats.addedRows,kind==='dispatch'?'quantityExact':'signedAmountExact')} {unit}；保留已有 {draft.stats.retainedCount} 行{current&&retaining?`（原采用 ${oldTotal} ${unit}）`:''}。</p>:null}

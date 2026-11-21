@@ -1,4 +1,5 @@
 import { CostFraction, Exact } from './profitAmounts';
+import { chartWithDispatch, detailWithDispatch } from './salesDispatchContribution';
 import { priceReportGroups } from './profitReports';
 import { profitCostWithinPeriod } from './profitPageProjection';
 import { storeSkuKey } from './manualCostOverride';
@@ -54,12 +55,14 @@ function priceSku(revenue, quantity, unitCost, rate) {
 export function buildSalesProfitAnalysis({ ledger, identities, costs, approvals, groups, rows, store = 'all' }) {
   const lines = priceReportGroups({ ledger, salesRows: identities, erpCosts: costs, approvals, allowMissing: true }, groups, profitCostWithinPeriod);
   const inScope = name => store === 'all' || salesStoreKey(name) === salesStoreKey(store);
-  const month = periodBucket(), days = new Map(), prices = new Map();
+  const month = periodBucket(), days = new Map(), prices = new Map(), costSources = new Map();
   const warehouseRate = ledger.warehouseRate ?? '0.7';
   for (const line of lines) {
     if (!inScope(line.store)) continue;
     addLine(month, line);
-    prices.set(storeSkuKey(line.store, line.platformSku), line.unitCostFraction ?? line.unitCostExact);
+    const key = storeSkuKey(line.store, line.platformSku);
+    prices.set(key, line.unitCostFraction ?? line.unitCostExact);
+    costSources.set(key, line.costSource);
   }
   if (rows) {
     const byDaySku = new Map();
@@ -84,7 +87,7 @@ export function buildSalesProfitAnalysis({ ledger, identities, costs, approvals,
       });
     }
   }
-  return { accountingMode: ledger.accountingMode, warehouseRate, unitCosts: Object.fromEntries(prices), month: finishPeriod(month), days: mapValues(days, finishPeriod) };
+  return { accountingMode: ledger.accountingMode, warehouseRate, unitCosts: Object.fromEntries(prices), costSources: Object.fromEntries(costSources), month: finishPeriod(month), days: mapValues(days, finishPeriod) };
 }
 
 // A legacy aggregate may cover a different set of records. Only join results with matching sales.
@@ -96,7 +99,7 @@ function withAmounts(sale, amounts) {
 const zeroAmounts = { revenueExact: '0', quantityExact: '0', purchaseCostExact: '0', warehouseCostExact: '0', profitExact: '0', profitFraction: ['0','1'] };
 export function withChartProfit(month, analysis) {
   if (!analysis?.month) return month;
-  return { ...month, accountingMode: analysis.accountingMode,
+  return chartWithDispatch({ ...month, accountingMode: analysis.accountingMode,
     monthTotalsExact: withAmounts(month.monthTotalsExact, analysis.month.total),
     monthlySegments: (month.monthlySegments ?? []).map(row => withAmounts(row, analysis.month.stores[salesStoreKey(row.store)])),
     daily: month.daily.map(day => {
@@ -105,17 +108,18 @@ export function withChartProfit(month, analysis) {
       return { ...withAmounts(day, period?.total ?? (day.status === 'known_zero' ? zeroAmounts : null)),
         segments: day.segments.map(row => withAmounts(row, period?.stores[salesStoreKey(row.store)])) };
     }),
-  };
+  }, analysis.dispatch);
 }
 export function withDetailProfit(detail, analysis, date) {
-  if (!detail || !analysis?.month || detail.status === 'unknown') return detail;
+  if (!detail || !analysis?.month) return detail;
+  if (detail.status === 'unknown') return detailWithDispatch(detail, analysis.dispatch, date);
   const period = date ? analysis.days[date] : analysis.month;
   const byStore = new Map();
   for (const sku of detail.skuRows ?? []) {
     const amounts = priceSku(sku.revenueExact, sku.quantityExact, analysis.unitCosts?.[sku.key], analysis.warehouseRate ?? '0.7');
     get(byStore, salesStoreKey(sku.store), () => []).push({ ...sku, ...amounts });
   }
-  return { ...detail, accountingMode: analysis.accountingMode, hasProfitAnalysis: true,
+  return detailWithDispatch({ ...detail, accountingMode: analysis.accountingMode, hasProfitAnalysis: true,
     totalsExact: withAmounts(detail.totalsExact, period?.total ?? (detail.status === 'known_zero' ? zeroAmounts : null)),
     stores: detail.stores.map(row => {
       const key = salesStoreKey(row.store), priced = withAmounts(row, period?.stores[key]);
@@ -124,7 +128,7 @@ export function withDetailProfit(detail, analysis, date) {
       return { ...priced, skuRows, breakdown: skuProfitBreakdown(skuRows) };
     }),
     rows: detail.rows.map(row => withAmounts(row, period?.products[row.key])),
-  };
+  }, analysis.dispatch, date);
 }
 
 // Classify the signed total for each SKU in this store and period, after returns and sales offset.
@@ -150,12 +154,15 @@ export function profitableSkcs(rows, unitCosts = {}) {
   for (const row of rows) {
     if (!row.platformSkc?.trim()) continue;
     const key = canonicalPlatformSkc(row.platformSkc);
-    const group = get(groups, key, () => ({ key, skc: row.platformSkc, purchase: zero(), profit: zero(), complete: true, min: null, max: null }));
+    const group = get(groups, key, () => ({ key, skc: row.platformSkc, purchase: zero(), profit: zero(), dispatch: zero(), dispatchQuantity: new Exact(0), stores: new Set(), complete: true, min: null, max: null }));
+    group.stores.add(row.store);
+    group.dispatch = group.dispatch.plus(row.dispatchAmountExact ?? 0);
+    group.dispatchQuantity = group.dispatchQuantity.plus(row.dispatchQuantityExact ?? 0);
     if (row.profitExact == null || row.purchaseCostExact == null) { group.complete = false; continue; }
     const profit = CostFraction.from(row.profitFraction ?? row.profitExact);
     group.profit = group.profit.plus(profit);
     // Existing chart snapshots retain the exact profit fraction even when purchase is a recurring decimal.
-    group.purchase = group.purchase.plus(CostFraction.from(row.revenueExact).minus(row.warehouseCostExact).minus(profit));
+    group.purchase = group.purchase.plus(CostFraction.from(row.revenueExact).minus(row.warehouseCostExact).minus(row.salesProfitFraction ?? profit));
     for (const sku of row.platformSkus ?? []) {
       const unit = unitCosts[storeSkuKey(row.store, sku)];
       if (unit == null) continue;
@@ -169,7 +176,7 @@ export function profitableSkcs(rows, unitCosts = {}) {
       const diff = b.profit.n * a.profit.d - a.profit.n * b.profit.d;
       return diff > 0n ? 1 : diff < 0n ? -1 : a.key.localeCompare(b.key);
     })
-    .map(({ key, skc, profit, purchase, min, max }) => ({
-      key, skc, profit: profit.decimal(), purchase: purchase.decimal(), minUnit: min?.toFixed(), maxUnit: max?.toFixed(),
+    .map(({ key, skc, profit, dispatch, dispatchQuantity, stores, purchase, min, max }) => ({
+      key, skc, stores: [...stores].sort(), dispatch: dispatch.decimal(), dispatchQuantity: dispatchQuantity.toFixed(), salesProfit: profit.minus(dispatch).decimal(), profit: profit.decimal(), purchase: purchase.decimal(), minUnit: min?.toFixed(), maxUnit: max?.toFixed(),
     }));
 }

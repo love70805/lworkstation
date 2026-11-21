@@ -8,6 +8,7 @@ import ProductEditor from "./ProductEditor";
 import ProductLibrary from "./ProductLibrary";
 import { ToastProvider } from "../components/UI";
 import { db, saveProductCatalogRecord, createManualCaptureRecord, updateCaptureDraft, setActiveMemberContext } from "../data/database";
+import { saveManualCostOverride } from "../data/repositories/profitRepository";
 import { erpProductCatalogFixture } from "../testFixtures/erpProductCatalog";
 import { createContinuousCatalogQueue, continuousCatalogPath } from "../domain/continuousCatalogQueue";
 
@@ -47,12 +48,16 @@ const change = (element, value) => act(async () => {
   element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
 });
 const click = (name) => act(async () => button(name).click());
-const mount = async (url, { library = false, initialEntries, initialIndex, readError = false, storedPreview = false } = {}) => {
+const mount = async (url, { library = false, initialEntries, initialIndex, readError = false, storedPreview = false, edit = true } = {}) => {
   router = createMemoryRouter([
     { path: "/products/edit", element: <ProductEditor /> },
     { path: "/products", element: library ? <ProductLibrary /> : <p>商品列表</p> },
   ], { initialEntries: initialEntries ?? ["/products", url], initialIndex });
   await act(async () => root.render(<ToastProvider><RouterProvider router={router} /></ToastProvider>));
+  if (url.startsWith('/products/edit?product=') && !readError && edit) {
+    await waitFor(() => button("编辑资料"));
+    await click("编辑资料");
+  }
   if (storedPreview) return waitFor(() => input("商品名称") && container.textContent.includes("可先修改基本信息"));
   await waitFor(() => readError ? container.textContent.includes("商品资料读取失败") : library && !url.includes("/edit") ? input(url.includes("reference") ? "搜索预存资料" : "搜索待确认采集") : input("商品名称") && !container.textContent.includes("可先修改基本信息"));
 };
@@ -158,6 +163,26 @@ describe("product editing workflow", () => {
     expect((await db.platformSkus.where('productId').equals(product.id).first()).attribute).toBe('深红');
   });
 
+  it("opens saved products in view mode, aligns edit actions, and discards only the current form edits", async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    await mount('/products/edit?product='+product.id,{edit:false});
+    expect(input("商品名称").closest("fieldset").disabled).toBe(true);
+    expect(container.querySelector(".catalog-row-actions")).toBeNull();
+    await click("编辑资料");
+    await waitFor(() => container.querySelector(".catalog-row-actions .catalog-cost-edit"));
+    expect(input("商品名称").closest("fieldset").disabled).toBe(false);
+    expect(container.querySelector(".catalog-row-actions .variant-remove")).toBeTruthy();
+    await change(input("商品名称"),"未保存的新名称");
+    await click("取消编辑");
+    await click("继续编辑");
+    expect(input("商品名称").value).toBe("未保存的新名称");
+    await click("取消编辑");
+    await click("放弃修改");
+    expect(input("商品名称").value).toBe(draft.name);
+    expect(input("商品名称").closest("fieldset").disabled).toBe(true);
+    expect((await db.products.get(product.id)).name).toBe(draft.name);
+  });
+
   it("recovers a failed editor read instead of remaining on a loading screen", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     editorSnapshotOverride.error = new Error("隔离读取故障");
@@ -167,6 +192,7 @@ describe("product editing workflow", () => {
     await click("重试读取");
     await waitFor(() => input("商品名称"));
     expect(input("商品名称").value).toBe(draft.name);
+    await click("编辑资料");
     await change(input("商品名称"), "重试后修改");
     await click("保存修改");
     await waitFor(async () => (await db.products.get(product.id)).name === "重试后修改");
@@ -306,6 +332,8 @@ describe("product editing workflow", () => {
     expect((await db.supplierOffers.toArray())[0]).toMatchObject({ platformSku: "SKU-B", supplierName: "乙", purchaseUnitPrice: 7, landedUnitCost: 7 });
     await act(async () => { await router.navigate("/products"); });
     await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
+    await waitFor(() => button("编辑资料"));
+    await click("编辑资料");
     await waitFor(() => input("乙 SKU-B 采购价")?.value === "7" && !input("乙 SKU-B 采购价").matches(':disabled') && input("第 2 个采购价"));
     expect(input("第 2 个采购价").value).toBe("");
     const offersBefore = await db.supplierOffers.toArray();
@@ -336,21 +364,37 @@ describe("product editing workflow", () => {
     expect(await db.supplierOffers.count()).toBe(0);
     const product = (await db.products.toArray())[0];
     await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
+    await waitFor(() => button("编辑资料"));
+    await click("编辑资料");
     await waitFor(() => button("保存预存资料"));
     expect(product.status).toBe("draft");
     expect(input("商品名称").value).toBe(product.name);
   });
 
+  it("reads the global ledger price and zero manual unit cost using the actual ledger rate", async () => {
+    const { product } = await saveProductCatalogRecord({ draft });
+    const scope={workspaceId:product.workspaceId,ledgerId:'CURRENT'};
+    await db.ledgers.put({id:scope.ledgerId,workspaceId:scope.workspaceId,period:'2026-08',status:'ready',warehouseRate:'0.45'});
+    await db.importBatches.put({...scope,id:'IMPORT',store:'甲',period:'2026-08',status:'completed',fileHash:'H',validRowCount:1});
+    await db.salesRows.add({...scope,batchId:'IMPORT',store:'甲',platformSku:'SKU-A',platformSkc:'SKC-A',quantity:2,quantityExact:'2',unitPriceRaw:'6.5',amount:13,amountExact:'13',rawAddedAt:'2026-08-11 14:00:00',sourceAddedDate:'2026-08-11'});
+    await saveManualCostOverride({ledgerId:scope.ledgerId,store:'甲',platformSku:'SKU-A',unitCost:0,reason:'样品免采购费'});
+    await mount('/products/edit?product='+product.id);
+    const cells=()=>container.querySelectorAll('.catalog-variants-table tbody tr:first-child td');
+    await waitFor(()=>cells()[2]?.textContent.includes('人工更正'));
+    expect(cells()[2].textContent).toContain('¥0');
+    expect(cells()[3].textContent).toContain('¥6.5');expect(cells()[3].querySelector('input,button')).toBeNull();
+    expect(cells()[4].textContent).toContain('¥6.05');
+  });
   it("shows current quote and missing sale price, then persists sequential raw tags", async () => {
     const { product } = await saveProductCatalogRecord({ draft });
     await mount(`/products/edit?product=${product.id}`);
     expect(button("保存修改")).toBeTruthy(); expect(button("保存草稿")).toBeUndefined();
     await change(input("第 1 个采购价"), "20");
-    expect(container.querySelector(".variants-table tbody tr").textContent).toContain("¥20.00");
+    expect(container.querySelector(".variants-table tbody tr").textContent).toContain("¥20");
     expect(container.querySelector(".variants-table tbody tr").textContent).toContain("1688 参考");
     expect(container.querySelector(".variants-table tbody tr").textContent).not.toContain("定稿历史");
-    await change(input("第 1 个售价"), "");
-    expect(container.querySelector(".variants-table tbody tr").textContent).toContain("待填写售价");
+    expect(input("第 1 个售价")).toBeNull();
+    await waitFor(() => container.querySelector(".variants-table tbody tr").textContent.includes("暂无台账售价"));
     for (const value of ["A", "A,", "A,B"]) await change(input("商品标签"), value);
     expect(input("商品标签").value).toBe("A,B");
     await click("保存修改");
@@ -451,23 +495,23 @@ describe("product editing workflow", () => {
   });
 });
 
-it("restores an explicitly excluded traffic SKU and keeps an unsaved price when ERP data arrives", async () => {
+it("restores an explicitly excluded traffic SKU and keeps an unsaved warehouse mapping when ERP data arrives", async () => {
   const fixture = erpProductCatalogFixture();
   fixture.catalogMappings = fixture.catalogMappings.map(row => row.platformSku === "SKU-BLUE" ? { ...row, attribute: "1% of people choose" } : row);
   const id = await db.erpCostRows.add(fixture);
   await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
   expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(1);
   expect(container.textContent).toContain("已排除规格（1）");
-  await change(input("第 1 个售价"), "17");
+  await change(input("第 1 个 ERP 仓库 SKU"), "WH17");
   await act(async () => input("恢复规格 SKU-BLUE").click());
   expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
   await act(async () => db.erpCostRows.update(id, { productName: "晚到标题" }));
-  await waitFor(() => input("第 1 个售价").value === "17");
+  await waitFor(() => input("第 1 个 ERP 仓库 SKU").value === "WH17");
   expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
   await click("保存预存资料"); await waitFor(async () => await db.platformSkus.count() === 2);
   const product = (await db.products.toArray())[0];
   expect(product.attributes.variantChoices["SKU-BLUE"].state).toBe("included");
-  expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-RED").salePrice).toBe(17);
+  expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-RED").warehouseSku).toBe("WH17");
 });
 
 it("moves a late automatic traffic exclusion out of an edited active list while retaining manual fields for restore", async () => {
@@ -476,19 +520,19 @@ it("moves a late automatic traffic exclusion out of an edited active list while 
   await mount("/products/edit?skc=SKC-CATALOG&sku=SKU-RED");
   await change(input("商品名称"), "本次手工标题");
   const blueRow = [...container.querySelectorAll(".variants-table tbody tr")].find(row => row.querySelector('input[aria-label*="平台 SKU"]')?.value === "SKU-BLUE");
-  await change(blueRow.querySelector('input[aria-label$="个售价"]'), "17");
+  await change(blueRow.querySelector('input[aria-label$="个 ERP 仓库 SKU"]'), "WH17");
   await act(async () => db.erpCostRows.update(id, { catalogMappings: fixture.catalogMappings.map(row => row.platformSku === "SKU-BLUE" ? { ...row, attribute: "1% of people choose" } : row) }));
   await waitFor(() => container.textContent.includes("已排除规格（1）"));
   expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(1);
   expect(input("商品名称").value).toBe("本次手工标题");
   await act(async () => input("恢复规格 SKU-BLUE").click());
   expect(container.querySelectorAll(".variants-table tbody tr")).toHaveLength(2);
-  expect(input("第 2 个售价").value).toBe("17");
+  expect(input("第 2 个 ERP 仓库 SKU").value).toBe("WH17");
   await click("保存预存资料"); await waitFor(async () => await db.platformSkus.count() === 2);
   const product = (await db.products.toArray())[0];
   expect(product.attributes.variantChoices["SKU-BLUE"].state).toBe("included");
   expect(product.attributes.excludedVariants).toEqual([]);
-  expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-BLUE").salePrice).toBe(17);
+  expect((await db.platformSkus.toArray()).find(row => row.platformSku === "SKU-BLUE").warehouseSku).toBe("WH17");
 });
 
 async function seedContinuousCatalog(count = 3) {
