@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/selected-store-profit-2.1.5",
+  "integrationBranch": "codex/profitable-skc-2.1.6",
   "requiredCommits": [
     {
-      "module": "release-2.1.4",
-      "commit": "fcf74d97d7b6d380c01ff3b905a9d185d19dd25b"
+      "module": "release-2.1.5",
+      "commit": "5f701904e870d5b77b9f2841bef17a6d0a5fc233"
     }
   ]
 }

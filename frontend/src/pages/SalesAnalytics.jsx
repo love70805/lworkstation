@@ -5,6 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Panel, Button } from '../components/UI';
 import { readLedgerSalesAnalytics, readWorkspaceSalesMonths, readLedgerPeriodSalesDetails } from '../data/repositories/salesAnalyticsRepository';
 import { readSalesProfitAnalysis } from '../data/repositories/salesProfitAnalysisRepository';
+import { readSalesCatalogLinks } from '../data/repositories/selectionRepository';
 import Decimal from 'decimal.js';
 import SalesPeriodDetails, { showSalesValue } from './SalesPeriodDetails';
 import { combinedProfit, withChartProfit, withDetailProfit } from '../domain/salesProfitAnalysis';
@@ -32,7 +33,7 @@ function filterChartMonth(month, hidden, includeDays) {
   };
 }
 
-function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreChange }) {
+function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreChange, onOpenProduct }) {
   const [showQuantity, setShowQuantity] = useState(false), [view, setView] = useState('daily');
   const [selection, setSelection] = useState(null), [hovered, setHovered] = useState(null);
   const [monthMode, setMonthMode] = useState('overview'), [rangeLength, setRangeLength] = useState(12), [rangeEnd, setRangeEnd] = useState(null), [chartOffset, setChartOffset] = useState(0);
@@ -89,6 +90,8 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const noStores = usesStoreSelection && storeNames.length > 0 && !visibleStoreKeys.length;
   const narrowed = usesStoreSelection && visibleStoreKeys.length < storeNames.length;
   const detailScope = JSON.stringify([scope, selection]);
+  const needCatalog = Boolean(selection && onOpenProduct);
+  const catalog = useLiveQuery(() => needCatalog ? readSalesCatalogLinks(workspaceId).catch(() => null) : null, [workspaceId, needCatalog]);
   const details = useLiveQuery(async () => {
     if (!selection) return null;
     if (selection.ledgerId.startsWith('missing:')) return { scope: detailScope, data: { period: selection.period, status: 'unknown', totalsExact: { revenueExact: null, quantityExact: null }, stores: [], rows: [] } };
@@ -245,12 +248,13 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
           : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} hovered={hovered} onHover={setHovered} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: visibleStoreKeys } : {}) })} />}
         {hovered && view === 'daily' ? <div className="sales-day-tooltip"><SalesHoverSummary month={visibleMonth} date={hovered} metric={metric} hiddenStores={hiddenStores} /></div> : null}
       </div> : <SalesPeriodDetails key={detailKey(selection, chosenStore)} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
+        unitCosts={profitData?.byLedger[selection.ledgerId]?.unitCosts} catalog={catalog} onOpenProduct={onOpenProduct}
         metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} productView={productView} onProductView={setProductView} state={listStates[listKey]} onStateChange={updateList}
         onBack={listStore ? () => chooseStore(null) : close} onTrend={listStore ? close : null}
         periods={periods} onPeriodChange={changePeriod} position={position} />}
     </div>
   </Panel>;
 }
-export default function SalesAnalytics({ workspaceId, ledgerId, store = 'all', stores = [], onStoreChange }) {
-  return <ScopedSalesAnalytics key={JSON.stringify([workspaceId, ledgerId])} {...{ workspaceId, ledgerId, store, stores, onStoreChange }} />;
+export default function SalesAnalytics({ workspaceId, ledgerId, store = 'all', stores = [], onStoreChange, onOpenProduct }) {
+  return <ScopedSalesAnalytics key={JSON.stringify([workspaceId, ledgerId])} {...{ workspaceId, ledgerId, store, stores, onStoreChange, onOpenProduct }} />;
 }

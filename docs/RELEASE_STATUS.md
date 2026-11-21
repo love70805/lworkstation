@@ -2,6 +2,10 @@
 
 本页列出正式版和独立 Beta 的发布记录。[开发历史](DEVELOPMENT_HISTORY.md)
 
+## 2.1.6 稳定版
+
+首页自动收起已齐成本月份的核算流程。扇形图下可查看盈利 SKC，复制编号、单件成本或采购成本，并打开对应商品资料。按日和按月查看明细复用趋势已读取的销售数据。[2.1.6 发布页](https://github.com/love70805/lworkstation/releases/tag/v2.1.6)
+
 ## 2.1.5 稳定版
 
 趋势中的选店范围贯穿柱状图、提示、日期切换和明细。店铺列表可直接查看构成盈利、亏损和待核金额的 SKU，整店盈利时也可追查亏损商品。[2.1.5 发布页](https://github.com/love70805/lworkstation/releases/tag/v2.1.5)

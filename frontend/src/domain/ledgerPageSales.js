@@ -4,6 +4,12 @@ import { saleFields } from './profitPageProjection';
 export const selectionSaleFields = ['id', 'workspaceId', 'ledgerId', 'batchId', 'platformSku', 'sku', 'platformSkc', 'attribute', 'store', 'supplierNumber', 'sourceSheet', 'sourceRow', 'sourceAddedDate', 'sourceAddedAt', 'rawAddedAt', 'sourceTimePrecision', 'movementType', 'isDeduction', 'quantityExact', 'quantity', 'qty', 'amountExact', 'amount', 'unitPriceRaw', 'unitPrice'];
 const chartFields = ['store', 'sourceAddedDate', 'isDeduction', 'movementType', 'quantityExact', 'quantity', 'amountExact', 'amount', 'sourceSheet', 'sourceRow'];
 const pageFields = [...new Set([...saleFields, ...selectionSaleFields, ...chartFields])];
+const detailFields = new Set(['store', 'sourceAddedDate', 'isDeduction', 'movementType', 'quantityExact', 'quantity', 'amountExact', 'amount', 'platformSku', 'sku', 'platformSkc']);
+
+// The trend already loaded these owned columns. A drilldown worker needs no order IDs or original evidence.
+export function periodDetailColumns({ count, columns }) {
+  return { count, columns: columns.filter(([field]) => detailFields.has(field)) };
+}
 
 // The three views share a bounded source scan. Repeated strings stay in a
 // dictionary while the page is mounted. Only a computation worker expands rows.

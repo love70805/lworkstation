@@ -735,6 +735,32 @@ async function productEditorErpPrefill({ draft, productId }) {
   return projection;
 }
 
+export async function readSalesCatalogLinks(workspaceId) {
+  return db.transaction('r', db.settings, db.products, db.platformSkus, async () => {
+    const context = await getActiveMemberContext();
+    if (workspaceId !== context.workspaceId) return new Map();
+    const products = workspaceId === DEFAULT_WORKSPACE_ID ? await db.products.toArray() : await db.products.where('workspaceId').equals(workspaceId).toArray();
+    const links = new Map(), legacyParents = [];
+    const add = (skc, id) => {
+      const key = canonicalPlatformSkc(skc);
+      links.set(key, links.has(key) && links.get(key) !== id ? null : id);
+    };
+    for (const product of products) {
+      if ((product.workspaceId ?? DEFAULT_WORKSPACE_ID) !== workspaceId || !selectionRecordVisible(product, context)) continue;
+      const skc = catalogText(product.platformSkc) || catalogText(product.canonicalPlatformSkc);
+      if (skc) add(skc, product.id);
+      else legacyParents.push(product.id);
+    }
+    if (legacyParents.length) {
+      const variants = await db.platformSkus.where('productId').anyOf(legacyParents).toArray();
+      for (const sku of variants) {
+        if ((!sku.workspaceId || sku.workspaceId === workspaceId) && catalogText(sku.platformSkc)) add(sku.platformSkc, sku.productId);
+      }
+    }
+    return links;
+  });
+}
+
 export async function listProductCatalogRecords({ includeDrafts = true, onProducts } = {}) {
   const [storedProducts, context] = await Promise.all([db.products.toArray(), getActiveMemberContext()]);
   const products = storedProducts.filter(product => (includeDrafts || product.status !== 'draft') && selectionRecordVisible(product, context));

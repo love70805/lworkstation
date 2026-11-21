@@ -49,6 +49,26 @@ afterEach(async () => {
   await act(async () => root.unmount()); container.remove(); delete globalThis.IS_REACT_ACT_ENVIRONMENT;
 });
 
+it('collapses each ready month and reopens steps when costs become pending', async () => {
+  const show = async (id, missingCount) => {
+    const selected = { id, period: id, status: missingCount ? 'cost_pending' : 'ready', costSummary: { missingCount } };
+    mocks.scope = { ready: true, context: { selected, query: 'ledger=' + id }, retry: vi.fn() };
+    await render([selected]);
+  };
+  await show('2026-08', 0);
+  const toggle = () => container.querySelector('.workspace-flow-toggle');
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  await act(async () => toggle().click());
+  expect(container.querySelector('#completed-flow-steps').hidden).toBe(false);
+  await show('2026-09', 0);
+  expect(toggle().getAttribute('aria-expanded')).toBe('false');
+  await show('2026-09', 1);
+  expect(toggle()).toBeNull();
+  expect(container.querySelector('.workspace-flow-step.active').textContent).toContain('核对成本');
+  await show('2026-09', 0);
+  expect(container.querySelector('#completed-flow-steps').hidden).toBe(true);
+});
+
 it("keeps a ready month out of outstanding tasks when a newer draft exists", async () => {
   await render([
     { id: "old/ready", period: "2026-06", status: "ready", updatedAt: "2026-07-01", costSummary: { missingCount: 0 } },
