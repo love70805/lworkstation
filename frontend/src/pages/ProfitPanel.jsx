@@ -164,8 +164,8 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
   const scopedRows = useMemo(() => filterProfitRowsByScope(calculated, { storeFilter, supplierSelection, supplierStoreSelection, missingOnly }), [calculated, storeFilter, supplierSelection, supplierStoreSelection, missingOnly]);
   const filtered = useMemo(() => {
     if (!focus) return searchProfitRows(scopedRows, deferredQuery);
-    return scopedRows.filter(row => row.platformSkc?.trim() && canonicalPlatformSkc(row.platformSkc) === focus.skcKey
-      && (!focus.skuKey || (row.platformSku?.trim() && canonicalPlatformSku(row.platformSku) === focus.skuKey))
+    return scopedRows.filter(row => String(row.platformSkc ?? '').trim() && canonicalPlatformSkc(row.platformSkc) === focus.skcKey
+      && (!focus.skuKey || (String(row.platformSku ?? '').trim() && canonicalPlatformSku(row.platformSku) === focus.skuKey))
       && (!focus.stores.length || focus.stores.includes(storeIdentity(row.store))));
   }, [scopedRows, deferredQuery, focus]);
   useEffect(() => {
@@ -346,7 +346,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       <div className="profit-detail-area" ref={detailsPanel}>
       {focus && <div className="profit-product-context" tabIndex={-1} data-profit-focus>
         <strong>{snapshot.ledger.period} 月度利润明细 · {focus.skc}</strong>
-        <span>{focus.stores.length ? '店铺 ' + focus.stores.join('、') : '全部店铺'}{focus.mode && focus.mode !== snapshot.ledger.accountingMode ? ' · 已按账本当前模式核算' : ''}</span>
+        <span>{focus.stores.length ? '店铺 ' + focus.stores.join('、') : '全部店铺'}{focus.mode && focus.mode !== (snapshot.ledger.accountingMode ?? 'weighted') ? ' · 已按账本当前模式核算' : ''}</span>
         <button type="button" className="inline-link" onClick={() => changeFilter({query:'',storeFilter:'all'})}>查看全部商品</button>
       </div>}
       {scopeFilters}

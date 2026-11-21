@@ -13,6 +13,7 @@
 .sales-stack-segment.is-zero { overflow: visible; }
 .sales-zero-tick { position: absolute; bottom: 0; left: 0; width: 100%; height: 2px; background: var(--text-muted); }
 .sales-bar-value { position:absolute; transform:translate(-50%, -100%); pointer-events:none; font-size:11px; font-variant-numeric:tabular-nums; line-height:1.1; color:var(--text); white-space:nowrap; }
+.sales-bar-value, .sales-column-value { z-index:1; padding-inline:1px; background:var(--surface); border-radius:2px; pointer-events:none; }
 .sales-bar-value.negative, .sales-column-value.negative { transform:translate(-50%, 0); }
 .sales-store-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 4px 0 12px; font-size: 12px; max-height: none; scrollbar-gutter: stable; }
 .sales-store-legend > button { display: inline-flex; align-items: center; gap: 6px; overflow-wrap: anywhere; padding: 6px 8px; min-height: 32px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; }

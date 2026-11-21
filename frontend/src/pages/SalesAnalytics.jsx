@@ -194,7 +194,9 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   }, [details, detailScope, selection, profitData]);
   function leaveTrend(action, skc, open, ...args) {
     const row = [...(chartRef.current?.querySelectorAll('[data-skc]') ?? [])].find(el => el.dataset.skc === skc);
-    saveTrendCheckpoint(historyEntry,scope,{ showQuantity,view,selection,monthMode,rangeLength,rangeEnd,chartOffset,hiddenStores,listStore,listStates,productView,
+    const sort = chartRef.current?.querySelector('.sales-details-controls select[aria-label="排序"]')?.value;
+    const restoredLists = sort ? { ...listStates, [listKey]:{ ...listStates[listKey], sort } } : listStates;
+    saveTrendCheckpoint(historyEntry,scope,{ showQuantity,view,selection,monthMode,rangeLength,rangeEnd,chartOffset,hiddenStores,listStore,listStates:restoredLists,productView,
       anchor:{ skc,action,top:row?.getBoundingClientRect().top,y:window.scrollY } });
     open(...args);
   }
