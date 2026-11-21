@@ -306,7 +306,7 @@ describe("product editing workflow", () => {
     expect((await db.supplierOffers.toArray())[0]).toMatchObject({ platformSku: "SKU-B", supplierName: "乙", purchaseUnitPrice: 7, landedUnitCost: 7 });
     await act(async () => { await router.navigate("/products"); });
     await act(async () => { await router.navigate(`/products/edit?product=${product.id}`); });
-    await waitFor(() => input("乙 SKU-B 采购价")?.value === "7" && !input("乙 SKU-B 采购价").matches(':disabled'));
+    await waitFor(() => input("乙 SKU-B 采购价")?.value === "7" && !input("乙 SKU-B 采购价").matches(':disabled') && input("第 2 个采购价"));
     expect(input("第 2 个采购价").value).toBe("");
     const offersBefore = await db.supplierOffers.toArray();
     const savedAt = (await db.products.get(product.id)).updatedAt;
