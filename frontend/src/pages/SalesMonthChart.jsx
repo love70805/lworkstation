@@ -6,8 +6,10 @@ const statusText = day => ({ future: '未发生', unobserved: '尚未统计', un
 const metricLabel = { revenueExact: '销售额', quantityExact: '销量', profitExact: '商品利润' };
 const metricValue = (number, metric) => metric === 'profitExact' && number != null ? new Decimal(number).toDecimalPlaces(2, Decimal.ROUND_DOWN).toFixed() : value(number);
 export const salesPair = (day, metric) => metric === 'profitExact' && day?.revenueExact != null
-  ? (day.profitExact == null ? '商品利润待核' : '商品利润 ¥' + metricValue(day.profitExact, metric))
-  : day?.revenueExact == null ? statusText(day) : `销售原额 ¥${value(day.revenueExact)} · 销量 ${value(day.quantityExact)} 件`;
+  ? (day.dispatchAmountExact != null
+    ? '利润贡献 ' + (day.profitExact == null ? '待核' : '¥' + metricValue(day.profitExact, metric)) + ' · 销售商品利润 ' + (day.salesProfitExact == null ? '待核' : '¥' + metricValue(day.salesProfitExact, metric)) + ' · 代发节省 ¥' + value(day.dispatchAmountExact)
+    : day.profitExact == null ? '商品利润待核' : '商品利润 ¥' + metricValue(day.profitExact, metric))
+  : day?.revenueExact == null ? statusText(day) + (day?.dispatchAmountExact != null ? ' · 已知代发节省 ¥' + value(day.dispatchAmountExact) : '') : `销售原额 ¥${value(day.revenueExact)} · 销量 ${value(day.quantityExact)} 件`;
 function hoverEvents(key, onHover) {
   const focusedKey = () => document.activeElement?.getAttribute('data-period-key');
   return {
@@ -25,7 +27,7 @@ export function SalesMonthChart({ month, metric, scale, selectedDay, onSelect, h
   })), [month, selectedDay, metric, scale]);
   return <section className={`sales-chart-panel sales-stack-chart${selectedDay ? ' is-day' : ''}`} data-period={month.period} aria-label={`${month.period} 销售图`}>
     {selectedDay ? <h3>{selectedDay}</h3> : null}
-    <div className="sales-daily-chart" aria-label={'每日' + metricLabel[metric]}>
+    <div className="sales-daily-chart" aria-label={'每日' + (month.hasDispatch && metric === 'profitExact' ? '利润贡献' : metricLabel[metric])}>
       <div className="sales-chart-axis" aria-hidden="true">{scale.max > 0 ? <span>{value(scale.max)}</span> : null}<span style={{ top: `${scale.zero}%` }}>0</span>{scale.min < 0 ? <span className="sales-axis-min">{value(scale.min)}</span> : null}</div>
       <div className="sales-chart-plot"><div className="sales-zero-line" style={{ top: `${scale.zero}%` }} aria-hidden="true" /><div className="sales-chart-bars">
         {days.map(day => <button key={day.date} type="button" data-date={day.date} className={`sales-daily-bar${hovered === day.date ? ' is-selected' : ''}`} aria-label={`${day.date}：${salesPair(day, metric)}；${day.plotted.map(segment => `${segment.store} ${salesPair(segment, metric)}${segment.percent != null ? `，占比 ${segment.percent}%` : ''}`).join('；')}`} aria-describedby={id} onClick={() => onSelect(day.date)} {...hoverEvents(day.date, onHover)}>
@@ -62,7 +64,7 @@ export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [
   const ticks = [...[0,25,50,75,100].filter(top => Math.abs(top - scale.zero) > 5), scale.zero].sort((a,b) => a-b);
   return <section ref={root} className={'sales-chart-panel sales-grouped-chart' + (single ? ' is-single-month' : '') + (single && mode !== 'overview' && width / Math.max(names.length, 1) < 65 ? ' is-dense-month' : '')} aria-label="月度销售图">
     {months.length > capacity ? <div className="sales-month-window"><button type="button" disabled={start === 0} onClick={() => onOffsetChange(Math.min(months.length - capacity, offset + capacity))}>较早月份</button><span>图中 {visible[0]?.period} 至 {visible.at(-1)?.period} · 已选 {months.length} 个月</span><button type="button" disabled={end === months.length} onClick={() => onOffsetChange(Math.max(0, offset - capacity))}>较新月份</button></div> : null}
-    <div className="sales-daily-chart" aria-label={'月度' + metricLabel[metric]}>
+    <div className="sales-daily-chart" aria-label={'月度' + (metric === 'profitExact' && months.some(month => month.hasDispatch) ? '利润贡献' : metricLabel[metric])}>
       <div className="sales-chart-axis" aria-hidden="true">{ticks.map(top => <span key={top} style={{ top: top + '%' }}>{top === scale.zero ? '0' : value(new Decimal(scale.max).minus(new Decimal(scale.range).times(top / 100)).toSignificantDigits(3))}</span>)}</div>
       <div className="sales-chart-plot sales-month-plot"><div className="sales-month-track">{[0,25,50,75,100].map(top => <div key={top} className="sales-grid-line" style={{ top: top + '%' }} aria-hidden="true" />)}<div className="sales-zero-line" style={{ top: scale.zero + '%' }} aria-hidden="true" />
         <div className="sales-month-groups">{visible.map(month => {

@@ -2,7 +2,7 @@ import { exact, exactSum, canonicalJson } from "./profitReports";
 import { decimalSource } from "./salesAnalytics";
 import { dispatchOrderHeaders } from './dispatchOrderNumber';
 
-export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@10-dispatch-period";
+export const SUPPLEMENT_PARSER_VERSION = "monthly-supplement@11-dispatch-date";
 export const DEDUCTION_STORE_RULE = 'deduction-store@1-sh-number';
 export const supplementFields = {
   owner: ["登记人", "姓名", "名字", "名字+店铺", "负责人", "采购人", "跟单人"],
@@ -74,6 +74,8 @@ export function inspectSupplementSource(source, { kind, headerRow = 1, mapping, 
     const sourcePeriod = periodScope?.rows[index];
     if (periodScope && !periodScope.selected.has(sourcePeriod)) { group=null; continue; }
     const position={sourceRow,recordRow:source.recordRows?.[index]??index+1,sourceFormat:source.sourceFormat??(source.sheetName==='CSV'?'csv':'xlsx'),businessId:normalized(values[Number(fields.businessId)]),sourceSheet:source.sheetName,...(sourcePeriod ? {sourcePeriod} : {})};
+    const day = kind === 'dispatch' && periodScope?.dates?.[index];
+    if (day) Object.assign(position, { dispatchDate: day.date, dispatchDateSourceRow: day.sourceRow });
     const missingQuantity=kind==='dispatch'&&!normalized(values[Number(fields.quantity)]);
     const mergedFrom={};
     const get = field => {

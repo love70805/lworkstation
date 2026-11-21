@@ -83,6 +83,19 @@ export function selectionLedgerPrice(index, platformSku, { ledgerId = null, stor
   return { ...base, status: uniqueWinner ? "ready" : "choose", reason: uniqueWinner ? "net_quantity" : timeUncertain ? "missing_time" : scope.latestMissingPrice ? "missing_latest_price" : "ambiguous_price", value: uniqueWinner ? ranked[0].value : null };
 }
 
+// Public sale prices come from the latest ledger containing this SKU, one resolved price per store.
+export function currentSkuPrices(index, sku) {
+  const scopes = [...(index.get(sku)?.values() ?? [])];
+  const period = scopes.reduce((latest, item) => item.period > latest ? item.period : latest, '');
+  return scopes.filter(item => item.period === period).map(({ ledgerId, store }) => {
+    const result = selectionLedgerPrice(index, sku, { ledgerId, store });
+    const candidates = result.candidates.map(({ priceExact, quantityExact }) => ({ priceExact, quantityExact }));
+    const winner = result.status === 'ready' ? candidates.reduce((best, item) => !best || new Exact(item.quantityExact ?? 0).gt(best.quantityExact ?? 0) ? item : best, null) : null;
+    return { ledgerId, period, store, status:result.status, value:winner?.priceExact ?? null, date:result.sourceAddedAt?.slice(0,10),
+      candidates, sources:result.sources.map(({ sourceSheet, sourceRow, batchId, sourceCount }) => ({ sourceSheet,sourceRow,batchId,sourceCount })) };
+  }).sort((a,b) => a.store.localeCompare(b.store,'zh-CN'));
+}
+
 export function selectionCatalogLedgerBySkc(rows = []) {
   const result = new Map();
   for (const row of rows) {

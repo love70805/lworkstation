@@ -2023,7 +2023,7 @@ async function readCompactSelectionSnapshot({ platformSkc = "", platformSkus = [
   const key = observable && revision && JSON.stringify([scope, revision]);
   const displayed = key && lastSelectionRead?.key === key ? lastSelectionRead.snapshot.deref() : null;
   const result = displayed || (observable ? await cachedDerived({
-    scope, formula: "selection-reference@7-profit-coverage", revision, revisionReader:selectionReferenceRevision, compute,
+    scope, formula: "selection-reference@8-ledger-prices", revision, revisionReader:selectionReferenceRevision, compute,
   }) : await compute());
   assertSourceRevision(revision, selectionReferenceRevision);
   if (key && !displayed && typeof WeakRef !== 'undefined') {

@@ -8,7 +8,7 @@ import { buildSelectionSalesLabels, prepareSelectionSalesLabelFacts } from "../d
 import { selectCurrentErpCatalogCoverage } from "../domain/erpCatalogFields";
 import { resolveProductStatus } from "../domain/selectionStatuses";
 import Decimal from "decimal.js";
-import { buildSelectionLedgerPriceIndex, selectionLedgerPrice, selectionCatalogLedgerBySkc } from "../domain/selectionLedgerPrices";
+import { currentSkuPrices, buildSelectionLedgerPriceIndex, selectionLedgerPrice, selectionCatalogLedgerBySkc } from "../domain/selectionLedgerPrices";
 import { combineSelectionSalesFacts } from "../domain/selectionSalesFacts";
 import { unpackSelectionSalesFacts } from "../domain/selectionSalesFactsCodec";
 const ExactQuantity = Decimal.clone({ precision: 80 });
@@ -218,7 +218,7 @@ export function buildSelectionReferenceRows({
       productId: product?.id ?? null,
       productName: catalogProductName(product?.name || product?.title) || erpName.value || "未建立商品档案",
       imageUrl: product?.attributes?.fieldEdits?.imageUrl ? product.imageUrl ?? "" : product?.imageUrl || product?.image || (product?.attributes?.fieldEdits?.variants?.[canonicalSku]?.imageUrl ? skuRecord?.imageUrl ?? "" : skuRecord?.imageUrl || erpImage.value),
-      ledgerSalePrice,
+      ledgerSalePrice, currentPrices: currentSkuPrices(ledgerPrices, canonicalSku),
       erpPurchaseState: referenceCost ? "available" : erpCatalog?.relationshipConflict ? "mapping_conflict" : (() => {
         const coverage = identity.platformSkc ? selectCurrentErpCatalogCoverage(coverageBySkc.get(canonicalPlatformSkc(identity.platformSkc))) : null;
         const evidence = coverage?.groups?.purchaseEvidence;

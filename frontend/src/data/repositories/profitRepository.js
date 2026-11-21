@@ -2616,7 +2616,7 @@ export async function getLedgerSnapshot(ledgerId, options = {}) {
   return options.profitPage ? withProfitRead(read) : read();
 }
 
-async function readLedgerSnapshot(ledgerId, { summaryOnly = false, profitPage = false } = {}) {
+async function readLedgerSnapshot(ledgerId, { summaryOnly = false, profitPage = false, requestedMode } = {}) {
   await observeLedgerSnapshotRevision();
   const dataVersion = ledgerSnapshotRevision();
   const original = await db.ledgers.get(ledgerId);
@@ -2624,7 +2624,7 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false, profitPage = 
   if (!ledger) return null;
   const member = await getActiveMemberContext();
   if (ledger.workspaceId !== member.workspaceId) return null;
-  const accountingMode = await readAccountingMode(ledger.workspaceId);
+  const accountingMode = ['weighted', LOWEST_ACCOUNTING].includes(requestedMode) ? requestedMode : await readAccountingMode(ledger.workspaceId);
   const [sales, batches, originalCosts, approvals, profitLines] = await Promise.all([
     profitPage ? readProfitPageSales(ledger) : readLedgerSalesRows(member.workspaceId, ledgerId),
     summaryOnly ? [] : db.importBatches.where("ledgerId").equals(ledgerId).toArray(),

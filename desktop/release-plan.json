@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/profitable-skc-2.1.6",
+  "integrationBranch": "codex/dispatch-contribution-preview-2.1.7",
   "requiredCommits": [
     {
-      "module": "release-2.1.5",
-      "commit": "5f701904e870d5b77b9f2841bef17a6d0a5fc233"
+      "module": "release-2.1.6",
+      "commit": "0c77c67cfabdf99f86278337b125375e0b43ff5c"
     }
   ]
 }

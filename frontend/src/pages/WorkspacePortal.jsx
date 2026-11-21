@@ -196,7 +196,11 @@ export default function WorkspacePortal() {
         <div className="workspace-primary">
           <section className="workspace-daily-trend" aria-label="销售与利润趋势">
             {ledgerScope.ready && ledgerScope.context?.selected ? <SalesAnalytics key={`${ledgerScope.context.workspaceId}:${ledgerScope.context.selected.id}:${ledgerScope.context.store}`} workspaceId={ledgerScope.context.workspaceId} ledgerId={ledgerScope.context.selected.id} store={ledgerScope.context.store} stores={ledgerScope.context.stores}
-              onOpenProduct={id => navigate('/products/edit?product=' + encodeURIComponent(id))} /> : <Panel>
+              onOpenProduct={(id, scope) => {
+                const params = new URLSearchParams({ product:id, ledger:scope.ledgerId, mode:scope.mode });
+                for (const name of scope.stores) params.append('store',name);
+                navigate('/products/edit?' + params);
+              }} /> : <Panel>
               <div className="panel-header"><div className="panel-title"><BarChart3 size={19} /><h2>销售与利润趋势</h2></div></div>
               <div className="dashboard-chart-empty">
                 <div>
