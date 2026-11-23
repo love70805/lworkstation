@@ -40,7 +40,9 @@ function filterChartMonth(month, hidden, includeDays) {
         return { ...day, dispatchQuantityExact:selected.dispatchQuantityExact ?? '0', dispatchAmountExact:selected.dispatchAmountExact ?? '0' };
       }
       const selected = day.segments.filter(visible);
-      return { ...day, ...storeTotals(selected), segments: selected, status: selected.length ? 'data' : 'absent_store' };
+      // A filtered day only carries dispatch amounts from the stores still in view.
+      return { ...day, dispatchAmountExact: null, dispatchQuantityExact: null, salesProfitExact: null,
+        ...storeTotals(selected), segments: selected, status: selected.length ? 'data' : 'absent_store' };
     }) : month.daily,
   };
 }

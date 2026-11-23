@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.10",
+  "version": "2.1.11",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/chart-tooltip-and-linked-store-rows",
+  "integrationBranch": "codex/trend-tooltip-spacing",
   "requiredCommits": [
     {
-      "module": "release-2.1.9",
-      "commit": "a9198c9837b5343805dcc6264f10387875dc0dc5"
+      "module": "release-2.1.10",
+      "commit": "aaa233d42ffd6aed454adaaa5792cab2518b6303"
     }
   ]
 }

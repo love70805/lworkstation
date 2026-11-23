@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Simulate } from 'react-dom/test-utils';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import SalesAnalytics from './SalesAnalytics';
+import { SalesMonthChart } from './SalesMonthChart';
 import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 const mock = vi.hoisted(() => ({ read: vi.fn() }));
 vi.mock('../data/repositories/salesProfitAnalysisRepository', () => ({ readSalesProfitAnalysis: async () => null }));
@@ -132,7 +133,7 @@ it('hover and keyboard focus keep chart and details DOM stable without extra dat
   expect(mock.read).toHaveBeenCalledTimes(1);
 });
 
-it('places the tooltip beside the active bar even inside the plot and flips it at the window edge', async () => {
+it('leaves space above and beside the pointer, stays steady within a bar and mirrors near the edge', async () => {
   const bar = container.querySelector('.sales-daily-bar'), plot = bar.closest('.sales-chart-plot');
   vi.stubGlobal('innerWidth', 1440);
   vi.stubGlobal('innerHeight', 880);
@@ -143,23 +144,43 @@ it('places the tooltip beside the active bar even inside the plot and flips it a
     return this.classList.contains('sales-day-tooltip') ? new DOMRect(0, 0, 350, 225) : new DOMRect();
   });
   try {
-    await act(async () => Simulate.mouseEnter(bar));
+    await act(async () => Simulate.mouseEnter(bar, { clientY: 610 }));
     const tooltip = () => container.querySelector('.sales-day-tooltip');
     expect(tooltip().style.visibility).toBe('visible');
-    expect(parseFloat(tooltip().style.left)).toBe(barRect.right + 12);
+    expect(parseFloat(tooltip().style.left)).toBe(barRect.right + 36);
     expect(parseFloat(tooltip().style.left)).toBeLessThan(plotRect.right);
+    const top = parseFloat(tooltip().style.top);
+    expect(top + 225 / 2).toBe(610 - 48);
+    await act(async () => Simulate.mouseMove(bar, { clientY: 630, movementY: 20 }));
+    expect(parseFloat(tooltip().style.top)).toBe(top);
     await act(async () => Simulate.mouseLeave(bar));
     vi.stubGlobal('innerWidth', 600);
     vi.stubGlobal('innerHeight', 320);
     plotRect = new DOMRect(40, 40, 540, 210);
     barRect = new DOMRect(530, 40, 18, 210);
-    await act(async () => Simulate.mouseEnter(bar));
+    await act(async () => Simulate.mouseEnter(bar, { clientY: 45 }));
     expect(tooltip().style.visibility).toBe('visible');
-    expect(parseFloat(tooltip().style.left) + 350).toBe(barRect.left - 12);
+    expect(parseFloat(tooltip().style.left) + 350).toBe(barRect.left - 20);
+    expect(parseFloat(tooltip().style.top)).toBe(12);
   } finally {
     measure.mockRestore();
     vi.unstubAllGlobals();
   }
+});
+
+it('keeps pending profit and unknown dates distinct from recorded dispatch savings in a tooltip', async () => {
+  const pending = { key: '27', store: '27', revenueExact: '10', quantityExact: '1', profitExact: null, salesProfitExact: null, dispatchAmountExact: '2.8' };
+  const month = { period: '2026-08', hasDispatch: true, daily: [
+    { ...pending, date: '2026-08-01', status: 'data', segments: [pending] },
+    { ...pending, date: '2026-08-02', status: 'unknown', revenueExact: null, quantityExact: null, segments: [] },
+  ] };
+  await act(async () => root.render(<SalesMonthChart month={month} metric="profitExact" scale={{min:0, max:1, range:1, zero:100}} />));
+  const bars = container.querySelectorAll('.sales-daily-bar');
+  await act(async () => bars[0].focus());
+  expect([...container.querySelector('.sales-tooltip-stores tr').cells].map(cell => cell.textContent)).toEqual(['27', '待核', '待核', '¥2.8']);
+  await act(async () => bars[1].focus());
+  expect(container.querySelector('.sales-tooltip-breakdown')).toBeNull();
+  expect(container.querySelector('.sales-hover-summary').textContent).toContain('数据待查 · 已知代发节省 ¥2.8');
 });
 
 it('resets hidden stores when the outer store scope changes', async () => {
