@@ -7,6 +7,7 @@ import SalesAnalytics from './SalesAnalytics';
 import { buildSalesMonth } from '../domain/salesChartModel';
 import { aggregatePeriodSalesDetails } from '../domain/salesPeriodDetails';
 import { buildSalesProfitAnalysis } from '../domain/salesProfitAnalysis';
+import { buildSalesDispatch } from '../domain/salesDispatchContribution';
 import { groupReportSales } from '../domain/profitReports';
 
 const mocks = vi.hoisted(() => ({ month: vi.fn(), months: vi.fn(), detail: vi.fn(), profit: vi.fn() }));
@@ -101,6 +102,39 @@ async function showStoreProfits(profits) {
     rows, identities: rows, groups: groupReportSales(rows), costs, approvals: [] }));
   await act(async () => root.render(<SalesAnalytics {...props} workspaceId="W2" />));
 }
+
+it('shows the same profit columns on days with and without dated dispatch and excludes hidden stores', async () => {
+  const period = '2026-08', ledger = { id: 'L', workspaceId: 'tip', period, accountingMode: 'weighted', warehouseRate: '0.7' };
+  const items = ['27', '20'].map(store => ({ store, platformSku: 'SKU' + store, platformSkc: 'SKC' + store, supplierNumber: 'SUP', quantityExact: '1', amountExact: '10' }));
+  const rows = ['13', '17'].flatMap(day => items.map(item => ({ ...item, sourceAddedDate: period + '-' + day })));
+  const costs = items.map(item => ({ ...item, unitCost: 2, checkedPeriod: period, withinPeriod: true, resolutionStatus: 'resolved', currency: 'CNY' }));
+  const dispatch = buildSalesDispatch({ id: 'B', adoptedQuantityExact: '15' }, [
+    { workspaceId: 'tip', ledgerId: 'L', batchId: 'B', kind: 'dispatch', store: '27', quantityExact: '10', dispatchDate: period + '-13' },
+    { workspaceId: 'tip', ledgerId: 'L', batchId: 'B', kind: 'dispatch', store: '27', quantityExact: '5' },
+  ], ledger);
+  const sales = { period, sourceRows: rows };
+  mocks.month.mockResolvedValue(sales);
+  mocks.months.mockResolvedValue([{ ...buildSalesMonth(sales), ledgerId: 'L' }]);
+  mocks.profit.mockResolvedValue({ ...buildSalesProfitAnalysis({ ledger, rows, identities: items, groups: groupReportSales(rows), costs, approvals: [] }), dispatch });
+  await act(async () => root.render(<SalesAnalytics {...props} workspaceId="tip" />));
+  const focusDay = day => act(async () => container.querySelector('[data-date="' + period + '-' + day + '"]').focus());
+  const headings = () => [...container.querySelectorAll('.sales-tooltip-breakdown thead th')].map(cell => cell.textContent);
+  const amounts = () => [...container.querySelectorAll('.sales-tooltip-total td')].slice(0, 3).map(cell => cell.textContent);
+  await focusDay('13');
+  expect(headings()).toEqual(['店铺', '利润贡献', '销售商品利润', '代发节省', '占比']);
+  expect(amounts()).toEqual(['¥21.6', '¥14.6', '¥7']);
+  await focusDay('17');
+  expect(headings()).toEqual(['店铺', '利润贡献', '销售商品利润', '代发节省', '占比']);
+  expect(amounts()).toEqual(['¥14.6', '¥14.6', '¥0']);
+  await click(button('27')); await focusDay('13');
+  expect(amounts()).toEqual(['¥7.3', '¥7.3', '¥0']);
+  expect(container.querySelectorAll('.sales-tooltip-stores tr')).toHaveLength(1);
+  await focusDay('18');
+  expect(container.querySelector('.sales-hover-summary').textContent).toContain('当日无销售或已登记的代发记录');
+  await click(button('按月'));
+  await act(async () => container.querySelector('[data-period-key="L"]').focus());
+  expect(amounts()).toEqual(['¥39.7', '¥29.2', '¥10.5']);
+});
 
 it.each([
   [[20, 60], '利润构成', ['25%', '75%']],
