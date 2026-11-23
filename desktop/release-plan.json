@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.8",
+  "version": "2.1.9",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/trend-detail-simplification",
+  "integrationBranch": "codex/trend-tooltip-and-store-selection",
   "requiredCommits": [
     {
-      "module": "release-2.1.7",
-      "commit": "00910ee981a8dee1c2d1b7752b8c0a486a3d77e8"
+      "module": "release-2.1.8",
+      "commit": "a082b6e8954c6162a2ec2067c1b1629692ccda47"
     }
   ]
 }

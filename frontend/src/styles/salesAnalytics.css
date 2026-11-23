@@ -21,7 +21,8 @@
 .sales-month-totals p { margin: 4px 0 8px; }
 .sales-analytics .sales-hover-summary { display: grid; gap: 5px; min-height: 0; padding: 0; font-size: 12px; }
 .sales-hover-summary small { display: block; font-size: 12px; }
-.sales-day-tooltip { position: absolute; top: 8px; right: 8px; max-width: min(360px, calc(100% - 16px)); z-index: 5; background: var(--surface-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-shadow: 0 4px 18px rgb(0 0 0 / .14); pointer-events: none; }
+.sales-day-tooltip { position: fixed; inset: auto; margin: 0; box-sizing: border-box; width: max-content; max-width: min(360px, calc(100vw - 16px)); overflow: hidden; overflow-wrap: anywhere; background: var(--surface-bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-shadow: 0 4px 18px rgb(0 0 0 / .14); pointer-events: none; }
+.sales-day-tooltip[data-compact] .sales-hover-summary small { display: none; }
 .sales-analytics .sales-day-details { animation: sales-details-appear 160ms ease-out; min-width: 0; padding: 14px; }
 .sales-analytics .sales-details-heading { gap: 8px; }
 .sales-analytics .sales-details-heading h3 { font-size: 14px; }
@@ -139,10 +140,6 @@ html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sa
 .sales-grouped-chart.is-dense-month .sales-column-name { writing-mode: vertical-rl; max-height: 74px; overflow: hidden; text-overflow: ellipsis; }
 
 .sales-month-controls select { min-height: 34px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; background: var(--surface-bg); color: var(--text); font: inherit; }
-.sales-grouped-chart .sales-day-tooltip { max-height: 240px; overflow-y: auto; }
-@container (max-width: 400px) {
-  .sales-grouped-chart .sales-day-tooltip small { display: none; }
-}
 
 .sales-details-loading { min-height: 380px; }
 
@@ -151,6 +148,9 @@ html[data-appearance="dark"] .sales-analytics { --sales-palette-0: #60a5fa; --sa
 .sales-composition-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .sales-composition-links button { padding: 4px 0; border: 0; background: transparent; color: var(--primary); font: inherit; cursor: pointer; }
 .sales-composition-links button:hover { text-decoration: underline; }
+.sales-store-preview { display: grid; justify-items: start; gap: 4px; overflow-wrap: anywhere; }
+.sales-store-preview strong { color: var(--text); }
+.sales-store-preview button { display: inline-flex; align-items: center; gap: 2px; }
 .sales-profit-cell { font-weight: 650; }
 .sales-analytics .sales-loss { color: var(--danger); }
 .sales-list-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }

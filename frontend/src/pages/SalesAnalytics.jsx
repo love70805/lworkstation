@@ -1,5 +1,5 @@
 import { buildSalesMonth, salesScale, salesGroupedScale, salesStoreKey, salesStoreColor, salesMonthRange, salesOverviewMonths, assignSalesStoreColors } from '../domain/salesChartModel';
-import { SalesMonthChart, SalesGroupedMonthChart, SalesHoverSummary } from './SalesMonthChart';
+import { SalesMonthChart, SalesGroupedMonthChart } from './SalesMonthChart';
 import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Panel, Button } from '../components/UI';
@@ -50,7 +50,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const [initial] = useState(() => readTrendCheckpoint(historyEntry,scope) ?? {});
   const pendingAnchor = useRef(initial.anchor);
   const [showQuantity, setShowQuantity] = useState(initial.showQuantity ?? false), [view, setView] = useState(initial.view ?? 'daily');
-  const [selection, setSelection] = useState(initial.selection ?? null), [hovered, setHovered] = useState(null);
+  const [selection, setSelection] = useState(initial.selection ?? null);
   const [monthMode, setMonthMode] = useState(initial.monthMode ?? 'overview'), [rangeLength, setRangeLength] = useState(initial.rangeLength ?? 12), [rangeEnd, setRangeEnd] = useState(initial.rangeEnd ?? null), [chartOffset, setChartOffset] = useState(initial.chartOffset ?? 0);
   if (!workspaceColors.has(workspaceId)) workspaceColors.set(workspaceId, new Map());
   const colorAssignments = useRef(workspaceColors.get(workspaceId));
@@ -140,7 +140,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     return () => cancelAnimationFrame(frame);
   }, [contextKey, detailReady]);
   function select(next) {
-    remember(); setListStore(null); setProductView('skc'); setSelection(next); setHovered(null);
+    remember(); setListStore(null); setProductView('skc'); setSelection(next);
     restore(detailKey(next, next.directStore ?? null));
   }
   function selectDay(date) {
@@ -152,7 +152,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
       ...(narrowed && names.length ? { storeKeys: visible.map(salesStoreKey) } : {}) });
   }
   function close() {
-    remember(); setSelection(null); setListStore(null); setHovered(null); restore('trend');
+    remember(); setSelection(null); setListStore(null); restore('trend');
   }
   function chooseStore(next, mode = 'skc') {
     remember(); setListStore(next); setProductView(mode);
@@ -254,7 +254,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
       {onStoreChange ? <label htmlFor={storeId}>店铺<select id={storeId} aria-label="每日销售店铺" value={store} disabled={changing} onChange={event => void changeStore(event.target.value)}><option value="all">全部店铺</option>{stores.map(name => <option key={name}>{name}</option>)}</select></label> : null}
       <div role="group" aria-label="趋势周期" className="sales-period-switch">
         {[['daily', '按日'], ['monthly', '按月']].map(([period, label]) => <Button key={period} aria-pressed={view === period}
-          onClick={() => { if (view !== period) { setView(period); setSelection(null); setHovered(null); } }}>{label}</Button>)}
+          onClick={() => { if (view !== period) { setView(period); setSelection(null); } }}>{label}</Button>)}
       </div>
       <div role="group" aria-label="趋势指标"><Button aria-pressed={!showQuantity} onClick={() => setShowQuantity(false)}>{readyForProfit ? profitTitle : '销售额'}</Button><Button aria-pressed={showQuantity} onClick={() => setShowQuantity(true)}>销量</Button></div>
     </div></div>
@@ -274,7 +274,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
         : !noStores && <p>所选店铺期间合计 · {metric === 'profitExact' ? `${profitTitle} ${profitLabel(comparedProfit)} · ` : ''}销售原额 ¥{showSalesValue(comparisonTotals.revenueExact)} · 销量 {showSalesValue(comparisonTotals.quantityExact, 6)} 件 · 仅含已有来源</p>}
     {hasDispatch && !noStores && <DispatchSummary totals={storeTotals(chartAmounts)} />}
     </div> : null}
-    {!selection && usesStoreSelection && storeNames.length > 0 ? <div className="sales-store-selection-actions"><Button disabled={!narrowed} onClick={() => setHiddenStores([])}>全选店铺</Button><Button disabled={noStores} onClick={() => { setHiddenStores(storeNames.map(salesStoreKey)); setHovered(null); }}>清空店铺</Button></div> : null}
+    {!selection && usesStoreSelection && storeNames.length > 0 ? <div className="sales-store-selection-actions"><Button disabled={!narrowed} onClick={() => setHiddenStores([])}>全选店铺</Button><Button disabled={noStores} onClick={() => setHiddenStores(storeNames.map(salesStoreKey))}>清空店铺</Button></div> : null}
     {!selection && (view === 'daily' || monthMode === 'comparison') ? <div className="sales-store-legend" aria-label="店铺颜色">{storeNames.map(name => {
       const checked = !hiddenStores.includes(salesStoreKey(name));
       const toggle = () => setHiddenStores(current => checked ? [...current, salesStoreKey(name)] : current.filter(key => key !== salesStoreKey(name)));
@@ -282,9 +282,8 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     })}</div> : null}
     <div ref={chartRef} className="sales-analysis-body">
       {!selection && noStores ? <p role="status">请选择至少一家店铺查看趋势。</p> : !selection ? <div className="sales-charts-area">
-        {view === 'daily' ? <SalesMonthChart month={visibleMonth} metric={metric} scale={scale} hovered={hovered} onHover={setHovered} onSelect={selectDay} />
-          : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} hovered={hovered} onHover={setHovered} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: visibleStoreKeys } : {}) })} />}
-        {hovered && view === 'daily' ? <div className="sales-day-tooltip"><SalesHoverSummary month={visibleMonth} date={hovered} metric={metric} hiddenStores={hiddenStores} /></div> : null}
+        {view === 'daily' ? <SalesMonthChart month={visibleMonth} metric={metric} scale={scale} onSelect={selectDay} />
+          : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: visibleStoreKeys } : {}) })} />}
       </div> : <SalesPeriodDetails key={detailKey(selection, chosenStore)} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
         unitCosts={profitData?.byLedger[selection.ledgerId]?.unitCosts} catalog={catalog} onOpenProduct={onOpenProduct && ((id, stores, skc) => leaveTrend('product',skc,onOpenProduct,id,{ledgerId:selection.ledgerId,mode:profitData?.byLedger[selection.ledgerId]?.accountingMode,stores,skc}))}
         onOpenProfit={onOpenProfit && ((skc,stores) => leaveTrend('profit',skc,onOpenProfit,{ledgerId:selection.ledgerId,mode:profitData?.byLedger[selection.ledgerId]?.accountingMode,stores,skc}))}

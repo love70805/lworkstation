@@ -104,9 +104,20 @@ it('hover and keyboard focus keep chart and details DOM stable without extra dat
   expect(container.querySelector('.sales-day-tooltip .sales-hover-summary').textContent).toContain('2026-08-01');
   await act(async () => Simulate.mouseLeave(bar));
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
-  await act(async () => Simulate.focus(bar));
+  await act(async () => bar.focus());
   expect(container.querySelector('.sales-day-tooltip').textContent).toContain('甲');
   expect(bar.getAttribute('aria-label')).toContain('占比');
+  const next = container.querySelectorAll('.sales-daily-bar')[1];
+  await act(async () => Simulate.mouseEnter(next));
+  expect(container.querySelector('.sales-hover-summary strong').textContent).toBe(bar.dataset.date);
+  await act(async () => Simulate.mouseMove(next, { movementX: 15 }));
+  expect(container.querySelector('.sales-hover-summary strong').textContent).toBe(next.dataset.date);
+  await act(async () => Simulate.mouseLeave(next));
+  expect(container.querySelector('.sales-day-tooltip')).toBeNull();
+  await act(async () => next.focus());
+  expect(container.querySelector('.sales-day-tooltip')).not.toBeNull();
+  await act(async () => next.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('.sales-day-tooltip')).toBeNull();
   await act(async () => bar.click());
   const table = container.querySelector('.sales-day-table'), input = container.querySelector('input');
   table.scrollLeft = 50;
@@ -116,6 +127,35 @@ it('hover and keyboard focus keep chart and details DOM stable without extra dat
   expect(container.querySelector('input')).toBe(input);
   expect(table.scrollLeft).toBe(50);
   expect(mock.read).toHaveBeenCalledTimes(1);
+});
+
+it('places a wide tooltip outside the plot on desktop and beside the active bar on short screens', async () => {
+  const bar = container.querySelector('.sales-daily-bar'), plot = bar.closest('.sales-chart-plot');
+  vi.stubGlobal('innerWidth', 1440);
+  vi.stubGlobal('innerHeight', 880);
+  let plotRect = new DOMRect(300, 470, 680, 210), barRect = new DOMRect(900, 470, 18, 210);
+  const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    if (this === bar) return barRect;
+    if (this === plot) return plotRect;
+    return this.classList.contains('sales-day-tooltip') ? new DOMRect(0, 0, 350, 225) : new DOMRect();
+  });
+  try {
+    await act(async () => Simulate.mouseEnter(bar));
+    const tooltip = () => container.querySelector('.sales-day-tooltip');
+    expect(tooltip().style.visibility).toBe('visible');
+    expect(parseFloat(tooltip().style.left)).toBeGreaterThan(plotRect.right);
+    await act(async () => Simulate.mouseLeave(bar));
+    vi.stubGlobal('innerWidth', 600);
+    vi.stubGlobal('innerHeight', 320);
+    plotRect = new DOMRect(40, 40, 540, 210);
+    barRect = new DOMRect(530, 40, 18, 210);
+    await act(async () => Simulate.mouseEnter(bar));
+    expect(tooltip().style.visibility).toBe('visible');
+    expect(parseFloat(tooltip().style.left) + 350).toBeLessThan(barRect.left);
+  } finally {
+    measure.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });
 
 it('resets hidden stores when the outer store scope changes', async () => {

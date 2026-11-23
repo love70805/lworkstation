@@ -67,13 +67,18 @@ function pieComposition(rows, metric, total) {
   return { metricName: lossPie ? '亏损额' : profit && losses.length ? '盈利额' : metricName, slices, losses };
 }
 
-function StoreComposition({ rows, total, status, metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted, children }) {
+function StoreComposition({ rows, total, status, metric, chosenStore, skuView, onChooseStore, onChooseProduct, onHighlight, highlighted, children }) {
   const products = Boolean(chosenStore), profit = metric === 'profitExact';
   const { metricName, slices, losses } = useMemo(() => pieComposition(rows, metric, total), [rows, metric, total]);
   const label = item => products ? (skuView ? item.platformSku || 'SKU 待查' : item.platformSkc || item.platformSkus?.join('、') || 'SKC 待补充') : item.store;
-  const choose = item => products ? onChooseProduct(item.key) : onChooseStore(salesStoreKey(item.store));
+  function choose(item) {
+    if (products) onChooseProduct(item.key);
+    else if (highlighted === item.key) onChooseStore(salesStoreKey(item.store));
+    else onHighlight(item.key);
+  }
   const selected = products ? rows.find(row => row.key === highlighted) : null;
   const selectedSlice = slices.find(slice => slice.row.key === highlighted);
+  const storePreview = !products && selectedSlice;
   const lossTotal = losses.length ? combinedProfit(losses) : null;
   let selectionNote = '点击扇区定位商品';
   if (selectedSlice) selectionNote = '选中商品占' + metricName + '的 ' + selectedSlice.percent + '%';
@@ -92,15 +97,21 @@ function StoreComposition({ rows, total, status, metric, chosenStore, skuView, o
       {slices.map(({ row, path, percent }) => {
         const name = label(row) + ' ' + (profit ? money(row[metric]) : showSalesValue(row[metric], 6)) + '，占' + metricName + ' ' + percent + '%';
         const props = { fill: products ? skcColor(row.key) : salesStoreColor(row.store), role: 'button', tabIndex: 0,
-          'aria-label': name, 'aria-pressed': products ? highlighted === row.key : undefined, onClick: () => choose(row),
-          onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(row); } } };
+          'aria-label': name, 'aria-pressed': highlighted === row.key, onClick: () => choose(row),
+          onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (!event.repeat) choose(row); } } };
         return slices.length === 1 ? <circle key={row.key} cx="100" cy="100" r="90" {...props}><title>{name}</title></circle>
           : <path key={row.key} d={path} {...props}><title>{name}</title></path>;
       })}
     </svg> : <p className="sales-pie-fallback" role="status">{status === 'unknown' ? '数据待查，暂无可用占比。' : profit
       ? (total != null && new Exact(total).isZero() && rows.every(row => row.profitExact != null && new Exact(row.profitExact).isZero()) ? '商品利润为 0，暂无金额占比。' : '暂无可核实的利润占比。')
       : '含负值、合计非正或构成不完整，不绘制扇形占比。'}</p>}
-    {(products || lossTotal != null) && <div className="sales-composition-notes">
+    {(products || storePreview || lossTotal != null) && <div className="sales-composition-notes">
+      {storePreview && <div className="sales-store-preview">
+        <div role="status"><strong>{storePreview.row.store} 店</strong><br />
+          {metric === 'quantityExact' ? showSalesValue(storePreview.row[metric], 6) + ' 件' : money(storePreview.row[metric])} · 占{metricName} {storePreview.percent}%
+        </div>
+        <div className="sales-composition-links"><button type="button" onClick={() => onChooseStore(salesStoreKey(storePreview.row.store))}>查看商品明细<ChevronRight size={14} aria-hidden="true" /></button></div>
+      </div>}
       {products && slices.length > 0 && <p className="sales-chart-note">{selectionNote}</p>}
       {lossTotal != null ? <p>{products ? '亏损合计' : '亏损店铺合计'} <b className="sales-loss">{money(lossTotal)}</b></p> : null}
       {profit && (positiveLeader || lossLeader) ? <div className="sales-composition-links">{positiveLeader && link('利润最高', positiveLeader)}{lossLeader && link('亏损最多', lossLeader)}</div> : null}
@@ -245,7 +256,7 @@ function SalesDetailList({ data, metric, chosenStore, selectedTotals, onChooseSt
     {data.unlocatedCount ? <p role="status">{data.date ? '仅含已定位到当天的记录；另有' : '本月包含'} {data.unlocatedCount} 条未定位到日期的记录。</p> : null}
     <div className={'sales-period-layout' + (chosenStore ? ' is-products' : '')}>
       <StoreComposition rows={data.status === 'unknown' ? [] : storeRows} total={skuView ? valueTotal(storeRows, metric) : (chosenStore ? selectedTotals : data.totalsExact)?.[metric]} status={data.status}
-        {...{ metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted }}>
+        onHighlight={setHighlighted} {...{ metric, chosenStore, skuView, onChooseStore, onChooseProduct, highlighted }}>
         {data.status === 'data' && data.hasProfitAnalysis && !skuView && <ProfitableSkcs hasDispatch={data.hasDispatch} rows={chosenStore ? storeRows : data.rows} {...{ unitCosts, catalog, onOpenProduct, onOpenProfit, state, onStateChange }} />}
       </StoreComposition>
       <div className="sales-period-products">
