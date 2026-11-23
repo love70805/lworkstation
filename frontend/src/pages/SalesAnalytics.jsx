@@ -161,7 +161,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
     restore(key);
   }
   function changePeriod(next) {
-    remember(); setSelection(next); restore(detailKey(next, chosenStore, productView));
+    remember(); pendingRestore.current = null; setSelection(next);
   }
   async function changeStore(next) {
     setSelection(null); setStoreError(''); setChanging(true);
@@ -243,7 +243,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const comparedProfit = monthMode === 'comparison' && !daily
     ? combinedProfit(actualMonths.flatMap(item => (item.monthlySegments ?? []).filter(segment => visibleStoreKeys.includes(salesStoreKey(segment.store))))) : null;
   const profitLabel = value => value == null ? '待核' : '¥' + showSalesValue(value);
-  const hasDispatch = selection ? scopedDetail?.hasDispatch : actualMonths.some(item => item.hasDispatch);
+  const hasDispatch = selection ? (scopedDetail?.hasDispatch ?? (daily ? month : rangeMonths.find(item => item.ledgerId === selection.ledgerId))?.hasDispatch) : actualMonths.some(item => item.hasDispatch);
   const profitTitle = hasDispatch ? '利润贡献' : '商品利润';
   const scopeNames = storeNames.filter(name => visibleStoreKeys.includes(salesStoreKey(name)));
   const scopeLabel = noStores ? '未选择店铺' : narrowed ? (scopeNames.length <= 3 ? '所选店铺 ' + scopeNames.join('、') : '已选 ' + scopeNames.length + ' 家店铺') : store === 'all' ? '全部店铺' : store;
@@ -284,7 +284,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
       {!selection && noStores ? <p role="status">请选择至少一家店铺查看趋势。</p> : !selection ? <div className="sales-charts-area">
         {view === 'daily' ? <SalesMonthChart month={visibleMonth} metric={metric} scale={scale} onSelect={selectDay} />
           : !monthsResult || monthsResult.scope !== scope ? <p role="status">正在读取月度销售...</p> : monthsResult.error ? <p role="alert">{monthsResult.error}</p> : !months.length ? <p>暂无可用账本月份。</p> : <SalesGroupedMonthChart mode={monthMode} offset={chartOffset} onOffsetChange={setChartOffset} months={plottedMonths} metric={metric} scale={scale} hiddenStores={monthMode === 'overview' ? [] : hiddenStores} onSelect={item => select({ ledgerId: item.ledgerId, period: item.period, ...(monthMode === 'comparison' ? { storeKeys: visibleStoreKeys } : {}) })} />}
-      </div> : <SalesPeriodDetails key={detailKey(selection, chosenStore)} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
+      </div> : <SalesPeriodDetails key={chosenStore ?? ''} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
         unitCosts={profitData?.byLedger[selection.ledgerId]?.unitCosts} catalog={catalog} onOpenProduct={onOpenProduct && ((id, stores, skc) => leaveTrend('product',skc,onOpenProduct,id,{ledgerId:selection.ledgerId,mode:profitData?.byLedger[selection.ledgerId]?.accountingMode,stores,skc}))}
         onOpenProfit={onOpenProfit && ((skc,stores) => leaveTrend('profit',skc,onOpenProfit,{ledgerId:selection.ledgerId,mode:profitData?.byLedger[selection.ledgerId]?.accountingMode,stores,skc}))}
         metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} productView={productView} state={listStates[listKey]} onStateChange={updateList}

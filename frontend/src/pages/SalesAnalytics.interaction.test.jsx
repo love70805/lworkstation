@@ -48,6 +48,8 @@ it('replaces daily stacks with a store pie, retains SKC details and preserves ho
   expect(container.querySelector('.sales-pie-legend')).toBeNull();
   expect(container.querySelector('.sales-day-tooltip')).toBeNull();
   await act(async () => container.querySelector('.sales-store-entry').click());
+  expect(container.querySelector('.sales-store-pie [aria-pressed="true"]')).not.toBeNull();
+  await act(async () => container.querySelector('tr[data-highlighted] td:last-child').click());
   expect(container.textContent).toContain('SKC');
   expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
   expect(container.querySelectorAll('.sales-store-pie [role="button"]').length).toBeGreaterThan(5);
@@ -64,6 +66,7 @@ it('replaces daily stacks with a store pie, retains SKC details and preserves ho
 it('search changes reset pagination without destroying the input element', async () => {
   await act(async () => container.querySelector('.sales-daily-bar').click());
   await act(async () => container.querySelector('.sales-store-entry').click());
+  await act(async () => find('查看商品明细').click());
   await act(async () => find('下一页').click());
   const input = container.querySelector('input'); input.focus();
   await choose(input, 'SKC24');
@@ -129,7 +132,7 @@ it('hover and keyboard focus keep chart and details DOM stable without extra dat
   expect(mock.read).toHaveBeenCalledTimes(1);
 });
 
-it('places a wide tooltip outside the plot on desktop and beside the active bar on short screens', async () => {
+it('places the tooltip beside the active bar even inside the plot and flips it at the window edge', async () => {
   const bar = container.querySelector('.sales-daily-bar'), plot = bar.closest('.sales-chart-plot');
   vi.stubGlobal('innerWidth', 1440);
   vi.stubGlobal('innerHeight', 880);
@@ -143,7 +146,8 @@ it('places a wide tooltip outside the plot on desktop and beside the active bar 
     await act(async () => Simulate.mouseEnter(bar));
     const tooltip = () => container.querySelector('.sales-day-tooltip');
     expect(tooltip().style.visibility).toBe('visible');
-    expect(parseFloat(tooltip().style.left)).toBeGreaterThan(plotRect.right);
+    expect(parseFloat(tooltip().style.left)).toBe(barRect.right + 12);
+    expect(parseFloat(tooltip().style.left)).toBeLessThan(plotRect.right);
     await act(async () => Simulate.mouseLeave(bar));
     vi.stubGlobal('innerWidth', 600);
     vi.stubGlobal('innerHeight', 320);
@@ -151,7 +155,7 @@ it('places a wide tooltip outside the plot on desktop and beside the active bar 
     barRect = new DOMRect(530, 40, 18, 210);
     await act(async () => Simulate.mouseEnter(bar));
     expect(tooltip().style.visibility).toBe('visible');
-    expect(parseFloat(tooltip().style.left) + 350).toBeLessThan(barRect.left);
+    expect(parseFloat(tooltip().style.left) + 350).toBe(barRect.left - 12);
   } finally {
     measure.mockRestore();
     vi.unstubAllGlobals();

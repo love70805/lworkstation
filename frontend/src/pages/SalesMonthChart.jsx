@@ -41,9 +41,20 @@ export function SalesMonthChart({ month, metric, scale, selectedDay, onSelect })
   </section>;
 }
 
+function hoveredMonthColumn(event) {
+  const hit = event.target.closest('.sales-month-column');
+  if (hit) return hit;
+  const columns = event.currentTarget.querySelector('.sales-month-columns');
+  if (!columns?.childElementCount) return event.currentTarget;
+  // The gaps belong to the nearest evenly spaced column. The month remains the drilldown target.
+  const { left, width } = columns.getBoundingClientRect();
+  const index = Math.floor((event.clientX - left) / Math.max(1, width) * columns.childElementCount);
+  return columns.children[Math.max(0, Math.min(index, columns.childElementCount - 1))] ?? event.currentTarget;
+}
+
 export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [], onSelect, mode = 'comparison', offset = 0, onOffsetChange = () => {} }) {
   const root = useRef(null), [width, setWidth] = useState(900);
-  const { anchor, events } = useChartHover();
+  const { anchor, events } = useChartHover(hoveredMonthColumn);
   useLayoutEffect(() => {
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(entries => setWidth(entries[0].contentRect.width));
@@ -52,7 +63,8 @@ export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [
   const names = [...new Set(months.flatMap(month => month.monthlySegments ?? []).map(item => item.store))].filter(name => !hiddenStores.includes(salesStoreKey(name))).sort((a,b) => salesStoreKey(a).localeCompare(salesStoreKey(b)));
   const capacity = Math.max(1, Math.floor((width - 58) / (mode === 'overview' ? 56 : Math.max(82, names.length * 25 + 20))));
   const end = Math.max(Math.min(capacity, months.length), months.length - offset), start = Math.max(0, end - capacity);
-  const visible = months.slice(start, end), active = anchor?.isConnected && visible.find(month => month.ledgerId === anchor.dataset.periodKey);
+  const activeKey = anchor?.isConnected && anchor.closest('[data-period-key]')?.dataset.periodKey;
+  const visible = months.slice(start, end), active = visible.find(month => month.ledgerId === activeKey);
   const single = visible.length === 1;
   const ticks = [...[0,25,50,75,100].filter(top => Math.abs(top - scale.zero) > 5), scale.zero].sort((a,b) => a-b);
   return <section ref={root} className={'sales-chart-panel sales-grouped-chart' + (single ? ' is-single-month' : '') + (single && mode !== 'overview' && width / Math.max(names.length, 1) < 65 ? ' is-dense-month' : '')} aria-label="月度销售图">

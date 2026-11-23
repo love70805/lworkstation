@@ -51,7 +51,11 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
-const openStore = async (name = '甲') => click([...container.querySelectorAll('.sales-store-entry')].find(node => node.textContent.includes(name)));
+const openStore = async (name = '甲') => {
+  const entry = [...container.querySelectorAll('.sales-store-entry')].find(node => node.textContent.includes(name));
+  await click(entry);
+  await click(entry);
+};
 const monthBar = period => [...container.querySelectorAll('.sales-month-group')].find(node => node.getAttribute('aria-label').startsWith(period));
 
 it('defaults to reconciled profit, locates a losing product beyond page one and keeps the chosen metric', async () => {
@@ -73,6 +77,8 @@ it('defaults to reconciled profit, locates a losing product beyond page one and 
   expect(container.querySelector('.sales-pagination').textContent).toContain('第 4/4 页');
   const total = container.querySelector('.sales-selected-store-totals').textContent;
   await click(button('返回店铺'));
+  await click(container.querySelector('[aria-label^="甲 店，查看亏损 SKU"]'));
+  expect(container.querySelector('.sales-store-entry[aria-pressed="true"]')).not.toBeNull();
   await click(container.querySelector('[aria-label^="甲 店，查看亏损 SKU"]'));
   expect(container.querySelectorAll('tbody tr')).toHaveLength(3);
   expect(container.querySelector('.sales-selected-store-totals').textContent).toBe(total);
@@ -124,13 +130,14 @@ it.each([
   }
 });
 
-it('previews each newly clicked store and opens only the chosen store from its preview', async () => {
+it('shares store selection across pie, table rows and SKU links', async () => {
   await showStoreProfits([20, 60]);
   await openDay();
   const sector = store => container.querySelector('.sales-store-pie [aria-label^="' + store + ' "]');
   const preview = () => container.querySelector('.sales-store-preview [role="status"]').textContent;
-  await act(async () => Simulate.click(sector('27')));
+  await click(container.querySelector('[data-store-key="27"]').closest('tr').lastElementChild);
   expect(preview()).toBe('27 店¥20 · 占利润 25%');
+  expect(sector('27').getAttribute('aria-pressed')).toBe('true');
   expect(container.querySelector('tr[data-highlighted] .sales-store-entry').dataset.storeKey).toBe('27');
   await act(async () => Simulate.click(sector('20')));
   expect(preview()).toBe('20 店¥60 · 占利润 75%');
@@ -140,10 +147,51 @@ it('previews each newly clicked store and opens only the chosen store from its p
   expect(container.querySelector('.sales-details-heading h3').textContent).toContain('20 商品明细');
   await click(button('返回店铺'));
   expect(container.querySelector('.sales-store-preview')).toBeNull();
-  await act(async () => Simulate.click(sector('27')));
+  await click(container.querySelector('[aria-label^="27 店，查看盈利 SKU"]'));
   expect(preview()).toContain('27 店');
   await act(async () => Simulate.click(sector('27')));
   expect(container.querySelector('.sales-details-heading h3').textContent).toContain('27 商品明细');
+  await click(button('返回店铺'));
+  await act(async () => Simulate.click(sector('20')));
+  await click(container.querySelector('[aria-label^="20 店，查看盈利 SKU"]'));
+  expect(container.querySelector('.sales-list-heading h3').textContent).toBe('20 · 盈利 SKU');
+});
+
+it('previews and opens a losing store from its row even when the pie shows only profitable stores', async () => {
+  await showStoreProfits([20, -60]); await openDay();
+  const entry = container.querySelector('.sales-store-entry[data-store-key="20"]');
+  await click(entry);
+  expect(entry.getAttribute('aria-pressed')).toBe('true');
+  expect(container.querySelector('.sales-store-preview [role="status"]').textContent).toBe('20 店¥-60');
+  expect(container.querySelector('.sales-store-pie [aria-pressed="true"]')).toBeNull();
+  await click(entry);
+  expect(container.querySelector('.sales-details-heading h3').textContent).toContain('20 商品明细');
+});
+
+it('reveals the selected store row when it is on another page or outside the search', async () => {
+  const rows = Array.from({ length: 7 }, (_, i) => ({
+    store: '店' + i, platformSkc: 'S' + i, platformSku: 'sku' + i, sourceAddedDate: '2026-08-01',
+    quantityExact: '1', amountExact: String(10 - i),
+  }));
+  mocks.detail.mockResolvedValue(aggregatePeriodSalesDetails(rows, { period: '2026-08', date: '2026-08-01' }));
+  await openDay();
+  const choose = store => act(async () => Simulate.click(container.querySelector('.sales-store-pie [aria-label^="' + store + ' "]')));
+  await choose('店6');
+  expect(container.querySelector('tr[data-highlighted] button').textContent).toContain('店6');
+  expect(container.querySelector('.sales-pagination').textContent).toContain('第 2/2 页');
+  await change(container.querySelector('.sales-detail-search input'), '店6');
+  await choose('店0');
+  expect(container.querySelector('.sales-detail-search input').value).toBe('');
+  expect(container.querySelector('tr[data-highlighted] button').textContent).toContain('店0');
+});
+
+it('selects the store on the first pending-cost click and opens its pending SKU list on the second', async () => {
+  await showStoreProfits([20, null]); await openDay();
+  const pending = byLabel('20 店，查看待核 SKU');
+  await click(pending);
+  expect(container.querySelector('tr[data-highlighted] .sales-store-entry').dataset.storeKey).toBe('20');
+  await click(pending);
+  expect(container.querySelector('.sales-list-heading h3').textContent).toBe('20 · 成本待核 SKU');
 });
 
 it('replaces sales with profit in the same slot for a fully costed store and keeps the quantity preference', async () => {
@@ -221,7 +269,11 @@ it('returns directly to the filtered chart after changing dates, including while
   expect(container.querySelector('.sales-details-heading h3').textContent).toBe('2026-08-01 甲 商品明细');
   let finish;
   mocks.detail.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await click(byLabel('下一日'));
+  const nextDay = byLabel('下一日');
+  nextDay.focus();
+  await click(nextDay);
+  expect(byLabel('下一日')).toBe(nextDay);
+  expect(document.activeElement).toBe(nextDay);
   expect(container.querySelector('.sales-details-heading h3').textContent).toBe('2026-08-02 甲 商品明细');
   expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
   await act(async () => Simulate.keyDown(container.querySelector('.sales-day-details'), { key: 'Escape' }));
@@ -243,6 +295,7 @@ it('returns directly to the filtered chart after changing dates, including while
 it('selects a product from any table cell or slice and keeps its search, page and share', async () => {
   await openDay();
   await click(container.querySelector('tbody tr td:last-child'));
+  await click(container.querySelector('tbody tr[data-highlighted] td:last-child'));
   await change(container.querySelector('.sales-details-controls input'), 'SKC-');
   await click(button('下一页'));
   const row = container.querySelectorAll('tbody tr')[2];
@@ -429,6 +482,7 @@ it('follows two selected stores from a date to a losing SKU inside a profitable 
   await openDay();
   expect([...container.querySelectorAll('.sales-store-entry')].map(node => node.dataset.storeKey).sort()).toEqual(['27','680']);
   expect(container.querySelector('.sales-details-heading p').textContent).toContain('当日所选店铺合计 · 商品利润 ¥90');
+  await click(byLabel('27 店，查看亏损 SKU，1 个'));
   await click(byLabel('27 店，查看亏损 SKU，1 个'));
   expect(container.querySelector('.sales-list-heading h3').textContent).toBe('27 · 亏损 SKU');
   expect(container.querySelector('tbody strong').textContent).toBe('RED');

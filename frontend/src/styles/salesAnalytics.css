@@ -70,7 +70,7 @@
 .sales-month-group { flex: 1 1 0; position: relative; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text); cursor: pointer; }
 .sales-month-group:hover, .sales-month-group:focus-visible { background: var(--primary-soft); }
 .sales-month-columns { display: flex; gap: 3px; height: 100%; margin: 0 6px; pointer-events: none; }
-.sales-month-column { position: relative; height: 100%; flex: 1; min-width: 3px; }
+.sales-month-column { position: relative; height: 100%; flex: 1; min-width: 3px; pointer-events: auto; }
 .sales-grouped-segment { position: absolute; left: 0; right: 0; border-radius: 3px 3px 0 0; }
 .sales-month-group > small { position: absolute; bottom: -23px; left: 0; right: 0; font-size: 11px; white-space: nowrap; }
 @container (max-width: 600px) {

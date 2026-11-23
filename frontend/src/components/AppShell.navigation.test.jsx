@@ -98,7 +98,8 @@ it('keeps a manual sidebar choice across compact-width navigation, resizing and 
  const mount=key=>act(async()=>root.render(<MemoryRouter key={key} initialEntries={['/workspace']}><ToastProvider><AppShell><p>导航验收</p></AppShell></ToastProvider></MemoryRouter>));
  try {
   await mount('compact-default');
-  expect(button('展开导航')).toBeTruthy();
+  expect([...host.querySelectorAll('[aria-label="展开导航"]')]).toEqual([host.querySelector('.brand-toggle')]);
+  expect(host.querySelector('.brand-toggle svg')).toBeNull();
   expect(localStorage.getItem('shopeers-sidebar-collapsed')).toBeNull();
   await act(async()=>button('展开导航').click());
   expect(localStorage.getItem('shopeers-sidebar-collapsed')).toBe('false');
