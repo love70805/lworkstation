@@ -114,9 +114,36 @@ it.each([
   if (!shares.length) expect(container.textContent).toContain('商品利润为 0');
   if (slices.length) {
     await act(async () => Simulate.keyDown(slices[0], { key: 'Enter' }));
+    expect(container.querySelector('.sales-store-preview').textContent).toContain(slices[0].getAttribute('aria-label').split('，')[1]);
+    expect(container.querySelector('.sales-store-entry')).not.toBeNull();
+    await act(async () => Simulate.keyDown(slices[0], { key: 'Enter', repeat: true }));
+    expect(container.querySelector('.sales-product-entry')).toBeNull();
+    await act(async () => Simulate.keyDown(slices[0], { key: ' ' }));
     await click(container.querySelector('tbody td:last-child'));
     expect(container.querySelector('.sales-store-pie [aria-pressed="true"]')).not.toBeNull();
   }
+});
+
+it('previews each newly clicked store and opens only the chosen store from its preview', async () => {
+  await showStoreProfits([20, 60]);
+  await openDay();
+  const sector = store => container.querySelector('.sales-store-pie [aria-label^="' + store + ' "]');
+  const preview = () => container.querySelector('.sales-store-preview [role="status"]').textContent;
+  await act(async () => Simulate.click(sector('27')));
+  expect(preview()).toBe('27 店¥20 · 占利润 25%');
+  expect(container.querySelector('tr[data-highlighted] .sales-store-entry').dataset.storeKey).toBe('27');
+  await act(async () => Simulate.click(sector('20')));
+  expect(preview()).toBe('20 店¥60 · 占利润 75%');
+  expect(sector('27').getAttribute('aria-pressed')).toBe('false');
+  expect(container.querySelector('tr[data-highlighted] .sales-store-entry').dataset.storeKey).toBe('20');
+  await click(button('查看商品明细'));
+  expect(container.querySelector('.sales-details-heading h3').textContent).toContain('20 商品明细');
+  await click(button('返回店铺'));
+  expect(container.querySelector('.sales-store-preview')).toBeNull();
+  await act(async () => Simulate.click(sector('27')));
+  expect(preview()).toContain('27 店');
+  await act(async () => Simulate.click(sector('27')));
+  expect(container.querySelector('.sales-details-heading h3').textContent).toContain('27 商品明细');
 });
 
 it('replaces sales with profit in the same slot for a fully costed store and keeps the quantity preference', async () => {
@@ -159,6 +186,7 @@ it('shows all products in five-row pages and searches beyond the old top five in
   await openDay();
   const total = container.querySelector('.sales-details-heading p').textContent;
   await act(async () => Simulate.keyDown(container.querySelector('.sales-store-pie [role="button"]'), { key: 'Enter' }));
+  await click(button('查看商品明细'));
   expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
   expect(container.querySelector('[aria-label="SKC 构成"] .sales-store-pie')).not.toBeNull();
   expect(container.querySelector('.sales-selected-store-totals').textContent).toContain('销量 2145 件');

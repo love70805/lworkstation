@@ -1,5 +1,6 @@
 import { useId, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { salesSegments, salesGroupedSegments, salesStoreColor, salesStoreKey } from '../domain/salesChartModel';
+import SalesChartTooltip, { useChartHover } from './SalesChartTooltip';
 import Decimal from 'decimal.js';
 const value = input => input == null ? '待查' : new Decimal(input).toFixed();
 const statusText = day => ({ future: '未发生', unobserved: '尚未统计', unknown: '数据待查', absent_store: '所选店铺无记录' }[day?.status] || '数据待查');
@@ -10,27 +11,19 @@ export const salesPair = (day, metric) => metric === 'profitExact' && day?.reven
     ? '利润贡献 ' + (day.profitExact == null ? '待核' : '¥' + metricValue(day.profitExact, metric)) + ' · 销售商品利润 ' + (day.salesProfitExact == null ? '待核' : '¥' + metricValue(day.salesProfitExact, metric)) + ' · 代发节省 ¥' + value(day.dispatchAmountExact)
     : day.profitExact == null ? '商品利润待核' : '商品利润 ¥' + metricValue(day.profitExact, metric))
   : day?.revenueExact == null ? statusText(day) + (day?.dispatchAmountExact != null ? ' · 已知代发节省 ¥' + value(day.dispatchAmountExact) : '') : `销售原额 ¥${value(day.revenueExact)} · 销量 ${value(day.quantityExact)} 件`;
-function hoverEvents(key, onHover) {
-  const focusedKey = () => document.activeElement?.getAttribute('data-period-key');
-  return {
-    'data-period-key': key,
-    onFocus: () => onHover(key), onBlur: () => onHover(null),
-    onMouseEnter: () => { if (!focusedKey() || focusedKey() === key) onHover(key); },
-    onMouseMove: event => { if (event.movementX || event.movementY) onHover(key); },
-    onMouseLeave: () => onHover(focusedKey() ?? null),
-  };
-}
-export function SalesMonthChart({ month, metric, scale, selectedDay, onSelect, hovered, onHover }) {
+export function SalesMonthChart({ month, metric, scale, selectedDay, onSelect }) {
   const id = useId();
+  const { anchor, events } = useChartHover();
   const days = useMemo(() => (selectedDay ? month.daily.filter(day => day.date === selectedDay) : month.daily).map(day => ({
     ...day, plotted: day.status === 'data' ? salesSegments(day, metric, scale) : [],
   })), [month, selectedDay, metric, scale]);
+  const active = anchor?.isConnected && days.find(day => day.date === anchor.dataset.date);
   return <section className={`sales-chart-panel sales-stack-chart${selectedDay ? ' is-day' : ''}`} data-period={month.period} aria-label={`${month.period} 销售图`}>
     {selectedDay ? <h3>{selectedDay}</h3> : null}
     <div className="sales-daily-chart" aria-label={'每日' + (month.hasDispatch && metric === 'profitExact' ? '利润贡献' : metricLabel[metric])}>
       <div className="sales-chart-axis" aria-hidden="true">{scale.max > 0 ? <span>{value(scale.max)}</span> : null}<span style={{ top: `${scale.zero}%` }}>0</span>{scale.min < 0 ? <span className="sales-axis-min">{value(scale.min)}</span> : null}</div>
       <div className="sales-chart-plot"><div className="sales-zero-line" style={{ top: `${scale.zero}%` }} aria-hidden="true" /><div className="sales-chart-bars">
-        {days.map(day => <button key={day.date} type="button" data-date={day.date} className={`sales-daily-bar${day.status === 'known_zero' ? ' is-empty' : ''}${hovered === day.date ? ' is-selected' : ''}`} aria-label={`${day.date}：${salesPair(day, metric)}；${day.plotted.map(segment => `${segment.store} ${salesPair(segment, metric)}${segment.percent != null ? `，占比 ${segment.percent}%` : ''}`).join('；')}`} aria-describedby={id} onClick={() => onSelect(day.date)} {...hoverEvents(day.date, onHover)}>
+        {days.map(day => <button key={day.date} type="button" data-date={day.date} className={`sales-daily-bar${day.status === 'known_zero' ? ' is-empty' : ''}${active === day ? ' is-selected' : ''}`} aria-label={`${day.date}：${salesPair(day, metric)}；${day.plotted.map(segment => `${segment.store} ${salesPair(segment, metric)}${segment.percent != null ? `，占比 ${segment.percent}%` : ''}`).join('；')}`} aria-describedby={id} onClick={() => onSelect(day.date)} {...events}>
           {day[metric] == null && !day.plotted.length ? <span className="sales-unknown-mark" style={{ top: `${Math.min(scale.zero, 94)}%` }}>·</span> : day.plotted.map(segment => <span key={segment.key} className={`sales-stack-segment${Number(segment[metric]) < 0 ? ' is-negative' : Number(segment[metric]) === 0 ? ' is-zero' : ''}`} style={{ top: `${segment.top}%`, height: `${segment.height}%`, background: salesStoreColor(segment.store) }}>
             {selectedDay && segment.height >= 14 ? <span className="sales-segment-label">{segment.store}{segment.percent != null ? ` ${segment.percent}%` : ''}</span> : null}
             {Number(segment[metric]) === 0 ? <span className="sales-zero-tick" /> : null}
@@ -40,16 +33,17 @@ export function SalesMonthChart({ month, metric, scale, selectedDay, onSelect, h
       </div></div>
     </div>
     <p id={id} className="sales-chart-note">{metric === 'quantityExact' ? '单位：件' : '单位：元'}{selectedDay ? ' · 店铺占比' : ' · 点击日期查看明细'}</p>
+    {active && <SalesChartTooltip anchor={anchor}><div className="sales-hover-summary" role="status">
+      <strong>{active.date}</strong>
+      <span>{active.status === 'known_zero' ? (month.hasDispatch ? '当日无销售或已登记的代发记录' : '当日无销售记录') : salesPair(active, metric)}</span>
+      {active.plotted.map(segment => <small key={segment.key}><i style={{ background: salesStoreColor(segment.store) }} />{segment.store} · {salesPair(segment, metric)}{segment.percent != null ? ` · ${segment.percent}%` : ''}</small>)}
+    </div></SalesChartTooltip>}
   </section>;
 }
-export function SalesHoverSummary({ month, date, metric, hiddenStores = [] }) {
-  const day = month.daily.find(item => item.date === date);
-  const segments = day?.status === 'data' ? salesSegments(day, metric, { zero: 100, range: 1 }) : [];
-  return <div className="sales-hover-summary" role="status"><strong>{date}</strong><span>{day?.status === 'known_zero' ? (month.hasDispatch ? '当日无销售或已登记的代发记录' : '当日无销售记录') : salesPair(day, metric)}</span>{segments.filter(segment => !hiddenStores.includes(salesStoreKey(segment.store))).map(segment => <small key={segment.key}><i style={{ background: salesStoreColor(segment.store) }} />{segment.store} · {salesPair(segment, metric)}{segment.percent != null ? ` · ${segment.percent}%` : ''}</small>)}</div>;
-}
 
-export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [], hovered, onHover, onSelect, mode = 'comparison', offset = 0, onOffsetChange = () => {} }) {
+export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [], onSelect, mode = 'comparison', offset = 0, onOffsetChange = () => {} }) {
   const root = useRef(null), [width, setWidth] = useState(900);
+  const { anchor, events } = useChartHover();
   useLayoutEffect(() => {
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(entries => setWidth(entries[0].contentRect.width));
@@ -58,7 +52,7 @@ export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [
   const names = [...new Set(months.flatMap(month => month.monthlySegments ?? []).map(item => item.store))].filter(name => !hiddenStores.includes(salesStoreKey(name))).sort((a,b) => salesStoreKey(a).localeCompare(salesStoreKey(b)));
   const capacity = Math.max(1, Math.floor((width - 58) / (mode === 'overview' ? 56 : Math.max(82, names.length * 25 + 20))));
   const end = Math.max(Math.min(capacity, months.length), months.length - offset), start = Math.max(0, end - capacity);
-  const visible = months.slice(start, end), active = months.find(month => month.ledgerId === hovered);
+  const visible = months.slice(start, end), active = anchor?.isConnected && visible.find(month => month.ledgerId === anchor.dataset.periodKey);
   const single = visible.length === 1;
   const ticks = [...[0,25,50,75,100].filter(top => Math.abs(top - scale.zero) > 5), scale.zero].sort((a,b) => a-b);
   return <section ref={root} className={'sales-chart-panel sales-grouped-chart' + (single ? ' is-single-month' : '') + (single && mode !== 'overview' && width / Math.max(names.length, 1) < 65 ? ' is-dense-month' : '')} aria-label="月度销售图">
@@ -70,7 +64,7 @@ export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [
           const unknown = month.missingStore || month.coverage === 'unknown';
           const actual = unknown ? [] : salesGroupedSegments({ ...month.monthTotalsExact, segments: month.monthlySegments ?? [] }, metric, scale);
           const segments = names.map(name => actual.find(item => item.store === name) ?? { key: salesStoreKey(name), store: name, [metric]: null });
-          return <button key={month.ledgerId} type="button" className={'sales-month-group' + (hovered === month.ledgerId ? ' is-selected' : '')} aria-label={month.period + '：' + (unknown ? '数据待查' : salesPair(month.monthTotalsExact, metric))} onClick={() => onSelect(month)} {...hoverEvents(month.ledgerId, onHover)}>
+          return <button key={month.ledgerId} type="button" data-period-key={month.ledgerId} className={'sales-month-group' + (active === month ? ' is-selected' : '')} aria-label={month.period + '：' + (unknown ? '数据待查' : salesPair(month.monthTotalsExact, metric))} onClick={() => onSelect(month)} {...events}>
             <span className="sales-month-columns">{segments.map(segment => <span className="sales-month-column" key={segment.key}>
               {segment[metric] == null
                 ? <span className="sales-unknown-mark" style={{ top: Math.min(scale.zero, 94) + '%' }}>·</span>
@@ -87,6 +81,10 @@ export function SalesGroupedMonthChart({ months, metric, scale, hiddenStores = [
       </div></div>
     </div>
     <p className="sales-chart-note">{metric === 'quantityExact' ? '单位：件' : '单位：元'} · {single ? visible[0]?.period + ' · ' : ''}{mode === 'overview' ? '全部店铺合计' : '店铺对比'} · 点击月份查看店铺</p>
-    {active ? <div className="sales-day-tooltip"><div className="sales-hover-summary" role="status"><strong>{active.period}</strong><span>{active.missingStore || active.coverage === 'unknown' ? '数据待查，未按零计算。' : salesPair(active.monthTotalsExact, metric)}</span>{active.unlocated ? <span>{active.unlocated} 条记录未定位到日期，已计入本月。</span> : null}{(active.monthlySegments ?? []).filter(segment => !hiddenStores.includes(salesStoreKey(segment.store))).map(segment => <small key={segment.key}><i style={{ background: salesStoreColor(segment.store) }} />{segment.store} · {salesPair(segment, metric)}</small>)}</div></div> : null}
+    {active && <SalesChartTooltip anchor={anchor}><div className="sales-hover-summary" role="status">
+      <strong>{active.period}</strong><span>{active.missingStore || active.coverage === 'unknown' ? '数据待查，未按零计算。' : salesPair(active.monthTotalsExact, metric)}</span>
+      {active.unlocated ? <span>{active.unlocated} 条记录未定位到日期，已计入本月。</span> : null}
+      {(active.monthlySegments ?? []).filter(segment => !hiddenStores.includes(salesStoreKey(segment.store))).map(segment => <small key={segment.key}><i style={{ background: salesStoreColor(segment.store) }} />{segment.store} · {salesPair(segment, metric)}</small>)}
+    </div></SalesChartTooltip>}
   </section>;
 }

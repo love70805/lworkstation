@@ -30,9 +30,10 @@ it('hover/focus reads both exact values without database work; toggling/reopenin
  expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
  const bars = [...container.querySelectorAll('.sales-daily-bar')];
  expect(bars.map(bar => bar.textContent)).toEqual(bars.map(bar => bar.dataset.date.slice(8)));
- await act(async () => Simulate.focus(bars[0]));
+ await act(async () => bars[0].focus());
  expect(container.querySelector('.sales-hover-summary').textContent).toContain('销售原额 ¥120');
  await act(async()=>Simulate.mouseEnter(container.querySelectorAll('.sales-daily-bar')[1]));
+ await act(async()=>Simulate.mouseMove(bars[1], { movementX: 14 }));
  expect(container.querySelector('.sales-hover-summary').textContent).toContain('¥-0.009 · 销量 -0.5 件');
  expect(mocks.day).not.toHaveBeenCalled();
  const negative=container.querySelector('.is-negative');expect(negative.style.top).toBe(container.querySelector('.sales-zero-line').style.top);
