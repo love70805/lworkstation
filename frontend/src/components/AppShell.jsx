@@ -12,10 +12,7 @@ import {
   HardDrive,
   Inbox,
   LayoutGrid,
-  Menu,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -92,7 +89,6 @@ export default function AppShell({ children, pageClass = "" }) {
   const navigate = useNavigate();
   const { notify } = useToast();
   const menuRef = useRef(null);
-  const brandToggleRef = useRef(null);
   const menuTrigger = useRef(null);
   const menuInitialFocus = useRef("first");
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -372,7 +368,6 @@ export default function AppShell({ children, pageClass = "" }) {
       <aside id="app-navigation" className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
           <button
-            ref={brandToggleRef}
             type="button"
             className={`brand-toggle ${effectiveSidebarCollapsed ? "brand-toggle-collapsed" : "brand-toggle-expanded"}`}
             onClick={onBrandToggle}
@@ -385,9 +380,6 @@ export default function AppShell({ children, pageClass = "" }) {
               <img className="brand-logo brand-logo-light" src="/assets/brand/lworkstation-wordmark-light.svg" alt="" aria-hidden="true" draggable="false" />
               <img className="brand-logo brand-logo-dark" src="/assets/brand/lworkstation-wordmark-dark.svg" alt="" aria-hidden="true" draggable="false" />
               <img className="brand-mark" src="/assets/brand/l7-app-icon-master.svg" alt="" aria-hidden="true" draggable="false" />
-            </span>
-            <span className="brand-toggle-hint" aria-hidden="true">
-              {effectiveSidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={18} />}
             </span>
           </button>
           <IconButton icon={X} label="关闭导航" className="sidebar-close" onClick={() => setMobileOpen(false)} />
@@ -413,8 +405,9 @@ export default function AppShell({ children, pageClass = "" }) {
 
       <header className="topbar">
         <div className="topbar-leading">
-          <IconButton icon={Menu} label="打开导航" className="mobile-menu" aria-expanded={mobileOpen} aria-controls="app-navigation" onClick={() => setMobileOpen(true)} />
-          {effectiveSidebarCollapsed ? <IconButton icon={PanelLeftOpen} label="展开导航" className="sidebar-expand" aria-expanded={false} aria-controls="app-navigation" onClick={() => { toggleSidebar(); brandToggleRef.current?.focus(); }} /> : null}
+          <button type="button" className="icon-button mobile-menu" aria-label="打开导航" title="打开导航" aria-expanded={mobileOpen} aria-controls="app-navigation" onClick={() => setMobileOpen(true)}>
+            <img src="/assets/brand/l7-app-icon-master.svg" alt="" width="32" height="32" draggable="false" />
+          </button>
           {trendOrigin ? <button type="button" className="topbar-trend-return" onClick={() => navigate(trendOrigin.href,trendReturnLocation(trendOrigin))}><ArrowLeft size={17} />返回趋势明细</button>
             : productOrigin ? <button type="button" className="topbar-trend-return" onClick={() => navigate(productOrigin,{replace:true})}><ArrowLeft size={17} />返回商品资料</button>
             : backTarget ? <IconButton icon={ArrowLeft} label="返回上一级" className="global-back" onClick={goBack} /> : null}

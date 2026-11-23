@@ -244,8 +244,6 @@ kbd {
   padding-right: 0;
 }
 
-/* The compact rail retains the product mark; the topbar offers a separate
-   expand control without moving any of the navigation items. */
 .brand-toggle {
   position: relative;
   display: flex;
@@ -253,8 +251,7 @@ kbd {
   min-width: 0;
   height: 40px;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  justify-content: flex-start;
   padding: 0 4px;
   border: 0;
   border-radius: var(--radius-lg);
@@ -269,35 +266,10 @@ kbd {
 .brand-toggle:hover { background: var(--surface-hover); }
 .brand-toggle:focus-visible { outline: 2px solid var(--primary-bright); outline-offset: 2px; }
 
-.brand-toggle-hint {
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  color: var(--text-muted);
-  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease, transform 100ms ease;
-}
-
-.brand-toggle:hover .brand-toggle-hint,
-.brand-toggle:focus-visible .brand-toggle-hint { background: var(--primary-soft); border-color: var(--primary-soft); color: var(--primary); }
-.brand-toggle:active .brand-toggle-hint { transform: scale(0.94); }
-.brand-toggle-hint svg { display: block; flex: 0 0 auto; }
-
 .brand-toggle-collapsed {
   flex: 0 0 40px;
   justify-content: center;
   padding: 0;
-}
-
-.brand-toggle-collapsed .brand-assets { display: flex; }
-
-.brand-toggle-collapsed .brand-toggle-hint {
-  display: none;
 }
 
 .brand-assets {
@@ -317,7 +289,6 @@ kbd {
 }
 .brand-mark { display: none; width: 36px; height: 36px; user-select: none; }
 .sidebar-collapsed .brand-mark { display: block; }
-.sidebar-expand { color: var(--primary); background: var(--primary-soft); }
 
 html[data-appearance="dark"] .brand-logo-light { display: none; }
 html[data-appearance="dark"] .brand-logo-dark { display: block; }
@@ -1440,8 +1411,7 @@ textarea::placeholder {
   }
 
   .brand-toggle-collapsed { flex: 1; justify-content: flex-start; padding: 0 4px; }
-  .brand-toggle-collapsed .brand-assets { display: flex; }
-  .sidebar-collapsed .brand-mark, .sidebar-expand { display: none !important; }
+  .sidebar-collapsed .brand-mark { display: none !important; }
   .sidebar-collapsed .brand-logo-light { display: block; }
   html[data-appearance="dark"] .sidebar-collapsed .brand-logo-light { display: none; }
   html[data-appearance="dark"] .sidebar-collapsed .brand-logo-dark { display: block; }
@@ -1467,7 +1437,6 @@ textarea::placeholder {
 
   .sidebar-open { transform: translateX(0); }
   .sidebar-close { display: inline-flex !important; margin-left: auto; }
-  .brand-toggle-hint { display: none; }
 
   .sidebar-scrim {
     position: fixed;

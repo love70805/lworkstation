@@ -43,7 +43,7 @@ it('hover/focus reads both exact values without database work; toggling/reopenin
  await act(async()=>Simulate.keyDown(container.querySelector('.sales-day-details'),{key:'Escape'}));expect(container.querySelector('.sales-day-details')).toBeNull();
 });
 it('paginates selected-period SKCs and searches without changing totals',async()=>{
- await click(dayButton());await click(container.querySelector('.sales-store-entry'));expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
+ await click(dayButton());await click(container.querySelector('.sales-store-entry'));await click(button('查看商品明细'));expect(container.querySelectorAll('tbody tr')).toHaveLength(5);
  expect(container.querySelector('tbody tr').textContent).toContain('skc-00');
  expect(container.querySelector('.sales-activities')).toBeNull();
  expect(container.querySelector('tbody tr strong').textContent).toBe('skc-00');

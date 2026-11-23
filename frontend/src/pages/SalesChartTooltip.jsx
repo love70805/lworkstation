@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-export function useChartHover() {
+export function useChartHover(pointerAnchor = event => event.currentTarget) {
   const [anchor, setAnchor] = useState(null);
   const keyboardAnchor = useRef(null);
   const open = anchor != null;
@@ -18,13 +18,13 @@ export function useChartHover() {
 
   function hide(event) {
     const target = event.currentTarget;
-    setAnchor(current => current === target ? null : current);
+    setAnchor(current => target.contains(current) ? null : current);
   }
   return { anchor, events: {
     onFocus: event => {
       if (event.currentTarget.matches(':focus-visible')) {
         keyboardAnchor.current = event.currentTarget;
-        setAnchor(event.currentTarget);
+        setAnchor(event.currentTarget.querySelector('.sales-month-column:only-child') ?? event.currentTarget);
       }
     },
     onBlur: event => {
@@ -32,11 +32,12 @@ export function useChartHover() {
       hide(event);
     },
     // Scrolling can put a new bar under a stationary pointer during keyboard navigation.
-    onMouseEnter: event => { if (!keyboardAnchor.current?.isConnected) setAnchor(event.currentTarget); },
+    onMouseEnter: event => { if (!keyboardAnchor.current?.isConnected) setAnchor(pointerAnchor(event)); },
     onMouseMove: event => {
       if (anchor && (event.movementX || event.movementY)) {
         keyboardAnchor.current = null;
-        if (anchor !== event.currentTarget) setAnchor(event.currentTarget);
+        const next = pointerAnchor(event);
+        if (anchor !== next) setAnchor(next);
       }
     },
     onMouseLeave: event => { if (!keyboardAnchor.current?.isConnected) hide(event); },
@@ -60,7 +61,7 @@ function spacesAround(rect, width, height) {
   }).filter(area => area.width > 0 && area.height > 0);
 }
 
-function positionTooltip(tip, anchor, plot) {
+function positionTooltip(tip, anchor) {
   const width = document.documentElement.clientWidth || window.innerWidth;
   const height = document.documentElement.clientHeight || window.innerHeight;
   const bar = anchor.getBoundingClientRect();
@@ -69,14 +70,7 @@ function positionTooltip(tip, anchor, plot) {
     return;
   }
   const centerX = (bar.left + bar.right) / 2, centerY = (bar.top + bar.bottom) / 2;
-  const distance = area => Math.hypot(
-    centerX - clamp(centerX, area.left, area.left + area.width),
-    centerY - clamp(centerY, area.top, area.top + area.height),
-  );
-  const nearestFirst = (a, b) => distance(a) - distance(b);
-  const aroundPlot = spacesAround(plot.getBoundingClientRect(), width, height).sort(nearestFirst);
-  const aroundBar = spacesAround(bar, width, height).sort(nearestFirst);
-  const spaces = [...aroundPlot, ...aroundBar];
+  const spaces = spacesAround(bar, width, height);
   tip.removeAttribute('data-compact');
   tip.style.maxWidth = '';
   tip.style.maxHeight = '';
@@ -91,7 +85,7 @@ function positionTooltip(tip, anchor, plot) {
   }
   if (!space) {
     const visibleArea = area => Math.min(area.width, size.width) * Math.min(area.height, size.height);
-    space = aroundBar.sort((a, b) => visibleArea(b) - visibleArea(a))[0];
+    space = spaces.sort((a, b) => visibleArea(b) - visibleArea(a))[0];
     if (!space) { tip.style.visibility = 'hidden'; return; }
     tip.style.maxWidth = Math.min(size.width, space.width) + 'px';
     tip.style.maxHeight = space.height + 'px';
@@ -108,7 +102,7 @@ export default function SalesChartTooltip({ anchor, children }) {
     const tip = ref.current, plot = anchor.closest('.sales-chart-plot');
     if (!plot) return;
     tip.showPopover?.();
-    const update = () => positionTooltip(tip, anchor, plot);
+    const update = () => positionTooltip(tip, anchor);
     update();
     let frame = 0;
     const schedule = () => {
