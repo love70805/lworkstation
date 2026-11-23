@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/dispatch-contribution-preview-2.1.7",
+  "integrationBranch": "codex/trend-detail-simplification",
   "requiredCommits": [
     {
-      "module": "release-2.1.6",
-      "commit": "0c77c67cfabdf99f86278337b125375e0b43ff5c"
+      "module": "release-2.1.7",
+      "commit": "00910ee981a8dee1c2d1b7752b8c0a486a3d77e8"
     }
   ]
 }

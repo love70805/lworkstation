@@ -288,7 +288,7 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
       </div> : <SalesPeriodDetails key={detailKey(selection, chosenStore)} selection={selection} data={scopedDetail} error={details?.scope === detailScope ? details.error : null}
         unitCosts={profitData?.byLedger[selection.ledgerId]?.unitCosts} catalog={catalog} onOpenProduct={onOpenProduct && ((id, stores, skc) => leaveTrend('product',skc,onOpenProduct,id,{ledgerId:selection.ledgerId,mode:profitData?.byLedger[selection.ledgerId]?.accountingMode,stores,skc}))}
         onOpenProfit={onOpenProfit && ((skc,stores) => leaveTrend('profit',skc,onOpenProfit,{ledgerId:selection.ledgerId,mode:profitData?.byLedger[selection.ledgerId]?.accountingMode,stores,skc}))}
-        metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} productView={productView} onProductView={setProductView} state={listStates[listKey]} onStateChange={updateList}
+        metric={metric} chosenStore={chosenStore} onChooseStore={chooseStore} productView={productView} state={listStates[listKey]} onStateChange={updateList}
         onBack={listStore ? () => chooseStore(null) : close} onTrend={listStore ? close : null}
         periods={periods} onPeriodChange={changePeriod} position={position} />}
     </div>
