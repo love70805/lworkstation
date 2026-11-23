@@ -28,12 +28,10 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
 it('hover/focus reads both exact values without database work; toggling/reopening does not recalculate month',async()=>{
  expect(container.querySelectorAll('.sales-daily-bar')).toHaveLength(31);
- const markers = [...container.querySelectorAll('.sales-daily-bar .sales-bar-value')];
- expect(markers.map(node => [node.closest('button').dataset.date, node.textContent])).toEqual([
-   ['2026-08-01','120'], ['2026-08-02','-0.009'],
- ]);
- expect(markers[1].classList.contains('negative')).toBe(true);
- expect([...container.querySelectorAll('.sales-daily-bar')].filter(node => node.textContent === '0' + node.dataset.date.slice(8))).toHaveLength(0);
+ const bars = [...container.querySelectorAll('.sales-daily-bar')];
+ expect(bars.map(bar => bar.textContent)).toEqual(bars.map(bar => bar.dataset.date.slice(8)));
+ await act(async () => Simulate.focus(bars[0]));
+ expect(container.querySelector('.sales-hover-summary').textContent).toContain('销售原额 ¥120');
  await act(async()=>Simulate.mouseEnter(container.querySelectorAll('.sales-daily-bar')[1]));
  expect(container.querySelector('.sales-hover-summary').textContent).toContain('¥-0.009 · 销量 -0.5 件');
  expect(mocks.day).not.toHaveBeenCalled();
@@ -54,7 +52,7 @@ it('paginates selected-period SKCs and searches without changing totals',async()
  const before=container.querySelector('.sales-details-heading p').textContent;
  await act(async()=>Simulate.change(container.querySelector('.sales-details-controls input'),{target:{value:'SKC-03'}}));
  expect(container.querySelectorAll('tbody tr')).toHaveLength(1);expect(container.querySelector('.sales-details-heading p').textContent).toBe(before);
- expect(container.querySelector('.sales-list-scope').textContent).toContain('1/15');
+ expect(container.querySelector('.sales-result-count').textContent).toBe('匹配 1/15 款商品');
 });
 it.each([{store:'乙'},{ledgerId:'new-month'},{workspaceId:'other-workspace'}])('discards a late day response after scope changes %j',async next=>{
  let finish;mocks.day.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
