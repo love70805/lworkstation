@@ -36,7 +36,7 @@ export async function sha256(value) {
 
 // An exported report keeps every source reference. The interactive page needs
 // the same exact sums, the source count and its first reference only.
-export function groupReportSales(salesRows, preview = false) {
+export function groupReportSales(salesRows, preview = false, freezeSources = false) {
   const groups = new Map();
   for (const source of salesRows) {
     if (/盘亏/.test(source.movementType ?? "")) continue;
@@ -44,9 +44,11 @@ export function groupReportSales(salesRows, preview = false) {
     const key = JSON.stringify([createLedgerGroupKey(source), createLedgerSkuKey(source)]);
     if (!groups.has(key)) groups.set(key, { lineKind: "product", store: source.store, platformSkc: source.platformSkc ?? "", groupSkc: source.platformSkc || source.supplierNumber, platformSku: source.platformSku, canonicalPlatformSku: canonicalPlatformSku(source.platformSku), supplierNumber: source.supplierNumber ?? "", attribute: source.attribute ?? "", quantityExact: "0", revenueExact: "0", sourceRows: [] });
     const row = groups.get(key);
-    row.quantityExact = new Exact(row.quantityExact).plus(exact(source.quantityExact ?? source.quantity)).toFixed();
-    row.revenueExact = new Exact(row.revenueExact).plus(exact(source.amountExact ?? source.amount)).toFixed();
-    if (!preview || !row.sourceRows.length) row.sourceRows.push({ id: source.id, batchId: source.batchId, sourceSheet: source.sourceSheet, sourceRow: source.sourceRow });
+    const quantityExact = exact(source.quantityExact ?? source.quantity), amountExact = exact(source.amountExact ?? source.amount);
+    row.quantityExact = new Exact(row.quantityExact).plus(quantityExact).toFixed();
+    row.revenueExact = new Exact(row.revenueExact).plus(amountExact).toFixed();
+    if (!preview || !row.sourceRows.length) row.sourceRows.push({ id: source.id, batchId: source.batchId, sourceSheet: source.sourceSheet, sourceRow: source.sourceRow,
+      ...(freezeSources ? { quantityExact, amountExact } : {}) });
     if (preview) row.sourceRowCount = (row.sourceRowCount ?? 0) + 1;
   }
   if (!groups.size) throw new Error("账本没有可生成报告的销售明细。");
@@ -54,10 +56,10 @@ export function groupReportSales(salesRows, preview = false) {
 }
 
 export function buildReportProducts(input, checkPeriod) {
-  return priceReportGroups(input, groupReportSales(input.salesRows), checkPeriod);
+  return priceReportGroups(input, groupReportSales(input.salesRows, false, input.freezeSources), checkPeriod);
 }
 
-export function priceReportGroups({ ledger, salesRows, erpCosts, approvals, allowMissing = false }, groups, checkPeriod) {
+export function priceReportGroups({ ledger, salesRows, erpCosts, approvals, allowMissing = false, freezeSources = false }, groups, checkPeriod) {
   const identities = buildLedgerSkuIdentityIndex(salesRows);
   const costs = new Map(erpCosts.map(row => [canonicalPlatformSku(row.platformSku), row]));
   const manualGroups = new Map();
@@ -71,7 +73,8 @@ export function priceReportGroups({ ledger, salesRows, erpCosts, approvals, allo
   return groups.map(row => {
     const scope = { workspaceId: ledger.workspaceId, ledgerId: ledger.id, store: row.store, platformSku: row.platformSku };
     const cost = costs.get(row.canonicalPlatformSku);
-    const decision = resolveLedgerCostDecision({ ...scope, accountingMode: ledger.accountingMode, identity: identities.get(row.canonicalPlatformSku), period: costEvaluationPeriod(ledger), erpCost: cost, manualOverride: selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope) }, checkPeriod);
+    const manualOverride = selectManualOverride(manualGroups.get(storeSkuKey(row.store, row.platformSku)), scope);
+    const decision = resolveLedgerCostDecision({ ...scope, accountingMode: ledger.accountingMode, identity: identities.get(row.canonicalPlatformSku), period: costEvaluationPeriod(ledger), erpCost: cost, manualOverride }, checkPeriod);
     if (!decision.eligibleForExactProfit) {
       if (allowMissing) return { ...row, unitCostExact:null, purchaseCostExact:null, profitExact:null, warehouseCostExact:new Exact(row.quantityExact).times(rate).toFixed(), costSource:decision.source, costSourceRecordId:decision.sourceRecordId, costIdentityIssue:decision.identityIssue ?? null };
       if (decision.identityIssue) throw new Error(`${describeLedgerCostIdentityIssue(decision.identityIssue)}不能生成报告。`);
@@ -80,6 +83,10 @@ export function priceReportGroups({ ledger, salesRows, erpCosts, approvals, allo
     const warehouseCostExact = new Exact(row.quantityExact).times(rate).toFixed();
     return { ...row, ...purchaseAmounts(decision, row.quantityExact, row.revenueExact, warehouseCostExact), accountingMode: decision.accountingMode, warehouseCostExact, costSource: decision.source, costSourceRecordId: decision.sourceRecordId, costApprovalId: decision.approvalId, orderNumber: cost?.orderNumber ?? "",
       costPurchaseRecords: decision.source === "erp" ? adoptedCostEvidence(cost).selected : [],
+      ...(freezeSources && manualOverride ? { manualCostSource: { id:manualOverride.id, approvedAmount:manualOverride.approvedAmount,
+        approvedBy:manualOverride.approvedBy, approvedAt:manualOverride.approvedAt, reason:manualOverride.reason } } : {}),
+      ...(freezeSources && decision.source === 'erp' ? { erpCostSource: { id:cost.id, batchId:cost.batchId, sourceInboxId:cost.sourceInboxId,
+        sourceCostRowId:cost.sourceCostRowId, warehouseSku:cost.warehouseSku, unitCost:cost.unitCostExact ?? cost.unitCost } } : {}),
       costResolutionVersion: decision.source === "erp" ? adoptedCostEvidence(cost).decision?.resolutionVersion ?? null : null };
   }).sort((a,b) => a.store.localeCompare(b.store,"zh-CN") || a.groupSkc.localeCompare(b.groupSkc) || a.platformSku.localeCompare(b.platformSku));
 }

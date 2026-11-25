@@ -2,7 +2,7 @@ import { canonicalPlatformSku, canonicalPlatformSkc } from './identifiers';
 import { resolveFormalCostDecision } from './costPolicy';
 
 const text = value => String(value ?? '').normalize('NFKC').trim();
-export const LEDGER_COST_IDENTITY_VERSION = 'ledger-cost-identity@2-shared-manual';
+export const LEDGER_COST_IDENTITY_VERSION = 'ledger-cost-identity@3-confirmed-zero';
 
 // Build from the complete ledger, before any store/search/missing-cost filter.
 // A manual amount can replace a price, but cannot resolve an ambiguous parent.

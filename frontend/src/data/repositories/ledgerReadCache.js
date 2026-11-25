@@ -82,7 +82,7 @@ export async function readLedgerStoreNames(workspaceId, ledgerId) {
 }
 
 // Every consumer establishes its own live-query dependency even on a shared hit.
-export async function readLedgerSalesRows(workspaceId, ledgerId, { strict = false, cooperative = false, observe = true, profitPage = false } = {}) {
+export async function readLedgerSalesRows(workspaceId, ledgerId, { strict = false, cooperative = false, observe = true, profitPage = false, fresh = false } = {}) {
   const writing = Dexie.currentTransaction?.mode === 'readwrite';
   const observable = !writing;
   if (observable && observe) await Promise.all([db.salesRows.count(), observeTableRevision('salesRows')]);
@@ -117,7 +117,7 @@ export async function readLedgerSalesRows(workspaceId, ledgerId, { strict = fals
   // receipt edits do not change the immutable sales source for other readers.
   const revisionReader = revision ? salesRevision : sourceRevision;
   const sourceVersion = revision ?? sourceRevision();
-  let rows = !observable ? await read() : await cachedDerived({ scope: [ledgerId], formula: profitPage ? 'profit-page-sales@1' : 'raw-ledger-rows@3-source', revision: sourceVersion,
+  let rows = fresh || !observable ? await read() : await cachedDerived({ scope: [ledgerId], formula: profitPage ? 'profit-page-sales@1' : 'raw-ledger-rows@3-source', revision: sourceVersion,
     revisionReader, persist: false, boundedMemory: true, compute: read,
     ...(cooperative ? { measure: cooperativeDerivedValueBytes } : {}),
   });

@@ -16,7 +16,7 @@ export function readSalesProfitAnalysis({ workspaceId, ledgerId, store = 'all', 
     const revisionReader = ledger.accountingMode === 'historical_lowest' ? inventoryLowestRevision : inventoryCalculationRevision;
     const result = await cachedDerived({
       scope: [workspaceId, ledgerId, store, daily, ledger.accountingMode, ledger.warehouseRate],
-      formula: 'sales-product-profit@3-cost-source', revision: dataVersion, revisionReader, boundedMemory: true,
+      formula: 'sales-product-profit@4-owned-ledgers', revision: dataVersion, revisionReader, boundedMemory: true,
       compute: async () => {
         const pageChunks = daily ? await readPageSaleChunks(workspaceId, ledgerId, { parent: ledger }) : undefined;
         return runDerivedComputation('sales-profit', { ledger, identities: rows, approvals, costs, groups: pageSales.groups, store, workspaceId, pageChunks });

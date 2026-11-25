@@ -11,6 +11,20 @@ const CANCELLED_PURCHASE_STATUS = /(?:^|[\s:：])(?:11|cancel(?:led)?|void(?:ed)
 
 export const PURCHASE_TOTAL_BASIS = "purchase_total";
 
+export function hasConfirmedZeroErpCost(row) {
+  const records = row?.costDecision?.selectedRecords;
+  return row?.unitCost === 0 && row.costDecision?.resolutionStatus === 'resolved'
+    && Array.isArray(records) && records.length > 0
+    && records.every(record => record?.unitPrice === 0 && record.effectiveUnitPrice === 0 && record.resolution?.action === 'ignore_anomaly');
+}
+
+export function compactZeroCostEvidence(row) {
+  if (!hasConfirmedZeroErpCost(row)) return {};
+  return { costDecision: { resolutionStatus: row.costDecision.resolutionStatus,
+    selectedRecords: row.costDecision.selectedRecords.map(({unitPrice, effectiveUnitPrice, resolution}) =>
+      ({unitPrice, effectiveUnitPrice, resolution: { action: resolution.action }})) } };
+}
+
 // Most ERP amounts fit the existing numeric representation. Preserve source
 // decimals as text whenever conversion to Number would change their value.
 export function purchaseTotalValue(value, numeric = finiteNumber(value)) {

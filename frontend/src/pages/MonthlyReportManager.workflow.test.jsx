@@ -42,11 +42,16 @@ it('uses current data for legacy finalized ledgers and permits source updates di
  expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('更新代发').click());expect(onEdit).toHaveBeenCalledWith('dispatch');
  await act(async()=>button('导出利润表').click());expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},expect.any(Object));
 });
-it('shows the current export and sources even when the ledger contains archived reports',async()=>{
+it('downloads a verified archived original on demand while current exports remain available',async()=>{
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
  expect(button('导出利润表')).toBeDefined();expect(button('更新扣款')).toBeDefined();
- expect(container.textContent).not.toMatch(/历史导出|下载此报告|下载最近报告|补齐代发单号/);
  expect(mock.read).not.toHaveBeenCalled();
+ const history=[...container.querySelectorAll('details')].find(item=>item.querySelector('summary')?.textContent==='导出记录');
+ await act(async()=>{history.open=true;history.dispatchEvent(new Event('toggle'));});
+ await act(async()=>button('下载原件').click());
+ expect(mock.read).toHaveBeenCalledWith('F');
+ expect(mock.download).toHaveBeenCalledWith(formal,{useStoredFile:true});
+ expect(mock.save).not.toHaveBeenCalled();
 });
 it('does not close a source editor when a prior report exists',async()=>{
  const onEdit=vi.fn();await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});

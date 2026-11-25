@@ -191,9 +191,11 @@ export function base64ToBytes(value){
   return result;
 }
 export async function prepareReportDownload(report, { dispatchRows, deductionRows, useStoredFile=false } = {}) {
-  if (report.bytes instanceof Uint8Array && !report.id && !dispatchRows && !deductionRows) return report.bytes;
-  if(report.downloadFormat===REPORT_DOWNLOAD_FORMAT&&FINAL_FILE_TEMPLATES.includes(report.templateVersion)
-    &&(useStoredFile||!dispatchRows&&!deductionRows)){
+  if (report.bytes instanceof Uint8Array && !useStoredFile && !dispatchRows && !deductionRows) {
+    if (report.id && await sha256(report.bytes)!==report.fileSha256) throw new Error('报告文件校验失败，请检查完整报告备份。');
+    return report.bytes;
+  }
+  if(useStoredFile || report.downloadFormat===REPORT_DOWNLOAD_FORMAT && FINAL_FILE_TEMPLATES.includes(report.templateVersion) && !dispatchRows && !deductionRows){
     const bytes=base64ToBytes(report.fileBase64);
     if(bytes[0]!==80||bytes[1]!==75||!report.fileSha256||await sha256(bytes)!==report.fileSha256)throw new Error('报告文件校验失败，请检查完整报告备份。');
     return bytes;
@@ -213,4 +215,4 @@ export async function prepareReportDownload(report, { dispatchRows, deductionRow
   const { formatSavedReportLayout } = await import('./savedReportLayout');
   return formatSavedReportLayout(bytes);
 }
-export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=profitReportFileName(report,options);a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+export async function downloadReportFile(report, options){const bytes=await prepareReportDownload(report, options);const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=options?.useStoredFile && report.fileName ? report.fileName : profitReportFileName(report,options);a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}

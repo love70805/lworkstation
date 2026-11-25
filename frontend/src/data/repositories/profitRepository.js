@@ -2646,7 +2646,7 @@ async function readLedgerSnapshot(ledgerId, { summaryOnly = false, profitPage = 
   // checks existed. Project current readiness without mutating business data or
   // touching any frozen report/snapshot during an upgrade or ordinary read.
   const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, ledger.period, accountingMode],
-    formula: profitPage ? 'profit-page-coverage@2-shared-manual' : 'inventory-cost-coverage@4-shared-manual', revisionReader: calculationReader, revision: calculationRevision, persist: profitPage,
+    formula: profitPage ? 'profit-page-coverage@3-owned-zero' : 'inventory-cost-coverage@5-owned-zero', revisionReader: calculationReader, revision: calculationRevision, persist: profitPage,
     compute: () => runDerivedComputation(profitPage ? 'profit-page-coverage' : 'cost-coverage', { salesRows: rows, erpCosts: costs, approvals,
       workspaceId: ledger.workspaceId, ledgerId: ledger.id, period: costEvaluationPeriod(ledger), accountingMode }) });
   assertSourceRevision(dataVersion, ledgerSnapshotRevision);
@@ -2680,15 +2680,16 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
     const projected = await Promise.all(ledgers.map(async original => {
       const ledger = operatingLedger(original);
       if (mode === 'historical_lowest') return (await getLedgerSnapshot(ledger.id, { summaryOnly: true, profitPage: true }))?.ledger ?? ledger;
-      if (ledger.costSummary?.identityPolicyVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
-      if (ledger.costSummary?.identityPolicyVersion === 'ledger-cost-identity@1') {
-        // A weighted summary from the previous version is still valid if there
-        // were no separate manual records to bring over from lowest mode.
+      const summaryVersion = ledger.costSummary?.identityPolicyVersion;
+      if (summaryVersion === LEDGER_COST_IDENTITY_VERSION) return ledger;
+      let priorCoverageApplies = summaryVersion === 'ledger-cost-identity@2-shared-manual';
+      if (summaryVersion === 'ledger-cost-identity@1') {
         const legacy = await db.costApprovals.where('ledgerId').equals(ledger.id).filter(row =>
           row.workspaceId === ledger.workspaceId && row.accountingMode === LOWEST_ACCOUNTING && manualSnapshot(row)?.kind === 'manual_override').first();
-        if (!legacy) return ledger;
+        priorCoverageApplies = !legacy;
       }
-      const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id], formula: 'ledger-cost-summary@2-shared-manual',
+      if (priorCoverageApplies && ledger.costSummary.missingCount === 0) return ledger;
+      const coverage = await cachedDerived({ scope: [ledger.workspaceId, ledger.id, priorCoverageApplies], formula: 'ledger-cost-summary@3-confirmed-zero',
         revision, revisionReader: selectionFactsRevision, persist: false, compute: async () => {
           const saleIdentities = new Map(), latest = new Map(), batchStates = new Map();
           let needsOwnershipProof = false, invalidSales = false, foreignSales = false, foreignBatch = false, foreignCost = false;
@@ -2723,14 +2724,13 @@ export async function withVerifiedLedgerCostSummaries(ledgers) {
             if (order < 0) return;
             // Consume period evidence while visiting the stored row; keep only
             // the small identity/amount projection in the derived cache path.
-            latest.set(sku, { id: row.id, batchId: row.batchId, platformSku: row.platformSku, platformSkc: row.platformSkc,
-              unitCost: row.unitCost, resolutionStatus: row.resolutionStatus, unresolvedAnomalyCount: row.unresolvedAnomalyCount,
-              publishedAt: row.publishedAt, periodVerified: isErpCostWithinPeriod(row, ledger.period) });
+            latest.set(sku, { id: row.id, batchId: row.batchId, ...projectCoverageCost(row, ledger.period) });
           });
           if (foreignCost) throw new Error('ERP 成本记录不属于当前账本工作区。');
           const identities = buildLedgerSkuIdentityIndex(salesRows);
           const currentCosts = [...latest.values()].filter(row => batchStates.get(row.batchId) === 'published');
-          const erpCosts = currentCosts.filter(row => row.periodVerified);
+          const erpCosts = currentCosts.filter(row => row.withinPeriod);
+          if (priorCoverageApplies && !erpCosts.some(row => row.unitCost === 0)) return null;
           const approvals = [];
           await db.costApprovals.where('ledgerId').equals(ledger.id).each(row => {
             if (row.workspaceId && row.workspaceId !== ledger.workspaceId) return;

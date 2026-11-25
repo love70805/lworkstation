@@ -33,15 +33,50 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
-it('downloads current workbook bytes without persisting a report, source lines, or audit',async()=>{
+it('archives every direct export with its own verified workbook, source lines and audit',async()=>{
  const input={ledgerId:'L',kind:'pre_deduction'},stages=[];
+ const ledger=await db.ledgers.get('L');
  const first=await createCurrentProfitReport(input,{onProgress:stage=>stages.push(stage)});
+ expect(await db.ledgers.get('L')).toEqual(ledger);
+ const original=await prepareReportDownload(first);
+ const firstLines=await db.profitReportLines.where('reportId').equals(first.id).toArray();
+ await db.ledgers.update('L',{warehouseRate:1});
  const second=await createCurrentProfitReport(input);
- expect(await prepareReportDownload(first)).toEqual(second.bytes);
- expect(first.bytes.slice(0,2)).toEqual(new Uint8Array([80,75]));
- expect(stages).toEqual(['正在核对台账与成本…','正在生成本次报告…','正在核对导出来源…']);
- expect(await db.profitReports.count()).toBe(0);expect(await db.profitReportLines.count()).toBe(0);
- expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(0);
+ expect(first).toMatchObject({revision:1,warehouseRateExact:'0.7'});
+ expect(second).toMatchObject({revision:2,warehouseRateExact:'1',supersedesReportId:first.id});
+ expect(second.id).not.toBe(first.id);
+ expect((await prepareReportDownload(second))).not.toEqual(original);
+ expect(await prepareReportDownload((await readProfitReportDownload(first.id)).report)).toEqual(original);
+ expect(firstLines).toHaveLength(2);
+ expect(firstLines[0].sourceRows[0]).toMatchObject({quantityExact:'0.5',amountExact:'0.009'});
+ expect(firstLines.every(row=>row.manualCostSource.id===row.costApprovalId)).toBe(true);
+ expect(await db.profitReportLines.where('reportId').equals(first.id).toArray()).toEqual(firstLines);
+ expect(stages).toContain('正在核对并保存报告…');
+ expect(await db.profitReports.count()).toBe(2);
+ expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(2);
+ const backup=await createWorkspaceBackupPayload();
+ await restoreWorkspaceBackupPayload(backup);
+ expect(await prepareReportDownload((await readProfitReportDownload(first.id)).report,{useStoredFile:true})).toEqual(original);
+});
+it('exports and adopts supplements in both modes for sales with a persisted parent and no workspace field',async()=>{
+ await db.salesRows.toCollection().modify({workspaceId:undefined});
+ for (const mode of ['weighted','historical_lowest']) {
+   if (mode==='historical_lowest') await toggleAccountingMode('W');
+   await adopt('dispatch');
+   await adopt('deduction');
+   for (const kind of ['pre_deduction','financial']) {
+     const saved=await createCurrentProfitReport({ledgerId:'L',kind});
+     expect(saved).toMatchObject({accountingMode:mode,kind,revision:1});
+     const frozen=await readProfitReportDownload(saved.id);
+     expect(frozen.deductionRows).toHaveLength(kind==='financial'?2:0);
+   }
+ }
+ expect((await db.salesRows.toArray()).every(row=>row.workspaceId===undefined)).toBe(true);
+ const sale=await db.salesRows.toCollection().first();
+ await db.salesRows.update(sale.id,{workspaceId:'OTHER'});
+ await expect(createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'})).rejects.toThrow('跨工作区');
+ await expect(adopt('dispatch')).rejects.toThrow('跨工作区');
+ expect(await db.profitReports.count()).toBe(4);
 });
 it('rejects equal-count source edits during direct generation without a partial report',async()=>{
  const row=await db.salesRows.toCollection().first();let edit;
@@ -79,16 +114,19 @@ it('rejects an in-place raw purchase edit even when its amount, SKU, publication
  expect(await db.profitReports.count()).toBe(0);
  expect(await db.profitReportLines.count()).toBe(0);
 });
-it('exports without accessing report-line storage',async()=>{
- const write=vi.spyOn(db.profitReportLines,'bulkAdd').mockRejectedValue(new Error('no archive available'));
- expect((await createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'})).bytes.length).toBeGreaterThan(0);
- expect(write).not.toHaveBeenCalled();
+it('rolls back the direct export when its frozen source lines cannot be written',async()=>{
+ vi.spyOn(db.profitReportLines,'bulkAdd').mockRejectedValue(new Error('快照写入失败'));
+ await expect(createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'})).rejects.toThrow('快照写入失败');
+ expect(await db.profitReports.count()).toBe(0);
+ expect(await db.profitReportLines.count()).toBe(0);
+ expect(await db.auditEvents.filter(row=>row.action==='report_saved').count()).toBe(0);
 });
-it.each(['permission','workspace','accounting','warehouse'])('rejects a %s change before the direct report write',async change=>{
+it.each(['permission','member','workspace','accounting','warehouse'])('rejects a %s change before the direct report write',async change=>{
  let edit;
  await expect(createCurrentProfitReport({ledgerId:'L',kind:'pre_deduction'},{onProgress:stage=>{
    if(stage!=='正在生成本次报告…')return;
    if(change==='permission')edit=setActiveMemberContext({workspaceId:'W',memberId:'viewer',role:'viewer'});
+   if(change==='member')edit=setActiveMemberContext({workspaceId:'W',memberId:'second-finance',role:'finance'});
    if(change==='workspace')edit=setActiveMemberContext({workspaceId:'OTHER',memberId:'finance',role:'finance'});
    if(change==='accounting')edit=db.settings.put({key:'inventory-accounting:W',value:'historical_lowest'});
    if(change==='warehouse')edit=db.ledgers.update('L',{warehouseRate:0.8});

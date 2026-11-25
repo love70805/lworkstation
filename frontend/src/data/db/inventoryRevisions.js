@@ -1,7 +1,7 @@
 import { db } from './clientDatabase';
 import { sourceRevision, tableRevisionReader, observeTableRevision } from './derivedCache';
 
-const evidenceTables = ['erpCostRows','erpCostBatches','erpCostInbox','erpCostRequests'];
+const evidenceTables = ['erpCostRows','erpCostBatches','erpCostInbox','erpCostRequests','ledgers'];
 const calculationTables = ['erpCostRows','erpCostBatches','ledgers','salesRows','costApprovals'];
 const lowestTables = [...new Set([...calculationTables,...evidenceTables])];
 const evidenceReaders = evidenceTables.map(tableRevisionReader);

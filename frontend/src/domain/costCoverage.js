@@ -1,6 +1,7 @@
 import { canonicalPlatformSku } from "./identifiers";
 import { manualSnapshot, createManualOverrideLookup, storeSkuKey } from "./manualCostOverride";
 import { isErpCostWithinPeriod } from "./erpCostPeriod";
+import { compactZeroCostEvidence, hasConfirmedZeroErpCost } from "./erpPurchaseEvidence";
 import { buildLedgerSkuIdentityIndex, ledgerCostIdentityIssue, LEDGER_COST_IDENTITY_VERSION } from './ledgerCostIdentity';
 import { accountingApprovals } from './inventoryAccounting';
 
@@ -10,7 +11,7 @@ function validAmount(value) {
 }
 
 function formalErpCost(item) {
-  return validAmount(item?.unitCost)
+  return (validAmount(item?.unitCost) || hasConfirmedZeroErpCost(item))
     && (item?.resolutionStatus === "resolved" || (item?.resolutionStatus == null && Boolean(item?.publishedAt)))
     && Number(item?.unresolvedAnomalyCount ?? 0) === 0;
 }
@@ -19,7 +20,7 @@ function formalErpCost(item) {
 // month against the original purchase records in the caller's transaction.
 export function projectCoverageCost(row, period, verifiedWithinPeriod) {
   const { platformSku, sku, platformSkc, unitCost, resolutionStatus, unresolvedAnomalyCount, publishedAt } = row;
-  return { platformSku, sku, platformSkc, unitCost, resolutionStatus, unresolvedAnomalyCount, publishedAt,
+  return { platformSku, sku, platformSkc, unitCost, resolutionStatus, unresolvedAnomalyCount, publishedAt, ...compactZeroCostEvidence(row),
     withinPeriod: formalErpCost(row) && (verifiedWithinPeriod ?? isErpCostWithinPeriod(row, period)) };
 }
 
