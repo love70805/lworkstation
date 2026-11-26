@@ -95,24 +95,24 @@ export function formatCostPurchaseEvidence(row) {
 
 export function buildProfitExportRows(rows, ledger, summary) {
   const version = isProfitSnapshot(ledger) ? ledger.formulaVersion : PROFIT_FORMULA_VERSION;
+  const displayVersion = /^monthly-profit@\d+/.exec(version)?.[0] ?? version ?? "未记录";
   const rule = version === PROFIT_FORMULA_VERSION
-    ? (ledger.accountingMode === 'historical_lowest' ? "最低模式取低后单价截到两位再乘销量" : "常规模式按完整单件成本核算，ERP 采购总价乘销量后除以采购件数")
+    ? "按各项采购成本汇总，合计金额按分展示"
     : "历史定稿快照：保留已存金额和公式版本，不重新计算";
   return [...rows.map((row) => ({
     SKC: row.groupSkc, SKU: row.platformSku, 属性: row.attribute,
     数量: row.qty, 金额: row.revenue, "关联单号": profitOrderNumberForExport(row),
     核算采购明细: formatCostPurchaseEvidence(row),
-    成本算法: row.costResolutionVersion ?? "",
     店铺: row.store,
     成本口径: row.costSource === "manual_override" ? "人工更正" : row.costSource === "erp" ? "ERP 正式成本" : row.costSource === "approved_1688" ? "人工参考，未计正式利润" : "待 ERP 成本",
     单件平均成本: row.unitCost ?? row.reference1688Cost?.unitCost ?? "缺失",
     "总件数*成本": row.purchaseCost ?? "缺失", 仓储成本: row.warehouseCost,
     客退罚款: row.penalty, 利润: row.profit ?? "未完成",
-    公式版本: version ?? "未记录", 汇总规则: rule,
+    公式版本: displayVersion, 汇总规则: rule,
   })), {
     SKC: "当前范围汇总", 数量: summary.totalUnits, 金额: summary.revenue,
     "总件数*成本": summary.purchaseCosts, 仓储成本: summary.warehouseFees,
     客退罚款: summary.penalties, 利润: summary.matchedProfit,
-    公式版本: version ?? "未记录", 汇总规则: rule,
+    公式版本: displayVersion, 汇总规则: rule,
   }];
 }

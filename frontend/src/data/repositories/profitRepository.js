@@ -274,7 +274,7 @@ export async function saveWarehouseHistoryCosts({ ledgerId, history, sourceName 
       // Re-evaluate from the preserved evidence; no imported proposed price is trusted.
       if (evidence.format !== WAREHOUSE_HISTORY_FORMAT) throw new Error('历史采购证据来源无效。');
       saved.push(await mutateManualCostOverride({ ledgerId, store: row.store, platformSku: row.platformSku, unitCost: row.unitCost,
-        reason: `历史仓库采购补齐：${row.warehouseSku}；按当前核算口径核价；来源 ${evidence.sourceName}；采购记录 ${row.selectedRecordIds.join('、')}。保留历史关联，不恢复当前 ERP 映射。`, historyEvidence: evidence, expectedAccountingMode: plan.ledger.accountingMode }));
+        reason: `已补齐历史仓库 ${row.warehouseSku} 的采购成本。来源 ${evidence.sourceName}，采购记录 ${row.selectedRecordIds.join('、')}。仅关联该次历史采购。`, historyEvidence: evidence, expectedAccountingMode: plan.ledger.accountingMode }));
     }
     return { savedCount: saved.length, pending: plan.pending, savedIds: saved.map(row => row.id) };
   });

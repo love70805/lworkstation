@@ -111,7 +111,7 @@ export default function PurchaseEvidenceDetails({ match, period }) {
         return <PurchaseLine key={record.recordId} record={record} reviewed={Boolean(baseline)}
           anomaly={anomaly && { ...anomaly, description: (anomaly.reasons ?? []).map(reason => evidenceReason(reason, baseline)).join('。') }} />;
       })}</ul></> : <p>{decision ? '本期没有合格采购。' : '当前证据未提供最近采购明细。'}</p>}
-    {lowest && <><h4>最低成本模式取价凭证</h4><ul className="purchase-review-list">
+    {lowest && <><h4>本次采用的采购凭证</h4><ul className="purchase-review-list">
       {actual.selectedRecords.map(record => <PurchaseLine key={record.recordId} record={record} />)}
     </ul></>}
     <ExcludedPurchases title="ERP 采集时排除的订单" records={originalExclusions} />

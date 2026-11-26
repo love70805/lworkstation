@@ -219,7 +219,7 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
   const exportingRef=useRef(false);
   const [exportStage,setExportStage]=useState('');
   const [historyOpen,setHistoryOpen]=useState(false);
-  const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,data:await readMonthlyReportState(ledgerId,{includeReports:historyOpen})};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry,historyOpen]);
+  const state=useLiveQuery(async()=>{try{return {ledgerId,workspaceId,reportsLoaded:historyOpen,data:await readMonthlyReportState(ledgerId,{includeReports:historyOpen})};}catch(error){return {ledgerId,workspaceId,error:error.message};}},[ledgerId,workspaceId,retry,historyOpen]);
   useEffect(()=>{onState?.(state);},[state,onState]);
   if(!state||state.ledgerId!==ledgerId)return <Panel>正在读取本月报告...</Panel>;
   if(state.error)return <Panel><p role="alert">{state.error}</p><Button onClick={()=>setRetry(value=>value+1)}>重新读取报告</Button></Panel>;
@@ -258,12 +258,12 @@ export default function MonthlyReportManager({ ledgerId, workspaceId, missingCos
     <div className="report-primary-actions"><p role="status">{costStatus}</p>{missing>0&&onOpenCosts?<Button onClick={onOpenCosts}>{costGuard.lastConfirmedFinished?'查看缺成本项':costGuard.blocked?'查看临时结果':'补齐成本'}</Button>:null}<Button variant="primary" loading={busy} disabled={busy||costGuard.blocked||!readiness.baseReady} onClick={exportCurrent}>{nextKind==='financial'?'导出利润表':'导出未扣款报告'}</Button></div>
 
     {exportStage ? <div className="erp-collection-meter" role="status"><span>{exportStage}</span><progress aria-label="报告导出进度" /></div> : null}
-    <details open={historyOpen} onToggle={event=>setHistoryOpen(event.currentTarget.open)}><summary>导出记录</summary>
-      {historyOpen && (data.reports?.length ? <ul>{data.reports.map(report=><li key={report.id}>
+    <details open={historyOpen} onToggle={event=>setHistoryOpen(event.currentTarget.open)}><summary>导出记录{historyOpen && state.reportsLoaded ? `（${data.reports.length}）` : ''}</summary>
+      {historyOpen && data.reports?.length > 0 && <ul>{data.reports.map(report=><li key={report.id}>
         <time dateTime={report.createdAt}>{new Date(report.createdAt).toLocaleString('zh-CN',{hour12:false})}</time>
         {' · '}{report.kind==='financial'?'利润表':'未扣款报告'} · 第 {report.revision} 版 · ¥{report.displayTotals?.profit}
         {' '}<Button disabled={busy} onClick={()=>downloadArchived(report.id)}>下载原件</Button>
-      </li>)}</ul> : <p>当前核算方式下还没有导出记录。</p>)}
+      </li>)}</ul>}
     </details>
     <details open={compact ? undefined : true}><summary>代发与扣款</summary>
     <p>代发可选填，未录入时导出的利润不含代发。扣款未齐时可导出未扣款报告。</p>
