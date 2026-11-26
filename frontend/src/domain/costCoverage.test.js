@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateLedgerCostCoverage, ledgerStatusFromCoverage } from "./costCoverage";
+import { calculateLedgerCostCoverage, ledgerStatusFromCoverage, projectCoverageCost } from "./costCoverage";
 
 describe("ledger cost coverage", () => {
   const salesRows = [
@@ -60,6 +60,18 @@ describe("ledger cost coverage", () => {
 
     expect(coverage.missingCount).toBe(3);
     expect(ledgerStatusFromCoverage(coverage)).toBe("cost_pending");
+  });
+
+  it("counts a confirmed ERP zero in full and compact coverage only when every selected purchase proves it", () => {
+    const ignored = { unitPrice:0, effectiveUnitPrice:0, resolution:{action:'ignore_anomaly'} };
+    for (const [records, count] of [[[ignored],1], [[],0], [[ignored,{...ignored,unitPrice:1}],0], [[{...ignored,resolution:{}}],0]]) {
+      const row = { platformSku:'SKU-A', unitCost:0, resolutionStatus:'resolved', withinPeriod:true,
+        costDecision:{ resolutionStatus:'resolved', selectedRecords:records } };
+      const input = { salesRows:[salesRows[0]], erpCosts:[row] };
+      expect(calculateLedgerCostCoverage(input).formalMatchedCount).toBe(count);
+      const projected = projectCoverageCost(row, null);
+      expect(calculateLedgerCostCoverage({...input,erpCosts:[projected]}, item=>item.withinPeriod).formalMatchedCount).toBe(count);
+    }
   });
 
   it("does not count a positive ERP amount while its purchase anomaly is pending", () => {

@@ -338,7 +338,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       <p className="profit-subtotal-label">商品小计 · 当前筛选范围</p>
       <div className="profit-summary-strip profit-summary-products">
         <div className="profit-summary-item"><span>销售金额</span><strong>{currency(filteredSummary.exactTotals?.revenue ?? revenue)}</strong><small>{totalUnits.toLocaleString("zh-CN")} 件</small></div>
-        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : snapshot.ledger.accountingMode === "historical_lowest" ? "最低单价截到两位 × 销量" : "按完整单价 × 销量"}</small></div>
+        <div className="profit-summary-item"><span>{missing ? "已确认采购成本" : "总采购成本"}</span><strong>{missing > 0 && missing === filtered.length ? "待补成本" : currency(filteredSummary.exactTotals?.purchaseCost ?? purchaseCosts)}</strong><small>{missing ? "缺失成本未按零计算" : "单件成本 × 销量"}</small></div>
         <button className="profit-summary-item profit-summary-action" onClick={() => { setRateDraft(String(warehouseRate)); setRateDialog(true); }}><span>仓储成本</span><strong>{currency(filteredSummary.exactTotals?.warehouseCost ?? warehouseFees)}</strong><small>每件 {warehouseRate.toFixed(2)} 元 · 点击调整</small><Warehouse size={18} /></button>
         <div className={`profit-summary-item profit-summary-total ${missing ? "is-pending" : ""}`}><span>商品利润</span><strong>{missing ? "待确认成本" : currency(filteredSummary.exactTotals?.profit ?? matchedProfit)}</strong><small>{missing ? `${missing} 条店铺 SKU 尚未确认成本` : "金额 − 采购 − 仓储"}</small></div>
       </div>
@@ -346,7 +346,7 @@ export function ProfitWorkspaceContent({ suppliedSnapshot, onReadiness, reportSt
       <div className="profit-detail-area" ref={detailsPanel}>
       {focus && <div className="profit-product-context" tabIndex={-1} data-profit-focus>
         <strong>{snapshot.ledger.period} 月度利润明细 · {focus.skc}</strong>
-        <span>{focus.stores.length ? '店铺 ' + focus.stores.join('、') : '全部店铺'}{focus.mode && focus.mode !== (snapshot.ledger.accountingMode ?? 'weighted') ? ' · 已按账本当前模式核算' : ''}</span>
+        <span>{focus.stores.length ? '店铺 ' + focus.stores.join('、') : '全部店铺'}</span>
         <button type="button" className="inline-link" onClick={() => changeFilter({query:'',storeFilter:'all'})}>查看全部商品</button>
       </div>}
       {scopeFilters}

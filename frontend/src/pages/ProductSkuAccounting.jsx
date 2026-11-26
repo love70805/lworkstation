@@ -7,7 +7,6 @@ import { storeIdentity } from '../domain/manualCostOverride';
 import { CostFraction, Exact } from '../domain/profitAmounts';
 
 const empty = [];
-const modeName = mode => mode === 'historical_lowest' ? '最低成本' : '常规核算';
 const money = value => {
   const exact = new Exact(value), rounded = exact.toDecimalPlaces(4);
   return '¥' + (rounded.isZero() && !exact.isZero() ? exact.toSignificantDigits(3) : rounded).toFixed();
@@ -62,7 +61,7 @@ export function AccountingCosts({ costs, reference, loading, profitLink, linkSta
   return <div className="catalog-cost-cell">
     {costs.map(cost => <div key={cost.ledgerId + ':' + cost.store} className="catalog-accounting-value">
       <strong title={cost.unit ?? undefined}>{profitLink && cost.ledgerId ? <Link className="catalog-profit-link" to={profitLink(cost)} state={linkState} aria-label={`查看 ${cost.store} 店 ${skuLabel} 的利润明细和采购记录`} title="查看月度利润明细和采购记录">{cost.unit == null ? '核算成本待补' : money(cost.unit)}<span aria-hidden="true"> ›</span></Link> : cost.unit == null ? '核算成本待补' : money(cost.unit)}</strong>
-      <small>{cost.store} 店 · {cost.period} · {modeName(cost.mode)}{cost.unit != null && ' · ' + (cost.source === 'manual_override' ? '人工更正' : 'ERP')}</small>
+      <small>{cost.store} 店 · {cost.period}{cost.unit != null && ' · ' + (cost.source === 'manual_override' ? '人工更正' : 'ERP')}</small>
     </div>)}
     {reference.unitCost != null && <div className="catalog-accounting-value"><strong>{money(reference.unitCost)}</strong><small>{reference.sourceLabel} · 选品参考</small></div>}
     {reference.historical && reference.supplier && <small>当前 1688 报价 {money(reference.supplier.unitCost)}</small>}

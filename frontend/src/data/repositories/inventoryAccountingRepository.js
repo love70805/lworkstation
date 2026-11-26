@@ -35,13 +35,19 @@ export async function toggleAccountingMode(workspaceId) {
     return mode;
   });
 }
+function rowBelongsToBatch(row, batch, workspaceId) {
+  return row && batch && (!row.workspaceId || row.workspaceId === workspaceId)
+    && (!row.ledgerId || row.ledgerId === batch.ledgerId);
+}
+
 export async function readHistoricalLowestCosts(workspaceId) {
   const compute = async () => {
     const published = new Map();
-    await db.erpCostBatches.where('workspaceId').equals(workspaceId).each(batch => {
-      if (batch.status !== 'published') return;
+    const ownedLedgers = await db.ledgers.where('workspaceId').equals(workspaceId).primaryKeys();
+    await db.erpCostBatches.where('ledgerId').anyOf(ownedLedgers).each(batch => {
+      if (batch.status !== 'published' || (batch.workspaceId && batch.workspaceId !== workspaceId)) return;
       const contract = batch.sourceContract;
-      published.set(batch.id, { requestId: batch.requestId, contract: contract && { batchId: contract.batchId, generatedAt: contract.generatedAt,
+      published.set(batch.id, { ledgerId: batch.ledgerId, requestId: batch.requestId, contract: contract && { batchId: contract.batchId, generatedAt: contract.generatedAt,
         sourceMeta: contract.sourceMeta, sourceFormatVersion: contract.sourceFormatVersion ?? contract.formatVersion, formatVersion: contract.formatVersion } });
     });
     const requests = new Map();
@@ -54,8 +60,8 @@ export async function readHistoricalLowestCosts(workspaceId) {
       && !boundary.blockedSkus.has(canonicalPlatformSku(row.platformSku))
       && !boundary.blockedWarehouses.has(canonicalWarehouseSku(row.warehouseSku));
     const rowsByBatch = new Map();
-    await db.erpCostRows.toCollection().each(row => {
-      if (!published.has(row.batchId) || row.workspaceId && row.workspaceId !== workspaceId) return;
+    await db.erpCostRows.where('batchId').anyOf([...published.keys()]).each(row => {
+      if (!rowBelongsToBatch(row, published.get(row.batchId), workspaceId)) return;
       if (!rowsByBatch.has(row.batchId)) rowsByBatch.set(row.batchId, []);
       const { platformSku, warehouseSku, mappingFallback, sourceWarnings } = row;
       rowsByBatch.get(row.batchId).push({ platformSku, warehouseSku, mappingFallback, sourceWarnings, ledgerScopeRole: row.ledgerScopeRole ?? 'expected' });
@@ -66,7 +72,7 @@ export async function readHistoricalLowestCosts(workspaceId) {
       const boundary = contract ? erpBatchAdoptionBoundary({ ...contract, rows: headers }) : null;
       const sourceOrder = contract ? erpSourceOrder(await readRequest(batch.requestId) ?? {}, contract) : undefined;
       await db.erpCostRows.where('batchId').equals(batchId).each(row => {
-        if ((!row.workspaceId || row.workspaceId === workspaceId) && (!boundary || allowed(boundary,row))) minima.add({ ...row,
+        if (rowBelongsToBatch(row, batch, workspaceId) && (!boundary || allowed(boundary,row))) minima.add({ ...row,
           sourceGeneratedAt: contract?.generatedAt, sourceOrder: row.sourceOrder ?? sourceOrder, evidenceOrigin: 'published' });
       });
     }
@@ -95,7 +101,7 @@ export async function readHistoricalLowestCosts(workspaceId) {
   // separate cache database. Only ordinary reads publish reusable projections.
   if (Dexie.currentTransaction) return compute();
   await observeInventoryRevision(true);
-  return cachedDerived({ scope: [workspaceId], formula: 'inventory-lowest@6-source-decimals', revisionReader: inventoryEvidenceRevision, revision: inventoryEvidenceRevision(), compute });
+  return cachedDerived({ scope: [workspaceId], formula: 'inventory-lowest@7-owned-ledgers', revisionReader: inventoryEvidenceRevision, revision: inventoryEvidenceRevision(), compute });
 }
 
 // Retrieve the full history only when opening the selected minimum's details.
@@ -111,8 +117,11 @@ export async function readLowestPurchaseReview(workspaceId, minimum, period) {
     source = batch.rows.find(row => row.canonicalPlatformSku === minimum.canonicalPlatformSku && row.canonicalWarehouseSku === minimum.canonicalWarehouseSku);
     resolutions = inbox.costResolutions;
   } else if (minimum.sourceCostRowId != null) {
+    const batch = await db.erpCostBatches.get(minimum.batchId);
+    if (!batch?.ledgerId || batch.status !== 'published' || (batch.workspaceId && batch.workspaceId !== workspaceId)
+      || (await db.ledgers.get(batch.ledgerId))?.workspaceId !== workspaceId) return null;
     source = await db.erpCostRows.get(minimum.sourceCostRowId);
-    if (!source || source.batchId !== minimum.batchId || source.workspaceId && source.workspaceId !== workspaceId) return null;
+    if (!rowBelongsToBatch(source, batch, workspaceId) || source.batchId !== batch.id) return null;
     resolutions = source.costDecision?.resolutions ?? source.resolutions;
   }
   if (!source || !source.warehouseSku || canonicalWarehouseSku(source.warehouseSku) !== minimum.canonicalWarehouseSku

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateExactProfitLine, calculateReferenceProfitLine, PROFIT_FORMULA_VERSION } from "../domain/profitCalculations";
+import { calculateExactProfitLine, calculateReferenceProfitLine } from "../domain/profitCalculations";
 import { resolveFormalCostDecision } from "../domain/costPolicy";
 import { calculateWarehouseCostDecision } from "../domain/erpCostResolution";
 import { buildProfitExportRows, formatErpUnitCost, formatProfitAmount, savedProfitRows, savedProfitSummary, summarizeProfitRows } from "./profitPrecision";
@@ -104,7 +104,8 @@ describe("ERP precision from evidence to ledger exits", () => {
     expect(exported[0]["总件数*成本"]).toBe(0.006);
     expect(exported[0].利润).toBe(-0.006);
     expect(exported[2]["总件数*成本"]).toBe(0.01);
-    expect(exported[0].公式版本).toBe(PROFIT_FORMULA_VERSION);
+    expect(exported[0].公式版本).toMatch(/^monthly-profit@\d+$/);
+    expect(buildProfitExportRows(rows, { status: "ready", accountingMode: "historical_lowest" }, summarizeProfitRows(rows))).toEqual(exported);
   });
 
   it.each(["finalized", "locked"])("preserves %s historical facts for display/export", (status) => {

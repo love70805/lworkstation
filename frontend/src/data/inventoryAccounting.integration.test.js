@@ -3,8 +3,8 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { liveQuery } from 'dexie';
 import { db } from './db/clientDatabase';
 import { setActiveMemberContext } from './repositories/selectionRepository';
-import { getLedgerSnapshot, getProfitPageCostEvidence, saveManualCostOverride, revokeManualCostOverride, updateLedgerWarehouseRate } from './repositories/profitRepository';
-import { readAccountingMode, toggleAccountingMode, readHistoricalLowestCosts } from './repositories/inventoryAccountingRepository';
+import { getLedgerSnapshot, getProfitPageCostEvidence, saveManualCostOverride, revokeManualCostOverride, updateLedgerWarehouseRate, withVerifiedLedgerCostSummaries } from './repositories/profitRepository';
+import { readAccountingMode, toggleAccountingMode, readHistoricalLowestCosts, readLowestPurchaseReview } from './repositories/inventoryAccountingRepository';
 import { readCachedReportProducts } from './repositories/derivedComputationService';
 import { previewProfitReport, saveProfitReport, readMonthlyReportState, readProfitReportDownload, previewMonthlySupplement, adoptMonthlySupplement } from './repositories/profitReportRepository';
 import { createWorkspaceBackupPayload, restoreWorkspaceBackupPayload } from './repositories/workspaceRepository';
@@ -371,6 +371,47 @@ it('retains owned legacy cost rows without workspace fields and keeps explicit v
   await db.erpCostBatches.put({ id: 'VOIDED', ledgerId: 'L', workspaceId: 'W', status: 'voided' });
   await db.erpCostRows.add({ ...row, batchId: 'VOIDED', workspaceId: 'W', publishedAt: '2026-11-04T12:00:00Z' });
   expect((await getLedgerSnapshot('L')).costs).toEqual([]);
+});
+
+it('uses the owned legacy batch for the historical minimum and rechecks the parent when opening its evidence', async () => {
+  await db.erpCostBatches.update('B', { workspaceId: undefined });
+  await db.erpCostRows.toCollection().modify({ workspaceId: undefined });
+  await toggleAccountingMode('W');
+  const [minimum] = await readHistoricalLowestCosts('W');
+  expect(minimum).toMatchObject({ batchId: 'B', unitCost: 2 });
+  expect(await readLowestPurchaseReview('W', minimum, '2026-08')).toBeTruthy();
+  await saveManualCostOverride({ ledgerId:'L', store:'甲', platformSku:'SKU', unitCost:8, reason:'合成对照' });
+  expect(lines(await getLedgerSnapshot('L'))[0].unitCostExact).toBe('2');
+  expect(await readHistoricalLowestCosts('OTHER')).toEqual([]);
+  await db.ledgers.update('L', { workspaceId: 'OTHER' });
+  expect(await readHistoricalLowestCosts('W')).toEqual([]);
+  expect(await readLowestPurchaseReview('W', minimum, '2026-08')).toBeNull();
+  await db.erpCostBatches.update('B',{workspaceId:'W'});
+  expect(await readHistoricalLowestCosts('OTHER')).toEqual([]);
+  await db.erpCostBatches.update('B',{workspaceId:undefined,status:'voided'});
+  expect(await readHistoricalLowestCosts('OTHER')).toEqual([]);
+  await db.erpCostBatches.update('B',{status:'published'});
+  await db.erpCostRows.toCollection().modify({ledgerId:'other-ledger'});
+  expect(await readHistoricalLowestCosts('OTHER')).toEqual([]);
+  await db.erpCostRows.toCollection().modify({ledgerId:'L'});
+  await db.ledgers.delete('L');
+  expect(await readHistoricalLowestCosts('OTHER')).toEqual([]);
+});
+
+it('refreshes a previously saved missing-cost summary for a confirmed zero and keeps its stored sources intact', async () => {
+  const record = { recordId:'zero', warehouseSku:'WH', purchaseDate:'2026-07-01', unitPrice:0, quantity:1, totalPrice:0 };
+  const decision = calculateWarehouseCostDecision({ warehouseSku:'WH', period:'2026-08', purchaseRecords:[record],
+    resolutions:[{ recordId:'zero', warehouseSku:'WH', action:'ignore_anomaly', originalUnitPrice:0, resolvedUnitPrice:0,
+      resolvedBy:'finance', resolvedAt:'2026-08-10T09:00:00Z' }] });
+  expect(decision.resolutionStatus).toBe('resolved');
+  await db.erpCostRows.toCollection().modify({unitCost:0, purchaseRecords:decision.purchaseRecords,
+    selectedRecordIds:decision.selectedRecordIds, costDecision:decision});
+  const ledger={...await db.ledgers.get('L'),status:'cost_pending',costSummary:{identityPolicyVersion:'ledger-cost-identity@2-shared-manual',missingCount:1}};
+  await db.ledgers.put(ledger);
+  const ready={status:'ready',costSummary:{missingCount:0,formalMatchedCount:1}};
+  expect((await withVerifiedLedgerCostSummaries([ledger]))[0]).toMatchObject(ready);
+  expect((await getLedgerSnapshot('L',{profitPage:true})).ledger).toMatchObject(ready);
+  expect(await db.ledgers.get('L')).toEqual(ledger);
 });
 
 it('rejects a manual cost draft after its accounting context changes', async () => {

@@ -78,7 +78,7 @@ async function readCandidate({ ledgerId, store, platformSku, inboxId = null, exp
       const candidate = plan.ready.find(row => storeIdentity(row.store) === storeIdentity(store));
       if (!candidate) continue;
       return { ...candidate, ledgerId, inboxId: inbox.id, accountingMode: mode,
-        reason: `确认历史仓库 ${candidate.warehouseSku} 的采购证据；按当前核算口径核价。历史关联不代表当前 ERP 映射。`,
+        reason: `已核实历史仓库 ${candidate.warehouseSku} 的采购证据。当前 ERP 映射按本月记录核对。`,
         historyEvidence: { ...candidate.historyEvidence, sourceInboxId: inbox.id, sourceBatchId: inbox.batchId, sourceName: 'ERP 同批历史采购证据' } };
     }
   }

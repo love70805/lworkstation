@@ -1,4 +1,4 @@
-import { weightedCostFraction } from './erpPurchaseEvidence';
+import { compactZeroCostEvidence, weightedCostFraction } from './erpPurchaseEvidence';
 import { isErpCostWithinPeriod } from './erpCostPeriod';
 
 const costFields = ['id', 'batchId', 'ledgerId', 'workspaceId', 'platformSku', 'canonicalPlatformSku', 'platformSkc',
@@ -28,11 +28,7 @@ export function profitCostFields(row, period) {
   result.withinPeriod = isErpCostWithinPeriod(row, period);
   result.ignoredAnomaly = row.resolutions?.some(item => item.action === 'ignore_anomaly') === true;
   // Preserve the explicit zero-price rule without retaining purchase identities or records.
-  if (row.unitCost === 0 && row.costDecision?.selectedRecords?.length) {
-    result.costDecision = { resolutionStatus: row.costDecision.resolutionStatus,
-      selectedRecords: row.costDecision.selectedRecords.map(r => ({ unitPrice: r.unitPrice, effectiveUnitPrice: r.effectiveUnitPrice,
-        resolution: { action: r.resolution?.action } })) };
-  }
+  Object.assign(result, compactZeroCostEvidence(row));
   const terms = new Set();
   for (const record of row.costDecision?.selectedRecords ?? []) {
     for (const value of [record.order1688, record.purchaseOrderNo, record.purchaseOrderId, record.purchaseDate]) if (value) terms.add(value);

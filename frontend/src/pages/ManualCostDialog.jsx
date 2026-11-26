@@ -142,7 +142,7 @@ export default function ManualCostDialog({
   let description = scope;
   if (protectedReadOnly) description += "。当前只读。";
   else if (identityConflict && row.manualOverride) description += "。已保存的人工金额可撤销。";
-  else if (showForm) description += shareCost && sharedPlan ? `。本次同时更正下方 ${sharedPlan.rows.filter(r => r.included).length} 条店铺 SKU，两种核算方式共用人工价。` : "。本月这家店的该 SKU 在两种核算方式中共用一笔人工价。";
+  else if (showForm && shareCost && sharedPlan) description += `。本次同时更正下方 ${sharedPlan.rows.filter(r => r.included).length} 条店铺 SKU。`;
 
   const Frame = embedded ? EmbeddedCostForm : Modal;
   return <Frame open={open} title={title} className={className} description={description} onClose={() => !saving && onClose()}
@@ -153,8 +153,8 @@ export default function ManualCostDialog({
       {canEdit && !showForm && <Button disabled={saving} onClick={startCorrection}>人工更正</Button>}
     </>}>
     {costGuard.blocked ? <p className="cost-correction-help" role="status"><strong>{costGuard.title}</strong><br />{costGuard.message}</p> : null}
-    {row.manualCostConflict ? <p className="cost-correction-help" role="status">旧账本记录了不同的人工价（{row.manualCostConflict.map(formatManualUnitCost).join('、')}）。在此确认本月单件成本后，两种核算方式共用该金额。</p> : null}
-    {ledger.accountingMode === 'historical_lowest' && row.manualOverride?.approvedAmount != null && erpApplied && currentAmount !== '' ? <p className="cost-correction-help">已保存人工价 {formatManualUnitCost(row.manualOverride.approvedAmount)}/件，本次最低成本核算取 ERP 价 {formatAccountingUnitCost(row.decision?.unitCostExact ?? currentAmount, ledger.accountingMode)}/件。</p> : null}
+    {row.manualCostConflict ? <p className="cost-correction-help" role="status">旧账本记录了不同的人工价（{row.manualCostConflict.map(formatManualUnitCost).join('、')}）。请核对并确认本月的单件成本。</p> : null}
+    {row.manualOverride?.approvedAmount != null && erpApplied && currentAmount !== '' ? <p className="cost-correction-help">已保存人工价 {formatManualUnitCost(row.manualOverride.approvedAmount)}/件，本次采用 ERP 价 {formatAccountingUnitCost(row.decision?.unitCostExact ?? currentAmount, ledger.accountingMode)}/件。</p> : null}
     {canEdit && purchaseConfirmation ? <section className="cost-confirm-purchases" aria-label="确认采购原价">
       <div><strong>使用采购原价</strong><p>{purchaseConfirmation.description}</p></div>
       <Button variant="primary" disabled={saving} onClick={confirmPurchases}>{saving ? '正在保存…' : '确认采购价正确'}</Button>

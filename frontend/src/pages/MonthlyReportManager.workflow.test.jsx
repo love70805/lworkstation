@@ -22,7 +22,7 @@ const button=name=>[...document.querySelectorAll('button')].find(node=>node.text
 async function mount(patch={},controls={}){
  globalThis.IS_REACT_ACT_ENVIRONMENT=true;
  for(const name of ['preview','save','read','download'])mock[name].mockReset();
- mock.state={ledgerId:'L',workspaceId:'W',data:{ledger,stores:['甲'],dispatch,deduction,adoptedRows:[],reports:[],...patch}};
+ mock.state={ledgerId:'L',workspaceId:'W',reportsLoaded:true,data:{ledger,stores:['甲'],dispatch,deduction,adoptedRows:[],reports:[],...patch}};
  mock.preview.mockResolvedValue({report:formal,fingerprint:'checked'});mock.save.mockResolvedValue(formal);mock.read.mockResolvedValue({report:formal,dispatchRows:[{ownerMarker:'张三'}]});
  container=document.createElement('div');document.body.append(container);root=createRoot(container);
  await act(async()=>root.render(<ToastProvider><MonthlyReportManager ledgerId="L" workspaceId="W" missingCostCount={0} editor={controls.editor} onEdit={controls.onEdit??vi.fn()}/></ToastProvider>));
@@ -42,11 +42,24 @@ it('uses current data for legacy finalized ledgers and permits source updates di
  expect(button('导出利润表').disabled).toBe(false);await act(async()=>button('更新代发').click());expect(onEdit).toHaveBeenCalledWith('dispatch');
  await act(async()=>button('导出利润表').click());expect(mock.save).toHaveBeenCalledWith({ledgerId:'L',kind:'financial'},expect.any(Object));
 });
-it('shows the current export and sources even when the ledger contains archived reports',async()=>{
+it.each(['weighted','historical_lowest'])('shows only the record count for an empty export history in %s',async accountingMode=>{
+ await mount({ledger:{...ledger,accountingMode}});
+ const summary=[...container.querySelectorAll('summary')].find(node=>node.textContent==='导出记录');
+ const history=summary.parentElement;
+ await act(async()=>{history.open=true;history.dispatchEvent(new Event('toggle'));});
+ expect(history.textContent.trim()).toBe('导出记录（0）');
+});
+it('downloads a verified archived original on demand while current exports remain available',async()=>{
  await mount({ledger:{...ledger,status:'finalized',currentBaseReportId:'B'},reports:[formal,base]});
  expect(button('导出利润表')).toBeDefined();expect(button('更新扣款')).toBeDefined();
- expect(container.textContent).not.toMatch(/历史导出|下载此报告|下载最近报告|补齐代发单号/);
  expect(mock.read).not.toHaveBeenCalled();
+ const history=[...container.querySelectorAll('details')].find(item=>item.querySelector('summary')?.textContent==='导出记录');
+ await act(async()=>{history.open=true;history.dispatchEvent(new Event('toggle'));});
+ expect(history.querySelector('summary').textContent).toBe('导出记录（2）');
+ await act(async()=>button('下载原件').click());
+ expect(mock.read).toHaveBeenCalledWith('F');
+ expect(mock.download).toHaveBeenCalledWith(formal,{useStoredFile:true});
+ expect(mock.save).not.toHaveBeenCalled();
 });
 it('does not close a source editor when a prior report exists',async()=>{
  const onEdit=vi.fn();await mount({ledger:{...ledger,status:'locked',currentBaseReportId:'B'},reports:[base,formal]},{editor:'deduction',onEdit});

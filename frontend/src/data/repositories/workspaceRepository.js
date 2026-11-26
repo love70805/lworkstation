@@ -47,7 +47,7 @@ export async function getWorkspaceOperationalSummary({ includeRecordCount = true
     }
     const compute = () => readWorkspaceOperationalSummary(context, observable, includeRecordCount);
     const summary = observable ? await cachedDerived({
-      scope, formula: includeRecordCount ? "workspace-operational-summary@4-shared-manual" : "workspace-shell-summary@2-shared-manual", revision, compute,
+      scope, formula: includeRecordCount ? "workspace-operational-summary@5-confirmed-zero" : "workspace-shell-summary@3-confirmed-zero", revision, compute,
     }) : await compute();
     assertSourceRevision(revision);
     const {pendingCaptureCount, blockedCaptureCount, latestCaptureAt, missingCostCount, latestOpenLedger} = summary;

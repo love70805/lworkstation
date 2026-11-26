@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { accountingUnitCost, CostFraction } from "./profitAmounts";
-import { weightedCostFraction } from "./erpPurchaseEvidence";
+import { hasConfirmedZeroErpCost, weightedCostFraction } from "./erpPurchaseEvidence";
 import { canonicalPlatformSku, normalizePlatformSku } from "./identifiers";
 import { DEFAULT_CURRENCY } from "./erpCosts";
 import { validManualOverride } from "./manualCostOverride";
@@ -33,11 +33,7 @@ function normalizeCandidate(candidate, expectedCanonicalSku, kind) {
   if (!candidate) return { candidate: null, issues: [] };
 
   const issues = [];
-  const explicitZero = kind === "erp" && candidate.unitCost === 0
-    && candidate.costDecision?.resolutionStatus === "resolved"
-    && candidate.costDecision?.selectedRecords?.length > 0
-    && candidate.costDecision.selectedRecords.every(record => record.effectiveUnitPrice === 0
-      && record.unitPrice === 0 && record.resolution?.action === "ignore_anomaly");
+  const explicitZero = kind === "erp" && hasConfirmedZeroErpCost(candidate);
   const amount = explicitZero ? new Decimal(0) : positiveAmount(candidate.unitCostExact ?? candidate.unitCost ?? candidate.amount);
   const currency = String(candidate.currency ?? DEFAULT_CURRENCY).trim().toUpperCase();
   const candidateSku = text(candidate.platformSku);

@@ -33,7 +33,7 @@ export default function WarehouseHistoryDialog({ ledger, onClose, onSaved, initi
     footer={<><Button disabled={busy} onClick={onClose}>关闭</Button><Button variant="primary" loading={busy} disabled={busy || !plan?.ready.length} onClick={save}>补齐 {plan?.ready.length ?? 0} 项成本</Button></>}>
     <p>这是历史证据文件的兼容导入。日常采集会自动补查已知历史仓库，可直接在原成本核对流程确认；只有缺少可靠历史关联时，才需在 ERP 助手高级区域按明确仓库补充证据。</p>
     <div className="form-field"><label htmlFor="warehouse-history-file">仓库历史采购证据（JSON）</label><input id="warehouse-history-file" type="file" accept=".json,application/json" disabled={busy} onChange={event => void load(event.target.files?.[0])} /></div>
-    <p>系统按台账身份和唯一历史关联自动核对，按当前核算口径重算采购成本。同批合格项一次补齐并记录原始证据；归属冲突或证据不足的项单独保留。补齐通过人工更正记录生效，可撤销。</p>
+    <p>系统核对台账和历史仓库的关联，用已核实的采购记录重算成本。同批合格项一次补齐并保留原始证据。归属冲突或证据不足的项留待处理。补齐会记为人工更正，可撤销。</p>
     {plan ? <div role="status"><p>已核对 {plan.warehouseCount} 个仓库，可补齐 {plan.ready.length} 项。</p>{plan.ready.map(row => <p key={`${row.store}/${row.platformSku}`}>{row.store} · {row.platformSku} · {row.warehouseSku} · ¥{row.unitCost.toFixed(4)}/件</p>)}
       {plan.pending.length ? <details><summary>{plan.pending.length} 项继续待处理</summary>{plan.pending.map(row => <p key={`${row.store}/${row.platformSku}/${row.platformSkc}`}>{row.store} · {row.platformSku}：{row.reason}</p>)}</details> : null}</div> : null}
     {error ? <p role="alert">{error}</p> : null}

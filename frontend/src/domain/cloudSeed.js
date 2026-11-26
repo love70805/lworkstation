@@ -101,7 +101,7 @@ function inspectTables(tables, workspaceId) {
 
   for (const line of tables.profitLines ?? []) {
     if (line.calculationMode != null && line.calculationMode !== "exact") {
-      throw new Error("云端种子包中的正式利润行必须使用精确核算模式。");
+      throw new Error("云端种子包中的正式利润行必须使用精确核算结果。");
     }
     const source = line.formalCostSource ?? line.costSource;
     if (source != null && !["erp", "approved_1688"].includes(source)) {
