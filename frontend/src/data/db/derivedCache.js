@@ -1,4 +1,5 @@
 import Dexie from 'dexie';
+import { beginLedgerChanges, captureLedgerChanges, finishLedgerChanges, trendLedgerRevision } from './ledgerTrendRevisions';
 
 // Disposable sidecar only: the business database schema and backups stay intact.
 export const derivedCacheDb = new Dexie('shopeers-derived-cache-v1');
@@ -83,6 +84,11 @@ function invalidateTableRevision(table, notify = false) {
     try { await derivedCacheDb.entries.clear(); await derivedCacheDb.revisions.put({ key: `table:${table}`, revision: value }); }
     catch { /* Business primary-key counts retain value-change observation. */ }
   });
+  return value;
+}
+
+export function ledgerTableRevision(table, ledgerId) {
+  return trendLedgerRevision(table, ledgerId, tableRevisionReader(table)()) ?? sourceRevision();
 }
 
 export function sourceRevision() {
@@ -188,16 +194,20 @@ export function installDerivedInvalidation(database) {
           else if (changes.keys) for (const key of keys) changes.keys.add(key);
         }
         let changedTables = tablesObserved.get(request.trans);
-        if (!changedTables) { changedTables = new Set(); tablesObserved.set(request.trans, changedTables); }
+        if (!changedTables) { changedTables = new Map(); tablesObserved.set(request.trans, changedTables); }
         if (!changedTables.has(name)) {
-          changedTables.add(name);
-          invalidateTableRevision(name);
+          const changes = beginLedgerChanges(name, tableRevisionReader(name)());
+          changedTables.set(name, changes);
+          const pending = invalidateTableRevision(name);
+          if (changes) changes.pending = pending;
           if (name === 'erpCostInbox') observedInboxClock = tableRevisionReader(name)();
           if (name === 'erpCostRows') observedCostClock = tableRevisionReader(name)();
           const finish = () => {
             if (name === 'erpCostInbox') syncInboxClock();
             if (name === 'erpCostRows') existingCostRowVersion();
-            invalidateTableRevision(name, true);
+            const prior = changes && tableRevisionReader(name)();
+            const next = invalidateTableRevision(name, true);
+            finishLedgerChanges(name, changes, prior, next);
             if (name === 'erpCostRows') {
               observedCostClock = tableRevisionReader(name)();
               if (costReplacements.has(request.trans)) existingCostGeneration++;
@@ -227,7 +237,9 @@ export function installDerivedInvalidation(database) {
           request.trans.addEventListener('complete', () => invalidateDerivedCache(true, []));
           request.trans.addEventListener('abort', () => invalidateDerivedCache(true, []));
         }
-        return table.mutate(request);
+        const owners = captureLedgerChanges(table, request, changedTables.get(name));
+        const mutation = table.mutate(request);
+        return owners ? Promise.all([mutation, owners]).then(([result]) => result) : mutation;
       } };
     } };
   } });

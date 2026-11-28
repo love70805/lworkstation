@@ -33,6 +33,32 @@ beforeEach(async()=>{
  await saveManualCostOverride({ledgerId:'L',store:'乙',platformSku:'SKU2',unitCost:0.0000001,reason:'微小成本'});
 });
 afterEach(async()=>{vi.restoreAllMocks();await db.delete();});
+it('reads only adopted batches and preserves the old ordering of interleaved legacy and numbered rows', async () => {
+  const batch = (id, kind, status = 'adopted') => ({ ...scope, id, kind, status, revision: 1, createdAt: '2026-08-05' });
+  await db.monthlySupplementBatches.bulkAdd([
+    { ...batch('ZZ', 'dispatch'), adoptedQuantityExact: '3' },
+    { ...batch('AA', 'deduction'), signedAmountExact: '-2.75' },
+    batch('OLD', 'deduction', 'superseded'),
+  ]);
+  const row = (id, batchId, detail = {}) => ({ ...scope, id, batchId, store:'甲', ...detail });
+  await db.monthlySupplementRows.bulkAdd([
+    row('ZZ:10','ZZ',{quantityExact:'2'}), row('ZZ:2','ZZ',{quantityExact:'1'}),
+    row('AA:12','AA',{signedAmountExact:'0.25'}), row('AA:2','AA',{signedAmountExact:'-3'}),
+    row('A-man','ZZ',{manual:true, workspaceId:undefined}), row('B-man','AA',{manual:true}),
+    row('hidden','OLD'), row('orphan','absent'), row('foreign','ZZ',{ledgerId:'OTHER'}),
+  ]);
+  const read = () => readMonthlyReportState('L', {includeReports:false});
+  const originalIds = ['A-man','AA:2','AA:12','B-man','ZZ:2','ZZ:10'];
+  let state = await read();
+  expect(state.adoptedRows.map(item=>item.id)).toEqual(originalIds);
+  expect(state.adoptedRows.filter(item=>item.signedAmountExact).map(item=>item.signedAmountExact)).toEqual(['-3','0.25']);
+  expect(state.deduction.signedAmountExact).toBe('-2.75');
+  expect(state.dispatch.adoptedQuantityExact).toBe('3');
+  await db.monthlySupplementBatches.update('AA', {status:'superseded'});
+  expect((await read()).adoptedRows.map(item=>item.id)).toEqual(['A-man','ZZ:2','ZZ:10']);
+  await db.monthlySupplementBatches.update('ZZ', {status:'superseded'});
+  expect((await read()).adoptedRows).toEqual([]);
+});
 it('archives every direct export with its own verified workbook, source lines and audit',async()=>{
  const input={ledgerId:'L',kind:'pre_deduction'},stages=[];
  const ledger=await db.ledgers.get('L');

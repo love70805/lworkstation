@@ -2,6 +2,10 @@
 
 本页列出正式版和独立 Beta 的发布记录。[开发历史](DEVELOPMENT_HISTORY.md)
 
+## 2.2.1 稳定版
+
+跨月趋势复用来源未变的月份。利润页按当前采用的批次读取代发和扣款明细，沿用原有的来源顺序。[2.2.1 发布页](https://github.com/love70805/lworkstation/releases/tag/v2.2.1)
+
 ## 2.2.0 稳定版
 
 利润页的「导出记录」可重新下载当次 Excel 原件。调整费率或更正成本后，再次导出会生成新版本。旧账本可识别历史采购凭证、登记代发及扣款并导出，已确认的 ERP 零价计入成本确认进度。[2.2.0 发布页](https://github.com/love70805/lworkstation/releases/tag/v2.2.0)

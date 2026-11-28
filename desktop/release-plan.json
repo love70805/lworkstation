@@ -1,13 +1,13 @@
 {
   "product": "Lworkstation",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "edition": "stable",
   "candidateOnly": true,
-  "integrationBranch": "codex/ledger-repairs-2-2-0",
+  "integrationBranch": "codex/monthly-reads-2-2-1",
   "requiredCommits": [
     {
-      "module": "release-2.1.11",
-      "commit": "8df743fb081aa52271b62b8aaa6999c3a34534b7"
+      "module": "release-2.2.0",
+      "commit": "e73ba120f4d6b7dfc60307f3f5d5801b181f2452"
     }
   ]
 }

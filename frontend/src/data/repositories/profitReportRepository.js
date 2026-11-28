@@ -28,6 +28,14 @@ async function scope(ledgerId,write=false) {
   return {ledger,member};
 }
 const adopted=readAccountingSupplement;
+async function readAdoptedRows(ledgerId, dispatch, deduction) {
+  const batches = [dispatch, deduction].filter(Boolean);
+  const groups = await Promise.all(batches.map(batch =>
+    db.monthlySupplementRows.where('batchId').equals(batch.id).toArray()));
+  // The former ledger index returned primary-key order across both batches,
+  // including legacy IDs that do not encode the adoption position.
+  return groups.flat().filter(row => row.ledgerId === ledgerId).sort((a, b) => Dexie.cmp(a.id, b.id));
+}
 async function sourceContext(ledgerId,write=false,forReport=false,{freshnessOnly=false}={}){
   const {ledger,member}=await scope(ledgerId,write);
   const mode=await readAccountingMode(ledger.workspaceId);
@@ -52,7 +60,7 @@ async function readMonthlyReportStateOnce(ledgerId,includeReports){
     // a complete calculation context. Keep those reads for actual previews.
     const [stores,dispatch,deduction,reports]=await Promise.all([readLedgerStoreNames(ledger.workspaceId,ledgerId),adopted(ledger,'dispatch'),adopted(ledger,'deduction'),includeReports?readLedgerReportHeaders(ledger,revision):[]]);
     const batches=await db.monthlySupplementBatches.where('ledgerId').equals(ledgerId).toArray();
-    const adoptedRows=orderSupplementPresentation(await db.monthlySupplementRows.where('ledgerId').equals(ledgerId).filter(row=>[dispatch?.id,deduction?.id].includes(row.batchId)).toArray());
+    const adoptedRows=orderSupplementPresentation(await readAdoptedRows(ledgerId, dispatch, deduction));
     assertSourceRevision(revision);
     return {ledger,stores,dispatch,deduction,batches,adoptedRows,reports:reports.filter(report=>accountingMode(report.accountingMode)===ledger.accountingMode).toSorted((a,b)=>b.createdAt.localeCompare(a.createdAt))};
 }
@@ -126,8 +134,7 @@ export async function adoptMonthlySupplement(input,{expectedBatchId,inputSignatu
 // tell the user to export again. Historical reports are never backfilled.
 async function reportSourceInput(context) {
   const { ledger, salesRows, erpCosts, approvals, dispatch, deduction } = context;
-  const rows = await db.monthlySupplementRows.where('ledgerId').equals(ledger.id)
-    .filter(row => [dispatch?.id, deduction?.id].filter(Boolean).includes(row.batchId)).toArray();
+  const rows = await readAdoptedRows(ledger.id, dispatch, deduction);
   return { ledger, salesRows, erpCosts, approvals, dispatch, deduction, supplementRows: rows };
 }
 export async function readProfitReportFreshness(reportId) {
