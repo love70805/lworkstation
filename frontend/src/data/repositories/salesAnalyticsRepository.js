@@ -1,16 +1,16 @@
 import { db } from "../db/clientDatabase";
 import { getActiveMemberContext } from "./selectionRepository";
-import { cachedDerived, sourceRevision, tableRevisionReader, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
+import Dexie from 'dexie';
+import { cachedDerived, sourceRevision, ledgerTableRevision, assertSourceRevision, retrySourceRead, observeSourceRevision } from '../db/derivedCache';
 import { readLedgerSalesRows } from './ledgerReadCache';
 import { readPageSaleChunks } from './ledgerPageSalesRepository';
 import { periodDetailColumns } from '../../domain/ledgerPageSales';
 import { runDerivedComputation } from './derivedComputationService';
 import { canonicalStore } from "../../domain/batchSalesImport";
 
-const salesRevision = tableRevisionReader('salesRows');
-function cachedSales(options) {
-  const revision = salesRevision();
-  return revision ? cachedDerived({ ...options, revision, revisionReader: salesRevision }) : cachedDerived(options);
+function cachedSales(ledgerId, options) {
+  if (Dexie.currentTransaction?.mode === 'readwrite') return options.compute();
+  return cachedDerived({ ...options, revisionReader: () => ledgerTableRevision('salesRows', ledgerId) });
 }
 
 function readScopedSales(scope, aggregate) {
@@ -40,7 +40,7 @@ export async function readLedgerSalesAnalytics(scope) {
     if (!workspaceId || current.workspaceId !== workspaceId || ledger?.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
     assertSourceRevision(revision);
     await observeSourceRevision();
-    const result = await cachedSales({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), ledger.period, today], formula: 'daily-sales@5-chart',
+    const result = await cachedSales(ledgerId, { scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), ledger.period, today], formula: 'daily-sales@5-chart',
       compute: async () => {
         const pageChunks = await readPageSaleChunks(workspaceId, ledgerId, {parent:ledger});
         const hasStore = store === 'all' || pageChunks.some(chunk => [...chunk.stores.keys()].some(name => canonicalStore(name) === canonicalStore(store)));
@@ -54,7 +54,7 @@ export async function readLedgerSalesAnalytics(scope) {
 
 export async function readLedgerDailySalesDetails({ workspaceId, ledgerId, store = "all", date }) {
   const scope = { workspaceId, ledgerId, store, date };
-  return readScopedSales(scope, async (rows, period) => ({ ...await cachedSales({ scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date], formula: 'daily-details@1', compute: () => runDerivedComputation('day', { rows, period, date }) }), scope }));
+  return readScopedSales(scope, async (rows, period) => ({ ...await cachedSales(ledgerId, { scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date], formula: 'daily-details@1', compute: () => runDerivedComputation('day', { rows, period, date }) }), scope }));
 }
 
 export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, store = 'all', date = null }) {
@@ -65,7 +65,7 @@ export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, stor
     if (!workspaceId || current.workspaceId !== workspaceId || ledger?.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
     if (!await observeSourceRevision()) await db.salesRows.count();
     const { period } = ledger;
-    const detail = await cachedSales({
+    const detail = await cachedSales(ledgerId, {
       scope: [workspaceId, ledgerId, store === 'all' ? null : canonicalStore(store), period, date],
       formula: 'period-sku-details@2',
       compute: async () => {
@@ -78,20 +78,33 @@ export async function readLedgerPeriodSalesDetails({ workspaceId, ledgerId, stor
   });
 }
 
+// Keep the displayed series together even when a long history exceeds the
+// shared cache's entry limit. This retains only one workspace/store view.
+let recentMonthlySeries;
 export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
   return retrySourceRead(async () => {
     const revision = sourceRevision();
     const current = await getActiveMemberContext();
     if (!workspaceId || current.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
     const ledgers = await db.ledgers.where('workspaceId').equals(workspaceId).toArray();
-    await observeSourceRevision();
+    if (!await observeSourceRevision()) await db.salesRows.count();
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-    const months = [];
+    const storeKey = store === 'all' ? null : canonicalStore(store);
+    const previous = !Dexie.currentTransaction && recentMonthlySeries?.workspaceId === workspaceId
+      && recentMonthlySeries.storeKey === storeKey ? recentMonthlySeries.entries : null;
+    const entries = new Map();
     // Historical plotting retains compact summaries only. Read each cold ledger
     // transiently instead of filling the shared raw-row cache with up to 600k rows.
     for (const ledger of ledgers.sort((a, b) => a.period.localeCompare(b.period) || a.id.localeCompare(b.id))) {
-      const chartMonth = await cachedSales({
-        scope: [workspaceId, ledger.id, store === 'all' ? null : canonicalStore(store), ledger.period, today],
+      const calendar = ledger.period < today.slice(0, 7) ? 'closed' : today;
+      const version = JSON.stringify([ledger.period, calendar, ledgerTableRevision('salesRows', ledger.id)]);
+      const prior = previous?.get(ledger.id);
+      if (prior?.version === version) {
+        entries.set(ledger.id, prior);
+        continue;
+      }
+      const chartMonth = await cachedSales(ledger.id, {
+        scope: [workspaceId, ledger.id, storeKey, ledger.period, calendar],
         formula: 'monthly-chart@1',
         compute: async () => {
           const pageChunks = await readPageSaleChunks(workspaceId, ledger.id);
@@ -100,9 +113,10 @@ export async function readWorkspaceSalesMonths({ workspaceId, store = 'all' }) {
           return data.chartMonth;
         },
       });
-      months.push({ ...chartMonth, ledgerId: ledger.id });
+      entries.set(ledger.id, { version, month: { ...chartMonth, ledgerId: ledger.id } });
     }
     assertSourceRevision(revision);
-    return months;
+    if (!Dexie.currentTransaction) recentMonthlySeries = { workspaceId, storeKey, entries };
+    return Array.from(entries.values(), entry => entry.month);
   });
 }

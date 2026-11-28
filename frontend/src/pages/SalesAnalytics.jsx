@@ -82,13 +82,15 @@ function ScopedSalesAnalytics({ workspaceId, ledgerId, store, stores, onStoreCha
   const daily = view === 'daily';
   const requestedIds = JSON.stringify(daily ? [ledgerId] : salesRange.filter(item => !item.missingLedger).map(item => item.ledgerId));
   const profitScope = JSON.stringify([scope, daily, requestedIds]);
+  const previousProfitMonths = useRef(null);
   const profitResult = useLiveQuery(async () => {
     if (!data) return null;
     const byLedger = {}, errors = {};
     for (const id of JSON.parse(requestedIds)) {
-      try { byLedger[id] = await readSalesProfitAnalysis({ workspaceId, ledgerId: id, store, daily }); }
+      try { byLedger[id] = await readSalesProfitAnalysis({ workspaceId, ledgerId: id, store, daily }, previousProfitMonths.current?.[id]); }
       catch (error) { errors[id] = error.message; }
     }
+    previousProfitMonths.current = daily ? null : byLedger;
     return { scope: profitScope, byLedger, errors };
   }, [profitScope, Boolean(data)]);
   const profitData = profitResult?.scope === profitScope ? profitResult : null;

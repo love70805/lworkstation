@@ -1,15 +1,14 @@
 import Dexie from 'dexie';
 import { db } from '../db/clientDatabase';
-import { cachedDerived, observeTableRevision, tableRevisionReader, sourceRevision } from '../db/derivedCache';
+import { cachedDerived, observeTableRevision, ledgerTableRevision } from '../db/derivedCache';
 import { packPageSales } from '../../domain/ledgerPageSales';
 import { capturePageSaleIdentities } from './saleIdentityProjection';
 
-const salesRevision = tableRevisionReader('salesRows');
 export async function readPageSaleChunks(workspaceId, ledgerId, { parent, cache = true } = {}) {
   const ledger = parent ?? await db.ledgers.get(ledgerId);
   if (!ledger || ledger.id !== ledgerId || ledger.workspaceId !== workspaceId) throw new Error('账本不属于当前工作区。');
   await Promise.all([db.salesRows.count(), observeTableRevision('salesRows')]);
-  const readRevision = salesRevision() ? salesRevision : sourceRevision;
+  const readRevision = () => ledgerTableRevision('salesRows', ledgerId);
   const revision = readRevision();
   const identities = capturePageSaleIdentities(ledger);
   const read = (formula, scope, compute, persist = false) => !cache || Dexie.currentTransaction ? compute() :

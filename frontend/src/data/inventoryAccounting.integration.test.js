@@ -14,6 +14,77 @@ import { buildErpCostBatchEnvelope } from '../domain/erpCostBatchEnvelope';
 import { packProfitSearch, unpackProfitSearch } from '../domain/profitPageProjection';
 import { readLedgerScopeRows } from './repositories/ledgerReadCache';
 import { readSalesProfitAnalysis } from './repositories/salesProfitAnalysisRepository';
+import { readWorkspaceSalesMonths } from './repositories/salesAnalyticsRepository';
+
+it('invalidates only the owners of edited, moved and removed monthly sales', async () => {
+  for (const [id, period] of [['SEP','2026-09'], ['OCT','2026-10']]) {
+    await db.ledgers.add({ id, period, workspaceId:'W', warehouseRate:0.7 });
+  }
+  const sale = (ledgerId, amount) => ({ ledgerId, workspaceId:'W', store:'甲', platformSku:'A', platformSkc:'P', quantity:1, amount });
+  const [moved] = await db.salesRows.bulkAdd([sale('SEP',10), sale('SEP',6), sale('OCT',12)], {allKeys:true});
+  const read = () => readWorkspaceSalesMonths({workspaceId:'W'});
+  const before = await read();
+  const reads = new Set(), track = row => { reads.add(row.ledgerId); return row; };
+  db.salesRows.hook('reading', track);
+  try {
+    await db.salesRows.update(moved, {amount:11});
+    reads.clear();
+    let months = await read();
+    expect([...reads]).toEqual(['SEP']);
+    expect(months[1].monthTotalsExact.revenueExact).toBe('17');
+    expect(months[0]).toEqual(before[0]);
+    await db.salesRows.update(moved, {ledgerId:'OCT'});
+    reads.clear();
+    months = await read();
+    expect([...reads].sort()).toEqual(['OCT','SEP']);
+    expect(months.slice(1).map(item=>item.monthTotalsExact.revenueExact)).toEqual(['6','23']);
+    await expect(db.transaction('rw', db.salesRows, async () => {
+      await db.salesRows.update(moved, {amount:100});
+      throw Error('rollback');
+    })).rejects.toThrow('rollback');
+    expect(await read()).toEqual(months);
+    await db.salesRows.delete(moved);
+    reads.clear();
+    expect((await read())[2].monthTotalsExact.revenueExact).toBe('12');
+    expect([...reads]).toEqual(['OCT']);
+    await db.salesRows.clear();
+    expect((await read()).every(item=>item.coverage==='unknown')).toBe(true);
+  } finally { db.salesRows.hook('reading').unsubscribe(track); }
+});
+
+it('reuses unchanged monthly profit and rechecks prices, fees and the active workspace', async () => {
+  const options={workspaceId:'W',ledgerId:'L',daily:false};
+  const initial=await readSalesProfitAnalysis(options);
+  await db.ledgers.add({id:'OTHER',workspaceId:'W',period:'2026-09'});
+  await db.salesRows.add({ledgerId:'OTHER',workspaceId:'W',platformSku:'SKU',store:'甲',quantity:1,amount:8});
+  expect(await readSalesProfitAnalysis(options, initial)).toBe(initial);
+  await saveManualCostOverride({ledgerId:'L',store:'甲',platformSku:'SKU',unitCost:3,reason:'test'});
+  expect((await readSalesProfitAnalysis(options, initial)).month.total.profitExact).toBe('32.6');
+  await db.ledgers.update('L',{warehouseRate:1});
+  expect((await readSalesProfitAnalysis(options, initial)).month.total.profitExact).toBe('32');
+  await setActiveMemberContext({workspaceId:'other',memberId:'finance'});
+  await expect(readSalesProfitAnalysis(options, initial)).rejects.toThrow('工作区');
+});
+
+it('retains unchanged chart months when the displayed series exceeds the general cache limit', async () => {
+  const ledgers = Array.from({length:30}, (_, index) => ({
+    id:'history-'+index, workspaceId:'W',
+    period:new Date(Date.UTC(2020, index, 1)).toISOString().slice(0,7),
+  }));
+  await db.ledgers.bulkAdd(ledgers);
+  const sale = ledgerId => ({workspaceId:'W',ledgerId,store:'甲',platformSkc:'P',platformSku:'A',amount:7,quantity:1});
+  await db.salesRows.bulkAdd(ledgers.map(ledger => sale(ledger.id)));
+  const before = await readWorkspaceSalesMonths({workspaceId:'W'});
+  await db.salesRows.add(sale('history-14'));
+  const owners = new Set(), track = row => { owners.add(row.ledgerId); return row; };
+  db.salesRows.hook('reading', track);
+  try {
+    const after = await readWorkspaceSalesMonths({workspaceId:'W'});
+    expect([...owners]).toEqual(['history-14']);
+    expect(after[14].monthTotalsExact.revenueExact).toBe('14');
+    expect(after.filter((_,i)=>i!==14)).toEqual(before.filter((_,i)=>i!==14));
+  } finally { db.salesRows.hook('reading').unsubscribe(track); }
+});
 
 it('round-trips the complete searchable purchase numbers in a large cached month', async () => {
   const text = '采购单 / 中文 "订单" 2026-10-11 \n'.repeat(7000);
